@@ -39,6 +39,12 @@ export const LANES = [
       + 'versions.'
   },
   {
+    id: 'areas',
+    label: 'Area details',
+    blurb: 'An area’s name, its description and its icon. The name is also the <area> segment of '
+      + 'every uns/ topic beneath it.'
+  },
+  {
     id: 'cells',
     label: 'Cell details',
     blurb: 'A cell’s name, its Grafana dashboard and its icon.'

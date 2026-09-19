@@ -12,6 +12,7 @@ import {
 import { isPlaced } from '../../utils/floorPlans'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
+import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -86,6 +87,16 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         api.get('/api/v1/gateways', { signal })
       ])
       setAreas(ar); setCells(c); setAssets(a); setGateways(g)
+
+      /* The reader's own open proposals, so Propose a Change can add to one rather than replace
+         it. Tolerated rather than required: the page works without them, and somebody who holds no
+         `proposal:create` is refused this read. */
+      try {
+        const proposals = await api.get('/api/v1/proposals', { signal })
+        setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
+      } catch (pErr) {
+        if (pErr.name !== 'AbortError') setOpenProposals([])
+      }
       setLoading(false)
     } catch (err) {
       if (err.name !== 'AbortError') setLoading(false)
@@ -100,6 +111,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
+
+  /* One form, two endings (utils/proposeFromForm.js): for somebody who may not save it, the footer
+     files a proposal. Derived rather than stored, so it cannot disagree with the permission. */
+  const proposeMode = !canManage && canPropose
+  const [editingProposal, setEditingProposal] = useState(null)
+  const [openProposals, setOpenProposals] = useState([])
 
   // A sum over one term, written as the sum the other pages write: a second filter added here
   // joins it rather than replacing the expression.
@@ -107,6 +125,22 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   const save = async () => {
     try {
+      /* THE FORK IS AT THE END, not at the beginning: the fields and their validation are shared,
+         and only the last step differs -- by who is asking. */
+      if (proposeMode) {
+        if (!editing) throw new Error('An area can only be created by an Administrator.')
+        const patch = patchFromForm('area', editing, formVal)
+        await submitProposal({
+          kind: 'area', entityId: editing.area_id, patch,
+          rationale: formVal.__rationale, proposalId: editingProposal?.id
+        })
+        setShowForm(false); setEditingProposal(null); loadAll()
+        showToast(editingProposal
+          ? 'Your proposal was updated. An approver decides from here.'
+          : 'Proposed. An approver applies it, or says why not.', 'success')
+        return
+      }
+
       if (editing) await api.put(`/api/v1/areas/${editing.area_id}`, formVal)
       else         await api.post('/api/v1/areas', formVal)
       setShowForm(false); loadAll(); showToast(editing ? 'Area saved' : 'Area created', 'success')
@@ -364,16 +398,35 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               <label className="form-label" htmlFor="area-description">Description (Optional)</label>
               <input id="area-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. North campus, machining and assembly" />
             </div>
+            {/* The rationale, only when proposing: it is written to an approver who has not stood
+                in front of the area and does not know why this was asked for. */}
+            {proposeMode && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="area-propose-rationale">Why (optional)</label>
+                <textarea
+                  id="area-propose-rationale"
+                  className="form-control"
+                  rows={2}
+                  value={formVal.__rationale || ''}
+                  onChange={e => setFormVal(f => ({ ...f, __rationale: e.target.value }))}
+                  placeholder="What prompted this — an approver sees it beside the change"
+                />
+              </div>
+            )}
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel">Cancel</button>
               <ActionButton
                 pending={saving}
-                pendingLabel={editing ? 'Saving…' : 'Creating…'}
+                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
                 disabled={!formVal.area_name.trim() || /[/+#]/.test(formVal.area_name)}
-                title={/[/+#]/.test(formVal.area_name) ? 'The name cannot contain / + or #' : 'Save area'}
+                title={/[/+#]/.test(formVal.area_name)
+                  ? 'The name cannot contain / + or #'
+                  : proposeMode
+                    ? 'File this as a proposal for an approver to decide'
+                    : 'Save area'}
               >
-                Save
+                {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
             </div>
           </div>
@@ -450,10 +503,29 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         ] : []}
         actions={selectedArea ? [
           {
-            label: 'Edit Details', icon: <IconPencil size={13} />,
-            onClick: () => { setEditing(selectedArea); setFormVal({ area_name: selectedArea.area_name, description: selectedArea.description || '', icon: selectedArea.icon || DEFAULT_AREA_ICON }); setShowForm(true) },
-            disabled: !canManage,
-            title: !canManage ? 'Requires Admin permissions' : 'Rename or describe this area'
+            label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
+            onClick: () => {
+              setEditing(selectedArea)
+              // Seeded with the open proposal's patch when there is one: one open proposal per
+              // asset per person, so a second field extends the request.
+              const mine = proposeMode
+                ? openProposals.find(pr => pr.entity_type === 'areas' && pr.entity_id === selectedArea.area_id)
+                : null
+              setEditingProposal(mine || null)
+              setFormVal({
+                area_name: selectedArea.area_name,
+                description: selectedArea.description || '',
+                icon: selectedArea.icon || DEFAULT_AREA_ICON,
+                ...formFromPatch('area', mine?.patch)
+              })
+              setShowForm(true)
+            },
+            disabled: !canManage && !canPropose,
+            title: proposeMode
+              ? 'Ask for a change to this area — an approver applies it, or says why not'
+              : !canManage
+                ? 'Requires Admin permissions'
+                : 'Rename or describe this area'
           },
           canReadThread && {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,

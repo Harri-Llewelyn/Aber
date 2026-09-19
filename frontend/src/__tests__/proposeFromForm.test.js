@@ -56,6 +56,24 @@ describe('what a form would change', () => {
     expect(patch).toEqual({ grafana_url: 'https://new' })
   })
 
+  it('translates the area form’s area_name onto name', () => {
+    // Same shape as the cell pair above: `area_name` is the box, `name` is the column, and it is
+    // what reaches MQTT as the <area> segment of every uns/ topic beneath it.
+    const patch = patchFromForm('area',
+      { area_name: 'Building A', description: null, icon: 'Factory' },
+      { area_name: 'Building One', description: null, icon: 'Factory' })
+    expect(patch).toEqual({ name: 'Building One' })
+  })
+
+  it('carries all three of an area’s chosen columns and nothing else', () => {
+    /* `id` and `created_at` are the platform's, and the database's own allowlist refuses them --
+       but a form that offered a box for one would be refused at the INSERT rather than here. */
+    expect(Object.values(PROPOSAL_FORMS.area.fields).sort())
+      .toEqual(['description', 'icon', 'name'])
+    expect(PROPOSAL_FORMS.area.lane).toBe('areas')
+    expect(PROPOSAL_FORMS.area.idField).toBe('area_id')
+  })
+
   it('treats an emptied box as a proposal to clear the field', () => {
     // Dropping it would silently turn "remove the description" into a proposal that changes
     // nothing -- which the database would then refuse as an empty patch.

@@ -53,6 +53,11 @@ CELL = "7c000000-0000-4000-8000-000000000001"
 # `gateways.sparkplug_id` is generated from the first 21 hex characters under a unique index.
 GATEWAY = "7e000000-0000-4000-8000-000000000001"
 CELL_TWO = "7cf00000-0000-4000-8000-000000000001"
+# 0123's lane. No sparkplug_id is generated from an area's id, so the early-byte rule the device
+# and gateway ids follow does not apply here -- but `areas.name` is UNIQUE, and the second area
+# exists to make the approval collide with a name that is already taken.
+AREA = "79000000-0000-4000-8000-000000000001"
+AREA_TWO = "79f00000-0000-4000-8000-000000000001"
 # The schema lane (0088). An active parent and a draft forked from it, so a publication has
 # something to archive and something to rebind -- the half that makes publishing more than a
 # status flip.
@@ -127,6 +132,15 @@ class ProposalCase(unittest.TestCase):
                     "ON CONFLICT (user_id, role_id) DO NOTHING;",
                     (actor, role),
                 )
+            # 0123's lane. Two, because `areas_name_key` is what makes an approval able to fail on
+            # something the insert could not have caught.
+            for area_id, area_name in ((AREA, "Proposal Test Area"),
+                                       (AREA_TWO, "Proposal Test Area Two")):
+                cur.execute(
+                    "INSERT INTO public.areas (id, name) VALUES (%s, %s) "
+                    "ON CONFLICT (id) DO NOTHING;",
+                    (area_id, area_name),
+                )
             for cell_id, cell_name in ((CELL, "Proposal Test Cell"),
                                        (CELL_TWO, "Proposal Test Cell Two")):
                 cur.execute(
@@ -186,6 +200,12 @@ class ProposalCase(unittest.TestCase):
                         (DEVICE, DEVICE_TWO, CELL, GATEWAY))
             cur.execute("DELETE FROM public.gateways WHERE id = %s;", (GATEWAY,))
             cur.execute("DELETE FROM public.cells WHERE id IN (%s,%s);", (CELL, CELL_TWO))
+            # After the cells, which carry `area_id`: an area with a cell still filed in it is not
+            # deletable, and the cells above are the only ones these two ever hold.
+            cur.execute("DELETE FROM public.change_proposals WHERE entity_id IN (%s,%s);",
+                        (AREA, AREA_TWO))
+            cur.execute("DELETE FROM public.links WHERE entity_id IN (%s,%s);", (AREA, AREA_TWO))
+            cur.execute("DELETE FROM public.areas WHERE id IN (%s,%s);", (AREA, AREA_TWO))
             cur.execute("DELETE FROM public.user_roles WHERE user_id IN (%s,%s,%s,%s,%s);",
                         (OPERATOR, OPERATOR_TWO, MANAGER, AUDITOR, ADMIN))
             conn.commit()
@@ -752,6 +772,117 @@ class TestTheSchemaLaneIsWithdrawn(ProposalCase):
         as_user(self.cur, MANAGER)
         with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
             self.cur.execute("SELECT public.publish_schema_version(%s);", (SCHEMA_DRAFT,))
+
+
+class TestTheAreaLane(ProposalCase):
+    """
+    0123. The rung between the site and its cells, which had a page from 0097 and no lane until
+    now: an Operator holding `proposal:create` was shown a greyed-out Edit Details and nothing else.
+    """
+
+    def test_an_operator_may_propose_an_area_change(self):
+        proposal = self.propose({"name": "North Campus"}, entity_type="areas", entity_id=AREA)
+        self.assertIsNotNone(proposal)
+
+    def test_approving_applies_all_three_columns(self):
+        proposal = self.propose(
+            {"name": "North Campus", "description": "machining and assembly", "icon": "Warehouse"},
+            entity_type="areas", entity_id=AREA)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute("SELECT name, description, icon FROM public.areas WHERE id = %s;", (AREA,))
+        self.assertEqual(self.cur.fetchone(), ("North Campus", "machining and assembly", "Warehouse"))
+
+    def test_an_icon_nobody_drew_aborts_the_approval(self):
+        # APPROVING IS APPLYING, so `areas_icon_valid` runs inside the approver's transaction.
+        proposal = self.propose({"icon": "Banana"}, entity_type="areas", entity_id=AREA)
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+    def test_a_name_that_would_break_the_topic_aborts_the_approval(self):
+        # The area's name is the <area> segment of every uns/ topic beneath it, so
+        # `areas_name_topic_safe` refuses a separator -- at the approval, which is where the write
+        # happens.
+        proposal = self.propose({"name": "North/Campus"}, entity_type="areas", entity_id=AREA)
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+    def test_a_name_another_area_already_holds_aborts_the_approval(self):
+        # `areas_name_key`. The insert could not have caught this: the name was free when the
+        # proposal was filed and taken by the time it was decided, which is the whole reason
+        # approving has to be applying.
+        proposal = self.propose({"name": "Proposal Test Area Two"},
+                                entity_type="areas", entity_id=AREA)
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.UniqueViolation):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+    def test_a_column_outside_the_allowlist_is_refused(self):
+        # `id` and `created_at` are the platform's, not a person's to propose.
+        as_user(self.cur, OPERATOR)
+        for column, value in (("id", str(uuid.uuid4())), ("created_at", "2020-01-01T00:00:00Z")):
+            with self.subTest(column=column):
+                self.conn.rollback()
+                as_user(self.cur, OPERATOR)
+                with self.assertRaises(psycopg2.errors.InvalidParameterValue):
+                    self.cur.execute(
+                        "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                        "VALUES ('areas', %s, %s::jsonb);",
+                        (AREA, json.dumps({column: value})))
+
+    def test_a_proposal_against_an_area_that_does_not_exist_is_refused(self):
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.errors.ForeignKeyViolation):
+            self.cur.execute(
+                "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+                "VALUES ('areas', %s, '{\"name\": \"Nowhere\"}'::jsonb);", (ABSENT_UUID,))
+
+    def test_an_operator_cannot_decide_the_lane_and_a_manager_can(self):
+        """
+        THE GATE RESOLVES A ROLE PAIR, NOT A PERMISSION, and unlike cells and gateways that is
+        correct rather than an oversight: `areas_update_privileged` names these two roles and there
+        is no `area:manage` grant in the schema, so mirroring the table's own policy means
+        has_role() here. A lane gated on a permission the table does not consult would be a second,
+        disagreeing answer to the same question.
+        """
+        as_user(self.cur, OPERATOR)
+        self.cur.execute("SELECT public.may_decide_proposal('areas');")
+        self.assertFalse(self.cur.fetchone()[0])
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.may_decide_proposal('areas');")
+        self.assertTrue(self.cur.fetchone()[0])
+
+    def test_an_operator_still_cannot_update_an_area_directly(self):
+        # The same claim the device lane rests on: the write an Operator gained is to the QUEUE.
+        as_user(self.cur, OPERATOR)
+        self.cur.execute("UPDATE public.areas SET name = 'renamed directly' WHERE id = %s;", (AREA,))
+        self.assertEqual(self.cur.rowcount, 0)
+
+    def test_a_change_already_in_place_is_not_approvable(self):
+        # Somebody made it by hand while the proposal was open. Recording an approval of something
+        # that did not happen would put a lie in the audit trail.
+        proposal = self.propose({"description": "already said"}, entity_type="areas", entity_id=AREA)
+        as_owner(self.cur)
+        self.cur.execute("UPDATE public.areas SET description = 'already said' WHERE id = %s;", (AREA,))
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+
+    def test_the_applied_row_lands_in_the_asset_lane(self):
+        # 0097 put `areas` in the asset domain and 0120 left it there, so a Shopfloor_Manager can
+        # read the history of what they approved. Asserted because nothing in 0123 restates it.
+        proposal = self.propose({"name": "North Campus"}, entity_type="areas", entity_id=AREA)
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        as_owner(self.cur)
+        self.cur.execute(
+            "SELECT audit_domain FROM public.digital_thread "
+            " WHERE entity_type = 'areas' AND entity_id = %s AND action = 'PROPOSAL_APPLIED' "
+            " ORDER BY id DESC LIMIT 1;", (AREA,))
+        self.assertEqual(self.cur.fetchone()[0], "asset")
 
 
 class TestTheCellLane(ProposalCase):

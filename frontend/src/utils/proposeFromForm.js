@@ -59,6 +59,18 @@ export const PROPOSAL_FORMS = {
     },
     withheld: {}
   },
+  /* Every column of an area a person chooses; `id` and `created_at` are the platform's. `area_name`
+     is the form's name for `name`, which is what api.js writes on the direct path too. */
+  area: {
+    lane: 'areas',
+    idField: 'area_id',
+    fields: {
+      area_name: 'name',
+      description: 'description',
+      icon: 'icon'
+    },
+    withheld: {}
+  },
   cell: {
     lane: 'cells',
     idField: 'cell_id',

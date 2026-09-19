@@ -408,6 +408,9 @@ function Dashboard({ session, onSignOut }) {
    * dialog.
    */
   const openProposalSubject = (proposal) => {
+    // Before the `cell` test, not after: `startsWith` is a prefix match and "areas" shares none of
+    // these, but the device fallthrough at the end would take it if it were not named here.
+    if (proposal.entity_type.startsWith('area')) return showArea(proposal.entity_id)
     if (proposal.entity_type.startsWith('cell')) return showCell(proposal.entity_id)
     if (proposal.entity_type.startsWith('gateway')) return showGateway(proposal.entity_id)
     return showDevice(proposal.entity_id)
