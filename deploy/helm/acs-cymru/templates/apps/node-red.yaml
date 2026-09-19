@@ -2,20 +2,6 @@
 {{- $component := "node-red" -}}
 {{- $secretName := include "acs-cymru.secretName" . -}}
 {{- $fullname := include "acs-cymru.fullname" . -}}
-{{- $initScript := .Files.Get "files/node-red-scripts/node-red-init.mjs" -}}
-{{- if not $initScript }}
-{{- fail "acs-cymru: files/node-red-scripts/node-red-init.mjs is missing. Mirror it with: node scripts/sync-helm-chart-files.mjs -- without the init script Node-RED comes up with NO settings.js, which means no adminAuth, no httpNodeAuth, and the editor plus the /flows admin API plus POST /hooks/quarantine all open to anyone who can reach port 1880." }}
-{{- end }}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ printf "%s-node-red-seed" $fullname }}
-  labels:
-    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
-data:
-  node-red-init.mjs: |
-{{ $initScript | indent 4 }}
 ---
 {{- if .Values.nodeRed.persistence.enabled }}
 apiVersion: v1
@@ -76,10 +62,6 @@ spec:
     metadata:
       labels:
         {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
-      annotations:
-        # Roll when the init script changes. No flow is seeded, and node-red-init only rewrites
-        # flows.json when forceSeed is set, so this makes a settings.js regeneration take effect.
-        checksum/seed: {{ $initScript | sha256sum }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -108,7 +90,9 @@ spec:
           on every single boot, silently. If the log says `settings.js written` on more than the
           first boot, this is why.
 
-          One image value feeds both containers, so they cannot drift apart.
+          One image value feeds both containers, so they cannot drift apart. The script itself is in
+          that image (node-red/Dockerfile) rather than a mounted ConfigMap, so an edit to it takes a
+          rebuild; the dev loop restarts any workload whose image it rebuilt.
 
           THREE WRITES WITH THREE LIFETIMES, and collapsing them behind one guard is what broke the
           stack twice: the FLOW is user content (seed once, guarded on
@@ -119,7 +103,7 @@ spec:
         - name: node-red-init
           image: {{ include "acs-cymru.image" (dict "image" .Values.nodeRed.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.nodeRed.image.pullPolicy }}
-          command: ["node", "/seed/node-red-init.mjs"]
+          command: ["node", "/opt/acs-cymru/node-red-init.mjs"]
           env:
             {{/*
               THE SHARED AUTH BLOCK, included here AND in the main container below.
@@ -158,9 +142,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: seed
-              mountPath: /seed
-              readOnly: true
             {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
             {{- /* Mounted here as well as in the runtime so the init container can FAIL on an absent
                    CA. Node-RED itself would report only a generic "Connection failed to broker",
@@ -244,7 +225,4 @@ spec:
           */}}
           emptyDir: {}
           {{- end }}
-        - name: seed
-          configMap:
-            name: {{ printf "%s-node-red-seed" $fullname }}
 {{- end }}

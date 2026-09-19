@@ -134,12 +134,9 @@ const MIRRORS = [
     match: (name) => name === 'gitea-init.sh',
     why: 'Builds app.ini through the setup script the image ships, migrates the schema, and creates the administrator and the platform machine account. Runs as an initContainer',
   },
-  {
-    source: 'scripts',
-    dest: 'node-red-scripts',
-    match: (name) => name === 'node-red-init.mjs',
-    why: 'Provisions /data -- settings.js, the credentials and a blank flow. Runs as an initContainer',
-  },
+  // NODE-RED'S PROVISIONING SCRIPT IS NOT MIRRORED. It lives at node-red/node-red-init.mjs and is
+  // copied into that image, which is the same image the initContainer running it uses -- so the
+  // release Secret carries neither the chart-file copy nor the rendered ConfigMap.
   {
     source: 'scripts',
     dest: 'gateway-credential',
