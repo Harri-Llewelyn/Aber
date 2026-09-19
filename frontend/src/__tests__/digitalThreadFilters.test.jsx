@@ -1305,7 +1305,7 @@ describe('Digital Thread — removed tag filter', () => {
     })
   })
 
-  /* The swimlane redesign: contained track cards rather than ruled rows, asserted through the
+  /* The timeline is a flat grid -- ruled rows, not a stack of track cards -- asserted through the
      stylesheet because jsdom applies no layout. */
   /**
    * The rule body for a selector, from the stylesheet on disk. Local to these two describes; the
@@ -1316,43 +1316,42 @@ describe('Digital Thread — removed tag filter', () => {
     return APP_CSS.match(new RegExp(`\\n${escaped} \\{([\\s\\S]*?)\\n\\}`))?.[1]
   }
 
-  describe('swimlanes render as contained tracks', () => {
-    it('gives the track a container rather than a bare line', async () => {
+  describe('swimlanes render as a flat grid', () => {
+    it('draws the track bare, with no box of its own', async () => {
+      // The row's dividers are the lane's edges; a box inside them was a second set.
       const rule = ruleFor('.dt-track')
-      expect(rule).toMatch(/background:/)
-      expect(rule).toMatch(/border:/)
-      expect(rule).toMatch(/border-radius:/)
+      expect(rule).not.toMatch(/background:/)
+      expect(rule).not.toMatch(/border:/)
+      expect(rule).not.toMatch(/border-radius:/)
     })
 
-    it('leaves the axis row unboxed, because a scale is not a lane', async () => {
-      // Boxing the tick labels like data would make the ruler read as another asset.
-      const rule = ruleFor('.dt-track.dt-axis-track')
-      expect(rule).toMatch(/background:\s*none/)
-      expect(rule).toMatch(/border:\s*none/)
+    it('draws no guideline along the middle of a track', async () => {
+      /* With a rule under every row, a second line through each one made the page a stack of
+         rules for the eye to follow instead of markers. */
+      expect(ruleFor('.dt-track::before')).toBeUndefined()
     })
 
-    it('keeps a centre guideline lighter than the container edge', async () => {
-      /* The guideline is lighter than the track's own border so a lane does not read as three
-         stacked rules. */
-      const rule = ruleFor('.dt-track::before')
-      expect(rule).toMatch(/height:\s*1px/)
-      expect(rule).toMatch(/opacity:/)
-    })
-
-    it('separates lanes with space rather than a divider', async () => {
-      // `border-bottom` made the page a stack of table rows: the eye followed the rules instead of
-      // the tracks, and a marker near one read as belonging to the boundary.
+    it('separates lanes with a hairline divider and no padding', async () => {
       const rule = ruleFor('.dt-lane')
-      expect(rule).not.toMatch(/border-bottom/)
+      expect(rule).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
+      expect(rule).not.toMatch(/padding:/)
       expect(rule).toMatch(/gap:/)
     })
 
-    it('draws the label as a pill without breaking its scroll-under opacity', async () => {
-      /* Two jobs in tension: the label is sticky so markers pass under it, which needs an opaque
-         background in the card's colour, and it should read as a container. The pill is drawn by
-         ::before and the element stays opaque. */
+    it('keeps the label opaque, and draws no pill inside it', async () => {
+      /* The label is sticky so markers pass under it, which needs an opaque background in the
+         card's colour. The pill that used to be drawn inside it by ::before is gone with the boxes. */
       expect(ruleFor('.dt-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
-      expect(ruleFor('.dt-lane-label::before')).toMatch(/border-radius:/)
+      expect(ruleFor('.dt-lane-label::before')).toBeUndefined()
+    })
+
+    it('lights the row under the pointer, label column included', async () => {
+      /* The row tint is translucent and the label is opaque, so the label takes the tint as an
+         image over its own colour: the two match, and the label stays opaque. The axis row is not
+         a lane and is left out. */
+      expect(ruleFor('.dt-lane:not(.dt-axis):hover')).toMatch(/background:\s*var\(--bg-glass\)/)
+      expect(ruleFor('.dt-lane:not(.dt-axis):hover .dt-lane-label'))
+        .toMatch(/background-image:\s*linear-gradient\(var\(--bg-glass\)/)
     })
 
     it('renders the section heading as one badge', async () => {
@@ -1472,16 +1471,16 @@ describe('Digital Thread — removed tag filter', () => {
 })
 
 /**
- * Timeline density and layout, read from App.css since jsdom does no layout: a lane is 32px so ~200
- * audit rows across a dozen assets fit on a screen, and the label is sticky because opening the
- * drawer takes width off this list.
+ * Timeline density and layout, read from App.css since jsdom does no layout: a lane is 28px so the
+ * thirty-lane cap is about one screen, and the label is sticky because opening the drawer takes
+ * width off this list.
  */
 describe('Digital Thread timeline density', () => {
   const rule = (selector) =>
     APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
-  it('keeps a lane to 32px', () => {
-    expect(rule('.dt-track')).toMatch(/height:\s*32px/)
+  it('keeps a lane to 28px', () => {
+    expect(rule('.dt-track')).toMatch(/height:\s*28px/)
   })
 
   it('pins the lane label so it survives horizontal scrolling', () => {
