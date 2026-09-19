@@ -50,6 +50,10 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // rename moves the dashboard with the bucket instead of leaving it on the old name.
   VITE_MODEL_3D_BUCKET: %q,
   VITE_CAPTURE_BUCKET: %q,
+  // What this RELEASE is, against which the bundle states what IT is (src/version.js). The account
+  // menu compares them, so a browser on a page cached from before an upgrade -- or an image.tag
+  // pinned away from appVersion -- says so instead of looking current.
+  VITE_RELEASE_VERSION: %q,
 };
 `
   (include "acs-cymru.supabaseUrl" .)
@@ -60,7 +64,8 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   (include "acs-cymru.studioUrl" .)
   (include "acs-cymru.giteaUrl" .)
   .Values.supabaseStorage.bucket
-  .Values.supabaseStorage.captureBucket -}}
+  .Values.supabaseStorage.captureBucket
+  .Chart.AppVersion -}}
 ---
 {{/*
 =================================================================================================

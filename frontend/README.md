@@ -245,6 +245,39 @@ Five things about it are load-bearing, and each has a comment in the file saying
 security change: it stands for the `anon` role, is public by construction, and is already readable
 in any built bundle.
 
+### The bundle's version and the release's are two different facts
+
+`src/version.js` states what **this bundle** is, baked at image build, and is the one setting that
+deliberately has no runtime twin — a deployment must not be able to claim a version its bundle is
+not. `VITE_RELEASE_VERSION` states what **the release** is, `Chart.AppVersion` arriving through the
+same ConfigMap as everything else.
+
+`utils/releaseVersion.js` compares them and the account menu shows a line under the version when
+they disagree: *Update available — 0.2.0*.
+
+**A pod is self-consistent**, so this is not a rollout progress indicator: `config.js` is mounted
+with `subPath` and never updates in place, and the chart's `checksum/config` annotation rolls the pod
+when it changes. The two disagree in two situations:
+
+- the browser is running an `index.html` and bundle **cached from before an upgrade**, while
+  `config.js` — served `no-store` — came fresh from the new pod. This is the common one, and a forced
+  reload is the fix;
+- `frontend.image.tag` is **pinned or overridden**, so the running image is not the one the release
+  names. That survives a reload, which is how the two are told apart.
+
+Three things it is not:
+
+- **It does not reach the network**, so it cannot see a release published upstream — only the one
+  this stack was told to run. Checking GHCR would need an egress allowance the chart does not grant,
+  and would fail closed on a plant network with no route out.
+- **It compares `MAJOR.MINOR.PATCH` only.** A development bundle names itself with `git describe`
+  (`v0.1.0-752-g04374f9-dirty`), so anything stricter would warn on every dev cluster permanently.
+- **It is a statement, not a button.** Nothing in a browser can upgrade the stack; the upgrade is
+  [`docs/upgrades.md`](../docs/upgrades.md).
+
+Unknown renders nothing, and that is the point: an unlabelled build, or a plain image build that
+supplies no release version, is not evidence of drift.
+
 ---
 
 ## Tabs

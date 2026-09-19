@@ -35,6 +35,10 @@ export const RUNTIME_SETTING_NAMES = [
   // literal here was the one consumer a rename left behind.
   'VITE_MODEL_3D_BUCKET',
   'VITE_CAPTURE_BUCKET',
+  // The chart's appVersion -- what the RELEASE says it is, as against `src/version.js`, which is
+  // what this BUNDLE is. A runtime setting on purpose: it is a property of the deployment, and the
+  // two disagreeing is the fact utils/releaseVersion.js reports.
+  'VITE_RELEASE_VERSION',
 ];
 
 /**
@@ -52,6 +56,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_GITEA_URL: import.meta.env.VITE_GITEA_URL,
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
   VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,
+  VITE_RELEASE_VERSION: import.meta.env.VITE_RELEASE_VERSION,
 };
 
 /**
