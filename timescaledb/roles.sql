@@ -192,6 +192,22 @@ BEGIN
   -- which is one of the figures this exporter was added to provide.
   EXECUTE format('GRANT pg_monitor TO %I WITH INHERIT TRUE', v_role);
 
+  -- THE STORAGE FOOTPRINT IS NOT COVERED BY pg_monitor. That grant reaches the server's own
+  -- statistics views and stops there; `public.storage_footprint` is a view in this database and
+  -- needs its own SELECT, which is the same narrow-view grant 0027/0029/0036 use for the Grafana
+  -- reader. The exporter's custom queries read it, and scraping it is what turns a point-in-time
+  -- table into the growth rate an operator can alert on.
+  --
+  -- EXECUTE too, which SELECT on the view does not imply: storage_footprint_rows() is called in
+  -- the view body and is checked against the calling role. Guarded on the view existing, as
+  -- grafana_reader's copy is, because a first boot applies storage.sql after this file only if the
+  -- ordering in the Helm Job is wrong -- and that ordering is asserted below.
+  IF to_regclass('public.storage_footprint') IS NOT NULL THEN
+    EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', v_role);
+    EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
+  END IF;
+
   RAISE NOTICE
     'roles: % holds pg_monitor and no password, so it reads pg_stat_* from the sidecar on '
     'loopback and cannot authenticate from the network.', v_role;

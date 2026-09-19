@@ -805,6 +805,18 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
     - --no-collector.settings
     - --no-collector.stat_user_tables
     - --no-collector.statio_user_tables
+    {{- if $m.statementStats }}
+    {{- /* OFF BY DEFAULT IN THE EXPORTER, because the extension may not be there. It is, on both:
+           supabase/postgres preloads it already and the historian's args now add it. Bounded at
+           the exporter's own top-100, and the label is `queryid`, not the statement text. */}}
+    - --collector.stat_statements
+    {{- end }}
+    {{- if .queries }}
+    {{- /* The historian's TimescaleDB-specific series. DEPRECATED UPSTREAM AND FUNCTIONAL: v0.20.1
+           reads it and says so at startup. files/timescaledb-exporter/queries.yaml carries the
+           fallback if that ever stops being true. */}}
+    - --extend.query-path=/etc/postgres-exporter/queries.yaml
+    {{- end }}
     {{- range $m.extraArgs }}
     - {{ . | quote }}
     {{- end }}
@@ -815,6 +827,12 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
     - name: metrics
       containerPort: {{ $m.port }}
       protocol: TCP
+  {{- if .queries }}
+  volumeMounts:
+    - name: exporter-queries
+      mountPath: /etc/postgres-exporter
+      readOnly: true
+  {{- end }}
   resources:
     {{- toYaml $m.resources | nindent 4 }}
 {{- end -}}
