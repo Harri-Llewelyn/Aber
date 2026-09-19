@@ -3158,6 +3158,39 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Digital Thread swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
+/* The page fills the viewport instead of growing past it, so the timeline can scroll inside the
+   card and the axis row can pin to the top of that scroll. A chain of flex columns from here down
+   to .dt-scroll: every link may shrink, and everything beside the scroller -- the card header, the
+   filter bar, the header row, the lane toggle, the foot -- is told not to. A maximum rather than a
+   height, so a short thread gets a short card. */
+.dt-page { height: 100%; }
+
+.dt-page > .page-main {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.dt-page > .page-main > .card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dt-page > .page-main > .card > :not(.dt-timeline) { flex-shrink: 0; }
+
+/* The card body holding the timeline: the one link in the card that gives way, and inside it the
+   scroller is the one thing that does. */
+.dt-timeline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dt-timeline > :not(.dt-scroll) { flex-shrink: 0; }
+
+.dt-timeline > .dt-scroll { min-height: 0; }
+
 /* The row above the timeline: the count at the left, the colour key at the right. Baseline-aligned,
    because the two are set at different sizes. */
 .dt-header {
@@ -3204,12 +3237,17 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   font-variant-numeric: tabular-nums;
 }
 
-/* Horizontal scrolling lives HERE rather than on the page, because the drawer is a flex sibling
+/* Both scrolls live HERE rather than on the page. Horizontal, because the drawer is a flex sibling
    of the list: opening it takes 360px off this element's width, and a page that scrolled as a
-   whole would push the lane labels off-screen the moment an event was selected. */
+   whole would push the lane labels off-screen the moment an event was selected. Vertical, because
+   this is the box the axis row pins to: a sticky element resolves against its nearest scroll
+   container, and this was already one for the horizontal axis, so while the page did the vertical
+   scrolling the axis pinned to a box that never moved. The .dt-page chain is what gives this
+   element a height to overflow. */
 .dt-scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* The three widths every rule below is laid out from, declared once: a gridline is placed against
@@ -3219,6 +3257,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   --dt-label-width: 260px;
   --dt-lane-gap: 10px;
   --dt-track-min: 380px;
+  /* The axis track's height, which is also where a pinned section heading sits. */
+  --dt-axis-height: 24px;
   min-width: calc(var(--dt-label-width) + var(--dt-lane-gap) + var(--dt-track-min));
 }
 
@@ -3272,16 +3312,36 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
 }
 
-/* The section rule: Cells, then Gateways, then Devices, a plant's own containment order. Sticky
-   like the labels beside it, spanning only the label column so it never rides over the markers. */
+/* The axis row pins to the top of the scroller and the rows pass under it. Opaque in the card
+   colour for that reason, and above the lane labels and section headings, which are sticky on the
+   other axis and would ride over it on a diagonal scroll. The track inside stays bare: the row is
+   what is opaque, and a scale is not a lane. */
+.dt-lane.dt-axis {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-card);
+}
+
+/* The section rule: Cells, then Gateways, then Devices, a plant's own containment order. Sticky on
+   both axes: like the labels beside it, spanning only the label column so it never rides over the
+   markers; and under the axis row, so a reader deep in a section still knows which one. The offset
+   is the axis track plus the row's divider. Above the labels (2), because its own lanes come after
+   it in the DOM and would paint over it as they scrolled under. The space above it is margin, not
+   padding: sticky pins the border box, and padding would pin dead space under the axis and hide a
+   row of labels with it. */
 .dt-section {
   position: sticky;
   left: 0;
-  z-index: 2;
+  top: calc(var(--dt-axis-height) + 1px);
+  z-index: 3;
   display: flex;
   align-items: center;
-  width: 210px;
-  padding: 10px 10px 4px 0;
+  /* The whole label column, so a label scrolling under a pinned heading does not peek out beside
+     it. */
+  width: var(--dt-label-width);
+  margin-top: 10px;
+  padding: 0 10px 4px 0;
   background: var(--bg-card);
   color: var(--text-muted);
 }
@@ -3300,7 +3360,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
-.dt-body > .dt-section:first-child { padding-top: 4px; }
+.dt-body > .dt-section:first-child { margin-top: 4px; }
 
 .dt-section-name {
   font-size: 11px;
@@ -3405,7 +3465,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   height: 28px;
 }
 
-.dt-axis-track { height: 24px; }
+.dt-axis-track { height: var(--dt-axis-height); }
 
 .dt-tick {
   position: absolute;
@@ -3516,7 +3576,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 0 5px;
 }
 
-.dt-lane-toggle { margin-top: 10px; }
+/* A flex item of the timeline column now, so it is told not to stretch to the card's width. */
+.dt-lane-toggle { margin-top: 10px; align-self: flex-start; }
 
 /* The foot of the timeline, where the reader finds out whether they are looking at everything.
    Separated by a rule, because it makes a claim about the data above it. */

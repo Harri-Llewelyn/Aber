@@ -1342,7 +1342,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   })
 
   return (
-    <div className="page-layout">
+    /* `dt-page`: the page fills the viewport and the timeline scrolls inside the card, so the axis
+       row has a scroller to pin to. See .dt-page in App.css. */
+    <div className="page-layout dt-page">
       <div className="page-main">
         {/* The description is a tip on the title; Export sits in the header with the other actions
             and states the filtered count it will write. */}
@@ -1481,8 +1483,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         </div>
           </div>{/* .card-body */}
 
-        {/* A second `.card-body`, so the controls and the trace get a divider from one rule. */}
-        <div className="card-body">
+        {/* A second `.card-body`, so the controls and the trace get a divider from one rule.
+            `dt-timeline` is the one part of the card that gives way when the viewport is short. */}
+        <div className="card-body dt-timeline">
           {loading ? (
             <div className="loading-wrap"><div className="spinner" /> Loading digital thread trace sequence…</div>
           ) : events.length === 0 ? (
