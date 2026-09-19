@@ -1474,7 +1474,7 @@ block for its replica/strategy check, so neither keeps a copy that can fall behi
 
 ### Node-RED's init container must use the same image as the main container
 
-`settingsAreCorrect()` in `node-red-init.mjs` *evaluates* the settings.js it finds, and that file
+`settingsAreCorrect()` in `node-red/node-red-init.mjs` *evaluates* the settings.js it finds, and that file
 `require`s `passport-oauth2`. An init image without it throws — and that throw is already handled as
 "unloadable, replace it", so the script rewrites settings.js and clobbers `settings.js.bak` on **every
 boot**, silently. One image value feeds both containers. If the log says `settings.js written` on more

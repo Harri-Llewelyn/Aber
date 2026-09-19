@@ -102,21 +102,20 @@ spec:
             - name: AAS_MAX_BUNDLED_MODEL_BYTES
               value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | int64 | quote }}
             {{/*
-              =========================================================================================
+              =====================================================================================
               PHYSICAL GATEWAY ENROLMENT (enroll-gateway, gateway-bundle).
-                                                    #
-              EVERY ONE OF THESE IS AN OUTBOUND ADDRESS OR A NARROW CREDENTIAL, and none of them can be
-              derived from SUPABASE_URL above -- that is `supabase-kong:8000`, which resolves inside
-              this cluster and nowhere a shopfloor appliance lives. A bundle carrying it enrols
-              nothing: bootstrap fails at its first fetch against a URL that looks perfectly
-              plausible. Same reasoning as AAS_MODEL_PUBLIC_BASE two blocks up.
-                                                    #
+
+              EVERY ONE OF THESE IS AN OUTBOUND ADDRESS OR A NARROW CREDENTIAL, and none can be
+              derived from SUPABASE_URL above -- that is `supabase-kong:8000`, which resolves
+              inside this cluster and nowhere a shopfloor appliance lives. A bundle carrying it
+              enrols nothing: bootstrap fails at its first fetch against a plausible-looking URL.
+
               BOTH FUNCTIONS REFUSE RATHER THAN DEFAULT. gateway-bundle answers 503 and mints no
               token when SUPABASE_PUBLIC_URL is unset or in-stack; enroll-gateway answers 503
-              WITHOUT CONSUMING THE TOKEN when MQTT_PUBLIC_HOST is. So a chart installed without
-              these produces a legible failure at the point of use rather than a fleet of appliances
-              that enrol and then cannot connect.
-              =========================================================================================
+              WITHOUT CONSUMING THE TOKEN when MQTT_PUBLIC_HOST is. A chart installed without these
+              fails legibly at the point of use rather than producing a fleet of appliances that
+              enrol and then cannot connect.
+              =====================================================================================
             */}}
             - name: SUPABASE_PUBLIC_URL
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.supabasePublicUrl | default (include "acs-cymru.supabaseUrl" .) | quote }}
@@ -189,14 +188,14 @@ spec:
           #   /grafana-userinfo  401   a worker spawned and refused an unauthenticated caller
           #
           # Every one of those is a HEALTHY response, and httpGet scores all of them as failures
-          # (it only accepts 200-399). A pod probed that way never becomes ready, and the event
-          # says "readiness probe failed: HTTP 404" -- which reads as a missing function.
+          # (it accepts 200-399 only), so the pod never becomes ready and the event says
+          # "readiness probe failed: HTTP 404" -- which reads as a missing function. There is
+          # nothing to exec with either: the image carries no curl or wget.
           #
-          # There is also nothing to exec with: the image carries no curl or wget. So the honest
-          # probe is "is the listener accepting connections", which for a request router that holds
-          # no state and no upstream connection pool is a fair readiness signal. Anything stronger
-          # would mean invoking a real function on every probe -- which spawns a worker isolate and
-          # hits the database, on a 10s period, forever.
+          # So the honest probe is "is the listener accepting connections", which for a request
+          # router holding no state and no upstream pool is a fair readiness signal. Anything
+          # stronger would invoke a real function on every probe, spawning a worker isolate and
+          # hitting the database on a 10s period forever.
           startupProbe:
             tcpSocket:
               port: http

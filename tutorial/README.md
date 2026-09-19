@@ -21,7 +21,7 @@ somebody else's plant in it. What that floor knew is in this file instead.
 | The Node-RED editor | `http://localhost:1880` |
 | Grafana | `http://localhost:3002` |
 | Broker config and roles | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`../mosquitto/README.md`](../mosquitto/README.md) |
-| Node-RED provisioning | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
+| Node-RED provisioning | [`../node-red/node-red-init.mjs`](../node-red/node-red-init.mjs) |
 | Physical gateways (the pasted command, the bundle, the forge, the playbook) | [`../docs/physical-gateways.md`](../docs/physical-gateways.md) |
 | Break-glass credential rotation | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 

@@ -977,20 +977,41 @@ jobs:
           print(f"  both databases on TLS with hostssl-only pg_hba; {len(CLIENTS)} clients carry the CA; no sslmode=disable.")
           PY
 
-      # Helm stores every release as one Secret holding the chart archive and the rendered
-      # manifest, and a Secret may not exceed 1 MiB. This chart is close to it: revision 19 on
-      # the dev cluster was refused on 2026-09-13 for a few kilobytes. The estimate below encodes
-      # the chart and the manifest the way Helm does (base64 inside JSON, then gzip) and reads
-      # about 0.75 of the real payload, so the thresholds are on the estimate. Trimming the chart
-      # archive is what recovers headroom: templates' comment blocks ship in it even though they
-      # render to nothing, and files/ ships twice (once in the archive, once in the manifest).
+      # Helm stores every release as one Secret holding the chart archive AND the rendered manifest,
+      # and a Secret may not exceed 1 MiB.
+      #
+      # THE CEILING ON THE MEASURED NUMBER IS 786,432, NOT 1,048,576, and that is arithmetic rather
+      # than a safety margin: the Secret holds base64(gzip(json)), the limit applies to the base64
+      # text, and base64 is exactly 4/3. Measured on the dev cluster at revision 99 -- 1,034,052
+      # bytes stored over 775,537 gzipped is 1.3333. So this step compresses the same payload and
+      # compares it with 1,048,576 * 3/4.
+      #
+      # LEVEL 6, WHICH IS HELM'S, NOT 9. The level has to match or the estimate is not on the same
+      # basis as the thing it predicts: against that same revision 99, level 9 read 761,914 and
+      # level 6 read 766,642, for 775,537 actually stored. IT STILL READS ABOUT 1% LOW -- the
+      # release also carries `info`, `config` and the hook objects' own framing, which this does not
+      # reconstruct -- so the thresholds below leave room for that rather than sitting at the line.
+      #
+      # WHAT COUNTS AND WHAT DOES NOT. `files/` is paid for twice, once in the archive and again in
+      # the rendered ConfigMap; a template's comment blocks ship in the archive even though they
+      # render to nothing, while a `#` line inside a block scalar renders and is therefore paid for
+      # twice as well. `values.yaml` comments are NOT in the release at all -- Helm stores parsed
+      # values -- so trimming them buys nothing here.
+      #
+      # The levers taken and declined are recorded in docs/kubernetes-architecture.md §3.6.
       - name: Verify The Release Fits Helm's Secret
         run: |
           python3 - <<'PY'
-          import base64, fnmatch, gzip, json, os, sys
+          import base64, fnmatch, gzip, json, os, sys, yaml
           chart = 'deploy/helm/acs-cymru'
           rules = [l.strip() for l in open(os.path.join(chart, '.helmignore'), encoding='utf-8')
                    if l.strip() and not l.startswith('#')]
+          # NOT STORED AS ARCHIVE FILES. Helm keeps Chart.yaml as `chart.metadata` and values.yaml
+          # as `chart.values` -- PARSED, so neither file's comments reach the release. Counting them
+          # as raw files over-estimated by ~27 KB compressed and, worse, put values.yaml near the
+          # top of the list below, pointing at bytes that trimming it cannot recover. Verified
+          # against a decoded release Secret: `chart.files` carries neither name.
+          PARSED_NOT_STORED = ('Chart.yaml', 'values.yaml')
           def ignored(rel):
               parts = rel.split('/')
               for r in rules:
@@ -1005,20 +1026,46 @@ jobs:
               for n in names:
                   p = os.path.join(root, n)
                   rel = os.path.relpath(p, chart).replace(os.sep, '/')
-                  if n == '.helmignore' or ignored(rel): continue
+                  if n == '.helmignore' or rel in PARSED_NOT_STORED or ignored(rel): continue
                   data = base64.b64encode(open(p, 'rb').read()).decode()
                   (templates if rel.startswith('templates/') else files).append({'name': rel, 'data': data})
-          release = {'chart': {'templates': templates, 'files': files},
-                     'manifest': open('/tmp/db-tls.yaml', encoding='utf-8').read()}
-          est = len(gzip.compress(json.dumps(release).encode(), 9))
-          real = int(est * 1.332)  # revision 19 on the dev cluster: 775527 estimated, 1033188 stored
-          print(f"  estimated release payload {est} bytes (about {real} once Helm encodes it; the ceiling is 1048576)")
-          if est > 785000:
-              print("::error::the release would exceed Helm's 1 MiB Secret ceiling: helm upgrade will be refused with "
-                    "'Secret ... is invalid: data: Too long'. Trim the chart archive (see the comment on this step).")
+          manifest = open('/tmp/db-tls.yaml', encoding='utf-8').read()
+          values = yaml.safe_load(open(os.path.join(chart, 'values.yaml'), encoding='utf-8'))
+          metadata = yaml.safe_load(open(os.path.join(chart, 'Chart.yaml'), encoding='utf-8'))
+          release = {'chart': {'templates': templates, 'files': files,
+                               'values': values, 'metadata': metadata},
+                     'manifest': manifest}
+          est = len(gzip.compress(json.dumps(release).encode(), 6))  # 6 is Helm's
+
+          CEILING = 1048576 * 3 // 4          # base64 is 4/3, and the Secret limit applies to it
+          FAIL_AT = int(CEILING * 0.85)       # 668467
+          WARN_AT = int(CEILING * 0.75)       # 589824
+          print(f"  release payload {est} gzip bytes ({est * 4 // 3} once base64-encoded); "
+                f"the ceiling is {CEILING} gzip / 1048576 stored -- {100.0 * est / CEILING:.1f}% used")
+
+          # Named, so the number is actionable rather than merely reported. Each entry's cost is
+          # what removing it saves, which is not its own size: gzip shares a dictionary across the
+          # whole payload, so prose that repeats elsewhere is cheaper than it looks.
+          base = est
+          def without(drop):
+              kept = {'chart': {'templates': [t for t in templates if t['name'] != drop],
+                                'files': [f for f in files if f['name'] != drop],
+                                'values': values, 'metadata': metadata},
+                      'manifest': manifest}
+              return base - len(gzip.compress(json.dumps(kept).encode(), 6))
+          costs = sorted(((without(e['name']), e['name']) for e in templates + files), reverse=True)
+          print('  largest archive entries, by what removing each would save:')
+          for cost, name in costs[:10]:
+              print(f"    {cost:7d}  {name}")
+
+          if est > FAIL_AT:
+              print(f"::error::the release is at {100.0 * est / CEILING:.1f}% of Helm's Secret ceiling "
+                    f"(fail threshold {FAIL_AT}). Past 100% `helm upgrade` is refused with "
+                    "'Secret ... is invalid: data: Too long', which reads as a broken chart rather "
+                    "than a full one. See the comment on this step for what the levers are.")
               sys.exit(1)
-          if est > 770000:
-              print("::warning::the release is within two percent of Helm's 1 MiB Secret ceiling.")
+          if est > WARN_AT:
+              print(f"::warning::the release is at {100.0 * est / CEILING:.1f}% of Helm's Secret ceiling.")
           PY
 
       # An OAuth client's registered redirect_uri must match the callback byte for byte; GoTrue

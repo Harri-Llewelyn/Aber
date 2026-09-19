@@ -5,16 +5,12 @@
 PodDisruptionBudgets, for the multi-replica workloads ONLY.
 
 A PDB ON A SINGLE-REPLICA WORKLOAD IS ACTIVELY HARMFUL, which is why this file enumerates rather
-than loops over everything: `minAvailable: 1` against one pod can never be satisfied by an eviction,
-so `kubectl drain` blocks forever and NODE MAINTENANCE SILENTLY STOPS WORKING. The operator
-discovers it while trying to patch a kernel, and the message ("Cannot evict pod as it would violate
-the pod's disruption budget") names the pod rather than the mistake.
+than loops: `minAvailable: 1` against one pod can never be satisfied by an eviction, so
+`kubectl drain` blocks forever and NODE MAINTENANCE SILENTLY STOPS WORKING. The operator finds out
+while patching a kernel, and the message names the pod rather than the mistake.
 
-Every single-writer component in this stack is deliberately one replica -- ingestion because a second
-consumer duplicates telemetry, node-red and grafana and storage because they are single writers on a
-ReadWriteOnce PVC, realtime because it holds a replication slot, both databases because they are not
-replicated. None of them gets a PDB, and a PDB would not help them anyway: what protects them is
-`Recreate` plus backups, not an eviction budget.
+Every single-writer component here is deliberately one replica and gets no PDB; what protects them
+is `Recreate` plus backups, not an eviction budget.
 
 `maxUnavailable` rather than `minAvailable`, so the budget stays correct if replicas change --
 `minAvailable: 2` on a Deployment scaled down to 2 is the same trap in a different shape.

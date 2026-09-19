@@ -115,25 +115,23 @@ in one database and the server opens another, with nothing reporting a fault.
 {{/*
 =================================================================================================
 GITEA -- the forge: one private repository per enrolled gateway, cloned by the appliance's puller.
-
-THE ARGUMENT FOR IT IS IN supabase/README.md AND IS NOT REPEATED HERE. What this file adds is the
-three things the Kubernetes shape has to answer.
+The argument for it is in supabase/README.md. What this file adds is what the Kubernetes shape has
+to answer.
 
 ONE: SSH IS NOT AN INGRESS CONCERN. Every appliance holds a per-gateway deploy key confined by
 branch rules to pulling `main` and pushing `appliance`, and a Gitea deploy key is an SSH key --
-there is no per-repository HTTP token to use instead. An HTTP Ingress cannot carry SSH at all, so the same split mosquitto already makes applies:
-a plain ClusterIP for in-cluster resolution, and a SECOND Service for the fleet. Getting this wrong
-is quiet -- the web UI works perfectly, and appliances simply cannot clone.
+there is no per-repository HTTP token to use instead. An HTTP Ingress cannot carry SSH, so the
+split mosquitto already makes applies: a plain ClusterIP for in-cluster resolution and a SECOND
+Service for the fleet. Getting it wrong is quiet -- the web UI works and appliances cannot clone.
 
-TWO: SINGLE WRITER, SO `Recreate`. The backend is SQLite on a ReadWriteOnce PVC and the repositories
-are a directory on that same volume. Two replicas is not "twice the capacity", it is two processes
-writing one SQLite file. It is declared in `acs-cymru.singleWriterWorkloads` for the same reason
-grafana is, so the autoscaling guard refuses it rather than discovering it.
+TWO: SINGLE WRITER, SO `Recreate`. The backend is SQLite on a ReadWriteOnce PVC and the
+repositories are a directory on that same volume, so two replicas is two processes writing one
+SQLite file. Declared in `acs-cymru.singleWriterWorkloads` so the autoscaling guard refuses it
+rather than discovering it.
 
-THREE: THE ADMIN ACCOUNT IS AN initContainer, running the mirrored gitea-init.sh. Idempotent, and
-the reason it exists at all: `INSTALL_LOCK` closes the web installer, so
-the first account has to be created out of band or a forge on a plant network is one request away
-from anybody making themselves its administrator.
+THREE: THE ADMIN ACCOUNT IS AN initContainer running the mirrored gitea-init.sh, idempotent.
+`INSTALL_LOCK` closes the web installer, so the first account has to be created out of band or a
+forge on a plant network is one request away from anybody making themselves its administrator.
 =================================================================================================
 */}}
 apiVersion: v1
@@ -195,8 +193,8 @@ spec:
 Git over SSH from OUTSIDE the cluster.
 
 A SECOND Service and not a change of type on the one above, exactly as mosquitto-external is: the
-in-cluster name must stay a plain ClusterIP so `gitea:3000` resolves the same way on both targets,
-and mixing the two would tie internal service discovery to an external IP allocation.
+in-cluster name must stay a plain ClusterIP so `gitea:3000` keeps resolving for in-cluster
+clients, and mixing the two would tie service discovery to an external IP allocation.
 
 WHY SSH RATHER THAN AN HTTP TOKEN, restated here because this Service is what pays for it: a Gitea
 deploy key is per-repository, and branch rules confine it to one branch it may write, which is the

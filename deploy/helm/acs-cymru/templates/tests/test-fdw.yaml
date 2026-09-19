@@ -5,19 +5,18 @@
 M6 -- the postgres_fdw cross-database check, and the CHEAP GATE in front of every E2E suite.
 
 WHAT IT PROVES. `public.telemetry` in Supabase is not a table: it is a read-only projection of the
-TimescaleDB hypertable reached over postgres_fdw (a foreign server, a user mapping, and a foreign
-table, all created by 0001_baseline_schema.sql from the psql variables db-init passes it). Four
-separate things have to be right for a single row to come back, and a mistake in any of them --
-most likely the port, M2's whole subject -- surfaces as a RELATION-LEVEL ERROR FROM PostgREST.
+TimescaleDB hypertable over postgres_fdw -- a foreign server, a user mapping and a foreign table,
+all created by 0001_baseline_schema.sql from the psql variables db-init passes it. Four things must
+be right for one row to come back, and a mistake in any of them, most likely the port (M2's
+subject), surfaces as a RELATION-LEVEL ERROR FROM PostgREST.
 
-That reads as a schema fault. So `validate.py` would fail deep in its telemetry checks with an
-error pointing at the wrong layer entirely, and the operator would go looking at migrations.
-This runs first, takes about a second, and says exactly what is wrong.
+That reads as a schema fault, so validate.py would fail deep in its telemetry checks pointing at
+the wrong layer. This runs first, takes about a second, and says what is wrong.
 
-WHY `SELECT 1` WOULD PROVE NOTHING. It never crosses the wrapper. The query MUST touch the foreign
-table, which is what exercises the server definition, the user mapping and reachability together.
-A bounded time window keeps it from materialising the whole range: postgres_fdw pushes WHERE
-clauses to the remote but NOT LIMIT.
+WHY `SELECT 1` WOULD PROVE NOTHING: it never crosses the wrapper. The query MUST touch the foreign
+table, which exercises the server definition, the user mapping and reachability together. A bounded
+time window keeps it from materialising the whole range -- postgres_fdw pushes WHERE clauses to the
+remote but NOT LIMIT.
 
 RUN IT WITH:  helm test acs-cymru -n <namespace>
 =================================================================================================

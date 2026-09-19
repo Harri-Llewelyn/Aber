@@ -18,6 +18,22 @@ playbook's module for the edge runtime
 ([`scripts/sync-gateway-platform.mjs`](scripts/sync-gateway-platform.mjs)); edit the source,
 run the script, and CI's `--check` refuses a stale copy.
 
+**Sweeping a surface for the comment rule** means proving the sweep changed no behaviour, and the
+comparison depends on what the surface is. For Python, compare the AST minus docstrings; for YAML,
+compare the parsed data; for everything else, compare the comment-stripped text. For the Helm chart
+it is neither the template text nor the file: render the chart before and after with several value
+sets and compare the **parsed manifests** document by document, because that is the only artefact
+whose sameness means anything. Two traps live there. Most of the chart renders nothing under the
+dev values, so a single value set proves almost nothing — use one with the optional features on and
+one with `values-prod.yaml.example`. And a `#` line inside a block scalar is *data*, not YAML
+comment space: it renders into the manifest and is stored twice, so a sweep may take it, but it has
+to be classified deliberately rather than waved through with the template comments.
+
+**That comparison proves no behaviour changed and says nothing about whether the surviving comment
+is true.** A comment asserting a runtime fact is read against whatever produces that fact — the
+chart, the migration, the deployment target — rather than left shorter and still wrong. Argument and
+history move to the component README or `docs/incidents.md`; they are not deleted.
+
 ## Two rules worth stating up front
 
 - **`metric_catalog.name` is immutable.** Changing a metric is deprecate-and-supersede, never a

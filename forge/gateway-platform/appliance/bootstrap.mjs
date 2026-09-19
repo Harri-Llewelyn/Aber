@@ -260,7 +260,7 @@ async function enrol() {
 // Credentials, encrypted through Node-RED's own runtime
 /**
  * Write flows_cred.json the way Node-RED will read it, through the runtime's own module rather than
- * hand-rolled AES, as scripts/node-red-init.mjs does. Asserts ciphertext before writing: an export
+ * hand-rolled AES, as node-red/node-red-init.mjs does. Asserts ciphertext before writing: an export
  * without the `$` envelope means encryption did not happen.
  */
 async function writeEncryptedCredentials(brokerNodeId, username, password) {
@@ -403,7 +403,7 @@ const flow = template
   .replaceAll('__GATEWAY_NAME__', GATEWAY_NAME)
   // The CA path. The tls-config node's `ca` is a path read at deploy time; left empty, Node-RED
   // verifies the broker against the system trust store and reports only "Connection failed to
-  // broker", the same line a wrong password produces. scripts/node-red-init.mjs guards the
+  // broker", the same line a wrong password produces. node-red/node-red-init.mjs guards the
   // identical failure with MQTT_TLS_CA_FILE.
   .replaceAll('__CA_FILE__', CA_PATH)
   // Read every minute by the flow's `read deployed.json` branch; see the record written below.

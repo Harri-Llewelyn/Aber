@@ -9,55 +9,47 @@ HorizontalPodAutoscalers -- FOUR COMPONENTS, AND ONLY THESE FOUR.
   supabase-functions  the edge runtime: a request router, workers are per-request isolates
   frontend            NGINX serving static files
 
-EVERYTHING ELSE IN THIS STACK IS SINGLE-WRITER, and `acs-cymru.validateAutoscaling` REFUSES to
-render an HPA for one rather than warning about it. The reasons are per-component and recorded in
-each manifest, but they share a shape that makes refusal the right response: THE DAMAGE IS SILENT.
+EVERYTHING ELSE IS SINGLE-WRITER, and `acs-cymru.validateAutoscaling` REFUSES to render an HPA for
+one rather than warning. The reasons are per-component and recorded in each manifest, but they
+share the shape that makes refusal right: THE DAMAGE IS SILENT -- no error, no crash, no alert,
+just wrong data, arrived at under load, and by then the duplicate audit rows are permanent.
 
   ingestion          a plain paho subscribe with no shared-subscription group, so every replica
-                     consumes every message -- duplicate telemetry rows (each stamps its own
-                     timestamp, so ON CONFLICT DO NOTHING does not dedupe them), duplicate
-                     quarantine decisions, and duplicate rows in an APPEND-ONLY audit table
-  node-red           /data holds the live flow, the encrypted credentials, editor sessions and the
-                     persisted editor-user map; two instances race on all four
-  mosquitto          does not cluster -- two brokers behind one Service split the fleet in half,
-                     each seeing only the gateways that landed on it, and Sparkplug birth/death and
-                     sequence state is per-connection
-  realtime           holds a logical replication slot, which is per-instance state
-  supabase-storage   the file backend is a single writer on a ReadWriteOnce PVC
+                     consumes every message: duplicate telemetry rows (each stamps its own
+                     timestamp, so ON CONFLICT DO NOTHING does not dedupe), duplicate quarantine
+                     decisions, duplicate rows in an APPEND-ONLY audit table
+  node-red           /data holds the live flow, the credentials, editor sessions and the user map
+  mosquitto          does not cluster: two brokers behind one Service split the fleet, and
+                     Sparkplug birth/death and sequence state is per-connection
+  realtime           holds a logical replication slot
+  supabase-storage   a single writer on a ReadWriteOnce PVC
   grafana            SQLite on a ReadWriteOnce PVC
-  supabase-db        a single Postgres instance with no replication
+  supabase-db        one Postgres instance with no replication
   timescaledb        likewise
 
-No error, no crash, no alert -- just wrong data. An autoscaler makes that happen under load, which
-is the worst possible moment to discover it, and by then the duplicate audit rows are permanent.
-
 REQUIRES metrics-server. Without it the HPA reports `<unknown>` for every metric and never scales,
-which looks like the HPA being ignored rather than the metrics source being absent. CI's k3d cluster
-disables metrics-server deliberately, which is one reason autoscaling is off by default.
+which looks like the HPA being ignored rather than the metrics source being absent. CI's k3d
+cluster disables it deliberately, which is one reason autoscaling is off by default.
 
-TARGET IS THE DEPLOYMENT NAME, which for these four is the plain component name -- Services and
-Deployments here are NOT release-prefixed, deliberately (see _helpers.tpl). An HPA pointed at a
-prefixed name reports `FailedGetScale` and scales nothing.
+TARGET IS THE DEPLOYMENT NAME, which here is the plain component name -- Services and Deployments
+are not release-prefixed (_helpers.tpl). An HPA pointed at a prefixed name reports `FailedGetScale`.
 =================================================================================================
 */}}
 {{/*
 THIS TABLE AND THE ALLOW-LIST MUST NAME THE SAME FOUR, and the check below is what makes that true
-rather than merely intended.
+rather than merely intended. `acs-cymru.validateAutoscaling` refuses any component outside
+`acs-cymru.autoscalableWorkloads` (issue #31): a name there and not here would pass validation and
+render no HPA, which is that issue's silent failure one level down. A name here and not there is
+unreachable code.
 
-`acs-cymru.validateAutoscaling` refuses any component outside `acs-cymru.autoscalableWorkloads`
-(issue #31). If a name were added there and not here it would pass validation and then render no
-HPA -- which is exactly the silent failure that issue was about, reintroduced one level down. The
-reverse is quieter still: a name here and not there is unreachable code.
-
-Values lookups cannot be derived from a list of names -- `.Values.supabaseRest.enabled` is not
-spelled like its component -- so the mapping is written out and then ASSERTED, rather than being
-generated or trusted.
+Values lookups cannot be derived from names -- `.Values.supabaseRest.enabled` is not spelled like
+its component -- so the mapping is written out and then ASSERTED.
 
 THE ASSERTION COMPARES NAMES AND CANNOT SEE A DEAD VALUES PATH. `supabase-kong` sat here until
-b7989a0 deleted Kong and its values block with it; both sides still agreed, so the check passed
-and the render died one line earlier on a nil pointer -- and only under `autoscaling.enabled`,
-which is true in values-prod.yaml.example alone. A name removed from one side belongs removed
-from the other AND checked against a production render, which is the one that reaches this file.
+b7989a0 deleted Kong and its values block; both sides still agreed, so the check passed and the
+render died a line earlier on a nil pointer -- and only under `autoscaling.enabled`, which is
+values-prod.yaml.example alone. A name removed from one side belongs removed from the other AND
+checked against a production render.
 */}}
 {{- $enabledOf := dict
       "supabase-rest" .Values.supabaseRest.enabled
@@ -71,20 +63,14 @@ from the other AND checked against a production render, which is the one that re
 {{- end -}}
 {{- range .Values.autoscaling.components }}
 {{/*
-  ASKED FOR AND TURNED OFF IS AN ERROR, not a no-op. This used to be a bare `if`, so a component in
-  the allow-list whose workload was disabled rendered NO HPA AND NO ERROR -- issue #31's exact
-  symptom, arriving through a third door: not an unknown name, not a missing dispatch entry, but a
-  known name for something that is not deployed.
+  ASKED FOR AND TURNED OFF IS AN ERROR, not a no-op. As a bare `if`, a component in the allow-list
+  whose workload was disabled rendered NO HPA AND NO ERROR -- issue #31's symptom through a third
+  door: a known name for something not deployed.
 
-  NARROWED TO NAMES THIS TABLE ACTUALLY CARRIES. A first cut used a bare `not (index ...)`, which is
-  also true for a name the table has never heard of -- so it fired for every single-writer workload
-  and swallowed `acs-cymru.validateAutoscaling`'s message, which is the one that says WHY ingestion
-  or mosquitto cannot scale. Refusing with a less useful reason is its own regression: CI asserts
-  that a refused single-writer names "SINGLE-WRITER workload", and it was right to.
-
-  It was not hypothetical: values-prod.yaml.example once asked to autoscale a gateway workload
-  the chart no longer rendered, and the render answered with a gateway pinned at one replica where
-  the file plainly asked for two to six. Nothing said so.
+  NARROWED TO NAMES THIS TABLE CARRIES. A bare `not (index ...)` is also true for a name the table
+  has never heard of, so it fired for every single-writer workload and swallowed
+  `acs-cymru.validateAutoscaling`'s message, which is the one that says WHY. CI asserts that a
+  refused single-writer names "SINGLE-WRITER workload".
 */}}
 {{- if and (hasKey $enabledOf .) (not (index $enabledOf .)) }}
 {{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, but that workload is DISABLED.\n\nAn HPA cannot scale a Deployment the chart does not render, so this would have produced no\nHorizontalPodAutoscaler and no error -- the component would sit at its fixed replica count while\nthe values file said it scaled. Refused rather than ignored, because the symptom only appears\nunder load.\n\nEither enable it, or take it out of autoscaling.components. The gateway's name is supabase-envoy.\n" .) }}
@@ -117,16 +103,14 @@ spec:
       every one of these components declares `resources.requests.memory`. An HPA with a utilization
       target against a container with no request reports `<unknown>` forever and never scales.
 
-      TWO TEMPLATE-COMMENT TRAPS, both hit while writing this block:
-
-        1. A comment whose closing delimiter carries a leading dash chomps the newline after it,
-           joining the next YAML list item onto the previous line. It is reported as "mapping values
-           are not allowed in this context" at a line number in the RENDERED output, which does not
-           exist in this file. Use the non-chomping close -- as here.
-        2. A comment must not CONTAIN its own closing delimiter. Go templates end the comment at the
-           first occurrence, so an example of the syntax written literally terminates it early and
-           the remaining prose leaks into the YAML as garbage tokens. Hence this paragraph describes
-           the delimiters rather than showing them.
+      TWO TEMPLATE-COMMENT TRAPS:
+        1. A closing delimiter carrying a leading dash chomps the following newline, joining the
+           next YAML list item onto the previous line. It is reported as "mapping values are not
+           allowed in this context" at a line number in the RENDERED output. Use the non-chomping
+           close, as here.
+        2. A comment must not CONTAIN its own closing delimiter: Go templates end at the first
+           occurrence, so the remaining prose leaks into the YAML as garbage tokens. Hence this
+           paragraph describes the delimiters rather than showing them.
     */}}
     {{- if $.Values.autoscaling.targetMemoryUtilizationPercentage }}
     - type: Resource

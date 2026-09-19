@@ -8,37 +8,27 @@
 
 ITS SUBJECT IS PROVISIONED BY THE SUITE, not seeded and not produced by another Job. It creates a
 gateway, a device, a schema, a nameplate and its birth parameters at pinned ids through
-test-harness/aas_fixture.py, asserts against the document the exporter composes from them, and tears them
-down -- so the live checks need no broker, no simulator publishing a DBIRTH, and no operator
-approval, and no demo data either.
+test-harness/aas_fixture.py, asserts against the document the exporter composes, and tears them
+down -- so the live checks need no broker, no simulator publishing a DBIRTH, no operator approval
+and no demo data.
 
-IT USED TO TARGET `Sim_CNC_Mill_01`, registered by migration 0002 and given its schema and nameplate
-by 0020. That made a CONFORMANCE Job depend on DEMONSTRATION data the seed no longer creates -- and
-0020 exists partly because the same coupling bit once before, when the suite's previous subject
-quietly stopped receiving a DBIRTH while the suite went on naming it and reporting success.
+IT USED TO TARGET A DEMONSTRATION DEVICE, which made a CONFORMANCE Job depend on seed data. That
+coupling had already bitten once, when a previous subject quietly stopped receiving a DBIRTH while
+the suite went on naming it and reporting success. Seeding its own nameplate is what makes this
+suite independent of whatever the shipped Node-RED flow publishes.
 
-That is a CHANGE, and the note it replaces was wrong in a way worth recording: this block used to
-say the ordering below was "a DATA DEPENDENCY -- validate.py is what APPROVES Simulated_CNC_01 out of
-quarantine and records its birth parameters". validate.py does neither. It seeds a gateway at its own
-pinned UUID, creates its own VALIDATE_* devices at runtime, and never touches the demo device. The
-suite passed regardless because `LIVE` only requires the device ROW to exist, which the seed provided
--- so the stated dependency was load-bearing for nothing, and the Nameplate submodel was carried by
-whatever the shipped Node-RED flow happened to publish. When that flow was consolidated onto `Sim_`
-devices, nothing published under the demo device's id any more and the nameplate assertions had no
-source at all. Seeding the nameplate is what makes this suite's subject independent of the flow.
-
-The initContainer below is KEPT, for the narrower reason it gives itself: do not run a conformance
+The initContainer below is kept for the narrower reason it gives itself: do not run a conformance
 suite against a stack whose conformance run did not pass. A SUITE THAT SKIPS ITS OWN SUBJECT AND
-REPORTS SUCCESS is still the failure mode to avoid here, and it is still silent -- which is why CI
-asserts on the absence of the skip line rather than on this Job's exit status.
+REPORTS SUCCESS is the failure to avoid, and it is silent -- which is why CI asserts on the absence
+of the skip line rather than on this Job's exit status.
 
 WHAT IT COVERS THAT NOTHING ELSE DOES:
-  * conformance against the REAL vendored IDTA schema (test-harness/schemas), which caught three metamodel
-    violations the hand-written structural tests had passed -- all of the same shape: the metamodel
-    expresses "absent" by OMITTING a field, never by a placeholder;
+  * conformance against the REAL vendored IDTA schema (test-harness/schemas), which caught three
+    metamodel violations the hand-written structural tests passed -- all the same shape: the
+    metamodel expresses "absent" by OMITTING a field, never by a placeholder;
   * the AASX container's discovery chain, every link of which is load-bearing;
   * that the packaged Environment is byte-identical to the JSON export;
-  * the sparkplugToXsd / model3dContentType duplication between the edge worker and the frontend --
+  * the sparkplugToXsd / model3dContentType duplication between the edge worker and the frontend,
     which is why they may be duplicated at all.
 =================================================================================================
 */}}
@@ -70,20 +60,17 @@ spec:
       initContainers:
         - name: wait-for-validate
           # `bitnami/kubectl:1.31.1` UNTIL BITNAMI WITHDREW ITS TAGGED DOCKER HUB CATALOGUE. That
-          # repository now publishes only `latest` and digest references; every semver tag 404s, so
-          # the pin stopped resolving without anything in this repository changing. `bitnamilegacy`
-          # is where Bitnami relocated the archived builds -- byte-for-byte the image that was here
-          # before, same shell, same uid 1001, same kubectl v1.31.1.
+          # repository publishes only `latest` and digests now, so every semver tag 404s and the pin
+          # stopped resolving without anything here changing. `bitnamilegacy` is where the archived
+          # builds went -- byte-for-byte the same image, same shell, same uid 1001, same kubectl.
           #
-          # A STOPGAP, and the namespace name says so: it is frozen and will not be rebuilt for
-          # CVEs. The right fix is to drop the dependency rather than re-pin it -- this
-          # initContainer only polls one Job's status, which `curlimages/curl` (already pinned in
-          # this chart, 10 MB, has a shell) can do against the API server with the ServiceAccount
-          # token this pod already carries.
+          # A STOPGAP, and the namespace name says so: frozen, and not rebuilt for CVEs. The right
+          # fix is to drop the dependency rather than re-pin it -- this initContainer only polls one
+          # Job's status, which `curlimages/curl` (already pinned here, has a shell) can do against
+          # the API server with the token this pod already carries.
           #
-          # The alternatives were weighed: `rancher/kubectl` is distroless and has no /bin/sh, which
-          # the wait loop below needs; `alpine/k8s` has one but is 1.19 GB against 432 MB, pulled on
-          # every e2e run, to gain a toolchain nothing here uses.
+          # The alternatives: `rancher/kubectl` is distroless with no /bin/sh, which the wait loop
+          # needs; `alpine/k8s` has one but is 1.19 GB against 432 MB, pulled on every e2e run.
           image: bitnamilegacy/kubectl:1.31.1
           imagePullPolicy: IfNotPresent
           command:

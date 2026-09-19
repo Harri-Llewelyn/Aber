@@ -5,75 +5,55 @@
 ServiceMonitors -- ONLY for endpoints that actually serve Prometheus metrics.
 
 THE POINT OF THIS FILE IS WHAT IT REFUSES TO CREATE. A ServiceMonitor naming a port that serves
-nothing does not fail: Prometheus lists the target as DOWN, or worse scrapes an endpoint that
-answers 200 with no metrics, and the dashboards built on it render empty panels. Someone then
-concludes the component is idle. That is a monitoring stack lying about the thing it was installed
-to observe, which is worse than not monitoring it at all.
+nothing does not fail: Prometheus lists the target DOWN, or scrapes an endpoint that answers 200
+with no metrics, and the dashboards built on it render empty panels. Someone then concludes the
+component is idle -- a monitoring stack lying about the thing it was installed to observe.
 
-So each entry below was verified against the pinned image before it was written:
+So each entry was verified against the pinned image before it was written:
 
-  grafana         SERVES METRICS NATIVELY on its normal HTTP port at /metrics, unauthenticated.
-                  (grafana 11.6.1: 1250 metric series.) Nothing to enable.
+  grafana         NATIVE, on its normal HTTP port at /metrics, unauthenticated.
+                  (grafana 13.2.0: 499 metric families.) Nothing to enable.
 
-  supabase-envoy  SERVES METRICS ON ITS ADMIN LISTENER at /stats/prometheus, the port that also
-                  answers the readiness probe. The `envoy_http_downstream_rq_xx` family covers
-                  the HTTP tier for every REST, Auth, Storage, Realtime and edge-function
-                  request, which is what makes it the most valuable target here -- see the note
-                  on supabase-rest.
+  supabase-envoy  ON ITS ADMIN LISTENER at /stats/prometheus, the port that also answers the
+                  readiness probe. The `envoy_http_downstream_rq_xx` family covers the HTTP tier
+                  for every REST, Auth, Storage, Realtime and edge-function request.
 
   mosquitto       HAS NO HTTP METRICS SURFACE AT ALL and cannot be given one; it publishes to
                   `$SYS/broker/#` MQTT topics. `mosquitto.metrics.enabled` runs an exporter
                   sidecar that subscribes and re-serves them.
-                  (sapcc/mosquitto-exporter 0.8.0: 48 broker_* series -- note the `broker_`
-                  prefix, not `mosquitto_`.)
+                  (sapcc/mosquitto-exporter 0.8.0: 48 series, prefixed `broker_`, not
+                  `mosquitto_` -- alerts written against the latter match nothing, silently.)
 
-  supabase-rest   NO LONGER TRUE AS OF v14.12, AND THE OLD TEXT IS KEPT BELOW BECAUSE THE REASON
-                  IT WAS WRONG IS THE USEFUL PART. It read:
+  supabase-rest   ON THE ADMIN SERVER at /metrics, as of v14.12; 12.2.0 served /ready and /live
+                  there and nothing else, so read this off a running server rather than off a
+                  changelog. `pgrst_db_pool_max`, `pgrst_db_pool_waiting`,
+                  `pgrst_schema_cache_loads_total`, `pgrst_schema_cache_query_time_seconds` and
+                  the three `pgrst_jwt_cache_*_total` counters.
 
-                    "POSTGREST 12.2.0 EXPOSES NO METRICS. Its admin server (`admin-server-port`)
-                     serves /ready and /live and nothing else -- there is no metrics setting in
-                     the configuration at all. A ServiceMonitor for it would be pure fiction."
+                  THESE ARE WHAT THE GATEWAY CANNOT SEE. Every PostgREST request arrives through
+                  it, so its request and latency series cover the HTTP tier -- but a gateway-side
+                  200 says nothing about a schema cache reload or a pool with requests queued
+                  behind it. The admin listener is a ClusterIP port, absent from the Ingress and
+                  unrouted by the gateway, because IT HAS NO AUTHENTICATION and its readiness
+                  endpoints describe the database connection.
 
-                  That was accurate for 12.2.0 and stopped being accurate the moment the pin
-                  moved. Current PostgREST serves Prometheus text on the admin server at
-                  /metrics. Read off a running v14.12 rather than off a changelog:
-                  `pgrst_db_pool_max`, `pgrst_db_pool_waiting`, `pgrst_schema_cache_loads_total`,
-                  `pgrst_schema_cache_query_time_seconds`, and the three
-                  `pgrst_jwt_cache_*_total` counters.
+  ingestion       the daemon's own counter registry, rendered by ingestion/metrics.py on a fourth
+                  background thread beside the watchdog, heartbeat and stats reporter. Not a
+                  re-instrumentation: the counters already existed (issues #22, #24).
 
-                  THOSE ARE EXACTLY THE THINGS THE GATEWAY CANNOT SEE. Every PostgREST request
-                  does arrive through it, so its request and latency series cover the HTTP tier
-                  -- but a gateway-side
-                  200 says nothing about a schema cache reload or a connection pool with requests
-                  queued behind it. Those are process-internal and one hop removed.
+DELIBERATELY ABSENT:
 
-                  IT IS NOW A TARGET, on the `admin` port, and this entry stays here only
-                  because the reason it was wrong is worth keeping. The admin listener is bound by
-                  `PGRST_ADMIN_SERVER_PORT` on both deployments; it is a ClusterIP port, absent
-                  from the Ingress and unrouted by the gateway, because THE ADMIN SERVER HAS NO
-                  AUTHENTICATION and its readiness endpoints describe the database connection.
+  supabase-db /   Postgres exposes nothing without postgres_exporter, which needs its own
+  timescaledb     credentials and its own scrape story. Worth doing, and worth doing properly
+                  rather than half-added here.
 
-DELIBERATELY ABSENT, and this is the part worth reading:
+REQUIRES THE PROMETHEUS OPERATOR CRDs. ServiceMonitor is not a core type; without
+kube-prometheus-stack (or at least its CRDs), `helm install` fails with `no matches for kind
+"ServiceMonitor"`. Hence opt-in, and hence the note in values.yaml.
 
-  supabase-db /   Postgres exposes nothing without postgres_exporter, which is a separate
-  timescaledb     deployment with its own credentials and its own scrape story. Worth doing, and
-                  worth doing properly rather than half-added here.
-
-  (ingestion USED TO BE LISTED HERE, on the reasoning that it was "a Python daemon with no HTTP
-  server" and that giving it one would mean adding a listener to a process whose whole design is a
-  single MQTT loop. Issues #22 and #24 overturned that, and the second half of the argument turned
-  out to be the weaker one: the daemon ALREADY runs three background threads -- a device watchdog,
-  a liveness heartbeat and a stats reporter -- so a fourth serving a text endpoint fits the shape
-  it already had. What it is NOT is a re-instrumentation: the counters existed, and metrics.py
-  renders the registry they already fill. It is a target below.)
-
-REQUIRES THE PROMETHEUS OPERATOR CRDs. ServiceMonitor is not a core Kubernetes type; without
-kube-prometheus-stack (or at least its CRDs) installed, `helm install` fails with
-`no matches for kind "ServiceMonitor"`. Hence opt-in, and hence the note in values.yaml.
-
-NETWORK POLICY. Under `networkPolicy.enabled` every scrape is dropped by the default-deny rule --
-the generated edges only describe flows between components of this chart, and Prometheus is not one
-of them. `networkPolicy.extraIngress` is the seam; values-prod.yaml.example carries a working rule.
+NETWORK POLICY. Under `networkPolicy.enabled` every scrape is dropped by the default-deny rule:
+the generated edges describe flows between components of this chart, and Prometheus is not one.
+`networkPolicy.extraIngress` is the seam, and values-prod.yaml.example carries a working rule.
 Without it the targets are simply DOWN, which reads as the pods being unreachable.
 =================================================================================================
 */}}
