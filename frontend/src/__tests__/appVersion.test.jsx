@@ -46,6 +46,9 @@ const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 const VERSION_SRC = fs.readFileSync(path.resolve(__dirname, '../version.js'), 'utf8')
 const VITE_CONFIG = fs.readFileSync(path.resolve(__dirname, '../../vite.config.js'), 'utf8')
 const DOCKERFILE = fs.readFileSync(path.resolve(__dirname, '../../Dockerfile'), 'utf8')
+// The two scripts that build this image: a declared ARG only matters if a caller passes it.
+const DEV_CLUSTER = fs.readFileSync(path.resolve(__dirname, '../../../scripts/dev-cluster.mjs'), 'utf8')
+const RELEASE_WF = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/release.yml'), 'utf8')
 
 const openMenu = async () => {
   render(<App />)
@@ -108,6 +111,22 @@ describe('how the version reaches the bundle', () => {
 
   it('declares the build arg the Dockerfile has to pass', () => {
     expect(DOCKERFILE).toMatch(/^ARG VITE_APP_VERSION$/m)
+  })
+
+  /* An ARG nobody passes is an image reporting `unknown`. */
+  it('is passed by both builds of this image -- the release and the dev cluster', () => {
+    expect(RELEASE_WF).toMatch(/VITE_APP_VERSION=/)
+    expect(DEV_CLUSTER).toMatch(/VITE_APP_VERSION=DESCRIBE/)
+    expect(DEV_CLUSTER).toMatch(/function describeVersion/)
+  })
+
+  /* `VITE_APP_VERSION` ends in `VERSION`: substituting across the whole `NAME=value` renames the
+     argument to `VITE_APP_<tag>`, which Docker accepts with a warning. */
+  it('substitutes the dev cluster build args in the value, never in the name', () => {
+    expect(DEV_CLUSTER).toMatch(/const eq = a\.indexOf\('='\)/)
+    expect(DEV_CLUSTER).toMatch(/a\.slice\(eq \+ 1\)\.replace\('VERSION', version\)/)
+    // The shape it must not go back to: one replace over the whole argument.
+    expect(DEV_CLUSTER).not.toMatch(/push\('--build-arg', a\.replace\(/)
   })
 })
 
