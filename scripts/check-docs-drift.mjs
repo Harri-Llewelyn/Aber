@@ -529,6 +529,14 @@ function edgeFunctionNames() {
     // two-argument form first: an overload whose extra arguments default makes every RPC call
     // ambiguous at PostgREST.
     'public.create_machine_principal': '0125 adds p_name and p_purpose and writes machine_principals; 0080 holds the permissions-and-note form',
+    // 0129 adds p_rotated, which is what makes a RE-ISSUE reportable (#217), and DROPs every
+    // existing declaration first: the baseline recreates the one-argument form on every boot, so
+    // without the sweep a call by name could choose neither. The argument defaults, so a worker
+    // from the previous release still resolves to it during a rollout.
+    'public.playback_report_credentials': '0129 adds p_rotated so a re-issue moves the row; the baseline holds the ids-only form',
+    // 0129 adds the staleness gate to the credential tier. Same signature, so the grants survive
+    // and no sweep is needed; the body is carried whole because plpgsql cannot be patched.
+    'public.start_playback_job': '0129 refuses a target whose credential the worker has not picked up yet; the baseline holds the pre-#217 form',
     // 0103 names the gateway's scrape job as the chart's collector labels it (supabase-envoy);
     // the baseline holds the Compose-era `envoy`.
     'public.directory_liveness_job_map': '0103 renames the gateway job to supabase-envoy; the baseline holds envoy',

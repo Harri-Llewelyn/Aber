@@ -88,6 +88,8 @@ CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
     os.getenv("PLAYBACK_CREDENTIAL_REPORT_INTERVAL_SECONDS", "30")
 )
 
+
+
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
@@ -527,6 +529,11 @@ def main():
 
     last_report = 0.0
 
+    # EVERYTHING HELD COUNTS AS ROTATED AT STARTUP, and that is correct rather than optimistic: the
+    # file was genuinely just read, so what it holds now is what this worker observed now. A restart
+    # therefore re-stamps every observation, which is exactly what it is entitled to claim.
+    pending_rotation = set(credentials)
+
     while True:
         # ------------------------------------------------------------------------------------
         # Re-resolve what this worker holds, every pass.
@@ -569,13 +576,24 @@ def main():
                 "Playback credentials changed: now holding %d gateway(s) -- %s.",
                 len(credentials), "; ".join(parts) or "no change to which gateways are held",
             )
-            # ONLY WHEN THE REPORTED SET MOVED. `playback_report_credentials` carries edge-node ids
-            # and nothing else, so a rotation does not change what the row says and re-sending it
-            # early would be a write that tells the page nothing it does not already have.
-            if gained or lost:
-                # The playback dialog reads that row to decide whether a target is offerable, so
-                # waiting up to thirty seconds after an issue is thirty seconds of a page saying
-                # the opposite of what is true.
+            # WHICH GATEWAYS THIS WORKER HAS A NEW PASSWORD FOR, accumulated until a report gets
+            # through. A rotation does not change the reported ids, so before 0129 the row said the
+            # same thing before and after one and the dialog went on offering a target whose
+            # password had already been replaced (#217).
+            #
+            # IDS, NOT A TIME. The database stamps these with its own `now()`, which is the clock
+            # the CREDENTIAL_ISSUED row they are compared against also uses -- a timestamp taken
+            # here would make the answer depend on the offset between two clocks. And ids, not a
+            # fingerprint of the password: `playback_worker_status` is readable by three roles.
+            pending_rotation.update(gained)
+            pending_rotation.update(rotated)
+            pending_rotation.difference_update(lost)
+
+            # A ROTATION NOW MOVES THE ROW, so it reports on the same terms as a gain or a loss.
+            # The playback dialog reads that row to decide whether a target is offerable, so waiting
+            # up to thirty seconds after an issue is thirty seconds of a page saying the opposite of
+            # what is true.
+            if gained or lost or rotated:
                 last_report = 0.0
 
         # ------------------------------------------------------------------------------------
@@ -598,7 +616,12 @@ def main():
             try:
                 supabase.rpc("playback_report_credentials", {
                     "p_edge_nodes": sorted(credentials.keys()),
+                    "p_rotated": sorted(pending_rotation),
                 }).execute()
+                # CLEARED ONLY ON SUCCESS, so a rotation is not lost to a report that failed --
+                # which would leave the row claiming an observation older than the credential the
+                # worker actually holds, and the dialog refusing a target that works.
+                pending_rotation.clear()
             except Exception as err:
                 logger.warning("Could not report held credentials: %s", err)
 
