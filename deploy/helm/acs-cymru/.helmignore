@@ -38,14 +38,19 @@ __pycache__/
 /*.tgz
 /dist/
 
-# --- deliberately NOT ignored ------------------------------------------------------------------
-# values-dev.yaml and values-prod.yaml.example STAY IN THE PACKAGE, which is not the usual choice.
-# They are documentation that a published chart has no other way to carry: values-prod.yaml.example
-# is the only place the four optional hardening features are turned on together with the reasoning
-# for each, and `helm show values` renders values.yaml alone. Someone who pulled the chart from a
-# registry has no repository to read them from, which is precisely when they are worth the ~21 KB.
-
-# The example and dev values are passed by path (-f) and never read from inside the chart, so they
-# do not belong in the archive Helm stores with every release; that archive has a 1 MB ceiling.
+# --- the two values files, and the argument that was made both ways ----------------------------
+# THEY ARE IGNORED. They are passed by path (-f) and never read from inside the chart, so the only
+# thing carrying them would be the archive Helm stores with every release -- which shares a 1 MiB
+# Secret with the rendered manifest.
+#
+# The case against was that a published chart has no other way to carry them:
+# values-prod.yaml.example is the only place the optional hardening features are turned on together
+# with the reasoning for each, and `helm show values` renders values.yaml alone. That case stands
+# for someone who pulled the chart from a registry with no repository beside it -- and it loses to
+# the ceiling, because a chart that cannot be upgraded documents nothing. The README and
+# deploy/k8s/README.md both link them in the repository.
+#
+# This paragraph used to argue the opposite immediately above the two lines that ignore them, so
+# the file could not say which was true. It is the ignore.
 values-dev.yaml
 values-prod.yaml.example

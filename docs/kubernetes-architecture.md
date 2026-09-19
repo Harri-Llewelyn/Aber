@@ -448,6 +448,44 @@ Same guard-rail discipline as `check-mtconnect-seed-sync.mjs` and the isUuid/met
   cannot be repaired by re-running anything — the PVC has to be destroyed. An empty ConfigMap
   would mount cleanly, start cleanly, and fail at the first telemetry write.
 
+### 3.6 The release Secret has a ceiling, and the chart had reached it
+
+Helm stores every release as **one Secret**, holding the chart archive *and* the rendered manifest,
+and a Secret may not exceed 1 MiB. That is not a soft limit: `helm upgrade` exits on
+`Secret ... is invalid: data: Too long`, which reads as a broken chart rather than a full one.
+
+**The ceiling on the measured number is 786,432, not 1,048,576.** The Secret holds
+`base64(gzip(json))` and the limit applies to the base64 text, so the useful figure is the gzip
+payload against three quarters of the cap. Measured on the dev cluster at revision 99: 1,034,052
+bytes stored over 775,537 gzipped — exactly 4/3. The CI step *Verify The Release Fits Helm's Secret*
+compresses the same payload at Helm's own level and compares it with that number.
+
+**What is counted, and what is not.** `files/` is paid for twice, once in the archive and again in
+the ConfigMap it renders into. A template's `{{/* */}}` comment blocks ship in the archive even
+though they render to nothing, and a `#` line inside a block scalar renders, so it is paid for
+twice as well. `Chart.yaml` and `values.yaml` are **not** archive files: Helm stores them parsed, as
+`chart.metadata` and `chart.values`, so neither file's comments reach the release at all. The
+estimator counted them as raw files until this was measured against a decoded Secret, which
+over-stated the payload by about 27 KB and pointed the step's own advice at bytes that trimming
+`values.yaml` cannot recover.
+
+**The levers, and what was decided about each.**
+
+| Lever | Decision | Reason |
+| :--- | :--- | :--- |
+| The two API specifications into the `swagger-ui` image | **Taken** | ~155 KB, the largest single object. `swagger-ui` is their only reader, and the precedent is the migrations in `db-init`. |
+| `node-red-init.mjs` into the `node-red` image | **Taken** | The initContainer already runs on that image, and must, because it evaluates a `settings.js` that requires out of its `node_modules`. |
+| The templates' comment blocks | **Taken, as three sweeps** | Applied `CONTRIBUTING.md`'s comment rule rather than deleting comments. Worth roughly a tenth of the source, not the whole of it. |
+| The TimescaleDB maintenance SQL into an image | **Declined** | It would move to `db-init`, widening that image's build context to the repository root, and the historian's initdb bootstrap must stay a ConfigMap regardless. Revisit if headroom gets short. |
+| The broker and credential scripts into their image | **Declined** | `scripts/sync-helm-chart-files.mjs` records the trade: the image supplies the runtime and the chart supplies the code, so a script change needs no image rebuild. |
+| The Grafana dashboards and alert rules | **Kept** | There is no custom Grafana image, and this is the group that grows. It is what the headroom is for. |
+| Helm's `sql` storage driver | **Declined** | It removes the ceiling, but it is a property of the operator's Helm client rather than of the chart, so every operator would have to set it. |
+
+**Result: 775,537 gzip bytes to 557,372, or 98.6% of the ceiling to 70.9%.** The CI step's
+thresholds are set against the measured figure — a warning at 75% and a failure at 85% — leaving
+room for the roughly 1% it reads low, since the release also carries `info`, `config` and the hook
+objects' own framing that the estimate does not reconstruct.
+
 ## 4. Supabase control plane and the ordering problem
 
 Nine Deployments (`kong`, `auth`, `rest`, `realtime`, `storage`, `functions`, `meta`, `studio`,

@@ -19,10 +19,10 @@ moves out, and the table below says where it went.
 
 **Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
 2 audits the documentation, code and comments, and is worth running once against a codebase that
-has stopped moving: the last feature work, archiving as a lifecycle (`0124`), has landed. 3
-recovers the headroom the chart has nearly spent, and follows 2 because one of its levers is 2's
-comment sweep. 4 is last by rule: it folds the migration chain, so every entry that changes the
-schema must have landed before it.
+has stopped moving: the last feature work, archiving as a lifecycle (`0124`), has landed. Its
+sweep of the Helm templates has already run, as one of the levers that recovered the chart's
+release headroom. 3 is last by rule: it folds the migration chain, so every entry that changes
+the schema must have landed before it.
 
 **Retired entries, and where their substance went.**
 
@@ -54,6 +54,7 @@ schema must have landed before it.
 | The playback feature is reviewed end to end | Reviewed against a live stack rather than read. The worker now runs in the k3d loop (`playback.enabled`, `values-dev.yaml`), so the feature is exercised by something other than three unit suites, and [`ingestion/test_playback_replay.py`](../ingestion/test_playback_replay.py) mints the credential, waits out the kubelet's Secret refresh, replays a fixture and asserts the rows arrived **under the replay lane and under no other asset** — the observation QoS 0 will not give, since a publish the broker refuses is dropped with no PUBACK. Playback also gained its NetworkPolicy edges and an entry in the policy's component map, so it is confined rather than merely unmentioned. **Three defects fixed.** A blank delivery file was read as malformed, logging an `ERROR` every three seconds *forever* on any stack with no playback target — the chart creates that Secret key empty, so on Kubernetes "absent" is always blank, which is the one form the code did not handle. A playback the operator stopped was recorded `COMPLETED`, indistinguishable from one published in full (`0107`; [`supabase/README.md`](../supabase/README.md#capture-and-playback-orchestration-0055-0056-0057-0058-0060)). And the confinement claims still described the pre-Dynamic-Security ACL file, where `%u` was substituted and one pattern confined every gateway. **The measured facts** are in [`ingestion/README.md`](../ingestion/README.md#broker-capture-and-playback): a delivered credential takes about a kubelet sync period to reach the worker, a `DBIRTH` announces a device and writes no telemetry of its own, the per-gateway role confines *delivery* rather than subscription, and the page path meets no quarantine because the lanes are minted registered. Two findings left as issues: a capture whose timestamps fall outside the daemon's sanity window replays "successfully" and writes nothing ([#216](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/216)), and nothing can tell an operator when a *re-issued* credential has reached the worker, because the status row carries ids and a rotation does not change them ([#217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)) |
 | Retiring the flow-backup bucket | Removed: the `gateway-backups` bucket, its policies, its chart values and its policy test are gone, and no install had stored anything in it. A gateway's flow lives in its repository in the forge ([`docs/physical-gateways.md`](physical-gateways.md)); the repository pointer stays derived (`gateway-<sparkplug_id>` in the organisation `constants.js` names), a column is earned only if a gateway ever needs re-pointing. Archiving a gateway now archives its repository too, the one decision this entry held that nothing implemented ([#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197), `0114`): [`supabase/README.md`](../supabase/README.md#archiving-a-gateway-reaches-the-forge-0114) for the archive mark, where the call lives and why deleting a repository stays a decision a person takes in the forge |
 | Archiving an asset is a lifecycle rather than a flag (`0124`) | [`supabase/README.md`](../supabase/README.md#archiving-is-a-lifecycle-rather-than-a-flag-0124). The four pieces built: areas archive like everything else (three columns, the shared dialog, a guarded fourth `DELETE` in the purge job, Archive and Restore on the Areas page); a shadow lane follows its original through archive, restore and delete; a tombstone table, `retired_entities`, written on the delete of an archived row, is the Archived Entities page's second card, each row linking to the digital thread, the forge repository and any bundle; and `aas-export?format=bundle` takes a device away as one AASX with its thread, its live telemetry and a manifest naming the cold objects, stored beside the cold tier and recorded in `asset_exports`. The four early questions answered as the section records: an archived area's topics keep its name, the Site Map keeps drawing its plan, the vocabulary stayed in the UI (*Archived* and *Retired*, no column), and the tombstone is a table rather than a derivation from the partitioned thread |
+| The chart's release Secret is given room to grow | Built. **775,537 gzip bytes to 557,372 — 98.6% of the ceiling to 70.9%**, measured on the dev cluster rather than estimated. The recoverable ceiling is 786,432, not 1,048,576: the Secret holds `base64(gzip(json))` and the limit applies to the base64 text, so the guard's old 1.332 multiplier was base64's 4/3 all along. [`docs/kubernetes-architecture.md` §3.6](kubernetes-architecture.md#36-the-release-secret-has-a-ceiling-and-the-chart-had-reached-it) records what is counted, every lever taken and every lever declined with its reason. Taken: the two API specifications into a `swagger-ui` image and `node-red-init.mjs` into the `node-red` image, both on the precedent of the migrations in `db-init`; and the comment rule applied to the templates in three sweeps, which also corrected a stale Grafana measurement, a hook weight a comment had wrong, and six places still describing a second deployment target. Declined and recorded: the maintenance SQL, the broker scripts, the Grafana dashboards, and Helm's `sql` storage driver. The guard now compares gzip bytes against 786,432 at Helm's own compression level, warns at 75% and fails at 85%, and prints the ten entries whose removal would save the most — and it no longer counts `Chart.yaml` and `values.yaml`, which Helm stores parsed, so trimming their comments buys nothing. `.helmignore` argued both sides of whether the two values files belong in the package; it now states the ignore and why the other case loses |
 
 ---
 
@@ -108,11 +109,11 @@ lists; and the retired-entries table above, where an entry's substance lands whe
 
 **The gap** is three kinds of staleness the checker cannot see. Prose that describes a design since
 replaced: Compose is gone, and "Compose", "both targets" and "the divergence table" survive across
-the tree outside the incident log. Comments that argue history where the rule wants the constraint:
-the Python suites, the rest of `ingestion.py`, the i3X server, the capture, playback and cold-archive
-modules, the broker and setup scripts, and the Helm templates, whose comment blocks ship in
-every release's Secret and have brought it within two percent of Helm's 1 MiB ceiling (a CI step
-estimates it; revision 19 on the dev cluster was refused on 2026-09-13). Rules and tests guarding
+the tree outside the incident log — the chart's own copies of that have been cleared, the rest
+has not. Comments that argue history where the rule wants the constraint: the Python suites, the
+rest of `ingestion.py`, the i3X server, the capture, playback and cold-archive modules, and the
+broker and setup scripts. **The Helm templates are done**, swept in three passes while recovering
+the chart's release headroom, with the method recorded in `CONTRIBUTING.md`. Rules and tests guarding
 what nothing renders, which the Site Map work found in the stylesheet. Comments that are
 internally coherent and false, which the playback review found in the worker: a docstring
 reasoning at length about a credential file the chart never leaves absent, while the state it
@@ -140,52 +141,7 @@ method so the next one starts from it.
 
 ---
 
-## 3 · The chart's release Secret is given room to grow
-
-**Builds on:** `.github/workflows/ci.yml` (the *Verify The Release Fits Helm's Secret* step) ·
-[`deploy/helm/acs-cymru/.helmignore`](../deploy/helm/acs-cymru/.helmignore) ·
-`scripts/sync-helm-chart-files.mjs` · entry 3, whose comment sweep is one of the levers here
-
-**Built:** the guard. Helm stores every release as one Secret holding the chart archive *and* the
-rendered manifest, and a Secret may not exceed 1 MiB; the CI step estimates the payload the way
-Helm encodes it and fails the build before a deploy can be refused. `.helmignore` already keeps
-the editor litter, the packaging artefacts and the two values files out of the archive.
-
-**The gap** is that the guard reports a number nobody has acted on, and the number is 98.6%.
-Measured on the dev cluster 2026-09-16, revision 69: **1,034,060 bytes of 1,048,576 — 14,516
-bytes of headroom**, and that is *after* gzip, so it is perhaps 60–100 KB of source. This has
-already refused a deploy once (revision 19, 2026-09-13). Every entry above it and every feature
-after 1.0 that adds a chart file spends from the same 14 KB, and the failure it buys is
-`helm upgrade` exiting on `Secret ... is invalid: data: Too long` — which reads as a broken
-chart rather than as a full one.
-
-**The levers, largest first, each a decision rather than a task.** The rendered objects are led by
-`openapi` (287 KB), `grafana-dashboards-platform` (97 KB), `timescaledb-maintenance` (84 KB),
-`grafana-alerting` (80 KB) and `mosquitto-scripts` (62 KB). **Does a file that only one pod ever
-reads need to be a ConfigMap at all**, or does it belong in that pod's image — the OpenAPI
-document is served by `swagger-ui` and by nothing else, and an image is not in the release. Which
-of `files/` **needs to be in the chart archive as well as the manifest**: it is mirrored in so Helm
-can template it, and anything templated is already in the manifest, so the archive copy is paid for
-twice. Whether the **template comment blocks**, which render to nothing and ship in the archive
-regardless, come down with entry 3's sweep or are worth a pass of their own. And whether the
-estimate's 1.332 multiplier still holds, since the thresholds are set on it.
-
-**Decided.** The guard stays and its thresholds move down as headroom is recovered, or the entry
-buys nothing that the next feature does not immediately spend. Nothing is moved out of the chart
-that an operator reads from `helm show` or from a pulled chart with no repository beside it —
-that is the argument `.helmignore` already records for the values files, and it outranks the bytes.
-**Note while doing it:** `.helmignore`'s "deliberately NOT ignored" paragraph argues at length that
-`values-dev.yaml` and `values-prod.yaml.example` stay in the package, and the two lines directly
-beneath it ignore them both. One of the two is wrong and the file cannot say which.
-
-**Done means:** the release estimate has a stated target with real headroom rather than a warning
-threshold it sits against; the CI step's thresholds have moved to match; each lever above is either
-taken or recorded as declined with its reason; and nothing an operator reads from a published chart
-has been moved somewhere they cannot reach.
-
----
-
-## 4 · The migration chain folds back into the baseline
+## 3 · The migration chain folds back into the baseline
 
 **Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
 `scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
