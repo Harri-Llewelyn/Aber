@@ -88,7 +88,7 @@ spec:
         {{- if .Values.databaseMetrics.enabled }}
         # The exporter reads its query file once, at startup, so an edit has to roll the pod or it
         # sits in the ConfigMap unread.
-        checksum/exporter-queries: {{ include (print $.Template.BasePath "/data/timescaledb-exporter-configmap.yaml") . | sha256sum }}
+        checksum/exporter-queries: {{ include (print $.Template.BasePath "/data/database-exporter-configmap.yaml") . | sha256sum }}
         {{- include "acs-cymru.scrapeAnnotations" (dict "port" .Values.databaseMetrics.port "path" "/metrics") | nindent 8 }}
         {{- end }}
         {{- if .Values.postgresTls.enabled }}
@@ -213,7 +213,7 @@ spec:
         {{- include "acs-cymru.dbCertificateReload" (dict "ctx" . "image" (printf "%s:%s" .Values.timescaledb.image.repository .Values.timescaledb.image.tag) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
         {{- end }}
         {{- if .Values.databaseMetrics.enabled }}
-        {{- include "acs-cymru.dbMetricsExporter" (dict "ctx" . "db" $component "database" .Values.timescaledb.database "queries" true) | nindent 8 }}
+        {{- include "acs-cymru.dbMetricsExporter" (dict "ctx" . "db" $component "database" .Values.timescaledb.database) | nindent 8 }}
         {{- end }}
       volumes:
         - name: init

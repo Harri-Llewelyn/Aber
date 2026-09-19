@@ -23,12 +23,21 @@
 acs_historian_chunks:
   # Per hypertable, because "19 chunks" says nothing without knowing which table they belong to:
   # the raw `telemetry` hypertable and the three rollups age on completely different policies.
+  #
+  # THE JOIN IS FOR THE LABEL, NOT THE DATA. A continuous aggregate's chunks belong to a
+  # materialisation hypertable named `_materialized_hypertable_3`, which is the name nothing else
+  # in this platform uses -- the rollups are `telemetry_1m`, `_5m` and `_1h` everywhere an operator
+  # meets them, including the storage query below. Left join so the raw hypertable, which has no
+  # continuous aggregate, keeps its own name.
   query: |
-    SELECT hypertable_name::text                            AS hypertable,
-           count(*)::bigint                                 AS count,
-           count(*) FILTER (WHERE is_compressed)::bigint    AS compressed
-      FROM timescaledb_information.chunks
-     GROUP BY hypertable_name
+    SELECT coalesce(ca.view_name, c.hypertable_name)::text        AS hypertable,
+           count(*)::bigint                                       AS count,
+           count(*) FILTER (WHERE c.is_compressed)::bigint        AS compressed
+      FROM timescaledb_information.chunks c
+      LEFT JOIN timescaledb_information.continuous_aggregates ca
+             ON ca.materialization_hypertable_schema = c.hypertable_schema
+            AND ca.materialization_hypertable_name   = c.hypertable_name
+     GROUP BY 1
   metrics:
     - hypertable:
         usage: "LABEL"

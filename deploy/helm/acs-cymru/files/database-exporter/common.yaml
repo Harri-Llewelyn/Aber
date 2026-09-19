@@ -1,0 +1,14 @@
+# Custom queries for BOTH databases' postgres_exporter sidecars.
+#
+# ONE QUERY, AND IT IS HERE BECAUSE OF A DELIBERATE OMISSION ELSEWHERE. `max_connections` is a GUC,
+# and the exporter's `settings` collector -- which would report it -- is switched off: it emits one
+# series per GUC, 355 of them on the historian, describing configuration that does not vary between
+# scrapes. Re-enabling that collector to obtain ONE number is the wrong trade, and without the
+# number `pg_stat_activity_count` is a count with no denominator: 96 connections is either fine or
+# four short of refusing the next one, and nothing on the dashboard could say which.
+acs_postgres_max:
+  query: "SELECT current_setting('max_connections')::bigint AS connections"
+  metrics:
+    - connections:
+        usage: "GAUGE"
+        description: "max_connections. The denominator for pg_stat_activity_count; a count of backends means nothing without it"
