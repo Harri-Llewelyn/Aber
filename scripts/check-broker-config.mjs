@@ -48,7 +48,7 @@ function pinnedTag() {
   return m[1];
 }
 
-/** Both targets must pin the same tag; the chart's is checked by check-image-tag-parity.mjs. */
+/** The tag the chart pins, read from values.yaml so this check runs the broker the stack runs. */
 const TAG = pinnedTag();
 const IMAGE = `eclipse-mosquitto:${TAG}`;
 /** The credential service's image, built from the repository so the check runs the real reconcile. */

@@ -379,8 +379,7 @@ function edgeFunctionNames() {
 // 8. Every image this repository builds has a documented build command (arm64 clusters and
 // air-gapped ones build their own, and a change to a component has to be tagged as the reference
 // the chart resolves). The image set is identified by an empty tag, which marks the images the
-// chart resolves from Chart.AppVersion; the set is asserted non-empty and to agree with
-// scripts/check-image-tag-parity.mjs.
+// chart resolves from Chart.AppVersion.
 // -------------------------------------------------------------------------------------------------
 {
   const values = read('deploy/helm/acs-cymru/values.yaml');
@@ -389,7 +388,7 @@ function edgeFunctionNames() {
   ].map((m) => m[1]);
   const unique = [...new Set(built)];
   // Bumped deliberately rather than derived: the count is the check.
-  const EXPECTED = 9;
+  const EXPECTED = 10;
   if (unique.length !== EXPECTED) {
     fail(
       `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +

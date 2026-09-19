@@ -246,7 +246,7 @@ const sqlString = (value) => `'${String(value).replace(/'/g, "''")}'`;
  * A deliberately narrow reader for UANodeSet documents, rather than an XML dependency.
  *
  * package.json has no dependencies at all and several scripts go out of their way to keep it that
- * way (check-image-tag-parity.mjs parses YAML by hand for the same reason). These files are
+ * way (check-broker-config.mjs parses YAML by hand for the same reason). These files are
  * machine-generated with one element per node and attributes on the opening tag, so scanning for
  * element boundaries is sound here in a way it would not be for arbitrary XML. It is used only to
  * read attributes and References -- never to round-trip or rewrite the document.

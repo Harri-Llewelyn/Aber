@@ -535,11 +535,14 @@ supabaseStudio:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }
 
+# The API documentation site. Built FROM swaggerapi/swagger-ui with docs/openapi.yaml and
+# docs/i3x-openapi.yaml copied in, because the specs are read by this pod alone and the release
+# Secret carries a ConfigMap's bytes twice. A spec edit ships with the next image build.
 swaggerUi:
   enabled: true
   image:
-    repository: swaggerapi/swagger-ui
-    tag: v5.32.14
+    repository: ghcr.io/harri-llewelyn/acs-cymru/swagger-ui
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   resources:

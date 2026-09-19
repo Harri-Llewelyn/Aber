@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Assert that every Python module an image's sources import at module scope is copied into it. The
- * Python suites import from the source tree, check-docs-drift asserts a build command exists, and
- * check-image-tag-parity compares pins; a module left out of a Dockerfile's COPY is found only by
- * the container crash-looping with ModuleNotFoundError. Module scope, because an import at column 0
+ * Python suites import from the source tree and check-docs-drift asserts a build command exists;
+ * a module left out of a Dockerfile's COPY is found only by the container crash-looping with
+ * ModuleNotFoundError. Module scope, because an import at column 0
  * fails at interpreter start. Directory-local: a copied module's local imports resolve against its
  * own source directory and must be copied by the same Dockerfile; third-party imports are
  * requirements.txt's business.

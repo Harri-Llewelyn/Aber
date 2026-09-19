@@ -1,12 +1,14 @@
 # Build-context exclusions for the images built from the REPOSITORY ROOT:
 #   ingestion/Dockerfile            -> ingestion daemon
 #   supabase/functions/Dockerfile   -> edge runtime (needs gateway-bundle-template)
-#   tests/Dockerfile                -> conformance test runner
+#   test-harness/Dockerfile         -> conformance test runner
+#   i3x/Dockerfile                  -> i3X server (compiles sparkplug_b.proto)
+#   swagger-ui/Dockerfile           -> the API documentation site (needs both docs/*.yaml)
 #
-# ONE .dockerignore SERVES ALL THREE, so an exclusion added for one image can break another. That
-# is not hypothetical: excluding `tests` for the ingestion build later broke the test-runner build,
-# which needs tests/schemas -- and it failed as "/tests/schemas: not found" during COPY, which reads
-# like a missing file rather than an ignored one.
+# ONE .dockerignore SERVES THEM ALL, so an exclusion added for one image can break another. That is
+# not hypothetical: excluding `test-harness` for the ingestion build broke the test-runner build,
+# which needs test-harness/schemas, and it failed as a "not found" during COPY, which reads like a
+# missing file rather than an ignored one.
 #
 # frontend/ has its own .dockerignore because it is built from its own context. It must keep
 # frontend/src/utils/ -- the test runner reads sparkplugDatatype.js and model3d.js from THIS context
@@ -24,23 +26,25 @@ frontend/coverage
 .env.*
 !.env.example
 
-# Nothing in these is read at build time by any of the three images; excluding them keeps the context
-# small and, more importantly, stops an unrelated edit from busting the layer cache.
+# Nothing in these is read at build time by the images above; excluding them keeps the context small
+# and stops an unrelated edit from busting the layer cache.
 #
-# `tests` is NOT excluded: tests/Dockerfile copies tests/schemas (the vendored IDTA metamodel schema)
-# and it is 60 KB. Its absence would make the AAS suite skip its schema-conformance assertions -- the
-# ones that caught three real metamodel violations -- while still reporting success.
+# `test-harness` is NOT excluded: test-harness/Dockerfile copies test-harness/schemas, the vendored
+# IDTA metamodel schema. Its absence would make the AAS suite skip its schema-conformance
+# assertions while still reporting success.
 #
-# AND `docs/openapi.yaml` IS NOT EXCLUDED EITHER, which is the second time this file has caught
-# somebody out in exactly the way its own header warns about. tests/Dockerfile:61 copies it --
-# test_aas_api.py asserts that every route the service advertises is documented, so the spec is a
-# FIXTURE of the suite and not only a deliverable. Without the negation the build fails as
-# `"/docs/openapi.yaml": not found`, which reads like a deleted file rather than an ignored one.
+# BOTH SPECS UNDER `docs` ARE NEGATED, and each is needed by a different image:
+#   openapi.yaml      test-harness/Dockerfile -- test_aas_api.py asserts that every route the
+#                     service advertises is documented, so the spec is a fixture of the suite.
+#   i3x-openapi.yaml  swagger-ui/Dockerfile, which serves both documents.
+# Without a negation the build fails as `"/docs/<name>": not found`, which reads like a deleted
+# file rather than an ignored one.
 #
-# The negation has to come AFTER the `docs` line: Docker applies these in order and the last match
-# wins. Putting it before makes it a no-op that looks correct.
+# The negations have to come AFTER the `docs` line: Docker applies these in order and the last match
+# wins. Putting them before makes them no-ops that look correct.
 docs
 !docs/openapi.yaml
+!docs/i3x-openapi.yaml
 grafana
 simulators
 timescaledb
