@@ -2,7 +2,7 @@
 # chart directory, so a bare name matches at any depth and a leading `/` anchors it to the root.
 #
 # WHAT THIS FILE IS ACTUALLY FOR HERE. Almost every chart's .helmignore is boilerplate, because
-# almost every chart directory holds nothing but templates. This one holds files/ -- 13 directories
+# almost every chart directory holds nothing but templates. This one holds files/ -- 18 directories
 # of repository-owned configuration mirrored in by scripts/sync-helm-chart-files.mjs, because Helm
 # cannot read outside its own chart. That mirror is a copy of things that live elsewhere in the
 # repository, so anything an editor, an OS or a tool drops next to the originals gets copied in

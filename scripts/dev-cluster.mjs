@@ -2,7 +2,7 @@
 /**
  * The development loop on a local k3d cluster: build, import, install, wait, test.
  *
- *   node scripts/dev-cluster.mjs up        create the cluster if absent, build and import the nine
+ *   node scripts/dev-cluster.mjs up        create the cluster if absent, build and import the ten
  *                                          images, install or upgrade the chart, wait until the stack
  *                                          is consuming, run `helm test`
  *   node scripts/dev-cluster.mjs test      the stack lane and validate.py from the host, through
@@ -72,6 +72,8 @@ const IMAGES = [
   { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: 'gateway-credential' },
   { name: 'backup-service', file: 'backup-service/Dockerfile', context: 'backup-service' },
   { name: 'db-init', file: 'supabase/db-init/Dockerfile', context: 'supabase' },
+  // Carries docs/openapi.yaml and docs/i3x-openapi.yaml, so a spec edit needs this rebuild.
+  { name: 'swagger-ui', file: 'swagger-ui/Dockerfile', context: '.' },
   // Extends the ingestion image, so it is built last and told which one.
   { name: 'test-runner', file: 'test-harness/Dockerfile', context: '.', args: [`INGESTION_IMAGE=${IMG_NS}/ingestion:VERSION`] },
 ]
@@ -224,7 +226,7 @@ function ensureCertManager () {
 // Images
 // ---------------------------------------------------------------------------------------------
 function buildImages (version, only) {
-  step(`build ${only ? only.join(', ') : 'the nine images'} as ${IMG_NS}/<name>:${version}`)
+  step(`build ${only ? only.join(', ') : 'the ten images'} as ${IMG_NS}/<name>:${version}`)
   for (const img of IMAGES) {
     if (only && !only.includes(img.name)) continue
     const args = ['build', '-f', img.file, '-t', `${IMG_NS}/${img.name}:${version}`]

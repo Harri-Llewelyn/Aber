@@ -105,16 +105,10 @@ const MIRRORS = [
     match: (name) => name === 'storage-init.mjs',
     why: 'Creates the asset-3d-models bucket through the Storage REST API',
   },
-  {
-    source: 'docs',
-    dest: 'docs',
-    // TWO specs, because they describe two different origins. openapi.yaml is everything behind
-    // the gateway on :54321; i3x-openapi.yaml is the i3X server on :8090, which has no gateway route, takes
-    // no `apikey`, and would collide on /v1/schema if it were merged in. swagger-ui serves both
-    // from one dropdown.
-    match: (name) => name === 'openapi.yaml' || name === 'i3x-openapi.yaml',
-    why: 'The curated API specs swagger-ui serves',
-  },
+  // THE API SPECS ARE NOT MIRRORED. docs/openapi.yaml and docs/i3x-openapi.yaml are copied into
+  // swagger-ui/Dockerfile's image instead: swagger-ui is their only reader, and at ~270 KB the
+  // ConfigMap was the largest object in Helm's 1 MiB release Secret, which stores the chart archive
+  // and the rendered manifest both.
   {
     source: 'mosquitto',
     dest: 'mosquitto',

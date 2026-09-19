@@ -107,7 +107,7 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 ```bash
 # Everything below in one command, plus the waits and helm test: npm run dev:up
 #   (deploy/k8s/README.md, "The development loop"). Step by step:
-# Nine images are built from this repository. They are published to GHCR at the chart's
+# Ten images are built from this repository. They are published to GHCR at the chart's
 # appVersion, and the chart pulls them under exactly these names: a local build that is
 # tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
 NS=ghcr.io/harri-llewelyn/acs-cymru
@@ -120,6 +120,7 @@ docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
 docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
 docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
+docker build -f swagger-ui/Dockerfile           -t $NS/swagger-ui:$V .
 docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V -t $NS/test-runner:$V .
 
 # A local cluster: k3d is k3s in Docker, with the Traefik, ServiceLB and local-path that
@@ -127,7 +128,7 @@ docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestio
 k3d cluster create acs-cymru --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" --wait
 k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
-  gateway-credential backup-service db-init test-runner; do echo $NS/$i:$V; done) -c acs-cymru
+  gateway-credential backup-service db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c acs-cymru
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 
@@ -364,7 +365,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `supabase-rest` | `postgrest/postgrest:v14.12` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
 | `supabase-storage` | `supabase/storage-api:v1.60.4` | behind `api.<domain>/storage/v1` |
 | `supabase-studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `studio.<domain>`, off by default, behind the gateway's login |
-| `swagger-ui` | `swaggerapi/swagger-ui:v5.32.14` | `docs.<domain>` |
+| `swagger-ui` | `ghcr.io/harri-llewelyn/acs-cymru/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
 | `test-db-tls` | `supabase/postgres:17.6.1.160` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
 | `timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `timescaledb:5432` |

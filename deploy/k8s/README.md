@@ -95,7 +95,7 @@ kubectl config set-cluster k3d-acs-cymru --server=https://127.0.0.1:<port>
 stack lane added: the same steps CI's k8s-validation job runs, repeatable on a laptop.
 
 ```bash
-npm run dev:up        # cluster if absent, cert-manager and the internal CA, the nine images built
+npm run dev:up        # cluster if absent, cert-manager and the internal CA, the ten images built
                       # and imported, helm upgrade --install with values-dev.yaml, every hook and
                       # rollout waited for, the daemon subscribed, helm test
 npm run dev:test      # validate.py and the stack lane from the host, through port-forwards
@@ -131,7 +131,7 @@ run this stack; **from a checkout** if you are changing it.
 
 ### A. From the published chart (no checkout, no image builds)
 
-The chart and the nine images this repository builds are published to GHCR as OCI artefacts. Helm
+The chart and the ten images this repository builds are published to GHCR as OCI artefacts. Helm
 speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
@@ -618,7 +618,7 @@ kubectl -n acs-cymru get pvc          # delete deliberately, never as cleanup ha
 
 ### Images you must build
 
-Nine images are built from this repository rather than pulled from a vendor. **They are published**
+Ten images are built from this repository rather than pulled from a vendor. **They are published**
 to `ghcr.io/harri-llewelyn/acs-cymru/`, so an ordinary install needs none of this — the chart pulls
 them at its own `appVersion`.
 
@@ -668,6 +668,12 @@ docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gat
 # code itself is projected from a ConfigMap (scripts/backup-service.mjs), so this is runtime only.
 docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
 
+# The API documentation site — THE SPECS, baked in. swaggerapi/swagger-ui with docs/openapi.yaml
+# and docs/i3x-openapi.yaml copied to the document root; context is the repository root, where they
+# live. They travel in the image for the same reason the migrations do: swagger-ui is their only
+# reader, and Helm's release Secret holds a ConfigMap's bytes twice under a 1 MiB cap.
+docker build -f swagger-ui/Dockerfile           -t $NS/swagger-ui:$V .
+
 # db-init — THE SCHEMA, baked in. supabase/postgres with supabase/migrations/*.sql copied to
 # /migrations; context is supabase/, where that directory lives. It exists because the chain cannot
 # travel in the chart: a ConfigMap is capped at 1 MiB, which forced it to be gzipped, and Helm's
@@ -686,7 +692,7 @@ docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
 docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
                                                 -t $NS/test-runner:$V .
 
-for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service db-init test-runner; do
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service db-init swagger-ui test-runner; do
   k3d image import $NS/$i:$V -c <cluster>   # or push to your registry
 done
 ```
@@ -695,7 +701,7 @@ done
 
 ## Publishing a release
 
-[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the nine images and
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the ten images and
 then the chart, to GHCR over OCI, on a `v*` tag.
 
 ```bash

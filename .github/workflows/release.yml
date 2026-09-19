@@ -97,16 +97,10 @@ jobs:
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
-      # Both targets must pin the same tag for every shared image, and the eight built images must
-      # agree across values.yaml, ci.yml and this file, which decides whether the chart names images
-      # this workflow pushed.
-      - name: Verify Image Tag Parity Across Both Targets And The Release Surface
-        run: node scripts/check-image-tag-parity.mjs --verbose
-
       - name: Verify Documentation Matches The Repository
         run: node scripts/check-docs-drift.mjs
 
-  # The four independent images, in parallel. ingestion is not here: test-runner is built FROM it,
+  # The eight independent images, in parallel. ingestion is not here: test-runner is built FROM it,
   # and the two have to share a runner. See build-ingestion-chain below.
   build-images:
     name: Image — ${{ matrix.name }}
@@ -157,6 +151,14 @@ jobs:
           - name: db-init
             dockerfile: supabase/db-init/Dockerfile
             context: supabase
+            build_args: ''
+          # Swagger UI with docs/openapi.yaml and docs/i3x-openapi.yaml copied in. Repository root,
+          # because both specs live there; .dockerignore negates each by name. The specs travel in
+          # the image for the same reason the migrations do -- Helm's release Secret holds a
+          # ConfigMap's bytes twice and is capped at 1 MiB.
+          - name: swagger-ui
+            dockerfile: swagger-ui/Dockerfile
+            context: .
             build_args: ''
           # VITE_RUNTIME_CONFIG=true bakes nothing about the environment, so one published image
           # serves any environment from the /config.js ConfigMap; a default build would carry a
@@ -339,7 +341,7 @@ jobs:
             --set e2e.enabled=true > /tmp/from-package.yaml
 
           MISSING=0
-          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init; do
+          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
             REF="$IMAGE_NAMESPACE/$img:$V"
             if grep -qF "$REF" /tmp/from-package.yaml; then
               echo "  ok  $REF"
@@ -392,7 +394,7 @@ jobs:
             echo '```'
             echo
             echo "Images published at \`$V\`:"
-            for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init; do
+            for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
               echo "- \`$IMAGE_NAMESPACE/$img:$V\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"

@@ -452,7 +452,9 @@ Same guard-rail discipline as `check-mtconnect-seed-sync.mjs` and the isUuid/met
 
 Nine Deployments (`kong`, `auth`, `rest`, `realtime`, `storage`, `functions`, `meta`, `studio`,
 `swagger-ui`), three hook Jobs, and the ConfigMaps carrying the migrations, the seed, the Kong
-template, the storage-init script and the OpenAPI spec.
+template and the storage-init script. The OpenAPI specifications are not among them: swagger-ui
+is their only reader, so they are baked into its image (swagger-ui/Dockerfile) and the ConfigMap
+that carried them is gone -- it was the largest object in the release Secret.
 
 **Three things here cannot be derived from reading `docker-compose.yml`**, and each was established
 by probing the images directly:
