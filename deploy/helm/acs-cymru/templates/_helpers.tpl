@@ -811,12 +811,29 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
            the exporter's own top-100, and the label is `queryid`, not the statement text. */}}
     - --collector.stat_statements
     {{- end }}
-    {{- if .queries }}
-    {{- /* The historian's TimescaleDB-specific series. DEPRECATED UPSTREAM AND FUNCTIONAL: v0.20.1
-           reads it and says so at startup. files/timescaledb-exporter/queries.yaml carries the
-           fallback if that ever stops being true. */}}
+    {{- /*
+      TWO COLLECTORS THE EXPORTER LEAVES OFF, each turned on for a specific reader.
+
+        database_wraparound  age(datfrozenxid) and mxid_age(datminmxid) per database -- the only
+                             warning of transaction-ID exhaustion, which stops writes cluster-wide.
+                             4 series.
+        stat_checkpointer    PG17 moved checkpoint counters out of pg_stat_bgwriter into
+                             pg_stat_checkpointer, and the exporter follows the server; without this
+                             there are no checkpoint series at all on 17. 11 series.
+
+      Measured together on the historian: 255 series to 272.
+
+      MIND THE NAME ON THE WRAPAROUND SERIES. `pg_database_wraparound_age_datfrozenxid_seconds` is
+      NOT seconds -- it is `age(datfrozenxid)`, a transaction count, and the suffix is an upstream
+      misnomer. Verified: the metric read 222470 against `age(datfrozenxid)` of 222470 on a server
+      that had been up 477 seconds. A threshold written as a duration is wrong by six orders of
+      magnitude, so the alert rule states this too.
+    */}}
+    - --collector.database_wraparound
+    - --collector.stat_checkpointer
+    {{- /* The custom queries. DEPRECATED UPSTREAM AND FUNCTIONAL: v0.20.1 reads the file and says
+           so at startup. files/database-exporter/common.yaml records the fallback. */}}
     - --extend.query-path=/etc/postgres-exporter/queries.yaml
-    {{- end }}
     {{- range $m.extraArgs }}
     - {{ . | quote }}
     {{- end }}
@@ -827,12 +844,10 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
     - name: metrics
       containerPort: {{ $m.port }}
       protocol: TCP
-  {{- if .queries }}
   volumeMounts:
     - name: exporter-queries
       mountPath: /etc/postgres-exporter
       readOnly: true
-  {{- end }}
   resources:
     {{- toYaml $m.resources | nindent 4 }}
 {{- end -}}
