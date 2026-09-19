@@ -6,7 +6,7 @@ Who and what can reach this platform, and with which authority. It covers both k
 
 - **Identity** is the principal. **Holds** is what it currently has -- a role, a credential, a token. **Reaches** is what that lets it get to, and **Purpose** is why it exists, which is the field that makes an unfamiliar machine principal safe to leave alone or safe to remove.
 - **Mint** and **Issue** create a credential. A machine credential is shown once, at the moment it is created, and cannot be re-shown -- if it is lost, the answer is to issue another and revoke the first.
-- **New Principal** creates a database identity for a process that reads this platform through the API: a name, a purpose and read-only permissions from a fixed menu, then its first token. It reaches the database only. A process that speaks MQTT is issued a broker account, not a principal.
+- **New Principal** creates a database identity for a process that reads this platform through the API: a name, a purpose and read-only permissions from a fixed menu, then its first token. It reaches the database only. A process that speaks MQTT is issued a broker account, not a principal. The pencil beside such a principal's name changes its name or purpose; what it holds is fixed at creation, because a wider grant would reach every token already issued for it.
 - **MQTT username** and **ACL pattern** are the broker half: the identity the principal connects as, and the topic rules that bound what it may publish or subscribe to.
 
 ## What the states mean

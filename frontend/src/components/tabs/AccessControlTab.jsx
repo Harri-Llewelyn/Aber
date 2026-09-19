@@ -7,7 +7,8 @@ import { ServiceTokenModal } from '../modals/ServiceTokenModal'
 import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal'
 import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { ServicePrincipalCreateModal } from '../modals/ServicePrincipalCreateModal'
-import { IconDownload, IconLock, IconPlus, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescribeModal'
+import { IconDownload, IconLock, IconPencil, IconPlus, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { PageHeading } from '../common/PageHeading'
 import { ContextPanel } from '../common/ContextPanel'
@@ -111,6 +112,8 @@ export function AccessControlTab({ showToast }) {
   // True while the create dialog is open (0125). On success the token dialog opens for the new
   // identity, so the first token is shown once the way every other is.
   const [creating, setCreating] = useState(false)
+  // The principal row whose name and purpose are being edited (0126), or null.
+  const [describing, setDescribing] = useState(null)
   // Its own error: gateway credentials accept Shopfloor_Manager, service principals are
   // Administrator-only, and one error state would blame the whole page for a refusal that applies
   // to one section.
@@ -632,6 +635,20 @@ export function AccessControlTab({ showToast }) {
                         >
                           {meta.name}
                         </span>
+                        {/* Only a row with a name of its own can be renamed: the three pinned
+                            identities are named in the registry, and the RPC refuses them. */}
+                        {p.name && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-icon"
+                            style={{ marginLeft: '4px', verticalAlign: 'middle' }}
+                            onClick={() => setDescribing(p)}
+                            title={`Rename ${meta.name} or change its purpose`}
+                            aria-label={`Describe ${meta.name}`}
+                          >
+                            <IconPencil size={12} />
+                          </button>
+                        )}
                       </td>
                       <td>
                         <CopyableId
@@ -1048,6 +1065,15 @@ export function AccessControlTab({ showToast }) {
               name: created.name,
             })
           }}
+          showToast={showToast}
+        />
+      )}
+
+      {describing && (
+        <ServicePrincipalDescribeModal
+          principal={describing}
+          onClose={() => setDescribing(null)}
+          onChanged={load}
           showToast={showToast}
         />
       )}
