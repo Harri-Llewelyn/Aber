@@ -453,9 +453,13 @@ describe('Digital Thread swimlanes', () => {
     expect(new Set(lefts).size).toBeGreaterThan(1)
   })
 
-  it('folds the long tail of lanes behind a toggle', async () => {
-    /* Forty lanes against a cap of thirty. The bulk assets are also returned by the devices lookup,
-       so none reads as purged and hidden by default. */
+  it('draws every lane, with no cap to fold the rest behind', async () => {
+    /* Forty lanes, more than the thirty the old cap drew. The cap folded the long tail behind a
+       "Show all lanes" button at the foot, and since lanes are ordered busiest-first across the
+       whole page the hidden ones belonged to every section: pressing a button at the bottom
+       expanded rows at the top. The timeline scrolls inside the card now and a page holds at
+       most 200 events, so there is nothing for a cap to guard. The bulk assets are also returned
+       by the devices lookup, so none reads as purged and hidden by default. */
     const many = Array.from({ length: 40 }, (_, i) => ({
       event_id: 100 + i, entity_type: 'devices', entity_id: `bulk-${i}`, event_type: 'UPDATE',
       timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null, actor_source: 'service'
@@ -470,19 +474,11 @@ describe('Digital Thread swimlanes', () => {
     })
     render(<DigitalThreadTab />)
 
-    const toggle = await screen.findByText(/Show all lanes \(\+10\)/)
-    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(30)
-
-    /* AND THE LEGEND SAYS SO. It named every lane while the cap drew thirty, so a reader adding up
-       the section badges got thirty against a header saying forty, with nothing on the page to
-       reconcile them. */
-    expect(screen.getByText(/30\/40 entities/)).toBeInTheDocument()
-
-    fireEvent.click(toggle)
     await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(40))
-    // Uncapped, the ratio goes: forty of forty is not a fraction.
+    // The header names the whole set, as a plain count: nothing is held back to make a fraction.
     expect(screen.getByText(/40 entities/)).toBeInTheDocument()
-    expect(screen.queryByText(/40\/40/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\d+\/40/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Show all lanes|Show fewer lanes/)).not.toBeInTheDocument()
   })
 })
 
@@ -1496,9 +1492,9 @@ describe('Digital Thread — removed tag filter', () => {
 })
 
 /**
- * Timeline density and layout, read from App.css since jsdom does no layout: a lane is 28px so the
- * thirty-lane cap is about one screen, and the label is sticky because opening the drawer takes
- * width off this list.
+ * Timeline density and layout, read from App.css since jsdom does no layout: a lane is 28px so
+ * about thirty fit a 1080p card, and the label is sticky because opening the drawer takes width
+ * off this list.
  */
 describe('Digital Thread timeline density', () => {
   const rule = (selector) =>

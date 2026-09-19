@@ -17,13 +17,6 @@ vi.mock('../api', async () => {
 
 const SETTINGS = [
   {
-    id: '1', key: 'ui.digital_thread_lane_limit', value: 30, value_type: 'number',
-    category: 'Digital Thread', label: 'Lanes drawn before folding',
-    description: 'How many asset lanes the Digital Thread draws.',
-    fallback_source: 'DEFAULT_LANE_LIMIT in DigitalThreadTab.jsx',
-    updated_at: '2026-08-22T10:00:00Z', updated_by: null
-  },
-  {
     id: '2', key: 'ui.digital_thread_poll_seconds', value: 60, value_type: 'number',
     category: 'Digital Thread', label: 'Refresh interval (seconds)',
     description: 'How often the Digital Thread re-reads the audit log.',
@@ -116,7 +109,7 @@ describe('the page', () => {
 
   const show = async () => {
     render(<SettingsTab showToast={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Lanes drawn before folding')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Refresh interval (seconds)')).toBeInTheDocument())
   }
 
   /* One category is on screen at a time, so a test about a setting outside the first one has to
@@ -131,16 +124,16 @@ describe('the page', () => {
     expect(screen.getByText('Refresh interval (seconds)')).toBeInTheDocument()
     // The description is read on demand from the "?" beside the label rather than printed under
     // every row: the page is a list of controls, not a manual.
-    const tip = screen.getByRole('button', { name: 'About Lanes drawn before folding' })
+    const tip = screen.getByRole('button', { name: 'About Refresh interval (seconds)' })
     fireEvent.mouseEnter(tip)
-    expect(screen.getByRole('tooltip')).toHaveTextContent(/How many asset lanes/)
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/How often the Digital Thread/)
   })
 
   it('names what applies when a setting has never been changed', async () => {
     /* An absent row is not an absent value: the fallback is the first thing to check when a setting
        appears to do nothing, so the page names it. */
     await show()
-    expect(screen.getByText('DEFAULT_LANE_LIMIT in DigitalThreadTab.jsx')).toBeInTheDocument()
+    expect(screen.getByText('the 60_000 ms interval in DigitalThreadTab.jsx')).toBeInTheDocument()
   })
 
   it('offers no way to add or delete a setting', async () => {
@@ -154,7 +147,7 @@ describe('the page', () => {
     await show()
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull()
 
-    fireEvent.change(screen.getByLabelText('Lanes drawn before folding'), { target: { value: '45' } })
+    fireEvent.change(screen.getByLabelText('Refresh interval (seconds)'), { target: { value: '45' } })
 
     /* Awaited, like every other post-fireEvent assertion in the file: nothing in the page's
        contract promises the button appears in the same tick, and the guarantee (Save must appear)
@@ -164,16 +157,16 @@ describe('the page', () => {
 
   it('sends the coerced value, not the string from the input', async () => {
     await show()
-    fireEvent.change(screen.getByLabelText('Lanes drawn before folding'), { target: { value: '45' } })
+    fireEvent.change(screen.getByLabelText('Refresh interval (seconds)'), { target: { value: '45' } })
     fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
 
     await waitFor(() => expect(api.patchSetting).toHaveBeenCalled())
-    expect(api.patchSetting).toHaveBeenCalledWith('ui.digital_thread_lane_limit', 45)
+    expect(api.patchSetting).toHaveBeenCalledWith('ui.digital_thread_poll_seconds', 45)
   })
 
   it('refuses a malformed value locally rather than sending it', async () => {
     await show()
-    const input = screen.getByLabelText('Lanes drawn before folding')
+    const input = screen.getByLabelText('Refresh interval (seconds)')
     // The DOM number input would reject this itself in a browser; the page must not depend on that.
     fireEvent.change(input, { target: { value: 'not-a-number' } })
     fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
@@ -189,7 +182,7 @@ describe('the page', () => {
       new Error('That setting was not updated. Changing settings requires the Administrator role.')
     )
     await show()
-    fireEvent.change(screen.getByLabelText('Lanes drawn before folding'), { target: { value: '45' } })
+    fireEvent.change(screen.getByLabelText('Refresh interval (seconds)'), { target: { value: '45' } })
     fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
 
     await waitFor(() =>
@@ -198,13 +191,13 @@ describe('the page', () => {
 
   it('discards an edit back to the stored value', async () => {
     await show()
-    const input = screen.getByLabelText('Lanes drawn before folding')
+    const input = screen.getByLabelText('Refresh interval (seconds)')
     fireEvent.change(input, { target: { value: '45' } })
     // Awaited for the reason given above: neither control is promised in the tick that changed
     // the input, and a synchronous lookup here is a pass that depends on how busy the run is.
     fireEvent.click(await screen.findByRole('button', { name: /Discard/i }))
 
-    await waitFor(() => expect(input.value).toBe('30'))
+    await waitFor(() => expect(input.value).toBe('60'))
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull()
   })
 
@@ -235,7 +228,7 @@ describe('the page', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
     expect(screen.getByLabelText('Alert history kept for (days)')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Lanes drawn before folding')).toBeNull()
+    expect(screen.queryByLabelText('Refresh interval (seconds)')).toBeNull()
   })
 
   it('says plainly that nothing secret belongs here', async () => {

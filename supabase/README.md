@@ -1403,6 +1403,26 @@ entries. Only the JS side is parsed as text; the SQL side is the function itself
 cannot drift into agreeing with a regex instead of with the database.
 
 
+### The thread draws every lane (`0128`)
+
+**The Digital Thread no longer caps its lanes, so the setting that sized the cap has no reader.**
+`ui.digital_thread_lane_limit` folded every lane past the thirtieth behind a "Show all lanes"
+button at the foot of the page. Lanes are ordered busiest-first across the whole page, so the
+hidden ones belonged to every section, and pressing a button at the bottom expanded rows at the
+top — which is what users reported. The cap was a render guard from when the page grew with its
+content; the timeline now scrolls inside the card, and a page holds at most 200 events, so there is
+nothing left for it to guard.
+
+**A setting nothing reads is a control that does nothing**, which is the rule `0002` states for
+declaring one. The row is removed here rather than left as a dead control on the Settings page.
+`0002` no longer declares it, but `0002` replays on every boot and `seed_setting()` would not
+re-create a row that was never there — the problem is the stacks that already hold it, and this
+migration is the `DELETE` for those. Its self-check asserts the key is absent and that the poll
+interval, the thread's remaining setting, is still present: properties, not a count of rows.
+
+The deletion is audited like any other write to `system_settings` — the thread records its own
+control being retired, under the `migration` actor.
+
 ### A lane nothing wrote (`0122`)
 
 **`device_nameplate` was a Digital Thread filter that could only ever answer empty.**

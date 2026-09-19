@@ -205,12 +205,6 @@ export function timeWindow(preset, customStart, customEnd) {
 }
 
 /**
- * Lanes drawn before the rest fold behind a toggle. About a screen of lanes at 28px; a smaller cap
- * folded a single lane on a sixteen-asset stack.
- */
-const DEFAULT_LANE_LIMIT = 30
-
-/**
  * The fallback for the `ui.digital_thread_poll_seconds` setting, whose `fallback_source` names this
  * constant.
  */
@@ -363,9 +357,8 @@ const SECTIONS = DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => ({
 export const isPartial = (shown, total) => typeof total === 'number' && total > shown
 
 /**
- * What is drawn over what there is, as a ratio: "200/467", or "200" when that is all of them. Used
- * for the events against the whole match AND for the lanes against the lane cap, which are the two
- * numbers in the header row's label and were both being drawn as though they were the whole thing.
+ * What is drawn over what there is, as a ratio: "200/467", or "200" when that is all of them. The
+ * events against the whole match, on the header row and the Export button.
  */
 export const countRatio = (shown, total) =>
   isPartial(shown, total) ? `${shown}/${total}` : String(shown)
@@ -788,11 +781,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   // Principal id -> `machine_principals` row (0125), for the same roles as the accounts above.
   const [machinePrincipals, setMachinePrincipals] = useState(() => new Map())
   const [selectedEventId, setSelectedEventId] = useState(null)
-  const [showAllLanes, setShowAllLanes] = useState(false)
 
-  /* Runtime overrides, each falling back to the constant above, which is what a stack whose
-     Settings were never touched runs on. */
-  const laneLimit = useSetting('ui.digital_thread_lane_limit', DEFAULT_LANE_LIMIT)
+  /* A runtime override, falling back to the constant above, which is what a stack whose Settings
+     were never touched runs on. */
   const pollSeconds = useSetting('ui.digital_thread_poll_seconds', DEFAULT_POLL_SECONDS)
 
   useEffect(() => {
@@ -1142,36 +1133,30 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
   }, [events, entityIdentities, loadedKinds])
 
-  const visibleLanes = showAllLanes ? lanes : lanes.slice(0, laneLimit)
-  const hiddenLaneCount = lanes.length - visibleLanes.length
-
   /**
-   * The visible lanes, cut into sections after the cap is applied, so the cap means what it says
-   * across the whole set. Empty sections are omitted.
-   */
-  /**
-   * Lanes grouped into sections. Nothing visible may be dropped here: known kinds keep their order
-   * and icons, and every remaining kind gets a section of its own with the fallback icon.
+   * Every lane, grouped into sections. Nothing may be dropped here: known kinds keep their order
+   * and icons, and every remaining kind gets a section of its own with the fallback icon. Empty
+   * sections are omitted.
    */
   const sections = useMemo(() => {
     const known = SECTIONS
       .filter(s => allowedKinds.has(s.kind))
-      .map(s => ({ ...s, lanes: visibleLanes.filter(l => l.kind === s.kind) }))
+      .map(s => ({ ...s, lanes: lanes.filter(l => l.kind === s.kind) }))
       .filter(s => s.lanes.length > 0)
 
     const claimed = new Set(SECTIONS.map(s => s.kind))
-    const leftovers = [...new Set(visibleLanes.map(l => l.kind).filter(k => !claimed.has(k)))]
+    const leftovers = [...new Set(lanes.map(l => l.kind).filter(k => !claimed.has(k)))]
       .sort()
       .map(kind => ({
         kind,
         // The raw kind, uppercased: it reads as a gap to close rather than a considered label.
         label: kind,
         Icon: FALLBACK_SECTION_ICON,
-        lanes: visibleLanes.filter(l => l.kind === kind)
+        lanes: lanes.filter(l => l.kind === kind)
       }))
 
     return [...known, ...leftovers]
-  }, [visibleLanes, allowedKinds])
+  }, [lanes, allowedKinds])
 
   /**
    * The x-axis extent, from the events rather than the range control: the default range is
@@ -1229,11 +1214,11 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
    */
   const laneClusters = useMemo(() => {
     const m = new Map()
-    for (const lane of visibleLanes) {
+    for (const lane of lanes) {
       m.set(lane.key, clusterEvents(lane.events, (e) => fractionFor(e.timestamp), trackWidth))
     }
     return m
-  }, [visibleLanes, fractionFor, trackWidth])
+  }, [lanes, fractionFor, trackWidth])
 
   /**
    * How many badges are drawn, which the legend's Grouped entry counts. Badges rather than the
@@ -1507,23 +1492,20 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                   colour key at the right. */}
               <div className="dt-header">
                 {/* ENTITIES, not assets: a lane can be a setting, a role assignment or a backup
-                    job, and `asset` is the shopfloor class. BOTH NUMBERS ARE WHAT IS DRAWN over
-                    what there is -- the cap draws thirty lanes of however many matched, and a
-                    reader adding up the section badges must get the number above them. */}
+                    job, and `asset` is the shopfloor class. Every lane is drawn, so the first
+                    number is the whole set and a reader adding up the section counts gets it; the
+                    second is what is loaded over what matched. */}
                 <div
                   className="dt-count"
                   title={[
-                    hiddenLaneCount > 0
-                      ? `${visibleLanes.length} of ${lanes.length} entities have a lane drawn; `
-                        + 'the rest are behind Show all lanes.'
-                      : `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
+                    `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
                     hasMoreToLoad
                       ? `${events.length} of the ${totalMatching} events matching these filters `
                         + 'are loaded; the rest are behind Load more, at the foot of the page.'
                       : 'Every event matching these filters is loaded.'
                   ].join('\n')}
                 >
-                  {countRatio(visibleLanes.length, lanes.length)}
+                  {lanes.length}
                   {' '}{lanes.length === 1 ? 'entity' : 'entities'}
                   {' · '}{eventRatio} {events.length === 1 && !hasMoreToLoad ? 'event' : 'events'}
                 </div>
@@ -1702,25 +1684,6 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                   </div>
                 </div>
               </div>
-
-              {hiddenLaneCount > 0 && (
-                <button
-                  className="btn btn-ghost btn-sm dt-lane-toggle"
-                  onClick={() => setShowAllLanes(true)}
-                  title={`Draw the remaining ${hiddenLaneCount} lanes`}
-                >
-                  Show all lanes (+{hiddenLaneCount})
-                </button>
-              )}
-              {showAllLanes && lanes.length > laneLimit && (
-                <button
-                  className="btn btn-ghost btn-sm dt-lane-toggle"
-                  onClick={() => setShowAllLanes(false)}
-                  title={`Collapse back to the ${laneLimit} busiest assets`}
-                >
-                  Show fewer lanes
-                </button>
-              )}
 
               {/* Where the thread's end is, drawn only when there is something to say about it: a
                   page still to load, a cut-off, or an end met at a page boundary. The count is on
