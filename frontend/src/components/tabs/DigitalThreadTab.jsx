@@ -205,7 +205,7 @@ export function timeWindow(preset, customStart, customEnd) {
 }
 
 /**
- * Lanes drawn before the rest fold behind a toggle. About a screen of lanes at 33px; a smaller cap
+ * Lanes drawn before the rest fold behind a toggle. About a screen of lanes at 28px; a smaller cap
  * folded a single lane on a sixteen-asset stack.
  */
 const DEFAULT_LANE_LIMIT = 30
@@ -1503,56 +1503,54 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             </div>
           ) : (
             <>
-              {/* The legend for a derived colour scale: nothing else on the page says what amber
-                  means. */}
-              <div className="dt-legend">
-                {Object.entries(MARKERS).map(([kind, m]) => (
-                  <span key={kind} className="dt-legend-item" title={m.hint}>
-                    <span className={`dt-node-dot dt-node-${kind}`} aria-hidden="true" />
-                    {m.label}
-                  </span>
-                ))}
+              {/* One row above the timeline: how much of the thread is on screen at the left, the
+                  colour key at the right. */}
+              <div className="dt-header">
+                {/* ENTITIES, not assets: a lane can be a setting, a role assignment or a backup
+                    job, and `asset` is the shopfloor class. BOTH NUMBERS ARE WHAT IS DRAWN over
+                    what there is -- the cap draws thirty lanes of however many matched, and a
+                    reader adding up the section badges must get the number above them. */}
+                <div
+                  className="dt-count"
+                  title={[
+                    hiddenLaneCount > 0
+                      ? `${visibleLanes.length} of ${lanes.length} entities have a lane drawn; `
+                        + 'the rest are behind Show all lanes.'
+                      : `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
+                    hasMoreToLoad
+                      ? `${events.length} of the ${totalMatching} events matching these filters `
+                        + 'are loaded; the rest are behind Load more, at the foot of the page.'
+                      : 'Every event matching these filters is loaded.'
+                  ].join('\n')}
+                >
+                  {countRatio(visibleLanes.length, lanes.length)}
+                  {' '}{lanes.length === 1 ? 'entity' : 'entities'} · {eventRatio} events
+                </div>
 
-                {/* Shown only while a badge is on screen. The sample is a real `.dt-cluster`,
-                    reading `n` as a placeholder for each badge's count. */}
-                {clusterCount > 0 && (
-                  <span
-                    className="dt-legend-item"
-                    title={`Events too close together to draw separately are ONE badge carrying the count — `
-                         + `${clusterCount} on this timeline. Hover one for the breakdown, or narrow the `
-                         + `time range and they separate back into individual markers.`}
-                  >
-                    <span className="dt-cluster dt-legend-cluster" aria-hidden="true">n</span>
-                    Grouped ({clusterCount})
-                  </span>
-                )}
-              </div>
+                {/* The legend for a derived colour scale: nothing else on the page says what
+                    amber means. */}
+                <div className="dt-legend">
+                  {Object.entries(MARKERS).map(([kind, m]) => (
+                    <span key={kind} className="dt-legend-item" title={m.hint}>
+                      <span className={`dt-node-dot dt-node-${kind}`} aria-hidden="true" />
+                      {m.label}
+                    </span>
+                  ))}
 
-              {/* WHAT THIS PAGE IS SHOWING, between the key and the timeline it describes.
-                  It lived in the axis corner, at lane-label size and hard against the left edge
-                  beside the first tick, where readers missed it -- so the one line that says how
-                  much of the thread is on screen was the easiest thing on the page to overlook.
-
-                  ENTITIES, not assets: a lane can be a setting, a role assignment or a backup job,
-                  and `asset` is the shopfloor class. BOTH NUMBERS ARE WHAT IS DRAWN over what
-                  there is -- the lane count named every lane while the cap drew thirty of them, so
-                  a reader adding up the section badges got a different number from the one above
-                  them. */}
-              <div
-                className="dt-count"
-                title={[
-                  hiddenLaneCount > 0
-                    ? `${visibleLanes.length} of ${lanes.length} entities have a lane drawn; `
-                      + 'the rest are behind Show all lanes.'
-                    : `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
-                  hasMoreToLoad
-                    ? `${events.length} of the ${totalMatching} events matching these filters `
-                      + 'are loaded; the rest are behind Load more, at the foot of the page.'
-                    : 'Every event matching these filters is loaded.'
-                ].join('\n')}
-              >
-                {countRatio(visibleLanes.length, lanes.length)}
-                {' '}{lanes.length === 1 ? 'entity' : 'entities'} · {eventRatio} events
+                  {/* Shown only while a badge is on screen. The sample is a real `.dt-cluster`,
+                      reading `n` as a placeholder for each badge's count. */}
+                  {clusterCount > 0 && (
+                    <span
+                      className="dt-legend-item"
+                      title={`Events too close together to draw separately are ONE badge carrying the count — `
+                           + `${clusterCount} on this timeline. Hover one for the breakdown, or narrow the `
+                           + `time range and they separate back into individual markers.`}
+                    >
+                      <span className="dt-cluster dt-legend-cluster" aria-hidden="true">n</span>
+                      Grouped ({clusterCount})
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="dt-scroll">

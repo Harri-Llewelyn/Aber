@@ -3125,6 +3125,17 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Digital Thread swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
+/* The row above the timeline: the count at the left, the colour key at the right. Baseline-aligned,
+   because the two are set at different sizes. */
+.dt-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 10px;
+}
+
 /* The colour key. `.dt-node-dot` shares the `.dt-node-<kind>` fills with the markers themselves,
    so the legend cannot drift away from what it describes. */
 .dt-legend {
@@ -3132,7 +3143,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
-  margin-bottom: 10px;
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -3150,21 +3160,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   flex-shrink: 0;
 }
 
-/* How much of the thread is on screen, between the key and the timeline. Centred over the whole
-   card rather than aligned to the tracks: it describes the page, not the axis, and the axis corner
-   it used to sit in is 210px hard against the left edge -- which is where readers missed it.
-   Larger than the legend beside it for the same reason; it is the line that tells you the view is
-   partial. Its own `dt-count-total` is not needed: the ratio carries both numbers. */
+/* How much of the thread is on screen. Shares one row with the legend: the count at the left, the
+   key at the right. A tier above the muted legend beside it, which is what stops it reading as part
+   of the key. Tabular figures so the numbers do not shuffle sideways as the poll and Load more
+   change them under a reader's eye. */
 .dt-count {
-  margin: 2px 0 12px;
-  text-align: center;
   font-size: 14px;
   font-weight: 600;
-  /* The primary tier, not a muted one: this is the line a reader was missing, and the legend
-     immediately above it is already --text-muted at 11px. */
   color: var(--text-primary);
-  /* Tabular figures so the numbers do not shuffle sideways as the poll and Load more change them
-     under a reader's eye. */
   font-variant-numeric: tabular-nums;
 }
 
@@ -3180,13 +3183,25 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   min-width: 620px;
 }
 
-/* A lane is a row of two cards, not a ruled line, so each asset's history is a thing with edges and
-   a marker near a boundary reads as belonging to its lane. */
+/* A lane is one ruled row of a grid: the label column and the track, divided from the row below by
+   a hairline. `stretch`, so the label's opaque background covers the whole row height. */
 .dt-lane {
   display: flex;
   align-items: stretch;
   gap: 10px;
-  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The row under the pointer, so one entity's markers can be followed across a wide track. The same
+   tint the tables use. The label is opaque in the card colour (see .dt-lane-label), so the tint is
+   laid over that as an image rather than replacing it -- the row and its label then match without
+   the label losing what keeps markers from showing through it. */
+.dt-lane:not(.dt-axis):hover {
+  background: var(--bg-glass);
+}
+
+.dt-lane:not(.dt-axis):hover .dt-lane-label {
+  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
 }
 
 /* The section rule: Cells, then Gateways, then Devices, a plant's own containment order. Sticky
@@ -3198,14 +3213,13 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   display: flex;
   align-items: center;
   width: 210px;
-  padding: 14px 10px 6px 0;
+  padding: 10px 10px 4px 0;
   background: var(--bg-card);
   color: var(--text-muted);
 }
 
-/* The heading as a BADGE rather than three loose items on a ruled row. The rule that used to sit
-   under it was the same weight as the lane dividers, so a section heading and an asset lane were
-   separated by identical lines and the hierarchy had to be inferred from the text. */
+/* The heading as a BADGE rather than three loose items on a ruled row, so a section heading and an
+   asset lane are not separated by identical lines with the hierarchy left to the text. */
 .dt-section-badge {
   display: inline-flex;
   align-items: center;
@@ -3218,7 +3232,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
-.dt-section:first-of-type { padding-top: 4px; }
+.dt-axis + .dt-section { padding-top: 4px; }
 
 .dt-section-name {
   font-size: 11px;
@@ -3240,9 +3254,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
    them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
    here would let a dozen dots slide through the text. */
-/* The label is a pill with two jobs: it is sticky, so it needs an opaque background in the card's
-   colour or dots show through the name as they pass, and it should read as a container. So the
-   element stays opaque and the pill is drawn by `::before` inside it. */
 /* 260px, not 210px. A schema lane is `<name> v<version>`, and a lineage shares the name and differs
    only in the version -- so at 210px, with the deleted flag beside it, every version of one schema
    ellipsised to the same string and the lanes became indistinguishable. The track is `flex: 1` and
@@ -3257,23 +3268,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 17px 0 9px;
+  /* 9px on the left lines the lane icon up with the icon inside the section badge above it. */
+  padding: 0 8px 0 9px;
   background: var(--bg-card);
   font-size: 12px;
 }
-
-.dt-lane-label::before {
-  content: '';
-  position: absolute;
-  inset: 1px 8px 1px 0;
-  border-radius: 6px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  pointer-events: none;
-}
-
-/* Above the pill layer. Without this the children paint under it and vanish. */
-.dt-lane-label > * { position: relative; z-index: 1; }
 
 /* The one element allowed to lose characters. Everything else in the label -- the icon, the
    deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
@@ -3326,55 +3325,19 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   opacity: 0.85;
 }
 
-/* The track is a container with edges, so a lane reads as one asset's stretch of time and a marker
-   is unambiguously in it. */
+/* The track is the row's remaining width, bare: the dividers above and below are the lane's edges,
+   and a marker centred between them is unambiguously in it. No guideline along the middle either --
+   with a rule under every row, a second line through each one made the page a stack of rules for
+   the eye to follow instead of markers. 28px holds an 18px cluster badge with 5px clear on each
+   side. */
 .dt-track {
   position: relative;
   flex: 1;
   min-width: 380px;
-  height: 32px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  height: 28px;
 }
-
-/* The axis row is a scale, not a lane. Left bare so the tick labels are not boxed like data. */
-.dt-track.dt-axis-track {
-  background: none;
-  border: none;
-}
-
-/* The lane's rule, inset by the same 14px the markers are padded with so it starts and stops
-   where they do. */
-.dt-track::before {
-  content: '';
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  top: 50%;
-  height: 1px;
-  margin-top: -0.5px;
-  /* One pixel, and lighter than the border it sits inside, so a track does not read as three
-     stacked rules; the markers are what the eye should find. */
-  background: var(--border);
-  opacity: 0.7;
-}
-
-/* The axis has no timeline to mark. */
-.dt-track.dt-axis-track::before { display: none; }
-
-/* The axis corner is a caption, not an asset. No pill: boxing "16 assets - 102 events" like a lane
-   label would put a count where a name goes. */
-.dt-axis .dt-lane-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 600;
-  padding-left: 0;
-}
-.dt-axis .dt-lane-label::before { display: none; }
 
 .dt-axis-track { height: 24px; }
-.dt-axis-track::before { display: none; }
 
 .dt-tick {
   position: absolute;
@@ -3401,8 +3364,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   height: 13px;
   padding: 0;
   border-radius: 50%;
-  /* The ring keeps two adjacent markers from reading as one blob. In the card's colour rather than
-     the track's, because it has to separate a marker from its neighbour. */
+  /* The ring keeps two adjacent markers from reading as one blob. In the card's colour, which is
+     what the row is drawn on. */
   border: 2px solid var(--bg-card);
   cursor: pointer;
   transform: translate(-50%, -50%);
@@ -3454,7 +3417,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   cursor: pointer;
 }
 
-/* On a track it is a marker. 18px inside a 32px lane, centred on the same rule the dots sit on.
+/* On a track it is a marker. 18px inside a 28px lane, centred on the same line the dots sit on.
    Above them in the stack, because a badge that a stray single dot painted over would be the
    overlap problem again in a new colour. */
 .dt-track .dt-cluster {

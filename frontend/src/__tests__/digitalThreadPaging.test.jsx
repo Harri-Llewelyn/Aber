@@ -403,17 +403,17 @@ describe('DigitalThreadTab total', () => {
     }))
     render(<DigitalThreadTab />)
 
-    // Above the timeline, under the key, as its own line.
+    // Above the timeline, on the header row beside the key.
     expect(await screen.findByText(/2 entities · 2\/467 events/)).toBeInTheDocument()
     // And the foot of the page, which has room for the words. Both read the same pair, so they
     // cannot end up describing different sets.
     expect(screen.getByText(/^2 of 467 events$/)).toBeInTheDocument()
   })
 
-  it('draws the count between the key and the timeline, not inside the swimlanes', async () => {
-    /* It lived in the axis corner -- a 210px lane label hard against the left edge, at lane-label
-       size, beside the first tick -- and readers missed it. Asserted by POSITION and not only by
-       text, because the text passed from there too. */
+  it('draws the count beside the key, above the timeline and not inside the swimlanes', async () => {
+    /* Asserted by POSITION and not only by text: the axis corner, a lane label hard against the
+       left edge beside the first tick, is where readers missed it, and the text would pass from
+       there too. */
     respond(() => page([event(42), event(41)], {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
@@ -423,19 +423,23 @@ describe('DigitalThreadTab total', () => {
     const count = document.querySelector('.dt-count')
     expect(count).toBeTruthy()
     expect(count.textContent).toMatch(/2 entities · 2\/467 events/)
-    // Between the two: after the key, before the scroller that holds the tracks.
-    expect(count.previousElementSibling).toHaveClass('dt-legend')
-    expect(count.nextElementSibling).toHaveClass('dt-scroll')
+    // One row with the key: the count first, the key after it, and the scroller that holds the
+    // tracks directly under the row.
+    const header = count.parentElement
+    expect(header).toHaveClass('dt-header')
+    expect(count.nextElementSibling).toHaveClass('dt-legend')
+    expect(header.nextElementSibling).toHaveClass('dt-scroll')
     // And gone from the corner, which is now only the spacer that lines the ticks up.
     expect(document.querySelector('.dt-axis-corner').textContent).toBe('')
   })
 
-  it('is centred and larger than the key it sits under', async () => {
-    // jsdom lays nothing out, so the rule is read from the stylesheet. Without this the move is
-    // asserted as markup only, and the reason for it -- that the line was easy to miss -- is not.
+  it('is larger than the key it shares a row with', async () => {
+    // jsdom lays nothing out, so the rule is read from the stylesheet. Without this the position
+    // is asserted as markup only, and the reason for it -- that the line was easy to miss -- is
+    // not. The size is what carries that: the row puts it beside a muted 11px key, and at the same
+    // size it would read as one more entry in the key.
     const rule = APP_CSS.match(/\n\.dt-count \{([\s\S]*?)\n\}/)?.[1]
     expect(rule, '.dt-count has no rule in App.css').toBeTruthy()
-    expect(rule).toMatch(/text-align:\s*center/)
 
     const size = (r) => Number(/font-size:\s*(\d+)px/.exec(r)?.[1])
     const legend = APP_CSS.match(/\n\.dt-legend \{([\s\S]*?)\n\}/)?.[1]
