@@ -110,6 +110,21 @@ describe('the shortcuts dialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('closes on a click outside it, and not on one inside', () => {
+    /* The deviation is deliberate and narrow. Most dialogs here do NOT close this way, because
+       most hold input a stray click would discard; this one is a list to read, like the alerts
+       popover it was compared to. The inside case is what stops a click on the list dismissing
+       the list. */
+    const onClose = vi.fn()
+    render(<ShortcutsModal onClose={onClose} />)
+
+    fireEvent.click(document.querySelector('.modal'))
+    expect(onClose).not.toHaveBeenCalled()
+
+    fireEvent.click(document.querySelector('.modal-overlay'))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('renders its keys as <kbd>, which is the element that means this', () => {
     render(<ShortcutsModal onClose={vi.fn()} />)
     const keys = [...document.querySelectorAll('kbd')]
