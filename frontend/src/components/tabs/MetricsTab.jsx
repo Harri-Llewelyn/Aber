@@ -444,10 +444,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               text="The catalog of metrics every schema is built from, grouped by the first segment of their name — Axes/C/ANGLE and Axes/X/POSITION both belong to Axes, and a name with no / is listed under Ungrouped. A metric's name is what a device publishes, so it reaches MQTT, TimescaleDB and Grafana, and cannot be changed afterwards: one no longer wanted is deprecated rather than removed. Search reaches a known metric without opening every group; Use on the Vocabulary page starts a new one from a standard's entry."
             />
           </h3>
-          {/* The label follows the form's state rather than naming a fixed action, so the control
-              always says what pressing it will do. */}
+          {/* The label AND the fill follow the form's state, so the control always says what
+              pressing it will do and how much it is being offered. Filled while it opens the form,
+              which is what every other page's create action looks like; ghost once the form is
+              open, where it means Cancel and the form's own Add Metric is the filled one. */}
           <button
-            className={`btn btn-ghost btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
+            className={`btn btn-sm ${showAddMetric ? 'btn-ghost' : 'btn-primary'} ${!canManageSchema ? 'btn-disabled' : ''}`}
             style={{ marginLeft: 'auto' }}
             disabled={!canManageSchema}
             aria-expanded={showAddMetric}

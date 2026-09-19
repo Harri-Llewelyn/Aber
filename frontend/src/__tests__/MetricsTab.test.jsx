@@ -255,6 +255,26 @@ describe('Metric Catalog — Add Metric toggle', () => {
     expect(screen.queryByText('Data Item Type')).toBeNull()
   })
 
+  it('is filled while it opens the form and ghost while it cancels one', async () => {
+    /* Filled is what a create action looks like on every other page -- Build Schema from Catalog,
+       New Area, New Cell. It cannot STAY filled once the form is open: the label is Cancel by
+       then, and the form's own submit is the filled one, so two would compete. */
+    renderTab()
+    await waitForCatalog()
+
+    expect(addButton().className).toContain('btn-primary')
+    expect(addButton().className).not.toContain('btn-ghost')
+
+    fireEvent.click(addButton())
+
+    expect(addButton().className).toContain('btn-ghost')
+    expect(addButton().className).not.toContain('btn-primary')
+    // Exactly one filled button on screen: the form's own, which commits the metric.
+    const filled = [...document.querySelectorAll('.btn-primary')]
+    expect(filled).toHaveLength(1)
+    expect(filled[0].textContent.trim()).toBe('Add')
+  })
+
   it('discards what was typed, so a reopened form does not inherit stale input', async () => {
     // The label says Cancel, so it has to mean cancel.
     renderTab()
