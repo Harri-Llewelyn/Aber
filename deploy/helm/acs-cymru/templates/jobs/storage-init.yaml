@@ -48,18 +48,16 @@ spec:
         {{/*
           Waits on storage-api's OWN readiness, not just on the database.
 
-          storage-api creates and migrates the `storage` schema on boot. Up to
-          supabase/postgres:15.6.1.143 the image shipped a STUB of it (buckets/objects/migrations,
-          with no `public` or `file_size_limit` column); 17.6.1.160 ships the schema EMPTY, so
-          there is now no stub at all. Either way the conclusion is the same and stronger than
-          before: the bucket is created here, through the REST API, rather than by a SQL migration,
-          because db-init finishes long before storage-api starts. An INSERT into storage.buckets
-          would once have hit the stub and been unable to mark the bucket public; today it would
-          hit nothing at all. It would come up PRIVATE (or not at all) on a fresh install, and
-          every AAS `File` URL in every exported shell would 404 for a viewer holding no session.
+          storage-api creates and migrates the `storage` schema on boot; supabase/postgres ships it
+          EMPTY as of 17.6.1.160, and shipped only a stub before that. Either way the bucket is
+          created here through the REST API rather than by a SQL migration, because db-init
+          finishes long before storage-api starts. An INSERT into storage.buckets would once have
+          hit the stub and been unable to mark the bucket public; today it would hit nothing. The
+          bucket would come up private or not at all, and every AAS `File` URL in every exported
+          shell would 404 for a viewer holding no session.
 
-          The RLS policies on storage.objects moved out of 0001 for exactly this reason -- see the
-          storage-policies Job, which runs at weight 25.
+          The RLS policies on storage.objects moved out of 0001 for the same reason -- see the
+          storage-policies Job, which runs at weight 18.
         */}}
         {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it migrates the storage schema on boot)") | nindent 8 }}
       containers:

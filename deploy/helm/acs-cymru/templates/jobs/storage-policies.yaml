@@ -29,21 +29,20 @@ metadata:
     {{/*
       WEIGHT 18 -- BETWEEN db-init (10) and storage-init (20), and both bounds matter.
 
-      THE ORDERING IS THE WHOLE POINT OF THIS JOB EXISTING. These policies were section 6 of
-      0001_baseline_schema.sql and ran with the migrations, which worked only because
-      `supabase/postgres:15.6.1.143` shipped a STUB storage schema containing `objects`.
-      17.6.1.160 ships that schema EMPTY, so the migration aborted on
-      `relation "storage.objects" does not exist` and took the entire boot with it.
+      THE ORDERING IS WHY THIS JOB EXISTS. These policies were section 6 of 0001_baseline_schema.sql
+      and ran with the migrations, which worked only because `supabase/postgres:15.6.1.143` shipped
+      a STUB storage schema containing `objects`. 17.6.1.160 ships that schema EMPTY, so the
+      migration aborted on `relation "storage.objects" does not exist` and took the boot with it.
 
-      It cannot be fixed by reordering inside db-init: storage-api creates `storage.objects` in
-      its own migrations when it boots, and it waits on db-init COMPLETING. The table cannot
-      exist while migrations run, on either target, by construction.
+      Reordering inside db-init cannot fix it: storage-api creates `storage.objects` in its own
+      migrations when it boots, and it waits on db-init COMPLETING, so the table cannot exist while
+      migrations run.
 
-      AND IT MUST PRECEDE storage-init (20), not follow it. storage-init creates the bucket
-      through the Storage REST API, which storage-api serves by assuming service_role -- a role
-      that holds no privileges on the storage tables until this Job grants them. Run it after and
-      the bucket creation fails with `400 new row violates row-level security policy`, whose real
-      cause is a 42501 privilege error nested several levels inside the error payload.
+      AND IT MUST PRECEDE storage-init (20). storage-init creates the bucket through the Storage
+      REST API, which storage-api serves by assuming service_role -- a role holding no privileges on
+      the storage tables until this Job grants them. Run it after and bucket creation fails with
+      `400 new row violates row-level security policy`, whose real cause is a 42501 privilege error
+      nested several levels inside the payload.
     */}}
     "helm.sh/hook-weight": "18"
     "helm.sh/hook-delete-policy": before-hook-creation

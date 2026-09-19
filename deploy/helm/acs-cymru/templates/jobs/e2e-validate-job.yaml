@@ -5,17 +5,13 @@
 =================================================================================================
 `ingestion/validate.py`, run as a Job IN the namespace.
 
-THIS IS THE SIMPLER OF THE TWO WAYS TO RUN IT. From the host (`npm run dev:test`) the script
-reaches the stack through port-forwards on 5433 / 54322 / 1883 / 54321, because the in-cluster names
-do not resolve outside the cluster. In-cluster the SERVICE NAMES ARE THE CORRECT CONFIGURATION, so
-the values below are the plain defaults with no rewriting and no port-forwarding.
+In-cluster the SERVICE NAMES ARE THE CORRECT CONFIGURATION, so the values below are the plain
+defaults; from the host (`npm run dev:test`) the same suite needs port-forwards, because those
+names do not resolve outside the cluster.
 
-NOT A `helm test` HOOK, deliberately, unlike test-fdw. This suite SEEDS AND DELETES fixtures, drives
-real MQTT traffic and takes minutes; `helm test` should stay the cheap gate anyone can run against a
-live stack without thinking about it. Gated on `e2e.enabled` so it exists only when asked for.
-
-IT IS THE SAME 20 CHECKS `npm run dev:test` runs from the host; if both pass, the wiring agrees
-with itself where it matters.
+NOT A `helm test` HOOK, unlike test-fdw: this suite seeds and deletes fixtures, drives real MQTT
+traffic and takes minutes, so `helm test` stays the cheap gate anyone can run against a live stack.
+Gated on `e2e.enabled`. It is the same 20 checks `npm run dev:test` runs from the host.
 =================================================================================================
 */}}
 apiVersion: batch/v1
@@ -45,19 +41,15 @@ spec:
       {{- end }}
       {{- /*
         CHECK 7b SIGNS IN THROUGH THE REAL OAUTH CHAIN, so it follows BROWSER-FACING URLs:
-        /auth/strategy redirects to `api.<publicBaseDomain>`, and GoTrue then hands back a callback
-        on `nodered.<publicBaseDomain>`. That is the point of the check -- it is what catches a
-        redirect_uri that disagrees with what the service advertises -- and it cannot be replaced by
-        in-cluster names without testing something else entirely.
+        /auth/strategy redirects to `api.<publicBaseDomain>`, and GoTrue hands back a callback on
+        `nodered.<publicBaseDomain>`. That is what catches a redirect_uri disagreeing with what the
+        service advertises, so in-cluster names would be testing something else.
 
-        But a pod does not resolve those names the way a browser does. With the dev domain
-        `localhost` they resolve to 127.0.0.1 -- which inside this pod is THE POD ITSELF -- or, as
-        `*.localhost` names, to nothing. 7b failed as `Connection refused`, reading as a broken
-        Node-RED rather than as a name pointing at the wrong host.
-
-        `e2e.ingressIp` maps those hostnames onto the ingress controller instead, so the Job walks
-        the same redirect chain a browser would. Left empty the aliases are simply absent, which is
-        right for any deployment whose public domain already resolves from inside the cluster.
+        A pod does not resolve those names the way a browser does: under the dev domain `localhost`
+        they are THE POD ITSELF, and as `*.localhost` names they resolve to nothing -- 7b failed as
+        `Connection refused`. `e2e.ingressIp` maps them onto the ingress controller instead. Left
+        empty the aliases are absent, which is right where the public domain already resolves
+        in-cluster.
       */}}
       {{- if .Values.e2e.ingressIp }}
       hostAliases:
@@ -69,39 +61,20 @@ spec:
       {{- end }}
       initContainers:
         {{/*
-          WAITS FOR THE MIGRATIONS, NOT FOR THE GATEWAY. This is a plain Job, so Kubernetes creates
-          it at `helm install` time -- alongside every Deployment and MINUTES BEFORE the
-          post-install hooks that bootstrap the database. It previously waited only on the gateway, and
-          that failed in CI in the most misleading way available:
+          WAITS FOR THE MIGRATIONS TO FINISH -- not for the gateway, and not for one table.
 
-            * the gateway answers as soon as it is up, long before PostgREST has a schema behind it;
-            * the probe was `curl -s -o /dev/null`, with NO `-f`, so the 502 the gateway returns while its
-              upstream is broken counted as SUCCESS.
+          This is a plain Job, so Kubernetes creates it at `helm install` time, MINUTES BEFORE the
+          post-install hooks that bootstrap the database. Waiting on the gateway let it start while
+          PostgREST had no schema behind it (and the probe carried no `-f`, so the gateway's 502
+          counted as success). Waiting on `public.devices` was no better: 0001 creates it, so the
+          probe passed once one migration of seventy had run, and the suite was green whenever
+          db-init happened to win the race and read as flaky quarantine bugs otherwise. 0072 has
+          the full account.
 
-          So the Job started ~3 minutes early, found `supabase-db` still refusing connections, and
-          died reporting `relation "public.devices" does not exist` and a pydantic parse error
-          inside the PostgREST client. The pod ages are what gave it away: `e2e-validate` was
-          3m27s old while `db-init` was 43s old. Nothing in the failure named ordering.
-
-          Waiting on a QUERY covers both halves at once -- `psql` exits non-zero whether the server
-          is down or the object does not exist yet -- and the answer to both is the same: keep
-          waiting. It is the same discipline `ingestion` uses against the telemetry hypertable:
-          probe the OBJECT the workload needs, not the process that serves it.
-
-          THAT OBJECT WAS `public.devices`, AND IT WAS THE WRONG ONE. 0001 creates it, so the probe
-          started passing once ONE migration of seventy had run and then stayed passing for the
-          other sixty-nine. It proved the chain had STARTED. On CI run 33503395769 validate.py began
-          publishing while the chain was in its fifties, and checks 1/1d/1e/1f failed against a
-          `devices` table that did not have `conformance_policy` yet -- a column 0050 adds. The
-          suite was green whenever db-init happened to win the race, so it read as four flaky
-          quarantine bugs rather than as one ordering fault. 0072 has the full account.
-
-          `1/count(*)` IS DELIBERATE, AND IT IS THE WHOLE POINT OF THE FIX. This helper reads the
-          EXIT CODE, and a query that matches no rows still exits 0 -- which is why the old probe
-          could not have expressed "and the chain has finished" no matter which table it named. The
-          division makes an empty result an ERROR: no sentinel row yet, or `completed_at` still NULL
-          because db-init is mid-chain, and psql exits non-zero and the loop waits. Complete, and it
-          evaluates to 1.
+          `1/count(*)` IS THE FIX RATHER THAN DECORATION. This helper reads the EXIT CODE, and a
+          query matching no rows still exits 0 -- so no table name could express "and the chain has
+          finished". The division makes an empty result an ERROR: no sentinel row yet, or
+          `completed_at` still NULL mid-chain, and psql exits non-zero so the loop waits.
         */}}
         {{- include "acs-cymru.waitForPostgres" (dict
              "ctx" .
@@ -116,32 +89,29 @@ spec:
            | nindent 8 }}
         {{/*
           The gateway second, and with `-f` this time. validate.py reaches Supabase THROUGH the
-          gateway, so the database being ready is necessary but not sufficient. `-f` matters:
-          without it any response at all -- including the 502 the gateway returns while its
-          upstream is down -- satisfies the probe, which is exactly how this check came to pass
-          while proving nothing.
+          gateway, so a ready database is necessary but not sufficient. Without `-f` any response
+          satisfies the probe, including the 502 the gateway returns while its upstream is down.
 
           The secret key alone: the gateway matches it as an opaque string and hands PostgREST the
-          service-role bearer, which holds SELECT on `devices`. Measured: no key -> 401, the
-          publishable key alone -> 401 (anon holds no SELECT there), the secret key -> 200.
+          service-role bearer, which holds SELECT on `devices`. Measured -- no key 401, the
+          publishable key alone 401, the secret key 200.
         */}}
         {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" (printf "curl -sf -o /dev/null -H \"apikey: $SUPABASE_SECRET_KEY\" '%s/rest/v1/devices?limit=1'" (include "acs-cymru.supabase.internalUrl" .)) "describe" "the gateway routing to PostgREST with a live schema" "env" (include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SECRET_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY"))) | nindent 8 }}
         {{/*
-          NODE-RED AND i3X TOO, because validate.py asserts against them directly -- checks 7/7b
+          NODE-RED AND i3X TOO, because validate.py asserts against them directly: checks 7/7b
           drive a real editor sign-in and 12-12f exercise the i3X address space.
 
           THIS JOB'S START TIME IS NOT ORDERED BY THE CI WORKFLOW. It is a plain Job created at
-          install, so its own initContainers are the only thing holding it back; CI's "wait for
-          every workload" step runs CONCURRENTLY with it, not before it. Once the database wait
-          above stopped it racing db-init, it simply raced these two instead -- and failed with
-          `Connection refused` and `HTTP 0`, which read as broken services rather than as a Job
-          that started too early. Both pods were 1/1 Running by the time diagnostics ran.
+          install, so its own initContainers are the only thing holding it back and CI's "wait for
+          every workload" step runs CONCURRENTLY with it. Without these waits it failed with
+          `Connection refused` and `HTTP 0` against pods that were 1/1 Running by the time anyone
+          looked.
 
           `curl -s` WITHOUT `-f` FOR NODE-RED, deliberately, and it is not the mistake corrected
-          above. curl still exits non-zero when it cannot connect, so this proves the port is open
-          and speaking HTTP -- and Node-RED's admin API answers 401 unauthenticated, which is what
-          check 7 asserts, so demanding a 2xx here would wait forever for something that must not
-          happen. i3X's /info is unauthenticated by specification, so `-f` is right there.
+          above: curl still exits non-zero when it cannot connect, so this proves the port is open
+          and speaking HTTP, and Node-RED's admin API answers 401 unauthenticated -- which is what
+          check 7 asserts, so demanding a 2xx would wait forever. i3X's /info is unauthenticated by
+          specification, so `-f` is right there.
         */}}
         {{- if .Values.nodeRed.enabled }}
         {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-node-red" "image" "curlimages/curl:8.10.1" "command" "curl -s -o /dev/null http://node-red:1880/" "describe" "node-red (checks 7/7b sign in to the editor)") | nindent 8 }}
@@ -152,29 +122,20 @@ spec:
         {{/*
           AND THE INGESTION DAEMON LAST, ON ITS OWN METRIC RATHER THAN ON ITS POD.
 
-          THIS IS THE ONE THAT WAS MISSING, and CI run 33606772340 on `main` is what it cost:
-          twelve checks failed at once -- quarantine, birth parameters, birth-metric observation,
-          unmodelled detection, telemetry, rename safety, label propagation, every alias check and
-          the rebirth NCMD -- while i3X, the Directory, Node-RED and the Digital Thread all passed.
-          That split is the signature: everything that needed the daemon to have CONSUMED something
-          failed, and everything that read the database directly passed. The daemon's log told the
-          rest -- it logged `Subscribed to 'spBv1.0/#'` at 08:13:48, and validate.py had published
-          its entire scenario between 08:10:55 and then. Sparkplug fixtures go out at QoS 0, so
-          those messages were not queued for a late subscriber; they were simply gone.
-
           The daemon is held behind its own wait on the telemetry hypertable, so on a slow node it
-          reaches the broker minutes after this Job is created. Nothing ordered the two.
+          reaches the broker minutes after this Job is created, and nothing orders the two. Without
+          this wait every check that needed the daemon to have CONSUMED something failed while every
+          check that read the database passed -- Sparkplug fixtures go out at QoS 0, so a scenario
+          published before the daemon subscribed is simply gone, not queued. docs/incidents.md
+          carries the account.
 
-          THE CI WORKFLOW'S OWN "WAIT FOR THE INGESTION DAEMON TO BE CONSUMING" STEP DOES NOT COVER
-          THIS, for the reason the block above already gives about Node-RED and i3X: this is a plain
-          Job created at install time, so a workflow step runs CONCURRENTLY with it. On that run the
-          step passed at 08:13:51, five seconds after the suite had already failed and reported.
+          CI's own "wait for the ingestion daemon to be consuming" step does not cover this, for the
+          reason the block above gives: a workflow step runs concurrently with a plain Job.
 
           `acs_ingestion_mqtt_connected`, NOT `acs_ingestion_up`. `up` says the process is alive,
           which it is throughout the failure; the subscription is the thing being waited on. Read
           from the headless metrics Service, which sets `publishNotReadyAddresses` precisely so an
-          unhealthy daemon can still be scraped -- exactly the state this probe has to observe
-          rather than be hidden from.
+          unhealthy daemon can still be scraped.
         */}}
         {{- if .Values.ingestion.enabled }}
         {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-ingestion" "command" "wget -q -O - http://ingestion-metrics:9108/metrics 2>/dev/null | awk '/^acs_ingestion_mqtt_connected /{found=($2==1)} END{exit found?0:1}'" "describe" "the ingestion daemon to be subscribed to spBv1.0/# (every check that asserts on consumed telemetry)") | nindent 8 }}
@@ -253,23 +214,17 @@ spec:
             {{- /*
               THE PUBLIC ORIGIN, NOT THE IN-CLUSTER ONE, AND THE COOKIE IS THE REASON.
 
-              This was `http://node-red:1880`, which is correct for check 7 and silently wrong for
-              7b. 7b drives the real browser handshake, and validate.py says why in its own comment:
-              "the state and PKCE verifier live in Node-RED's express session, so the callback has
-              to arrive carrying the cookie the /auth/strategy request set".
+              7b drives the real browser handshake, and the state and PKCE verifier live in
+              Node-RED's express session, so the callback has to arrive carrying the cookie the
+              /auth/strategy request set. A COOKIE JAR IS HOST-SCOPED: starting at `node-red:1880`
+              and receiving the callback at `nodered.<publicBaseDomain>` -- which is what the OAuth
+              client's registered redirect_uri necessarily is -- means the cookie is never sent
+              back, Node-RED has no verifier for the code, and Passport fails with 403 surfacing as
+              `AuthenticationError: Forbidden`.
 
-              A cookie jar is HOST-SCOPED. Starting the flow at `node-red:1880` and receiving the
-              callback at `nodered.<publicBaseDomain>` -- which is what the OAuth client's
-              registered redirect_uri necessarily is -- means the session cookie is never sent
-              back. Node-RED then has no PKCE verifier for the code, and Passport fails the callback
-              with 403, surfacing as `AuthenticationError: Forbidden`. Nothing is broken; the
-              handshake was split across two origins.
-
-              Using the public origin here makes the flow single-origin, and has the side benefit
-              that check 7 now exercises the ingress path a real operator uses.
-
-              Falls back to the in-cluster Service when no public domain is configured, so a stack
-              installed without one still runs the suite instead of rendering an unusable hostname.
+              The public origin makes the flow single-origin, and check 7 then exercises the ingress
+              path a real operator uses. Falls back to the in-cluster Service with no public domain
+              configured, so such a stack still runs the suite.
             */}}
             - name: NODERED_BASE_URL
               value: {{ (.Values.publicUrls.nodered | default (ternary (printf "%s://nodered.%s" .Values.global.scheme .Values.global.publicBaseDomain) "" (ne (.Values.global.publicBaseDomain | toString) ""))) | default "http://node-red:1880" | quote }}

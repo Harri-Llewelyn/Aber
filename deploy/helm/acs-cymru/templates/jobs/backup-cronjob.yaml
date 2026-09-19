@@ -16,34 +16,30 @@
 =================================================================================================
 Scheduled logical backups -- AND THE ONLY RECOVERY PATH THIS STACK HAS.
 
-`local-path` is a node-local hostPath provisioner: one node, no replication, no snapshots. Neither
-database is replicated either -- both are deliberately single instances (an operator and a custom
-image would be needed for Postgres HA, which architecture §3.3 keeps out of scope). So there is no storage
-layer underneath to fall back on, and this is it.
+`local-path` is a node-local hostPath provisioner: one node, no replication, no snapshots, and
+neither database is replicated either (architecture §3.3 keeps Postgres HA out of scope). There is
+no storage layer underneath to fall back on.
 
 WHAT IS WORTH BACKING UP, AND WHAT IS NOT:
   supabase-db   asset metadata, RLS policies, the schema registry, and `digital_thread` -- an
-                APPEND-ONLY audit table. That last one is the reason this matters most: telemetry
-                can be re-derived from a rebirth, an audit trail cannot be reconstructed at all.
+                APPEND-ONLY audit table, which is why this matters most: telemetry can be
+                re-derived from a rebirth, an audit trail cannot.
   timescaledb   the telemetry hypertable. Large and growing; see the retention note below.
-  storage       the 3D model objects, WHEN `backup.includeStorage` is set. Not a database, and not
-                covered by either dump -- but `devices.model_3d_path` in the first one points at
-                them, so restoring the databases alone yields a fleet of rows referencing objects
-                that are gone. The AAS exporter composes that URL from the key without fetching
-                it, so nothing detects the break until a viewer opens the shell.
+  storage       the 3D model objects, WHEN `backup.includeStorage` is set. Neither dump covers
+                them, but `devices.model_3d_path` points at them, and the AAS exporter composes
+                that URL without fetching it -- so nothing detects the break until a viewer opens
+                the shell.
 
 `pg_dump -Fc` (custom format), not plain SQL: compressed, and restorable SELECTIVELY with
-pg_restore -- a plain dump can only be replayed whole, which on the historian is not a realistic
+pg_restore. A plain dump can only be replayed whole, which on the historian is not a realistic
 recovery.
 
-A LOGICAL DUMP IS NOT A PITR SOLUTION. It recovers to the last nightly run and no finer. For a real
-RPO this wants pgBackRest or WAL archiving to object storage; that is a larger piece of work and this
-is the floor, not the ceiling. Said plainly here so nobody mistakes it for the latter.
+A LOGICAL DUMP IS NOT A PITR SOLUTION: it recovers to the last nightly run and no finer. A real RPO
+wants pgBackRest or WAL archiving to object storage. This is the floor, not the ceiling.
 
-`--no-owner --no-privileges` are DELIBERATELY ABSENT. The role scaffolding is exactly what a restore
-needs: supabase_auth_admin, authenticator and supabase_storage_admin own objects, and RLS policies
-reference roles by name. A dump stripped of ownership restores into a database where every policy
-denies.
+`--no-owner --no-privileges` are DELIBERATELY ABSENT. supabase_auth_admin, authenticator and
+supabase_storage_admin own objects and RLS policies reference roles by name, so a dump stripped of
+ownership restores into a database where every policy denies.
 =================================================================================================
 */}}
 {{- if eq .Values.backup.destination "pvc" }}
@@ -140,15 +136,14 @@ spec:
           containers:
             - name: backup
               # The supabase/postgres image, for its pg_dump. THE DUMPING CLIENT MUST BE AT LEAST THE
-              # SERVER'S VERSION -- an older pg_dump refuses outright ("server version mismatch"),
-              # which is why this reuses the server's own image rather than a generic postgres-client.
+              # SERVER'S VERSION -- an older pg_dump refuses outright ("server version mismatch") --
+              # which is why this reuses the server's own image rather than a generic client.
               #
-              # AND THAT IS WHY THE HISTORIAN IS ON pg17 RATHER THAN pg18. This Job dumps BOTH
-              # databases with THIS image's pg_dump, so the historian's PostgreSQL major is capped
-              # by whatever `supabase/postgres` ships -- currently 17.6, with no PG18 line published
-              # at all. TimescaleDB does build a pg18 image, and taking it would break nothing at
-              # boot and nothing in a dashboard: it would break this Job, at 02:00, in a log nobody
-              # is reading. Raise the historian only when supabaseDb.image.tag can go with it.
+              # AND THAT IS WHY THE HISTORIAN IS ON pg17 RATHER THAN pg18: this Job dumps BOTH
+              # databases with THIS image's pg_dump, so the historian's major is capped by whatever
+              # `supabase/postgres` ships. Taking TimescaleDB's pg18 image would break nothing at
+              # boot and nothing in a dashboard -- it would break this Job, at 02:00, in a log
+              # nobody is reading. Raise the historian only when supabaseDb.image.tag can go too.
               image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
               imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
               env:

@@ -240,6 +240,29 @@ subscribed receives nothing.
 
 ---
 
+## The e2e suite published its whole scenario before the daemon subscribed
+
+**Where the fix lives:** `deploy/helm/acs-cymru/templates/jobs/e2e-validate-job.yaml`, the
+`wait-for-ingestion` initContainer.
+
+**Symptom:** twelve checks failed at once -- quarantine, birth parameters, birth-metric observation,
+unmodelled detection, telemetry, rename safety, label propagation, every alias check and the rebirth
+NCMD -- while i3X, the Directory, Node-RED and the Digital Thread all passed.
+
+That split is the signature: everything needing the daemon to have *consumed* something failed, and
+everything reading the database directly passed. The daemon logged `Subscribed to 'spBv1.0/#'` three
+minutes after the suite had published its entire scenario. Sparkplug fixtures go out at QoS 0, so
+those messages were not queued for a late subscriber; they were gone.
+
+The e2e suite is a plain Job, created at install time, and the daemon is held behind its own wait on
+the telemetry hypertable, so on a slow node it reaches the broker minutes later. Nothing ordered the
+two, and the CI workflow's own "wait for the ingestion daemon to be consuming" step cannot: a
+workflow step runs concurrently with a Job that Kubernetes has already created. The Job waits on
+`acs_ingestion_mqtt_connected` itself, which is scraped from the headless metrics Service because
+that sets `publishNotReadyAddresses` -- the daemon being unready is the state this has to observe.
+
+---
+
 ## The validator's default password matched the demo credential
 
 **Where the fix lives:** `ingestion/validate.py` (refuses to start without `MQTT_VALIDATOR_USER` / `MQTT_VALIDATOR_PASSWORD`); the e2e job's `. ./.env`.

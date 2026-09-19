@@ -3,16 +3,15 @@ Telemetry lifecycle reconciliation: compression and retention on the raw hyperta
 1m/5m/1h rollups, their policies, and the telemetry_latest view.
 
 WHY A HOOK JOB AND NOT AN initdb SCRIPT. The postgres entrypoint runs /docker-entrypoint-initdb.d
-ONLY on an empty data directory, and on Kubernetes "recreate the volume" means deleting the PVC --
-`helm upgrade` will not do it and neither will deleting the pod, because the StatefulSet reattaches
-the same claim. A retention interval that could only be chosen before the first telemetry row was
-written was not a setting; it was a constant with a misleading name. This runs on every install and
-every upgrade, so `timescaledb.retention.*` and `timescaledb.rollups.*` are authoritative in both
-directions. Rollups defined in init/ would exist on fresh installs and silently nowhere else.
+ONLY on an empty data directory, and on Kubernetes recreating the volume means deleting the PVC --
+`helm upgrade` will not, and neither will deleting the pod, because the StatefulSet reattaches the
+same claim. A retention interval choosable only before the first telemetry row is not a setting.
+This runs on every install and upgrade, so `timescaledb.retention.*` and `timescaledb.rollups.*`
+are authoritative in both directions.
 
-WHY post-upgrade AND post-install. Changing an interval is an upgrade, and that is the case this
-exists to serve. `before-hook-creation` deletes the previous Job so a repeat upgrade is not refused
-by the immutability of a completed Job's pod template.
+WHY post-upgrade AND post-install: changing an interval is an upgrade, which is the case this
+exists to serve. `before-hook-creation` deletes the previous Job, so a repeat upgrade is not
+refused by the immutability of a completed Job's pod template.
 */ -}}
 {{- if and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled }}
 {{- $component := "timescaledb-maintenance" -}}

@@ -4,24 +4,17 @@
 {{- $fullname := include "acs-cymru.fullname" . -}}
 ---
 {{/*
-The seed, as a ConfigMap.
+The seed, as a ConfigMap. MIRRORED from supabase/seed.sql by scripts/sync-helm-chart-files.mjs --
+Helm cannot read outside its chart -- and CI runs that script with --check.
 
-MIRRORED from supabase/seed.sql by scripts/sync-helm-chart-files.mjs -- Helm cannot read outside its
-chart. CI runs that script with --check.
+THE MIGRATIONS ARE NOT HERE. They are baked into the db-init image and read from its filesystem;
+supabase/db-init/Dockerfile carries the reasoning. In short: a ConfigMap cannot exceed 1 MiB, which
+forced the chain to be gzipped, and Helm's release Secret has the SAME ceiling while carrying those
+bytes twice -- as chart files and again base64-encoded into the rendered ConfigMap, neither copy
+compressible. No size of file satisfies both as the chain grows.
 
-THE MIGRATIONS ARE NOT HERE ANY MORE. They are baked into the db-init image and read from its
-filesystem; supabase/db-init/Dockerfile carries the reasoning. In short: a ConfigMap cannot exceed
-1 MiB, which forced the chain to be gzipped -- and Helm's release Secret has the SAME 1 MiB ceiling
-while carrying those bytes twice, once as chart files and once base64-encoded into the rendered
-ConfigMap, neither copy compressible. Satisfying one limit broke the other, and no size of file
-satisfies both as the chain grows, because the same bytes are counted by each.
-
-THE SEED STAYS A ConfigMap. It is one small file, and it is the one an operator might legitimately
-replace at install time: demo accounts are a deployment choice, whereas the schema is not.
-
-The image has the source directory copied in by `COPY migrations/*.sql`, so there is no mirrored
-copy left to drift and
-no sync check needed to prove there isn't.
+THE SEED STAYS A ConfigMap: one small file, and the one an operator might legitimately replace at
+install time, since demo accounts are a deployment choice and the schema is not.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -186,15 +179,14 @@ spec:
               # -------------------------------------------------------------------------------
               # THE CHAIN IS NOW IN PROGRESS, AND ANYTHING GATED ON IT MUST WAIT.
               #
-              # 0072 exists to record that. `completed_at` is cleared here and stamped after
-              # seed.sql, and the e2e-validate Job's init container blocks until it is non-null.
-              # Without the clear, a `helm upgrade` would find the PREVIOUS boot's completion still
-              # recorded and start conformance against a chain that is mid-replay -- the same race
-              # this closes, one deployment later.
+              # `completed_at` is cleared here and stamped after seed.sql, and the e2e-validate
+              # Job's init container blocks until it is non-null. Without the clear, a `helm
+              # upgrade` would find the PREVIOUS boot's completion recorded and start conformance
+              # against a chain that is mid-replay. 0072 has the account.
               #
-              # `|| true` ONLY BECAUSE OF BOOT ONE: on a database that has never been migrated the
-              # table does not exist yet, because 0072 is what creates it. The stamp at the end is
-              # what the gate actually reads, and that one is not tolerant of an error.
+              # `|| true` ONLY BECAUSE OF BOOT ONE: 0072 is what creates this table, so it does not
+              # exist on a database that has never been migrated. The stamp at the end is what the
+              # gate reads, and that one is not tolerant of an error.
               # -------------------------------------------------------------------------------
               $PSQL -c 'UPDATE public.schema_bootstrap SET started_at = now(), completed_at = NULL' >/dev/null 2>&1 || true
 
@@ -202,12 +194,11 @@ spec:
               # THE MIGRATIONS ARE IN THE IMAGE, at /migrations, copied there by
               # supabase/db-init/Dockerfile. No ConfigMap, no decompression, no scratch volume.
               #
-              # STILL FAILS CLOSED on an empty directory. That is not paranoia about a mount that no
-              # longer exists: a mistyped COPY, a .dockerignore that grows an entry, or an image tag
-              # resolving to something older than the chart all produce a container with fewer
-              # migrations than the chart expects. Without this the loop below applies nothing,
-              # exits 0, and every downstream service then fails against a database with no schema
-              # -- which reads as a dozen unrelated faults rather than as one missing step.
+              # STILL FAILS CLOSED on an empty directory: a mistyped COPY, a .dockerignore that
+              # grows an entry, or an image tag older than the chart all produce a container with
+              # fewer migrations than expected. Without this the loop applies nothing, exits 0, and
+              # every downstream service fails against a database with no schema -- which reads as
+              # a dozen unrelated faults rather than one missing step.
               # -------------------------------------------------------------------------------
               COUNT=$(ls -1 /migrations/*.sql 2>/dev/null | wc -l)
               if [ "$COUNT" -eq 0 ]; then
@@ -226,17 +217,15 @@ spec:
               {{/*
                 RETRIED ONLY ON A DEADLOCK, never on anything else.
 
-                db-init takes DDL locks on tables that supabase-realtime is concurrently reading
-                to evaluate its subscriptions -- 0023 alters policies on `public.platform_alerts`,
-                which the dashboard subscribes to -- so the two can invert lock order and either
-                side can be chosen as the victim. Seen in the wild as `exit 3` from db-init with
-                the rest of the chain unapplied, which on that boot left `public.storage_footprint`
-                dropped by 0001 and never recreated by 0027.
+                db-init takes DDL locks on tables supabase-realtime is concurrently reading to
+                evaluate its subscriptions, so the two can invert lock order and either side can be
+                chosen as the victim. Seen as `exit 3` with the rest of the chain unapplied, which
+                left `public.storage_footprint` dropped by 0001 and never recreated by 0027.
 
                 Retrying is safe BY CONSTRUCTION here and nowhere else: every migration is
-                idempotent and is replayed on every boot already. It is deliberately NOT a blanket
-                retry -- a genuine schema error retried three times only delays the failure and
-                prints it three times, so anything that is not a deadlock exits immediately.
+                idempotent and replayed on every boot already. Deliberately not a blanket retry --
+                a genuine schema error retried three times only delays the failure and prints it
+                three times.
               */}}
               for f in /migrations/*.sql; do
                 [ -f "$f" ] || continue
