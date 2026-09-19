@@ -128,12 +128,37 @@ export const KNOWN_PRINCIPALS = {
   },
 }
 
-export function describePrincipal(principalId) {
-  return KNOWN_PRINCIPALS[principalId] || {
+/** The mint command that signs a token a client will actually present. */
+const MCP_MINT_PREFIX = 'node scripts/mint-mcp-token.mjs'
+
+/**
+ * What the page knows about one principal: the registry entry for an id a migration pinned, the
+ * `machine_principals` row (0125) for one an Administrator created from the page, and an honest
+ * fallback for anything else.
+ *
+ * @param {string} principalId
+ * @param {{ name?: string, purpose?: string|null }} [row] the `machine_principals` columns
+ *        api.listServicePrincipals() merges onto the RPC row, when there are any
+ */
+export function describePrincipal(principalId, row) {
+  if (KNOWN_PRINCIPALS[principalId]) return KNOWN_PRINCIPALS[principalId]
+  if (row?.name) {
+    return {
+      name: row.name,
+      // The Administrator's own words, or a sentence saying none were given: a blank tooltip on a
+      // row that exists to explain itself would read as a page that lost the description.
+      purpose: row.purpose
+        || 'No purpose was recorded when this identity was created from the Access Control page.',
+      mintedBy: 'the Access Control page',
+      mintCommand: `${MCP_MINT_PREFIX} --principal {id}`,
+    }
+  }
+  return {
     name: 'Undocumented principal',
     // Honest rather than blank: an unrecognised machine identity is more interesting than a
     // recognised one. It names both origins (a migration, or a suite's self-seeded fixture) because
-    // check-docs-drift.mjs reads the migrations statically and cannot see a row created at runtime.
+    // check-docs-drift.mjs reads the migrations statically and cannot see a row created at runtime,
+    // and since 0125 a principal created from the page always carries a name.
     purpose: 'No description is recorded in the dashboard for this identity. It was created '
       + 'outside this map — by a migration, or by a test suite that seeded it and did not clean '
       + 'up. Check which one before assuming it is safe: if no migration seeded this id, it is '
@@ -142,12 +167,9 @@ export function describePrincipal(principalId) {
     // The generic mint command is right for an unknown principal: one nobody has documented is most
     // likely one `create_service_principal()` made at runtime, and this is how a token for it is
     // issued.
-    mintCommand: 'node scripts/mint-mcp-token.mjs --principal {id}',
+    mintCommand: `${MCP_MINT_PREFIX} --principal {id}`,
   }
 }
-
-/** The mint command that signs a token a client will actually present. */
-const MCP_MINT_PREFIX = 'node scripts/mint-mcp-token.mjs'
 
 /**
  * Whether the Access Control page should offer to mint a token for this principal.
@@ -172,6 +194,14 @@ const PERMISSION_REACH = {
   'quarantine:view': 'Can see the onboarding quarantine queue, but cannot approve or reject anything in it.',
   'digital_thread:read': 'Can read the Digital Thread — every attributed change anyone has made to this stack.',
 }
+
+/**
+ * The permissions the page offers when creating a principal, in the order the menu lists them.
+ * The same three `create_machine_principal()` allows and no others: the function refuses anything
+ * else, and `scripts/check-docs-drift.mjs` asserts this list and the function's allow-list agree,
+ * so a permission added to one side without the other fails the build rather than the click.
+ */
+export const GRANTABLE_PERMISSIONS = Object.keys(PERMISSION_REACH)
 
 export function permissionReach(permissions) {
   if (!permissions || permissions.length === 0) {

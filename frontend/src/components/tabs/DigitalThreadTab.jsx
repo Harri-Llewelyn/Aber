@@ -802,6 +802,8 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   const [schemas, setSchemas] = useState([])
   // Empty for a role that may not ask (0116), which is also a role that cannot see the lane.
   const [userAccounts, setUserAccounts] = useState([])
+  // Principal id -> `machine_principals` row (0125), for the same roles as the accounts above.
+  const [machinePrincipals, setMachinePrincipals] = useState(() => new Map())
   const [selectedEventId, setSelectedEventId] = useState(null)
   const [showAllLanes, setShowAllLanes] = useState(false)
 
@@ -819,24 +821,30 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     // a refused request are the same value and opposite facts, and reading the second as the first
     // would call every live entity of that kind deleted and then hide it. `loadedKinds` below
     // admits only the kinds whose own lookup landed.
-    const tolerated = (p) => p.then(r => r || []).catch(() => null)
+    // A thunk rather than a promise, so a lookup that throws before it returns one (an api method
+    // the build does not have) is tolerated the same way as one that rejects.
+    const tolerated = (f) => Promise.resolve().then(f).then(r => r || []).catch(() => null)
     Promise.all([
       api.get('/api/v1/devices'),
       api.get('/api/v1/gateways'),
       api.get('/api/v1/cells'),
       // Tolerated rather than required: this page must not fail to load because one lookup did,
       // and the uuid fallback below is exactly the behaviour that was there before.
-      tolerated(api.get('/api/v1/schemas')),
-      tolerated(api.get('/api/v1/areas')),
+      tolerated(() => api.get('/api/v1/schemas')),
+      tolerated(() => api.get('/api/v1/areas')),
       // A ROLE-ASSIGNMENT ROW IS ABOUT A PERSON. `log_role_assignment()` keys it by `user_id`, and
       // this is the only way to turn that into anybody (0116). REFUSED FOR A SHOPFLOOR_MANAGER OR
       // AN OPERATOR, deliberately -- and they cannot see the lane either, so the empty list they
       // fall back to names nothing they were going to be shown.
-      tolerated(api.listUserAccounts())
+      tolerated(() => api.listUserAccounts()),
+      // The names Administrators gave the principals they created from the Access Control page
+      // (0125). Same readers as the accounts above, same fallback.
+      tolerated(() => api.listMachinePrincipalNames()),
     ])
-      .then(([d, g, c, sc, ar, us]) => {
+      .then(([d, g, c, sc, ar, us, mp]) => {
         setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setAreas(ar || [])
         setUserAccounts(us || [])
+        setMachinePrincipals(mp instanceof Map ? mp : new Map())
         // SUBTRACTED FROM THE CONSTANT, never listed again: a second list of kinds here is the
         // same two-sources-of-truth defect `DELETABLE_KINDS` was written to end, and it would go
         // stale silently the next time a kind joined. The required three landed or this branch did
@@ -876,16 +884,19 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     // The email, which is all `auth.users` carries here (0116). An account without one falls
     // through to the id, as every unnamed entity did before.
     for (const u of userAccounts) if (u?.user_id && u.email) m.set(u.user_id, { name: u.email })
-    // THE MACHINE IDENTITIES, FROM A CONSTANT RATHER THAN A FETCH. There is no `service_principals`
-    // table to join -- the audit row IS the record, which is why api.js lists them by reading this
-    // lane -- so the dashboard's own registry of the ids a migration pinned is the only thing that
-    // can name one. An id outside it keeps its uuid rather than taking describePrincipal()'s
-    // "Undocumented principal", which would draw every unknown one as the same lane.
+    // THE MACHINE IDENTITIES, FROM TWO PLACES. The three a migration pinned are named by the
+    // dashboard's own registry; one an Administrator created from the Access Control page has a
+    // `machine_principals` row (0125). An id in neither keeps its uuid rather than taking
+    // describePrincipal()'s "Undocumented principal", which would draw every unknown one as the
+    // same lane.
     for (const [id, meta] of Object.entries(KNOWN_PRINCIPALS)) {
       if (meta?.name) m.set(id, { name: meta.name })
     }
+    for (const [id, row] of machinePrincipals) {
+      if (row?.name && !m.has(id)) m.set(id, { name: row.name })
+    }
     return m
-  }, [areas, cells, gateways, devices, schemas, userAccounts])
+  }, [areas, cells, gateways, devices, schemas, userAccounts, machinePrincipals])
 
   /**
    * The same thing as one string per id, which is what the search, the export, the drawer title and

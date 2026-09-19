@@ -16,6 +16,7 @@ vi.mock('../api', () => ({
     listRevokedServicePrincipals: vi.fn(),
     revokeServicePrincipal: vi.fn(),
     reinstateServicePrincipal: vi.fn(),
+    createServicePrincipal: vi.fn(),
   }
 }))
 
@@ -33,6 +34,18 @@ vi.mock('../components/modals/ServiceTokenModal', () => ({
 vi.mock('../components/modals/ServicePrincipalRevocationModal', () => ({
   ServicePrincipalRevocationModal: ({ principalName, revocation }) => (
     <div data-testid="identity-modal">{revocation ? 'reinstate' : 'withdraw'}:{principalName}</div>
+  )
+}))
+// A stub that can be "submitted": the tab's job on creation is to open the token dialog for the
+// row the RPC returned, and that is asserted by pressing the stub's button.
+vi.mock('../components/modals/ServicePrincipalCreateModal', () => ({
+  ServicePrincipalCreateModal: ({ onCreated, onClose }) => (
+    <div data-testid="create-modal">
+      <button onClick={() => {
+        onCreated({ principal_id: 'c0000000-0000-4000-8000-000000000009', name: 'Line 4 OEE report', permissions: ['telemetry:read'] })
+        onClose()
+      }}>stub-create</button>
+    </div>
   )
 }))
 vi.mock('../components/modals/ServiceTokenInventoryModal', () => ({
@@ -410,6 +423,61 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
     expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
+  })
+
+  /**
+   * A principal created from the page (0125) carries its name and purpose on the row, and the page
+   * lists it by them rather than as undocumented.
+   */
+  it('names a principal from its machine_principals row', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      {
+        principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['telemetry:read'],
+        created_at: null, can_sign_in: false, name: 'Line 4 OEE report', purpose: 'Reads the hourly rollup.',
+      }
+    ])
+    await renderServices()
+
+    await waitFor(() => expect(screen.getByText('Line 4 OEE report')).toBeTruthy())
+    expect(screen.getByTitle('Reads the hourly rollup.')).toBeTruthy()
+    expect(screen.queryByText(/Undocumented principal/i)).toBeNull()
+    expect(within(screen.getByText('Line 4 OEE report').closest('tr')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
+  })
+
+  it('offers New Principal on the database principals card, and not when the list was refused', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    await renderServices()
+    await waitFor(() => expect(screen.getByRole('button', { name: /New Principal/i })).toBeTruthy())
+    // Which plane, on the button itself.
+    expect(screen.getByRole('button', { name: /New Principal/i }).title).toMatch(/never the broker/)
+  })
+
+  it('withholds New Principal when the principal read was refused', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockRejectedValue(new Error('insufficient privileges to list machine principals'))
+    await renderServices()
+    await waitFor(() => expect(screen.getByText(/insufficient privileges/)).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /New Principal/i })).toBeNull()
+  })
+
+  /**
+   * Create, then straight into the token dialog for the new row, named from the RPC's own return
+   * rather than waited for from the reload: the first token is shown once the way every other is.
+   */
+  it('opens the token dialog for a principal the moment it is created', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    await renderServices()
+    await waitFor(() => expect(screen.getByRole('button', { name: /New Principal/i })).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /New Principal/i }))
+    await waitFor(() => expect(screen.getByTestId('create-modal')).toBeTruthy())
+    fireEvent.click(screen.getByText('stub-create'))
+
+    await waitFor(() => expect(screen.getByTestId('token-modal').textContent).toBe('Line 4 OEE report'))
+    expect(screen.queryByTestId('create-modal')).toBeNull()
+    // The list is reloaded so the row appears behind the dialog.
+    expect(api.listServicePrincipals).toHaveBeenCalledTimes(2)
   })
 
   it('opens the token dialog for the principal whose button was pressed', async () => {

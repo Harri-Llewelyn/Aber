@@ -337,6 +337,12 @@ python supabase/migrations/test_service_token_revocation.py
 # subject arm is checked first so its message wins, and its uuid cast must fall THROUGH to the
 # token arm rather than return, or a junk `sub` would bypass the token denylist.
 python supabase/migrations/test_service_principal_revocation.py
+# A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
+# writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
+# name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
+# overload whose extra arguments default makes every RPC call ambiguous). The name table reads for
+# Administrator and Auditor and for nobody else.
+python supabase/migrations/test_machine_principal_naming.py
 # The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
 # PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a
 # migration with a GRANT and no REVOKE has narrowed nothing. A FRESH-BOOT-ONLY FAULT: 0001's sweep

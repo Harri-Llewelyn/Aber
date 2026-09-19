@@ -6,7 +6,8 @@ import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { ServiceTokenModal } from '../modals/ServiceTokenModal'
 import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal'
 import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
-import { IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import { ServicePrincipalCreateModal } from '../modals/ServicePrincipalCreateModal'
+import { IconDownload, IconLock, IconPlus, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { PageHeading } from '../common/PageHeading'
 import { ContextPanel } from '../common/ContextPanel'
@@ -107,6 +108,9 @@ export function AccessControlTab({ showToast }) {
   const [revokedPrincipals, setRevokedPrincipals] = useState(() => new Map())
   // { principal, name, revocation, activeTokens } while the withdraw/reinstate dialog is open.
   const [revokeIdentity, setRevokeIdentity] = useState(null)
+  // True while the create dialog is open (0125). On success the token dialog opens for the new
+  // identity, so the first token is shown once the way every other is.
+  const [creating, setCreating] = useState(false)
   // Its own error: gateway credentials accept Shopfloor_Manager, service principals are
   // Administrator-only, and one error state would blame the whole page for a refusal that applies
   // to one section.
@@ -558,6 +562,17 @@ export function AccessControlTab({ showToast }) {
                 text="The identities the stack's own processes authenticate as. None has an email or password, so none can sign in: each is named by a token, holds permissions of its own rather than a person's role, and writes only through gates that check which one is calling."
               />
             </h3>
+            {/* Offered only when the list could be read: a caller the RPC refused would be refused
+                here too, and a button that opens a dialog to fail is worse than none. */}
+            {!principalError && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => setCreating(true)}
+                title="Create a database identity for a process that reads this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
+              >
+                <IconPlus size={13} /> New Principal
+              </button>
+            )}
           </div>
 
           {principalError && (
@@ -592,7 +607,9 @@ export function AccessControlTab({ showToast }) {
                   </td></tr>
                 )}
                 {principals.map(p => {
-                  const meta = describePrincipal(p.principal_id)
+                  // The row carries `name` and `purpose` for a principal created from the page
+                  // (0125); the registry answers for the three a migration pinned.
+                  const meta = describePrincipal(p.principal_id, p)
                   // The denylist is passed so a withdrawn token stops counting as active.
                   // `Date.now()` is spelled out because the third argument cannot be reached past a
                   // defaulted second.
@@ -1014,6 +1031,23 @@ export function AccessControlTab({ showToast }) {
           status={tokensFor.status}
           onClose={() => setTokensFor(null)}
           onChanged={load}
+          showToast={showToast}
+        />
+      )}
+
+      {/* Create, then straight into the token dialog for the new row: the id comes from the RPC's
+          return and the name from the dialog that sent it, rather than waiting for the reload.
+          `load()` runs as well so the row is listed behind the dialog. */}
+      {creating && (
+        <ServicePrincipalCreateModal
+          onClose={() => setCreating(false)}
+          onCreated={(created) => {
+            load()
+            setMintFor({
+              principal: { principal_id: created.principal_id, permissions: created.permissions, can_sign_in: false },
+              name: created.name,
+            })
+          }}
           showToast={showToast}
         />
       )}

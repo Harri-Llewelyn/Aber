@@ -692,7 +692,26 @@ const apiMethods = {
   listServicePrincipals: async () => {
     const { data, error } = await supabase.rpc('list_machine_principals');
     if (error) throw new Error(error.message || 'Could not list machine principals');
-    return data || [];
+    // The name and purpose an Administrator gave each one (0125), merged onto the RPC row. A
+    // separate read rather than a wider RPC: a changed return type cannot ship under the same
+    // function name on a chain that replays. Tolerated to nothing, so a principal whose name
+    // cannot be read is still listed, as "Undocumented principal".
+    const names = await api.listMachinePrincipalNames().catch(() => new Map());
+    return (data || []).map(p => ({ ...p, ...(names.get(p.principal_id) || {}) }));
+  },
+
+  /**
+   * Principal id -> `{ name, purpose, created_by, created_at }` from `machine_principals` (0125).
+   *
+   * Administrator and Auditor at the database, matching `list_user_accounts()`: a name here labels
+   * digital-thread rows both roles may read. Empty for anybody else.
+   */
+  listMachinePrincipalNames: async () => {
+    const { data, error } = await supabase
+      .from('machine_principals')
+      .select('principal_id, name, purpose, created_by, created_at');
+    if (error) throw new Error(error.message || 'Could not read machine principal names');
+    return new Map((data || []).map(r => [r.principal_id, r]));
   },
 
   /**
@@ -812,16 +831,22 @@ const apiMethods = {
   },
 
   /**
-   * Create a machine identity that cannot sign in.
+   * Create a machine identity that cannot sign in, with the name the page will list it by.
    *
-   * Through `create_machine_principal()`, which is SECURITY DEFINER and checks has_role() itself.
-   * It takes permissions, not a role, from an allow-list (`telemetry:read`, `quarantine:view`,
-   * `digital_thread:read`), so widening `Operator` does not widen the identity.
+   * Through `create_machine_principal()` (0125), which is SECURITY DEFINER and checks has_role()
+   * itself. It takes permissions, not a role, from an allow-list (`telemetry:read`,
+   * `quarantine:view`, `digital_thread:read`), so widening `Operator` does not widen the identity.
+   * No token is issued here: the identity reaches nothing until `mintServiceToken()` signs one,
+   * which the page offers next.
+   *
+   * @returns {{ principal_id: string, permissions: string[] }} 0080's shape; the name is the
+   *          caller's own argument
    */
-  createServicePrincipal: async (permissions, note) => {
+  createServicePrincipal: async (name, permissions, purpose) => {
     const { data, error } = await supabase.rpc('create_machine_principal', {
+      p_name: name,
       p_permissions: Array.isArray(permissions) ? permissions : [permissions],
-      p_note: note || null,
+      p_purpose: purpose || null,
     });
     if (error) throw new Error(error.message || 'Could not create the machine principal');
     return Array.isArray(data) ? data[0] : data;
