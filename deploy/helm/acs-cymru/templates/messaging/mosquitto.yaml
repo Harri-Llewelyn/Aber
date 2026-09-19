@@ -44,8 +44,8 @@ data:
 {{ $roles | indent 4 }}
   {{- if $tls.enabled }}
   # Appended to mosquitto.conf by the assemble-config initContainer. Carried as a separate key so
-  # `kubectl get cm -o yaml` shows the base policy unchanged and the TLS addendum as its own object
-  # -- the diff between the two targets is then one file, visible, rather than a merged blob.
+  # `kubectl get cm -o yaml` shows the base policy unchanged and the TLS addendum as its own object,
+  # visible as one file rather than merged into a blob.
   mosquitto-tls.conf: |
 {{ $tlsConf | indent 4 }}
   {{- end }}
@@ -55,22 +55,19 @@ data:
 =================================================================================================
 The broker's server certificate.
 
-WHY A cert-manager Certificate AND NOT A HAND-MADE SECRET. Renewal. A certificate that is created
-once by hand expires in the middle of a shift 90 days later, and the failure is every gateway
-refusing to connect at once with a hostname/expiry alert the broker does not log -- the fleet simply
-goes quiet. cert-manager renews at renewBefore and the reload sidecar SIGHUPs the broker, which
-re-reads the certificate WITHOUT dropping connected gateways (verified against eclipse-mosquitto
-2.0.20, and carried forward to the 2.0.22 pin unre-verified: swapping the files and sending
-SIGHUP changes the served certificate in place).
+WHY A cert-manager Certificate AND NOT A HAND-MADE SECRET: renewal. One made by hand expires
+mid-shift 90 days later, and the failure is every gateway refusing to connect at once, with an
+expiry the broker does not log -- the fleet simply goes quiet. cert-manager renews at renewBefore
+and the reload sidecar SIGHUPs the broker, which re-reads the certificate without dropping
+connected gateways (verified on eclipse-mosquitto 2.0.20, carried to the 2.0.22 pin unre-verified).
 
 THE SAN LIST IS THE WHOLE DIFFICULTY, and it is asymmetric in a way that hides the mistake:
 
-  - IN-CLUSTER clients (the ingestion daemon, Node-RED) dial `mosquitto`, which is in the list
-    below, so they verify correctly the moment this is enabled. That is where you will test.
-  - GATEWAYS dial an IP ADDRESS, because there is rarely plant DNS for the broker. If that address
-    is not in ipAddresses below, every gateway fails verification while the in-cluster clients are
-    perfectly happy -- so the stack reports healthy, telemetry keeps flowing from the simulator,
-    and the fleet is off. It reads as a gateway fault.
+  - IN-CLUSTER clients dial `mosquitto`, which is in the list below, so they verify the moment this
+    is enabled. That is where you will test.
+  - GATEWAYS dial an IP ADDRESS, because there is rarely plant DNS for the broker. If it is not in
+    ipAddresses below, every gateway fails verification while the in-cluster clients are happy --
+    the stack reports healthy, the simulator keeps producing, and the fleet is off.
 
 `external.loadBalancerIP` is included automatically when set. Everything else the fleet dials goes
 in `tls.extraIpSans` / `tls.extraDnsSans`.
@@ -134,16 +131,14 @@ spec:
 ---
 {{/*
 The Secret the credential service patches: the playback delivery file (0078), which playback reads
-through its own projection of this Secret, and a `password_file` key from a release that predates
-the Dynamic Security plugin, imported into the plugin's document by the initContainer on the first
-start and left in place.
+through its own projection, and a `password_file` key from a release predating the Dynamic Security
+plugin, imported into the plugin's document on first start.
 
-CREATED EMPTY AND NEVER OVERWRITTEN. `helm.sh/resource-policy: keep` plus the lookup below mean an
-existing Secret is left exactly as it is: `helm upgrade` re-renders this document, and preserving
-the current contents through `lookup` is what stops it being reset -- `resource-policy: keep` only
+CREATED EMPTY AND NEVER OVERWRITTEN. `helm upgrade` re-renders this document, so preserving the
+current contents through the `lookup` below is what stops it being reset -- `resource-policy: keep`
 governs deletion, not update.
 
-Gateway accounts are NOT here. They live in the plugin's document on the data PVC, written by the
+Gateway accounts are NOT here: they live in the plugin's document on the data PVC, written by the
 broker itself.
 */}}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace .Values.mosquitto.credentials.secretName }}
@@ -262,16 +257,15 @@ spec:
 External exposure for shopfloor gateways.
 
 A SECOND Service, not a change of type on the one above: the in-cluster name must stay a plain
-ClusterIP so `mosquitto` keeps resolving for the in-cluster clients, and mixing the two would tie
-internal service discovery to an external IP allocation.
+ClusterIP so `mosquitto` keeps resolving for in-cluster clients, and mixing the two would tie
+service discovery to an external IP allocation.
 
-MQTT IS RAW TCP AND CANNOT RIDE AN HTTP INGRESS. On k3s the built-in ServiceLB (Klipper) satisfies
-`LoadBalancer` with no MetalLB by binding the port on nodes that have it free -- which also means
-1883 must BE free: anything else holding it on the node leaves this Service at <pending> with
-nothing naming the conflict.
+MQTT IS RAW TCP AND CANNOT RIDE AN HTTP INGRESS. On k3s the built-in ServiceLB satisfies
+`LoadBalancer` with no MetalLB by binding the port on nodes that have it free -- so 1883 must BE
+free: anything else holding it leaves this Service at <pending> with nothing naming the conflict.
 
-The WebSocket listener (9001) is exposed here too for parity, but it can also ride the
-Ingress, which is the better place for it once TLS terminates there.
+The WebSocket listener (9001) is exposed here for parity, but it can also ride the Ingress, which
+is the better place for it once TLS terminates there.
 */}}
 apiVersion: v1
 kind: Service
@@ -381,18 +375,17 @@ spec:
         {{- toYaml .Values.mosquitto.podSecurityContext | nindent 8 }}
       initContainers:
         {{/*
-          Assembles /mosquitto/config as a WRITABLE emptyDir, then writes the plugin's document
-          onto the data PVC with the reconcile in scripts/mosquitto-dynsec-init.mjs:
-          the roles from the ConfigMap, the platform principals and the plugin's admin from the
-          Secret, every gateway account already in the document kept as it is. A Secret carrying a
-          `password_file` from before the plugin is imported on the first start.
+          Assembles /mosquitto/config as a WRITABLE emptyDir, then writes the plugin's document onto
+          the data PVC with the reconcile in scripts/mosquitto-dynsec-init.mjs: roles from the
+          ConfigMap, platform principals and the plugin's admin from the Secret, every existing
+          gateway account kept as it is.
 
-          WHY NOT MOUNT mosquitto.conf DIRECTLY. The TLS stanza is appended to it when certificates
-          exist, and a ConfigMap mount is read-only. The assembled copy is what the broker reads.
+          WHY NOT MOUNT mosquitto.conf DIRECTLY: the TLS stanza is appended to it when certificates
+          exist, and a ConfigMap mount is read-only.
 
           THE CREDENTIAL SERVICE'S IMAGE, not the broker's: the reconcile needs node beside the
-          broker's own mosquitto_passwd, and that image is built FROM the broker's for exactly this.
-          Root, because the document is written owned by uid 1883 at mode 0600; the plugin warns on
+          broker's own mosquitto_passwd, and that image is built FROM the broker's for this. Root,
+          because the document is written owned by uid 1883 at mode 0600; the plugin warns on
           anything wider.
         */}}
         - name: assemble-config
@@ -575,18 +568,17 @@ spec:
           =========================================================================================
           The certificate reload sidecar.
 
-          cert-manager renews the leaf on its own schedule and rewrites the Secret in place.
-          Nothing restarts the broker: a Deployment's pod template has not changed, so there is no
-          rollout. Mosquitto read the certificate once at start, so without this it keeps serving
-          the OLD one until it expires, and then every gateway fails verification at once -- weeks
-          after the renewal that was supposed to prevent it, with a healthy cert-manager reporting
-          the certificate valid.
+          cert-manager renews the leaf and rewrites the Secret in place. Nothing restarts the
+          broker -- a Deployment's pod template has not changed, so there is no rollout -- and
+          mosquitto read the certificate once at start. Without this it serves the OLD one until it
+          expires, and then every gateway fails verification at once, weeks after the renewal that
+          was supposed to prevent it, with cert-manager reporting the certificate valid.
 
-          SIGHUP is enough: verified against eclipse-mosquitto 2.0.20 (not re-verified on the
-          2.0.22 pin, same 2.0.x line) that swapping the files and sending SIGHUP changes the
-          certificate served on an established listener, with no restart and no disconnection.
-          That is why this is a sidecar and not a `kubectl rollout restart` on a schedule, and it
-          is the only reason the pod shares a PID namespace.
+          SIGHUP is enough: verified on eclipse-mosquitto 2.0.20 (not re-verified on the 2.0.22
+          pin, same 2.0.x line) that swapping the files and sending SIGHUP changes the certificate
+          served on an established listener, with no restart and no disconnection. That is why this
+          is a sidecar rather than a scheduled rollout restart, and the only reason the pod shares
+          a PID namespace.
           =========================================================================================
         */}}
         - name: certificate-reload
@@ -638,19 +630,19 @@ spec:
 
           Issues a gateway's account, disables one, lists what the broker holds -- by sending the
           Dynamic Security plugin's commands to the broker over MQTT as the plugin's admin. The
-          broker applies each change to itself at once and rewrites its own document, so nothing
-          here is signalled, shared or copied.
+          broker applies each change to itself and rewrites its own document, so nothing here is
+          signalled, shared or copied.
 
-          A SIDECAR IN THIS POD still, for the shape rather than for a mechanism: it dials the
-          broker on loopback, the CA it returns to an enrolling appliance is the same projected
-          Secret the broker serves from, and the NetworkPolicy's one edge into credential issuance
-          stays a port on the broker's pods.
+          A SIDECAR IN THIS POD for the shape rather than a mechanism: it dials the broker on
+          loopback, the CA it returns to an enrolling appliance is the same projected Secret the
+          broker serves from, and the NetworkPolicy's one edge into credential issuance stays a
+          port on the broker's pods.
 
           IT HOLDS A SERVICEACCOUNT TOKEN, AND ONLY THIS CONTAINER DOES, for one purpose: the
           playback delivery file (0078) is a key on the credential Secret, patched through the API
           and read by playback through its own projection. The pod sets
-          `automountServiceAccountToken: false` and the token is projected into this container
-          alone. The Role behind it permits `get` and `patch` on ONE Secret, by name.
+          `automountServiceAccountToken: false`, the token is projected into this container alone,
+          and the Role behind it permits `get` and `patch` on ONE Secret, by name.
           =========================================================================================
         */}}
         - name: gateway-credential
@@ -713,20 +705,18 @@ spec:
           =========================================================================================
           The metrics exporter.
 
-          MOSQUITTO PUBLISHES STATISTICS AS MQTT TOPICS, NOT AS HTTP. There is no endpoint to
-          scrape and no setting that creates one -- `$SYS/broker/#` is the entire interface. So
-          this container is an MQTT CLIENT that subscribes to those topics and re-serves them in
-          Prometheus format. That is why it needs broker credentials at all, which no other
-          exporter in this chart does.
+          MOSQUITTO PUBLISHES STATISTICS AS MQTT TOPICS, NOT AS HTTP: `$SYS/broker/#` is the entire
+          interface, and no setting creates an endpoint. This container is an MQTT CLIENT that
+          subscribes and re-serves them in Prometheus format, which is why it needs broker
+          credentials at all.
 
           IT CONNECTS OVER PLAINTEXT 1883 ON LOOPBACK even when MQTTS is enabled. Sharing the pod's
-          network namespace, the traffic never leaves the pod, so there is nothing for TLS to
-          protect here -- and pointing it at 8883 would make it verify a certificate whose SANs
-          name the Service, not `127.0.0.1`, for no gain. 1883 always listens on loopback, whatever
-          the Services publish (see mosquitto.conf), so this arm is always available.
+          network namespace, the traffic never leaves the pod, and pointing it at 8883 would make
+          it verify a certificate whose SANs name the Service, not `127.0.0.1`. 1883 always listens
+          on loopback whatever the Services publish (mosquitto.conf), so this arm is always there.
 
-          THE METRICS ARE PREFIXED `broker_`, NOT `mosquitto_`. Alerts written against the latter
-          match nothing, silently.
+          THE METRICS ARE PREFIXED `broker_`, NOT `mosquitto_`. Alerts against the latter match
+          nothing, silently.
           =========================================================================================
         */}}
         - name: metrics

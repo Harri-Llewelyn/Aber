@@ -224,8 +224,8 @@ spec:
                   -e "s|__SUPABASE_JWT_SECRET_B64URL__|$JWT_B64URL|g" \
                   /template/envoy.yaml > /config/envoy.yaml
 
-              # The leftover scan both targets run. Comments are excluded -- envoy.yaml's header
-              # documents the placeholders by name.
+              # The leftover scan. Comments are excluded -- envoy.yaml's header documents the
+              # placeholders by name.
               LEFTOVER=$(grep -vE '^[[:space:]]*#' /config/envoy.yaml | grep -oE '__[A-Z0-9_]+__' | sort -u || true)
               if [ -n "$LEFTOVER" ]; then
                 echo "Unsubstituted placeholder(s) left in envoy.yaml: $LEFTOVER" >&2

@@ -71,9 +71,7 @@ spec:
         M5. The `node-red` user is uid/gid 1000, and local-path hands over a root-owned directory.
 
         fsGroup does the `chown -R 1000:1000 /data` natively on volume mount, and OnRootMismatch
-        avoids a recursive chgrp on every restart. The initContainer below therefore does NOT chown,
-        which is the one difference
-        between the two targets' provisioning.
+        avoids a recursive chgrp on every restart. The initContainer below therefore does NOT chown.
       */}}
       securityContext:
         {{- toYaml .Values.nodeRed.podSecurityContext | nindent 8 }}
@@ -82,22 +80,21 @@ spec:
           =========================================================================================
           node-red-init, AS AN initContainer BUILT FROM THE SAME IMAGE AS THE MAIN CONTAINER.
 
-          THE SHARED IMAGE IS LOAD-BEARING, not tidiness. settingsAreCorrect() in
-          node-red-init.mjs EVALUATES the settings.js it finds, and that file `require`s
-          passport-oauth2 and jsonwebtoken by absolute path into the image's node_modules. An init
-          image without them throws on the require -- and that throw is already handled as
-          "unloadable, replace it", so the script rewrites settings.js and CLOBBERS settings.js.bak
-          on every single boot, silently. If the log says `settings.js written` on more than the
-          first boot, this is why.
+          THE SHARED IMAGE IS LOAD-BEARING. settingsAreCorrect() in node-red-init.mjs EVALUATES the
+          settings.js it finds, and that file `require`s passport-oauth2 and jsonwebtoken by
+          absolute path into the image's node_modules. An init image without them throws on the
+          require, which is already handled as "unloadable, replace it" -- so the script rewrites
+          settings.js and CLOBBERS settings.js.bak on every boot, silently. If the log says
+          `settings.js written` on more than the first boot, this is why.
 
-          One image value feeds both containers, so they cannot drift apart. The script itself is in
-          that image (node-red/Dockerfile) rather than a mounted ConfigMap, so an edit to it takes a
-          rebuild; the dev loop restarts any workload whose image it rebuilt.
+          One image value feeds both containers, so they cannot drift apart. The script is in that
+          image (node-red/Dockerfile) rather than a mounted ConfigMap, so an edit takes a rebuild;
+          the dev loop restarts any workload whose image it rebuilt.
 
-          THREE WRITES WITH THREE LIFETIMES, and collapsing them behind one guard is what broke the
-          stack twice: the FLOW is user content (seed once, guarded on
-          /data/.factoryplus-seeded), while settings.js and the CREDENTIALS are stack configuration
-          that must be reconciled on every boot -- a volume outlives a fix.
+          THREE WRITES WITH THREE LIFETIMES, and collapsing them behind one guard broke the stack
+          twice: the FLOW is user content, seeded once and guarded on /data/.factoryplus-seeded,
+          while settings.js and the CREDENTIALS are stack configuration reconciled on every boot --
+          a volume outlives a fix.
           =========================================================================================
         */}}
         - name: node-red-init

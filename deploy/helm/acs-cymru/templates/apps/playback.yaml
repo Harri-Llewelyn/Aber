@@ -5,23 +5,20 @@
 =================================================================================================
 The broker playback worker: a stored capture -> MQTT, published as a simulated gateway.
 
-THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND, and that is deliberate rather than
-economical. What playback genuinely needs that is new is a separate PROCESS holding a separate
-Supabase principal and its own broker credentials -- none of which an image boundary provides. It
-publishes using capture.py's plan_playback(), which is already in that image, so a second image
-would be this one minus two files plus a second build, a second tag to keep in step, and a second
-entry in check-image-tag-parity.mjs.
+THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND. What playback needs that is new is a
+separate PROCESS holding a separate Supabase principal and its own broker credentials, none of
+which an image boundary provides. It publishes using capture.py's plan_playback(), already in that
+image, so a second image would be this one minus two files plus a second build and a second tag to
+keep in step.
 
-`ingestion.image` IS THEREFORE REFERENCED DIRECTLY, with no `playback.image` of its own. A separate
+`ingestion.image` IS THEREFORE REFERENCED DIRECTLY, with no `playback.image` of its own: a separate
 values key would let a deployment run the two from different builds, which is a way to get a worker
 whose capture.py disagrees with the daemon's about the file format.
 
-NO SERVICE, AND NO PROBE. It is a pure producer: nothing calls it, and it serves no HTTP endpoint
-of any kind -- unlike ingestion, which publishes /metrics. A liveness probe would need one, and
-inventing an endpoint so that a probe has something to read is the wrong order to do that in. What
-a restart costs is bounded and visible: `playback_reconcile_jobs()` fails whatever was in flight,
-with a message saying the worker restarted, and the row stops blocking further playbacks onto that
-gateway.
+NO SERVICE, AND NO PROBE. It is a pure producer: nothing calls it and it serves no HTTP endpoint,
+unlike ingestion. Inventing an endpoint so a probe has something to read is the wrong order. What a
+restart costs is bounded and visible -- `playback_reconcile_jobs()` fails whatever was in flight
+with a message saying the worker restarted, and the row stops blocking further playbacks.
 =================================================================================================
 */}}
 apiVersion: apps/v1
@@ -74,11 +71,9 @@ spec:
               JSON LOGS: the daemon's `reason`, `device` and `edge_node` become top-level keys rather
               than an appended `[reason=...]`, which is what makes a log query filter on them.
 
-              SET ON BOTH TARGETS EVEN THOUGH THIS CHART DEPLOYS NO LOKI. A cluster's own log
-              stack parses JSON better than prose too, and leaving this unset here to mirror the
-              absent store would be a silent behavioural difference in the daemon itself -- which
-              is exactly what the divergence table exists to prevent. The store is the divergence;
-              the log FORMAT is not.
+              SET EVEN WHERE THIS CHART DEPLOYS NO LOKI: a cluster's own log stack parses JSON
+              better than prose too, and leaving it unset to mirror an absent store would be a
+              behavioural difference in the daemon itself. The store is optional; the format is not.
             */}}
             - name: LOG_FORMAT
               value: "json"
@@ -126,20 +121,17 @@ spec:
         {{- end }}
         # ONE KEY OUT OF THE BROKER'S CREDENTIAL SECRET, named explicitly.
         #
-        # `items` is what keeps this honest. That Secret also holds `password_file` -- every
-        # gateway's hashed broker password -- and mounting the Secret whole would hand the replay
-        # worker the broker's account file for no reason. Naming the one key means a future key
-        # added to that Secret is not silently exposed here as well.
+        # `items` is what keeps this honest: that Secret also holds `password_file`, every gateway's
+        # hashed broker password, and mounting it whole would hand the replay worker the broker's
+        # account file. Naming the one key means a future key added there is not silently exposed.
         #
         # THE KEY SHARING IS AN RBAC DECISION. gateway-credential's Role grants `patch` on exactly
-        # one Secret by name; a separate Secret for delivery would mean widening the authority of
-        # the component that mints broker credentials, which is the opposite of the trade this
-        # whole design makes.
+        # one Secret by name; a separate Secret for delivery would widen the authority of the
+        # component that mints broker credentials.
         #
         # `optional: true` BECAUSE THE KEY DOES NOT EXIST UNTIL THE FIRST DELIVERY. Without it a
-        # fresh install cannot start this pod at all: a Secret key named in `items` and absent
-        # leaves the container stuck in ContainerCreating, which would make "no playback credential
-        # has been issued yet" -- the correct state of every new stack -- look like a broken chart.
+        # named-but-absent key leaves the container in ContainerCreating, making "no playback
+        # credential issued yet" -- the correct state of every new stack -- look like a broken chart.
         - name: playback-credentials
           secret:
             secretName: {{ .Values.mosquitto.credentials.secretName | quote }}

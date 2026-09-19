@@ -1125,10 +1125,10 @@ networkPolicy:
   #
   # Gitea runs with reverse-proxy authentication so the gateway's `forge` listener can hand a
   # verified identity down as a header, and Gitea trusts that header FROM ANY PEER
-  # (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only; measured). On Compose the control
-  # is the `forge` Docker network. On Kubernetes the equivalent is a policy -- so with the line
-  # above at its default, ONE HTTP request to gitea:3000 from any pod in the namespace signs in as
-  # any user, Node-RED included, which runs whatever JavaScript a flow author writes. The API path
+  # (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only; measured). A network policy is
+  # the only control -- so with the line above at its default, ONE HTTP request to gitea:3000 from
+  # any pod in the namespace signs in as any user, Node-RED included, which runs whatever
+  # JavaScript a flow author writes. The API path
   # is unaffected (ENABLE_REVERSE_PROXY_AUTHENTICATION_API is off) and SSH is a separate principal;
   # the exposure is the web UI, its approve control on `main`, and through `administrators` every
   # gateway's flow.

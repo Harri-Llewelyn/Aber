@@ -22,24 +22,20 @@ spec:
     ============================================================================================
     EXACTLY ONE REPLICA. THIS IS NOT A TUNABLE, AND SCALING IT CORRUPTS DATA.
 
-    Spelled out here because Kubernetes makes `replicas: 2` a one-word change, and the damage is
-    silent -- no error, no crash, just wrong data:
+    Spelled out because Kubernetes makes `replicas: 2` a one-word change and the damage is silent:
 
       * DOUBLE-CONSUMPTION. ingestion.py does a plain paho subscribe with NO shared-subscription
-        group ($share/...), so every broker message is delivered to EVERY replica. Two replicas
-        means two INSERTs per telemetry sample. The historian insert is ON CONFLICT DO NOTHING and
-        the hypertable's key includes `time`, so duplicates land as separate rows whenever the
-        timestamps differ by a microsecond -- which they do, because each replica stamps its own.
-      * DUPLICATED QUARANTINE DECISIONS. An unknown device makes both replicas race to insert the
-        same row, and each writes a digital_thread audit row via the trigger. digital_thread is
-        APPEND-ONLY, so that noise is permanent.
-      * DOUBLED HEARTBEATS. Every replica stamps gateways.last_heartbeat, firing the pg_net
-        quarantine webhook's UPDATE trigger twice per beat.
+        group, so every broker message reaches EVERY replica. The historian insert is ON CONFLICT
+        DO NOTHING and the hypertable's key includes `time`, so duplicates land as separate rows
+        whenever the timestamps differ by a microsecond -- which they do, because each replica
+        stamps its own.
+      * DUPLICATED QUARANTINE DECISIONS. Both replicas race to insert the same row and each writes
+        a digital_thread audit row via the trigger. That table is APPEND-ONLY, so the noise is
+        permanent.
+      * DOUBLED HEARTBEATS, firing the pg_net quarantine webhook's UPDATE trigger twice per beat.
 
-    Scaling this out means adding MQTT v5 shared subscriptions to ingestion.py first. Until then,
-    one.
-
-    `replicas` is not templated for the same reason: values should not offer the choice.
+    Scaling out means adding MQTT v5 shared subscriptions to ingestion.py first. `replicas` is not
+    templated for the same reason: values should not offer the choice.
     ============================================================================================
   */}}
   replicas: 1
@@ -137,17 +133,17 @@ spec:
 
               It connected as the admin user, which is superuser there: the process most exposed to
               the plant network could DROP the hypertable and rewrite any observation, while the
-              README's security model listed "append-only historian writes" as a control at this
-              layer. `ingest_writer` (timescaledb/roles.sql) makes that claim a grant.
+              README listed "append-only historian writes" as a control at this layer.
+              `ingest_writer` (timescaledb/roles.sql) makes that claim a grant.
 
-              THE PASSWORD FOLLOWS THE USER rather than being set beside it. One setting decides
-              both, so they cannot disagree -- a dbUser of `ingest_writer` paired with the admin
-              password is a stack that fails to authenticate and reports it as a database outage.
+              THE PASSWORD FOLLOWS THE USER rather than being set beside it, so the two cannot
+              disagree -- a dbUser of `ingest_writer` with the admin password is a stack that fails
+              to authenticate and reports a database outage.
 
-              DEFAULTS TO WHAT IT WAS. An upgrade that sets nothing keeps the admin credential, so
-              this cannot break a deployment that has not opted in. Set ingestion.dbUser only AFTER
-              secrets.ingestWriterPassword is set and the maintenance Job has created the role --
-              the reverse order points the daemon at a role that does not exist.
+              DEFAULTS TO WHAT IT WAS, so an upgrade setting nothing keeps the admin credential.
+              Set ingestion.dbUser only AFTER secrets.ingestWriterPassword is set and the
+              maintenance Job has created the role; the reverse order points the daemon at a role
+              that does not exist.
             */}}
             {{- $ingestUser := .Values.ingestion.dbUser | default .Values.timescaledb.username }}
             {{- $ingestPwKey := ternary "INGEST_WRITER_PASSWORD" "DB_PASSWORD" (eq $ingestUser "ingest_writer") }}
