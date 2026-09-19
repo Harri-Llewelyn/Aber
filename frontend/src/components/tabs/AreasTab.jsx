@@ -101,6 +101,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
 
+  // A sum over one term, written as the sum the other pages write: a second filter added here
+  // joins it rather than replacing the expression.
+  const activeFilterCount = (searchQuery ? 1 : 0)
+
   const save = async () => {
     try {
       if (editing) await api.put(`/api/v1/areas/${editing.area_id}`, formVal)
@@ -236,9 +240,16 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               placeholder="Search by area ID or name…"
               title="Filter areas by ID or name"
             />
-            {searchQuery && (
-              <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={clearSearch} title="Clear the search">
-                <IconX size={13} /> Clear
+            {/* The same control the other asset pages carry, worded and counted the same way.
+                Search is this page's only filter, so the count is always one -- it says which
+                control is on rather than how many. */}
+            {activeFilterCount > 0 && (
+              <button
+                className="btn btn-ghost btn-sm filter-bar-spacer"
+                onClick={clearSearch}
+                title="Clear every filter"
+              >
+                <IconX size={13} /> Clear filters ({activeFilterCount})
               </button>
             )}
           </div>

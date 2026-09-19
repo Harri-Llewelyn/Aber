@@ -603,4 +603,23 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(within(planRow()).getByText('Plan attached')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Upload plan|Replace plan|Remove plan/ })).toBeNull()
   })
+
+  it('clears its filter with the control the other asset pages carry', async () => {
+    /* Wording, icon and count, asserted together: this page said "Clear" with no count while
+       Cells, Gateways, Devices and Schemas said "Clear filters (n)", and a control that is the
+       same control on five pages should not be read as a different one on the sixth. */
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
+    const searchBox = screen.getByPlaceholderText(/Search by area ID or name/)
+
+    // Nothing to clear on arrival, so nothing is offered.
+    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+
+    fireEvent.change(searchBox, { target: { value: 'Building A' } })
+    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+
+    fireEvent.click(screen.getByTitle('Clear every filter'))
+    expect(searchBox).toHaveValue('')
+    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+  })
 })
