@@ -3312,22 +3312,22 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
 }
 
-/* The axis row pins to the top of the scroller and the rows pass under it. Opaque in the card
-   colour for that reason, and above the lane labels and section headings, which are sticky on the
-   other axis and would ride over it on a diagonal scroll. Tinted like `thead tr` over that, as the
-   section headings are, so the two read as one header system. The track inside stays bare: the
-   row is what is opaque, and a scale is not a lane. */
+/* The axis row pins to the top of the scroller and the rows pass under it. Opaque for that reason,
+   and above the lane labels and section headings, which are sticky on the other axis and would
+   ride over it on a diagonal scroll. ON THE BASE SURFACE, as the section headings are, so the two
+   read as one header system: the `thead` tint is 2% in the light theme and did not read as a band
+   on a white card, while the base colour is a header band in both themes. The track inside stays
+   bare: the row is what is opaque, and a scale is not a lane. */
 .dt-lane.dt-axis {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: var(--bg-card);
-  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
+  background: var(--bg-base);
 }
 
-/* The corner is part of the row, so it takes the row's tint over its own opaque colour. */
+/* The corner is part of the row, so it takes the row's colour. */
 .dt-axis .dt-lane-label {
-  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
+  background: var(--bg-base);
 }
 
 /* The section heading is a row of the grid: the same two columns as a lane, the same height and
@@ -3335,9 +3335,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
    break at a section. Stated here rather than shared with .dt-lane, which the lane counts and the
    hover rule select on. Sticky under the axis row, so a reader deep in a section still knows which
    one; the offset is the axis track plus the row's divider. Above the labels (2), because its own
-   lanes come after it in the DOM and would paint over it as they scrolled under. Opaque in the
-   card colour for the rows that pass under it, and tinted like `thead tr` over that, so it and the
-   pinned date row read as one header system. */
+   lanes come after it in the DOM and would paint over it as they scrolled under. Opaque for the
+   rows that pass under it, on the base surface so it stands apart from the rows it heads; see the
+   axis row above for why not the `thead` tint. */
 .dt-section {
   position: sticky;
   top: calc(var(--dt-axis-height) + 1px);
@@ -3346,15 +3346,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   align-items: stretch;
   gap: var(--dt-lane-gap);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-card);
-  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
+  background: var(--bg-base);
 }
 
-/* A heading's label: the icon at 9px, where the lanes' names indent to meet its text. Tinted like
-   the row it heads, over the opaque colour that keeps markers from showing through it. */
+/* A heading's label: the icon at 9px, where the lanes' names indent to meet its text. The row's
+   own colour, opaque, so markers cannot show through it either. */
 .dt-section .dt-lane-label {
   padding-left: 9px;
-  background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
+  background: var(--bg-base);
   color: var(--text-muted);
 }
 

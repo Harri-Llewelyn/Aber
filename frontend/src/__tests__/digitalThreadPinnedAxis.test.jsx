@@ -84,7 +84,7 @@ describe('the axis row stays in view', () => {
     expect(axis).toMatch(/position:\s*sticky/)
     expect(axis).toMatch(/top:\s*0/)
     // Opaque, or the rows show through the dates as they pass under.
-    expect(axis).toMatch(/background:\s*var\(--bg-card\)/)
+    expect(axis).toMatch(/background:\s*var\(--bg-base\)/)
     expect(zIndex(axis)).toBeGreaterThan(zIndex(ruleFor('.dt-lane-label')))
   })
 
@@ -121,16 +121,18 @@ describe('the axis row stays in view', () => {
     expect(zIndex(ruleFor('.dt-track .dt-cluster'))).toBeGreaterThanOrEqual(zIndex(ruleFor('.dt-section')))
   })
 
-  it('tints the header rows the way every table tints thead', () => {
-    /* The pinned date row and the pinned heading under it read as one header system, and both
-       take the tint as an image over the opaque card colour that keeps the rows from showing
-       through as they pass. The label column of each is opaque in its own right and takes the
-       same tint, or it would sit as an untinted block at the left of a tinted row. */
-    const tint = /background-image:\s*linear-gradient\(var\(--bg-glass\), var\(--bg-glass\)\)/
+  it('draws the header rows on the base surface, not the thead tint', () => {
+    /* The pinned date row and the pinned heading under it read as one header system. The `thead`
+       tint they first took is 2% black in the light theme, which on a white card is no band at
+       all; the base surface is a header band in both themes. The label column of each row is
+       opaque in its own right and takes the same colour, or it would sit as a block of a
+       different colour at the left of the row. */
+    const base = /background:\s*var\(--bg-base\)/
+    for (const selector of ['.dt-lane.dt-axis', '.dt-axis .dt-lane-label', '.dt-section', '.dt-section .dt-lane-label']) {
+      expect(ruleFor(selector), selector).toMatch(base)
+      expect(ruleFor(selector), selector).not.toMatch(/background-image/)
+    }
+    // Which is a deliberate step away from the tables' own header tint.
     expect(ruleFor('thead tr')).toMatch(/background:\s*var\(--bg-glass\)/)
-    expect(ruleFor('.dt-lane.dt-axis')).toMatch(tint)
-    expect(ruleFor('.dt-axis .dt-lane-label')).toMatch(tint)
-    expect(ruleFor('.dt-section')).toMatch(tint)
-    expect(ruleFor('.dt-section .dt-lane-label')).toMatch(tint)
   })
 })
