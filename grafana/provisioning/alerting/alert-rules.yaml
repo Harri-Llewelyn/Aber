@@ -1582,3 +1582,449 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
+
+  # ===============================================================================================
+  # DATABASES: the two PostgreSQL servers, from the postgres_exporter sidecar in each database pod.
+  #
+  # EVERY RULE HERE IS `noDataState: OK`, AND THAT IS A DELIBERATE CHOICE WITH A KNOWN COST.
+  # `databaseMetrics.enabled` can be turned off, and this file is provisioned whatever it is set to
+  # -- a static file, not a template. With the exporters gone every series below is absent, and
+  # `OK` is what keeps six rules from alerting forever about a measurement the operator declined.
+  # The cost is recorded on the "not observed" rule, which is the one it weakens.
+  #
+  # The `job` label is the pod's component, as the chart's Alloy writes it: `supabase-db` and
+  # `timescaledb`. Each rule is multi-dimensional on it, so one alert instance per database.
+  # ===============================================================================================
+  - orgId: 1
+    name: Databases
+    folder: ACS-Cymru - Platform Infrastructure
+    # 1m, like the other Prometheus groups. Nothing here moves faster: the slowest is transaction-ID
+    # age, which takes days, and the fastest is a connection count already smoothed by `for: 5m`.
+    interval: 1m
+    rules:
+
+      # -------------------------------------------------------------------------------------------
+      # 1. CONNECTIONS NEAR THE LIMIT. Past `max_connections` PostgreSQL refuses new connections
+      # outright, and every client sees it at once: PostgREST's pool, the ingestion daemon's writer,
+      # the edge functions. There is no degradation before it, which is why the alert is at 80%
+      # rather than at the wall.
+      #
+      # THE DENOMINATOR IS A CUSTOM QUERY, not the exporter's `settings` collector -- that one is
+      # off because it emits a series per GUC. `acs_postgres_max_connections` is the single number
+      # that collector was wanted for.
+      #
+      # `for: 5m` because a connection count is spiky by nature: a rollout opens a pool, a backup
+      # opens its own. Five minutes at 80% is a pool that is not going to drain on its own.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-db-connections
+        title: Database Connections Near Limit
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            {{ $labels.job }} is at {{ humanizePercentage $values.B }} of max_connections and has
+            been for five minutes. At 100% it refuses every new connection at once -- PostgREST's
+            pool, the ingestion writer and the edge functions together. Find what is holding them
+            open (the Backends by State panel separates `idle in transaction` from `active`) before
+            raising max_connections.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                sum by (job) (pg_stat_activity_count)
+                / on (job)
+                max by (job) (acs_postgres_max_connections)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.8]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 2. DEADLOCKS. The correct number is zero. A deadlock is two transactions taking the same
+      # locks in different orders; PostgreSQL resolves it by killing one, so the DATABASE considers
+      # the matter closed and only the application sees an error. Nothing restates it afterwards.
+      #
+      # `for: 0s` BECAUSE THE WINDOW IS THE DELAY. `increase(...[10m])` already requires the
+      # deadlock to have happened within ten minutes; a `for` on top would mean the condition has to
+      # persist, and a single deadlock does not persist -- it happens once and the rule would never
+      # fire. The same reasoning as the enrolment and CA-expiry rules above.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-db-deadlocks
+        title: Database Deadlocks
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            {{ $labels.job }} has recorded {{ $values.B }} deadlock(s) in the last ten minutes.
+            PostgreSQL resolved each by killing one transaction, so the database is healthy and an
+            application saw an error it may not have logged. Two transactions are taking the same
+            locks in different orders.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                sum by (job) (increase(pg_stat_database_deadlocks[10m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 3. TRANSACTION ID AGE. At 2^31 (~2.147e9) PostgreSQL stops accepting writes CLUSTER-WIDE and
+      # will only come back after a single-user-mode vacuum. It is the one condition here that ends
+      # in downtime measured in hours, and it approaches slowly enough to be entirely preventable --
+      # which is why an alert exists at all.
+      #
+      # THE METRIC IS NOT SECONDS. `pg_database_wraparound_age_datfrozenxid_seconds` is
+      # `age(datfrozenxid)`, a TRANSACTION COUNT; the suffix is an upstream misnomer. Verified
+      # against the server: the metric read 222470 while `age(datfrozenxid)` was 222470 and the
+      # postmaster had been up 477 seconds. DO NOT "correct" the threshold below into a duration.
+      #
+      # 1e9 is half the wall and five times `autovacuum_freeze_max_age` (200M by default), so
+      # reaching it means autovacuum has not merely fallen behind but has been prevented -- almost
+      # always by a long-lived transaction or an abandoned replication slot.
+      #
+      # `for: 15m` is a scrape-blip guard and nothing more. This number moves in one direction, over
+      # days; waiting longer would only delay a warning that is already deliberately early.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-db-wraparound
+        title: Transaction ID Wraparound Approaching
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            {{ $labels.job }} has a transaction ID age of {{ $values.B }} (TRANSACTIONS, not
+            seconds). PostgreSQL refuses all writes at about 2.147e9 and recovers only in
+            single-user mode. Autovacuum is being prevented from freezing -- look for a long-lived
+            transaction or an inactive replication slot, then let autovacuum catch up.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                max by (job) (pg_database_wraparound_age_datfrozenxid_seconds)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1000000000]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 4. A HISTORIAN POLICY JOB IS FAILING. This is the "is the telemetry lifecycle keeping up?"
+      # question #150 was filed about, and it is the one failure here with NO OTHER SYMPTOM: a
+      # retention job that stops running leaves the volume growing, a compression job that stops
+      # leaves it growing faster, and a continuous-aggregate refresh that stops leaves the rollups
+      # silently behind the raw data while every dashboard built on them keeps drawing.
+      #
+      # ON THE FAILURE COUNT RISING, not on the last run's status. `last_run_succeeded` is 0 both
+      # for a job that failed and for one that has never run -- `policy_telemetry` is in the second
+      # state on every fresh stack -- so alerting on it would fire on every install. An increase in
+      # `failures_total` cannot be that: it requires a run that happened and went wrong.
+      #
+      # `for: 0s`, as with deadlocks: the one-hour window is the tolerance. Labelled with the job id
+      # AND the procedure, because the id is what `timescaledb_information.jobs` is queried by and
+      # the procedure is what tells an operator which policy stopped.
+      #
+      # `and on (job_id) acs_historian_job_runs_total` RESTRICTS THIS TO JOBS THAT STILL EXIST, and
+      # it is not tidiness. TimescaleDB re-creates its policy jobs with NEW IDS every time the
+      # maintenance hook runs, which is every helm upgrade -- so the one-hour window accumulates the
+      # ids from every upgrade in the last hour. Measured on the dev stack mid-build: 10 jobs
+      # actually existed and the rule was evaluating 66 instances. An `and` against an INSTANT
+      # selector filters to series with a recent sample, taking it back to 10.
+      #
+      # The instance count is the lesser half. A job that failed and was then re-created under a new
+      # id would go on alerting under the OLD one for an hour, naming a job_id an operator would
+      # look up in `timescaledb_information.jobs` and not find -- which reads as the alert being
+      # wrong rather than as the job having been replaced.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-db-historian-job-failing
+        title: Historian Policy Job Failing
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            TimescaleDB job {{ $labels.job_id }} ({{ $labels.proc_name }}) has failed
+            {{ $values.B }} time(s) in the last hour. Retention, compression and rollup refresh are
+            what keep the historian's storage and its aggregates true; a failing policy has no other
+            symptom until the volume fills or a dashboard quietly goes stale. Check the job's last
+            error: SELECT * FROM timescaledb_information.job_stats WHERE job_id = {{ $labels.job_id }};
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                sum by (job_id, proc_name) (increase(acs_historian_job_failures_total[1h]))
+                and on (job_id) acs_historian_job_runs_total
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 5. A DATABASE IS NOT ANSWERING. `pg_up` is the exporter's own verdict on the connection it
+      # opens over loopback, so 0 means the sidecar is running and the server beside it did not
+      # answer -- a server that is down, still starting, in recovery, or refusing connections
+      # because rule 1 went unheeded.
+      #
+      # WHAT THIS RULE CANNOT SEE, stated because `noDataState: OK` is what makes it blind: if the
+      # POD is gone, Alloy stops discovering it, the series stop existing, and this evaluates NoData
+      # and reports OK. That case belongs to the Cluster group -- Container Restarting and the
+      # workload rules beside it -- which reads cAdvisor and does not depend on this exporter. The
+      # alternative, `noDataState: Alerting`, would make all six rules in this group fire forever on
+      # any stack running with `databaseMetrics.enabled: false`, which is a supported configuration.
+      #
+      # `for: 5m` rides out a rolling restart of the database StatefulSet, which is a normal upgrade
+      # and takes well under that.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-db-not-answering
+        title: Database Not Answering
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            {{ $labels.job }} has not answered its own exporter for five minutes. The exporter runs
+            beside the server in the same pod and connects over loopback, so this is the database
+            itself: down, still recovering, or out of connections. Nothing reaches it either --
+            check the pod: kubectl -n acs-cymru logs {{ $labels.job }}-0 -c {{ $labels.job }}
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                min by (job) (pg_up)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 6. A COLLECTOR IS FAILING, which is the rule that keeps the other five honest.
+      #
+      # THE EXPORTER DOES NOT FAIL A SCRAPE WHEN A COLLECTOR FAILS. It logs an error, keeps serving,
+      # and `pg_exporter_last_scrape_error` stays 0 -- so that collector's series simply stop
+      # existing, every panel drawn on them goes empty, and every rule written against them
+      # evaluates NoData and reports OK. A monitoring stack that has quietly stopped monitoring
+      # part of its subject, which is the exact failure `templates/obs/servicemonitors.yaml`
+      # refuses to create a ServiceMonitor for.
+      #
+      # BOTH FAILURES THIS CLASS PRODUCES WERE OBSERVED WHILE #150 WAS BUILT: `stat_statements`
+      # against a database where the extension was not loaded, and `wal` under a role whose
+      # pg_monitor grant was held without INHERIT. In both cases this gauge was the only signal.
+      #
+      # `for: 10m` because a collector can fail once on a statement timeout during a checkpoint and
+      # recover by itself; ten minutes of continuous failure is configuration, not load.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-db-collector-failing
+        title: Database Collector Failing
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The `{{ $labels.collector }}` collector on {{ $labels.job }} has failed for ten minutes.
+            The exporter is still serving and the scrape still succeeds, so every panel and rule
+            built on that collector's series is now silently empty rather than reporting a problem.
+            Usually a missing extension or a privilege the exporter's role does not hold --
+            kubectl -n acs-cymru logs {{ $labels.job }}-0 -c metrics names the cause.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                min by (job, collector) (pg_scrape_collector_success)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              datasource:
+                type: __expr__
+                uid: __expr__
