@@ -13,6 +13,7 @@ Two layers, deliberately in one file:
 
 Run:  python supabase/functions/aas-export/test_aas_export.py
 """
+import hashlib
 import io
 import json
 import os
@@ -20,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 import urllib.error
 import urllib.request
@@ -1047,6 +1049,308 @@ class TestNoVisualRepresentationWithoutAModel(unittest.TestCase):
         # that could be unreachable. Without this, an unset AAS_MODEL_PUBLIC_BASE would warn on
         # every export from every device on the stack, which is how a real warning gets ignored.
         self.assertIsNone(body.get("warning"), body.get("warning"))
+
+
+# ---- The bundle: the AASX with its history inside ------------------------------------------------
+TS_BUNDLE = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "bundle.ts"
+
+
+def run_bundle_helpers(script: str) -> dict:
+    """
+    Execute the pure half of _shared/aas/bundle.ts in Node and return what `script` prints.
+
+    EXECUTED, NOT GREPPED, for the reason run_modelled_metrics() gives. The pure functions sit
+    before the loaders in that file by design (its header says so), so the harness takes the text
+    from the first constant up to the first loader's interface, plus buildBundleManifest() and the
+    interface it reads, and runs it with Node's own type stripping. Every type in that half is
+    erasable syntax -- interfaces, annotations, `as const` -- which is what the flag strips; an
+    `enum` or a parameter property would fail loudly here rather than silently pass.
+
+    `script` runs after the module's own text and must print ONE JSON document.
+    """
+    source = TS_BUNDLE.read_text(encoding="utf-8")
+    pure_start = source.index("export const BUNDLE_SCHEMA")
+    pure_end = source.index("export interface TelemetryPart")
+    manifest = re.search(
+        r"^export interface ManifestInput \{.*?^export function buildBundleManifest\(.*?^\}",
+        source, re.S | re.M,
+    )
+    if not manifest:
+        raise AssertionError(f"buildBundleManifest() not found in {TS_BUNDLE}")
+    harness = source[pure_start:pure_end] + "\n" + manifest.group(0) + "\n" + script + "\n"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bundle_harness.ts"
+        path.write_text(harness, encoding="utf-8")
+        completed = subprocess.run(
+            [shutil.which("node"), "--experimental-strip-types", str(path)],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+    return json.loads(completed.stdout)
+
+
+@unittest.skipIf(shutil.which("node") is None, "node is not on PATH")
+class TestBundleHelpers(unittest.TestCase):
+    """The pure functions the bundle is assembled from, run against fixed inputs."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = run_bundle_helpers("""
+const rows = [
+  { time: "2026-09-01T10:00:00Z", metric_name: "Spindle/Speed", val_double: 1200.5, val_string: null, val_bool: null },
+  { time: "2026-09-01T10:00:01Z", metric_name: "Job,Name", val_double: null, val_string: 'say "hi"', val_bool: null },
+  { time: "2026-09-01T10:00:02Z", metric_name: "Note", val_double: null, val_string: "two\\nlines", val_bool: true },
+];
+const part = (n, oldest, newest, extra = {}) => ({ rows: Array.from({ length: n }, (_, i) => ({ i })), oldest, newest, truncated: false, ...extra });
+const base = {
+  takenAt: "2026-09-19T10:00:00.000Z",
+  takenBy: { id: "user-1", email: "ops@example.test" },
+  device: { id: "dev-1", name: "CNC_01", sparkplug_id: "abc123", created_at: "2026-01-01T00:00:00Z", is_archived: true, archived_at: "2026-09-01T00:00:00Z", model_3d_path: null },
+  gateway: { name: "Line_A", sparkplug_id: "gw1" },
+  caps: { telemetry: 3, thread: 2 },
+  raw: part(2, "2026-09-01T10:00:00Z", "2026-09-01T10:00:01Z"),
+  hourly: part(1, "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z"),
+  thread: { rows: [{ id: 1 }], truncated: false },
+  horizons: { telemetry: "2026-08-01T00:00:00Z", telemetry_1h: null },
+  cold: { objects: [{ object_key: "2026/08/telemetry-x.parquet" }], unavailable: null },
+  bundled3dModel: false,
+};
+const capped = {
+  ...base,
+  raw: part(3, "2026-09-01T10:00:00Z", "2026-09-01T10:00:02Z", { truncated: true }),
+  thread: { rows: [{ id: 1 }, { id: 2 }], truncated: true },
+  cold: { objects: [], unavailable: "cold_storage_rows refused: permission denied" },
+  device: { ...base.device, model_3d_path: "models/x.glb" },
+};
+console.log(JSON.stringify({
+  csv: csvOf(rows, RAW_COLUMNS),
+  empty_csv: csvOf([], HOURLY_COLUMNS),
+  coverage_full: describeCoverage(2, 3, "a", "b", "h"),
+  coverage_cut: describeCoverage(3, 3, "a", "b", null),
+  coverage_unknown: describeCoverage(0, 3, null, null, undefined),
+  key: exportObjectKey("abc123", "2026-09-19T10:00:00.000Z"),
+  bounded: [boundedInt(undefined, 7), boundedInt("0", 7), boundedInt("12", 7), boundedInt("abc", 7), boundedInt("-3", 7)],
+  parts: BUNDLE_PARTS,
+  schema: BUNDLE_SCHEMA,
+  manifest: buildBundleManifest(base),
+  manifest_capped: buildBundleManifest(capped),
+}));
+""")
+
+    # -- csvOf: RFC 4180, so the part opens in anything ----------------------------------------
+    def test_csv_quotes_only_what_needs_quoting_and_ends_lines_with_crlf(self):
+        lines = self.out["csv"].split("\r\n")
+        self.assertEqual(lines[0], "time,metric_name,val_double,val_string,val_bool")
+        self.assertEqual(lines[1], "2026-09-01T10:00:00Z,Spindle/Speed,1200.5,,")
+        # A comma in a value, and a doubled quote inside a quoted one.
+        self.assertEqual(lines[2], '2026-09-01T10:00:01Z,"Job,Name",,"say ""hi""",')
+        # A bare LF inside a value stays inside its quotes, so it is not a record boundary; the
+        # record still ends with CRLF, which is why splitting on CRLF leaves one trailing empty line.
+        self.assertEqual(lines[3], '2026-09-01T10:00:02Z,Note,,"two\nlines",true')
+        self.assertEqual(lines[4:], [""], "every record, the last included, ends with CRLF")
+
+    def test_an_empty_relation_is_a_header_alone(self):
+        # The rollup's own columns (timescaledb/aggregates.sql), less asset_id, which the manifest
+        # states once; a column named here that the view lacks fails the whole bundle with a 500.
+        self.assertEqual(self.out["empty_csv"], ",".join([
+            "bucket", "metric_name", "avg_double", "min_double", "max_double",
+            "last_double", "last_string", "last_bool", "n_double", "n_rows",
+        ]) + "\r\n")
+
+    # -- describeCoverage: the three-valued horizon and the cap ---------------------------------
+    def test_coverage_says_when_it_was_cut_and_when_it_was_not(self):
+        full, cut = self.out["coverage_full"], self.out["coverage_cut"]
+        self.assertFalse(full["truncated"])
+        self.assertIn("Every row", full["note"])
+        self.assertTrue(cut["truncated"])
+        self.assertIn("Cut at 3 rows", cut["note"])
+        self.assertIn("older than a", cut["note"])
+
+    def test_coverage_tells_an_unanswered_horizon_from_an_empty_relation(self):
+        # undefined is "the lookup did not answer"; null is "the relation is empty". The dialog on
+        # the Devices page acts on the same distinction (0111).
+        self.assertEqual(self.out["coverage_unknown"]["relation_reaches_back_to"], "unknown")
+        self.assertIsNone(self.out["coverage_cut"]["relation_reaches_back_to"])
+        self.assertEqual(self.out["coverage_full"]["relation_reaches_back_to"], "h")
+
+    # -- exportObjectKey and boundedInt -----------------------------------------------------------
+    def test_object_key_sits_under_the_asset_prefix_with_a_filename_safe_stamp(self):
+        self.assertEqual(self.out["key"], "assets/abc123/2026-09-19T10-00-00-000Z.aasx")
+
+    def test_a_cap_from_the_environment_is_a_positive_integer_or_the_fallback(self):
+        self.assertEqual(self.out["bounded"], [7, 7, 12, 7, 7])
+
+    # -- buildBundleManifest ----------------------------------------------------------------------
+    def test_manifest_names_its_schema_and_every_part_under_the_supplement_directory(self):
+        m = self.out["manifest"]
+        self.assertEqual(m["schema"], "acs-cymru/asset-bundle/1")
+        self.assertEqual(m["schema"], self.out["schema"])
+        for name, path in self.out["parts"].items():
+            self.assertTrue(path.startswith("aasx/files/acs-cymru/"), f"{name}: {path}")
+        self.assertEqual(m["parts"]["environment"], "aasx/aasenv-root.json")
+        self.assertEqual(m["parts"]["digital_thread"], self.out["parts"]["thread"])
+        self.assertEqual(m["parts"]["telemetry_raw"], self.out["parts"]["raw"])
+        self.assertEqual(m["parts"]["telemetry_1h"], self.out["parts"]["hourly"])
+
+    def test_manifest_states_the_historian_key_and_the_coverage_of_each_telemetry_part(self):
+        m = self.out["manifest"]
+        self.assertEqual(m["telemetry"]["asset_id"], "abc123")
+        self.assertEqual(m["telemetry"]["raw"]["rows"], 2)
+        self.assertEqual(m["telemetry"]["raw"]["relation_reaches_back_to"], "2026-08-01T00:00:00Z")
+        self.assertIsNone(m["telemetry"]["hourly"]["relation_reaches_back_to"])
+        self.assertEqual(m["digital_thread"], {"rows": 1, "cap": 2, "truncated": False})
+        self.assertEqual(m["device"]["gateway"], {"name": "Line_A", "sparkplug_id": "gw1"})
+        self.assertEqual(m["taken_by"], {"id": "user-1", "email": "ops@example.test"})
+
+    def test_manifest_names_the_cold_objects_and_never_claims_to_hold_them(self):
+        # The no-read-back rule of the cold tier, restated in the one document a reader of the
+        # bundle will open: the objects are listed, and a sentence says they were not read back.
+        m = self.out["manifest"]
+        self.assertEqual(m["cold_objects"], [{"object_key": "2026/08/telemetry-x.parquet"}])
+        self.assertTrue(any("never read back" in s for s in m["not_included"]), m["not_included"])
+        self.assertTrue(any("1-minute and 5-minute" in s for s in m["not_included"]))
+
+    def test_an_uncut_bundle_lists_only_the_two_standing_exclusions(self):
+        # The rollups and the cold objects are always stated; nothing else is, or every manifest
+        # would carry warnings that mean nothing.
+        self.assertEqual(len(self.out["manifest"]["not_included"]), 2, self.out["manifest"]["not_included"])
+
+    def test_every_cap_that_was_hit_is_a_sentence_rather_than_a_silent_tail(self):
+        m = self.out["manifest_capped"]
+        sentences = m["not_included"]
+        self.assertTrue(any(s.startswith("raw telemetry older than 2026-09-01T10:00:00Z") and "cap of 3 rows" in s for s in sentences), sentences)
+        self.assertTrue(any(s.startswith("digital thread rows after the first 2") for s in sentences), sentences)
+        self.assertTrue(any(s.startswith("the cold catalogue: cold_storage_rows refused") for s in sentences), sentences)
+        self.assertTrue(any(s.startswith("the 3D model: not bundled") for s in sentences), sentences)
+        self.assertTrue(m["telemetry"]["raw"]["truncated"])
+        self.assertFalse(m["telemetry"]["hourly"]["truncated"])
+
+
+@unittest.skipUnless(LIVE, SKIP_REASON)
+class TestAssetBundle(unittest.TestCase):
+    """
+    `format=bundle` against the deployed function: the same AASX with the four supplementary parts,
+    a stored copy in the cold tier's bucket, and a row in `asset_exports`.
+
+    The stored object is deleted on teardown, as the Administrator the suite signs in as (the
+    bucket's delete policy admits that role alone). The `asset_exports` row cannot be: the table has
+    no write policy for any role, by design, so a run leaves one row that names a device the fixture
+    then deletes -- which is precisely the state the Archived Entities page's second card exists to
+    show, and is harmless on the ephemeral stacks this class runs against.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/functions/v1/aas-export?format=bundle",
+            data=json.dumps({"device_id": DEVICE_ID}).encode(),
+            method="POST",
+        )
+        req.add_header("apikey", PUBLISHABLE_KEY)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=120) as res:
+            cls.status = res.status
+            cls.headers = lower_headers(res.headers)
+            cls.payload = res.read()
+        cls.zip = zipfile.ZipFile(io.BytesIO(cls.payload))
+        cls.stats = json.loads(cls.headers.get("x-aas-stats", "{}"))
+        cls.bundle = cls.stats.get("bundle", {})
+
+    @classmethod
+    def tearDownClass(cls):
+        key = cls.bundle.get("object_key")
+        bucket = cls.bundle.get("bucket")
+        if not (cls.bundle.get("stored") and key and bucket):
+            return
+        req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{key}", method="DELETE")
+        req.add_header("apikey", PUBLISHABLE_KEY)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        try:
+            urllib.request.urlopen(req, timeout=30).read()
+        except urllib.error.URLError as err:  # pragma: no cover - reported, never silently skipped
+            print(f"[test_aas_export] bundle object {key} not removed: {err}")
+
+    def rest_get(self, path: str):
+        req = urllib.request.Request(f"{SUPABASE_URL}/rest/v1{path}")
+        req.add_header("apikey", PUBLISHABLE_KEY)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        with urllib.request.urlopen(req, timeout=30) as res:
+            return json.loads(res.read())
+
+    def manifest(self) -> dict:
+        return json.loads(self.zip.read("aasx/files/acs-cymru/manifest.json"))
+
+    def test_is_still_an_aasx_with_a_bundle_filename(self):
+        self.assertEqual(self.status, 200)
+        self.assertIn("asset-administration-shell-package", self.headers.get("content-type", ""))
+        self.assertIn("-bundle.aasx", self.headers.get("content-disposition", ""))
+        self.assertIsNone(self.zip.testzip(), "corrupt archive")
+        # The OPC chain the plain package carries, untouched by the supplements.
+        for part in ("_rels/.rels", "aasx/aasx-origin", "aasx/_rels/aasx-origin.rels", "aasx/aasenv-root.json"):
+            self.assertIn(part, self.zip.namelist())
+
+    def test_carries_the_four_supplementary_parts(self):
+        names = self.zip.namelist()
+        for part in (
+            "aasx/files/acs-cymru/manifest.json",
+            "aasx/files/acs-cymru/digital-thread.json",
+            "aasx/files/acs-cymru/telemetry-raw.csv",
+            "aasx/files/acs-cymru/telemetry-1h.csv",
+        ):
+            self.assertIn(part, names)
+
+    def test_manifest_describes_this_device_and_agrees_with_the_parts(self):
+        m = self.manifest()
+        self.assertEqual(m["schema"], "acs-cymru/asset-bundle/1")
+        self.assertEqual(m["device"]["id"], DEVICE_ID)
+        self.assertEqual(m["telemetry"]["asset_id"], m["device"]["sparkplug_id"])
+        thread = json.loads(self.zip.read("aasx/files/acs-cymru/digital-thread.json"))
+        self.assertIsInstance(thread, list)
+        self.assertEqual(m["digital_thread"]["rows"], len(thread))
+        # A CSV part's rows are its lines less the header; both parts are oldest-first.
+        raw_lines = self.zip.read("aasx/files/acs-cymru/telemetry-raw.csv").decode().split("\r\n")
+        self.assertEqual(raw_lines[0], "time,metric_name,val_double,val_string,val_bool")
+        self.assertEqual(m["telemetry"]["raw"]["rows"], len([l for l in raw_lines[1:] if l]))
+        # The hourly header is the rollup's own columns: the first live run of this class found a
+        # column the view does not have, and PostgREST fails the whole request for one.
+        hourly_lines = self.zip.read("aasx/files/acs-cymru/telemetry-1h.csv").decode().split("\r\n")
+        self.assertEqual(hourly_lines[0], "bucket,metric_name,avg_double,min_double,max_double,last_double,last_string,last_bool,n_double,n_rows")
+        self.assertEqual(m["telemetry"]["hourly"]["rows"], len([l for l in hourly_lines[1:] if l]))
+        # The fixture just arrived: nothing has been read from it, so the fixture also proves the
+        # two standing exclusions are stated on an otherwise empty bundle.
+        self.assertTrue(any("never read back" in s for s in m["not_included"]))
+
+    def test_the_thread_part_holds_the_fixture_s_own_creation(self):
+        # The fixture INSERTed the device through PostgREST, which the audit trigger recorded, so
+        # the part is never empty for a device that exists at all.
+        thread = json.loads(self.zip.read("aasx/files/acs-cymru/digital-thread.json"))
+        self.assertTrue(any(row.get("entity_id") == DEVICE_ID for row in thread), thread[:3])
+
+    def test_reports_the_stored_copy_in_the_stats_header(self):
+        self.assertIn("bundle", self.stats, self.stats)
+        b = self.bundle
+        for key in ("raw_rows", "hourly_rows", "thread_rows", "cold_objects", "truncated", "stored", "bucket", "object_key", "taken_at"):
+            self.assertIn(key, b, b)
+        self.assertTrue(b["stored"], f"the bundle was not stored: {b.get('reason')}")
+        self.assertTrue(b["object_key"].startswith("assets/"), b["object_key"])
+        self.assertEqual(b["sha256"], hashlib.sha256(self.payload).hexdigest())
+
+    def test_records_the_export_where_a_tombstone_can_find_it(self):
+        rows = self.rest_get(f"/asset_exports?entity_id=eq.{DEVICE_ID}&select=entity_type,object_bucket,object_key,sha256,format,stats")
+        match = [r for r in rows if r["object_key"] == self.bundle["object_key"]]
+        self.assertEqual(len(match), 1, rows)
+        row = match[0]
+        self.assertEqual(row["entity_type"], "devices")
+        self.assertEqual(row["format"], "aasx")
+        self.assertEqual(row["object_bucket"], self.bundle["bucket"])
+        self.assertEqual(row["sha256"], self.bundle["sha256"])
+        self.assertEqual(row["stats"]["raw_rows"], self.bundle["raw_rows"])
+
+    def test_the_export_is_on_the_digital_thread(self):
+        rows = self.rest_get(f"/digital_thread?entity_id=eq.{DEVICE_ID}&action=eq.EXPORTED&select=action,entity_type,new_data")
+        self.assertTrue(rows, "no EXPORTED row for the device")
+        self.assertTrue(any((r.get("new_data") or {}).get("object_key") == self.bundle["object_key"] for r in rows), rows)
 
 
 if __name__ == "__main__":

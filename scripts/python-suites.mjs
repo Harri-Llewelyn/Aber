@@ -484,6 +484,18 @@ export const SUITES = {
       'afterwards but an audit row. Asserts the catalogue fact over every child of cells, not ' +
       'just the one that was wrong.',
   },
+  'supabase/migrations/test_archiving_is_a_lifecycle.py': {
+    lanes: ['db'],
+    why:
+      '0124, and the four things in it that fail silently. An archived area that MOVED its cells ' +
+      'would rename every uns/ topic beneath it with nothing logged, so the view is asserted ' +
+      'unchanged across the archive. The purge job is one transaction: an areas DELETE refused ' +
+      'by an Area-Wide asset would roll back the three deletes above it every night, so the guard ' +
+      'is asserted in the job text and exercised. A lane that did not follow its original stayed ' +
+      'live on the playback gateway, visible only as a replay that succeeded. And a tombstone ' +
+      'whose thread_id is NULL means the two AFTER triggers fired in the wrong order, which no ' +
+      'page would show.',
+  },
   'supabase/migrations/test_relocate_devices.py': {
     lanes: ['db'],
     why:

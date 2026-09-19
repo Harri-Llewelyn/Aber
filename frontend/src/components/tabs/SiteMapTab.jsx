@@ -343,17 +343,24 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const state = stateOf(devices)
     const AreaGlyph = areaIconComponent(ar.icon)
     const wideCount = wide.gateways.length + wide.devices.length
+    // Archived: drawn muted with its plan and its pins kept, as an archived cell's pin is. The
+    // cells are still filed here and the topics beneath it still carry its name, so taking the
+    // card away would misplace what is under it.
+    const archived = !!ar.is_archived
     return (
       <div
         key={ar.area_id}
-        className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
+        className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}${archived ? ' area-thumb-archived' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
         data-area={ar.area_id}
         /* A pin stops its own click (FloorPin), so a click that reaches here is the area's. */
         onClick={() => toggleArea(ar.area_id)}
       >
         <div className="area-thumb-header">
-          {/* The one dot that goes red: an alert against a device here outranks the rollup. */}
-          <span className={`tile-dot tile-dot-${state.pin}`} title={STATUS_LABEL[state.pin]} />
+          {/* The one dot that goes red: an alert against a device here outranks the rollup. An
+              archived area shows the archive glyph where the dot would be. */}
+          {archived
+            ? <IconArchive size={12} style={{ color: 'var(--warning-text)', flexShrink: 0 }} title="Archived" />
+            : <span className={`tile-dot tile-dot-${state.pin}`} title={STATUS_LABEL[state.pin]} />}
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
           <button
             type="button"
@@ -361,10 +368,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             /* Stopped, or the card behind it toggles the panel straight back shut. */
             onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
             aria-pressed={selectedAreaId === ar.area_id}
-            title={`${ar.area_name} — ${STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
+            title={`${ar.area_name} — ${archived ? 'archived' : STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
           >
             {ar.area_name}
           </button>
+          {archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
           {/* What the area IS, for the areas that say. Only when there is one: a bare "?" on every
               area without a description would be a question mark that answers nothing. The name's
               own title carries the status, which is a different fact and changes on its own. */}

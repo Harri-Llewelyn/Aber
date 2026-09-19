@@ -1,11 +1,14 @@
 /**
- * AAS export: emit an Asset Administration Shell (IEC 63278) V3 document for one device, as JSON or
- * as an `.aasx` package. An adapter, not a migration: the database keeps its own shape and this
- * projects it on the way out. The mapping lives in `../_shared/aas/shell.ts`, shared with `aas-api`
- * so the two cannot describe the same machine differently; what remains here is the role ladder,
- * the OPC packaging, and what to do when a bundled model cannot be reached. The caller's JWT
- * resolves their role, and the service-role client is used only after that check; `aas-api`
- * deliberately does not hold that key.
+ * AAS export: emit an Asset Administration Shell (IEC 63278) V3 document for one device, as JSON,
+ * as an `.aasx` package, or as a `bundle` -- the same `.aasx` with the device's digital thread, the
+ * telemetry still in the live historian and a manifest naming the cold objects added as
+ * supplementary parts, stored beside the cold tier and recorded in `asset_exports`. An adapter,
+ * not a migration: the database keeps its own shape and this projects it on the way out. The
+ * mapping lives in `../_shared/aas/shell.ts`, shared with `aas-api` so the two cannot describe the
+ * same machine differently, and the bundle's parts in `../_shared/aas/bundle.ts`; what remains
+ * here is the role ladder, the OPC packaging, and what to do when a bundled model cannot be
+ * reached. The caller's JWT resolves their role, and the service-role client is used only after
+ * that check; `aas-api` deliberately does not hold that key.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -13,6 +16,24 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
 import { modelContentType } from "../_shared/aas/model3dContentType.ts";
+import {
+  BUNDLE_PARTS,
+  DEFAULT_MAX_TELEMETRY_ROWS,
+  DEFAULT_MAX_THREAD_ROWS,
+  EXPORT_CONTENT_TYPE,
+  HOURLY_COLUMNS,
+  RAW_COLUMNS,
+  boundedInt,
+  buildBundleManifest,
+  csvOf,
+  exportObjectKey,
+  loadColdObjects,
+  loadExportBucket,
+  loadHorizons,
+  loadTelemetry,
+  loadThread,
+  sha256Hex,
+} from "../_shared/aas/bundle.ts";
 import {
   buildEnvironment,
   loadDeviceRecord,
@@ -165,8 +186,8 @@ export default async function handler(req: Request): Promise<Response> {
       new URL(req.url).searchParams.get("format") ?? body.format ?? "json",
     ).toLowerCase();
 
-    if (requestedFormat !== "json" && requestedFormat !== "aasx") {
-      return json({ error: "format must be 'json' or 'aasx'" }, 400);
+    if (requestedFormat !== "json" && requestedFormat !== "aasx" && requestedFormat !== "bundle") {
+      return json({ error: "format must be 'json', 'aasx' or 'bundle'" }, 400);
     }
     const format = requestedFormat;
 
@@ -179,8 +200,10 @@ export default async function handler(req: Request): Promise<Response> {
     const { environment, stats, modelPath, modelUrl } = buildEnvironment(record);
 
     // ---- AASX packaging (Open Packaging Conventions / ISO 29500) ------------------------------
-    if (format === "aasx") {
-      const filename = `${toIdShort(String(device.name ?? ""), "device")}.aasx`;
+    // A bundle is an AASX with more supplements, so it takes this branch and adds its parts below.
+    if (format === "aasx" || format === "bundle") {
+      const idShort = toIdShort(String(device.name ?? ""), "device");
+      const filename = format === "bundle" ? `${idShort}-bundle.aasx` : `${idShort}.aasx`;
       const supplements: SupplementaryFile[] = [];
       let bundled3dModel = false;
 
@@ -243,15 +266,129 @@ export default async function handler(req: Request): Promise<Response> {
         }, 500);
       }
 
-      return new Response(buildAasxPackage(environment, supplements), {
+      if (format === "aasx") {
+        return new Response(buildAasxPackage(environment, supplements), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": AASX_MEDIA_TYPE,
+            "Content-Disposition": `attachment; filename="${filename}"`,
+            // Read by the browser so the UI can report the same counts the JSON path returns in
+            // its body -- a binary response has nowhere else to carry them.
+            "X-AAS-Stats": JSON.stringify({ ...stats, bundled_3d_model: bundled3dModel }),
+            "Access-Control-Expose-Headers": "X-AAS-Stats, Content-Disposition",
+          },
+        });
+      }
+
+      // ---- The bundle: the parts, the manifest, the stored copy ------------------------------
+      const takenAt = new Date().toISOString();
+      const caps = {
+        telemetry: boundedInt(Deno.env.get("ASSET_EXPORT_MAX_TELEMETRY_ROWS"), DEFAULT_MAX_TELEMETRY_ROWS),
+        thread: boundedInt(Deno.env.get("ASSET_EXPORT_MAX_THREAD_ROWS"), DEFAULT_MAX_THREAD_ROWS),
+      };
+      const sparkplugId = String(device.sparkplug_id ?? "");
+
+      // One historian scan at a time: concurrent range scans over the FDW are the load pattern
+      // the telemetry export dialog avoids too. The thread and the horizons are the platform's
+      // own tables and run together.
+      const raw = await loadTelemetry(supabaseAdmin, "telemetry", sparkplugId, caps.telemetry);
+      const hourly = await loadTelemetry(supabaseAdmin, "telemetry_1h", sparkplugId, caps.telemetry);
+      const [thread, horizons] = await Promise.all([
+        loadThread(supabaseAdmin, String(device.id), caps.thread),
+        loadHorizons(supabaseAdmin).catch((err) => {
+          console.warn(`[aas-export] horizons unavailable for the bundle: ${err instanceof Error ? err.message : String(err)}`);
+          return {} as Record<string, string | null>;
+        }),
+      ]);
+      // As the caller, so the manifest lists what this person may know exists.
+      const cold = await loadColdObjects(supabaseUser, (device.created_at as string | null) ?? null, takenAt);
+
+      const manifest = buildBundleManifest({
+        takenAt,
+        takenBy: { id: user.id, email: user.email ?? null },
+        device,
+        gateway: record.gateway,
+        caps,
+        raw,
+        hourly,
+        thread,
+        horizons,
+        cold,
+        bundled3dModel,
+      });
+
+      // Oldest first in the files, as a history reads; the loaders page newest first so a cap
+      // keeps the most recent rows.
+      supplements.push(
+        { part: BUNDLE_PARTS.thread, bytes: strToU8(JSON.stringify(thread.rows, null, 2)), contentType: "application/json" },
+        { part: BUNDLE_PARTS.raw, bytes: strToU8(csvOf([...raw.rows].reverse(), RAW_COLUMNS)), contentType: "text/csv" },
+        { part: BUNDLE_PARTS.hourly, bytes: strToU8(csvOf([...hourly.rows].reverse(), HOURLY_COLUMNS)), contentType: "text/csv" },
+        { part: BUNDLE_PARTS.manifest, bytes: strToU8(JSON.stringify(manifest, null, 2)), contentType: "application/json" },
+      );
+      const bytes = buildAasxPackage(environment, supplements);
+
+      // The stored copy is what a tombstone can point at once the row is gone; the download is
+      // what the caller asked for. A failure to store is reported in the header and the download
+      // still happens -- the caller holds the only copy then, and the stats say so.
+      const bucket = await loadExportBucket(supabaseAdmin);
+      const objectKey = exportObjectKey(sparkplugId || String(device.id), takenAt);
+      const stored: Record<string, unknown> = { bucket, object_key: objectKey, stored: false };
+      const bundleStats = {
+        raw_rows: raw.rows.length,
+        hourly_rows: hourly.rows.length,
+        thread_rows: thread.rows.length,
+        cold_objects: cold.objects.length,
+        truncated: raw.truncated || hourly.truncated || thread.truncated,
+        not_included: manifest.not_included,
+      };
+      try {
+        const digest = await sha256Hex(bytes);
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from(bucket)
+          .upload(objectKey, bytes, { contentType: EXPORT_CONTENT_TYPE, upsert: false });
+        if (uploadError) throw new Error(uploadError.message);
+
+        const { data: row, error: rowError } = await supabaseAdmin
+          .from("asset_exports")
+          .insert({
+            entity_type: "devices",
+            entity_id: device.id,
+            name: device.name,
+            sparkplug_id: sparkplugId || null,
+            format: "aasx",
+            object_bucket: bucket,
+            object_key: objectKey,
+            object_bytes: bytes.byteLength,
+            sha256: digest,
+            stats: bundleStats,
+            taken_at: takenAt,
+            taken_by: user.id,
+            taken_by_email: user.email ?? null,
+          })
+          .select("id")
+          .single();
+        if (rowError) throw new Error(rowError.message);
+
+        stored.stored = true;
+        stored.export_id = row.id;
+        stored.sha256 = digest;
+      } catch (err) {
+        stored.reason = err instanceof Error ? err.message : String(err);
+        console.error(`[aas-export] bundle for ${device.id} was not stored: ${stored.reason}`);
+      }
+
+      return new Response(bytes, {
         status: 200,
         headers: {
           ...corsHeaders,
           "Content-Type": AASX_MEDIA_TYPE,
           "Content-Disposition": `attachment; filename="${filename}"`,
-          // Read by the browser so the UI can report the same counts the JSON path returns in its
-          // body -- a binary response has nowhere else to carry them.
-          "X-AAS-Stats": JSON.stringify({ ...stats, bundled_3d_model: bundled3dModel }),
+          "X-AAS-Stats": JSON.stringify({
+            ...stats,
+            bundled_3d_model: bundled3dModel,
+            bundle: { ...bundleStats, ...stored, taken_at: takenAt },
+          }),
           "Access-Control-Expose-Headers": "X-AAS-Stats, Content-Disposition",
         },
       });

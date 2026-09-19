@@ -368,6 +368,22 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(clean.querySelector('.area-thumb-aside')).toBeNull()
   })
 
+  it('keeps drawing an archived area, muted, with its plan and its pins', async () => {
+    /* Archiving moves nothing beneath the area: its cells stay filed in it and its topics keep its
+       name, so a card that vanished would misplace what is still under it. The dot gives way to
+       the archive glyph, the way an archived cell's pin does. */
+    api.get.mockImplementation(routeGet({ areas: [{ ...areaA, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }, areaB] }))
+    await renderSiteMap()
+    const card = screen.getByRole('button', { name: 'Building A' }).closest('.area-thumb')
+    expect(card).toHaveClass('area-thumb-archived')
+    expect(within(card).getByText('ARCHIVED')).toBeInTheDocument()
+    expect(card.querySelector('.area-thumb-header .tile-dot')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Building A' })).toHaveAttribute('title', expect.stringMatching(/archived/))
+    expect(pinNames()).toEqual(expect.arrayContaining(['Bay 1', 'Bay 2']))
+    // The one beside it is untouched.
+    expect(screen.getByRole('button', { name: 'Building B' }).closest('.area-thumb')).not.toHaveClass('area-thumb-archived')
+  })
+
   it('draws the uploaded plan where there is one, and the default outline where there is not', async () => {
     await renderSiteMap()
     expect(thumbs()[0].querySelector('.floor-plan').getAttribute('data-plan')).toBe('uploaded')
@@ -439,19 +455,33 @@ describe('AreasTab files cells into areas', () => {
     )
   })
 
-  it('deletes an area only once its name has been typed', async () => {
-    api.delete.mockResolvedValue(true)
+  /* An area archives the way a cell does: the same dialog, the same timer, and the row leaves the
+     table for the Archived Entities page, which is the only place it can be deleted from. */
+  it('archives an area through the shared dialog rather than deleting it from here', async () => {
+    api.post.mockResolvedValue({})
     await renderAreas()
     fireEvent.click(screen.getByText('Building B'))
-    fireEvent.click(screen.getByRole('button', { name: /Delete Area/ }))
+    expect(screen.queryByRole('button', { name: /Delete Area/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Archive Area/ }))
     const dialog = document.querySelector('.modal')
-    expect(within(dialog).getByText(/Delete area 'Building B'\?/)).toBeInTheDocument()
-    const confirm = within(dialog).getByRole('button', { name: 'Delete area' })
-    expect(confirm).toBeDisabled()
-    fireEvent.change(within(dialog).getByLabelText(/Type the area name to confirm/), { target: { value: 'Building B' } })
-    expect(confirm).not.toBeDisabled()
-    await act(async () => { fireEvent.click(confirm) })
-    expect(api.delete).toHaveBeenCalledWith('/api/v1/areas/area-b')
+    expect(within(dialog).getByText('Building B')).toBeInTheDocument()
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: /Archive & Set Timer/ })) })
+    expect(api.post).toHaveBeenCalledWith('/api/v1/areas/area-b/archive', { auto_delete_days: 30 })
+    expect(api.delete).not.toHaveBeenCalled()
+  })
+
+  it('hides an archived area behind the lifecycle filter, and offers Restore on it', async () => {
+    api.post.mockResolvedValue({})
+    api.get.mockImplementation(routeGet({ areas: [areaA, { ...areaB, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }] }))
+    await renderAreas()
+    // Active by default, as the Cells page filters: an archived area is not a place to file into.
+    expect(screen.queryByText('Building B')).toBeNull()
+    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'archived' } })
+    const row = rowFor('Building B')
+    expect(within(row).getByText('ARCHIVED')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Building B'))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Restore Area/ })) })
+    expect(api.post).toHaveBeenCalledWith('/api/v1/areas/area-b/restore', {})
   })
 
   it('says whether an area carries a plan, and how many of its cells sit on it', async () => {

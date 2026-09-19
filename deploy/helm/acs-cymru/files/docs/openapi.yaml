@@ -1904,6 +1904,99 @@ paths:
         '204': { description: Deleted. }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /rest/v1/retired_entities:
+    get:
+      tags: [Registry]
+      summary: The tombstones of archived entities that have since been deleted
+      description: |
+        One row per area, cell, gateway or device that was **archived and then deleted**, by its
+        retention timer or by hand, written by an `AFTER DELETE` trigger on each of the four tables
+        as the row goes (`0124`). A delete that skipped the archive stage leaves no row here: it is
+        still on the digital thread, but it is not a retirement.
+
+        The row carries what the entity was called, the `sparkplug_id` its readings are still keyed
+        by in the historian, when it was archived and retired, who retired it (`retired_by` is null
+        when the timer did), the id of the thread's `DELETE` row, and `old_data`, the whole row as
+        it was. It is the Archived Entities page's second card, where each row links to what
+        survives it: the digital thread, a gateway's repository in the forge, and any bundle in
+        `asset_exports`.
+
+        **Read-only for every role.** No write policy exists; the trigger writes as definer.
+        Readable by any role holding `archive:manage` or `digital_thread:read`.
+      parameters:
+        - { name: entity_type, in: query, schema: { type: string, enum: [areas, cells, gateways, devices] }, description: 'e.g. `eq.devices`' }
+        - { name: entity_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Tombstones, newest first when ordered by `retired_at`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    entity_type: { type: string, enum: [areas, cells, gateways, devices] }
+                    entity_id: { type: string, format: uuid }
+                    name: { type: string, nullable: true }
+                    sparkplug_id: { type: string, nullable: true, description: 'The historian key; null for an area or a cell.' }
+                    archived_at: { type: string, format: date-time, nullable: true }
+                    retired_at: { type: string, format: date-time }
+                    retired_by: { type: string, format: uuid, nullable: true, description: 'Null when the retention job deleted it.' }
+                    retired_by_email: { type: string, nullable: true }
+                    thread_id: { type: integer, nullable: true, description: 'The digital thread row that recorded the DELETE.' }
+                    old_data: { type: object, description: 'The row as it was.' }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/asset_exports:
+    get:
+      tags: [Registry]
+      summary: The bundles taken of devices, stored beside the cold tier
+      description: |
+        One row per `aas-export?format=bundle` that was stored (`0124`): which device, where the
+        copy is (`object_bucket`, `object_key`, in the cold tier's bucket under `assets/`), its
+        size and SHA-256, the counts the bundle's manifest reported, and who took it. The row
+        outlives the device, which is the point: the Archived Entities page offers the download
+        from a tombstone. The object itself is fetched with the ordinary Storage API, through a
+        signed URL.
+
+        **Read-only for every role**, and readable by the three roles the bucket's read policy
+        admits: `Administrator`, `Shopfloor_Manager` and `Auditor`. The row is written by the
+        function with the service role; its insert is recorded on the digital thread as `EXPORTED`.
+        It is **not** a row in `telemetry_archive_manifest`: that catalogue is keyed by chunk and
+        exists to make dropping a chunk safe, and a per-asset bundle has no chunk.
+      parameters:
+        - { name: entity_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Stored bundles visible to the caller.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    entity_type: { type: string, enum: [devices] }
+                    entity_id: { type: string, format: uuid }
+                    name: { type: string, nullable: true }
+                    sparkplug_id: { type: string, nullable: true }
+                    format: { type: string, enum: [aasx] }
+                    object_bucket: { type: string }
+                    object_key: { type: string }
+                    object_bytes: { type: integer, nullable: true }
+                    sha256: { type: string, nullable: true }
+                    stats: { type: object, description: 'The counts the manifest reported: raw, hourly and thread rows, cold objects named, whether a cap was hit.' }
+                    taken_at: { type: string, format: date-time }
+                    taken_by: { type: string, format: uuid, nullable: true }
+                    taken_by_email: { type: string, nullable: true }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
   /rest/v1/directory_services:
     get:
       tags: [Registry]
@@ -2629,14 +2722,24 @@ paths:
         byte-identical to the JSON export, except that a bundled 3D model's `File.value` is
         rewritten to the part name.
 
+        `?format=bundle` returns the same AASX with the device's history inside, for taking an
+        asset away before it is taken out of service: supplementary parts under
+        `aasx/files/acs-cymru/` hold the digital thread (JSON), the readings still in the live
+        historian at raw and hourly resolution (CSV, oldest first, capped newest-first), and a
+        manifest (`acs-cymru/asset-bundle/1`) that says what each part holds, where it was cut,
+        and which cold-tier objects hold the rest — named, never read back. A copy is stored in the
+        cold tier's bucket under `assets/<sparkplug_id>/<stamp>.aasx` and recorded in
+        `asset_exports`; `X-AAS-Stats.bundle` says whether that copy was stored, and the file is
+        returned either way.
+
         > **A browser cannot fetch AASX through `functions.invoke()`.** supabase-js decodes
         > anything that is not JSON or octet-stream as *text*, which corrupts a ZIP. Build the
         > request yourself and ask for a Blob; the counts ride back in `X-AAS-Stats`.
       parameters:
         - name: format
           in: query
-          schema: { type: string, enum: [json, aasx], default: json }
-          description: 'May also be sent in the body. `aasx` returns a ZIP.'
+          schema: { type: string, enum: [json, aasx, bundle], default: json }
+          description: 'May also be sent in the body. `aasx` returns a ZIP; `bundle` returns that ZIP with the history parts and stores a copy.'
       requestBody:
         required: true
         content:
@@ -2646,14 +2749,14 @@ paths:
               required: [device_id]
               properties:
                 device_id: { type: string, format: uuid }
-                format: { type: string, enum: [json, aasx] }
+                format: { type: string, enum: [json, aasx, bundle] }
       responses:
         '200':
-          description: The AAS Environment, or an AASX package.
+          description: The AAS Environment, an AASX package, or the bundle.
           headers:
             X-AAS-Stats:
               schema: { type: string }
-              description: 'JSON counts (submodels, elements, unmapped semantic ids) — the only channel a binary body leaves for them.'
+              description: 'JSON counts (submodels, elements, unmapped semantic ids) — the only channel a binary body leaves for them. For `bundle`, a `bundle` object with the row counts of each part, `truncated`, `not_included`, and `stored` with the `bucket`, `object_key`, `sha256` and `export_id` of the copy, or `reason` when it was not stored.'
           content:
             application/json:
               schema:

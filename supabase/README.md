@@ -3241,6 +3241,73 @@ Readable by `authenticated` with no per-row policy, because it carries no metric
 identity: four relation names and four timestamps. Retention is a property of the chunk rather than
 of a device, so there is nothing to filter by either.
 
+### Archiving is a lifecycle rather than a flag (`0124`)
+
+**Archiving was one flag, a timestamp and a timer, and an area could not be archived at all.** A
+cell's archive set the flag and nothing else; a device's stopped its readings and set the flag;
+only a gateway's meant anything further, and that half is above. Underneath, nothing heard: the
+replay lane a device had been given stayed live on the playback gateway, deleting the original left
+that lane standing in for nothing (`shadow_of` is `ON DELETE SET NULL`, which `0083` tolerates
+deliberately), and deleting anything removed it from the Archived Entities page entirely, which was
+the one act the page could not account for. `0124` makes the four missing pieces one lifecycle:
+archived, then retired, with the record's history and identifiers surviving both.
+
+**Areas archive like everything else.** The three columns, the same dialog, and a fourth `DELETE`
+in `purge_expired_archives`, **areas last and only those nothing names**: the job is one
+transaction, and an area-wide device or gateway still pointing at an area would abort the whole
+pass, so the DELETE carries a `NOT EXISTS` guard over both and the area waits for the asset to be
+moved. **An archived area moves nothing beneath it**, which was the first question the entry asked:
+`areas.name` is a segment of every `uns/` topic under it, and `device_locations` never consults
+`is_archived`, so the cells stay filed and the topics keep their name, exactly as an archived cell
+behaves. The Site Map keeps drawing its plan, muted, with the archive glyph where the status dot
+was, because a card that vanished would misplace what is still under it. The Areas page offers
+Archive and Restore where it offered Delete; deleting an area is done from Archived Entities, like
+every other type. `validate_change_proposal()` gains the `is_archived` test on its areas arm
+that `0123` could not write because the column did not exist.
+
+**A shadow follows its original.** One function, `shadow_follows_its_original()`, attached twice:
+`AFTER UPDATE OF is_archived` copies the flag, the timestamp and the timer to every lane whose
+`shadow_of` is the device, and `BEFORE DELETE` deletes the lanes first, so a restored machine
+gets its lane back and a deleted one takes it along. The FK stays `SET NULL` and `0083`'s gate
+stays silent about a lane already orphaned: a lane whose original went before `0124`, or whose
+`shadow_of` was cleared by hand, is still a legal state, and the suite for `0083` now asserts the
+orphan is *edited* rather than *made* by a delete.
+
+**A tombstone is written on the way out, not derived later.** The digital thread's `DELETE` row
+carries the whole row as `old_data`, but the thread is month-partitioned for an eventual
+`DETACH` that would take the oldest tombstones with it, so `retired_entities` is a small table of
+its own: type, id, the name and `sparkplug_id` the row had, when it was archived and retired, who
+retired it (nobody, when the timer did), the id of the thread's `DELETE` row, and `old_data`.
+`record_retired_entity()` writes it from an `AFTER DELETE` trigger on all four tables **and only
+for a row that was archived**: a delete that skipped the archive stage is still recorded by the
+thread, but it is not a retirement. Readable by `archive:manage` or `digital_thread:read`; no
+write policy exists, and the trigger runs as definer. The Archived Entities page gains its second
+card from this table, and each tombstone links to what survives it: the digital thread (opened with
+deleted entities shown), a gateway's repository in the forge (derived from the id as everywhere
+else; `0114` archived it and nothing deletes it), any bundle exported while the device was alive,
+and the historian id its readings are still keyed by. The vocabulary stayed in the UI: the first
+card is *Archived* and the second *Retired*, and no column was added to say so.
+
+**An asset can be taken away before it is taken out of service.** `aas-export?format=bundle`
+returns the same AASX as `format=aasx`, the same Environment and OPC chain, with supplementary
+parts under `aasx/files/acs-cymru/`: the device's digital thread as JSON, the readings still in
+the live historian at raw and hourly resolution as CSV, and a manifest
+(`acs-cymru/asset-bundle/1`) that says what each part holds, where it was cut, and which cold-tier
+objects hold what the live historian no longer does. **The bundle states rather than reaches for.**
+Cold telemetry keeps its no-read-back rule, so the manifest names the objects whose range overlaps
+the device's life and fetches none of them; both telemetry parts are capped, newest first
+(`ASSET_EXPORT_MAX_TELEMETRY_ROWS`, `ASSET_EXPORT_MAX_THREAD_ROWS`, defaults in the function),
+and a cap that was hit is a sentence under `not_included` rather than a silent tail. The hourly
+rollup is included because it reaches years further back than raw (`0111`); the minute rollups
+are not, and the manifest says so. A copy is stored in the cold tier's bucket under
+`assets/<sparkplug_id>/<stamp>.aasx` and recorded in `asset_exports` with its SHA-256, so a
+tombstone can still offer the download; it is **not** a row in the cold manifest, which is keyed by
+chunk and exists to make dropping a chunk safe, and a per-asset bundle has no chunk. A storage
+failure does not fail the export: the file is still returned, the response says it was not stored,
+and the page says to keep the file. Every export is an `EXPORTED` row on the thread, written by a
+trigger on the insert. Readable by the three roles the bucket admits (Administrator,
+Shopfloor_Manager, Auditor), and the export itself is offered to `archive:manage`.
+
 ### The platform playbook is published by the sweep
 
 [`forge/gateway-platform/`](../forge/gateway-platform) is the playbook every appliance converges to

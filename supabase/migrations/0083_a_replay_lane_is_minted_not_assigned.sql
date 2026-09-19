@@ -12,6 +12,8 @@
 -- has `shadow_of IS NULL`, and the FK reaches that state by an UPDATE that fires triggers. The
 -- invariant is about the act: INSERT and an UPDATE that changes gateway_id are checked; an UPDATE
 -- that leaves it alone is not. Arriving on the lane is minted by ensure_shadow_devices().
+-- Since 0124 a lane is deleted with its original (shadow_follows_its_original(), BEFORE DELETE),
+-- so the FK's SET NULL is reached only by a lane whose original went before that, or by hand.
 --
 -- A trigger, not a CHECK: a CHECK cannot see `gateways.is_shadow`, and a denormalised copy of
 -- the flag is forbidden. The pickers are fixed too, but `devices` is writable through PostgREST

@@ -18,13 +18,14 @@ import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { HelpTip } from '../common/HelpTip'
 import { AreaPlanPanel } from '../common/AreaPlanPanel'
-import { ConfirmModal } from '../modals/ConfirmModal'
+import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconFactory,
   IconPlus,
   IconPencil,
-  IconTrash,
+  IconArchive,
+  IconRefreshCw,
   IconHistory,
   IconBookOpen,
   IconShieldAlert,
@@ -57,7 +58,11 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   const blank = { area_name: '', description: '', icon: DEFAULT_AREA_ICON }
   const [formVal, setFormVal]   = useState(blank)
-  const [deleteTarget, setDeleteTarget] = useState(null)
+  // Archive, never delete, from this page: the delete is the Archived Entities page's, as it is
+  // for cells, gateways and devices. Archived areas are filtered out of the table by default and
+  // shown, muted, under their own filter.
+  const [archiveTarget, setArchiveTarget] = useState(null)
+  const [filterMode, setFilterMode] = useState('active')
   const [searchQuery, setSearchQuery] = useState(() => {
     const params = new URLSearchParams(window.location.search)
     return params.get('search') || initialSearchFilter || ''
@@ -110,6 +115,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [saving, runSave] = usePendingAction()
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
+  const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
   const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
@@ -147,11 +153,24 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
     } catch (e) { showToast(e.message, 'error') }
   }
 
-  const deleteArea = async () => {
+  /**
+   * Archiving an area moves nothing: its cells stay filed in it and every uns/ topic beneath it
+   * keeps its name. It leaves this table, is drawn muted on the Site Map, and runs its timer on the
+   * Archived Entities page, which is where deleting it lives.
+   */
+  const archiveArea = async (days) => {
     try {
-      await api.delete(`/api/v1/areas/${deleteTarget.area_id}`)
-      setDeleteTarget(null); setSelectedId(null); loadAll()
-      showToast(`Area '${deleteTarget.area_name}' deleted — its cells are unfiled`, 'success')
+      await api.post(`/api/v1/areas/${archiveTarget.area_id}/archive`, { auto_delete_days: days })
+      // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
+      setArchiveTarget(null); setSelectedId(null); loadAll()
+      showToast(`Area '${archiveTarget.area_name}' archived (Out of Commission)`, 'success')
+    } catch (e) { showToast(e.message, 'error') }
+  }
+
+  const restoreArea = async (area) => {
+    try {
+      await api.post(`/api/v1/areas/${area.area_id}/restore`, {})
+      loadAll(); showToast(`Area '${area.area_name}' restored to active service`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -192,18 +211,23 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const areaWideGateways = (areaId) => gateways.filter(g => g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
 
   const filteredAreas = areas.filter(a => {
+    if (filterMode === 'active'   && a.is_archived) return false
+    if (filterMode === 'archived' && !a.is_archived) return false
     if (!searchQuery) return true
     const q = searchQuery.toLowerCase()
     return String(a.area_id).toLowerCase().includes(q) || a.area_name.toLowerCase().includes(q)
   })
 
-  useArrivalSelection(searchQuery, areas, (a, term) => a.area_id === term, (a) => setSelectedId(a.area_id))
+  // An arrival by id opens the area whatever its state, so a link to an archived one still lands.
+  useArrivalSelection(searchQuery, areas, (a, term) => a.area_id === term, (a) => {
+    if (a.is_archived) setFilterMode('all')
+    setSelectedId(a.area_id)
+  })
 
   const selectedArea = areas.find(a => a.area_id === selectedId) || null
   const selectedCells = selectedArea ? (cellsByArea.get(selectedArea.area_id) || []) : []
   const selectedWideDevices = selectedArea ? areaWideDevices(selectedArea.area_id) : []
   const selectedWideGateways = selectedArea ? areaWideGateways(selectedArea.area_id) : []
-  const selectedBlocksDelete = selectedWideDevices.length + selectedWideGateways.length > 0
 
   const cellChip = (c) => (
     <span
@@ -266,6 +290,19 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
         <div className="card-body">
           <div className="filter-bar">
+            {/* Lifecycle is a filter like the rest, as it is on the Cells page; the counts are in
+                the option labels. */}
+            <select
+              className="form-control"
+              style={{ width: '150px' }}
+              value={filterMode}
+              onChange={e => setFilterMode(e.target.value)}
+              title="Filter by lifecycle state"
+            >
+              <option value="all">All ({areas.length})</option>
+              <option value="active">Active ({areas.filter(a => !a.is_archived).length})</option>
+              <option value="archived">Archived ({areas.filter(a => a.is_archived).length})</option>
+            </select>
             <input
               className="form-control"
               style={{ width: '220px' }}
@@ -297,7 +334,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             <div className="empty-text">
               {areas.length === 0
                 ? 'No areas yet. Add one, then file the cells into it.'
-                : 'No areas match the search.'}
+                : 'No areas match the filters.'}
             </div>
           </div>
         ) : (
@@ -321,6 +358,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                     <tr
                       key={a.area_id}
                       className={`row-selectable${selectedId === a.area_id ? ' row-selected' : ''}`}
+                      style={{ background: a.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
                       onClick={rowSelectHandler(() => setSelectedId(id => id === a.area_id ? null : a.area_id))}
                       onDragOver={handleDragOver}
                       onDrop={e => handleDrop(e, a.area_id)}
@@ -329,6 +367,11 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                       <td className="cell-icon-col"><AreaIcon area={a} size={16} /></td>
                       <td>
                         <strong>{a.area_name}</strong>
+                        {a.is_archived && (
+                          <span className="badge badge-warning" style={{ marginLeft: '8px', fontSize: '11px' }} title="Archived: out of commission, its cells still filed here, its topics unchanged">
+                            <IconArchive size={11} /> ARCHIVED
+                          </span>
+                        )}
                         {a.description && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{a.description}</div>}
                       </td>
                       <td>
@@ -433,15 +476,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         </div>
       )}
 
-      {deleteTarget && (
-        <ConfirmModal
-          message={`Delete area '${deleteTarget.area_name}'? Its cells are kept and become unfiled; its floor plan is deleted.`}
-          requireTyped={deleteTarget.area_name}
-          requireTypedLabel="area name"
-          confirmLabel="Delete area"
-          pendingLabel="Deleting…"
-          onConfirm={deleteArea}
-          onCancel={() => setDeleteTarget(null)}
+      {archiveTarget && (
+        <ArchiveModal
+          entityType="areas" entityId={archiveTarget.area_id} displayName={archiveTarget.area_name}
+          onArchive={archiveArea} onCancel={() => setArchiveTarget(null)}
         />
       )}
 
@@ -539,17 +577,24 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             onClick: () => setDocsForArea(selectedArea),
             title: 'Attach or edit links for this area — documents, a site plan, any URL'
           },
-          {
-            label: 'Delete Area', icon: <IconTrash size={13} />,
-            onClick: () => setDeleteTarget(selectedArea),
-            disabled: !canManage || selectedBlocksDelete,
-            danger: true,
-            title: !canManage
-              ? 'Requires Admin permissions'
-              : selectedBlocksDelete
-                ? 'An Area-Wide asset names this area; move it first'
-                : 'Delete this area. Its cells become unfiled.'
-          }
+          // Archive or Restore, never both: the two are mutually exclusive states of the same row.
+          // The delete is the Archived Entities page's, where it is typed back and irreversible.
+          selectedArea.is_archived
+            ? {
+              label: 'Restore Area', icon: <IconRefreshCw size={13} />,
+              onClick: () => restoreArea(selectedArea),
+              disabled: !canArchive,
+              title: !canArchive ? 'Requires Admin permissions' : 'Return this area to service; its retention timer is cleared'
+            }
+            : {
+              label: 'Archive Area', icon: <IconArchive size={13} />,
+              onClick: () => setArchiveTarget(selectedArea),
+              disabled: !canArchive,
+              danger: true,
+              title: !canArchive
+                ? 'Requires Admin permissions'
+                : 'Take this area out of commission. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
+            }
         ].filter(Boolean) : []}
       >
         {selectedArea && (

@@ -49,14 +49,14 @@ const threadUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.include
 describe('the action filter offers every action the database can record', () => {
   /* Several of these are not written by the generic audit trigger. Spelled out rather than derived,
      so adding one is a deliberate edit; the test below proves the list cannot drift from the enum. */
-  it('lists every action, including the sixteen the generic trigger does not write', async () => {
+  it('lists every action, including the seventeen the generic trigger does not write', async () => {
     await show()
     const values = [...filter().querySelectorAll('option')].map(o => o.value)
 
     // Pinned in order as well as by membership, because this select is what a reader scans.
     expect(values).toEqual([
       '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'ROLE_GRANTED', 'ROLE_REVOKED',
+      'TOKEN_REVOKED', 'PROPOSAL_APPLIED', 'EXPORTED', 'PROPOSAL_EXPIRED', 'ROLE_GRANTED', 'ROLE_REVOKED',
       'FLOW_DEPLOYED', 'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN',
       'BACKUP_FAILED', 'BACKUP_PRUNED'
     ])

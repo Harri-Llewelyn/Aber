@@ -2439,6 +2439,12 @@ SELECT public.ensure_cron_job(
 -- the next". No FK in this chain restricts, so no delete here has ever failed: gateways.cell_id
 -- was ON DELETE CASCADE and a cell's timer took its gateways with it, Permanent Retention and
 -- all. 0112 is what makes the paragraph above true.
+--
+-- AREAS LAST, AND ONLY THOSE NOTHING NAMES. `devices.area_id` and `gateways.area_id` have no
+-- ON DELETE action (0097): an Area-Wide asset's area cannot be deleted until the asset moves. A
+-- refused DELETE would abort the whole job -- one transaction -- and take the three deletes above
+-- with it, so such an area is skipped this run and stays on the Archived Entities page, which says
+-- why. 0124 gave areas the three columns and asserts this job names them after cells.
 SELECT public.ensure_cron_job(
   'purge_expired_archives',
   '30 3 * * *',
@@ -2449,6 +2455,10 @@ SELECT public.ensure_cron_job(
       WHERE is_archived AND auto_delete_at IS NOT NULL AND auto_delete_at <= NOW();
     DELETE FROM public.cells
       WHERE is_archived AND auto_delete_at IS NOT NULL AND auto_delete_at <= NOW();
+    DELETE FROM public.areas a
+      WHERE a.is_archived AND a.auto_delete_at IS NOT NULL AND a.auto_delete_at <= NOW()
+        AND NOT EXISTS (SELECT 1 FROM public.devices d WHERE d.area_id = a.id)
+        AND NOT EXISTS (SELECT 1 FROM public.gateways g WHERE g.area_id = a.id);
   $job$
 );
 
