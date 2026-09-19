@@ -9,6 +9,7 @@ vi.mock('../lib/supabaseClient', () => {
     update: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    in: vi.fn().mockReturnThis(),
     gte: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
@@ -20,6 +21,8 @@ vi.mock('../lib/supabaseClient', () => {
   };
 
   return {
+    SUPABASE_URL: 'http://stack.test',
+    SUPABASE_GATEWAY_KEY: 'sb_publishable_test',
     supabase: {
       from: vi.fn(() => mockQueryBuilder),
       // '/api/v1/digital-thread' is served by the digital_thread_page RPC. This path only has to
@@ -31,14 +34,29 @@ vi.mock('../lib/supabaseClient', () => {
       // so the mock needs this surface too.
       functions: {
         invoke: vi.fn().mockResolvedValue({ data: {}, error: null })
+      },
+      // '/api/v1/devices/asset-export' fetches the Edge Function directly (a ZIP must not pass
+      // through invoke's text decoding), with the session's token when there is one.
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: null } })
       }
     }
   };
 });
 
+// The direct fetch above, answered with an empty bundle.
+vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+  ok: true, status: 200,
+  headers: { get: () => null },
+  blob: async () => new Blob([]),
+  json: async () => ({})
+}));
+
 describe('API Path Coverage Test', () => {
   const getPaths = [
     '/api/v1/archives',
+    '/api/v1/archives/retired',
+    '/api/v1/archives/exports',
     '/api/v1/cells',
     '/api/v1/gateways',
     '/api/v1/devices',
@@ -68,8 +86,11 @@ describe('API Path Coverage Test', () => {
     '/api/v1/devices',
     '/api/v1/cells/cell-123/archive',
     '/api/v1/cells/cell-123/restore',
+    '/api/v1/areas/area-123/archive',
+    '/api/v1/areas/area-123/restore',
     '/api/v1/quarantine/dev-123/reject',
     '/api/v1/devices/aas-export',
+    '/api/v1/devices/asset-export',
     '/api/v1/links',
     '/api/v1/schemas/validate',
     '/api/v1/schemas'
@@ -85,6 +106,7 @@ describe('API Path Coverage Test', () => {
   ];
 
   const deletePaths = [
+    '/api/v1/areas/area-123',
     '/api/v1/cells/cell-123',
     '/api/v1/gateways/gw-123',
     '/api/v1/devices/dev-123',

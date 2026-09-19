@@ -370,9 +370,13 @@ function Dashboard({ session, onSignOut }) {
     setSelectedThreadEntity, setPendingVocabularyEntry, setSelectedAreaFilter
   )
 
-  /** Drill into one asset's audit trace on the page that owns it, rather than in a dialog. */
-  const viewThreadFor = (id, type) => {
-    setSelectedThreadEntity({ id, type })
+  /**
+   * Drill into one asset's audit trace on the page that owns it, rather than in a dialog. `purged`
+   * is a tombstone's handover: the entity is gone from the live tables, so the page shows deleted
+   * entities rather than hiding every row of it.
+   */
+  const viewThreadFor = (id, type, purged = false) => {
+    setSelectedThreadEntity({ id, type, purged })
     setTab('digital-thread', { entity: id })
   }
 
@@ -613,7 +617,7 @@ function Dashboard({ session, onSignOut }) {
                 roles that can record. */}
             {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
+            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewThread={t => viewThreadFor(t.id, t.type, t.purged)} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}

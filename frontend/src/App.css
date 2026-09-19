@@ -1925,6 +1925,13 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: 0 0 14px rgba(255, 77, 109, 0.25);
 }
 
+/* An archived area: still drawn, with its plan and its pins, and muted the way an archived cell's
+   pin is. The border takes the warning colour so it reads as archived rather than as faded. */
+.area-thumb.area-thumb-archived {
+  opacity: 0.7;
+  border-color: var(--warning);
+}
+
 /* Wraps, so a card too narrow for the name and the counts together gives the counts their own
    line rather than shrinking the name away to nothing. Four tallies and an open context panel is
    where that happens: the name is the one thing on the card that must survive. */

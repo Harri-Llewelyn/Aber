@@ -294,14 +294,22 @@ python supabase/migrations/test_area_plans.py
 # The test asserts the catalogue fact over every child of `cells`, not only the one that was
 # wrong, and that the un-filing is recorded against the gateway rather than lost with the cell.
 python supabase/migrations/test_archive_purge_cascade.py
+# Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
+# nothing beneath them (device_locations and cells.area_id are read before and after); the purge
+# job names areas last and its DELETE is guarded by the area-wide assets that still name the area,
+# because the job is one transaction; a replay lane is archived, restored and deleted with its
+# original; a deleted row that was archived leaves a tombstone in retired_entities pointing at the
+# thread's DELETE row, and one that was never archived leaves none; the tombstone table has one
+# SELECT policy and no way in for authenticated; an export reaches the thread as EXPORTED.
+python supabase/migrations/test_archiving_is_a_lifecycle.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid
 # creating", in the words of the migration that refuses to mint one. THE TEST THAT EARNS ITS PLACE
-# IS NOT THE REFUSAL, it is that deleting a replayed machine still works: shadow_of is ON DELETE SET
-# NULL, so the delete UPDATEs the lane into exactly the shape the gate rejects on arrival, and a
-# gate written against the STATE rather than the ACT would break every such deletion with an error
-# about playback.
+# IS NOT THE REFUSAL, it is that deleting a replayed machine still works, and that a lane orphaned
+# by hand (shadow_of cleared by an UPDATE, the shape the gate rejects on arrival) can still be
+# edited: a gate written against the STATE rather than the ACT would break both with an error about
+# playback. Since 0124 the lane is deleted with its original rather than orphaned by the FK.
 python supabase/migrations/test_shadow_lane_is_not_assignable.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py

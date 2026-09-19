@@ -212,9 +212,9 @@ BEGIN
         WHEN NEW.entity_type IN ('devices', 'device_nameplate') THEN
             EXISTS (SELECT 1 FROM public.devices d
                      WHERE d.id = NEW.entity_id AND d.is_archived = false)
-        -- NO ARCHIVED TEST, because an area cannot be archived: `areas` carries no `is_archived`
-        -- column. An area is deleted outright and its cells become unfiled, so existing is the
-        -- whole of what there is to check here.
+        -- No archived test here because `areas` had no `is_archived` column when this was written.
+        -- 0124 gives it one and redeclares this function with the test; this body is replaced on
+        -- every boot and is kept as the form 0123 introduced.
         WHEN NEW.entity_type = 'areas' THEN
             EXISTS (SELECT 1 FROM public.areas a WHERE a.id = NEW.entity_id)
         WHEN NEW.entity_type = 'cells' THEN

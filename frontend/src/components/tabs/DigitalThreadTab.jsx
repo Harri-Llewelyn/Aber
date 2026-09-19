@@ -1061,7 +1061,10 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     if (!initialEntity?.id) return
     setEntityTypeFilter(initialEntity.type || '')
     setNameFilter(initialEntity.id)
-  }, [initialEntity?.id, initialEntity?.type])
+    // A handover from a tombstone names an entity the live tables no longer hold; the page would
+    // otherwise hide every row of it and read as empty.
+    if (initialEntity.purged) setShowPurged(true)
+  }, [initialEntity?.id, initialEntity?.type, initialEntity?.purged])
 
   const rangeIsFiltering =
     rangePreset === 'custom' ? !!(customStart || customEnd) : rangePreset !== 'all'

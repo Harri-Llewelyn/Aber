@@ -14,17 +14,19 @@ to avoid creating." Nothing raised. The badge was even correct.
 
 WHAT THIS SUITE IS ACTUALLY GUARDING, WHICH IS THE NARROWNESS. Writing the gate is easy; writing it
 without breaking a deletion is the part worth pinning. `devices_shadow_of_fkey` is ON DELETE SET
-NULL, chosen over CASCADE on the stated grounds that "a shadow outliving its original is a lane
-whose label has gone vague, which is recoverable" -- so a lane whose original was deleted sits on
-the shadow gateway with `shadow_of IS NULL`, and that is LEGAL. The FK reaches that state by
-UPDATE-ing the lane, which fires triggers.
+NULL, so a lane whose original went before 0124 sits on the shadow gateway with `shadow_of IS
+NULL`, and that is LEGAL; a lane may also reach that state by a direct UPDATE. Since 0124 a lane
+follows its original (shadow_follows_its_original(): archived, restored and deleted with it), so an
+ordinary delete no longer produces the orphan -- but the gate must still tolerate the ones that
+exist, and must still let the original go.
 
 So the two failures this suite exists to catch pull in opposite directions:
 
   * too loose -- the gate stops refusing hand assignment, and #144 is back;
-  * too tight -- the gate refuses the FK's own write, and deleting a device that has ever been
-    replayed starts failing with an error about provenance. That one would be found by an operator,
-    in production, on a delete that looks unrelated to playback.
+  * too tight -- the gate refuses a write it should not see, and deleting a device that has ever
+    been replayed, or editing a lane the old FK orphaned, starts failing with an error about
+    provenance. That one would be found by an operator, in production, on an act that looks
+    unrelated to playback.
 
 test_deleting_the_original_still_works is the second half and is the reason this file exists rather
 than a single negative assertion.
@@ -198,34 +200,34 @@ class TheGateIsNarrowEnough(ReplayLaneBase):
 
     def test_deleting_the_original_still_works(self):
         """
-        THE REGRESSION THIS SUITE EXISTS TO CATCH. devices_shadow_of_fkey is ON DELETE SET NULL, so
-        deleting a replayed machine UPDATEs its lane to shadow_of = NULL -- leaving a device on a
-        shadow gateway with no provenance, which is the exact shape the gate refuses on arrival.
+        THE REGRESSION THIS SUITE EXISTS TO CATCH. Deleting a replayed machine must not fail with
+        an error about playback provenance on an operation that mentions neither.
 
-        A gate checking the STATE rather than the ACT would refuse the FK's own write, and the
-        symptom would be that deleting any device that had ever been captured fails, with an error
-        about playback provenance on an operation that mentions neither.
+        Since 0124 the lane goes with its original (shadow_follows_its_original() deletes it
+        BEFORE the original's row goes), so the FK's SET NULL is never reached on this path. The
+        assertion is that the delete succeeds and takes the lane -- the outcome
+        test_archiving_is_a_lifecycle.py pins from the lifecycle's side.
         """
         origin = self._device(gateway_id=self.real_gateway)
         lane = self._device(gateway_id=self.shadow_gateway, shadow_of=origin)
 
         self.cur.execute("DELETE FROM public.devices WHERE id = %s;", (origin,))
+        self.assertEqual(self.cur.rowcount, 1)
 
-        self.cur.execute("SELECT shadow_of FROM public.devices WHERE id = %s;", (lane,))
-        row = self.cur.fetchone()
-        self.assertIsNotNone(row, "the lane was deleted; the FK is CASCADE, not SET NULL")
-        self.assertIsNone(row[0], "the FK did not clear shadow_of")
+        self.cur.execute("SELECT 1 FROM public.devices WHERE id = %s;", (lane,))
+        self.assertIsNone(self.cur.fetchone(), "the lane outlived its original")
 
     def test_an_orphaned_lane_can_still_be_edited(self):
         """
-        Following on from the above: once shadow_of is NULL the lane is still a row somebody may
-        need to rename or retire. PostgREST sends the whole row on a PATCH, so gateway_id is
-        MENTIONED in that UPDATE even though it does not change -- which is why the gate compares
-        old and new rather than trusting `UPDATE OF gateway_id` to mean "moved".
+        A lane whose shadow_of is NULL is still a row somebody may need to rename or retire: the
+        FK orphaned lanes before 0124, and nothing refuses the direct UPDATE that makes one now.
+        PostgREST sends the whole row on a PATCH, so gateway_id is MENTIONED in that UPDATE even
+        though it does not change -- which is why the gate compares old and new rather than trusting
+        `UPDATE OF gateway_id` to mean "moved".
         """
         origin = self._device(gateway_id=self.real_gateway)
         lane = self._device(gateway_id=self.shadow_gateway, shadow_of=origin)
-        self.cur.execute("DELETE FROM public.devices WHERE id = %s;", (origin,))
+        self.cur.execute("UPDATE public.devices SET shadow_of = NULL WHERE id = %s;", (lane,))
 
         self.cur.execute(
             "UPDATE public.devices SET name = %s, gateway_id = %s WHERE id = %s;",

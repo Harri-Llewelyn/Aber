@@ -1329,6 +1329,19 @@ const apiMethods = {
   },
 
   /**
+   * A stored asset bundle, as a download. The object sits in the cold tier's bucket, whose read
+   * policy admits the same three roles the exports table does, so a row the reader can see is an
+   * object they can fetch. Sixty seconds, one object, the same shape as a capture download.
+   */
+  assetExportDownloadUrl: async (row) => {
+    const filename = row.object_key.split('/').pop();
+    const { data, error } = await supabase.storage
+      .from(row.object_bucket).createSignedUrl(row.object_key, 60, { download: filename });
+    if (error) throw new Error(error.message || 'Could not create a download link');
+    return withApiKey(data.signedUrl);
+  },
+
+  /**
    * Remove a capture: the row and the object. The row goes first, the opposite of upload: a failed
    * object delete leaves unreferenced bytes that the next capture of that subject overwrites.
    */
@@ -1379,16 +1392,71 @@ const apiMethods = {
       return filtered.map(mapDigitalThreadRow);
     }
 
+    /**
+     * The tombstones: rows that were archived and then deleted, one per entity, written by the
+     * database on the DELETE and readable by whoever may read the page or the thread's asset
+     * lane. Each carries the exports taken of it while it was alive, so the page can offer the
+     * download after the row is gone.
+     */
+    if (path.startsWith('/api/v1/archives/retired')) {
+      const { data, error } = await supabase
+        .from('retired_entities')
+        .select('*')
+        .order('retired_at', { ascending: false });
+      if (error) throw error;
+      const rows = data || [];
+      // Tolerated: the exports table is readable by the three bucket roles, and a reader admitted
+      // to the tombstones by `digital_thread:read` alone sees them without their downloads.
+      const { data: exportRows } = await supabase
+        .from('asset_exports')
+        .select('*')
+        .in('entity_id', rows.map(r => r.entity_id))
+        .order('taken_at', { ascending: false });
+      const exportsByEntity = new Map();
+      for (const x of exportRows || []) {
+        if (!exportsByEntity.has(x.entity_id)) exportsByEntity.set(x.entity_id, []);
+        exportsByEntity.get(x.entity_id).push(x);
+      }
+      return rows.map(r => ({
+        ...r,
+        // The singular the page's other rows use, so one row shape serves both cards.
+        entity_type: r.entity_type.replace(/s$/, ''),
+        exports: exportsByEntity.get(r.entity_id) || []
+      }));
+    }
+
+    /** The bundles taken of live devices, newest first, keyed by device for the archived card. */
+    if (path.startsWith('/api/v1/archives/exports')) {
+      const { data, error } = await supabase
+        .from('asset_exports')
+        .select('*')
+        .order('taken_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+
     if (path.startsWith('/api/v1/archives')) {
-      const [cellsRes, gatewaysRes, devicesRes] = await Promise.all([
+      const [areasRes, cellsRes, gatewaysRes, devicesRes] = await Promise.all([
+        supabase.from('areas').select('*').eq('is_archived', true),
         supabase.from('cells').select('*').eq('is_archived', true),
         supabase.from('gateways').select('*').eq('is_archived', true),
         supabase.from('devices').select('*').eq('is_archived', true)
       ]);
 
+      if (areasRes.error) throw areasRes.error;
       if (cellsRes.error) throw cellsRes.error;
       if (gatewaysRes.error) throw gatewaysRes.error;
       if (devicesRes.error) throw devicesRes.error;
+
+      const areas = (areasRes.data || []).map(a => ({
+        entity_id: a.id,
+        name: a.name,
+        entity_type: 'area',
+        archived_at: a.archived_at,
+        auto_delete_at: a.auto_delete_at,
+        // The purge dialog says the plan goes with the row, when there is one.
+        plan_path: a.plan_path
+      }));
 
       const cells = (cellsRes.data || []).map(c => ({
         entity_id: c.id,
@@ -1421,7 +1489,7 @@ const apiMethods = {
         auto_delete_at: d.auto_delete_at
       }));
 
-      const combined = [...cells, ...gateways, ...devices];
+      const combined = [...areas, ...cells, ...gateways, ...devices];
       combined.sort((a, b) => new Date(b.archived_at || 0) - new Date(a.archived_at || 0));
       return combined;
     }
@@ -2351,6 +2419,37 @@ const apiMethods = {
       if (error) throw error;
       const item = data?.[0] || {};
       return { schema_uuid: item.id || '', ...item };
+    }
+
+    /**
+     * The per-asset bundle: the AASX with the device's thread, its live telemetry and a manifest
+     * naming the cold objects, stored beside the cold tier and recorded in `asset_exports` by the
+     * function. Fetched directly for the reason the AASX path is: the body is a ZIP. The counts,
+     * and whether the copy was stored, ride in the same header.
+     */
+    if (path.startsWith('/api/v1/devices/asset-export')) {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/aas-export?format=bundle`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_GATEWAY_KEY,
+          Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ device_id: body.device_id })
+      });
+
+      if (!res.ok) {
+        let message = `Export failed (${res.status})`;
+        try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
+        throw new Error(message);
+      }
+
+      let stats = {};
+      try { stats = JSON.parse(res.headers.get('X-AAS-Stats') || '{}'); } catch { /* absent */ }
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] || null;
+      return { blob: await res.blob(), stats, filename, format: 'bundle' };
     }
 
     if (path.startsWith('/api/v1/devices/aas-export')) {

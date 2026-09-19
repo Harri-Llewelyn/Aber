@@ -55,6 +55,9 @@ export const DIGITAL_THREAD_ACTIONS = {
   // approved lately" is a question this page answers. Rejected and withdrawn proposals are absent:
   // neither changed anything, and the proposal row carries the refusal.
   PROPOSAL_APPLIED:  'Proposal applied',
+  // A per-asset bundle stored beside the cold tier (asset_exports): the one row of a device's
+  // history that says a copy of it left the platform, and who took it.
+  EXPORTED:          'Exported',
   // Written by the expiry timer, with `changed_by` NULL because a timer is not a person.
   PROPOSAL_EXPIRED:  'Proposal expired',
   // Written by `log_role_assignment()`, not the generic audit trigger (`user_roles` has no `id`).

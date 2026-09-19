@@ -360,6 +360,24 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const exportAas = async (asset, format = 'json') => {
     setExportingAas(asset.asset_id)
     try {
+      // THE BUNDLE IS THE AASX WITH THE DEVICE'S HISTORY IN IT: the thread, the telemetry still in
+      // the live historian, and a manifest naming the cold objects. Stored beside the cold tier
+      // and recorded, so the Archived Entities page can offer it after the row is gone.
+      if (format === 'bundle') {
+        const result = await api.post('/api/v1/devices/asset-export', { device_id: asset.asset_id })
+        downloadBlob(result.blob, result.filename || `${asset.asset_name}-bundle.aasx`)
+        const b = result.stats?.bundle || {}
+        const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.thread_rows ?? 0} thread rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
+        if (b.stored === false) {
+          showToast(`Bundle downloaded for '${asset.asset_name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
+        } else if (b.truncated) {
+          showToast(`Bundle exported for '${asset.asset_name}' (${summary}) — a cap was reached; the manifest says what is not included`, 'warning')
+        } else {
+          showToast(`Bundle exported for '${asset.asset_name}' (${summary})`, 'success')
+        }
+        return
+      }
+
       const result = await api.post('/api/v1/devices/aas-export', { device_id: asset.asset_id, format })
 
       if (format === 'aasx') {
@@ -1652,6 +1670,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             onClick: () => exportAas(selectedDevice, 'aasx'),
             disabled: exportingAas === selectedDevice.asset_id,
             title: 'Download an AASX (OPC) package, with any attached 3D model bundled in'
+          },
+          /* Withheld from a replay lane, which is a recording of an asset rather than one: the
+             bundle is for taking a machine away, and a lane goes with its original. */
+          !selectedDevice.shadow_of && {
+            label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export Bundle (with history)',
+            icon: <IconDownload size={13} />,
+            onClick: () => exportAas(selectedDevice, 'bundle'),
+            disabled: exportingAas === selectedDevice.asset_id,
+            title: 'Download the AASX with this device\'s digital thread, the telemetry still in the live historian and a manifest naming the cold objects; a copy is kept beside the cold tier'
           },
           /* Also withheld from a replay lane: links are resolved through `shadow_of` at read time,
              and a copy here would go stale. */

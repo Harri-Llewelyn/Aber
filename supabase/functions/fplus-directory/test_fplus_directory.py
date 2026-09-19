@@ -149,7 +149,8 @@ def provision(token):
         "name": LEGACY_DEVICE_NAME,
         "gateway_id": aas_fixture.GATEWAY_UUID,
         "schema_id": schema_id,
-        "status": "ONLINE",
+        # OFFLINE: devices_online_implies_born (0119) refuses ONLINE without a first_dbirth_at.
+        "status": "OFFLINE",
         "is_quarantined": False,
         "connection_method": "MQTT / Sparkplug B",
     }, {"Prefer": "resolution=merge-duplicates,return=representation"})
