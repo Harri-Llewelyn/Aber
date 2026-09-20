@@ -67,7 +67,10 @@ const IMAGES = [
   { name: 'edge-runtime', file: 'supabase/functions/Dockerfile', context: '.' },
   { name: 'ingestion', file: 'ingestion/Dockerfile', context: '.' },
   { name: 'node-red', file: 'node-red/Dockerfile', context: 'node-red' },
-  { name: 'frontend', file: 'frontend/Dockerfile', context: 'frontend', args: ['VITE_RUNTIME_CONFIG=true'] },
+  // VITE_APP_VERSION must be passed: the context is `frontend`, so vite.config.js has no .git to
+  // read and the account menu reads "unknown". DESCRIBE, not VERSION -- the tag is Chart.appVersion,
+  // which on a tree ahead of it would claim a release this bundle is not.
+  { name: 'frontend', file: 'frontend/Dockerfile', context: 'frontend', args: ['VITE_RUNTIME_CONFIG=true', 'VITE_APP_VERSION=DESCRIBE'] },
   { name: 'i3x-service', file: 'i3x/Dockerfile', context: '.' },
   { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: 'gateway-credential' },
   { name: 'backup-service', file: 'backup-service/Dockerfile', context: 'backup-service' },
@@ -160,6 +163,14 @@ function appVersion () {
   return m[1]
 }
 
+/**
+ * What this working tree calls itself, for the account menu -- the string `npm run dev` bakes.
+ * Empty when git cannot answer, which the frontend renders as "unknown"; never fatal.
+ */
+function describeVersion () {
+  return capture('git', ['describe', '--tags', '--always', '--dirty']).out
+}
+
 // ---------------------------------------------------------------------------------------------
 // The cluster
 // ---------------------------------------------------------------------------------------------
@@ -226,11 +237,19 @@ function ensureCertManager () {
 // Images
 // ---------------------------------------------------------------------------------------------
 function buildImages (version, only) {
+  const describe = describeVersion()
   step(`build ${only ? only.join(', ') : 'the ten images'} as ${IMG_NS}/<name>:${version}`)
   for (const img of IMAGES) {
     if (only && !only.includes(img.name)) continue
     const args = ['build', '-f', img.file, '-t', `${IMG_NS}/${img.name}:${version}`]
-    for (const a of img.args || []) args.push('--build-arg', a.replace('VERSION', version))
+    // Substituted in the value, never the name: `VITE_APP_VERSION` ends in `VERSION`, so replacing
+    // across the whole `NAME=value` rewrites the name itself, and Docker only warns at an
+    // unrecognised --build-arg.
+    for (const a of img.args || []) {
+      const eq = a.indexOf('=')
+      const value = a.slice(eq + 1).replace('VERSION', version).replace('DESCRIBE', describe)
+      args.push('--build-arg', `${a.slice(0, eq)}=${value}`)
+    }
     args.push(img.context)
     console.log(`  ${c.dim(`docker ${args.join(' ')}`)}`)
     must('docker', args, `the ${img.name} image did not build`)
