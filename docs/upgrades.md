@@ -11,6 +11,40 @@ and — in §4 — the three places where that is not the whole truth.
 
 ---
 
+## 0. The command
+
+```bash
+# Take a backup first — §2 says why, and the dashboard's Backups page is the way with no shell.
+
+V=<the version you are upgrading to>
+
+# Does it exist? This reads GHCR anonymously and needs no credentials.
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version "$V"
+
+helm upgrade acs-cymru oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru \
+  --version "$V" \
+  --namespace acs-cymru \
+  --values my-values.yaml \
+  --wait --timeout 15m
+```
+
+Three things about that command:
+
+- **`--version` is not optional in practice.** Without it Helm resolves the newest release, which
+  makes the command mean something different next month.
+- **Pass the same `--values` you installed with.** `helm upgrade` does not inherit the previous
+  release's values: omitting the file returns every setting to the chart's defaults, which turns off
+  the hardening in [`deploy/k8s/README.md`](../deploy/k8s/README.md) in one step. `--reuse-values`
+  avoids that and brings its own problem — it carries the old release's values forward, so a setting
+  the new chart version introduces does not get its default.
+- **`--wait` is safe here and is not safe on the first install.** The install deadlocks on it — the
+  bootstrap hooks set the database roles the workloads wait for — and `deploy/k8s/README.md` gives
+  that failure in full. On an upgrade the roles already have their passwords, so there is no cycle.
+
+Everything below is what that one command does and does not disturb.
+
+---
+
 ## 1. Identity cannot change, because nothing can write it
 
 `gateways.sparkplug_id` and `devices.sparkplug_id` are **generated columns**:
@@ -80,19 +114,35 @@ There are no down-migrations, and this is the honest limit of §2. **The images 
 the schema cannot.** Deploying `v0.2.0` after `v0.3.0` gives you old code against a newer schema —
 which mostly works, because every migration so far has been additive, and mostly is not a guarantee.
 
-If a rollback is a real possibility for your deployment, **take a backup before upgrading**. There
-is a script for it, and it covers both databases plus the 3D model objects:
+If a rollback is a real possibility for your deployment, **take a backup before upgrading**.
+
+On Kubernetes that is `backup.enabled=true`, which gives you one of two things depending on a second
+flag. Both write one directory per backup to a PVC that survives `helm uninstall` — deleting the
+release is exactly when a backup is most wanted.
+
+- **`backupService.enabled=true` — Dashboard → Backups.** An Administrator asks on the page and a
+  Deployment takes it; the CronJob yields to it. A backup requested this way is **pinned** —
+  retention does not remove it — until an Administrator releases it, which is what you want of the
+  one you took before an upgrade. This is the only path that needs no shell, and the only one that
+  can include the forge.
+- **Otherwise, the nightly CronJob.** A safety net to the last run and no finer, so it is not a
+  substitute for taking one deliberately before an upgrade.
+
+Either way the two databases are always dumped, and the **3D model objects and the forge's volume
+are not**: they are `backup.includeStorage` and `backup.includeForge`, both off by default, and each
+pins the pod to a ReadWriteOnce volume's node.
+[`deploy/k8s/README.md`](../deploy/k8s/README.md) has that caveat in full.
+
+From a host with a shell, against any reachable Postgres:
 
 ```bash
-bash scripts/backup-databases.sh          # through `npm run dev:forward`, or against any reachable PG
+bash scripts/backup-databases.sh          # both databases plus the 3D model objects
 bash scripts/restore-databases.sh         # the other half
 ```
 
-On Kubernetes the chart's backup CronJob (`backup.enabled=true`) writes the same three artefacts
-nightly to a PVC that survives `helm uninstall` — see
-[`deploy/k8s/README.md`](../deploy/k8s/README.md). That is a nightly dump, so it is a safety net to
-the last run and no finer; before a deliberate upgrade, run the script rather than trusting the
-schedule.
+**Restore is a runbook, not a button** — [`supabase/README.md`](../supabase/README.md) §*Backup and
+Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `digital_thread`, so
+the bytes are deliberately never handed to a browser.
 
 **`digital_thread` is the reason this matters more than it looks.** It is append-only audit and is
 unreconstructable from anything else, so it is the one table for which "restore from backup" is the
@@ -195,6 +245,11 @@ rather than a schema one.
 
 Nothing here is required — the point of the above is that an upgrade is not an event. These are what
 to look at if you want positive confirmation rather than absence of complaints:
+
+**The two Job logs have an hour on them.** `initJobs.ttlSecondsAfterFinished` is 3600, so a Job that
+succeeded is garbage-collected an hour later and `kubectl logs job/...` then reports that it does not
+exist. That is the Job being cleaned up, not the upgrade having failed — but it means the first two
+checks are ones to run while the upgrade is still fresh.
 
 | Check | Where |
 | :--- | :--- |
