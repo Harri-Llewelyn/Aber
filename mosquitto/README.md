@@ -75,6 +75,13 @@ re-run.
 - **`disableClient` disconnects a live session** and refuses the next CONNECT; `enableClient`
   admits it again. This is what the ACL file could not do: revocation used to take effect only
   when the appliance next reconnected.
+- **`setClientPassword` disconnects a live session too**, about half a second after the re-issue,
+  and the old password is then refused on CONNECT. A re-issue is as loud as a revocation, which is
+  the better outcome: the holder goes stale on the dashboard inside the 90s threshold rather than
+  failing quietly at some later reconnect. The playback worker is the one holder this does not
+  reach — it keeps no session (`ingestion/playback_worker.py` polls), so there is nothing for the
+  broker to drop, which is why [issue #217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)
+  is a playback problem and not a fleet one.
 - A `$7$` hash written by `mosquitto_passwd` authenticates when transplanted into a client's
   `password`, `salt` and `iterations` fields. The boot reconcile relies on this for the platform
   principals and for importing a password file.

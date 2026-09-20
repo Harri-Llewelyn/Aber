@@ -12,8 +12,9 @@
  * (scripts/mosquitto-dynsec-init.mjs) in the credential service's image, from the repository's
  * roles, the environment and a seeded legacy password file, so the import, the hash transplant and
  * a second idempotent run are exercised. The plugin's control API is then driven through
- * mosquitto_rr the way the credential service drives it: issue, re-issue, disable a live session,
- * re-enable. The TLS listener is checked when a certificate can be produced.
+ * mosquitto_rr the way the credential service drives it: issue, re-issue, disable, re-enable, with
+ * a live session held across the two that drop one. The TLS listener is checked when a certificate
+ * can be produced.
  *
  * Requires Docker, and skips with a clear message without it.
  *
@@ -613,6 +614,30 @@ try {
           false
         );
 
+        // A re-issue drops the live session as well, and the mint dialog promises an operator
+        // exactly that (issue #291). Nothing here asserted it: the block below checks the next
+        // CONNECT and the live-session test further down is written for disableClient, so a
+        // broker bump could change this silently while the dialog went on making the promise.
+        //
+        // THE POSITIVE CONTROL IS LOAD-BEARING. A subscriber that never really attached would
+        // also "exit", and would prove nothing; a message delivered to it first is what makes the
+        // session observed rather than assumed.
+        //
+        // The window is 60s rather than the 20s below because this assertion reads the subscriber's
+        // exit as the re-issue's doing: a window that closed on its own would look identical, and
+        // the re-issue happens ~7s in. `stillUp` refuses that reading outright.
+        const rotated = '/tmp/rotated.txt';
+        docker(['exec', '-d', r.name, 'sh', '-c',
+          `mosquitto_sub -u ${GATEWAY_C} -P ${passwordC1} -t 'spBv1.0/+/NCMD/+' -W 60 > ${rotated} 2>&1; echo EXIT:$? >> ${rotated}`]);
+        docker(['exec', r.name, 'sleep', '2']);
+        docker(['exec', r.name, 'mosquitto_pub',
+          '-u', 'factoryplus_ingestion', '-P', ACCOUNTS.factoryplus_ingestion,
+          '-t', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_C}`, '-m', MARKER]);
+        docker(['exec', r.name, 'sleep', '2']);
+        const beforeRotation = docker(['exec', r.name, 'cat', rotated]).stdout || '';
+        const sessionWasLive = beforeRotation.includes(MARKER);
+        const stillUp = !beforeRotation.includes('EXIT:');
+
         let reissued;
         try {
           reissued = issueWithControl(send, GATEWAY_C, passwordC2);
@@ -622,6 +647,24 @@ try {
         if (reissued) {
           if (reissued.replaced === true) ok.push('re-issuing an existing gateway reports replaced: true');
           else problems.push('re-issuing an existing gateway reported replaced: false');
+
+          docker(['exec', r.name, 'sleep', '3']);
+          if (!sessionWasLive || !stillUp) {
+            problems.push(
+              !sessionWasLive
+                ? 'the positive control never reached the subscriber, so nothing here proves what '
+                  + 'a re-issue does to a live session'
+                : 'the subscriber had already exited before the re-issue, so its exit says nothing '
+                  + 'about what the re-issue did'
+            );
+          } else if ((docker(['exec', r.name, 'cat', rotated]).stdout || '').includes('EXIT:')) {
+            ok.push('setClientPassword drops the live session (the subscriber exited)');
+          } else {
+            problems.push(
+              'a re-issue did NOT drop the live session; the mint dialog tells an operator it does'
+            );
+          }
+
           if (refusedConnect(pubAsC(passwordC1))) {
             ok.push('after a re-issue the previous password is refused');
           } else {
