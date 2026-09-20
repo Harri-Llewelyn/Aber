@@ -70,6 +70,13 @@ python ingestion/test_structured_logging.py
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
 # the log store exists to keep is actually being kept.
 python test-harness/test_log_pipeline.py
+# The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
+# by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
+# before the run rather than after it. Two of its conclusions are wrong in a believable direction
+# if this is: a write-latency quantile taken over Prometheus's CUMULATIVE buckets answers for every
+# write since the daemon started, and a saturated stack and a generator that cannot push hard
+# enough both show as a shortfall against target.
+python test-harness/test_load_generator.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # The historian writer -- several messages become one transaction; one bad message still loses one

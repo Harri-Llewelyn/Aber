@@ -1147,6 +1147,43 @@ e2e:
     limits: { memory: 1Gi }
 
 # ---------------------------------------------------------------------------------------------
+# Synthetic load, for measuring where the stack stops keeping up (test-harness/README.md).
+#
+# OFF, AND NOT TURNED ON BY AN UPGRADE. `scripts/load-test.mjs run` renders this one template and
+# applies the Job on its own; a fleet and a broker account have to be provisioned first with
+# `scripts/load-test.mjs up`. The demonstration simulator was removed because a default install ran
+# it, and nothing here can be reached by installing the chart.
+# ---------------------------------------------------------------------------------------------
+loadTest:
+  enabled: false
+  image:
+    # The same test-runner image the conformance Job runs: it already carries paho, psycopg2 and
+    # the generated `sparkplug_b_pb2`, which is all the generator needs.
+    #   docker build -f test-harness/Dockerfile -t <repo>:<tag> .
+    repository: ghcr.io/harri-llewelyn/aber/test-runner
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Steps as <messages per second>x<seconds>. Each is held for its duration and reported on its own.
+  plan: "100x90,250x90,500x90,1000x90,2000x90"
+  # Metrics per DDATA, which is what multiplies rows per message. At most 20; the generator
+  # declares that many names at birth.
+  metricsPerMessage: 10
+  # Seconds at the step's rate before the sample window opens, so work carried over from the
+  # previous step is not counted against this one.
+  settleSeconds: 15
+  # The fleet is every gateway whose name starts with this.
+  prefix: "LOADGEN"
+  # Written by `scripts/load-test.mjs up`, not by this chart. Empty names <release>-load-test.
+  credentialSecret: ""
+  # Kept after success: the value of a load run is its report.
+  ttlSecondsAfterFinished: 86400
+  # Enough CPU that the generator is not the bottleneck being measured. It shares the node with the
+  # stack it loads, which the published figures state rather than correct for.
+  resources:
+    requests: { cpu: 500m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# ---------------------------------------------------------------------------------------------
 # Hardening
 # ---------------------------------------------------------------------------------------------
 

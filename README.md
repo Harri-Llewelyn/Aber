@@ -338,7 +338,7 @@ administrator, who can set a password through the Auth API or Studio instead.
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 99 superseded migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
 | [`scripts/`](scripts) | Setup, the dev loop, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, AAS push |
-| [`test-harness/`](test-harness) | Vendored IDTA AAS schema, conformance test-runner image |
+| **[`test-harness/`](test-harness/README.md)** | The test-runner image, the synthetic load generator and the scale envelope, the stack-only suites, the vendored IDTA AAS schema |
 | [`forge/`](forge) | Everything the platform publishes into the forge as a repository. `gateway-platform/` is the playbook every appliance converges to with `ansible-pull`, tagged at the platform's version; its `appliance/` is the compose project the appliance runs, which the installer lays down and the ZIP bundle ships |
 
 ---
@@ -368,6 +368,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `grafana` | `grafana/grafana:13.2.0` | `grafana.<domain>` |
 | `i3x-service` | `ghcr.io/harri-llewelyn/aber/i3x-service` | `i3x.<domain>` |
 | `ingestion` | `ghcr.io/harri-llewelyn/aber/ingestion` | no route; `ingestion-metrics:9108` is scraped |
+| `load-test` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`loadTest.enabled`): synthetic Sparkplug load, applied by `scripts/load-test.mjs` |
 | `loki` | `grafana/loki:3.5.7` | `loki:3100`, read by Grafana |
 | `mosquitto` | `eclipse-mosquitto:2.0.22`, the `gateway-credential` sidecar, `sapcc/mosquitto-exporter:0.8.0` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
 | `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |

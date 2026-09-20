@@ -56,6 +56,11 @@ RUN python -m ensurepip \
     && python -m pip install --no-cache-dir jsonschema==4.23.0 \
     && python -m pip uninstall -y pip
 
+# The load generator, at the TOP LEVEL beside validate.py rather than under test-harness/: it
+# imports `sparkplug_b_pb2`, which the ingestion image puts at /app, and a script run from a
+# subdirectory puts that subdirectory on sys.path instead.
+COPY test-harness/load_generator.py /app/load_generator.py
+
 # parents[3] of /app/supabase/functions/aas-export/test_aas_export.py is /app -- so these paths, and
 # only these paths, make the suites' lookups resolve.
 COPY test-harness/schemas /app/test-harness/schemas

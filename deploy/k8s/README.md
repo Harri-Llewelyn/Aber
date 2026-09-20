@@ -60,6 +60,11 @@ These figures are an **idle stack with no gateways connected**. Ingestion throug
 and the two databases, Prometheus and Loki grow against their retention settings — `observability`
 keeps 30 days or 8 GB of metrics, whichever comes first. Size for the retention you configure.
 
+**What the stack does under load is a separate question, and it is measured separately.**
+[`test-harness/README.md`](../../test-harness/README.md), *The scale envelope*, carries the method
+and the figures: sustained messages per second, device count, metric count, chunk growth, and which
+of them gives way first.
+
 ### Local cluster with k3d
 
 ```bash
