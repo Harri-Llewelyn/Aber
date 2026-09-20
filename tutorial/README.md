@@ -289,6 +289,11 @@ depends on the literal values.
 | 4 | `DDEATH` | `spBv1.0/ACS-Cymru/DDEATH/gwy1200…/dev2200…` | Manually triggered — marks the device offline |
 | 5 | `NDATA` | `spBv1.0/ACS-Cymru/NDATA/gwy1200…` | Gateway heartbeat, every 30 s |
 
+`ACS-Cymru` is the **default** Sparkplug group and appears here because that is what a stack
+installed without naming one publishes under. A site sets its own with `ingestion.sparkplugGroup`
+at install; every topic above then carries that word instead, and the gateway's own row is what
+says which.
+
 ### Report by exception
 
 **`DDATA` means "these metrics changed".** The flow is *scanned* every 5 seconds; it *publishes*
