@@ -88,9 +88,10 @@ SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 # A READ-ONLY broker principal, matching what this service refuses to do in code: the i3x role
-# grants `factoryplus_i3x` only reads of `spBv1.0/#` and the Directory. Deliberately not the ingestion account, which
-# can publish NCMD -- a server whose durable control is that it cannot be talked into writing
-# should not hold a credential that could.
+# grants `factoryplus_i3x` reads of `spBv1.0/#` and nothing else. The Directory is read over
+# PostgREST (`_headers()` below), not from the broker. Deliberately not the ingestion account,
+# which can publish NCMD -- a server whose durable control is that it cannot be talked into
+# writing should not hold a credential that could.
 MQTT_USER = os.getenv("MQTT_USER", "factoryplus_i3x")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
