@@ -452,6 +452,16 @@ export const SUITES = {
       'firing. The suite also runs the naive predicate against the same fixture and asserts it ' +
       'DOES destroy the row, so the other cases cannot pass vacuously.',
   },
+  'supabase/migrations/test_sparkplug_group_setting.py': {
+    lanes: ['db'],
+    why:
+      "0131's site group, and the two halves that make it fixed rather than merely displayed " +
+      'as fixed. An Administrator holds GRANT UPDATE (value) on system_settings, so a direct ' +
+      'PostgREST write is admitted by RLS and only the trigger refuses it -- a read-only control ' +
+      'in the browser alone would be a suggestion. And the column default now reads the setting ' +
+      'rather than the old literal, so a default that silently reverted would address every ' +
+      "gateway created afterwards in the vendor's namespace while every page looked correct.",
+  },
   'supabase/migrations/test_system_settings_rls.py': {
     lanes: ['db'],
     why:

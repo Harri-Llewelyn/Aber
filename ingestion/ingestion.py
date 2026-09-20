@@ -362,9 +362,11 @@ IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 # for logging only: the topic is still what identifies the asset.
 FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 
-# Default Sparkplug Group ID, matching gateways.sparkplug_group's column default (migration
-# 0008). Used only to describe the fallback in a log line; resolution never assumes it.
-DEFAULT_SPARKPLUG_GROUP = "ACS-Cymru"
+# The site's Sparkplug Group ID, named by the chart and held by `sparkplug.group_id` (0131), which
+# is also what gateways.sparkplug_group defaults to. Used only to describe the fallback in a log
+# line; resolution never assumes it -- a gateway is resolved on the (group, node) pair its own row
+# carries.
+DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "ACS-Cymru")
 
 class DirectoryUnavailable(Exception):
     """

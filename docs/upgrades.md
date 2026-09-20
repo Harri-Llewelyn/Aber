@@ -67,6 +67,13 @@ was fixed when the row was created. An upgrade has nothing to change it *with*.
 The consequence worth stating to an operator: **an appliance that was publishing before an upgrade
 is publishing after it, having done nothing.** It does not re-enrol, re-register, or re-announce.
 
+**The other half of the address is fixed too, by a different mechanism.** `spBv1.0/<group>/…` takes
+its group from `ingestion.sparkplugGroup`, which `0131` seeds into a read-only setting on the first
+boot and holds there: a later boot whose chart value differs aborts `db-init` rather than
+re-addressing the fleet quietly. So an upgrade cannot move a site's topics, and changing the group
+deliberately is a stated procedure in [`supabase/README.md`](../supabase/README.md#changing-it-deliberately)
+rather than an edit.
+
 ---
 
 ## 2. The database upgrades itself, forwards, on every boot

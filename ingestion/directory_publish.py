@@ -108,8 +108,13 @@ DIRECTORY_MQTT_ENABLED = os.getenv("DIRECTORY_MQTT_ENABLED", "").strip().lower()
 # inside it by pattern; a Directory document is not a Sparkplug message and must not arrive looking
 # like one. A separate root also means the broker's default-deny covers this subtree until a rule
 # is written for it, rather than the per-gateway pattern accidentally granting something.
+#
+# Derived from the site's group when the chart leaves the prefix empty, which is what makes the
+# broker grant and this publisher one value: the reconcile grants `<prefix>/#` from the same
+# rendered string.
 DIRECTORY_MQTT_TOPIC_PREFIX = os.getenv(
-    "DIRECTORY_MQTT_TOPIC_PREFIX", "ACS-Cymru/Directory/v1"
+    "DIRECTORY_MQTT_TOPIC_PREFIX",
+    "%s/Directory/v1" % os.getenv("SPARKPLUG_GROUP", "ACS-Cymru"),
 ).strip().rstrip("/")
 
 DIRECTORY_MQTT_INTERVAL_SECONDS = int(os.getenv("DIRECTORY_MQTT_INTERVAL_SECONDS", "60"))

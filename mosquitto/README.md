@@ -38,6 +38,13 @@ Directory (`ACS-Cymru/Directory/#`) and the Unified Namespace (`uns/#`). The i3X
 monitoring account reads `$SYS/#` and publishes nothing. No gateway reads the Directory or the
 UNS: either is the whole plant behind one credential, and reading is silent.
 
+**The Directory's grant is not in this file either, and for the same reason.** Its subtree is
+named after the site's Sparkplug group (`ingestion.sparkplugGroup`, held by `sparkplug.group_id`
+since `0131`), which this repository does not choose. The chart renders one prefix, hands it to
+both this reconcile and the daemon that publishes into it, and `withDirectoryGrant()` adds
+`<prefix>/#` to the `ingestion` role. A broker granted one subtree while the daemon writes another
+would drop every Directory publish with no error anywhere, since refusal is silent at QoS 0.
+
 **One grant is not in this file, and cannot be.** The ingestion daemon is the site's Sparkplug
 primary host application: it publishes a retained `online: true` on `spBv1.0/STATE/<host_id>` and
 registers `online: false` as its Last Will, which is how a third-party gateway learns whether its

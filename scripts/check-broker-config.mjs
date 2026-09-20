@@ -109,6 +109,16 @@ const IMPORTED = [GATEWAY_B, 'probe'];
  */
 const PRIMARY_HOST_ID = 'Check-Site';
 const OTHER_HOST_ID = 'Someone-Else';
+
+/**
+ * The Directory prefix this check reconciles against, and it is DELIBERATELY NOT the chart's
+ * default. The grant is derived from this value at reconcile time rather than written into
+ * dynsec-roles.json, so a prefix that happened to match the repository's old literal would pass
+ * whether or not the derivation ran at all.
+ */
+const DIRECTORY_PREFIX = 'Check-Site/Directory/v1';
+const DIRECTORY_DOC = `${DIRECTORY_PREFIX}/device`;
+const DIRECTORY_FILTER = `${DIRECTORY_PREFIX}/#`;
 const EXPECTED_CLIENTS = Object.keys(ACCOUNTS).sort();
 
 const INIT_ENV = {
@@ -130,6 +140,8 @@ const INIT_ENV = {
   // reading it out of the roles file. A literal here, not the chart's value: the point of the
   // assertions below is that the grant is exactly this one topic.
   PRIMARY_HOST_ID: PRIMARY_HOST_ID,
+  // Derived by the chart from the site group; the reconcile grants `<prefix>/#` from it.
+  DIRECTORY_MQTT_TOPIC_PREFIX: DIRECTORY_PREFIX,
 };
 
 /**
@@ -453,14 +465,14 @@ try {
       // be able to enumerate the site, and reading is silent.
       expect(
         'the ingestion principal MAY publish the Directory (it is the only writer)',
-        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
-          'factoryplus_ingestion', 'ACS-Cymru/Directory/#')),
+        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
+          'factoryplus_ingestion', DIRECTORY_FILTER)),
         true
       );
       expect(
         'a gateway may NOT read the Directory (it would enumerate every asset on the site)',
-        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
-          GATEWAY_A, 'ACS-Cymru/Directory/#')),
+        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
+          GATEWAY_A, DIRECTORY_FILTER)),
         false
       );
       // The i3X server reads the Directory over PostgREST, so its role holds no grant here
@@ -468,8 +480,8 @@ try {
       // check would notice it coming back.
       expect(
         'the i3X principal may NOT read the Directory (it reads it from the database)',
-        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
-          'factoryplus_i3x', 'ACS-Cymru/Directory/#')),
+        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
+          'factoryplus_i3x', DIRECTORY_FILTER)),
         false
       );
 

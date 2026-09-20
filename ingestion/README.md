@@ -1055,12 +1055,17 @@ subscriber. Publishing the Directory therefore moves the access decision out of 
 into the broker, and turning it on is an exposure decision that belongs to a deployment, not a
 default.
 
-**The broker's roles are the whole of that access control**, and they are deliberately narrow
-(`mosquitto/dynsec-roles.json`):
+**The broker's roles are the whole of that access control**, and they are deliberately narrow:
 
 ```
-ingestion   publish, subscribe, receive   ACS-Cymru/Directory/#
+ingestion   publish, subscribe, receive   <DIRECTORY_MQTT_TOPIC_PREFIX>/#
 ```
+
+**That grant is not in `dynsec-roles.json`.** The subtree is named after the site's Sparkplug
+group, which this repository does not choose, so it is injected at reconcile time from the same
+rendered prefix the daemon publishes to — the arrangement the primary-host STATE grant already
+used. A broker granted one subtree while the daemon writes another would drop every Directory
+publish silently, because refusal is silent at QoS 0.
 
 **Nothing else holds a Directory grant**, including the i3X server: it reads the Directory from
 the database over PostgREST, where the rows are authoritative, so a broker grant would be one it
@@ -1097,7 +1102,8 @@ interoperability claim would become false the moment the payload left HTTP.
 | Variable | Default | |
 | :--- | :--- | :--- |
 | `DIRECTORY_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
-| `DIRECTORY_MQTT_TOPIC_PREFIX` | `ACS-Cymru/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any |
+| `DIRECTORY_MQTT_TOPIC_PREFIX` | `<SPARKPLUG_GROUP>/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any. The broker's grant is derived from this same value |
+| `SPARKPLUG_GROUP` | `ACS-Cymru` | The site's group, from `ingestion.sparkplugGroup`. Names the Directory subtree above and the group a log line reports when a gateway's row carries none; resolution always uses the row |
 | `DIRECTORY_MQTT_INTERVAL_SECONDS` | `60` | Republish interval |
 
 ## The Unified Namespace

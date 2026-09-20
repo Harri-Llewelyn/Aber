@@ -25,14 +25,11 @@
     },
     {
       "rolename": "ingestion",
-      "textDescription": "The ingestion daemon: reads every Sparkplug topic, publishes only rebirth NCMDs, and is the only writer of the Directory and the Unified Namespace. It is also the site primary host application; its write on spBv1.0/STATE/<host_id> is ONE literal topic injected at reconcile time from PRIMARY_HOST_ID, because the host id is named by the deployment and not by this file.",
+      "textDescription": "The ingestion daemon: reads every Sparkplug topic, publishes only rebirth NCMDs, and is the only writer of the Directory and the Unified Namespace. TWO of its grants are not in this file, because both are named by the deployment rather than by this repository and are injected at reconcile time: its write on spBv1.0/STATE/<host_id> from PRIMARY_HOST_ID, and the Directory subtree from DIRECTORY_MQTT_TOPIC_PREFIX, which is derived from the site's Sparkplug group.",
       "acls": [
         { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true },
         { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true },
         { "acltype": "publishClientSend", "topic": "spBv1.0/+/NCMD/+", "allow": true },
-        { "acltype": "publishClientSend", "topic": "ACS-Cymru/Directory/#", "allow": true },
-        { "acltype": "subscribePattern", "topic": "ACS-Cymru/Directory/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "ACS-Cymru/Directory/#", "allow": true },
         { "acltype": "publishClientSend", "topic": "uns/#", "allow": true },
         { "acltype": "subscribePattern", "topic": "uns/#", "allow": true },
         { "acltype": "publishClientReceive", "topic": "uns/#", "allow": true }

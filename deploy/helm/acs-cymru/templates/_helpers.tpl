@@ -134,6 +134,44 @@ rather than installing without it -- the daemon refuses to start, naming only an
 {{- $id -}}
 {{- end -}}
 
+{{/*
+The Sparkplug group id: the second segment of every topic this site publishes, and the enterprise
+segment of its Unified Namespace. Fixed at install -- `0131` seeds it into the `sparkplug.group_id`
+setting on the first boot and refuses a later value that differs, because changing it re-addresses
+every gateway rather than changing a preference.
+
+UNLIKE primaryHostId, THIS HAS A DEFAULT. An install that predates the key has published under
+`ACS-Cymru` since its first message, and rendering must go on producing that for it.
+*/}}
+{{- define "acs-cymru.sparkplugGroup" -}}
+{{- $g := .Values.ingestion.sparkplugGroup | default "" -}}
+{{- if not $g -}}
+{{- fail "\n\nacs-cymru: ingestion.sparkplugGroup is empty.\n\nIt is the Sparkplug group id -- the second segment of every topic this site publishes. Leave the\nkey out to take the default (ACS-Cymru), or name the site's own group:\n\n  --set ingestion.sparkplugGroup=<the group this plant publishes under>\n\nOne topic level: no '/', '+', '#' or whitespace.\n" -}}
+{{- end -}}
+{{- if regexMatch "[/+#[:space:]]" $g -}}
+{{- fail (printf "\n\nacs-cymru: ingestion.sparkplugGroup is %q, which is not one topic level.\n\nThe group is one segment of `spBv1.0/<group>/<TYPE>/<node>`, and the broker's Directory grant is\nderived from it. A value containing '/', '+', '#' or whitespace addresses a subtree nothing grants,\nand the broker drops the publish silently at QoS 0.\n" $g) -}}
+{{- end -}}
+{{- $g -}}
+{{- end -}}
+
+{{/*
+The Directory's MQTT prefix, derived from the group unless a deployment names its own. The broker's
+ingestion role is granted `<prefix>/#` at reconcile time from this same value, so the two cannot
+disagree -- which they could when the prefix was a literal in values.yaml and another in the roles
+file.
+*/}}
+{{- define "acs-cymru.directoryTopicPrefix" -}}
+{{- $p := .Values.ingestion.directoryMqttTopicPrefix | default "" -}}
+{{- if not $p -}}
+{{- $p = printf "%s/Directory/v1" (include "acs-cymru.sparkplugGroup" .) -}}
+{{- end -}}
+{{- $p = trimSuffix "/" $p -}}
+{{- if regexMatch "[+#[:space:]]" $p -}}
+{{- fail (printf "\n\nacs-cymru: ingestion.directoryMqttTopicPrefix is %q.\n\nIt becomes the broker grant `<prefix>/#`, so a '+', '#' or whitespace in it either grants a subtree\nnobody meant or matches nothing at all.\n" $p) -}}
+{{- end -}}
+{{- $p -}}
+{{- end -}}
+
 {{- define "acs-cymru.lokiUrl" -}}
 {{- if .Values.grafana.lokiUrl -}}
 {{- .Values.grafana.lokiUrl -}}

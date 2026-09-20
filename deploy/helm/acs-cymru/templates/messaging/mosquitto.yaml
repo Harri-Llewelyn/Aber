@@ -408,6 +408,14 @@ spec:
             */}}
             - name: PRIMARY_HOST_ID
               value: {{ include "acs-cymru.primaryHostId" . | quote }}
+            {{/*
+              The Directory grant is derived from the prefix for the same reason: the subtree
+              belongs to the site's group, which this file does not name. THE SAME HELPER THE
+              INGESTION DAEMON'S ENV USES, so a broker granted one prefix while the daemon
+              publishes another cannot happen -- and at QoS 0 that mismatch would be silent.
+            */}}
+            - name: DIRECTORY_MQTT_TOPIC_PREFIX
+              value: {{ include "acs-cymru.directoryTopicPrefix" . | quote }}
             - name: LEGACY_PASSWORD_FILE
               value: /passwd-src/password_file
             # The validator is a fixture: a production install leaves its password empty and gets

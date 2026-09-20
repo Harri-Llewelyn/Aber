@@ -198,6 +198,9 @@ spec:
             */}}
             - name: PRIMARY_HOST_ID
               value: {{ include "acs-cymru.primaryHostId" . | quote }}
+            # validate.py publishes under this group, and the gateway row it seeds carries it.
+            - name: SPARKPLUG_GROUP
+              value: {{ include "acs-cymru.sparkplugGroup" . | quote }}
             - name: SUPABASE_URL
               value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
             # WITHOUT THE SECRET KEY the script seeds nothing and fails about 12 of 20 checks in a

@@ -107,17 +107,36 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
           <span className="mono setting-key" title="The key the code reads. Immutable.">{setting.key}</span>
           {/* Named, because an absent row is not an absent value: what applies when this has never
               been changed is the env var or constant below, and the first thing to check when a
-              setting appears to do nothing. */}
+              setting appears to do nothing. A read-only row's source is not a fallback -- it is
+              where the value came from and the only place it can be changed. */}
           {setting.fallback_source && (
-            <span className="setting-fallback" title="What applies if this setting is never changed">
-              falls back to <span className="mono">{setting.fallback_source}</span>
+            <span
+              className="setting-fallback"
+              title={setting.read_only
+                ? 'Where this value is set. Changing it here is not possible'
+                : 'What applies if this setting is never changed'}
+            >
+              {setting.read_only ? 'set by ' : 'falls back to '}
+              <span className="mono">{setting.fallback_source}</span>
             </span>
           )}
         </div>
       </div>
 
       <div className="setting-control">
-        {setting.value_type === 'boolean' ? (
+        {/* READ-ONLY IS RENDERED, NOT DISABLED-AND-HOPED. The database refuses the write either
+            way (0131's trigger), so this is about not offering an operator a control that cannot
+            work -- the group is fixed at install because changing it re-addresses every gateway. */}
+        {setting.read_only ? (
+          <input
+            id={`setting-${setting.key}`}
+            className="form-control"
+            type="text"
+            value={stored}
+            readOnly
+            disabled
+          />
+        ) : setting.value_type === 'boolean' ? (
           <select
             id={`setting-${setting.key}`}
             className="form-control"

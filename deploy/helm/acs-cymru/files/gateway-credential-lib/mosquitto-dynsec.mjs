@@ -93,6 +93,56 @@ export function withPrimaryHostGrant(policy, hostId) {
   return { ...policy, roles };
 }
 
+/**
+ * The role that writes the Directory, and the subtree it may write.
+ *
+ * NOT A LINE IN dynsec-roles.json, for the same reason the primary host's STATE grant is not: the
+ * subtree is named after the site's Sparkplug group, which this repository does not choose. The
+ * prefix is rendered once by the chart and handed to both the daemon and this reconcile, so a
+ * broker granted one subtree while the daemon publishes another cannot happen -- and at QoS 0 that
+ * mismatch is silent, which is what makes it worth removing rather than documenting.
+ */
+export const DIRECTORY_ROLE = 'ingestion';
+
+/** No wildcard and no separator of its own: the grant appends `/#` and that is the whole width. */
+const DIRECTORY_PREFIX_PATTERN = /^[^+#\s]+$/;
+
+export function directoryTopicFilter(prefix) {
+  const clean = typeof prefix === 'string' ? prefix.trim().replace(/\/+$/, '') : '';
+  if (!clean || !DIRECTORY_PREFIX_PATTERN.test(clean)) {
+    throw new CredentialError(
+      `'${prefix}' is not a usable Directory topic prefix: it must be non-empty and contain no `
+      + "'+', '#' or whitespace",
+      'invalid_directory_prefix',
+    );
+  }
+  return `${clean}/#`;
+}
+
+/**
+ * The policy with the Directory's three grants added to its `ingestion` role. Returns a NEW policy;
+ * applying it twice is a no-op, which is what keeps the boot reconcile idempotent.
+ */
+export function withDirectoryGrant(policy, prefix) {
+  const topic = directoryTopicFilter(prefix);
+  const acltypes = ['publishClientSend', 'subscribePattern', 'publishClientReceive'];
+  const roles = (policy?.roles || []).map((role) => {
+    if (role.rolename !== DIRECTORY_ROLE) return role;
+    const acls = role.acls || [];
+    const missing = acltypes
+      .filter((acltype) => !acls.some((a) => a.acltype === acltype && a.topic === topic))
+      .map((acltype) => ({ acltype, topic, allow: true }));
+    return missing.length ? { ...role, acls: [...acls, ...missing] } : role;
+  });
+  if (!roles.some((r) => r.rolename === DIRECTORY_ROLE)) {
+    throw new CredentialError(
+      `the policy declares no '${DIRECTORY_ROLE}' role, so the Directory has nothing to grant`,
+      'invalid_policy',
+    );
+  }
+  return { ...policy, roles };
+}
+
 export function gatewayRoleName(sparkplugId) {
   if (!isGatewayId(sparkplugId)) {
     throw new CredentialError(`'${sparkplugId}' is not a gateway sparkplug_id`, 'invalid_sparkplug_id');

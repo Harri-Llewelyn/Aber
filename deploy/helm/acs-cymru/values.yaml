@@ -799,12 +799,26 @@ ingestion:
   # One topic level: no `/`, `+`, `#` or whitespace. The broker grants the ingestion role write on
   # exactly this one topic, so a value with a separator in it publishes where nothing is granted.
   primaryHostId: ""
+  # The Sparkplug group id: the second segment of every topic this site publishes
+  # (`spBv1.0/<group>/<TYPE>/<node>`) and the enterprise segment of its Unified Namespace.
+  #
+  # FIXED AT INSTALL, and 0131 enforces that. It is seeded into the read-only `sparkplug.group_id`
+  # setting on the first boot, shown on the Settings page, and db-init REFUSES a later boot whose
+  # value differs -- because changing the group re-addresses every gateway, every appliance bundle
+  # and every row of history keyed on the old pair. That is a migration, not a preference.
+  #
+  # Unlike primaryHostId this has a default: an install predating the key has published under
+  # `ACS-Cymru` since its first message and must go on doing so. One topic level: no `/`, `+`, `#`
+  # or whitespace.
+  sparkplugGroup: ACS-Cymru
   # The Directory's MQTT half. Off by default: a topic has no caller, so publishing puts the
-  # whole address space behind the broker's roles alone. The prefix MUST stay inside the
-  # ingestion role's `ACS-Cymru/Directory/#` publish rule, or publishes are dropped silently at
-  # QoS 0.
+  # whole address space behind the broker's roles alone.
+  #
+  # EMPTY DERIVES `<sparkplugGroup>/Directory/v1`. The broker's ingestion role is granted
+  # `<prefix>/#` from this same value at reconcile time, so the two cannot disagree -- which they
+  # could when the prefix was a literal here and another literal in dynsec-roles.json.
   directoryMqttEnabled: false
-  directoryMqttTopicPrefix: ACS-Cymru/Directory/v1
+  directoryMqttTopicPrefix: ""
   directoryMqttIntervalSeconds: 60
   # The Unified Namespace bridge (ingestion/uns_publish.py). Off by default for the same reason:
   # every decoded reading, retained under uns/..., behind the broker's roles alone. The root MUST

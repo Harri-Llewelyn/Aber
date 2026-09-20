@@ -13,6 +13,8 @@
  *   DYNSEC_POLICY_FILE           the roles (default /policy/dynsec-roles.json)
  *   PRIMARY_HOST_ID              the Sparkplug primary host id, required; the ingestion role is
  *                                granted write on `spBv1.0/STATE/<id>` and nothing wider
+ *   DIRECTORY_MQTT_TOPIC_PREFIX  the Directory subtree, required; the ingestion role is granted
+ *                                `<prefix>/#`, and the daemon publishes to the same rendered value
  *   LEGACY_PASSWORD_FILE         imported when DYNSEC_FILE does not exist (default none)
  *   DYNSEC_REQUIRED_PRINCIPALS   space-separated env names that must carry a password; MONITOR is
  *                                always required
@@ -32,10 +34,12 @@ import {
   DYNSEC_FILE,
   PLATFORM_PRINCIPALS,
   clientFromPasswordEntry,
+  directoryTopicFilter,
   importPasswordFile,
   primaryHostStateTopic,
   reconcile,
   rolesFor,
+  withDirectoryGrant,
   withPrimaryHostGrant,
 } from './lib/mosquitto-dynsec.mjs';
 
@@ -95,6 +99,24 @@ function main() {
     fail(`PRIMARY_HOST_ID: ${err.message}`);
   }
   log(`primary host '${primaryHostId}': granting the ingestion role write on ${primaryHostStateTopic(primaryHostId)}`);
+
+  // The Directory subtree, for the same reason: it is named after the site's Sparkplug group, and
+  // the chart renders one prefix for this reconcile and for the daemon that publishes into it.
+  // Required rather than defaulted here, so a chart that stopped passing it fails at the broker
+  // rather than granting a subtree nobody publishes to.
+  const directoryPrefix = (process.env.DIRECTORY_MQTT_TOPIC_PREFIX || '').trim();
+  if (!directoryPrefix) {
+    fail('DIRECTORY_MQTT_TOPIC_PREFIX is empty. It names the subtree the ingestion daemon writes '
+      + 'the Directory to, and the broker grant is derived from it, so a reconcile without it '
+      + 'leaves the only writer of the Directory unable to publish -- silently, at QoS 0. It is '
+      + 'derived from ingestion.sparkplugGroup unless the chart values name it.');
+  }
+  try {
+    policy = withDirectoryGrant(policy, directoryPrefix);
+  } catch (err) {
+    fail(`DIRECTORY_MQTT_TOPIC_PREFIX: ${err.message}`);
+  }
+  log(`directory: granting the ingestion role ${directoryTopicFilter(directoryPrefix)}`);
 
   // The managed clients: the admin, then each platform principal with a password.
   const adminUser = process.env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin';
