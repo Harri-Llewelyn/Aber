@@ -289,7 +289,7 @@ BEGIN
     -- Not `status = 'ONLINE'`: a playback target is legitimately OFFLINE until a playback runs.
     -- This proves the credential exists, not that the worker holds it (the worker refuses for
     -- itself). `gateway_has_broker_credential()`, not `gateway_holds_a_credential()`, which means
-    -- "physical and enrolled" and excludes every virtual gateway.
+    -- "remote and enrolled" and excludes every host-run gateway.
     IF NOT public.gateway_has_broker_credential(v_gateway) THEN
         RAISE EXCEPTION
           'start_playback_job: gateway % holds no broker credential, so nothing can authenticate '

@@ -285,8 +285,8 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               publisher on the same edge node, so the two sets of Sparkplug sequence numbers
               interleave and the daemon reports both as losing messages.
               <br />
-              A playback target is best as a gateway <em>nothing else</em> publishes as — a virtual
-              one created for the purpose, rather than one a simulator or an appliance is driving.
+              A playback target is best as a gateway <em>nothing else</em> publishes as — a Simulated
+              one created for the purpose, rather than one a simulator or an appliance is already driving.
             </div>
           </div>
         )}
