@@ -17,8 +17,8 @@ FOUR MAPPINGS THAT ARE NOT MECHANICAL, each of which is a decision:
   parentId is the CELL, not the gateway. i3X gives an Object exactly one parentId, and a device here
   has two parents: a cell (where it is) and a gateway (how its data arrives). HasParent is
   organizational hierarchy, so the cell wins; the data path is modelled as a separate relationship
-  pair with a `reverseOf`, which is what relationships are for. Collapsing them would make a virtual
-  gateway -- a host-run proxy with no honest cell -- unrepresentable.
+  pair with a `reverseOf`, which is what relationships are for. Collapsing them would make a Host
+  gateway -- a connector with no honest cell -- unrepresentable.
 
   Unassigned is a SYNTHETIC object. `parentId: null` means root, so a device with no cell would
   otherwise be a second root beside the site. A synthetic object is legitimate here in a way a magic

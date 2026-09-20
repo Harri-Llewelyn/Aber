@@ -10,7 +10,7 @@ WHAT THIS COLUMN IS FOR. `is_virtual` carries three incompatible definitions -- 
 exists", "runs on the app host", "(Cloud / Server-Simulated)" -- while every behaviour branching on
 it is about a fourth thing, remoteness. 0064's header argues that at length; the evidence arrived
 anyway, as `gateway_holds_a_credential()` being the wrong predicate three times: 0056 (playback
-targets), 0062 (the credential inventory), 0063 (revocation never firing for a virtual gateway).
+targets), 0062 (the credential inventory), 0063 (revocation never firing for a host-run gateway).
 
 WHAT THIS SUITE PROTECTS, WHICH IS NARROWER. Not the rename -- `is_virtual` is still here and still
 read by every consumer. It protects the property that makes the rename possible later: **the two

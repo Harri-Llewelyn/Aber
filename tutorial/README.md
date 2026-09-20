@@ -22,7 +22,7 @@ somebody else's plant in it. What that floor knew is in this file instead.
 | Grafana | `http://localhost:3002` |
 | Broker config and roles | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`../mosquitto/README.md`](../mosquitto/README.md) |
 | Node-RED provisioning | [`../node-red/node-red-init.mjs`](../node-red/node-red-init.mjs) |
-| Physical gateways (the pasted command, the bundle, the forge, the playbook) | [`../docs/physical-gateways.md`](../docs/physical-gateways.md) |
+| Remote gateways (the pasted command, the bundle, the forge, the playbook) | [`../docs/remote-gateways.md`](../docs/remote-gateways.md) |
 | Break-glass credential rotation | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 
 ---
@@ -50,8 +50,8 @@ deliberate assertion rather than missing data.
 
 ### 3. Create a gateway
 
-**Gateways** tab, then new gateway. Tick **Mark as Virtual Gateway** if this is going to be Node-RED
-on the host running the stack rather than an appliance out on the plant.
+**Gateways** tab, then new gateway. Set **Type** to **Host** if this is going to be Node-RED on
+the host running the stack rather than an appliance out on the plant.
 
 **Copy the Sparkplug ID it issues.** You do not get to choose it: `sparkplug_id` is a generated
 column — `gwy` plus 21 hex characters of the row's UUID — and the broker ACL matches it exactly.
@@ -70,13 +70,13 @@ This is the step that used to require a shell on the host. It goes through the s
 credential service an appliance's enrolment uses, authorised by role rather than by a single-use
 token, because you are holding a session and an appliance is not.
 
-**A physical gateway takes the other path.** Its row is created with *Virtual* unchecked, and the
+**A Remote gateway takes the other path.** Its row is created with **Type** set to *Remote*, and the
 dashboard hands you a command to paste on a fresh Ubuntu machine (or a bundle to copy to one that
 already has Docker). Either carries a single-use claim, never a credential: the appliance installs
 itself, enrols, mints its own broker account, and from then on pulls its flow from its own
-repository in the forge and converges its operating system to a tagged platform playbook. A virtual
+repository in the forge and converges its operating system to a tagged platform playbook. A Host
 gateway is refused outright, since there would be no appliance to install on. See
-[`../docs/physical-gateways.md`](../docs/physical-gateways.md).
+[`../docs/remote-gateways.md`](../docs/remote-gateways.md).
 
 ### 5. Author a schema
 
@@ -409,7 +409,7 @@ Confined principals replace it, each holding a role from
 | :--- | :--- |
 | `factoryplus_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), the Directory and the Unified Namespace |
 | `factoryplus_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
-| any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a virtual gateway, by the enrolment bundle for an appliance |
+| any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
 | `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
 | `factoryplus_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
 | `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |

@@ -10,7 +10,7 @@ or re-birth when the host returns.
 WHY IT MATTERS HERE AND NOT ONLY IN THE ABSTRACT. The daemon already compensates for a host that
 vanishes with machinery of its own -- the rebirth poller, the device watchdog, the stale sweep --
 and those work. They only work for devices that behave the way this stack expects. A compliant
-third-party gateway, which is the whole point of docs/physical-gateways.md and the enrolment path,
+third-party gateway, which is the whole point of docs/remote-gateways.md and the enrolment path,
 watches STATE instead. Without a publisher it watches a permanently empty topic and falls back to
 whatever its vendor chose. The broker's roles have granted every gateway read on this subtree from
 the beginning (mosquitto/dynsec-roles.json), so the promise was already made; this keeps it.

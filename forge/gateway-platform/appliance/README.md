@@ -1,4 +1,4 @@
-# ACS-Cymru physical gateway — `__GATEWAY_NAME__`
+# ACS-Cymru Remote gateway — `__GATEWAY_NAME__`
 
 This folder turns a machine on your shopfloor into a gateway for the ACS-Cymru platform. It runs
 Node-RED in Docker, enrols itself on first boot, and publishes Sparkplug B over MQTTS.

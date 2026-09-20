@@ -422,7 +422,7 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
 
     -- The asset trail: the shopfloor's own history, which is what a Shopfloor_Manager manages.
     -- CREDENTIAL_ISSUED lands here on `gateways` deliberately -- see the header. A Manager may
-    -- mint a virtual gateway's broker credential, so a Manager may read that one was minted.
+    -- mint a host-run gateway's broker credential, so a Manager may read that one was minted.
     WHEN p_entity_type IN ('cells', 'devices', 'gateways', 'links')
       THEN 'asset'
 
@@ -442,10 +442,10 @@ COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) I
 
 --
 
--- authorize_virtual_gateway_credential(uuid) :: FUNCTION
+-- authorize_host_gateway_credential(uuid) :: FUNCTION
 --
 
-CREATE OR REPLACE FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) RETURNS TABLE(sparkplug_id text, gateway_name text)
+CREATE OR REPLACE FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) RETURNS TABLE(sparkplug_id text, gateway_name text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -491,10 +491,10 @@ $$;
 
 --
 
--- FUNCTION authorize_virtual_gateway_credential(p_gateway_id uuid) :: COMMENT
+-- FUNCTION authorize_host_gateway_credential(p_gateway_id uuid) :: COMMENT
 --
 
-COMMENT ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) IS 'Gate for minting a VIRTUAL gateway''s broker credential: checks has_role(), refuses a physical or archived gateway, and returns the generated sparkplug_id the account must be named after. The mirror of issue_gateway_enrollment_token(), which refuses exactly the gateways this accepts.';
+COMMENT ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) IS 'Gate for minting a HOST gateway''s broker credential: checks has_role(), refuses a Remote or archived gateway, and returns the generated sparkplug_id the account must be named after. The mirror of issue_gateway_enrollment_token(), which refuses exactly the gateways this accepts.';
 
 --
 
@@ -1401,7 +1401,7 @@ ALTER TABLE ONLY public.gateways REPLICA IDENTITY FULL;
 -- COLUMN gateways.status :: COMMENT
 --
 
-COMMENT ON COLUMN public.gateways.status IS 'Free text, deliberately unconstrained -- a Gateway_Status metric in an NBIRTH payload overrides whatever the message type implies, so the domain is not closed. The values this platform writes are: PENDING_ENROLLMENT (a physical gateway awaiting its bundle redemption), AWAITING_BIRTH (enrolled, holds a credential, has not yet published), ONLINE and OFFLINE (written by the ingestion daemon from node-level Sparkplug messages). STALE is DERIVED at read time by public.gateway_status and is never stored.';
+COMMENT ON COLUMN public.gateways.status IS 'Free text, deliberately unconstrained -- a Gateway_Status metric in an NBIRTH payload overrides whatever the message type implies, so the domain is not closed. The values this platform writes are: PENDING_ENROLLMENT (a Remote gateway awaiting its bundle redemption), AWAITING_BIRTH (enrolled, holds a credential, has not yet published), ONLINE and OFFLINE (written by the ingestion daemon from node-level Sparkplug messages). STALE is DERIVED at read time by public.gateway_status and is never stored.';
 
 --
 
@@ -1450,14 +1450,14 @@ COMMENT ON COLUMN public.gateways.description IS 'Optional operator note. Free t
 -- COLUMN gateways.enrolled_at :: COMMENT
 --
 
-COMMENT ON COLUMN public.gateways.enrolled_at IS 'When this gateway last redeemed an enrolment token and received a broker credential. NULL for a virtual gateway and for a physical one that has never enrolled. Re-enrolment overwrites it.';
+COMMENT ON COLUMN public.gateways.enrolled_at IS 'When this gateway last redeemed an enrolment token and received a broker credential. NULL for a host-run gateway and for a Remote one that has never enrolled. Re-enrolment overwrites it.';
 
 --
 
 -- COLUMN gateways.agent_version :: COMMENT
 --
 
-COMMENT ON COLUMN public.gateways.agent_version IS 'Version stamp of the bundle the appliance is running. Written at enrolment and REFRESHED from the Agent_Version metric on every node-level message that carries one, so an appliance upgraded in place is visible without re-enrolment. Lets the fleet''s vintage be seen without reaching into every appliance. NULL for a virtual gateway and for one that has never enrolled.';
+COMMENT ON COLUMN public.gateways.agent_version IS 'Version stamp of the bundle the appliance is running. Written at enrolment and REFRESHED from the Agent_Version metric on every node-level message that carries one, so an appliance upgraded in place is visible without re-enrolment. Lets the fleet''s vintage be seen without reaching into every appliance. NULL for a host-run gateway and for one that has never enrolled.';
 
 --
 
@@ -2535,7 +2535,7 @@ END $$;
 -- FUNCTION issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) :: COMMENT
 --
 
-COMMENT ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) IS 'Mint a single-use enrolment token for a physical gateway and move it to PENDING_ENROLLMENT. Returns the raw token ONCE -- only its SHA-256 is stored. Requires Administrator or Shopfloor_Manager. Re-issuing consumes any previous live token, so a regenerated bundle invalidates the one already downloaded.';
+COMMENT ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) IS 'Mint a single-use enrolment token for a Remote gateway and move it to PENDING_ENROLLMENT. Returns the raw token ONCE -- only its SHA-256 is stored. Requires Administrator or Shopfloor_Manager. Re-issuing consumes any previous live token, so a regenerated bundle invalidates the one already downloaded.';
 
 --
 
@@ -2809,7 +2809,7 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
     UNION ALL
 
     -- ---------------------------------------------------------------------------------------
-    -- An enrolment that never completed: a physical gateway redeems its token, lands in
+    -- An enrolment that never completed: a Remote gateway redeems its token, lands in
     -- AWAITING_BIRTH, and leaves that state on its first NBIRTH. Age is measured from
     -- `enrolled_at`.
     -- ---------------------------------------------------------------------------------------
@@ -3356,7 +3356,7 @@ $$;
 -- FUNCTION record_gateway_credential_issued(p_gateway_id uuid) :: COMMENT
 --
 
-COMMENT ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) IS 'Record that a broker credential was minted for a virtual gateway, as a CREDENTIAL_ISSUED row in digital_thread attributed to the calling operator. Carries the wire identity and never the password: the audit trail is append-only and the secret is reveal-once.';
+COMMENT ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) IS 'Record that a broker credential was minted for a host-run gateway, as a CREDENTIAL_ISSUED row in digital_thread attributed to the calling operator. Carries the wire identity and never the password: the audit trail is append-only and the secret is reveal-once.';
 
 --
 
@@ -4409,7 +4409,7 @@ END $$;
 -- FUNCTION revoke_credential_on_decommission() :: COMMENT
 --
 
-COMMENT ON FUNCTION public.revoke_credential_on_decommission() IS 'Rotates a decommissioned gateway''s broker credential to a password nobody records. Gated on gateway_has_broker_credential() (0056), NOT gateway_holds_a_credential() (0038): the latter asks about physical enrolment and therefore refused every virtual gateway, which is every gateway a provisioned stack has. The gate still cannot admit a gateway that never held an account, so 0040''s guarantee -- revocation never CREATES one -- is preserved.';
+COMMENT ON FUNCTION public.revoke_credential_on_decommission() IS 'Rotates a decommissioned gateway''s broker credential to a password nobody records. Gated on gateway_has_broker_credential() (0056), NOT gateway_holds_a_credential() (0038): the latter asks about Remote enrolment and therefore refused every host-run gateway, which is every gateway a provisioned stack has. The gate still cannot admit a gateway that never held an account, so 0040''s guarantee -- revocation never CREATES one -- is preserved.';
 
 --
 
@@ -4756,7 +4756,7 @@ BEGIN
     -- Not `status = 'ONLINE'`: a playback target is legitimately OFFLINE until a playback runs.
     -- This proves the credential exists, not that the worker holds it (the worker refuses for
     -- itself). `gateway_has_broker_credential()`, not `gateway_holds_a_credential()`, which means
-    -- "physical and enrolled" and excludes every virtual gateway.
+    -- "remote and enrolled" and excludes every host-run gateway.
     IF NOT public.gateway_has_broker_credential(v_gateway) THEN
         RAISE EXCEPTION
           'start_playback_job: gateway % holds no broker credential, so nothing can authenticate '
@@ -5517,7 +5517,7 @@ CREATE TABLE IF NOT EXISTS public.gateway_enrollment_tokens (
 -- TABLE gateway_enrollment_tokens :: COMMENT
 --
 
-COMMENT ON TABLE public.gateway_enrollment_tokens IS 'Single-use, short-lived claims that let a physical gateway appliance exchange its downloaded bundle for a broker credential exactly once. NOT READABLE BY ANY BROWSER-FACING ROLE -- RLS is enabled with no policy for anon or authenticated, so only service_role (which bypasses RLS) can see it, and only the enroll-gateway edge function holds that key. Deliberately a separate table rather than columns on public.gateways: that table is world-readable to authenticated users, its full row is copied into digital_thread on every write, and public.gateway_status selects g.*.';
+COMMENT ON TABLE public.gateway_enrollment_tokens IS 'Single-use, short-lived claims that let a Remote gateway appliance exchange its downloaded bundle for a broker credential exactly once. NOT READABLE BY ANY BROWSER-FACING ROLE -- RLS is enabled with no policy for anon or authenticated, so only service_role (which bypasses RLS) can see it, and only the enroll-gateway edge function holds that key. Deliberately a separate table rather than columns on public.gateways: that table is world-readable to authenticated users, its full row is copied into digital_thread on every write, and public.gateway_status selects g.*.';
 
 --
 
@@ -8735,12 +8735,12 @@ GRANT ALL ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text)
 
 --
 
--- FUNCTION authorize_virtual_gateway_credential(p_gateway_id uuid) :: ACL
+-- FUNCTION authorize_host_gateway_credential(p_gateway_id uuid) :: ACL
 --
 
-REVOKE ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) TO service_role;
-GRANT ALL ON FUNCTION public.authorize_virtual_gateway_credential(p_gateway_id uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) TO authenticated;
 
 --
 

@@ -56,7 +56,7 @@
       "id": 2,
       "type": "table",
       "title": "Every gateway, worst first",
-      "description": "One row per non-archived gateway, from `public.gateway_health` (migration 0036). Sorted so anything stale, and anything whose CA is closest to expiry, is at the top.\n\n**Blank health columns are not a fault.** A virtual gateway has no appliance behind it, and a physical one on a bundle predating migration 0035 does not report health at all -- which is why `Health age` is empty rather than large. A LARGE health age is the interesting case: the appliance is still heartbeating but its collector has stopped.",
+      "description": "One row per non-archived gateway, from `public.gateway_health` (migration 0036). Sorted so anything stale, and anything whose CA is closest to expiry, is at the top.\n\n**Blank health columns are not a fault.** A host-run gateway has no appliance behind it, and a Remote one on a bundle predating migration 0035 does not report health at all -- which is why `Health age` is empty rather than large. A LARGE health age is the interesting case: the appliance is still heartbeating but its collector has stopped.",
       "datasource": {
         "type": "postgres",
         "uid": "supabase"
@@ -434,7 +434,7 @@
       "id": 6,
       "type": "stat",
       "title": "Health last reported",
-      "description": "Seconds since a heartbeat last carried a recognised health metric.\n\n**Empty means the appliance does not report health**, not that it stopped -- an older bundle, or a virtual gateway. Migration 0035 keeps `health_reported_at` separate from `last_heartbeat` precisely so those two are distinguishable. A LARGE value means the collector stopped while the gateway kept beating.",
+      "description": "Seconds since a heartbeat last carried a recognised health metric.\n\n**Empty means the appliance does not report health**, not that it stopped -- an older bundle, or a host-run gateway. Migration 0035 keeps `health_reported_at` separate from `last_heartbeat` precisely so those two are distinguishable. A LARGE value means the collector stopped while the gateway kept beating.",
       "datasource": {
         "type": "postgres",
         "uid": "supabase"
@@ -927,7 +927,7 @@
       "id": 15,
       "type": "timeseries",
       "title": "Clock offset",
-      "description": "How far this appliance's own clock is from the platform's, in seconds. **Positive means the appliance is ahead**, which is the direction that corrupts.\n\n**This is the fault that passes every other panel on this page.** Devices supply their own metric timestamps and are trusted for ordering, so a gateway a minute fast is ONLINE, drops nothing, and files every reading a minute early -- silently and permanently. Certificate validity is measured in months, so TLS tolerates exactly the skew the historian does not.\n\nThe measurement costs the appliance nothing: ingestion subtracts the timestamp the node put on its own heartbeat from the time that heartbeat arrived. Beyond **+5 minutes** the telemetry is discarded outright rather than misfiled; the backward tolerance is a full day, because a gateway flushing a buffered outage is legitimate late data.\n\nNothing here corrects it. It is fixed on the appliance -- see docs/physical-gateways.md.",
+      "description": "How far this appliance's own clock is from the platform's, in seconds. **Positive means the appliance is ahead**, which is the direction that corrupts.\n\n**This is the fault that passes every other panel on this page.** Devices supply their own metric timestamps and are trusted for ordering, so a gateway a minute fast is ONLINE, drops nothing, and files every reading a minute early -- silently and permanently. Certificate validity is measured in months, so TLS tolerates exactly the skew the historian does not.\n\nThe measurement costs the appliance nothing: ingestion subtracts the timestamp the node put on its own heartbeat from the time that heartbeat arrived. Beyond **+5 minutes** the telemetry is discarded outright rather than misfiled; the backward tolerance is a full day, because a gateway flushing a buffered outage is legitimate late data.\n\nNothing here corrects it. It is fixed on the appliance -- see docs/remote-gateways.md.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

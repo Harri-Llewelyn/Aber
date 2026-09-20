@@ -45,7 +45,7 @@ const device = (overrides = {}) => ({
 
 const GATEWAYS = [
   { gateway_id: 'gw-1', gateway_name: 'Line_A_Gateway', sparkplug_id: 'gwy-1-sparkplug', cell_id: CELL_1, location_scope: 'cell', status: 'ONLINE', is_archived: false, devices: [] },
-  { gateway_id: 'gw-virtual', gateway_name: 'Virtual_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] },
+  { gateway_id: 'gw-host', gateway_name: 'Host_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] },
   // `gateways_synthetic_has_no_cell` (0059) forbids a cell here, so cell_id is null by constraint
   // rather than by omission -- the fixture cannot be written any other way.
   { gateway_id: 'gw-sim', gateway_name: 'Sim_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', is_simulated: true, status: 'ONLINE', is_archived: false, devices: [] }
@@ -107,7 +107,7 @@ describe('the cell column', () => {
   it('renders Unassigned as a warning rather than an em dash', async () => {
     // An em dash reads as "nothing to see here". This is a work queue entry.
     await show([device({
-      active_gateway_id: 'gw-virtual', effective_cell_id: null, gateway_cell_id: null,
+      active_gateway_id: 'gw-host', effective_cell_id: null, gateway_cell_id: null,
       location_source: 'unassigned'
     })])
     expect(within(cellColumn()).getByText(/Unassigned/)).toBeInTheDocument()
@@ -253,7 +253,7 @@ describe('the edit form', () => {
 
   it('says the device will land in the Unassigned queue when nothing can supply a cell', async () => {
     await show([device({
-      active_gateway_id: 'gw-virtual', effective_cell_id: null, gateway_cell_id: null,
+      active_gateway_id: 'gw-host', effective_cell_id: null, gateway_cell_id: null,
       location_source: 'unassigned'
     })])
     openEdit()
@@ -412,7 +412,7 @@ describe('needs attention', () => {
 
   it('counts an unassigned device', async () => {
     await show([device({
-      active_gateway_id: 'gw-virtual', effective_cell_id: null, gateway_cell_id: null,
+      active_gateway_id: 'gw-host', effective_cell_id: null, gateway_cell_id: null,
       location_source: 'unassigned'
     })])
     expect(attentionButton().textContent).toMatch(/\(1\)/)
@@ -444,7 +444,7 @@ describe('approving a quarantined device', () => {
     asset_name: 'Unknown_Robot',
     reported_identity: 'devffffffffffffffffffff1',
     quarantine_reason: 'UNKNOWN_DEVICE',
-    gateway_id: 'gw-virtual',
+    gateway_id: 'gw-host',
     entity_type: 'DEVICE'
   }
 

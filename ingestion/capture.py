@@ -64,7 +64,7 @@ parse_sparkplug_payload() already accepts as its fallback, so a hand-edit that i
 valid to the daemon too.
 
 BUT PLAYBACK RE-ENCODES INTO THE ENCODING EACH MESSAGE ARRIVED IN, and that is not a detail. Both
-encodings are live traffic on this stack -- the Node-RED simulator flow publishes JSON, physical
+encodings are live traffic on this stack -- the Node-RED simulator flow publishes JSON, Remote
 gateways publish protobuf -- and they enter the daemon down different branches of
 parse_sparkplug_payload(). Replaying a JSON fleet as protobuf would mean a fault reproduced
 through this tool could be one the playback introduced, or one it silently repaired. The encoding

@@ -146,7 +146,7 @@ describe('GatewayRepositoryPanel — host-run gateways', () => {
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
-  it('does not call it a virtual gateway', () => {
+  it('does not call it a host-run gateway', () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
     expect(screen.queryByText(/virtual/i)).toBeNull()
   })

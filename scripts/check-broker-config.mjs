@@ -786,7 +786,7 @@ try {
           problems.push('a second mosquitto-tls-init run failed; it must be idempotent');
         } else if (!before || before !== after) {
           problems.push(
-            'RE-RUNNING mosquitto-tls-init MINTED A NEW ROOT. Every physical gateway trusts the '
+            'RE-RUNNING mosquitto-tls-init MINTED A NEW ROOT. Every Remote gateway trusts the '
             + 'previous one by hand-distributed copy, so this would take the whole fleet offline '
             + 'on the next broker start while the stack reported itself healthy.'
           );

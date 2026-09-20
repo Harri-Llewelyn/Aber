@@ -253,7 +253,7 @@ groups:
         title: Gateway CA Expiring
         condition: C
         for: 0s
-        # NoData IS OK. On a stack with no physical gateways -- the demonstrator, and every CI run --
+        # NoData IS OK. On a stack with no Remote gateways -- the demonstrator, and every CI run --
         # no appliance reports a certificate date and the query returns nothing. That is a fleet
         # with no appliances, not a fleet in trouble.
         noDataState: OK
@@ -282,7 +282,7 @@ groups:
               rawQuery: true
               editorMode: code
               # `collected_at AS "time"` because the time_series format requires a time column.
-              # `IS NOT NULL` is load-bearing: a virtual gateway, or an appliance on an older bundle, reports
+              # `IS NOT NULL` is load-bearing: a host-run gateway, or an appliance on an older bundle, reports
               # no certificate date, and a NULL per gateway would become an alert instance.
               rawSql: |
                 SELECT collected_at          AS "time",
@@ -900,7 +900,7 @@ groups:
             Edge node {{ $labels.edge_node }} has a clock that disagrees with the platform by more
             than a minute, so every reading it sends is being filed at the wrong time. Nothing
             corrects this centrally -- devices are trusted for their own timestamps. Fix time
-            synchronisation on the appliance; see docs/physical-gateways.md.
+            synchronisation on the appliance; see docs/remote-gateways.md.
         data:
           - refId: A
             relativeTimeRange:

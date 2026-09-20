@@ -5,7 +5,7 @@ WHAT THESE TESTS ARE FOR. Every property asserted here fails SILENTLY and in the
 direction if it regresses:
 
   * a token table readable by `authenticated` never errors -- it just exposes the claim material
-    for every physical gateway to every signed-in user, including Operator and Auditor;
+    for every Remote gateway to every signed-in user, including Operator and Auditor;
   * a non-atomic claim never errors -- two appliances redeem one token, both receive a credential
     for the same edge node, and because the broker's roles pin the topic to the username they then
     fight over one identity with no message anywhere saying so;
@@ -37,8 +37,8 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 # The 2f/2e prefixes continue the convention in scripts/provision-gateways.mjs and cannot collide
 # with the simulator (12-15…) or validator (11…) blocks -- and, per that script's warning, they
 # differ in the FIRST group because sparkplug_id is derived from the leading 21 hex characters.
-PHYSICAL_GW = "2f000000-0000-4000-8000-000000000001"
-VIRTUAL_GW = "2e000000-0000-4000-8000-000000000001"
+REMOTE_GW = "2f000000-0000-4000-8000-000000000001"
+HOST_GW = "2e000000-0000-4000-8000-000000000001"
 
 # THE DEMO ACCOUNTS FROM supabase/seed.sql, NOT SYNTHETIC UUIDs, and that is not a convenience.
 #
@@ -139,8 +139,8 @@ class GatewayEnrollmentBase(unittest.TestCase):
                     f"(found {found}) -- apply supabase/seed.sql first"
                 )
 
-            # A PHYSICAL gateway and a VIRTUAL one, because the issuing RPC refuses the second and
-            # that refusal is a property worth holding onto: a bundle for a virtual gateway would
+            # A REMOTE gateway and a HOST one, because the issuing RPC refuses the second and
+            # that refusal is a property worth holding onto: a bundle for a host-run gateway would
             # mint a broker credential nothing could ever present.
             cur.execute(
                 """
@@ -150,7 +150,7 @@ class GatewayEnrollmentBase(unittest.TestCase):
                 ON CONFLICT (id) DO UPDATE
                    SET deployment = EXCLUDED.deployment, status = 'OFFLINE';
                 """,
-                (PHYSICAL_GW, VIRTUAL_GW),
+                (REMOTE_GW, HOST_GW),
             )
             conn.commit()
         finally:
@@ -163,7 +163,7 @@ class GatewayEnrollmentBase(unittest.TestCase):
         try:
             # The tokens go with the gateway: the FK is ON DELETE CASCADE. The demo accounts are
             # NOT removed -- they are the stack's own seed data, not this suite's fixture.
-            cur.execute("DELETE FROM public.gateways WHERE id IN (%s, %s);", (PHYSICAL_GW, VIRTUAL_GW))
+            cur.execute("DELETE FROM public.gateways WHERE id IN (%s, %s);", (REMOTE_GW, HOST_GW))
             conn.commit()
         finally:
             conn.close()
@@ -178,7 +178,7 @@ class GatewayEnrollmentBase(unittest.TestCase):
         self.conn.rollback()
         self.conn.close()
 
-    def issue(self, gateway_id=PHYSICAL_GW, ttl=30, user=ADMIN_USER, role="Administrator"):
+    def issue(self, gateway_id=REMOTE_GW, ttl=30, user=ADMIN_USER, role="Administrator"):
         as_role(self.cur, user, role)
         self.cur.execute(
             "SELECT token, expires_at FROM public.issue_gateway_enrollment_token(%s, %s);",
@@ -276,12 +276,12 @@ class TestIssuing(GatewayEnrollmentBase):
         self.cur.execute("SET ROLE anon;")
         with self.assertRaises(pg_errors.InsufficientPrivilege):
             self.cur.execute(
-                "SELECT * FROM public.issue_gateway_enrollment_token(%s, 30);", (PHYSICAL_GW,)
+                "SELECT * FROM public.issue_gateway_enrollment_token(%s, 30);", (REMOTE_GW,)
             )
 
-    def test_virtual_gateway_is_refused(self):
+    def test_a_host_gateway_is_refused(self):
         with self.assertRaises(psycopg2.errors.InvalidParameterValue):
-            self.issue(gateway_id=VIRTUAL_GW)
+            self.issue(gateway_id=HOST_GW)
 
     def test_unknown_gateway_is_refused(self):
         with self.assertRaises(psycopg2.errors.ForeignKeyViolation):
@@ -296,7 +296,7 @@ class TestIssuing(GatewayEnrollmentBase):
 
     def test_issuing_sets_pending_enrollment(self):
         self.issue()
-        self.cur.execute("SELECT status FROM public.gateways WHERE id = %s;", (PHYSICAL_GW,))
+        self.cur.execute("SELECT status FROM public.gateways WHERE id = %s;", (REMOTE_GW,))
         self.assertEqual(self.cur.fetchone()[0], "PENDING_ENROLLMENT")
 
     def test_reissuing_invalidates_the_previous_token(self):
@@ -315,7 +315,7 @@ class TestIssuing(GatewayEnrollmentBase):
                    count(*)
               FROM public.gateway_enrollment_tokens WHERE gateway_id = %s;
             """,
-            (PHYSICAL_GW,),
+            (REMOTE_GW,),
         )
         live, total = self.cur.fetchone()
         self.assertEqual(live, 1, "more than one live token exists for a single gateway")
@@ -337,7 +337,7 @@ class TestRedeeming(GatewayEnrollmentBase):
         row = self.cur.fetchone()
         self.assertIsNotNone(row, "a live token was refused")
         gateway_id, sparkplug_id, sparkplug_group, name = row
-        self.assertEqual(str(gateway_id), PHYSICAL_GW)
+        self.assertEqual(str(gateway_id), REMOTE_GW)
         # The username the broker's roles pin the topic's edge-node segment to. An appliance given
         # anything else authenticates and then has every message dropped by the broker.
         self.assertRegex(sparkplug_id, r"^gwy[0-9a-f]{21}$")
@@ -374,7 +374,7 @@ class TestRedeeming(GatewayEnrollmentBase):
              WHERE gateway_id = %s AND consumed_at IS NULL
             RETURNING id;
             """,
-            (PHYSICAL_GW,),
+            (REMOTE_GW,),
         )
         return self.cur.fetchone()[0]
 
@@ -436,7 +436,7 @@ class TestRedeeming(GatewayEnrollmentBase):
         )
         row = self.cur.fetchone()
         self.assertIsNotNone(row, "a live token was refused by the check")
-        self.assertEqual(str(row[0]), PHYSICAL_GW)
+        self.assertEqual(str(row[0]), REMOTE_GW)
         self.assertRegex(row[1], r"^gwy[0-9a-f]{21}$")
         self.assertEqual(row[2], "Test_Remote_Gateway")
         self.assertEqual(row[3], expires_at)
@@ -507,7 +507,7 @@ class TestRedeeming(GatewayEnrollmentBase):
             # Committed above, so tearDown's rollback cannot reach it.
             cleanup = get_connection()
             cur = cleanup.cursor()
-            cur.execute("DELETE FROM public.gateway_enrollment_tokens WHERE gateway_id = %s;", (PHYSICAL_GW,))
+            cur.execute("DELETE FROM public.gateway_enrollment_tokens WHERE gateway_id = %s;", (REMOTE_GW,))
             cleanup.commit()
             cleanup.close()
 
@@ -534,7 +534,7 @@ class TestGatewayStatusView(GatewayEnrollmentBase):
         """A gateway that has never beaten keeps its stored status rather than ageing out."""
         self.issue()
         self.cur.execute(
-            "SELECT live_status, is_stale FROM public.gateway_status WHERE id = %s;", (PHYSICAL_GW,)
+            "SELECT live_status, is_stale FROM public.gateway_status WHERE id = %s;", (REMOTE_GW,)
         )
         live_status, is_stale = self.cur.fetchone()
         self.assertEqual(live_status, "PENDING_ENROLLMENT")
@@ -569,7 +569,7 @@ class TestBrokerCapturePolicies(GatewayEnrollmentBase):
                 raise unittest.SkipTest(
                     "the broker_captures_* policies are not applied -- run supabase/storage-policies.sql"
                 )
-            cur.execute("SELECT sparkplug_id FROM public.gateways WHERE id = %s;", (PHYSICAL_GW,))
+            cur.execute("SELECT sparkplug_id FROM public.gateways WHERE id = %s;", (REMOTE_GW,))
             cls.sparkplug_id = cur.fetchone()[0]
         finally:
             conn.close()

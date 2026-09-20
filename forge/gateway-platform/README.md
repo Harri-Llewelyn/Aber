@@ -53,7 +53,7 @@ puts the packages the playbook needs in place, fetches this playbook (as a zip, 
 the forge refuses anonymous reads and the appliance has no key yet), runs it, writes the
 appliance's `.env`, and enrols by starting the compose project. Install first, enrol last: every
 step before enrolment can be re-run with the same command, and the token is spent only by the
-enrolment. The runbook is in `docs/physical-gateways.md`.
+enrolment. The runbook is in `docs/remote-gateways.md`.
 
 ## How an appliance runs it
 
@@ -121,7 +121,7 @@ is what was approved either way.
   the platform refuses what is more than five minutes ahead and counts it. An **RTC module** is a
   recommendation for single-board appliances and not a requirement: without one the clock starts
   in the past, TLS fails visibly, and chrony's `makestep` recovers it once a source is reachable.
-  `docs/physical-gateways.md` §8 carries the reasoning.
+  `docs/remote-gateways.md` §8 carries the reasoning.
 - **The compose volume is a bind mount** under `/var/lib/acs-gateway/data`, so the host's
   converge script can reach the deploy key, the host key and the repository checkout that
   `bootstrap.mjs` wrote inside the container.

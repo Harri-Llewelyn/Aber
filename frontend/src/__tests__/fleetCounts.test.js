@@ -77,7 +77,7 @@ describe('gatewayFleetCounts', () => {
   })
 
   it('keeps awaiting-setup out of the offline bucket', () => {
-    // A physical gateway sits in PENDING_ENROLLMENT from creation until somebody carries its
+    // A Remote gateway sits in PENDING_ENROLLMENT from creation until somebody carries its
     // bundle to a machine. Counted as offline, ordering four appliances shows four faults.
     const counts = gatewayFleetCounts([
       gateway(),

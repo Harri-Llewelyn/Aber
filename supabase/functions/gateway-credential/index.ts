@@ -6,18 +6,18 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
- * Mint a broker credential for a virtual gateway and reveal it exactly once. The second caller of
+ * Mint a broker credential for a host-run gateway and reveal it exactly once. The second caller of
  * the credential service's issue verb, beside enroll-gateway, and nothing is added to that verb
  * here. The mirror image of enroll-gateway, which has no user and is authorised by a token; this
  * has a session and is authorised by role, and folding the two would mean one function accepting
- * two unrelated proofs of authority. A virtual gateway needs this because its `sparkplug_id` is
+ * two unrelated proofs of authority. A host-run gateway needs this because its `sparkplug_id` is
  * generated from its row, so the account can only be minted after the row, and there is no
  * appliance to carry a bundle to.
  *
  * The authority is more than gateway-bundle's, which holds no secret: the broker's accounts are
  * not reachable from SQL, so minting requires MQTT_CREDENTIAL_SERVICE_TOKEN. There is still no
  * service-role key, so this cannot read or write a table outside the caller's RLS context. The
- * decision is the database's: `authorize_virtual_gateway_credential()` is SECURITY DEFINER and
+ * decision is the database's: `authorize_host_gateway_credential()` is SECURITY DEFINER and
  * checks `has_role()` itself, so the role check below exists only so a refusal answers 403 with a
  * usable message.
  */
@@ -108,11 +108,11 @@ serve(async (req) => {
     });
   }
 
-  // 1. The authority decision, made by the database. Refuses a physical gateway (use a bundle), an
+  // 1. The authority decision, made by the database. Refuses a Remote gateway (use a bundle), an
   // archived one, and a caller without the role, and returns the generated sparkplug_id, the only
   // thing the account may be named.
   const { data: authorized, error: authError } = await supabase
-    .rpc("authorize_virtual_gateway_credential", { p_gateway_id: gatewayId });
+    .rpc("authorize_host_gateway_credential", { p_gateway_id: gatewayId });
 
   if (authError) {
     console.error(`gateway-credential: authorisation refused: ${authError.message}`);

@@ -174,7 +174,7 @@ spec:
             {{- include "acs-cymru.brokerClientEnv" . | nindent 12 }}
             {{- /*
               The validator connects AS AN ORDINARY GATEWAY, confined by its own broker role to its
-              own edge-node subtree exactly as a physical one is. The username is the `sparkplug_id`
+              own edge-node subtree exactly as a Remote one is. The username is the `sparkplug_id`
               generated from VAL_GW_UUID in validate.py -- pinned there precisely so this
               credential can be issued before the row exists. A mismatch between the two shows up
               as every publish being silently dropped, and the run failing as "no telemetry".

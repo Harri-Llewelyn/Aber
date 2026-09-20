@@ -196,7 +196,7 @@ describe('AccessControlTab', () => {
     expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
   })
 
-  it('offers a mint for a virtual gateway and a bundle for a physical one', async () => {
+  it('offers a mint for a host-run gateway and a bundle for a Remote one', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned, enrolled])
     render(<AccessControlTab showToast={vi.fn()} />)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Assert the physical gateway's flow template is one an appliance can run. `flows.template.json` is
+ * Assert the Remote gateway's flow template is one an appliance can run. `flows.template.json` is
  * JavaScript inside JSON inside a template, shipped to hardware nobody here can log into;
  * `bootstrap.mjs` parses it on the appliance after the token is spent, and Node-RED evaluates a
  * function node's body at the first tick. Checks: 1. every function node's body compiles, in the

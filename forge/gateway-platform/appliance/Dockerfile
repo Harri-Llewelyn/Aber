@@ -1,4 +1,4 @@
-# Node-RED for an ACS-Cymru PHYSICAL gateway appliance.
+# Node-RED for an ACS-Cymru REMOTE gateway appliance.
 #
 # RECONSTRUCTED. The original of this file was overwritten during Phase 4 and was never committed,
 # so this is a rebuild from what bootstrap.mjs and README.md state rather than the original text.

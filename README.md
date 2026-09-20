@@ -32,7 +32,7 @@ cron writer, and AAS is an **adapter on the way out**, not an adopted metamodel.
 flowchart TB
     subgraph Edge ["Edge & Physical Shopfloor"]
         NR["Node-RED Gateway Simulator<br/>(Port 1880)"]
-        DEV["Physical Sparkplug B Gateways"]
+        DEV["Remote Sparkplug B Gateways"]
     end
 
     subgraph Messaging ["Message Broker"]
@@ -178,7 +178,7 @@ shopfloor simulator needed, `0020` retires the introductory single-device simula
 schema and IDTA nameplate onto the demonstration mill, `0021` gives each shopfloor cell an icon from
 a closed set, `0023` adds the `platform_alerts` occurrence log Grafana alerting writes into and publishes it for
 Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
-physical-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
+Remote-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
 the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
 `AWAITING_BIRTH` lifecycle states — `0026` stamps every audit row with the transaction that wrote
 it (`digital_thread.causation_id`, from `txid_current()`) so the several rows one operator action
@@ -218,9 +218,9 @@ a delete verb that could stop the whole fleet publishing is not one it carries �
 makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
 an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
 after the gateway was archived, which issued a real broker credential and resurrected the row
-to `ONLINE` — and `0039` adds `0041` gives a **virtual gateway a
-"Generate broker credential" path that needs no shell**: `authorize_virtual_gateway_credential()`
-gates by role and refuses a physical or archived gateway, and
+to `ONLINE` — and `0039` adds `0041` gives a **host-run gateway a
+"Generate broker credential" path that needs no shell**: `authorize_host_gateway_credential()`
+gates by role and refuses a Remote or archived gateway, and
 `record_gateway_credential_issued()` writes the `CREDENTIAL_ISSUED` audit row attributed to the
 operator who asked — the two are separate so that a credential service that is down cannot produce
 a record of a mint that never happened, and a mint that succeeds cannot go unrecorded — and `0042`
@@ -580,7 +580,7 @@ would add a reload-dependent mechanism nothing here consumes.
 **Revisit if** the root is ever exported, or if client certificates replace password authentication
 on the broker. The re-walk itself is no longer a visit: the sweep publishes the current root to
 `trust/` on the platform repository and every appliance installs it at its next hourly convergence,
-which is what the compromised-key case needs (`docs/physical-gateways.md` §8).
+which is what the compromised-key case needs (`docs/remote-gateways.md` §8).
 
 #### An appliance's deploy key can write its repository's wiki
 

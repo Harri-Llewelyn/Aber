@@ -382,7 +382,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
             {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
             the deployment rather than here: on Compose, <span className="mono">npm run setup</span> asks
-            for the host on a fresh .env, or set both and restart (docs/physical-gateways.md, section 7).
+            for the host on a fresh .env, or set both and restart (docs/remote-gateways.md, section 7).
             Host-run and simulated gateways are unaffected.
           </span>
         </div>
@@ -825,7 +825,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           /**
            * What the appliance says about itself. Shown only once `health_reported_at` is set: a
-           * gateway that never reported is virtual or on an older bundle, and six rows of dashes
+           * gateway that never reported is host-run or on an older bundle, and six rows of dashes
            * would read as six faults. Current values with no history; the trend is in Grafana's
            * Gateway Fleet Health dashboard.
            */

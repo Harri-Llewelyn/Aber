@@ -30,7 +30,7 @@ const NOW = Date.parse('2026-07-28T12:00:00Z')
 
 const gateway = {
   gateway_id: 'gw-1',
-  gateway_name: 'Virtual_Gateway_NodeRED',
+  gateway_name: 'Host_Gateway_NodeRED',
   sparkplug_id: 'gwy_aaaabbbbccccdddd',
   cell_id: 'cell-1',
   location_scope: 'cell',
@@ -237,10 +237,10 @@ describe('Gateways page drawer', () => {
 
   it('opens on a row click and shows the identifiers the row has no room for', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     expect(isOpen()).toBe(false)
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
 
     await waitFor(() => expect(isOpen()).toBe(true))
     const p = within(panel())
@@ -254,20 +254,20 @@ describe('Gateways page drawer', () => {
     // With the list still live beside the panel, "which of these am I looking at" is otherwise
     // unanswerable.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(document.querySelectorAll('tr.row-selected')).toHaveLength(1))
   })
 
   it('closes when the same row is clicked again', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(false))
   })
 
@@ -275,12 +275,12 @@ describe('Gateways page drawer', () => {
     // The whole point of a drawer over a modal. If the list were covered, flicking between two
     // entities would be open-read-close-open-read.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    expect(list().getByText('Virtual_Gateway_NodeRED')).toBeVisible()
+    expect(list().getByText('Host_Gateway_NodeRED')).toBeVisible()
     expect(document.querySelector('.page-main table')).toBeTruthy()
   })
 
@@ -288,11 +288,11 @@ describe('Gateways page drawer', () => {
     // The panel holds an ID and re-resolves it every render. Capturing the object freezes the
     // drawer while the row beside it keeps updating.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    expect(within(panel()).getByText('Virtual_Gateway_NodeRED')).toBeTruthy()
+    expect(within(panel()).getByText('Host_Gateway_NodeRED')).toBeTruthy()
 
     // The gateway is renamed underneath the open panel, as a poll would deliver it.
     api.get.mockImplementation(routeGet({
@@ -306,8 +306,8 @@ describe('Gateways page drawer', () => {
 
   it('closes itself if the entity disappears', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
     api.get.mockImplementation(routeGet({ gateways: [] }))
@@ -333,7 +333,7 @@ describe('Devices page drawer', () => {
     const p = within(panel())
     expect(p.getByText('Assembly Line 1')).toBeTruthy()
     expect(p.getByText('inherited')).toBeTruthy()
-    expect(p.getByText('Virtual_Gateway_NodeRED')).toBeTruthy()
+    expect(p.getByText('Host_Gateway_NodeRED')).toBeTruthy()
   })
 })
 
@@ -406,7 +406,7 @@ describe('Identifiers in the panel are copyable', () => {
         open
         onClose={vi.fn()}
         type="GATEWAY"
-        title="Virtual_Gateway_NodeRED"
+        title="Host_Gateway_NodeRED"
         fields={[{ label: 'Gateway UUID', value: 'gw-1', mono: true, copyable: true }]}
       />
     )
@@ -471,9 +471,9 @@ describe('Tables shed what the panel now carries', () => {
     render(
       <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />
     )
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const p = within(panel())
@@ -511,12 +511,12 @@ describe('The panel is the single home for entity actions', () => {
     render(
       <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />
     )
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     const headers = [...document.querySelectorAll('.page-main th')].map(h => h.textContent)
     expect(headers).not.toContain('Actions')
 
-    const p = within(panel_after(() => fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))))
+    const p = within(panel_after(() => fireEvent.click(list().getByText('Host_Gateway_NodeRED'))))
     for (const label of ['Edit Details', 'View Digital Thread', 'Attached Links']) {
       expect(p.getByText(label)).toBeTruthy()
     }
@@ -620,7 +620,7 @@ describe('A card is a composition: header, description, filters, table', () => {
 
   it('composes the gateways card', async () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     composedCard(/New Gateway/i)
   })
 
@@ -660,7 +660,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const p = within(panel())
-    fireEvent.click(p.getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(p.getByText('Host_Gateway_NodeRED'))
     expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
 
     fireEvent.click(p.getByText('Simulated_CNC_01'))
@@ -686,7 +686,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     expect(within(cellsTable()).getByText('1 Online / 0 Offline')).toBeTruthy()
-    expect(within(cellsTable()).getByText('Virtual_Gateway_NodeRED')).toBeTruthy()
+    expect(within(cellsTable()).getByText('Host_Gateway_NodeRED')).toBeTruthy()
   })
 
   it('renders a cell with nothing in it as one row, marked empty', async () => {
@@ -723,9 +723,9 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
       gateways: [{ ...gateway, sparkplug_group: 'Wales' }]
     }))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
     expect(within(panel()).getByText('spBv1.0/Wales/NDATA/gwy_aaaabbbbccccdddd')).toBeTruthy()
@@ -733,9 +733,9 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
 
   it('falls back to a wildcard only where no group is recorded', async () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const topic = within(panel()).getByText(/spBv1\.0\/\+\/NDATA/)
@@ -746,9 +746,9 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
 
   it('names the connected devices once, not a count and then a list', async () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const p = within(panel())
@@ -774,9 +774,9 @@ describe('Context panel layout invariants', () => {
 
   it('puts a gateway\'s device list above its actions, not below them', async () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const facts = panel().querySelector('.context-panel-facts')

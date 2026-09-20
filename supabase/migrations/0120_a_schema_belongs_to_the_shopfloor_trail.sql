@@ -32,7 +32,7 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
       THEN 'security'
 
     -- The asset trail: the shopfloor's own history. CREDENTIAL_ISSUED lands here on `gateways`
-    -- deliberately: a Manager may mint a virtual gateway's broker credential. `schemas` joined in
+    -- deliberately: a Manager may mint a host-run gateway's broker credential. `schemas` joined in
     -- 0120 -- see the header for why an Administrator-only write is still an asset-lane record.
     WHEN p_entity_type IN ('areas', 'cells', 'devices', 'gateways', 'links',
                            'schemas', 'device_nameplate', 'change_proposals',

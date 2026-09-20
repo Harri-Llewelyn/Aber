@@ -1,14 +1,16 @@
-# Physical gateways — operator runbook
+# Remote gateways — operator runbook
 
 How a piece of hardware on a shopfloor becomes a gateway this platform trusts, and what to do when
 that goes wrong.
 
-A **virtual** gateway is a connector running on the application host: it exists the moment its row
-does, and it needs nothing installed. A **physical** gateway runs on its own machine — a Raspberry
-Pi, an industrial PC, a spare server in a cabinet — and has to be given an identity, a credential and
-a way to verify the broker before it can publish anything. This document is about the second kind.
+A gateway is one of three types, which the dashboard's **Type** control selects between. A **Host**
+gateway is a connector running inside this stack: it exists the moment its row does, and it needs
+nothing installed. A **Simulated** gateway is host-run too, and its readings are generated rather
+than observed. A **Remote** gateway runs on its own machine — a Raspberry Pi, an industrial PC, a
+spare server in a cabinet — and has to be given an identity, a credential and a way to verify the
+broker before it can publish anything. This document is about the third kind.
 
-> **The short version.** Create the gateway in the dashboard with *Virtual* left unchecked and
+> **The short version.** Create the gateway in the dashboard with its **Type** set to *Remote* and
 > paste the command it shows on a fresh Ubuntu machine; it installs everything, enrols, and prints
 > the editor password once. Or download the bundle, copy the folder to a machine with Docker, run
 > `docker compose up -d --build`, then `docker compose logs bootstrap`. Either way the gateway goes
@@ -46,7 +48,7 @@ that file would have no revocation story at all.
    (§7). Save is withheld for a Remote gateway until it can; Host and Simulated are unaffected.
    `npm run setup` asks for the domain when it writes a values file.
 1. **Gateways → New Gateway.** Name it after the machine or the cell it serves.
-2. **Leave “Mark as Virtual Gateway” unchecked.** The form says which way it is going before you
+2. **Set Type to “Remote”.** The form says which way it is going before you
    save: *“Runs on its own hardware. On save you will be given a bundle to copy to that machine.”*
 3. **Save.** The setup modal opens and **mints immediately** — the gateway is seconds old, so
    there is no earlier token for this one to invalidate. It is now **AWAITING SETUP**
@@ -139,7 +141,7 @@ bundle-installed appliance until somebody runs the platform playbook on it once 
 * For the bundle: Docker and the Compose plugin.
 * A route to the platform's API — the address in `ACS_SUPABASE_URL`, which the server refuses to set
   to anything in-stack (§7).
-* A route to the broker on **8883**. Physical gateways use MQTTS exclusively; 1883 is published only
+* A route to the broker on **8883**. Remote gateways use MQTTS exclusively; 1883 is published only
   for gateways not yet moved, and is not used here.
 * The broker's hostname must resolve. It also has to be in the certificate's SAN — see §7.
 
@@ -194,7 +196,7 @@ place to discover that — it is the hardest thing in the deployment to get a sh
 ## 5. The enrolment lifecycle
 
 ```
-   operator saves a physical gateway
+   operator saves a Remote gateway
                 │
                 ▼
       PENDING_ENROLLMENT ── "AWAITING SETUP"        waiting for a PERSON

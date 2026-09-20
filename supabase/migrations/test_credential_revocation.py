@@ -1,12 +1,12 @@
 """
-Revocation reaches a virtual gateway (0063), and still cannot invent an account (0040's guarantee).
+Revocation reaches a host-run gateway (0063), and still cannot invent an account (0040's guarantee).
 
     python supabase/migrations/test_credential_revocation.py
 
 Requires the Supabase database (54322 by default) and archived migration 0063 applied.
 
 ---------------------------------------------------------------------------------------------
-THE REGRESSION THIS EXISTS FOR, demonstrated end to end before it was fixed: create a virtual
+THE REGRESSION THIS EXISTS FOR, demonstrated end to end before it was fixed: create a host-run
 gateway, give it a broker account with a known password, publish, DELETE the gateway row, and the
 credential went on publishing. `revoke_credential_on_decommission()` gated on
 `gateway_holds_a_credential()` -- `NOT is_virtual AND enrolled_at IS NOT NULL` -- which is false for
@@ -105,8 +105,8 @@ class RevocationBase(unittest.TestCase):
 
 class TestTheGatewaysItReaches(RevocationBase):
 
-    def test_deleting_a_virtual_gateway_asks_for_its_credential_back(self):
-        """The exact case that failed: a virtual gateway, deleted, credential left working."""
+    def test_deleting_a_host_gateway_asks_for_its_credential_back(self):
+        """The exact case that failed: a host-run gateway, deleted, credential left working."""
         gid, _ = self.a_gateway(host_run=True, with_credential=True)
         before = self.queue_depth()
 
@@ -120,7 +120,7 @@ class TestTheGatewaysItReaches(RevocationBase):
             "after its row was gone.",
         )
 
-    def test_archiving_a_virtual_gateway_asks_and_stamps(self):
+    def test_archiving_a_host_gateway_asks_and_stamps(self):
         gid, _ = self.a_gateway(host_run=True, with_credential=True)
         before = self.queue_depth()
 
@@ -136,7 +136,7 @@ class TestTheGatewaysItReaches(RevocationBase):
         # pg_net never recorded a 2xx, which is what makes the optimism eventually correct.
         self.assertIsNotNone(self.cur.fetchone()[0])
 
-    def test_a_physical_enrolled_gateway_still_works(self):
+    def test_a_remote_enrolled_gateway_still_works(self):
         """The case that was never broken, asserted so the fix is not a swap of one gap for another."""
         gid, _ = self.a_gateway(host_run=False, enrolled=True)
         before = self.queue_depth()
@@ -154,7 +154,7 @@ class TestWhatItStillPassesOver(RevocationBase):
     litter the password file, one junk account per gateway ever deleted.
     """
 
-    def test_a_virtual_gateway_with_no_recorded_credential_is_passed_over(self):
+    def test_a_host_gateway_with_no_recorded_credential_is_passed_over(self):
         gid, _ = self.a_gateway(host_run=True, with_credential=False)
         before = self.queue_depth()
 
@@ -168,7 +168,7 @@ class TestWhatItStillPassesOver(RevocationBase):
             "0063 keeps that protection by reading the record rather than the flag.",
         )
 
-    def test_a_physical_gateway_that_never_enrolled_is_passed_over(self):
+    def test_a_remote_gateway_that_never_enrolled_is_passed_over(self):
         gid, _ = self.a_gateway(host_run=False, enrolled=False)
         before = self.queue_depth()
 
@@ -197,7 +197,7 @@ class TestTheSweepAgrees(RevocationBase):
     hole in exactly the shape of the bug.
     """
 
-    def test_the_sweep_retries_a_virtual_gateway(self):
+    def test_the_sweep_retries_a_host_gateway(self):
         gid, _ = self.a_gateway(host_run=True, with_credential=True)
         self.cur.execute("UPDATE public.gateways SET is_archived = true WHERE id = %s;", (gid,))
         # CLEARED IN A SECOND STATEMENT, and the first attempt at this test got it wrong in a way

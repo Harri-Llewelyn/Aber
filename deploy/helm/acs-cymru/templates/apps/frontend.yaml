@@ -202,7 +202,7 @@ spec:
               readOnly: true
             {{- if .Values.ingress.tls.enabled }}
             {{- /* THE PLATFORM'S ROOT, served over plain HTTP at a static path for the one-liner's
-                   stage 0 (docs/physical-gateways.md): a fresh appliance fetches it as inert bytes,
+                   stage 0 (docs/remote-gateways.md): a fresh appliance fetches it as inert bytes,
                    checks it against the pin the dashboard minted, and only then trusts TLS to the
                    API. A directory mount holding ONE projected key -- never the Secret whole, which
                    also holds tls.key. Optional, so the pod starts before cert-manager has issued;

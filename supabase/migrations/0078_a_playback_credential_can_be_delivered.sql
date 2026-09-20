@@ -10,7 +10,7 @@
 -- See docs/incidents.md and ingestion/README.md -> "Issuing a playback credential delivers it".
 
 -- =================================================================================================
--- A SEPARATE FUNCTION, not a third column on `authorize_virtual_gateway_credential()`: a later
+-- A SEPARATE FUNCTION, not a third column on `authorize_host_gateway_credential()`: a later
 -- migration may redeclare a function 0001 declares but must not change its return type, because
 -- 0001 re-declares its own form first on every boot with CREATE OR REPLACE and aborts the chain
 -- on the second boot (check-docs-drift.mjs enforces this). The cost is a second round trip from
@@ -43,7 +43,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) IS
-  'Whether a freshly-issued broker credential for this gateway may be DELIVERED to the playback worker. is_simulated -- the same predicate start_playback_job() gates on, so the set of passwords the worker can hold is exactly the set of gateways it may publish as. Deliberately NOT a column on authorize_virtual_gateway_credential(): 0001 redeclares that function on every boot and CREATE OR REPLACE cannot change a return type, which aborts the whole chain at file one.';
+  'Whether a freshly-issued broker credential for this gateway may be DELIVERED to the playback worker. is_simulated -- the same predicate start_playback_job() gates on, so the set of passwords the worker can hold is exactly the set of gateways it may publish as. Deliberately NOT a column on authorize_host_gateway_credential(): 0001 redeclares that function on every boot and CREATE OR REPLACE cannot change a return type, which aborts the whole chain at file one.';
 
 REVOKE ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) TO service_role;

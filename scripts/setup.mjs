@@ -16,7 +16,7 @@
  * every request. Node's built-in `crypto` does HMAC-SHA256, so this stays a zero-install script.
  *
  * One question is asked, on a terminal only: the domain every host is published under, which is
- * what a browser and a physical gateway both dial. `--domain=<base>` answers it from a script;
+ * what a browser and a Remote gateway both dial. `--domain=<base>` answers it from a script;
  * without a terminal it is left at the chart's default, and the file says what that withholds.
  *
  * For anything another person can reach, an externally managed Secret (`secrets.existingSecret`,
@@ -151,7 +151,7 @@ async function resolveDomain() {
   if (!process.stdin.isTTY) return '';
   console.log('');
   console.log('🌐 Every host is published under one domain: app.<domain>, api.<domain>, mqtt.<domain> and');
-  console.log('   the rest. A browser and a physical gateway both dial it, so it has to resolve on the');
+  console.log('   the rest. A browser and a Remote gateway both dial it, so it has to resolve on the');
   console.log('   plant network -- a name, or <ip>.nip.io. Leave it blank to keep the chart\'s loopback');
   console.log('   default, which works on this machine and withholds remote enrolment.');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -205,7 +205,7 @@ console.log(`   Both valid ${SERVICE_KEY_DEFAULT_DAYS} days, until ${ingestionKe
 console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs both.');
 console.log('');
 if (domain) {
-  console.log(`🌐 Every host is under ${domain}: browsers and physical gateways dial it, and the broker`);
+  console.log(`🌐 Every host is under ${domain}: browsers and Remote gateways dial it, and the broker`);
   console.log('   certificate carries mqtt.' + domain + ' once mosquitto.tls.enabled is on.');
 } else {
   console.log('🌐 No domain was given, so the dev values\' localhost stays: this machine only, and');

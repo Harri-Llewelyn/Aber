@@ -11,7 +11,7 @@ import {
 } from "../_shared/forge.ts";
 
 /**
- * Physical gateway enrolment: exchange a single-use token for a broker credential. The caller is an
+ * Remote gateway enrolment: exchange a single-use token for a broker credential. The caller is an
  * appliance, not a person, so there is no role to resolve: possession of the token is the
  * authorisation. The anon key gets the request past the gateway; the token authorises it.
  *
@@ -92,7 +92,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json(503, {
       error: "Enrolment is not configured on this deployment",
       details:
-        `MQTT_PUBLIC_HOST is ${broker.problem} -- set it to the hostname or IP physical gateways ` +
+        `MQTT_PUBLIC_HOST is ${broker.problem} -- set it to the hostname or IP Remote gateways ` +
         "dial, then re-issue the certificate (mosquitto-tls-init folds it into the broker " +
         "certificate's SAN). No token was consumed.",
     });
@@ -217,7 +217,7 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 
-  // No CA means no enrolment, and this is a refusal rather than a degradation: physical gateways
+  // No CA means no enrolment, and this is a refusal rather than a degradation: Remote gateways
   // connect over MQTTS only, and an appliance without the CA could only proceed by skipping
   // verification, which this stack has no switch for. The claim is released, since this is a
   // deployment fault and the same bundle should work once TLS is provisioned.
@@ -227,7 +227,7 @@ export default async function handler(req: Request): Promise<Response> {
     return json(503, {
       error: "The broker has no certificate authority",
       details:
-        "Physical gateways connect over MQTTS and must verify the broker against its CA. " +
+        "Remote gateways connect over MQTTS and must verify the broker against its CA. " +
         "Check mosquitto.tls.enabled and the cert-manager issuer it names.",
       retryable,
     });

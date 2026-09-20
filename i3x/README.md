@@ -77,7 +77,7 @@ Four mappings that are decisions rather than mechanics:
 - **`parentId` is the cell, not the gateway.** i3X gives an Object one parent; a device here has two
   (a cell — where it is; a gateway — how its data arrives). `HasParent` is organizational hierarchy,
   so the cell wins, and the data path becomes a `ConnectsVia` / `ProvidesConnectivityFor` pair.
-  Collapsing them would make a virtual gateway unrepresentable.
+  Collapsing them would make a host-run gateway unrepresentable.
 - **Unassigned is synthetic.** `parentId: null` means root, so a device with no cell would otherwise
   become a second root. A synthetic object is legitimate where a magic `cells` row is not: it has no
   table behind it, so it cannot be edited, deleted, or swept by the pg_cron purge that runs past RLS.

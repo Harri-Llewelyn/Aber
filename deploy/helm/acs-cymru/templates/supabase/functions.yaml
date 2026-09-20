@@ -43,7 +43,7 @@ spec:
       {{- end }}
       containers:
         - name: edge-runtime
-          # BUILT FROM supabase/functions/Dockerfile, not pulled. The functions and the physical
+          # BUILT FROM supabase/functions/Dockerfile, not pulled. The functions and the Remote
           # gateway bundle template are baked in: there is no repository on a cluster node to
           # mount, and baking is what makes "which revision of aas-export is running" a property
           # of the deployed artefact -- so a rollback rolls the functions back too.
@@ -103,7 +103,7 @@ spec:
               value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | int64 | quote }}
             {{/*
               =====================================================================================
-              PHYSICAL GATEWAY ENROLMENT (enroll-gateway, gateway-bundle).
+              REMOTE GATEWAY ENROLMENT (enroll-gateway, gateway-bundle).
 
               EVERY ONE OF THESE IS AN OUTBOUND ADDRESS OR A NARROW CREDENTIAL, and none can be
               derived from SUPABASE_URL above -- that is `supabase-kong:8000`, which resolves
@@ -119,7 +119,7 @@ spec:
             */}}
             - name: SUPABASE_PUBLIC_URL
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.supabasePublicUrl | default (include "acs-cymru.supabaseUrl" .) | quote }}
-            {{- /* THE ONE-LINER (docs/physical-gateways.md). Where a fresh appliance fetches the
+            {{- /* THE ONE-LINER (docs/remote-gateways.md). Where a fresh appliance fetches the
                    platform's root over plain HTTP before it trusts anything: the dashboard's host,
                    which serves the ingress TLS Secret's ca.crt at this path (frontend.yaml). The
                    pin the command carries is computed from the same Secret, mounted below. */}}
@@ -134,7 +134,7 @@ spec:
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
                    already derives for the external broker route, which is the address the
                    certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
-            {{- /* THE FORGE, for enrolment's fourth step (docs/physical-gateways.md). The in-cluster Service, not
+            {{- /* THE FORGE, for enrolment's fourth step (docs/remote-gateways.md). The in-cluster Service, not
                    the ingress hostname: the clone URL an appliance is handed comes from the forge's
                    own answer, which is built from its ROOT_URL and SSH_DOMAIN, so these two never
                    have to agree.

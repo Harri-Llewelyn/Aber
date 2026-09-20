@@ -31,7 +31,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // Reads the committed flow from the environment and pushes it to Node-RED's admin API.
   // No service-role key: it makes no privileged database write.
 
-  // Mints a virtual gateway's broker credential and reveals it once, authorised by role through a
+  // Mints a host-run gateway's broker credential and reveals it once, authorised by role through a
   // SECURITY DEFINER RPC that checks has_role() itself. No service-role key: it holds the
   // credential service's bearer token, whose authority is one confined account at the broker.
   "gateway-credential": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
@@ -49,7 +49,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // record_service_token_issued() is SECURITY DEFINER and re-checks the actor.
   "mint-service-token": ["JWT_SECRET"],
 
-  // Physical gateway enrolment, the only function here with no user: the caller is an appliance
+  // Remote gateway enrolment, the only function here with no user: the caller is an appliance
   // holding a single-use token. It holds the service-role key because the token table is reachable
   // by nothing else, and the credential service's bearer token to mint the broker account.
   // MQTT_PUBLIC_HOST is the address an appliance connects to, which cannot be derived from the
@@ -85,7 +85,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GATEWAY_REVOKE_SECRET",
   ],
 
-  // Packages the physical gateway bootstrap bundle as a ZIP, or mints the one-liner. No
+  // Packages the Remote gateway bootstrap bundle as a ZIP, or mints the one-liner. No
   // service-role key: it reads the gateway and mints the enrolment token as the caller, through a
   // SECURITY DEFINER function that checks has_role() itself. The appliance's files are a module
   // import (an edge worker cannot read the image's filesystem); SUPABASE_PUBLIC_URL is the address

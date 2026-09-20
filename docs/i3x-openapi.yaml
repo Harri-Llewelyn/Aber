@@ -229,7 +229,7 @@ paths:
         has two parents — a cell (where it is) and a gateway (how its data arrives). i3X
         gives an Object one parent, `HasParent` is organizational hierarchy, so the cell wins
         and the data path becomes `ConnectsVia`/`ProvidesConnectivityFor`. Collapsing them
-        would make a virtual gateway unrepresentable.
+        would make a host-run gateway unrepresentable.
       responses:
         '200':
           description: All relationship types.

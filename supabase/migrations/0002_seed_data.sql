@@ -7567,7 +7567,7 @@ SELECT set_config('acs_cymru.nodered_redirect_uri',        :'nodered_redirect_ur
 DO $$
 DECLARE
   -- Pinned, not generated. settings.js carries this as NODERED_OAUTH_CLIENT_ID, and a fresh UUID on every stack rebuild would silently break the
-  -- integration. Same reasoning as the Grafana client id and the pinned virtual gateway.
+  -- integration. Same reasoning as the Grafana client id and the pinned host-run gateway.
   -- Deliberately the next value after Grafana's ...0001.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000002';
   v_secret    TEXT := current_setting('acs_cymru.nodered_oauth_client_secret', true);
