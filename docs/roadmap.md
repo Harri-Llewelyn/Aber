@@ -153,6 +153,27 @@ database holding a cells proposal the re-add scans the rows, fails, and aborts d
 file after it. `0097` re-adds the integer `cells.floor` on every boot and `0098` drops it again.
 Both are idempotent and both are tested, and both are the shape a squash exists to remove.
 
+**The archive is this entry's other output, and its README has drifted.** Nothing in
+`supabase/migrations/archive/` executes: `db-init` and CI both glob `supabase/migrations/*.sql`,
+which does not recurse, so the directory is documentation with a `.sql` extension — the *why* a
+`pg_dump`-derived baseline cannot carry, cited by number from the applied files and the component
+READMEs, with `check-docs-drift.mjs` holding the citation form (`archived migration NNNN`). Its
+README still opens *"The 38 files in this directory are the original incremental migrations"*, and
+there are 99: the second squash moved `0003`–`0078` in and left the prose describing the first.
+This fold makes it wrong a third time unless the README is rewritten to describe the chain it
+holds rather than one event in it.
+
+**One column is waiting for this entry.** `gateways.is_virtual` was retired in code by archived
+`0064`–`0066`, `deployment` carrying the question it was being asked — where the connector runs.
+`0066` recorded that the column could not be dropped because archived `0036` named
+`is_virtual boolean` in `gateway_health_rows()`'s `RETURNS TABLE` and executed the function in its
+own self-check; that obstacle went into the archive with `0036` and no longer runs. The
+declaration is now `0001`'s own, and the live readers are `0001` and `0002` alone:
+`gateway_health_rows()` and the `gateway_health` view name the column, `sync_gateway_deployment()`
+writes it, and `0002`'s seed still INSERTs it *instead of* `deployment`, leaning on that trigger to
+derive one from the other. A function's return shape and a seed's column list are baseline edits,
+which is what this entry is.
+
 **Decided:** the fold rule is the first squash's. An additive migration folds into the baseline,
 because a fresh install would do it anyway; a subtractive one stays in the tail until every
 database that could receive it has. Two rules found the hard way carry in: a file that creates a
@@ -161,8 +182,9 @@ which runs earlier and corrects the ACL one boot late; and no file re-asserts an
 a later file widens. Constraints are added guarded, never dropped and re-added.
 
 **Done means:** a fresh boot and a second boot pass every self-check; every database suite passes
-on the throwaway cluster; the drift check is clean; and the chain is the baseline plus a tail
-short enough to read in one sitting.
+on the throwaway cluster; the drift check is clean; the chain is the baseline plus a tail
+short enough to read in one sitting; and the archive's README describes every squash it holds
+rather than the first alone.
 
 **Must not touch:** the replay contract. Every file still runs on every boot with no ledger, so
 nothing in the fold may depend on a file having run once.
