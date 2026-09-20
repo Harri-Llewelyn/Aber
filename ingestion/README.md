@@ -328,7 +328,7 @@ of what arrived — and the shape is the one `parse_sparkplug_payload()` already
 fallback, so a hand-edit valid in the file is valid to the daemon.
 
 **Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
-Node-RED simulator flow publishes JSON, physical gateways publish protobuf — and they enter the
+Node-RED simulator flow publishes JSON, Remote gateways publish protobuf — and they enter the
 daemon down different branches of `parse_sparkplug_payload()`. Replaying a JSON fleet as protobuf
 would mean a fault reproduced through this tool could be one the playback introduced, or one it
 silently repaired.
@@ -575,10 +575,10 @@ not be able to overwrite the recordings it replays.
 
 **The credential predicate is `gateway_has_broker_credential()`, not
 `gateway_holds_a_credential()`.** The latter is `g.deployment = 'remote' AND g.enrolled_at IS NOT NULL` —
-"is this a physical appliance that completed enrolment" — which for playback is inverted: it refuses
-every virtual gateway, which is what a playback target normally is, and admits only real hardware,
+"is this a Remote gateway that completed enrolment" — which for playback is inverted: it refuses
+every host-run gateway, which is what a playback target normally is, and admits only real hardware,
 which is exactly what a playback must never publish as. `0056`'s predicate asks the question of both
-routes — physical enrolment, and the `CREDENTIAL_ISSUED` audit row that is the only record a virtual
+routes — Remote enrolment, and the `CREDENTIAL_ISSUED` audit row that is the only record a host-run
 mint leaves — and subtracts revocation. Liveness is not the predicate either: a playback target is
 legitimately `OFFLINE`, because nothing publishes as it until a playback runs.
 
@@ -704,7 +704,7 @@ asserting the same asset identity. A shadow is not a product and has no manufact
 resolved through `shadow_of` rather than duplicated, for the ordinary reason that a copy goes stale.
 
 **The Playback gateway needs its own broker credential**, minted on the Access Control page like any
-virtual gateway's and then placed in `MQTT_PLAYBACK_CREDENTIALS`. The migration's `NOTICE` says so
+host-run gateway's and then placed in `MQTT_PLAYBACK_CREDENTIALS`. The migration's `NOTICE` says so
 with the `sparkplug_id` already filled in.
 
 **Re-minting it means recreating the playback container**, and until it does the worker is holding

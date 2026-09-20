@@ -522,12 +522,12 @@ See [Machine identities](#machine-identities) for why the two never collapse int
 
 **`gateway_has_broker_credential()` exists because `gateway_holds_a_credential()` (`0038`) answers
 the opposite question.** The older predicate is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` —
-"a physical appliance that completed enrolment" — which refuses every virtual gateway and admits
+"a Remote gateway that completed enrolment" — which refuses every host-run gateway and admits
 only real hardware. For a playback target that is inverted twice over: the target is normally
-virtual, and real hardware is exactly what a playback must never publish as. `0041` had already
-recorded that a virtual gateway is outside the older predicate's scope by definition. The new one
-asks both routes — physical enrolment, or the `CREDENTIAL_ISSUED` audit row that is the only trace a
-virtual mint leaves — and subtracts revocation.
+host-run, and real hardware is exactly what a playback must never publish as. `0041` had already
+recorded that a host-run gateway is outside the older predicate's scope by definition. The new one
+asks both routes — Remote enrolment, or the `CREDENTIAL_ISSUED` audit row that is the only trace a
+host-run mint leaves — and subtracts revocation.
 
 **`0057` exists because the database cannot know what a process holds.** It records what the
 playback worker reports on a heartbeat: the gateways it has an MQTT password for, and when it last
@@ -655,7 +655,7 @@ rule."*
 
 **`is_shadow`, and not one of the other three flags.** `is_simulated` is carried by every simulator
 gateway, and those do heartbeat — their silence is a real fault. `is_virtual` answers whether an
-appliance physically exists, not whether anything publishes as it. `is_archived` would mean
+appliance exists at all, not whether anything publishes as it. `is_archived` would mean
 archiving the gateway, which `0060`'s trigger forbids: it requires exactly one live shadow gateway
 to exist.
 
@@ -1003,7 +1003,7 @@ read in full is not an improvement.
 
 **The rule is who may PERFORM the act, not what the act is about.** `CREDENTIAL_ISSUED` stays in
 the asset lane because [`0041`](migrations/archive/0041_virtual_gateway_credential.sql) admits a
-Shopfloor_Manager to `issue_virtual_gateway_credential()`. Filing it as security would mean a
+Shopfloor_Manager to `authorize_host_gateway_credential()`. Filing it as security would mean a
 Manager mints a broker credential and the record of their own act disappears — an empty lane is
 only honest when the rows in it belong to somebody else.
 
@@ -2065,9 +2065,31 @@ PostgreSQL freezes into an explicit column list, and that frozen list is a hard 
 fact that makes `ensure_gateway_status_view()` necessary when a column is *added* is what blocks a
 drop.
 
-Three things deliberately keep the old word: migration filenames (the chain is immutable),
-`authorize_virtual_gateway_credential()` (an RPC name is client-visible, and renaming it is its own
-change), and every `CREDENTIAL_ISSUED` row written before `0065`.
+Two things keep the old word: migration filenames (the chain is immutable) and every
+`CREDENTIAL_ISSUED` row written before `0065`. The third was
+`authorize_virtual_gateway_credential()`, held back because an RPC name is client-visible and
+renaming it is its own change. [`0130`](migrations/0130_the_gateway_types_keep_their_names.sql) is
+that change.
+
+### The credential gate is named after the type it accepts (`0130`)
+
+`authorize_host_gateway_credential(uuid)`, because a gateway is **Host**, **Remote** or
+**Simulated** — `deployment` plus `is_simulated`, rendered as one control by
+`frontend/src/utils/gatewayType.js`. The old name outlived the word by four migrations.
+
+`0001` declares the new name, so the only thing left to do is remove the old one, which every
+database provisioned before this boot still holds. **A sweep over `pg_proc` rather than one
+`DROP FUNCTION`**, for the reason recorded two sections above: this function was briefly given a
+third output column, so a database that lived through that shape can hold a declaration whose
+argument list this file cannot predict. It is the `0118` idiom.
+
+**The rename is not free, and the cost is a window rather than a risk.** The only caller is
+`supabase/functions/gateway-credential`, which ships in an image built from this tree. During a
+rollout the previous function image runs against the new schema, and its call fails with
+`function does not exist` until the new image lands. It fails *closed* — no credential is minted
+against a gate the database no longer documents — and a mint is a deliberate operator act rather
+than a background path, so the remedy is to press the button again. Any RPC rename has this
+window; naming it here is the point.
 
 **`0065` moves the SQL half**, and it went first because that is where the ambiguity has actually
 cost something: `gateway_holds_a_credential()`, `gateway_has_broker_credential()`,
@@ -2098,8 +2120,8 @@ default: a row naming only `deployment` arrives with both set, and the one the c
 
 `0038` revokes a decommissioned gateway's broker credential (since `0102`, by disabling the account
 at the broker, which drops its live session; before that, by rotating it to a password nobody
-recorded). **It never fired for a virtual gateway, which is every gateway a provisioned stack has**,
-because it gated on `gateway_holds_a_credential()`. Demonstrated end to end: create a virtual
+recorded). **It never fired for a host-run gateway, which is every gateway a provisioned stack has**,
+because it gated on `gateway_holds_a_credential()`. Demonstrated end to end: create a host-run
 gateway, give it a broker account, publish, `DELETE` the row, and it went on publishing — with
 nothing queued in `net.http_request_queue`, so the revocation was never attempted rather than
 failing.
@@ -2113,7 +2135,7 @@ for an account that was never issued. What was wrong is the second half — a si
 exactly what was minted for it on the host.
 
 So `0063` swaps both the trigger and the pg_cron sweep onto `gateway_has_broker_credential()`, which
-admits a virtual gateway **only when a `CREDENTIAL_ISSUED` row exists**. That closes the leak and
+admits a host-run gateway **only when a `CREDENTIAL_ISSUED` row exists**. That closes the leak and
 keeps `0040`'s guarantee: a gateway that never held an account still cannot have one created for it
 by being deleted. Revoking unconditionally was the obvious alternative and would have traded the
 leak for one junk account per gateway ever deleted.
@@ -3487,7 +3509,7 @@ bytes changed. The flow reads `ca.json` every minute through a file-in node — 
 pattern — and reports `Cert_Expires_At` from it, so the date on the Gateways page is the root the
 appliance holds now. `gateway-bundle`'s readiness `GET` reports the platform's own root beside it,
 and the drawer says *holds an older root* when a gateway is more than a day behind. That is the
-signal the runbook's rotation waits on (`docs/physical-gateways.md` §8).
+signal the runbook's rotation waits on (`docs/remote-gateways.md` §8).
 
 ### The forge checks a flow before it is merged
 
@@ -3587,7 +3609,7 @@ started and exited.
 ### The one-liner (`0105`)
 
 Commissioning as a pasted command
-([`docs/physical-gateways.md`](../docs/physical-gateways.md#on-the-appliance-the-command)).
+([`docs/remote-gateways.md`](../docs/remote-gateways.md#on-the-appliance-the-command)).
 `gateway-bundle` mints the token as before and, asked for `format: "command"`, answers JSON
 instead of a ZIP: the token, its expiry, the command, and the pin. `gateway-install` is what the
 command and the installer fetch from, three things against the token in `X-Enrolment-Token`: the

@@ -75,7 +75,7 @@ def delete_broker_account(username):
     )
 
 
-# A physical gateway created and torn down by this suite. Pinned so a crashed run leaves a row the
+# A Remote gateway created and torn down by this suite. Pinned so a crashed run leaves a row the
 # next setUpClass reclaims rather than accumulating gateways. Distinct from the migration suite's
 # 2f/2e block -- these run against the same database and must not fight over one row.
 TEST_GW_ID = "2d000000-0000-4000-8000-000000000001"
@@ -184,7 +184,7 @@ class EnrollGatewayBase(unittest.TestCase):
             "/gateways", method="POST", prefer="return=representation",
             body={
                 "id": TEST_GW_ID,
-                "name": "Test_Physical_Gateway_Enrol",
+                "name": "Test_Remote_Gateway_Enrol",
                 "status": "OFFLINE",
                 # deployment 'remote' is the precondition: issue_gateway_enrollment_token() refuses
                 # a host-run gateway, because a bundle for one would mint a broker credential that
@@ -263,7 +263,7 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         # boundary; returned exactly once and unrecoverable thereafter.
         self.assertRegex(payload["mqtt_password"], r"^[A-Za-z0-9_-]{16,128}$")
 
-        # TRUST. Physical gateways connect over MQTTS only, so a PEM root is not optional.
+        # TRUST. Remote gateways connect over MQTTS only, so a PEM root is not optional.
         self.assertIn("BEGIN CERTIFICATE", payload["ca_cert"])
         self.assertIn("END CERTIFICATE", payload["ca_cert"])
 

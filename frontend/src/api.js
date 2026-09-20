@@ -576,11 +576,11 @@ const apiMethods = {
   },
 
   // ===============================================================================================
-  // Physical gateway enrolment
+  // Remote gateway enrolment
   // ===============================================================================================
 
   /**
-   * Download the bootstrap bundle for a physical gateway.
+   * Download the bootstrap bundle for a Remote gateway.
    *
    * A raw fetch(), not supabase.functions.invoke(): invoke() decodes any response that is neither
    * JSON nor octet-stream as text, which silently corrupts a ZIP. Returns the blob plus the
@@ -873,7 +873,7 @@ const apiMethods = {
    * Every gateway with what the platform knows about its broker credential.
    *
    * Two reads, not a join: `gateway_status` carries `enrolled_at` and `credential_revoked_at`
-   * for a remote gateway; a virtual one has only the CREDENTIAL_ISSUED row in `digital_thread`,
+   * for a remote gateway; a host-run one has only the CREDENTIAL_ISSUED row in `digital_thread`,
    * whose `entity_id` carries no foreign key by design. Only CREDENTIAL_ISSUED rows are selected
    * and only the newest per gateway is kept.
    */
@@ -946,7 +946,7 @@ const apiMethods = {
       method: 'POST',
       headers: {
         apikey: SUPABASE_GATEWAY_KEY,
-        // The CALLER's token. authorize_virtual_gateway_credential() is SECURITY DEFINER and
+        // The CALLER's token. authorize_host_gateway_credential() is SECURITY DEFINER and
         // checks has_role() itself, and the audit row is attributed to auth.uid() -- so the anon
         // key alone would be refused, and would have nobody to attribute the mint to if it were not.
         Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
@@ -959,7 +959,7 @@ const apiMethods = {
     try { body = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      // `details` carries the RPC's own message -- "gateway X is a physical gateway; use an
+      // `details` carries the RPC's own message -- "gateway X is a Remote gateway; use an
       // enrolment bundle", "gateway X is archived" -- which is the sentence an operator can act on.
       // `error` alone would flatten all of them to "Cannot mint a credential".
       throw new Error(body?.details || body?.error || `Could not mint a credential (${res.status})`);

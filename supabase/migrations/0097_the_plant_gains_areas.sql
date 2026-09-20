@@ -468,7 +468,7 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
       THEN 'security'
 
     -- The asset trail: the shopfloor's own history. CREDENTIAL_ISSUED lands here on `gateways`
-    -- deliberately: a Manager may mint a virtual gateway's broker credential.
+    -- deliberately: a Manager may mint a host-run gateway's broker credential.
     WHEN p_entity_type IN ('areas', 'cells', 'devices', 'gateways', 'links',
                            'device_nameplate', 'change_proposals',
                            'cell_links', 'gateway_links', 'device_links')

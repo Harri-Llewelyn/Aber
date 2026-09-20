@@ -12,7 +12,7 @@ import { installerTransport } from "../_shared/installer.ts";
 import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
 
 /**
- * Package the physical gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token,
+ * Package the Remote gateway bootstrap bundle as a ZIP, with a freshly minted enrolment token,
  * or mint the token and hand back the one-liner an operator pastes on the appliance instead
  * (`format: "command"`). The mirror image of enroll-gateway: no token, authorised by role
  * (Administrator or Shopfloor_Manager). The token is minted through
@@ -25,7 +25,7 @@ import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts"
  * the appliance obtains one at first boot. `NODERED_CREDENTIAL_SECRET` is generated per bundle, so
  * one appliance's credential file cannot be decrypted with another bundle's .env.
  *
- * The command is two stages in one line (docs/physical-gateways.md). Stage 0 carries no secret:
+ * The command is two stages in one line (docs/remote-gateways.md). Stage 0 carries no secret:
  * it fetches the platform's root over plain HTTP from the dashboard's host, checks its public
  * key against the pin minted here beside the token over the authenticated browser session, which
  * is the trusted channel, and installs it. Stage 1 fetches the installer from gateway-install over
@@ -294,7 +294,7 @@ export default async function handler(req: Request): Promise<Response> {
       return json(503, {
         error: "Bundle generation is not configured on this deployment",
         details:
-          `SUPABASE_PUBLIC_URL is ${platform.problem} -- set it to the URL physical gateways ` +
+          `SUPABASE_PUBLIC_URL is ${platform.problem} -- set it to the URL Remote gateways ` +
           "reach the platform on, in .env on Compose. No enrolment token was minted.",
       });
     }
@@ -317,10 +317,10 @@ export default async function handler(req: Request): Promise<Response> {
       // The RPC refuses this too; caught here so the message names the reason. A host-run gateway
       // has no appliance, so a bundle for one would mint a broker credential nothing could present.
       return json(400, {
-        error: "That gateway is virtual",
+        error: "That gateway is Host, not Remote",
         details:
-          "Enrolment bundles are for physical appliances. Clear 'Mark as Virtual Gateway' on the " +
-          "gateway first, or create a physical one.",
+          "Enrolment bundles are for Remote gateways, which run on their own hardware. Set " +
+          "this gateway's Type to Remote, or create a Remote one.",
       });
     }
 
@@ -426,7 +426,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     // A per-gateway note at the top of the folder, so an unpacked bundle is self-identifying. The
     // bundle for the wrong gateway is otherwise indistinguishable from the right one until booted.
-    files[`${folder}/GATEWAY.txt`] = strToU8(`ACS-Cymru physical gateway bundle
+    files[`${folder}/GATEWAY.txt`] = strToU8(`ACS-Cymru Remote gateway bundle
 =================================
 
   Gateway          : ${gateway.name}

@@ -2228,7 +2228,7 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
     post:
       tags: [Edge Functions]
-      summary: Download a physical gateway's bootstrap bundle (ZIP)
+      summary: Download a Remote gateway's bootstrap bundle (ZIP)
       description: |
         Returns a `.zip` containing everything needed to turn a machine into a gateway: a
         `docker-compose.yml`, a `Dockerfile`, `bootstrap.mjs`, a sample `flows.template.json`, a
@@ -2260,7 +2260,7 @@ paths:
                 gateway_id:
                   type: string
                   format: uuid
-                  description: The physical gateway to generate a bundle for.
+                  description: The Remote gateway to generate a bundle for.
       responses:
         '200':
           description: The bundle. `X-ACS-Token-Expires-At` carries the enrolment deadline.
@@ -2282,7 +2282,7 @@ paths:
           content:
             application/zip:
               schema: { type: string, format: binary }
-        '400': { description: '`gateway_id` missing, or the gateway is virtual.' }
+        '400': { description: '`gateway_id` missing, or the gateway is Host, not Remote.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
         '404': { description: No such gateway. }
@@ -2294,9 +2294,9 @@ paths:
   /functions/v1/gateway-credential:
     post:
       tags: [Edge Functions]
-      summary: Mint a virtual gateway's broker credential and reveal it once
+      summary: Mint a host-run gateway's broker credential and reveal it once
       description: |
-        Issues a Mosquitto account for a **virtual** gateway and returns the password in the
+        Issues a Mosquitto account for a **Host** gateway and returns the password in the
         response. It is shown once and is not recoverable afterwards: the broker stores only a
         hash, and nothing in this stack keeps a copy.
 
@@ -2310,7 +2310,7 @@ paths:
         beside a working bundle would be offering the worse of two options with nothing to say so.
 
         Requires `Administrator` or `Shopfloor_Manager`. The authority decision is made by
-        `authorize_virtual_gateway_credential()`, a `SECURITY DEFINER` RPC called *as the caller*
+        `authorize_host_gateway_credential()`, a `SECURITY DEFINER` RPC called *as the caller*
         that checks `has_role()` itself — the role check in the function turns a refusal into a
         usable 403 rather than being the boundary. The mint is recorded in `digital_thread` as a
         `CREDENTIAL_ISSUED` row attributed to the calling operator, carrying the wire identity and
@@ -2330,7 +2330,7 @@ paths:
                 gateway_id:
                   type: string
                   format: uuid
-                  description: The virtual gateway to mint a broker account for.
+                  description: The host-run gateway to mint a broker account for.
       responses:
         '200':
           description: >-
@@ -2363,7 +2363,7 @@ paths:
                     description: >-
                       The `MQTT_GW_<NAME>_USER` / `_PASSWORD` variable names `node-red-init`
                       reconciles a broker node's credentials from.
-        '400': { description: '`gateway_id` malformed, absent, or naming a physical or archived gateway.' }
+        '400': { description: '`gateway_id` malformed, absent, or naming a Remote or archived gateway.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
         '500': { description: The credential service is not configured for this deployment. }
@@ -2595,15 +2595,15 @@ paths:
   /functions/v1/enroll-gateway:
     post:
       tags: [Edge Functions]
-      summary: Redeem a physical gateway's enrolment token for a broker credential
+      summary: Redeem a Remote gateway's enrolment token for a broker credential
       description: |
-        Called by a **physical gateway appliance on first boot**, not by a browser. There is no
+        Called by a **Remote gateway appliance on first boot**, not by a browser. There is no
         user, no session and no role: possession of the single-use enrolment token is the
         authorisation. The request still needs the `apikey` header — the gateway gates `/functions/v1/`
         — but the **publishable key is sufficient and no user JWT is required**.
 
         The token is minted by `issue_gateway_enrollment_token()` when an operator creates a
-        physical gateway in the dashboard, is valid for 30 minutes by default, and is bound to
+        Remote gateway in the dashboard, is valid for 30 minutes by default, and is bound to
         exactly one gateway.
 
         **The claim is atomic.** Two appliances racing the same token produce exactly one winner —
@@ -2660,7 +2660,7 @@ paths:
                   ca_cert:
                     type: string
                     description: >-
-                      The broker's CA in PEM form. Physical gateways connect over MQTTS only and
+                      The broker's CA in PEM form. Remote gateways connect over MQTTS only and
                       must verify against this; there is no unverified fallback.
                   applied_to_running_broker:
                     type: boolean

@@ -1,6 +1,6 @@
 /**
  * The appliance-health helpers on the Gateways page. Each, broken, is wrong in the quiet direction:
- * a zero reading and an unreported one must not render the same (every column is NULL on a virtual
+ * a zero reading and an unreported one must not render the same (every column is NULL on a host-run
  * gateway); an expired CA must read as expired rather than as a negative day count; and
  * CERT_EXPIRY_WARN_DAYS mirrors the Grafana rule's threshold so the UI warning and the alert agree.
  */

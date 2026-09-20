@@ -15,7 +15,7 @@ const NOW = Date.parse('2026-01-01T12:00:00Z');
 const agoMs = (ms) => new Date(NOW - ms).toISOString();
 const inMs = (ms) => new Date(NOW + ms).toISOString();
 
-describe('the two physical-gateway enrolment states', () => {
+describe('the two Remote-gateway enrolment states', () => {
   it('recognises both as pending and nothing else', () => {
     expect(isGatewayPending({ status: GATEWAY_STATUS_PENDING_ENROLMENT })).toBe(true);
     expect(isGatewayPending({ status: GATEWAY_STATUS_AWAITING_BIRTH })).toBe(true);

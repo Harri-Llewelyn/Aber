@@ -16,7 +16,7 @@ WHAT THIS SUITE IS DEFENDING:
      symmetrical, and the test names which one it is choosing.
 
   4. THE RULE IS AUTHORITY, NOT SUBJECT MATTER. `CREDENTIAL_ISSUED` stays readable by a
-     Shopfloor_Manager because `0041` lets one mint a virtual gateway's broker credential. A
+     Shopfloor_Manager because `0041` lets one mint a host-run gateway's broker credential. A
      Manager who performs an act must be able to read that they performed it; an empty lane is
      only honest when the rows in it are somebody else's.
 
@@ -177,7 +177,7 @@ class TheClassifier(AuditDomainFixture):
         THE RULE IS AUTHORITY, NOT SUBJECT MATTER, and this is the case that separates them.
 
         CREDENTIAL_ISSUED reads like a row a Shopfloor_Manager should not read. But 0041
-        admits a Shopfloor_Manager to issue_virtual_gateway_credential(), so filing it as security
+        admits a Shopfloor_Manager to authorize_host_gateway_credential(), so filing it as security
         would mean a Manager mints a broker credential and the record of their own act disappears.
         An empty lane is only honest when the rows in it belong to somebody else.
         """

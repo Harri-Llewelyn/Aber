@@ -11,7 +11,7 @@ vi.mock('../api', async () => {
 
 const gateway = (overrides = {}) => ({
   gateway_id: 'gw-1',
-  gateway_name: 'Virtual_Gateway_NodeRED',
+  gateway_name: 'Host_Gateway_NodeRED',
   sparkplug_id: 'gwy100000000000400080000',
   cell_id: 'cell-1',
   status: 'ONLINE',
@@ -47,7 +47,7 @@ const show = async (rows, hasPermission = () => true) => {
  * Select a gateway row and return its context panel, where the actions live. Archive sits in the
  * row beside Edit; the documents accordion is mounted once for the selected gateway.
  */
-const openPanel = (name = 'Virtual_Gateway_NodeRED') => {
+const openPanel = (name = 'Host_Gateway_NodeRED') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
   return within(document.querySelector('.context-panel'))
 }
@@ -208,7 +208,7 @@ describe('gateway document links', () => {
     api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/links'))).toHaveLength(0)
   })
 
@@ -218,7 +218,7 @@ describe('gateway document links', () => {
     api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     expect(openPanel().getByText('Attached Links')).toBeInTheDocument()
   })
 })
@@ -241,7 +241,7 @@ describe('the playback gateway is filtered out by default', () => {
     api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     expect(screen.queryByText('Playback')).toBeNull()
   })
 
@@ -273,7 +273,7 @@ describe('the playback gateway is filtered out by default', () => {
     api.get.mockImplementation(routeGet([gateway()]))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     expect(screen.queryByText(/Show playback gateway/)).toBeNull()
   })
 
@@ -284,7 +284,7 @@ describe('the playback gateway is filtered out by default', () => {
     api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'simulated' } })
     expect(screen.queryByText('Playback')).toBeNull()
   })

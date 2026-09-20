@@ -70,7 +70,7 @@ const typeName = (value = GATEWAY.gateway_name) =>
 describe('GatewayBundleModal — straight after creating the gateway', () => {
   /**
    * No confirmation on this route: the gateway is seconds old, so there is no earlier bundle to
-   * invalidate, and saving a gateway with "Virtual" unchecked is already an explicit request for a
+   * invalidate, and saving a gateway with Type set to Remote is already an explicit request for a
    * bundle.
    */
   it('downloads on open, with no intermediate confirm step', async () => {
@@ -419,7 +419,7 @@ describe('GatewayBundleModal — failure on open', () => {
     // names the variable. The gateway row exists, which the dialog says rather than leaves implied.
     const refusal = new Error('Bundle generation is not configured on this deployment')
     refusal.status = 503
-    refusal.details = 'SUPABASE_PUBLIC_URL is unset -- set it to the URL physical gateways reach the platform on, in .env on Compose. No enrolment token was minted.'
+    refusal.details = 'SUPABASE_PUBLIC_URL is unset -- set it to the URL Remote gateways reach the platform on, in .env on Compose. No enrolment token was minted.'
     api.downloadGatewayBundle.mockRejectedValue(refusal)
     renderModal()
 

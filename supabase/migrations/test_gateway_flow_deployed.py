@@ -3,7 +3,7 @@ PostgreSQL integration tests for `0100_a_deployed_flow_is_an_event_and_a_reading
 
 TWO HALVES, AND THE FIRST IS THE ONE THAT WAS SILENTLY WRONG.
 
-  1. A READING IS NOT AN EVENT. A physical appliance rewrites six health columns on every
+  1. A READING IS NOT AN EVENT. A Remote gateway rewrites six health columns on every
      heartbeat, and the audit trigger compared whole rows minus `last_heartbeat` alone -- so every
      heartbeat that carried health appended an UPDATE row to an append-only table, 2,880 a day per
      appliance. The trigger now subtracts everything `audit_telemetry_columns()` names.

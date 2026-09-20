@@ -18,7 +18,7 @@ directory carries all of it.
 | `backups/` | Logical dumps from `scripts/backup-databases.sh`: `auth.users` bcrypt hashes, OAuth client secret hashes, every audit row |
 | `deploy/helm/acs-cymru/values-local.yaml` | Every credential `npm run setup` minted, including `serviceRoleKey` and `jwtSecret` |
 | `frontend/dist/` | A built bundle carrying whichever `VITE_*` values were baked at build time |
-| The k3d cluster | Both databases, the broker's CA **private key** (a cert-manager Secret; it is in every physical gateway's trust store, and re-minting it takes the fleet offline silently), the forge and the backups PVC. `npm run dev:down` deletes all of it |
+| The k3d cluster | Both databases, the broker's CA **private key** (a cert-manager Secret; it is in every Remote gateway's trust store, and re-minting it takes the fleet offline silently), the forge and the backups PVC. `npm run dev:down` deletes all of it |
 
 ```bash
 npm run dev:down
@@ -26,7 +26,7 @@ rm -rf backups/ deploy/helm/acs-cymru/values-local.yaml frontend/dist/
 ```
 
 The recipient runs `npm run setup` themselves: that is what makes the credentials theirs rather
-than a copy of yours. It asks for the domain physical gateways reach their machine on; blank is
+than a copy of yours. It asks for the domain Remote gateways reach their machine on; blank is
 accepted and means remote gateways cannot be enrolled until `global.publicBaseDomain` is set.
 `values-dev.yaml` carries published demonstration secrets so the stack still starts without a
 local file, which is a convenience and **not** a supported state for anything another person can

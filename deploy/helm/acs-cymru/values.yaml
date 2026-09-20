@@ -488,7 +488,7 @@ supabaseFunctions:
   replicas: 1
   # Each function checks its own role claim, which is why the runtime does not.
   verifyJwt: false
-  # Physical gateway enrolment addresses (enroll-gateway, gateway-bundle): what an APPLIANCE
+  # Remote gateway enrolment addresses (enroll-gateway, gateway-bundle): what an APPLIANCE
   # dials. SUPABASE_PUBLIC_URL is derived from global.publicBaseDomain; only the broker's
   # address needs stating, and only when it differs from `mqtt.<domain>`. Both functions answer
   # 503 rather than guess. The address must also be in the broker certificate's SAN

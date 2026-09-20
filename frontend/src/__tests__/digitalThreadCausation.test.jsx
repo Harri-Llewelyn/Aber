@@ -21,7 +21,7 @@ vi.mock('../api', async () => {
 })
 
 const CELLS = [{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }]
-const GATEWAYS = [{ gateway_id: 'gw-1', gateway_name: 'Virtual_Gateway_NodeRED', devices: [] }]
+const GATEWAYS = [{ gateway_id: 'gw-1', gateway_name: 'Host_Gateway_NodeRED', devices: [] }]
 const DEVICES = [
   { asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', last_birth_metrics: [] },
   { asset_id: 'dev-2', asset_name: 'Press_02', last_birth_metrics: [] }

@@ -5,7 +5,7 @@
 -- =================================================================================================
 -- WHAT THIS IS FOR
 --
--- The one-liner commissioning path (docs/physical-gateways.md) fetches three things from the
+-- The one-liner commissioning path (docs/remote-gateways.md) fetches three things from the
 -- platform before it enrols: the installer, the platform playbook and the appliance's .env, each
 -- authorised by the enrolment token in a header. Fetching must validate the token and must not
 -- consume it: consuming is `consume_gateway_enrollment_token()` (0001), the one act that also

@@ -198,7 +198,7 @@ clients, and mixing the two would tie service discovery to an external IP alloca
 
 WHY SSH RATHER THAN AN HTTP TOKEN, restated here because this Service is what pays for it: a Gitea
 deploy key is per-repository, and branch rules confine it to one branch it may write, which is the
-credential model enrolment issues (docs/physical-gateways.md). An
+credential model enrolment issues (docs/remote-gateways.md). An
 HTTP token is per-USER and carries that user's access to EVERY repository, so using one would hand
 each appliance the whole fleet's flows in order to save a port.
 */}}

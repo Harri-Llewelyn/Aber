@@ -19,10 +19,10 @@ const NOW = Date.parse('2026-07-28T12:00:00Z')
 
 const gateway = {
   gateway_id: 'gw-1',
-  gateway_name: 'Virtual_Gateway_NodeRED',
+  gateway_name: 'Host_Gateway_NodeRED',
   cell_id: 'cell-1',
-  // NOT NULL DEFAULT 'cell' (archived migration 0036), so every real payload carries it. Virtual and
-  // site-wide are independent: this fixture is a virtual gateway that has been given a cell.
+  // NOT NULL DEFAULT 'cell' (archived migration 0036), so every real payload carries it. Host and
+  // site-wide are independent: this fixture is a host-run gateway that has been given a cell.
   location_scope: 'cell',
   status: 'ONLINE',
   deployment: 'host',
@@ -32,7 +32,7 @@ const gateway = {
   devices: [
     {
       asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', status: 'ONLINE',
-      gateway_name: 'Virtual_Gateway_NodeRED', active_gateway_id: 'gw-1',
+      gateway_name: 'Host_Gateway_NodeRED', active_gateway_id: 'gw-1',
       // Location as api.js merges it from device_locations: no explicit override, so the device
       // inherits its gateway's cell. Cell membership is grouped from the device list by the tabs.
       cell_id: null, location_scope: 'cell', effective_cell_id: 'cell-1',
@@ -99,7 +99,7 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
     // A cell names the gateways assigned to it and the devices that resolve to it, as two columns
     // of one table.
     const row = screen.getByText('Assembly Line 1').closest('tr')
-    expect(within(row).getByText('Virtual_Gateway_NodeRED')).toBeTruthy()
+    expect(within(row).getByText('Host_Gateway_NodeRED')).toBeTruthy()
     expect(within(row).getByText('Simulated_CNC_01')).toBeTruthy()
     // The same summary the Gateways page puts on a gateway's device column.
     expect(within(row).getByText('1 Online / 0 Offline')).toBeTruthy()
@@ -144,7 +144,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     expect(screen.getByText('1 Online / 0 Offline')).toBeInTheDocument()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
@@ -163,7 +163,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     expect(screen.getByText('Site-Wide')).toBeInTheDocument()
     expect(screen.queryByText('No cell')).not.toBeInTheDocument()
   })
@@ -173,10 +173,10 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     api.put.mockResolvedValue({})
 
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     // Edit moved into the context panel with the rest of the gateway ACTIONS column.
-    fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('Host_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
     // Site-Wide is one radio of three, not a checkbox beside the cell picker: you cannot choose
     // Site-Wide and a cell because they are the same question.
@@ -188,15 +188,15 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
   })
 
   it('does not treat the Type control as a location assertion', async () => {
-    // Virtual is a deployment fact; site-wide is a claim about location. A virtual gateway is
+    // Host is a deployment fact; site-wide is a claim about location. A host-run gateway is
     // usually site-wide, but tying them together would relocate assets on a checkbox.
     api.get.mockImplementation(routeGet())
     api.put.mockResolvedValue({})
 
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('Host_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
     // Changing the type must not move the cell: where the connector runs and where its assets are
     // are different questions.
@@ -214,7 +214,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     await waitFor(() => expect(screen.getByText('Quiet_Gateway')).toBeInTheDocument())
     const banner = screen.getByText(/1 gateway offline/).closest('div')
     expect(banner).toHaveTextContent('Quiet_Gateway')
-    expect(banner).not.toHaveTextContent('Virtual_Gateway_NodeRED')
+    expect(banner).not.toHaveTextContent('Host_Gateway_NodeRED')
     expect(banner.closest('.card')).toBeNull()
   })
 

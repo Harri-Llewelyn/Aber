@@ -21,7 +21,7 @@ vi.mock('../api', async () => {
 })
 
 const CELLS = [{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }]
-const GATEWAYS = [{ gateway_id: 'gw-1', gateway_name: 'Virtual_Gateway_NodeRED', devices: [] }]
+const GATEWAYS = [{ gateway_id: 'gw-1', gateway_name: 'Host_Gateway_NodeRED', devices: [] }]
 const DEVICES = [
   { asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', last_birth_metrics: [] },
   { asset_id: 'dev-2', asset_name: 'Press_02', last_birth_metrics: [] }
@@ -43,7 +43,7 @@ const EVENTS = [
     event_id: 2, entity_type: 'gateways', entity_id: 'gw-1', event_type: 'INSERT',
     timestamp: '2026-08-02T11:00:00Z', description: 'Action INSERT on gateways [gw-1]',
     changed_by: null, actor_source: 'ingestion',
-    old_data: null, new_data: { id: 'gw-1', name: 'Virtual_Gateway_NodeRED', status: 'ONLINE' }
+    old_data: null, new_data: { id: 'gw-1', name: 'Host_Gateway_NodeRED', status: 'ONLINE' }
   },
   // A cell that no longer exists, which is what a DELETE means: absent from CELLS because
   // /api/v1/cells cannot return a deleted row, so only its final snapshot can name it.
@@ -549,7 +549,7 @@ describe('Digital Thread event classification', () => {
 
   it('paints an INSERT as creation', async () => {
     await show()
-    expect(classOf(/INSERT on Virtual_Gateway_NodeRED/)).toContain('dt-node-creation')
+    expect(classOf(/INSERT on Host_Gateway_NodeRED/)).toContain('dt-node-creation')
   })
 
   it('paints a DELETE as lifecycle-critical', async () => {
@@ -679,7 +679,7 @@ describe('Digital Thread event drawer', () => {
 
   it('renders an INSERT as the properties it was created with', async () => {
     await show()
-    await selectEvent(/INSERT on Virtual_Gateway_NodeRED/)
+    await selectEvent(/INSERT on Host_Gateway_NodeRED/)
 
     expect(screen.getByText('Initial properties')).toBeInTheDocument()
     // One-sided: there is no previous value to compare against, so no Previous column.
@@ -748,7 +748,7 @@ describe('Digital Thread event drawer', () => {
 
   it('drops to two columns when there is no before/after pair', async () => {
     await show()
-    await selectEvent(/INSERT on Virtual_Gateway_NodeRED/)
+    await selectEvent(/INSERT on Host_Gateway_NodeRED/)
 
     // Otherwise the three-column widths leave a third of a 360px drawer empty.
     expect(document.querySelector('.dt-diff-table').className).toContain('dt-diff-onesided')
@@ -867,7 +867,7 @@ describe('Digital Thread attribution', () => {
 
   it('names the machine behind an unattributed change rather than leaving it blank', async () => {
     await show()
-    await selectEvent(/INSERT on Virtual_Gateway_NodeRED/)
+    await selectEvent(/INSERT on Host_Gateway_NodeRED/)
     expect(screen.getByText('Ingestion daemon')).toBeInTheDocument()
   })
 
@@ -881,13 +881,13 @@ describe('Digital Thread attribution', () => {
 
   it('names the actor on hover too, so the timeline is readable without opening anything', async () => {
     await show()
-    expect(nodeFor(/INSERT on Virtual_Gateway_NodeRED/).getAttribute('title'))
+    expect(nodeFor(/INSERT on Host_Gateway_NodeRED/).getAttribute('title'))
       .toContain('Ingestion daemon')
   })
 
   it('offers a user id only when there is one', async () => {
     await show()
-    await selectEvent(/INSERT on Virtual_Gateway_NodeRED/)
+    await selectEvent(/INSERT on Host_Gateway_NodeRED/)
     // changed_by is NULL for every machine-originated write; an empty "Not set" row against the
     // ingestion daemon's own change would read as a gap rather than the ordinary case it is.
     expect(screen.queryByText('User ID')).toBeNull()

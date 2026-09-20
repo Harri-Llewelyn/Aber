@@ -29,7 +29,7 @@ const onlineGateway = {
 }
 // Heartbeat older than the 90s staleness threshold, so gatewayLiveStatus() reports STALE even
 // though the stored status column still says ONLINE.
-const staleVirtualGateway = {
+const staleHostGateway = {
   ...onlineGateway,
   gateway_id: 'gw-2', gateway_name: 'Sim_Gateway', sparkplug_id: 'gwy200000000000400080000',
   cell_id: 'cell-2', deployment: 'host',
@@ -83,14 +83,14 @@ const cells = [
     gateways: [onlineGateway], devices: [healthyDevice, offlineDevice] },
   // Attention: stale gateway AND a quarantined device.
   { cell_id: 'cell-2', cell_name: 'Weld Cell 2', is_archived: false,
-    gateways: [staleVirtualGateway], devices: [neverBornDevice, quarantinedDevice] },
+    gateways: [staleHostGateway], devices: [neverBornDevice, quarantinedDevice] },
   // Empty: no gateways at all.
   { cell_id: 'cell-3', cell_name: 'Spare Bay 3', is_archived: false, gateways: [], devices: [] }
 ]
 
 const routeGet = (overrides = {}) => (path) => {
   if (path.startsWith('/api/v1/cells'))          return Promise.resolve(overrides.cells ?? cells)
-  if (path.startsWith('/api/v1/gateways'))       return Promise.resolve(overrides.gateways ?? [onlineGateway, staleVirtualGateway])
+  if (path.startsWith('/api/v1/gateways'))       return Promise.resolve(overrides.gateways ?? [onlineGateway, staleHostGateway])
   if (path.startsWith('/api/v1/quarantine'))     return Promise.resolve(overrides.quarantine ?? [quarantinedDevice])
   if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(overrides.catalog ?? CATALOG)
   if (path.startsWith('/api/v1/schemas'))        return Promise.resolve(overrides.schemas ?? SCHEMAS)
@@ -313,8 +313,8 @@ describe('GatewaysTab filters', () => {
     // gateways_simulated_is_host requires of the simulated one.
     api.get.mockImplementation(routeGet({
       gateways: [
-        { ...staleVirtualGateway, gateway_name: 'Host_Connector', is_simulated: false },
-        { ...staleVirtualGateway, gateway_id: 'gw-3', gateway_name: 'Sim_Fleet', is_simulated: true }
+        { ...staleHostGateway, gateway_name: 'Host_Connector', is_simulated: false },
+        { ...staleHostGateway, gateway_id: 'gw-3', gateway_name: 'Sim_Fleet', is_simulated: true }
       ]
     }))
     renderGateways()

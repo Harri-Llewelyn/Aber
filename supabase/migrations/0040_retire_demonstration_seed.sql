@@ -23,7 +23,7 @@
 -- keyed by the text `sparkplug_id` and nothing cascades. 4. The cells, by captured id and only
 -- where empty, never by name. `device_submodels` and `device_nameplate` cascade.
 --
--- The broker accounts outlive the rows: `gateway_holds_a_credential()` is false for a virtual,
+-- The broker accounts outlive the rows: `gateway_holds_a_credential()` is false for a host-run gateway,
 -- unenrolled gateway, so the revoke trigger rotates nothing, and the credential service is
 -- add-only. The accounts are confined by mosquitto.acl to a subtree nothing publishes to.
 --

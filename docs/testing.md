@@ -129,7 +129,7 @@ python supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py
 # question from opposite ends and nothing else compares them, so a disagreement is a 200 at both.
 python supabase/functions/fplus-directory/test_fplus_directory.py
 
-# Physical gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
+# Remote gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
 # gated on has_role, so the service key cannot do it), then redeems them the way an appliance does:
 # the publishable key and no user JWT. Stops the credential service to exercise the 503 rollback path.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \

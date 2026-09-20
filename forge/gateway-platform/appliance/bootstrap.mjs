@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * First-boot provisioning for an ACS-Cymru physical gateway appliance. Once: redeems the single-use
+ * First-boot provisioning for an ACS-Cymru Remote gateway appliance. Once: redeems the single-use
  * enrolment token in .env against enroll-gateway, writes the broker CA, writes /data/flows.json
  * from flows.template.json with this gateway's identity substituted, writes /data/flows_cred.json
  * encrypted through Node-RED's own credential runtime, writes /data/settings.js with a generated

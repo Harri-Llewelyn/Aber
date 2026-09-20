@@ -2,7 +2,7 @@
 /**
  * Issue a broker CA and an MQTTS leaf certificate into mosquitto/tls-init, idempotently.
  *
- * WHY THIS EXISTS. Physical gateways connect over MQTTS on 8883, because a per-gateway broker
+ * WHY THIS EXISTS. Remote gateways connect over MQTTS on 8883, because a per-gateway broker
  * password crossing a plant network in clear text is not a credential, it is a transcript. In the
  * cluster, cert-manager issues the broker leaf from the ClusterIssuer in deploy/k8s/internal-ca.yaml
  * and the chart appends mosquitto-tls.conf when the Secret exists. This script is the off-cluster
@@ -18,7 +18,7 @@
  * THE CA IS NEVER REGENERATED ONCE IT EXISTS. THIS IS THE MOST IMPORTANT LINE IN THE FILE.
  *
  * Same reasoning as internal-ca.yaml's "helm uninstall would take it with it": the root is
- * distributed to every physical gateway's trust store, by hand, one appliance at a time. Minting a
+ * distributed to every Remote gateway's trust store, by hand, one appliance at a time. Minting a
  * new one does not fail -- it succeeds, and every gateway in the plant then rejects the broker with
  * a verification error while the stack reports itself perfectly healthy. The fleet goes dark and
  * the cause is a container that ran successfully at boot.
@@ -248,7 +248,7 @@ function issueCa() {
 
   console.log(`[mosquitto-tls-init] issued a ${CA_DAYS}-day root at ${CA_CRT}.`);
   console.log(
-    '[mosquitto-tls-init] DISTRIBUTE THIS ROOT to every physical gateway. Until it is in an '
+    '[mosquitto-tls-init] DISTRIBUTE THIS ROOT to every Remote gateway. Until it is in an '
     + 'appliance\'s trust store that appliance cannot verify the broker, and MQTTS will fail closed.'
   );
 }
@@ -347,7 +347,7 @@ function main() {
     console.error(
       `[mosquitto-tls-init] ${CERT_DIR} holds ${caCrt ? 'ca.crt without ca.key' : 'ca.key without ca.crt'}.\n`
       + 'Refusing to continue: issuing a fresh root here would invalidate the one already '
-      + 'distributed to every physical gateway, and every appliance would fail verification at once.\n'
+      + 'distributed to every Remote gateway, and every appliance would fail verification at once.\n'
       + 'Restore the missing half from backup, or delete both DELIBERATELY and re-enrol the fleet.'
     );
     process.exit(1);

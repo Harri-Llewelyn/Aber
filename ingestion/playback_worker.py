@@ -100,7 +100,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 # the failure arrived as a broker refusal.
 #
 # WRITTEN ONLY FOR GATEWAYS THE DATABASE CALLS PLAYBACK TARGETS. The filter is applied at issue time
-# by authorize_virtual_gateway_credential() (0078), not here, because `is_simulated` is the
+# by authorize_host_gateway_credential() (0078), not here, because `is_simulated` is the
 # database's fact and a worker deciding which passwords it is allowed to have would be deciding its
 # own blast radius. This end only reads what it was given.
 #

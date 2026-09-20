@@ -211,7 +211,7 @@ describe('writing an asset location', () => {
   });
 
   it('does not treat deployment as a location assertion', async () => {
-    // A virtual gateway is a deployment fact; site-wide is an operator's claim about location.
+    // A host-run gateway is a deployment fact; site-wide is an operator's claim about location.
     await api.put('/api/v1/gateways/gw-1', { gateway_name: 'Virtual', deployment: 'host', cell_id: 'cell-1' });
     expect(callFor('gateways').payload).toMatchObject({ deployment: 'host', cell_id: 'cell-1' });
     expect('location_scope' in callFor('gateways').payload).toBe(false);

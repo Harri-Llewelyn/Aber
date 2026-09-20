@@ -194,7 +194,7 @@ function namespace() {
  * browser that will show it once. A delivery that does not happen now cannot happen later.
  *
  * THIS FUNCTION MAKES NO DECISION ABOUT WHO IS ELIGIBLE. `deliver` is decided by
- * `authorize_virtual_gateway_credential()` (0078) from `is_simulated` and arrives already answered;
+ * `authorize_host_gateway_credential()` (0078) from `is_simulated` and arrives already answered;
  * this service holds a `sparkplug_id` and no database connection, by design.
  *
  * MERGED, NOT OVERWRITTEN: a stack can have several playback targets, issued one at a time.
@@ -233,7 +233,7 @@ async function issue(sparkplugId, password, { deliver = false } = {}) {
   const { replaced } = issueWithControl(control, sparkplugId, password);
 
   // NULL RATHER THAN AN ERROR when there is no CA. enroll-gateway treats a missing CA as fatal --
-  // physical gateways connect over 8883 exclusively -- but a plaintext-only stack can still issue.
+  // Remote gateways connect over 8883 exclusively -- but a plaintext-only stack can still issue.
   let caCert = null;
   try {
     caCert = readFileSync(CA_FILE, 'utf8');

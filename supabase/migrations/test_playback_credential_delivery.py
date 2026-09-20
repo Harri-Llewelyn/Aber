@@ -88,7 +88,7 @@ class PlaybackCredentialDelivery(unittest.TestCase):
         """The gate, unchanged by 0078 -- deliberately, see `_deliverable`."""
         self.cur.execute(
             "SELECT sparkplug_id, gateway_name "
-            "  FROM public.authorize_virtual_gateway_credential(%s)", (gateway_id,)
+            "  FROM public.authorize_host_gateway_credential(%s)", (gateway_id,)
         )
         return self.cur.fetchone()
 
@@ -135,7 +135,7 @@ class PlaybackCredentialDelivery(unittest.TestCase):
         self.cur.execute(
             "SELECT count(*), max(pg_get_function_result(p.oid)) "
             "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            " WHERE n.nspname = 'public' AND p.proname = 'authorize_virtual_gateway_credential'"
+            " WHERE n.nspname = 'public' AND p.proname = 'authorize_host_gateway_credential'"
         )
         count, result = self.cur.fetchone()
         self.assertEqual(count, 1)

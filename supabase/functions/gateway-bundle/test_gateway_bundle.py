@@ -33,8 +33,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
-PHYSICAL_GW = "2c000000-0000-4000-8000-000000000001"
-VIRTUAL_GW = "2b000000-0000-4000-8000-000000000001"
+REMOTE_GW = "2c000000-0000-4000-8000-000000000001"
+HOST_GW = "2b000000-0000-4000-8000-000000000001"
 
 ACCOUNTS = {
     "Administrator": "admin@acs-cymru.local",
@@ -125,19 +125,19 @@ class BundleBase(unittest.TestCase):
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
 
-        for gid in (PHYSICAL_GW, VIRTUAL_GW):
+        for gid in (REMOTE_GW, HOST_GW):
             rest(f"/gateways?id=eq.{gid}", method="DELETE")
 
         _, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body=[
-                {"id": PHYSICAL_GW, "name": "Test Bundle Gateway", "status": "OFFLINE",
+                {"id": REMOTE_GW, "name": "Test Bundle Gateway", "status": "OFFLINE",
                  "deployment": "remote"},
-                {"id": VIRTUAL_GW, "name": "Test Bundle Virtual", "status": "OFFLINE",
+                {"id": HOST_GW, "name": "Test Bundle Host", "status": "OFFLINE",
                  "deployment": "host"},
             ],
         )
-        cls.sparkplug_id = next(r["sparkplug_id"] for r in rows if r["id"] == PHYSICAL_GW)
+        cls.sparkplug_id = next(r["sparkplug_id"] for r in rows if r["id"] == REMOTE_GW)
 
         cls.tokens = {}
         for role, email in ACCOUNTS.items():
@@ -148,7 +148,7 @@ class BundleBase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        for gid in (PHYSICAL_GW, VIRTUAL_GW):
+        for gid in (REMOTE_GW, HOST_GW):
             rest(f"/gateways?id=eq.{gid}", method="DELETE")
 
 
@@ -236,9 +236,9 @@ class TestReadiness(BundleBase):
         self.assertIn(status, (400, 401))
 
     def test_probe_mints_nothing(self):
-        rest(f"/gateway_enrollment_tokens?gateway_id=eq.{PHYSICAL_GW}", method="DELETE")
+        rest(f"/gateway_enrollment_tokens?gateway_id=eq.{REMOTE_GW}", method="DELETE")
         probe(self.tokens["Administrator"])
-        _, rows = rest(f"/gateway_enrollment_tokens?gateway_id=eq.{PHYSICAL_GW}&select=id")
+        _, rows = rest(f"/gateway_enrollment_tokens?gateway_id=eq.{REMOTE_GW}&select=id")
         self.assertEqual(rows, [], "the readiness probe minted an enrolment token")
 
 
@@ -246,7 +246,7 @@ class TestPermissions(BundleBase):
     def test_privileged_roles_may_download(self):
         for role in ("Administrator", "Shopfloor_Manager"):
             with self.subTest(role=role):
-                status, body, _ = download(PHYSICAL_GW, self.tokens[role])
+                status, body, _ = download(REMOTE_GW, self.tokens[role])
                 self.assertEqual(status, 200, body)
 
     def test_operator_and_auditor_are_refused(self):
@@ -257,33 +257,33 @@ class TestPermissions(BundleBase):
         """
         for role in ("Operator", "Auditor"):
             with self.subTest(role=role):
-                status, body, _ = download(PHYSICAL_GW, self.tokens[role])
+                status, body, _ = download(REMOTE_GW, self.tokens[role])
                 self.assertEqual(status, 403, body)
                 self.assertIn("Insufficient privileges", body["error"])
 
     def test_refusal_issues_no_token(self):
         """A 403 must not leave a live claim behind -- otherwise the refusal is only cosmetic."""
-        rest(f"/gateway_enrollment_tokens?gateway_id=eq.{PHYSICAL_GW}", method="DELETE")
-        download(PHYSICAL_GW, self.tokens["Operator"])
+        rest(f"/gateway_enrollment_tokens?gateway_id=eq.{REMOTE_GW}", method="DELETE")
+        download(REMOTE_GW, self.tokens["Operator"])
         _, rows = rest(
-            f"/gateway_enrollment_tokens?gateway_id=eq.{PHYSICAL_GW}&select=id"
+            f"/gateway_enrollment_tokens?gateway_id=eq.{REMOTE_GW}&select=id"
         )
         self.assertEqual(rows, [], "a refused download still minted an enrolment token")
 
     def test_no_authorization_header(self):
         req = urllib.request.Request(
             f"{SUPABASE_URL}/functions/v1/gateway-bundle",
-            method="POST", data=json.dumps({"gateway_id": PHYSICAL_GW}).encode(),
+            method="POST", data=json.dumps({"gateway_id": REMOTE_GW}).encode(),
             headers={"apikey": PUBLISHABLE_KEY, "Content-Type": "application/json"},
         )
         with self.assertRaises(urllib.error.HTTPError) as caught:
             urllib.request.urlopen(req, timeout=15)
         self.assertIn(caught.exception.code, (400, 401))
 
-    def test_virtual_gateway_is_refused(self):
-        status, body, _ = download(VIRTUAL_GW, self.tokens["Administrator"])
+    def test_a_host_gateway_is_refused(self):
+        status, body, _ = download(HOST_GW, self.tokens["Administrator"])
         self.assertEqual(status, 400, body)
-        self.assertIn("virtual", body["error"].lower())
+        self.assertIn("host", body["error"].lower())
 
     def test_unknown_gateway_is_404(self):
         status, body, _ = download("00000000-0000-4000-8000-00000000dead",
@@ -293,7 +293,7 @@ class TestPermissions(BundleBase):
 
 class TestArchiveIntegrity(BundleBase):
     def setUp(self):
-        status, self.body, self.headers = download(PHYSICAL_GW, self.tokens["Administrator"])
+        status, self.body, self.headers = download(REMOTE_GW, self.tokens["Administrator"])
         self.assertEqual(status, 200, self.body)
 
     def test_binary_response_headers(self):
@@ -357,7 +357,7 @@ class TestTokenEmbedding(BundleBase):
         return archive.read(f"{folder}/.env").decode()
 
     def test_env_carries_a_usable_token_and_no_broker_password(self):
-        _, body, headers = download(PHYSICAL_GW, self.tokens["Administrator"])
+        _, body, headers = download(REMOTE_GW, self.tokens["Administrator"])
         env = self.env_of(body)
 
         token = re.search(r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", env, re.M)
@@ -378,7 +378,7 @@ class TestTokenEmbedding(BundleBase):
 
     def test_the_embedded_token_matches_the_stored_hash(self):
         """The token in the file is the one the database will accept -- not merely well-formed."""
-        _, body, _ = download(PHYSICAL_GW, self.tokens["Administrator"])
+        _, body, _ = download(REMOTE_GW, self.tokens["Administrator"])
         token = re.search(r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(body), re.M).group(1)
 
         _, rows = rest(
@@ -394,7 +394,7 @@ class TestTokenEmbedding(BundleBase):
         """
         secrets = set()
         for _ in range(3):
-            _, body, _ = download(PHYSICAL_GW, self.tokens["Administrator"])
+            _, body, _ = download(REMOTE_GW, self.tokens["Administrator"])
             secrets.add(
                 re.search(r"^NODERED_CREDENTIAL_SECRET=(.+)$", self.env_of(body), re.M).group(1)
             )
@@ -407,11 +407,11 @@ class TestTokenEmbedding(BundleBase):
         Exactly one download is ever redeemable. Otherwise 'regenerate' hands out a second valid
         claim rather than replacing the first, and two appliances could enrol as one gateway.
         """
-        _, first, _ = download(PHYSICAL_GW, self.tokens["Administrator"])
+        _, first, _ = download(REMOTE_GW, self.tokens["Administrator"])
         first_token = re.search(
             r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(first), re.M).group(1)
 
-        _, second, _ = download(PHYSICAL_GW, self.tokens["Administrator"])
+        _, second, _ = download(REMOTE_GW, self.tokens["Administrator"])
         second_token = re.search(
             r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(second), re.M).group(1)
 

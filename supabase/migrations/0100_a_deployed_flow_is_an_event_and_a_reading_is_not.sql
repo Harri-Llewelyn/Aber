@@ -5,7 +5,7 @@
 -- =================================================================================================
 -- WHAT THIS IS FOR
 --
--- A physical appliance reports seven health readings on every heartbeat (0035), and the audit
+-- A Remote gateway reports seven health readings on every heartbeat (0035), and the audit
 -- trigger compared whole rows minus `last_heartbeat` (0005). Uptime moves every thirty seconds,
 -- so every heartbeat that carried health wrote an UPDATE row to digital_thread: an append-only
 -- table gaining 2,880 rows a day per appliance, none of them an event, with the one change that

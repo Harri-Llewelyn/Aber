@@ -105,7 +105,7 @@ entire recovery story.
 **Nothing in this platform pushes a flow to a plant appliance.** The dashboard's *"Sync Edge Flows
 via GitOps"* action and the `deploy-nodered` edge function both target
 `http://node-red:1880/flows` — the **central** Node-RED that runs the simulated shopfloor. A
-physical gateway's Node-RED has no inbound path at all: it dials out to the broker on 8883 and
+Remote gateway's Node-RED has no inbound path at all: it dials out to the broker on 8883 and
 nothing anywhere assumes traffic in the other direction.
 
 So an appliance keeps running the flow it was bundled with, across every platform upgrade, until
@@ -136,7 +136,7 @@ documented meaning, and the UI treats "not reported" as a state rather than as a
 
 ### 4.1 Updating an appliance's *flow* still means a new bundle
 
-There is no fleet flow-update path. Changing what a physical appliance publishes means issuing a new
+There is no fleet flow-update path. Changing what a Remote gateway publishes means issuing a new
 bundle from the dashboard and running it on the appliance — which **consumes a fresh enrolment
 token** and is a manual act, per appliance.
 
@@ -210,7 +210,7 @@ to look at if you want positive confirmation rather than absence of complaints:
 
 ## Related
 
-- [`physical-gateways.md`](physical-gateways.md) — the appliance runbook, including re-issuing a
+- [`remote-gateways.md`](remote-gateways.md) — the appliance runbook, including re-issuing a
   bundle and what it invalidates
 - [`kubernetes-architecture.md`](kubernetes-architecture.md) — the chart, and how a release is
   published from a single `v*` tag
