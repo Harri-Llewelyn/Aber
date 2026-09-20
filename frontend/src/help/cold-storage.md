@@ -7,6 +7,7 @@ Telemetry that has aged out of the live historian and been written to object sto
 - **Object** is the file on object storage. **Range** is the window of time it covers, and **Chunk** the historian partition it came from.
 - **Rows** and **Size** are what it holds, which is how you judge whether a range is worth retrieving before you retrieve it.
 - **State** says where a range currently is in the tiering lifecycle.
+- **Unexported since** is where the data that has **not** reached the endpoint begins. Everything after that date is telemetry no object is yet known to hold. Up to a week behind is normal -- a chunk is not exported until its whole span has passed the threshold -- and the tooltip gives the exact figure. It turns amber, and the Archive Backlog alert fires, once it runs two weeks past the threshold, which usually means the endpoint cannot be reached.
 
 ## What the states mean
 

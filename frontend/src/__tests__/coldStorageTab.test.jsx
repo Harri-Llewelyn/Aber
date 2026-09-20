@@ -6,7 +6,9 @@ import { ColdStorageTab } from '../components/tabs/ColdStorageTab'
 import { coldStorageSummary, formatBytes, coldStateLabel } from '../utils/coldStorage'
 import { api } from '../api'
 
-vi.mock('../api', () => ({ api: { listColdStorage: vi.fn(), get: vi.fn() } }))
+vi.mock('../api', () => ({
+  api: { listColdStorage: vi.fn(), coldArchiveBacklog: vi.fn(), get: vi.fn() },
+}))
 
 const row = (overrides = {}) => ({
   chunk_name: '_hyper_1_38_chunk',
@@ -25,8 +27,20 @@ const row = (overrides = {}) => ({
   ...overrides,
 })
 
-const show = async (rows, userRole = 'Administrator') => {
+/** 0133's one row. Archiving off by default, matching the setting, so only the tests about the
+ *  backlog have to think about it. */
+const backlogRow = (overrides = {}) => ({
+  enabled: false,
+  threshold_days: 90,
+  oldest_unexported: '2026-04-09T00:00:00Z',
+  age_seconds: 90 * 86400,
+  overdue_seconds: 0,
+  ...overrides,
+})
+
+const show = async (rows, userRole = 'Administrator', backlog = backlogRow()) => {
   api.listColdStorage.mockResolvedValue(rows)
+  api.coldArchiveBacklog.mockResolvedValue(backlog)
   render(<ColdStorageTab showToast={vi.fn()} userRole={userRole} />)
   await waitFor(() => expect(api.listColdStorage).toHaveBeenCalled())
 }
@@ -188,11 +202,18 @@ describe('the empty state distinguishes off from on-and-idle', () => {
 
   it('says it runs by itself, because it does', async () => {
     /* The empty state attributes the emptiness to nothing being eligible yet, not to a missing
-       scheduler; the `cold-archiver` service schedules it. */
+       scheduler; the cold-archive CronJob schedules it.
+
+       IT NAMES THE THING THAT ACTUALLY RUNS. This asserted `cold-archiver`, a Compose service that
+       has not existed since Compose was dropped -- so the page told an operator to look for a
+       container that is not there, and the test held it that way. */
     api.get.mockResolvedValue([{ key: 'archive.enabled', value: true }])
     await show([])
     await waitFor(() => expect(screen.getByText(/runs by itself/i)).toBeInTheDocument())
-    expect(screen.getByText(/cold-archiver/)).toBeInTheDocument()
+    // Exact: the CronJob is named twice on this page, once alone and once inside the kubectl line.
+    expect(screen.getByText('cold-archive')).toBeInTheDocument()
+    expect(screen.queryByText(/cold-archiver/)).toBeNull()
+    expect(screen.queryByText(/docker exec/)).toBeNull()
     // "eligible" appears twice by design -- as the cause, and again in the command that lists it --
     // so this asserts the cause rather than either occurrence.
     expect(screen.getByText(/nothing is/i).textContent).toMatch(/eligible/i)
@@ -212,5 +233,63 @@ describe('the empty state distinguishes off from on-and-idle', () => {
     api.get.mockRejectedValue(new Error('offline'))
     await show([])
     await waitFor(() => expect(screen.getByText(/Cold storage is off/i)).toBeInTheDocument())
+  })
+})
+
+describe('how far behind the archive is', () => {
+
+  it('names the date the unexported span begins once archiving is on', async () => {
+    // THE FIGURE THAT SAYS A LINK IS DOWN. Every other stat describes what reached the endpoint;
+    // this is where the data that has not begins, which is the number an outage moves.
+    await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 3 * 86400 }))
+    await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
+  })
+
+  it('shows the backlog even when nothing has ever been archived', async () => {
+    // THE CASE THE FIGURE EXISTS FOR, and the one the live stack caught. An archiver that has never
+    // reached its endpoint has an EMPTY catalogue -- so a stats row gated on the catalogue hides
+    // the only figure that could say so, exactly when it is the whole story.
+    await show([], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 30 * 86400 }))
+    await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
+    // And the catalogue's own figures stay away: they describe what reached the endpoint.
+    expect(screen.queryByText('Oldest span held')).toBeNull()
+  })
+
+  it('says nothing about a backlog when archiving is off', async () => {
+    // With archiving off every chunk is unexported for ever, so the figure would be alarming and
+    // meaningless -- the state a stack that simply does not archive is permanently in.
+    await show([row()], 'Administrator', backlogRow({ enabled: false }))
+    await waitFor(() => expect(screen.getByText('Oldest span held')).toBeInTheDocument())
+    expect(screen.queryByText('Unexported since')).toBeNull()
+  })
+
+  /** The figure's own value element, whose inline `color` is what `tone` actually sets. */
+  const backlogColour = () =>
+    screen.getByText('Unexported since').parentElement.querySelectorAll('div')[1].style.color
+
+  it('stays neutral inside one chunk interval', async () => {
+    // A chunk is not eligible until its whole seven-day span has passed the threshold, so a
+    // healthy site is always a few days behind. Colouring that amber would train the reader to
+    // ignore the colour by the second week of every install.
+    await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 5 * 86400 }))
+    await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
+    expect(backlogColour()).toBe('var(--text-primary)')
+  })
+
+  it('warns once the backlog passes the tolerance the alert fires on', async () => {
+    // The other half of the pair: a threshold that never colours anything would pass the test
+    // above and ship dead. 20 days is past the 14 the Archive Backlog rule fires on.
+    await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 20 * 86400 }))
+    await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
+    expect(backlogColour()).toBe('var(--warning-text)')
+  })
+
+  it('renders the catalogue even when the backlog cannot be read', async () => {
+    // It fails SOFT. The catalogue is the page; losing one figure must not lose the rest of it.
+    api.listColdStorage.mockResolvedValue([row()])
+    api.coldArchiveBacklog.mockRejectedValue(new Error('fdw is down'))
+    render(<ColdStorageTab showToast={vi.fn()} userRole="Administrator" />)
+    await waitFor(() => expect(screen.getByText('Oldest span held')).toBeInTheDocument())
+    expect(screen.queryByText('Unexported since')).toBeNull()
   })
 })

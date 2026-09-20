@@ -1469,3 +1469,33 @@ refusing one that would have worked -- a false refusal cannot be told from a bro
       port: 22
 {{- end -}}
 {{- end -}}
+
+{{/*
+=================================================================================================
+acs-cymru.timescaleRetainFor -- the historian's raw retention window.
+
+DERIVED WHEN `timescaledb.retention.retainFor` IS EMPTY, because the right answer depends on
+whether cold archival has somewhere to put a chunk:
+
+  * a configured coldArchive.s3 destination -> `never`. Both mechanisms drop chunks and the timer
+    wins the race for anything the archiver has not reached; since 0132 that race is run over a
+    network link, where an outage is measured in days. Archiving replaces retention.
+  * no destination -> `90 days`, the value this chart has always shipped.
+
+An explicit value always wins, including an explicit `90 days` beside a configured endpoint --
+which is a site saying it accepts the deletion, and is not this template's decision to overrule.
+
+The destination test is the three fields that cannot be defaulted (site key, endpoint, bucket)
+rather than the credential, which lives in a Secret this template should not read.
+=================================================================================================
+*/}}
+{{- define "acs-cymru.timescaleRetainFor" -}}
+{{- $explicit := .Values.timescaledb.retention.retainFor | default "" -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else if and .Values.coldArchive.enabled .Values.coldArchive.s3.siteKey .Values.coldArchive.s3.endpoint .Values.coldArchive.s3.bucket -}}
+never
+{{- else -}}
+90 days
+{{- end -}}
+{{- end -}}

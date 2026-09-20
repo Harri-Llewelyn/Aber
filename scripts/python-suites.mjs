@@ -453,6 +453,18 @@ export const SUITES = {
       'firing. The suite also runs the naive predicate against the same fixture and asserts it ' +
       'DOES destroy the row, so the other cases cannot pass vacuously.',
   },
+  'supabase/migrations/test_cold_archive_backlog.py': {
+    lanes: ['db'],
+    why:
+      "0133's backlog figure, and chiefly the one property the rest of the platform's alerting " +
+      'rests on: `platform_health_rows()` is a single UNION and postgres_fdw raises on CONNECT, ' +
+      'so an arm reading the historian takes gateway staleness, stuck enrolments, the quarantine ' +
+      'queue and expected publishers down with it whenever that database is unreachable -- which ' +
+      'is exactly when somebody is reading them. The db lane HAS no historian, so it is the lane ' +
+      'that exercises that path on every run. Also that "cannot be computed" is reported as an ' +
+      'absent row rather than a reassuring zero, and that the ungated arithmetic is not callable ' +
+      'from PostgREST.',
+  },
   'supabase/migrations/test_sparkplug_group_setting.py': {
     lanes: ['db'],
     why:

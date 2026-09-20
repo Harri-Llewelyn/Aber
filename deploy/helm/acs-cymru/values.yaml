@@ -252,8 +252,22 @@ timescaledb:
     # late-arrival window (inserts into compressed chunks succeed); only the daemon's
     # TELEMETRY_MAX_AGE_SECONDS does.
     compressAfter: "7 days"
-    # A HARD DELETE with no undo. 90 days is a starting point, not a compliance decision.
-    retainFor: "90 days"
+    # A HARD DELETE with no undo, and DERIVED when left empty rather than defaulted in place.
+    #
+    #   empty + a configured coldArchive.s3 destination  ->  never
+    #   empty + no destination                           ->  90 days
+    #   anything else                                    ->  exactly what you wrote
+    #
+    # Because the two mechanisms both drop chunks and the timer wins the race for anything the
+    # archiver has not reached -- and since 0132 that race is run over a network link, so an
+    # outage is measured in days rather than seconds. Archiving replaces retention; it does not
+    # run beside it. `timescaledb/retention.sql` has warned about the combination since it was
+    # written, and a warning at boot is not read by whoever configured the endpoint a year later.
+    #
+    # `never` means the volume grows until somebody acts, which is the better of the two failures:
+    # it is recoverable and it loses nothing. The Cold Storage page and the Archive Backlog alert
+    # (0133) are what say it is coming. 90 days is a starting point, not a compliance decision.
+    retainFor: ""
   # --- Rollups (continuous aggregates) ---------------------------------------------------------
   # 1m -> 5m -> 1h buckets, read by Grafana's trend panels and long-window queries. They outlive
   # the raw data on purpose. Disabling stops reconciling them; it does not drop them.

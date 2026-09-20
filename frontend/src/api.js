@@ -743,6 +743,20 @@ const apiMethods = {
   },
 
   /**
+   * How far the cold archive has fallen behind (`0133`): when the unexported span begins, and how
+   * far past `archive.tier_after_days` that has run.
+   *
+   * ONE ROW, ALWAYS, so a null return means the call failed rather than that nothing is behind.
+   * The catalogue above cannot answer this: it lists what HAS been exported, and a stalled
+   * archiver's symptom is the absence of rows nobody notices.
+   */
+  coldArchiveBacklog: async () => {
+    const { data, error } = await supabase.rpc('cold_archive_backlog');
+    if (error) throw new Error(error.message || 'Could not read the cold archive backlog');
+    return Array.isArray(data) ? (data[0] || null) : (data || null);
+  },
+
+  /**
    * Every TOKEN_MINTED row, grouped by the principal it was signed for.
    *
    * All of them, not the latest per principal: a re-mint does not invalidate the previous token,
