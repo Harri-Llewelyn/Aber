@@ -156,6 +156,27 @@ spec:
             */}}
             - name: ARCHIVE_SITE_KEY
               value: {{ .Values.coldArchive.s3.siteKey | default "" | quote }}
+            {{/*
+              The rest of the destination. A SEED, not the source: 0134 writes each into its
+              settings row only while that row is empty, so a chart value configures a new stack
+              and never overwrites what an Administrator later set from the Cold Storage page.
+            */}}
+            - name: ARCHIVE_ENDPOINT
+              value: {{ .Values.coldArchive.s3.endpoint | default "" | quote }}
+            - name: ARCHIVE_REGION
+              value: {{ .Values.coldArchive.s3.region | default "" | quote }}
+            - name: ARCHIVE_BUCKET
+              value: {{ .Values.coldArchive.s3.bucket | default "" | quote }}
+            - name: ARCHIVE_ACCESS_KEY_ID
+              value: {{ .Values.coldArchive.s3.accessKeyId | default "" | quote }}
+            - name: ARCHIVE_PATH_STYLE
+              value: {{ .Values.coldArchive.s3.pathStyle | default false | quote }}
+            - name: ARCHIVE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: ARCHIVE_S3_SECRET_ACCESS_KEY
+                  optional: true
             {{- /*
               Creates the Supabase-side `grafana_reader` in archived migration 0027 -- the role Grafana
               connects as to read public.storage_footprint. THE SAME CREDENTIAL as the
@@ -273,6 +294,12 @@ spec:
                     -v forge_sweep_secret="$FORGE_SWEEP_SECRET" \
                     -v sparkplug_group="$SPARKPLUG_GROUP" \
                     -v archive_site_key="$ARCHIVE_SITE_KEY" \
+                    -v archive_endpoint="$ARCHIVE_ENDPOINT" \
+                    -v archive_region="$ARCHIVE_REGION" \
+                    -v archive_bucket="$ARCHIVE_BUCKET" \
+                    -v archive_access_key_id="$ARCHIVE_ACCESS_KEY_ID" \
+                    -v archive_path_style="$ARCHIVE_PATH_STYLE" \
+                    -v archive_secret_access_key="$ARCHIVE_SECRET_ACCESS_KEY" \
                     -f "$f" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi
                   cat /tmp/migration.log
                   if [ "$attempt" -ge 3 ] || ! grep -qE "deadlock detected|due to lock timeout" /tmp/migration.log; then

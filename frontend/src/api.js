@@ -757,6 +757,37 @@ const apiMethods = {
   },
 
   /**
+   * Whether an S3 credential is in the vault (`0134`). Never what it is — nothing reads it back to
+   * a browser, so this is the only question a page can ask about it.
+   *
+   * False for a caller who is not an Administrator, which reads as "not configured" and is correct
+   * for somebody who cannot configure it.
+   */
+  archiveCredentialIsSet: async () => {
+    const { data, error } = await supabase.rpc('archive_credential_is_set');
+    if (error) throw new Error(error.message || 'Could not check the cold archive credential');
+    return data === true;
+  },
+
+  /**
+   * Put the S3 secret key in the vault. Administrator only, enforced in the function rather than
+   * here: a check in the browser is a suggestion.
+   *
+   * WRITE-ONLY. There is no counterpart that reads it back, which is why the page shows "set" or
+   * "not set" and never a masked value it would have to have fetched to mask.
+   */
+  setArchiveCredential: async (secret) => {
+    const { error } = await supabase.rpc('set_archive_credential', { p_secret: secret });
+    if (error) {
+      // PostgREST maps the function's insufficient_privilege to 403; anything else is a fault.
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can set the archive credential'
+        : (error.message || 'Could not set the archive credential'));
+    }
+    return true;
+  },
+
+  /**
    * Every TOKEN_MINTED row, grouped by the principal it was signed for.
    *
    * All of them, not the latest per principal: a re-mint does not invalidate the previous token,

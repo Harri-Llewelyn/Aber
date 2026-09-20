@@ -782,7 +782,15 @@ coldArchive:
   # WHERE THE ONLY REMAINING COPY GOES. An archived object is not a backup: the raw chunk was
   # dropped because this object was verified, so the destination has to be somewhere a site loss
   # does not reach. There is no local fallback and no default endpoint -- an unset destination
-  # means nothing is exported, and the exporter says which variables are missing.
+  # means nothing is exported, and the exporter says which fields are missing.
+  #
+  # A SEED, NOT THE SOURCE, since 0134. These configure a NEW stack: each is written into its
+  # settings row only while that row is empty, so an install can be described here and an
+  # Administrator can change it afterwards from Settings > Cold Storage without the next
+  # `helm upgrade` quietly putting it back. Leaving them empty is now the ordinary case.
+  #
+  # siteKey is the exception and belongs here: it is the IAM prefix every object is addressed
+  # under, frozen read-only at first boot, and changing it is a procedure rather than an edit.
   #
   # "S3" names a protocol, not a vendor: AWS, Cloudflare R2, Backblaze B2, Wasabi and a MinIO in
   # another building all serve it. Which one is the operator's decision and the code never knows.

@@ -550,6 +550,20 @@ describe('area thumbnail grid across viewports', () => {
 describe('sidebar warning tone', () => {
   it('colours a flagged item, and never the current page', () => {
     expect(APP_CSS).toMatch(/\.sidebar-item\.sidebar-item-warning:not\(\.active\) \{ color: var\(--warning-text\); \}/)
+  })
+})
+
+/**
+ * The KPI ribbon was a clickable 48px bar of figures above the shopfloor map, retired when the Site
+ * Map became one view. This guard stops its stylesheet coming back and quietly re-enabling it.
+ *
+ * MOVED OUT OF THE TEST ABOVE, where it was one line with nothing to do with the sidebar's warning
+ * tone: an unrelated page adding a `.kpi-` class failed a test named "colours a flagged item, and
+ * never the current page", which says nothing about what was actually wrong or what to do about it.
+ * Same assertion, somewhere it can explain itself.
+ */
+describe('the retired KPI ribbon', () => {
+  it('does not come back', () => {
     expect(APP_CSS).not.toMatch(/\.kpi-/)
   })
 })

@@ -106,27 +106,55 @@ def log(message):
 # -------------------------------------------------------------------------------------------------
 def s3_config():
     """
-    The destination, from the environment. The chart renders it; the credential is a release Secret.
+    The destination, read from the platform database as the daemon's own principal.
+
+    FROM THE DATABASE RATHER THAN THE ENVIRONMENT, because an operator configures this from the
+    Cold Storage page (`0134`) and a container reads its environment once, at start. A destination
+    in the environment could only be changed by a redeploy, which is what made this feature cost a
+    `helm upgrade` to turn on.
+
+    ONE CALL, `cold_archive_destination()`, which is SECURITY DEFINER and returns a row to the
+    ingestion principal alone. The endpoint, region, bucket, key id and path style are settings an
+    Administrator can see; the secret comes out of the vault and is the one thing that never
+    reaches a browser. A caller without that identity gets no row, so a misconfigured key fails as
+    "not configured" rather than as a permission error about a function it should not know exists.
 
     A FOREIGN CREDENTIAL, NOT A DATABASE PRINCIPAL. We cannot mint, rotate or revoke a key at
-    another provider, so this sits where the SMTP relay password and the Grafana contact-point
-    bearer sit rather than with the principals the stack issues itself.
+    another provider -- the vault is where it is kept, not where it is issued.
 
     EVERY FIELD IS REQUIRED, INCLUDING THE ENDPOINT, which AWS would let us infer from the region.
     An inferred destination is one nobody states, and "somewhere else" is the entire property this
     feature has: the endpoint is written down so that reading the configuration tells you where a
     decade of plant history went.
+
+    FALLING BACK TO NOTHING RATHER THAN FAILING, as read_settings() does: an unreadable database
+    means "not configured", and every path that would write refuses on it and says which fields are
+    missing.
     """
+    empty = {
+        "endpoint": "", "region": "", "bucket": "",
+        "access_key": "", "secret_key": "", "path_style": False,
+    }
+    try:
+        from supabase import create_client
+
+        client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
+        client.postgrest.auth(SUPABASE_INGESTION_KEY or SUPABASE_GATEWAY_KEY)
+        rows = client.rpc("cold_archive_destination").execute().data or []
+    except Exception as err:  # noqa: BLE001 - see the docstring
+        log(f"could not read the archive destination ({err}); treating it as unconfigured")
+        return empty
+
+    row = (rows[0] if isinstance(rows, list) else rows) or {}
     return {
-        "endpoint": os.environ.get("ARCHIVE_S3_ENDPOINT", "").strip(),
-        "region": os.environ.get("ARCHIVE_S3_REGION", "").strip(),
-        "bucket": os.environ.get("ARCHIVE_S3_BUCKET", "").strip(),
-        "access_key": os.environ.get("ARCHIVE_S3_ACCESS_KEY_ID", "").strip(),
-        "secret_key": os.environ.get("ARCHIVE_S3_SECRET_ACCESS_KEY", ""),
+        "endpoint": (row.get("endpoint") or "").strip(),
+        "region": (row.get("region") or "").strip(),
+        "bucket": (row.get("bucket") or "").strip(),
+        "access_key": (row.get("access_key_id") or "").strip(),
+        "secret_key": row.get("secret_key") or "",
         # MinIO and most self-hosted gateways address buckets by path; AWS, R2 and B2 take the
         # virtual-host form. Getting this wrong fails as DNS resolution, which names nothing.
-        "path_style": os.environ.get("ARCHIVE_S3_PATH_STYLE", "").strip().lower()
-        in ("1", "true", "yes", "on"),
+        "path_style": bool(row.get("path_style")),
     }
 
 
@@ -139,17 +167,21 @@ def unconfigured(config, site_key):
     one missing variable per run costs five runs.
     """
     missing = []
+    # Named as the operator sees them on the Cold Storage page, not as the columns behind them: the
+    # person reading this refusal is going to go and fill in a form.
     for field, name in (
-        ("endpoint", "ARCHIVE_S3_ENDPOINT"),
-        ("region", "ARCHIVE_S3_REGION"),
-        ("bucket", "ARCHIVE_S3_BUCKET"),
-        ("access_key", "ARCHIVE_S3_ACCESS_KEY_ID"),
-        ("secret_key", "ARCHIVE_S3_SECRET_ACCESS_KEY"),
+        ("endpoint", "S3 endpoint"),
+        ("region", "S3 region"),
+        ("bucket", "S3 bucket"),
+        ("access_key", "S3 access key ID"),
+        ("secret_key", "the secret access key"),
     ):
         if not (config.get(field) or "").strip():
             missing.append(name)
+    # The one field that is NOT set from the page: it is frozen at install because it is the IAM
+    # prefix every object is already addressed under (0132).
     if not (site_key or "").strip():
-        missing.append("the archive.site_key setting (values.yaml coldArchive.s3.siteKey)")
+        missing.append("the site key (values.yaml coldArchive.s3.siteKey, fixed at install)")
     return missing
 
 
@@ -970,8 +1002,8 @@ def main():
         log("cold telemetry archival is not configured. Missing:")
         for name in missing:
             log(f"  {name}")
-        log("See supabase/README.md, 'Cold telemetry archival', for the chart values and the")
-        log("bucket policy the credential needs.")
+        log("Set them under Settings > Cold Storage as an Administrator. supabase/README.md,")
+        log("'Cold telemetry archival', has the bucket policy the credential needs.")
         return 2
 
     # NOT CHECKED FOR THE ARCHIVE PATH YET, and that distinction is the difference between a

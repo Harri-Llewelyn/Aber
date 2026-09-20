@@ -139,3 +139,41 @@ export function overdueDays(seconds) {
 export function backlogTone(seconds) {
   return overdueDays(seconds) > ARCHIVE_BACKLOG_TOLERANCE_DAYS ? 'warning' : 'neutral'
 }
+
+/**
+ * The destination fields an Administrator sets, in the order the page asks for them.
+ *
+ * KEPT IN STEP WITH `unconfigured()` in ingestion/cold_archive.py BY HAND, and the labels are the
+ * same words on purpose: the exporter's refusal ends up in a CronJob log, and an operator matching
+ * that log against this page should not have to translate. Two languages, one list; a test asserts
+ * the page's half and the migration seeds exactly these keys.
+ */
+export const DESTINATION_FIELDS = [
+  { key: 'archive.endpoint', label: 'S3 endpoint' },
+  { key: 'archive.region', label: 'S3 region' },
+  { key: 'archive.bucket', label: 'S3 bucket' },
+  { key: 'archive.access_key_id', label: 'S3 access key ID' },
+]
+
+/**
+ * What is still missing before anything can be exported, as labels.
+ *
+ * `siteKey` is included but is NOT set from the page: it is frozen at install because it is the
+ * prefix every object is already addressed under. It appears here so an operator is told the whole
+ * truth in one place rather than discovering the last field from a failed job.
+ */
+export function missingDestination({ values = {}, credentialSet = false, siteKey = '' } = {}) {
+  const missing = DESTINATION_FIELDS
+    .filter(f => !String(values[f.key] ?? '').trim())
+    .map(f => f.label)
+  if (!credentialSet) missing.push('the secret access key')
+  if (!String(siteKey ?? '').trim()) missing.push('the site key (set at install)')
+  return missing
+}
+
+/** `endpoint/bucket/site=key/`, or null when there is not enough to name one. */
+export function destinationSummary({ endpoint = '', bucket = '', siteKey = '' } = {}) {
+  if (!endpoint.trim() || !bucket.trim()) return null
+  const base = `${endpoint.trim().replace(/\/+$/, '')}/${bucket.trim()}`
+  return siteKey.trim() ? `${base}/site=${siteKey.trim()}/` : `${base}/`
+}

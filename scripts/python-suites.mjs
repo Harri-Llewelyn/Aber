@@ -453,6 +453,18 @@ export const SUITES = {
       'firing. The suite also runs the naive predicate against the same fixture and asserts it ' +
       'DOES destroy the row, so the other cases cannot pass vacuously.',
   },
+  'supabase/migrations/test_cold_archive_destination.py': {
+    lanes: ['db'],
+    why:
+      "0134's `sensitive` clause, asserted from both sides. system_settings is readable by every " +
+      'signed-in user ON PURPOSE -- a setting shapes what a page renders for every role -- so the ' +
+      "five rows naming where a plant's history is written, and under which access key, are " +
+      'protected by one clause on one policy and nothing else. Lose it and nothing breaks: the ' +
+      'page works, the exporter exports, and the only symptom is a disclosure nobody is looking ' +
+      'for. Also that the two functions reaching past RLS admit only who they are meant to, and ' +
+      'that the credential is write-only -- it is never asserted by value because nothing returns ' +
+      'it, which is the property rather than a gap.',
+  },
   'supabase/migrations/test_cold_archive_backlog.py': {
     lanes: ['db'],
     why:

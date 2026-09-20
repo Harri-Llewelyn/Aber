@@ -1656,6 +1656,31 @@ tbody tr:hover { background: var(--bg-glass); }
    centred text, so the button needs to become a block to sit in the middle of it. */
 .empty-state .btn { display: inline-flex; margin-top: 12px; }
 
+/* ===== Stat strip ===== */
+/* A row of figures above a table, centred on the card and ruled between. Left-aligned and spaced
+   only by a gap, a run of six read as one ragged block with no boundary between "object storage
+   used" and the figure after it -- the eye had to use the label casing to find where each one
+   started. The rule does that instead, and centring stops a short run sitting off to one side of a
+   wide card. */
+.stat-strip {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.stat-strip > * {
+  padding: 0 20px;
+  text-align: center;
+}
+
+/* The separator belongs to the item on its right, so the first has none and a run of any length
+   stays ruled between and clear at both ends. */
+.stat-strip > * + * {
+  border-left: 1px solid var(--border);
+}
+
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
   font-family: 'JetBrains Mono', monospace;
@@ -4162,7 +4187,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   line-height: 1.5;
   letter-spacing: normal;
   text-transform: none;
-  white-space: normal;
+  /* `pre-line`, not `normal`: a tooltip long enough to need a second paragraph -- Cold telemetry's,
+     which carries the only-copy warning -- had its blank line collapsed into one wall of text.
+     Spaces and wrapping still collapse as before, and no other tip's text contains a newline, so
+     this only enables the break rather than changing any existing bubble. */
+  white-space: pre-line;
   pointer-events: none;
 }
 
