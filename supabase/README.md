@@ -47,9 +47,28 @@ no-op on a fresh install and the repair on an existing one. `0053` is the subtle
 creates the one-shot ledger and grants `service_role` full rights on it, and `0053` is what takes
 them away — fold `0053` and the grant comes back on every boot.
 
-The rule for the future: **an additive change goes in a new numbered migration and folds into the
-baseline at the next squash; a subtractive one stays until every database that could receive it
-has.**
+### The four rules the next fold carries in
+
+Three more were found the hard way after the second squash, and a fold that ignores any of them
+rebuilds the thing it was run to remove. The tail already holds two examples: `0088` drops and
+re-adds `change_proposals_entity_type_known` with three lanes and `0090` widens it to seven two
+files later, so on a database holding a cells proposal the re-add scans the rows, fails, and aborts
+db-init with every file after it; and `0097` re-adds the integer `cells.floor` on every boot while
+`0098` drops it again.
+
+1. **An additive change folds; a subtractive one waits.** A new table, column, function or seeded
+   row goes in a new numbered migration and folds into the baseline at the next squash, because a
+   fresh install would do it anyway. A drop, a delete or a withdrawn privilege stays in the tail
+   until every database that could receive it has.
+2. **Constraints are added guarded, never dropped and re-added.** `DROP CONSTRAINT IF EXISTS`
+   followed by `ADD CONSTRAINT` scans the rows, and on a populated database the scan is what fails.
+3. **A file that creates a function states its own `REVOKE ALL ON FUNCTION … FROM PUBLIC, anon`**
+   rather than leaning on `0001`'s sweeper. The sweeper runs earlier in the same boot, so it
+   corrects the ACL one boot late — the first-boot window described in
+   [the anon sweep](#the-anon-sweep-runs-after-the-functions-exist-0009-0071).
+4. **No file re-asserts an absolute set that a later file widens.** A `CHECK` naming every legal
+   value, or a self-check counting every expected permission, is correct on the boot it is written
+   and wrong on the first boot after something is added.
 
 ### The baseline is generated, and the equivalence is checked
 
@@ -847,8 +866,9 @@ attached device against.
 **`fork_schema()` carried the same gate**, under a comment claiming *"Same allow-list as the RLS
 write policies on `schemas`"* — true when written, false the moment `0069` moved those policies
 underneath it. This repository already has a name for that shape: an analysis that was right when
-written and wrong when read, which is why the roadmap tells a reader to sweep back over whatever
-cited a thing as settled.
+written and wrong when read, which is why [`CONTRIBUTING.md`](../CONTRIBUTING.md) has a sweep read
+every comment asserting a runtime fact against whatever produces it, rather than leaving it shorter
+and still wrong.
 
 **`0087` gates both on `has_authority(ARRAY['schema:manage'])`** rather than on a role name. The
 seven policies `0069` narrowed name the role; these two now name the **permission**, so the gate is

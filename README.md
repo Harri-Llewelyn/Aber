@@ -715,15 +715,19 @@ port-forwards**, and the two agreeing is the wiring check.
 
 ## Roadmap & Future Extensions
 
-**The roadmap lives in [`docs/roadmap.md`](docs/roadmap.md)**, and none of it is speculative: every
-entry names the code it would build on, so a reader can tell how far away each is. That file lists
-only what is **not** built — an item that ships is removed from it and its substance moves into the
-documentation, which is why no entry there says `Built`.
+**The roadmap is the [1.0 milestone](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/1)**, and none of
+it is speculative: every issue on it names the code it would build on, so a reader can tell how far
+away each is. A thing that is not built and that 1.0 does not need competes for
+[2.0](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/2) rather than sitting in the release's critical
+path.
 
-**None of them are open defects.** Feature requests land there once they have been checked against
-the code; **known issues** stay in
-[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues), and **accepted risks** live
-under [Accepted risks](#accepted-risks).
+**[`docs/roadmap.md`](docs/roadmap.md) is what the roadmap left behind:** every entry that has
+retired and the documentation its substance moved into. Work does not stay on a list once it ships
+— it becomes the component's own documentation, and that file says which.
+
+**Defects and accepted risks are separate.** A known issue is a `bug` in
+[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues); **accepted risks** live under
+[Accepted risks](#accepted-risks).
 
 ---
 

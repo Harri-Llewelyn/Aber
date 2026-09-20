@@ -1,28 +1,33 @@
 # Roadmap
 
-**This file lists only what is not built.** Every entry names the code it builds on, states what
-remains, and records the decisions already taken so they are not re-argued. When an entry ships,
-it leaves this file and its substance moves into the documentation of the component it changed.
-**Known issues** stay in [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues);
+**The queue lives in the issue tracker.** What 1.0 must have is an issue on the
+[1.0 milestone](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/1); what it does not need is a
+feature request competing for [2.0](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/2) rather
+than sitting in the release's critical path. **This file is what the roadmap leaves behind:** the
+record of every entry that has retired, and where its substance now lives.
+
+**Why the queue moved.** This file and the 1.0 milestone were two lists both claiming to name what
+1.0 needs, and the entries in one were already half-written as issues in the other. An entry's
+number here was reading order, so it changed whenever another entry retired and nothing in the code
+could cite it; an issue number never changes, so a comment may cite `#338` and still be true years
+later. The rule that survives is where the reasoning goes, not where the queue does: an issue holds
+what remains and how it will be judged done, and a constraint that must outlive the work goes in the
+documentation of the thing it constrains ([`CONTRIBUTING.md`](../CONTRIBUTING.md) states the rule).
+
+**What this record covers.** The roadmap's own entries, and nothing else. It is not an index of
+every closed issue — a shipped issue is found through the tracker and the pull request that closed
+it. **Known issues** stay in [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues);
 **accepted risks** live under [Accepted risks](../README.md#accepted-risks).
 
-**It lists only what 1.0 must or should have.** A thing that is not built and that 1.0 does
-not need is a feature request, not an entry here: open one with
-[the template](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/new?template=feature_request.yml)
-and it competes with every other request rather than sitting in the release's critical path.
-An entry that turns out to be a could-have leaves the same way an entry that ships does — it
-moves out, and the table below says where it went.
+**The three entries that were still live when the queue moved.** Each kept its text; the
+constraints it had settled moved into the documentation first, so closing the issue cannot lose
+them.
 
-**The numbers are reading order, not identifiers.** Nothing in the code cites an entry by number
-(`CONTRIBUTING.md` says why), so retiring an entry and renumbering the rest costs one grep of
-`§[0-9]` in this file.
-
-**Ordering.** 1 is the platform's own: the rehearsal that turns the backup into a capability.
-2 audits the documentation, code and comments, and is worth running once against a codebase that
-has stopped moving: the last feature work, archiving as a lifecycle (`0124`), has landed. Its
-sweep of the Helm templates has already run, as one of the levers that recovered the chart's
-release headroom. 3 is last by rule: it folds the migration chain, so every entry that changes
-the schema must have landed before it.
+| Entry | Where it is now |
+| :--- | :--- |
+| A restore is rehearsed from a backup the service took | [#338](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/338), behind [#155](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/155) |
+| The documentation, code and comments are audited against the codebase | [#339](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/339); the sweep method and the two surfaces it must not touch are in [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
+| The migration chain folds back into the baseline | [#340](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/340); the four rules the fold carries in are in [`supabase/README.md`](../supabase/README.md#the-four-rules-the-next-fold-carries-in) |
 
 **Retired entries, and where their substance went.**
 
@@ -55,136 +60,3 @@ the schema must have landed before it.
 | Retiring the flow-backup bucket | Removed: the `gateway-backups` bucket, its policies, its chart values and its policy test are gone, and no install had stored anything in it. A gateway's flow lives in its repository in the forge ([`docs/remote-gateways.md`](remote-gateways.md)); the repository pointer stays derived (`gateway-<sparkplug_id>` in the organisation `constants.js` names), a column is earned only if a gateway ever needs re-pointing. Archiving a gateway now archives its repository too, the one decision this entry held that nothing implemented ([#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197), `0114`): [`supabase/README.md`](../supabase/README.md#archiving-a-gateway-reaches-the-forge-0114) for the archive mark, where the call lives and why deleting a repository stays a decision a person takes in the forge |
 | Archiving an asset is a lifecycle rather than a flag (`0124`) | [`supabase/README.md`](../supabase/README.md#archiving-is-a-lifecycle-rather-than-a-flag-0124). The four pieces built: areas archive like everything else (three columns, the shared dialog, a guarded fourth `DELETE` in the purge job, Archive and Restore on the Areas page); a shadow lane follows its original through archive, restore and delete; a tombstone table, `retired_entities`, written on the delete of an archived row, is the Archived Entities page's second card, each row linking to the digital thread, the forge repository and any bundle; and `aas-export?format=bundle` takes a device away as one AASX with its thread, its live telemetry and a manifest naming the cold objects, stored beside the cold tier and recorded in `asset_exports`. The four early questions answered as the section records: an archived area's topics keep its name, the Site Map keeps drawing its plan, the vocabulary stayed in the UI (*Archived* and *Retired*, no column), and the tombstone is a table rather than a derivation from the partitioned thread |
 | The chart's release Secret is given room to grow | Built. **775,537 gzip bytes to 557,372 — 98.6% of the ceiling to 70.9%**, measured on the dev cluster rather than estimated. The recoverable ceiling is 786,432, not 1,048,576: the Secret holds `base64(gzip(json))` and the limit applies to the base64 text, so the guard's old 1.332 multiplier was base64's 4/3 all along. [`docs/kubernetes-architecture.md` §3.6](kubernetes-architecture.md#36-the-release-secret-has-a-ceiling-and-the-chart-had-reached-it) records what is counted, every lever taken and every lever declined with its reason. Taken: the two API specifications into a `swagger-ui` image and `node-red-init.mjs` into the `node-red` image, both on the precedent of the migrations in `db-init`; and the comment rule applied to the templates in three sweeps, which also corrected a stale Grafana measurement, a hook weight a comment had wrong, and six places still describing a second deployment target. Declined and recorded: the maintenance SQL, the broker scripts, the Grafana dashboards, and Helm's `sql` storage driver. The guard now compares gzip bytes against 786,432 at Helm's own compression level, warns at 75% and fails at 85%, and prints the ten entries whose removal would save the most — and it no longer counts `Chart.yaml` and `values.yaml`, which Helm stores parsed, so trimming their comments buys nothing. `.helmignore` argued both sides of whether the two values files belong in the package; it now states the ignore and why the other case loses |
-
----
-
-## 1 · A restore is rehearsed from a backup the service took
-
-**Builds on:** [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) ·
-[`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
-[`scripts/backup-service.mjs`](../scripts/backup-service.mjs) and
-[Backups from the dashboard](../supabase/README.md#backups-from-the-dashboard-0101) (`0101`) ·
-issue [#155](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/155)
-
-The backup an Administrator takes on the Backups page has been taken and its digests checked, and
-nothing has yet restored from one. The weekly rehearsal in CI restores the CronJob's flat dumps
-into a disposable cluster and compares row counts; it has been failing since the Actions
-allowance ran out, and it knows nothing of the service's per-stamp directory or the forge archive. Until one restore has run end to end from a service-made directory, the
-README's own line applies: an untested backup is a belief, not a capability.
-
-**What remains.**
-
-- **Make the weekly rehearsal pass again** (#155), then move its backup step onto the service:
-  install with `backupService.enabled`, call `request_backup()` as the seeded Administrator,
-  wait for the `backups` row, and restore from the directory it names rather than from the
-  CronJob's files.
-- **Rehearse the forge.** Restore `forge-<stamp>.tar.gz` into an empty forge volume and assert
-  that every gateway repository is back, that `main` is still protected, and that the SSH host
-  key is byte-identical to the one an enrolled appliance pinned, because a forge restored without
-  it is a fleet-wide re-enrolment.
-
-**Decided:** restore stays a runbook and a rehearsal, never a button; the rehearsal is CI's and
-weekly, not the service's; and a rehearsal that restores the data layer alone is reported as
-that, as the workflow's header already insists.
-
-**Worth deciding early.** Whether the broker's CA and the Dynamic Security plugin's document
-(`mosquitto_certs`, `mosquitto_dynsec`; the `mosquitto-data` PVC on Kubernetes) join the tier 1
-backup. Neither is in it today; losing the root is a fleet-wide re-enrolment, losing the document
-is every gateway re-issued, and only a tier 2 snapshot saves them. Whether the platform's
-own Node-RED data joins for the same reason. Whether the rehearsal should also prove the
-retention prune removes exactly the directory the row named and nothing beside it.
-
----
-
-## 2 · The documentation, code and comments are audited against the codebase
-
-**Builds on:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) (the comment rule, and where argument and
-history go) · `scripts/check-docs-drift.mjs` · `scripts/check-mirror-drift.mjs` ·
-[`docs/incidents.md`](incidents.md)
-
-**Built:** the comment rule, and the rewrite that applied it to the chart values, the gateway, the
-active migrations, the frontend, the edge functions and the check scripts; the drift checker, which
-pins the README's component table, every workflow job, every help page and the other claims it
-lists; and the retired-entries table above, where an entry's substance lands when it ships.
-
-**The gap** is three kinds of staleness the checker cannot see. Prose that describes a design since
-replaced: Compose is gone, and "Compose", "both targets" and "the divergence table" survive across
-the tree outside the incident log — the chart's own copies of that have been cleared, the rest
-has not. Comments that argue history where the rule wants the constraint: the Python suites, the
-rest of `ingestion.py`, the i3X server, the capture, playback and cold-archive modules, and the
-broker and setup scripts. **The Helm templates are done**, swept in three passes while recovering
-the chart's release headroom, with the method recorded in `CONTRIBUTING.md`. Rules and tests guarding
-what nothing renders, which the Site Map work found in the stylesheet. Comments that are
-internally coherent and false, which the playback review found in the worker: a docstring
-reasoning at length about a credential file the chart never leaves absent, while the state it
-does leave — present and empty — went unhandled and logged an error every three seconds forever.
-And claims the checker could verify but does not, which is how the other kinds return.
-
-**Decided.** One sweep per surface, not one pass over everything, and a surface is done when its
-non-comment lines are unchanged (AST minus docstrings for Python, data equality for YAML, stripped
-text for the rest) and its prose names nothing that is not in the tree. **That comparison proves a
-sweep changed no behaviour and says nothing about whether the surviving comment is true**, so a
-comment asserting a runtime state is read against whatever produces that state — the chart, the
-migration, the deployment target — rather than left shorter and still wrong. Argument and history
-move to the component README or `docs/incidents.md`; they are not deleted. Nothing cites a roadmap
-number. Every claim found that the checker could verify gets a check, so the audit leaves a guard
-rather than a snapshot. The files under `deploy/helm/acs-cymru/files/` are mirrors: the source is
-edited and the sync script run.
-
-**Must not touch:** `supabase/migrations/archive/` (a historical record, not executed) and
-`supabase/config.toml` (the Supabase CLI's stock file).
-
-**Done means:** nothing outside `docs/incidents.md` and the README's history names Compose or a
-second target; every surface above has had its sweep with the non-comment comparison clean; the
-drift checker holds more claims than it does today; and `CONTRIBUTING.md` records the sweep's
-method so the next one starts from it.
-
----
-
-## 3 · The migration chain folds back into the baseline
-
-**Builds on:** [`supabase/README.md`](../supabase/README.md#why-those-nine-survived-the-squash-and-nothing-else-did) ·
-`scripts/test-db.mjs` · `scripts/check-docs-drift.mjs` · [`CONTRIBUTING.md`](../CONTRIBUTING.md)
-
-The first squash folded the beta chain into `0001` and `0002` and left a short corrective tail.
-The tail has grown, and later files now correct earlier ones. `0088` drops and re-adds the
-proposal entity constraint with three lanes and `0090` widens it to seven two files later; on a
-database holding a cells proposal the re-add scans the rows, fails, and aborts db-init with every
-file after it. `0097` re-adds the integer `cells.floor` on every boot and `0098` drops it again.
-Both are idempotent and both are tested, and both are the shape a squash exists to remove.
-
-**The archive is this entry's other output, and its README has drifted.** Nothing in
-`supabase/migrations/archive/` executes: `db-init` and CI both glob `supabase/migrations/*.sql`,
-which does not recurse, so the directory is documentation with a `.sql` extension — the *why* a
-`pg_dump`-derived baseline cannot carry, cited by number from the applied files and the component
-READMEs, with `check-docs-drift.mjs` holding the citation form (`archived migration NNNN`). Its
-README still opens *"The 38 files in this directory are the original incremental migrations"*, and
-there are 99: the second squash moved `0003`–`0078` in and left the prose describing the first.
-This fold makes it wrong a third time unless the README is rewritten to describe the chain it
-holds rather than one event in it.
-
-**One column is waiting for this entry.** `gateways.is_virtual` was retired in code by archived
-`0064`–`0066`, `deployment` carrying the question it was being asked — where the connector runs.
-`0066` recorded that the column could not be dropped because archived `0036` named
-`is_virtual boolean` in `gateway_health_rows()`'s `RETURNS TABLE` and executed the function in its
-own self-check; that obstacle went into the archive with `0036` and no longer runs. The
-declaration is now `0001`'s own, and the live readers are `0001` and `0002` alone:
-`gateway_health_rows()` and the `gateway_health` view name the column, `sync_gateway_deployment()`
-writes it, and `0002`'s seed still INSERTs it *instead of* `deployment`, leaning on that trigger to
-derive one from the other. A function's return shape and a seed's column list are baseline edits,
-which is what this entry is.
-
-**Decided:** the fold rule is the first squash's. An additive migration folds into the baseline,
-because a fresh install would do it anyway; a subtractive one stays in the tail until every
-database that could receive it has. Two rules found the hard way carry in: a file that creates a
-function states its own `REVOKE ... FROM PUBLIC, anon` rather than leaning on `0001`'s sweeper,
-which runs earlier and corrects the ACL one boot late; and no file re-asserts an absolute set that
-a later file widens. Constraints are added guarded, never dropped and re-added.
-
-**Done means:** a fresh boot and a second boot pass every self-check; every database suite passes
-on the throwaway cluster; the drift check is clean; the chain is the baseline plus a tail
-short enough to read in one sitting; and the archive's README describes every squash it holds
-rather than the first alone.
-
-**Must not touch:** the replay contract. Every file still runs on every boot with no ledger, so
-nothing in the fold may depend on a file having run once.

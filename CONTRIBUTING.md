@@ -3,9 +3,12 @@
 **Comments state what the code does and the constraint a reader changing that line needs**, and no
 more. The argument for a design, the history of how a line came to look this way, measurements and
 post-mortems belong in the component READMEs and in [`docs/incidents.md`](docs/incidents.md), which
-states the rule for what goes where. Comments do not cite roadmap entries by number: an entry that
-ships leaves [`docs/roadmap.md`](docs/roadmap.md), so a numbered citation ages the moment it is
-written. Cite the document that holds the substance, or the roadmap entry by title.
+states the rule for what goes where. **Cite the document that holds the substance**, not the work
+that produced it: a branch, a pull request or a planning note is stale by the time somebody reads
+the line. A GitHub issue is the exception, because its number never changes — `#340` names the same
+work in five years. The roadmap's numbers were reading order and never citable, which is one of the
+reasons its queue moved to the [1.0 milestone](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/1);
+[`docs/roadmap.md`](docs/roadmap.md) is the record of what has already left it.
 
 Some logic is **mirrored across languages** and must be kept in step: `frontend/src/utils/` mirrors
 generated columns and views in [`supabase/migrations/0001_baseline_schema.sql`](supabase/migrations/0001_baseline_schema.sql),
@@ -33,6 +36,12 @@ to be classified deliberately rather than waved through with the template commen
 is true.** A comment asserting a runtime fact is read against whatever produces that fact — the
 chart, the migration, the deployment target — rather than left shorter and still wrong. Argument and
 history move to the component README or `docs/incidents.md`; they are not deleted.
+
+**A sweep takes one surface, not one pass over everything**, and a surface is done when its
+non-comment comparison is clean *and* its prose names nothing that is not in the tree. Every claim
+it turns up that `check-docs-drift.mjs` could verify earns a check there, so a sweep leaves a guard
+rather than a snapshot. Two surfaces are never swept: `supabase/migrations/archive/` is a historical
+record that is never executed, and `supabase/config.toml` is the Supabase CLI's stock file.
 
 ## Two rules worth stating up front
 
