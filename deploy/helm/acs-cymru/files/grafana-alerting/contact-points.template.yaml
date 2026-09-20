@@ -38,8 +38,8 @@
 # `authorization_credentials`), which is spent on the bearer secret below -- so the only remaining
 # place to put a second credential was the URL. A query-string credential is logged: it lands in
 # Grafana's own delivery log and in the access log of anything between here and the gateway, which is a
-# poor place for a value to sit even when that value is public. Grafana's `headers` map (11.6+;
-# this stack pins 13.1.3, see deploy/helm/acs-cymru/values.yaml) removed the constraint.
+# poor place for a value to sit even when that value is public. Grafana's `headers` map, on 11.6
+# or newer, removed the constraint.
 #
 # IF THIS EVER RUNS ON A GRAFANA WITHOUT `headers`, the symptom is specific and worth knowing:
 # Grafana ignores the unknown setting, the gateway refuses the request with 401 for a missing apikey, and
