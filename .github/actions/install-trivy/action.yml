@@ -1,0 +1,28 @@
+# Trivy, installed the same way for every workflow that scans.
+#
+# A composite action rather than a copied block: release.yml gates the images it publishes and
+# image-scan.yml watches the third-party ones, and the two applying different scanner versions
+# would make "clean at release, vulnerable on the first of the month" mean nothing. One recipe,
+# both callers -- the same rule the image list and the psql variables already follow.
+#
+# From Aqua's apt repository rather than a pinned binary: the vulnerability database is fetched at
+# scan time regardless, so pinning the scanner buys reproducibility of the tool and not of the
+# answer, and an old scanner is the one that misses a finding.
+name: Install Trivy
+description: Install the Trivy vulnerability scanner from Aqua's apt repository.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Trivy
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get install -y --no-install-recommends wget gnupg
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+          | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+          | sudo tee /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update
+        sudo apt-get install -y trivy
+        trivy --version

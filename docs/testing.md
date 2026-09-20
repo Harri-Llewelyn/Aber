@@ -573,7 +573,7 @@ schedule, not on this repository's.
 | Workflow | Job | Asks |
 | :--- | :--- | :--- |
 | [`renovate.yml`](../.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — routine PRs monthly, security PRs immediately |
-| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly |
+| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly, third-party images only; the ten built here are gated at release |
 | [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) | **rehearse** | *Would a restore actually work today?* — weekly |
 
 ### The restore rehearsal is the odd one out
@@ -640,8 +640,8 @@ never on a branch:
 | Job | Covers |
 | :--- | :--- |
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
-| **build-images** | The eight independent images, in parallel, pushed to GHCR |
-| **build-ingestion-chain** | `ingestion`, then `test-runner` **on the same runner** — the latter is built `FROM` the former, so the base must be in the local image store |
+| **build-images** | The eight independent images, in parallel: built, **scanned**, then pushed to GHCR |
+| **build-ingestion-chain** | `ingestion`, then `test-runner` **on the same runner** — the latter is built `FROM` the former, so the base must be in the local image store. Both scanned before either is pushed |
 | **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back |
 
 The tag is the single place the version is written — it stamps the ten image tags, the chart

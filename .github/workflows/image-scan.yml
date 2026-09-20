@@ -13,8 +13,9 @@
 # THE IMAGE LIST IS READ OUT OF THE RENDERED CHART RATHER THAN WRITTEN HERE, which is the same rule
 # every other guard in this repository follows: a hardcoded list is a second place for a version to
 # live, and it would go stale silently -- scanning the images this stack USED to run and reporting
-# green. Images built from this repository are excluded because they are built from these same
-# bases and have no upstream tag to look up.
+# green. Images built from this repository are excluded because release.yml scans each of them
+# before it is pushed, against the same policy; check-docs-drift.mjs holds that exclusion to the
+# release workflow, so this comment cannot outlive the step it points at.
 # =================================================================================================
 name: Container Image CVE Scan
 
@@ -55,7 +56,8 @@ jobs:
         run: |
           set -euo pipefail
           # Every image a full render names, with the optional workloads switched on so their
-          # images are scanned too; the chart's own builds are the release workflow's to scan.
+          # images are scanned too; the chart's own builds are scanned by release.yml, before
+          # each one is pushed.
           helm template acs-cymru deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml \
             --set backup.enabled=true --set backupService.enabled=true --set playback.enabled=true \
             --set e2e.enabled=true \
@@ -77,16 +79,7 @@ jobs:
           sed 's/^/  /' /tmp/images.txt
 
       - name: Install Trivy
-        run: |
-          set -euo pipefail
-          sudo apt-get install -y --no-install-recommends wget gnupg
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-            | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
-            | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
-          trivy --version
+        uses: ./.github/actions/install-trivy
 
       - name: Scan
         run: |

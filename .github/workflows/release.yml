@@ -186,13 +186,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Push
+      # BUILT AND LOADED, NOT PUSHED. The scan below needs the image in the runner's daemon, and
+      # the point of scanning at release is to gate the artefact rather than report on one that is
+      # already pullable. The push step repeats these inputs and resolves entirely from the GHA
+      # cache this step wrote, so nothing is built twice.
+      - name: Build
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build_args }}
-          push: ${{ needs.prepare-release.outputs.push == 'true' }}
+          push: false
+          load: true
           tags: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.name }}:${{ needs.prepare-release.outputs.version }}
           # `image.source` is what makes GHCR attach the package to this repository, so the package
           # page gets a README and the repository's settings govern it.
@@ -203,6 +208,37 @@ jobs:
             org.opencontainers.image.licenses=MIT
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Install Trivy
+        uses: ./.github/actions/install-trivy
+
+      # THE SAME POLICY image-scan.yml APPLIES TO THE THIRD-PARTY IMAGES: fixable HIGH and CRITICAL
+      # only. An unfixed CVE is not something a release can act on, and failing on one would train
+      # everyone to ignore this step. What this catches that the monthly scan cannot is everything
+      # installed ON TOP of a base -- the Python tree in ingestion, the npm trees in frontend and
+      # backup-service, the Deno modules in edge-runtime, the Node-RED palette.
+      - name: Scan
+        run: |
+          set -eu
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            --no-progress --scanners vuln \
+            "$IMAGE_NAMESPACE/${{ matrix.name }}:${{ needs.prepare-release.outputs.version }}"
+
+      - name: Push
+        if: needs.prepare-release.outputs.push == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_args }}
+          push: true
+          tags: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.name }}:${{ needs.prepare-release.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=${{ matrix.name }}
 
   # ingestion, then test-runner FROM it: one job, one runner, one local image store. test-runner is
   # `FROM ${INGESTION_IMAGE}`, so its base must be resolvable at build time; split across two jobs
@@ -275,6 +311,27 @@ jobs:
             --label "org.opencontainers.image.version=$V" \
             --label "org.opencontainers.image.licenses=MIT" \
             .
+
+      - name: Install Trivy
+        uses: ./.github/actions/install-trivy
+
+      # Both, before either is pushed, on image-scan.yml's policy. test-runner is built FROM
+      # ingestion, so a finding in the base is reported twice -- which is correct and cheap, and
+      # skipping the derived image would leave the conformance suites' own layer unscanned.
+      - name: Scan Both
+        run: |
+          set -uo pipefail   # NOT -e: a finding in one must not hide the other's result.
+          FAILED=0
+          for img in ingestion test-runner; do
+            echo "::group::$img"
+            trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+              --no-progress --scanners vuln "$IMAGE_NAMESPACE/$img:$V" || FAILED=1
+            echo "::endgroup::"
+          done
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::A fixable HIGH/CRITICAL was found. Nothing has been pushed."
+            exit 1
+          fi
 
       # Pushed only after BOTH have built. A pushed ingestion beside a test-runner that failed to
       # build would be a half-published release whose missing half is the thing that reports on it.

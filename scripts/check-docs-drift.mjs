@@ -510,6 +510,73 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 8b. image-scan.yml excludes this repository's own images because release.yml scans them, and this
+// is what makes that sentence true. It was false for as long as it was written: the monthly job
+// pointed at a release workflow with no scanner in it, so ten images reached GHCR with no
+// vulnerability gate anywhere while a reader auditing the supply chain followed the pointer and
+// reasonably stopped (issue #304).
+//
+// Checked textually rather than through a YAML parser: this runs in CI before any `npm install`.
+// Both halves matter -- the scan must exist in each build job, and it must run BEFORE the push, or
+// it reports on an artefact the world can already pull.
+// -------------------------------------------------------------------------------------------------
+{
+  const scan = read('.github/workflows/image-scan.yml');
+  const release = read('.github/workflows/release.yml');
+
+  // The exclusion is what creates the obligation. If the monthly job ever scans the published
+  // images itself, this check should be revisited rather than satisfied.
+  const excludes = /grep\s+-v\s+'\^ghcr\\\.io\/harri-llewelyn\//.test(scan);
+  if (!excludes) {
+    fail(
+      'image-scan.yml no longer excludes this repository\'s own images from the monthly scan. ' +
+      'Check 8b exists to hold release.yml to that exclusion; decide which job owns them and ' +
+      'update both this check and the comments in image-scan.yml.'
+    );
+  } else {
+    // The policy the monthly job applies, which the release scan must match: a stricter release
+    // gate would fail on findings the monthly job teaches everyone to ignore, and a looser one
+    // would let a release publish what the monthly job then reports.
+    const POLICY = ['--severity HIGH,CRITICAL', '--ignore-unfixed', '--exit-code 1'];
+    const jobs = ['build-images', 'build-ingestion-chain'];
+    const problems8b = [];
+
+    for (const job of jobs) {
+      const start = release.indexOf(`\n  ${job}:`);
+      if (start < 0) { problems8b.push(`release.yml has no \`${job}\` job`); continue; }
+      const rest = release.slice(start + 1);
+      const nextJob = rest.search(/\n {2}[a-z][a-z0-9-]*:\n/);
+      const body = nextJob > 0 ? rest.slice(0, nextJob) : rest;
+
+      const scanAt = body.indexOf('trivy image');
+      if (scanAt < 0) {
+        problems8b.push(
+          `${job} pushes images and never scans them, while image-scan.yml says it does`
+        );
+        continue;
+      }
+      for (const flag of POLICY) {
+        if (!body.includes(flag)) {
+          problems8b.push(`${job}'s scan omits \`${flag}\`, which image-scan.yml applies`);
+        }
+      }
+      // `push: true` is the action's form, `docker push` the plain one; this workflow uses both.
+      const pushes = [body.indexOf('push: true'), body.indexOf('docker push')].filter((i) => i >= 0);
+      if (pushes.length === 0) {
+        problems8b.push(`${job} has a scan and no push; this check has drifted from the workflow`);
+      } else if (Math.min(...pushes) < scanAt) {
+        problems8b.push(
+          `${job} pushes before it scans, so the gate reports on an image that is already pullable`
+        );
+      }
+    }
+
+    if (problems8b.length) problems8b.forEach(fail);
+    else pass(`release.yml scans every image it publishes, before pushing it (${jobs.length} jobs)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 9. Migration filenames carry unique numeric prefixes. db-init applies `/migrations/*.sql` in glob
 // order with no ledger, so the filename is the execution order; two files sharing a prefix run in
 // an order decided by whatever follows the number.
