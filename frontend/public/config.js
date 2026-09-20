@@ -41,4 +41,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // deployment only sets these if it renamed a bucket.
   VITE_MODEL_3D_BUCKET: '',
   VITE_CAPTURE_BUCKET: '',
+  // The chart's appVersion. Blank on a plain image build, which means the account menu says
+  // nothing about drift -- there is no release to be out of step with.
+  VITE_RELEASE_VERSION: '',
 };

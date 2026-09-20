@@ -39,10 +39,15 @@ import {
   IconUser,
   IconBug,
   IconTag,
+  IconRefreshCw,
+  IconAlertCircle,
   IconLogOut
 } from './components/common/Icons'
 
 import { APP_VERSION, VERSION_IS_KNOWN, versionTitle } from './version'
+import {
+  RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle, releaseVersion,
+} from './utils/releaseVersion'
 
 import { Toast } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
@@ -269,6 +274,13 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
 
   const nextTheme = theme === 'dark' ? 'Light' : 'Dark'
 
+  /* Read from the injected global, which `config.js` set at page load. Comparing it with the baked
+     bundle version is how a page cached from before an upgrade, or a pinned frontend.image.tag,
+     becomes visible -- utils/releaseVersion.js has both cases. */
+  const release = releaseVersion()
+  const drift = releaseDrift(APP_VERSION, release)
+  const driftLabel = releaseDriftLabel(drift, release)
+
   return (
     <div className="user-menu" ref={wrapRef}>
       {/* No visible text, so the accessible name comes from `title`, which leads with the address
@@ -299,6 +311,16 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
                   a bug report -- which is the same reason the Report Bug button is two rows down. */}
               <span className="mono">{APP_VERSION}</span>
             </div>
+            {/* Only when the bundle and the release disagree. `unknown` and `in-step` both render
+                nothing: a build that cannot name itself is not evidence of drift. */}
+            {driftLabel && (
+              <div className="user-popover-drift" title={releaseDriftTitle(drift, release)}>
+                {drift === RELEASE_STATES.BEHIND
+                  ? <IconRefreshCw size={11} aria-hidden="true" />
+                  : <IconAlertCircle size={11} aria-hidden="true" />}
+                <span>{driftLabel}</span>
+              </div>
+            )}
           </div>
 
           {/* The label states the current theme; the icon shows the destination. */}
