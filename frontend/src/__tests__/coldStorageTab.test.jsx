@@ -13,7 +13,9 @@ const row = (overrides = {}) => ({
   range_start: '2026-04-02T00:00:00Z',
   range_end: '2026-04-09T00:00:00Z',
   row_count: 1000,
-  object_key: 'year=2026/month=04/_hyper_1_38_chunk.parquet',
+  object_key:
+    'site=broughton-7f3a9c21/dataset=telemetry/v=1/year=2026/month=04/'
+    + '20260402T000000Z-20260409T000000Z.parquet',
   object_bytes: 4938,
   state: 'archived',
   on_cold_storage: true,
@@ -51,7 +53,10 @@ describe('the cold storage catalogue', () => {
   it('names the object key so it can be found on storage', async () => {
     await show([row()])
     await waitFor(() => expect(
-      screen.getByText('year=2026/month=04/_hyper_1_38_chunk.parquet')
+      screen.getByText(
+        'site=broughton-7f3a9c21/dataset=telemetry/v=1/year=2026/month=04/'
+        + '20260402T000000Z-20260409T000000Z.parquet'
+      )
     ).toBeInTheDocument())
   })
 
@@ -60,7 +65,9 @@ describe('the cold storage catalogue', () => {
     // tooltip: for every other bucket an object is a copy; here it is the original.
     await show([row()])
     await waitFor(() => expect(screen.getByText(/only copy/i)).toBeInTheDocument())
-    expect(screen.getByText(/dev:reset/)).toBeInTheDocument()
+    // And that it is not in this cluster: the footer used to point at the storage volume and at
+    // `dev:reset`, which stopped being where these objects live when the archive went remote.
+    expect(screen.getByText(/outside the cluster/i)).toBeInTheDocument()
   })
 
   it('does not claim the objects are the only copy when nothing has been dropped', async () => {

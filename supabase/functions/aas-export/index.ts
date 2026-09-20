@@ -20,6 +20,7 @@ import {
   BUNDLE_PARTS,
   DEFAULT_MAX_TELEMETRY_ROWS,
   DEFAULT_MAX_THREAD_ROWS,
+  EXPORT_BUCKET,
   EXPORT_CONTENT_TYPE,
   HOURLY_COLUMNS,
   RAW_COLUMNS,
@@ -28,7 +29,6 @@ import {
   csvOf,
   exportObjectKey,
   loadColdObjects,
-  loadExportBucket,
   loadHorizons,
   loadTelemetry,
   loadThread,
@@ -331,9 +331,10 @@ export default async function handler(req: Request): Promise<Response> {
       // The stored copy is what a tombstone can point at once the row is gone; the download is
       // what the caller asked for. A failure to store is reported in the header and the download
       // still happens -- the caller holds the only copy then, and the stats say so.
-      const bucket = await loadExportBucket(supabaseAdmin);
       const objectKey = exportObjectKey(sparkplugId || String(device.id), takenAt);
-      const stored: Record<string, unknown> = { bucket, object_key: objectKey, stored: false };
+      const stored: Record<string, unknown> = {
+        bucket: EXPORT_BUCKET, object_key: objectKey, stored: false,
+      };
       const bundleStats = {
         raw_rows: raw.rows.length,
         hourly_rows: hourly.rows.length,
@@ -345,7 +346,7 @@ export default async function handler(req: Request): Promise<Response> {
       try {
         const digest = await sha256Hex(bytes);
         const { error: uploadError } = await supabaseAdmin.storage
-          .from(bucket)
+          .from(EXPORT_BUCKET)
           .upload(objectKey, bytes, { contentType: EXPORT_CONTENT_TYPE, upsert: false });
         if (uploadError) throw new Error(uploadError.message);
 
@@ -357,7 +358,7 @@ export default async function handler(req: Request): Promise<Response> {
             name: device.name,
             sparkplug_id: sparkplugId || null,
             format: "aasx",
-            object_bucket: bucket,
+            object_bucket: EXPORT_BUCKET,
             object_key: objectKey,
             object_bytes: bytes.byteLength,
             sha256: digest,

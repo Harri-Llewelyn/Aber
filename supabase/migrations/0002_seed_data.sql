@@ -7338,16 +7338,9 @@ SELECT public.seed_setting(
     'TIMESCALE_RETAIN_FOR in .env (90 days)'
 );
 
-SELECT public.seed_setting(
-    'archive.bucket',
-    to_jsonb('telemetry-archive'::text),
-    'string',
-    'Cold Storage',
-    'Object storage bucket',
-    'The private bucket cold telemetry is written to. Created by scripts/storage-init.mjs; its '
-    'RLS policies admit the ingestion principal and no browser role.',
-    'telemetry-archive'
-);
+-- `archive.bucket` was seeded here and is not any more. Cold telemetry goes to a configured S3
+-- endpoint (0132), whose endpoint, bucket and credential are install configuration rather than a
+-- setting; 0132 deletes the row from databases that still hold it.
 
 -- -------------------------------------------------------------------------------------------
 -- Value domains, and the bounds on the two settings that have them

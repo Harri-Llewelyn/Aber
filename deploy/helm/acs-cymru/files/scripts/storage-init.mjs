@@ -40,9 +40,9 @@ const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY || '';
  * It used to read `STORAGE_FILE_SIZE_LIMIT`, which is storage-api's GLOBAL CEILING for every
  * bucket -- so one variable meant two different things and raising the ceiling silently raised
  * this bucket with it. That surfaced the moment the ceiling had to move: `broker-captures` asks
- * for 100 MiB and `telemetry-archive` for 1 GiB, and storage-api refuses to create a bucket whose
- * limit exceeds the ceiling, so the ceiling had to rise -- which would have taken 3D models from
- * 50 MiB to 1 GiB as a side effect nobody asked for.
+ * for 100 MiB, and storage-api refuses to create a bucket whose limit exceeds the ceiling, so the
+ * ceiling had to rise -- which would have taken 3D models up with it as a side effect nobody
+ * asked for.
  *
  * Two jobs, two variables. The ceiling is the largest bucket; this is what a model may be.
  */
@@ -117,35 +117,6 @@ const CAPTURE_FILE_SIZE_LIMIT = Number.parseInt(
 );
 
 /**
- * Cold telemetry objects.
- *
- * 1 GiB, an order of magnitude above a capture, because the unit is a whole TimescaleDB chunk
- * rather than a window somebody chose -- by default a week of every metric from every device on
- * the plant. Parquet's columnar compression does most of the work here, but the ceiling has to
- * admit a busy facility's week and not a demonstrator's.
- *
- * IT BINDS BEFORE ANYTHING IS DROPPED, which is what makes it safe to set at all: the exporter
- * uploads and VERIFIES before the raw chunk is removed, so a chunk too large for this bucket fails
- * the upload and simply stays in the hypertable. A cap that was too low would stall archival, not
- * lose data.
- */
-const TELEMETRY_ARCHIVE_SIZE_LIMIT = Number.parseInt(
-  process.env.TELEMETRY_ARCHIVE_SIZE_LIMIT || '1073741824',
-  10,
-);
-
-/**
- * Parquet has no registered IANA type. `application/vnd.apache.parquet` is what Arrow and DuckDB
- * emit and is the closest thing to a convention; the octet-stream fallback is what an HTTP client
- * that declines to guess will send, and refusing that would fail an upload over a header rather
- * than over its contents.
- */
-const TELEMETRY_ARCHIVE_MIME_TYPES = [
-  'application/vnd.apache.parquet',
-  'application/octet-stream',
-];
-
-/**
  * A floor plan is SVG and nothing else. Exact, with no octet-stream fallback: every browser
  * reports `image/svg+xml` for a .svg picked from disk, and the dashboard sets the type itself.
  * SVG is active content, so the bucket is private and the dashboard renders a plan through an
@@ -155,6 +126,28 @@ const FLOOR_PLAN_MIME_TYPES = ['image/svg+xml'];
 
 /** 5 MiB for a floor plan. A drawing larger than that is a CAD export, not a plan. */
 const FLOOR_PLAN_SIZE_LIMIT = 5242880;
+
+/**
+ * An AAS export bundle (`.aasx`), which is a ZIP of XML and CSV parts.
+ *
+ * 256 MiB against a bundle capped at 200,000 telemetry rows and 20,000 thread rows
+ * (supabase/functions/_shared/aas/bundle.ts): comfortably above the largest bundle those caps
+ * admit, and low enough that it is not a route to filling the volume. The row caps are the real
+ * limit; this is the one that stops a bug from becoming a disk.
+ */
+const ASSET_EXPORT_SIZE_LIMIT = 268435456;
+
+/**
+ * `.aasx` is a ZIP by construction and browsers disagree about what to call one, so both the
+ * generic and the ZIP types are admitted. The function sets the type itself
+ * (EXPORT_CONTENT_TYPE) and uploads as service_role; this list is what keeps a hand-uploaded
+ * file from arriving as something a viewer would execute.
+ */
+const ASSET_EXPORT_MIME_TYPES = [
+  'application/octet-stream',
+  'application/zip',
+  'application/asset-administration-shell-package+xml',
+];
 
 const BUCKETS = [
   {
@@ -187,21 +180,22 @@ const BUCKETS = [
     why: 'broker captures for playback, under <sparkplug_id>/ of the gateway they play back as',
   },
   {
-    id: process.env.TELEMETRY_ARCHIVE_BUCKET || 'telemetry-archive',
-    // PRIVATE, AND THE ONE BUCKET WHERE PUBLIC WOULD BE UNRECOVERABLE RATHER THAN MERELY WRONG.
-    // The others hold copies: a capture describes traffic the plant produced and can produce
-    // again. An object here is the ONLY remaining copy of a month of plant telemetry -- the raw
-    // chunk was dropped precisely because this was verified (timescaledb/cold_archive.sql). So a
-    // guessable unauthenticated URL would expose the plant's entire operating history, and a
-    // deletion here is not a lost backup, it is lost history.
+    // AAS export bundles. Fixed, not an environment variable, for the reason floor-plans gives
+    // below: the name is also in storage-policies.sql and in the function that writes here.
+    //
+    // ITS OWN BUCKET SINCE THE COLD ARCHIVE LEFT THE CLUSTER. These used to sit under `assets/`
+    // in `telemetry-archive`, which was a convenience while both were local. They are not the
+    // same kind of object: a bundle is a COPY somebody asked for, derived from rows that are
+    // still in the database, and it belongs on local storage where the browser can sign a URL
+    // for it. A cold telemetry object is the only remaining copy of history and now goes to a
+    // remote endpoint the browser never touches. One retention decision cannot serve both.
+    id: 'asset-exports',
+    // Private. The bundle carries a device's whole history -- every reading, every thread entry
+    // -- so a guessable unauthenticated URL would hand over the plant's record of one machine.
     public: false,
-    // FAR LARGER THAN A CAPTURE, because the unit is different in kind. A capture is a window
-    // somebody chose; this is a whole TimescaleDB chunk -- a week of every metric from every
-    // device by default. Parquet's columnar compression does most of the work, but the cap has to
-    // admit a busy plant's week rather than a demonstrator's.
-    file_size_limit: TELEMETRY_ARCHIVE_SIZE_LIMIT,
-    allowed_mime_types: TELEMETRY_ARCHIVE_MIME_TYPES,
-    why: 'cold telemetry chunks as Parquet, under year=YYYY/month=MM/, referenced by telemetry_archive_manifest',
+    file_size_limit: ASSET_EXPORT_SIZE_LIMIT,
+    allowed_mime_types: ASSET_EXPORT_MIME_TYPES,
+    why: 'AAS export bundles, under assets/<device>/, referenced by asset_exports.object_key',
   },
   {
     // Fixed, not an environment variable: supabase/storage-policies.sql and frontend/src/api.js

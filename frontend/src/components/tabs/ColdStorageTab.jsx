@@ -193,15 +193,16 @@ export function ColdStorageTab({ showToast, userRole }) {
           )}
 
           {/* Under the table rather than in a tooltip: for every other bucket an object is a copy.
-              Here it is the original, and deleting the storage volume takes it. */}
+              Here it is the original, and it is not in this cluster to point at. */}
           {summary.archived > 0 && (
             <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
               <strong>These objects are the only copy.</strong> The rows behind
               {' '}{summary.archived} chunk{summary.archived === 1 ? '' : 's'} were dropped from the
-              hypertable because their export verified, so deleting an object here loses that
-              history — there is nothing to restore it from. The objects sit on the storage
-              volume, which <code>helm uninstall</code> keeps and only deleting the namespace or{' '}
-              <code>npm run dev:reset</code> destroys.
+              hypertable because their export verified, so losing an object loses that history —
+              there is nothing to restore it from. They are held at the S3 endpoint this stack was
+              installed against, outside the cluster and outside its backups: nothing here can
+              delete them, and nothing here can prove their retention either. That is the
+              provider's to configure and yours to check.
             </div>
           )}
         </div>

@@ -1918,6 +1918,85 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// The buckets agree in all three places that decide whether one works
+//
+// A bucket created with no policies is invisible to every browser role; a policy naming a bucket
+// nothing creates is dead text; and the README's table is where an operator learns which is which.
+// The three drift apart one at a time and none of them reports it.
+//
+// THE CASE THIS WAS WRITTEN FOR. `telemetry-archive` was created for cold telemetry and quietly
+// acquired a second writer -- the AAS export function stored bundles under `assets/` in it -- so
+// retiring the bucket with the feature that made it would have taken the export path with it,
+// found at runtime by whoever next pressed Export. Nothing in the tree connected the two.
+{
+  const init = read('scripts/storage-init.mjs');
+  const policies = read('supabase/storage-policies.sql');
+  const readme = read('supabase/README.md');
+
+  const bucketsBlock = init.slice(init.indexOf('const BUCKETS = ['));
+  const created = [...bucketsBlock.matchAll(
+    /^\s*id:\s*(?:process\.env\.\w+\s*\|\|\s*)?'([^']+)'/gm
+  )].map((m) => m[1]);
+
+  const policed = new Set(
+    [...policies.matchAll(/bucket_id\s*=\s*'([^']+)'/g)].map((m) => m[1])
+  );
+
+  // The header row of the table under the section heading: `| | \`a\` | \`b\` | ... |`
+  const section = readme.slice(readme.indexOf('## Storage buckets and why they differ'));
+  const headerRow = section.split('\n').find((l) => l.startsWith('| |'));
+  const documented = new Set(
+    [...(headerRow || '').matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1])
+  );
+
+  const offences = [];
+  for (const id of created) {
+    if (!policed.has(id)) {
+      offences.push(
+        `storage-init.mjs creates \`${id}\`, which no policy in storage-policies.sql names. ` +
+          'RLS is on with no policy for it, so every browser role is denied and service_role is ' +
+          'not -- the bucket works from a function and is invisible in the dashboard.'
+      );
+    }
+    if (!documented.has(id)) {
+      offences.push(
+        `storage-init.mjs creates \`${id}\`, which the README's bucket table does not have a ` +
+          'column for.'
+      );
+    }
+  }
+  for (const id of policed) {
+    if (!created.includes(id)) {
+      offences.push(
+        `storage-policies.sql has a policy on \`${id}\`, which storage-init.mjs does not create. ` +
+          'Either the bucket was retired and its policies were left behind, or the policy names a ' +
+          'bucket that has never existed; both read as working.'
+      );
+    }
+  }
+  for (const id of documented) {
+    if (!created.includes(id)) {
+      offences.push(
+        `the README's bucket table has a column for \`${id}\`, which storage-init.mjs does not ` +
+          'create.'
+      );
+    }
+  }
+
+  if (offences.length) {
+    fail(
+      'the storage buckets disagree across the three places that define one:\n' +
+        offences.map((o) => `        ${o}`).join('\n')
+    );
+  } else {
+    pass(
+      `all ${created.length} storage bucket(s) are created, policed and documented: ` +
+        created.join(', ')
+    );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');

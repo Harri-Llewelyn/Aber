@@ -2004,13 +2004,151 @@ true"* — and the exporter runs as that role. `cold_tier_drop_verified()` is `S
 the daemon may *ask* for a drop the manifest has already cleared while holding no privilege to
 remove a row of its own choosing.
 
-**Its settings arrive with their reader**, which is `0031`'s rule and the reason there are three
-keys rather than six: `archive.enabled` (off by default), `archive.tier_after_days` and
-`archive.bucket`, all read by `ingestion/cold_archive.py`. There is no S3 endpoint key because this
-implementation writes to the platform's own object storage through the client
-`capture_worker.py` already uses; those keys belong to the migration that teaches it to use an
-external endpoint. **No credential key will ever be added** — every authenticated user can read
-`system_settings`, so secrets go to Vault through Studio.
+**Its settings arrive with their reader**, which is `0031`'s rule: `archive.enabled` (off by
+default), `archive.tier_after_days` and `archive.site_key`, all read by
+`ingestion/cold_archive.py`. **No credential key will ever be added** — every authenticated user
+can read `system_settings`, so the S3 credential is a release Secret and the endpoint and bucket
+are chart values, not settings. `archive.bucket` was a setting and is retired with the local
+bucket it named (`0132`).
+
+#### The destination is somewhere else, and only somewhere else (`0132`)
+
+An archived object is **not a backup**: the raw chunk was dropped *because* this object was
+verified, so it is the only remaining copy of that span of history. Until `0132` it landed in the
+`telemetry-archive` bucket on the storage PVC — one local volume to another local volume, usually
+on the same node as the database the rows were rescued from, with the original deleted. A site
+loss took both.
+
+There is now no filesystem path, no local bucket and no fallback. "Remote" is not a property the
+code can check, and an optional remote destination is one nobody tests: it gets chosen at install
+by whoever wants fewest questions, and its worthlessness is discovered on the day it matters. One
+destination type means one code path, exercised at every site.
+
+```yaml
+coldArchive:
+  s3:
+    siteKey: "broughton-7f3a9c21"          # frozen at the first boot that sets it
+    endpoint: "https://s3.eu-west-2.amazonaws.com"
+    region: "eu-west-2"
+    bucket: "plant-history"
+    accessKeyId: "AKIA..."
+    pathStyle: false                       # true for MinIO and most self-hosted gateways
+secrets:
+  archiveS3SecretAccessKey: "..."
+```
+
+"S3" names a protocol, not a vendor — AWS, Cloudflare R2, Backblaze B2, Wasabi and a MinIO in
+another building all serve it, and the code never knows which. Leave any of it unset and nothing is
+exported: the exporter names every missing variable and stops.
+
+**One requirement of the endpoint beyond the core API:** it must accept `x-amz-checksum-sha256` on
+`PutObject`, which is how the store is made to validate the payload rather than merely receive it.
+AWS, R2, B2 and MinIO releases from 2022 onward all do. An endpoint that rejects the header fails
+every upload with the chunk still in the hypertable — loudly, and losing nothing.
+
+**Under `networkPolicy.enabled` this needs an egress rule.** The chart cannot express a peer
+outside the cluster, so add the endpoint to `networkPolicy.extraEgress`. Without it every export
+fails at connect time, on a schedule, at 03:15.
+
+#### The object key, and why each segment is there
+
+```
+site=broughton-7f3a9c21/dataset=telemetry/v=1/year=2026/month=03/20260302T000000Z-20260309T000000Z.parquet
+```
+
+`key=value` directory names are read as columns by DuckDB, Spark and Arrow, so a reader skips whole
+prefixes without opening a file.
+
+- **`site=` is leftmost, and that is load-bearing.** An IAM policy scopes on a left-anchored
+  prefix, so anything to its left makes a per-site credential impossible to write. It is also what
+  makes one bucket safe for two sites: chunk numbering is per database, both fresh installs begin
+  at `_hyper_1_1_chunk`, and the upload overwrites without complaint.
+- **`dataset=`** leaves room for a rollup or a second hypertable without renaming what is written.
+- **`v=`** is the escape hatch: an incompatible change writes `v=2` and every existing reader keeps
+  working against `v=1`. Nothing is ever rewritten.
+- **The leaf is the time range, not the chunk.** `_hyper_1_42_chunk` says nothing to a human and
+  does not survive a restore into a fresh database. A range sorts lexically, describes itself, and
+  makes a retry produce the same key — which is what keeps overwrite-on-retry correct rather than
+  dangerous.
+
+**The month-boundary rule.** `year=`/`month=` come from `range_start`, and chunks are seven days,
+so around a dozen times a year a chunk straddles a month: one beginning 29 March holds April
+readings under `month=03`. The manifest is the authoritative index; the partitions are a
+convenience for a reader that does not have it, and such a reader must widen by one partition on
+each side.
+
+#### The site key is frozen, and changing it is a procedure
+
+`archive.site_key` is seeded read-only by `0132` from `coldArchive.s3.siteKey` on the first boot
+that supplies one, and a later boot whose chart value differs **raises** rather than re-pointing
+the archive — objects already written live under the old prefix, renaming does not move them, and a
+new key would orphan every one of them while the manifest still pointed at the old.
+
+To change it deliberately, in this order, with the CronJob suspended:
+
+1. Copy every object under the old prefix to the new one at the provider, and widen the bucket
+   policy to admit both prefixes.
+2. On **the historian**, repoint the catalogue —
+   `UPDATE public.telemetry_archive_manifest SET object_key = replace(object_key, 'site=old/', 'site=new/')`.
+   Not through the `timescale.` foreign table: `fdw_reader` is read-only, by design.
+3. On the platform database, as `postgres` in Studio's SQL editor — not from the Settings page,
+   which has no control for a read-only row and no rights to the `read_only` column:
+
+   ```sql
+   UPDATE public.system_settings SET read_only = false WHERE key = 'archive.site_key';
+   UPDATE public.system_settings SET value = to_jsonb('new'::text) WHERE key = 'archive.site_key';
+   UPDATE public.system_settings SET read_only = true WHERE key = 'archive.site_key';
+   ```
+
+4. Set `coldArchive.s3.siteKey` to the new value and upgrade, or the next boot raises on the
+   disagreement — which is the check working.
+5. `python -m cold_archive audit` is what says it worked, and only then narrow the bucket policy
+   and remove the old prefix.
+
+#### The credential is a foreign one, and it cannot delete
+
+We cannot mint, rotate or revoke a key at another provider, so it sits with the SMTP relay password
+rather than with the principals this stack issues. Scope it to `PutObject` and `GetObject` on this
+site's prefix, with **no `DeleteObject`**:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["s3:PutObject", "s3:GetObject"],
+    "Resource": "arn:aws:s3:::plant-history/site=broughton-7f3a9c21/*"
+  }]
+}
+```
+
+That turns "the exporter writes and never deletes" from a comment into something the gateway is
+unable to break. With bucket versioning and Object Lock on top, a compromised gateway cannot
+destroy history at all — which is more than the PVC could ever offer, where root on the node was
+the end of the story.
+
+**Verification got cheaper and stricter at the same time.** The upload sends `ChecksumSHA256`, so
+the store validates the payload server-side and rejects a corrupt write before it becomes an
+object; `verified_at` is then set from a `HEAD` plus one ranged read of the Parquet footer —
+measured at **64 KiB to verify a 15.2 MiB object**, against the whole object coming back on the old
+path, and checking one thing more than that read-back could.
+`telemetry_archive_manifest.object_etag` has existed since the table did and is finally populated.
+
+#### What happened to the old bucket
+
+Nothing deletes a bucket, and this does not either. `telemetry-archive` is dropped from
+`scripts/storage-init.mjs` so no new install creates it, and `supabase/storage-policies.sql` drops
+its four policies explicitly — a policy the file no longer mentions is one nothing maintains, and
+it would otherwise survive every boot guarding a bucket nothing writes to. On an existing install
+the bucket is left with whatever it holds, for an Administrator to check against the remote
+endpoint and then empty from Studio.
+
+**AAS export bundles did not follow it.** They were stored under `assets/` in the same bucket while
+both were local, and they now have their own: `asset-exports`, with its own policies. They are not
+the same kind of object — a bundle is a copy somebody asked for, derived from rows still in the
+database, and it belongs on local storage where the browser can sign a URL for it. An existing
+install's bundles stay where they were written; `asset_exports.object_bucket` is per row, which is
+what makes that safe to say.
 
 **Enabling it means standing retention down.** Both mechanisms drop chunks, and the timer wins the
 race for anything the archiver has not reached: set `TIMESCALE_RETAIN_FOR=never` and let
@@ -4215,16 +4353,23 @@ not a capability.
 
 Four buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
 first two are opposites in the one setting that matters, and the reasoning belongs together rather
-than split across comment blocks in the policy file. `telemetry-archive` is described with cold
-storage; `floor-plans` is the odd one out below.
+than split across comment blocks in the policy file. `floor-plans` is the odd one out below.
 
-| | `asset-3d-models` | `broker-captures` | `floor-plans` |
-| :--- | :--- | :--- | :--- |
-| Public read | **yes** | **no** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix |
-| Read | anyone, including `anon` | those two plus **Auditor** | every signed-in role |
-| Operator | read | nothing | read |
-| Reached by | a plain public URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
+There is no bucket for cold telemetry: it leaves the cluster entirely, for a configured S3
+endpoint. See "Cold telemetry archival" above.
+
+| | `asset-3d-models` | `broker-captures` | `floor-plans` | `asset-exports` |
+| :--- | :--- | :--- | :--- | :--- |
+| Public read | **yes** | **no** | **no** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` |
+| Read | anyone, including `anon` | those two plus **Auditor** | every signed-in role | Administrator, Shopfloor_Manager, Auditor |
+| Operator | read | nothing | read | nothing |
+| Reached by | a plain public URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check |
+
+`asset-exports` has no write policy at all, and that is the point: an object in it is evidence of
+an export that an `asset_exports` row records, so a hand-uploaded file would be a bundle with no
+provenance sitting beside ones that have it. Deletes are Administrator-only because the row's
+tombstone points at the object — removing one is a decision about the record, not about disk.
 
 `floor-plans` is readable by every signed-in role because the Site Map is the page an Operator
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
