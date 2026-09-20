@@ -148,6 +148,14 @@ spec:
             */}}
             - name: SPARKPLUG_GROUP
               value: {{ include "acs-cymru.sparkplugGroup" . | quote }}
+            {{/*
+              The cold archive's site key. 0132 adopts it on the boot that first supplies one and
+              RAISES afterwards if it differs: it is the leftmost segment of every object key, so
+              a changed value orphans everything already written. Empty is the normal state --
+              remote archiving is then unconfigured and nothing is exported.
+            */}}
+            - name: ARCHIVE_SITE_KEY
+              value: {{ .Values.coldArchive.s3.siteKey | default "" | quote }}
             {{- /*
               Creates the Supabase-side `grafana_reader` in archived migration 0027 -- the role Grafana
               connects as to read public.storage_footprint. THE SAME CREDENTIAL as the
@@ -264,6 +272,7 @@ spec:
                     -v gateway_revoke_secret="$GATEWAY_REVOKE_SECRET" \
                     -v forge_sweep_secret="$FORGE_SWEEP_SECRET" \
                     -v sparkplug_group="$SPARKPLUG_GROUP" \
+                    -v archive_site_key="$ARCHIVE_SITE_KEY" \
                     -f "$f" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi
                   cat /tmp/migration.log
                   if [ "$attempt" -ge 3 ] || ! grep -qE "deadlock detected|due to lock timeout" /tmp/migration.log; then

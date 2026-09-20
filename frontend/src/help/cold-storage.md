@@ -14,6 +14,8 @@ Telemetry that has aged out of the live historian and been written to object sto
 
 **These objects are the only copy.** Once a range has been tiered, the database no longer holds those readings -- so an object removed from storage by some other route is plant history that is gone. That is the sentence on this page worth remembering.
 
+**They are not in this cluster.** Tiered objects are written to the S3 endpoint the stack was installed against, deliberately somewhere a site loss does not reach. Their durability, versioning and retention are the provider's to configure -- this stack cannot check them and its backups do not include them.
+
 ## What this page is not
 
 **It is not Archived Entities**, which now sits directly below it in the rail and holds decommissioned **entities** -- cells, gateways and devices -- with a Restore button and a purge timer. This page holds **readings**, and it has neither.

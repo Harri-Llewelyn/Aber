@@ -8,8 +8,9 @@ Cold telemetry archival: export a chunk, verify the object, record it, and only 
 (ingestion/cold_archive.py). Turns the historian's retention policy from delete into move.
 
 The ingestion image under a different command, as the playback worker is: `cold_archive` reads
-the chunk with the daemon's own historian role and writes the object through the gateway as the
-daemon's own principal, so the two cannot disagree about either.
+the chunk with the daemon's own historian role, so the two cannot disagree about which rows they
+are looking at. The object goes to the S3 endpoint under coldArchive.s3 -- somewhere else, and
+only somewhere else, because `--drop` deletes the only other copy.
 
 `--drop` is on by default because the retention policy is: without it the chunks are exported
 and kept, and the historian never shrinks. Every drop is recorded in telemetry_archive_manifest,
@@ -71,6 +72,32 @@ spec:
                   value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
                 {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 16 }}
                 {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 16 }}
+                {{/*
+                  The destination. Rendered whether or not it is configured, because the exporter's
+                  refusal names the variables that are empty -- a missing variable and an empty one
+                  would otherwise read differently in `kubectl describe` for no reason.
+
+                  The site key is NOT here: it is read from the database, where 0132 froze it, so
+                  that the value addressing every existing object cannot be changed by a redeploy.
+                */}}
+                - name: ARCHIVE_S3_ENDPOINT
+                  value: {{ .Values.coldArchive.s3.endpoint | default "" | quote }}
+                - name: ARCHIVE_S3_REGION
+                  value: {{ .Values.coldArchive.s3.region | default "" | quote }}
+                - name: ARCHIVE_S3_BUCKET
+                  value: {{ .Values.coldArchive.s3.bucket | default "" | quote }}
+                - name: ARCHIVE_S3_ACCESS_KEY_ID
+                  value: {{ .Values.coldArchive.s3.accessKeyId | default "" | quote }}
+                - name: ARCHIVE_S3_PATH_STYLE
+                  value: {{ .Values.coldArchive.s3.pathStyle | default false | quote }}
+                # Optional, as the SMTP relay's password is: an externally-managed Secret that
+                # predates this key still starts the Job, which then reports it as missing.
+                - name: ARCHIVE_S3_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $secretName }}
+                      key: ARCHIVE_S3_SECRET_ACCESS_KEY
+                      optional: true
                 - name: PYTHONUNBUFFERED
                   value: "1"
               resources:

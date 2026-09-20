@@ -356,17 +356,18 @@ export const SUITES = {
     // THE ONE SUITE IN THE TREE THAT IS NOT A unittest SCRIPT, and it has to be spawned
     // differently or it asserts NOTHING. It is written in pytest's bare-function style with no
     // `if __name__ == "__main__"` block, so `python ingestion/test_cold_archive.py` imports the
-    // module, defines eight functions, calls none of them and exits 0 -- a green step over zero
-    // assertions, which is the exact failure this manifest exists to prevent, hiding inside the
-    // fix for it. Under pytest the same file runs seven checks (the eighth needs pyarrow and
-    // skips without it).
+    // module, defines every test function, calls none of them and exits 0 -- a green step over
+    // zero assertions, which is the exact failure this manifest exists to prevent, hiding inside
+    // the fix for it. Under pytest the same file runs them; the Parquet round trip needs pyarrow
+    // and skips without it.
     runner: 'pytest',
     why:
-      'Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Deliberately ' +
-      'narrow: the safety properties are asserted in SQL where they live. What is left for a unit ' +
-      'test is the part that is a DECISION rather than a mechanism -- the `year=YYYY/month=MM/` ' +
-      'key is baked into every object the moment one is written, and changing it later means ' +
-      'rewriting the archive or teaching every reader two schemes.',
+      'Cold telemetry archival -- the object LAYOUT, the destination guard and the Parquet round ' +
+      'trip. Deliberately narrow: the safety properties are asserted in SQL where they live. What ' +
+      'is left for a unit test is the part that is a DECISION rather than a mechanism -- the ' +
+      '`site=<key>/dataset=telemetry/v=1/year=YYYY/month=MM/` key is baked into every object the ' +
+      'moment one is written, and changing it later means rewriting the archive or teaching every ' +
+      'reader two schemes.',
   },
   'i3x/test_i3x_service.py': {
     lanes: ['unit'],

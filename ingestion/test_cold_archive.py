@@ -23,30 +23,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 @pytest.fixture(scope="module")
-def object_key_for():
+def cold_archive():
     """
     Imported lazily and skipped rather than failed when the daemon's config is absent.
 
     `cold_archive` imports `ingestion`, which reads the environment at module scope. This suite is
-    about a pure function; a missing DB_PASSWORD should not turn that into a red test.
+    about pure functions; a missing DB_PASSWORD should not turn that into a red test.
     """
     try:
-        from cold_archive import object_key_for as fn
+        import cold_archive as module
     except Exception as err:  # noqa: BLE001
         pytest.skip(f"cold_archive is not importable here: {err}")
-    return fn
+    return module
+
+
+@pytest.fixture(scope="module")
+def object_key_for(cold_archive):
+    return cold_archive.object_key_for
+
+
+WEEK_START = datetime(2026, 4, 2, tzinfo=timezone.utc)
+WEEK_END = datetime(2026, 4, 9, tzinfo=timezone.utc)
 
 
 def test_key_is_hive_partitioned(object_key_for):
     """
-    `year=YYYY/month=MM/` is not decoration -- it is what makes query-in-place possible.
+    Every segment of the key, pinned whole, because the layout is baked into each object the moment
+    one is written and changing it later means rewriting the archive or teaching readers two
+    schemes.
 
-    DuckDB, Spark and Arrow all read those directory names as COLUMNS, so `WHERE year = 2026` skips
-    whole prefixes without opening a file. A flat layout would still store the data and would make
-    the read side scan everything.
+    `key=value` directory names are read as COLUMNS by DuckDB, Spark and Arrow, so `WHERE year =
+    2026` skips whole prefixes without opening a file.
     """
-    key = object_key_for("_hyper_1_38_chunk", datetime(2026, 4, 2, tzinfo=timezone.utc))
-    assert key == "year=2026/month=04/_hyper_1_38_chunk.parquet"
+    key = object_key_for("broughton-7f3a9c21", WEEK_START, WEEK_END)
+    assert key == (
+        "site=broughton-7f3a9c21/dataset=telemetry/v=1/"
+        "year=2026/month=04/20260402T000000Z-20260409T000000Z.parquet"
+    )
+
+
+def test_the_site_is_the_leftmost_segment(object_key_for):
+    """
+    An IAM policy scopes on a LEFT-ANCHORED prefix, so anything to the left of the site makes a
+    per-site credential impossible to write -- and a per-site credential is what stops one plant's
+    compromised gateway reaching another's history in a shared bucket.
+    """
+    key = object_key_for("broughton-7f3a9c21", WEEK_START, WEEK_END)
+    assert key.startswith("site=broughton-7f3a9c21/")
+
+
+def test_two_sites_do_not_collide(object_key_for):
+    """
+    THE FAILURE THIS EXISTS FOR, and it is silent and destructive.
+
+    Chunk numbering is per database, so two fresh installs both begin at `_hyper_1_1_chunk` and
+    their first exports covered the same week. Pointed at one bucket under the old chunk-named
+    layout, site B's upload overwrote site A's object -- while site A's manifest still read
+    `verified` and `--drop` had already removed its rows.
+    """
+    a = object_key_for("broughton-7f3a9c21", WEEK_START, WEEK_END)
+    b = object_key_for("llanelli-4b1e8d02", WEEK_START, WEEK_END)
+    assert a != b
 
 
 def test_month_is_zero_padded(object_key_for):
@@ -56,22 +93,93 @@ def test_month_is_zero_padded(object_key_for):
     An archive that wrote both would silently split one month across two partitions, and a query
     filtering on one would return half the data with no error anywhere.
     """
-    key = object_key_for("_hyper_1_2_chunk", datetime(2026, 1, 31, tzinfo=timezone.utc))
-    assert "month=01/" in key
-    assert "month=1/" not in key
+    key = object_key_for(
+        "broughton-7f3a9c21",
+        datetime(2026, 1, 31, tzinfo=timezone.utc),
+        datetime(2026, 2, 7, tzinfo=timezone.utc),
+    )
+    assert "/month=01/" in key
+    assert "/month=1/" not in key
 
 
-def test_key_is_keyed_on_the_chunk_not_the_time(object_key_for):
+def test_the_partition_follows_the_start_across_a_month_boundary(object_key_for):
     """
-    Two chunks inside one month must not collide.
+    A chunk beginning 29 March holds April readings under `month=03`, and that is deliberate.
 
-    The chunk name is the unit that is exported and dropped, so it is the unit the object is named
-    for. Naming objects by month alone would make the second export of a month overwrite the first
-    -- and because the exporter uploads with `upsert`, it would do so silently, leaving a manifest
-    with two rows pointing at one object holding one of them.
+    Chunks are seven days and months are not, so this happens about a dozen times a year. The
+    manifest is the authoritative index; the Hive partitions are a convenience for a reader that
+    does not have it, and such a reader must widen by one partition on each side. Pinned here so
+    the rule is not "fixed" later by someone who meets it as a bug.
     """
-    when = datetime(2026, 4, 2, tzinfo=timezone.utc)
-    assert object_key_for("_hyper_1_38_chunk", when) != object_key_for("_hyper_1_39_chunk", when)
+    key = object_key_for(
+        "broughton-7f3a9c21",
+        datetime(2026, 3, 29, tzinfo=timezone.utc),
+        datetime(2026, 4, 5, tzinfo=timezone.utc),
+    )
+    assert "/year=2026/month=03/" in key
+    assert "20260329T000000Z-20260405T000000Z" in key
+
+
+def test_a_retry_addresses_the_same_object(object_key_for):
+    """
+    The upload overwrites, and the key is what makes that correct rather than dangerous.
+
+    A previous attempt may have uploaded and failed verification; its manifest row exists, so the
+    candidate list will never offer the chunk again and refusing to overwrite would strand it. The
+    key is derived from the chunk's TIME RANGE, which does not change between attempts -- unlike a
+    chunk name, which does not survive a restore into a fresh database.
+    """
+    first = object_key_for("broughton-7f3a9c21", WEEK_START, WEEK_END)
+    second = object_key_for("broughton-7f3a9c21", WEEK_START, WEEK_END)
+    assert first == second
+
+
+def test_the_stamp_is_utc_whatever_zone_it_arrives_in(object_key_for):
+    """
+    `range_start` comes back from psycopg2 in whatever zone the session carries, and two objects
+    naming the same instant differently would break the lexical ordering the leaf name exists for.
+    """
+    from datetime import timedelta
+
+    bst = timezone(timedelta(hours=1))
+    key = object_key_for(
+        "broughton-7f3a9c21",
+        datetime(2026, 4, 2, 1, 0, tzinfo=bst),
+        datetime(2026, 4, 9, 1, 0, tzinfo=bst),
+    )
+    assert "20260402T000000Z-20260409T000000Z" in key
+
+
+def test_an_unconfigured_destination_names_every_gap(cold_archive):
+    """
+    All of them, not the first: an operator configuring this is setting five things at once, and a
+    refusal that reveals one missing variable per run costs five runs.
+    """
+    missing = cold_archive.unconfigured({}, "")
+    assert "ARCHIVE_S3_ENDPOINT" in missing
+    assert "ARCHIVE_S3_BUCKET" in missing
+    assert "ARCHIVE_S3_SECRET_ACCESS_KEY" in missing
+    assert any("site_key" in m for m in missing)
+
+
+def test_a_complete_destination_is_not_refused(cold_archive):
+    """The negative half: a guard that refuses everything would pass the test above and ship dead."""
+    complete = {
+        "endpoint": "https://s3.eu-west-2.amazonaws.com",
+        "region": "eu-west-2",
+        "bucket": "plant-history",
+        "access_key": "AKIAEXAMPLE",
+        "secret_key": "secret",
+    }
+    assert cold_archive.unconfigured(complete, "broughton-7f3a9c21") == []
+
+
+def test_a_site_key_alone_is_not_a_destination(cold_archive):
+    """
+    The key says WHERE IN a bucket, never WHICH bucket. Treating it as sufficient would let a stack
+    that had named itself believe it could archive, and fail at 03:15 on a schedule.
+    """
+    assert cold_archive.unconfigured({}, "broughton-7f3a9c21") != []
 
 
 def test_parquet_round_trips_the_telemetry_columns():

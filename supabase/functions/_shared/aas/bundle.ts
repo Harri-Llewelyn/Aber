@@ -38,8 +38,16 @@ export const DEFAULT_MAX_THREAD_ROWS = 20_000;
 /** One PostgREST page. Keyset-paged on time, so the remote scan stops after this many rows. */
 export const TELEMETRY_PAGE_SIZE = 5_000;
 
-/** Where a stored bundle goes: the cold tier's bucket, under a prefix of its own. */
-export const DEFAULT_EXPORT_BUCKET = "telemetry-archive";
+/**
+ * Where a stored bundle goes.
+ *
+ * FIXED, NOT CONFIGURABLE. `supabase/storage-policies.sql` and `scripts/storage-init.mjs` name
+ * this bucket too, and a name that can be changed in one place is a bucket with no policies.
+ * It used to be read from the `archive.bucket` setting, which is retired with the local cold
+ * tier (migration 0132) -- a stored bundle is a copy somebody asked for, not the only remaining
+ * copy of anything, so it stays on local storage where a signed URL reaches it.
+ */
+export const EXPORT_BUCKET = "asset-exports";
 export const EXPORT_PREFIX = "assets";
 export const EXPORT_CONTENT_TYPE = "application/octet-stream";
 
@@ -259,18 +267,6 @@ export async function loadColdObjects(
       row_count: r.row_count,
     }));
   return { objects };
-}
-
-/** The `archive.bucket` setting, which cold_archive.py honours, else the default bucket. */
-export async function loadExportBucket(adminClient: Client): Promise<string> {
-  const { data } = await adminClient
-    .from("system_settings").select("value").eq("key", "archive.bucket").maybeSingle();
-  const value = data?.value;
-  if (typeof value === "string" && value.trim()) return value.trim().replace(/^"|"$/g, "");
-  if (value && typeof value === "object" && typeof (value as { value?: unknown }).value === "string") {
-    return String((value as { value: string }).value);
-  }
-  return DEFAULT_EXPORT_BUCKET;
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {

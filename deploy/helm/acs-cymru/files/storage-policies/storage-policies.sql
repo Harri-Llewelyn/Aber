@@ -330,105 +330,111 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------------------------
--- telemetry-archive -- cold telemetry chunks as Parquet
+-- telemetry-archive -- RETIRED
 -- ---------------------------------------------------------------------------------------------
--- An object here is the only remaining copy of a span of telemetry: the raw chunk was dropped
--- because this object was verified (timescaledb/cold_archive.sql). So no browser role writes
--- here at all (objects are written by the exporter and nothing else), READ is the same
--- privileged set as captures, and DELETE is Administrator-only and genuinely destructive.
+-- Cold telemetry is written to a configured S3 endpoint and no longer to a bucket in this
+-- cluster: the destination has to be somewhere a site loss does not reach, and an object here was
+-- on the same node as the database whose rows it had replaced.
+--
+-- DROPPED EXPLICITLY, because deleting the block above would not. This file drops each policy it
+-- is about to create, so a policy it no longer mentions is one nothing touches -- it survives
+-- every boot on a database that already has it, guarding a bucket nothing writes to.
+--
+-- THE BUCKET ITSELF IS NOT DELETED HERE, and nothing else deletes it either. It is left with
+-- whatever it holds, for an Administrator to empty and remove from Studio once satisfied the
+-- objects in it are also at the remote endpoint. `cold_archive audit` answers that question for
+-- the manifest's rows; objects no manifest row references are reported by the same command.
 DROP POLICY IF EXISTS "telemetry_archive_read_privileged" ON storage.objects;
-CREATE POLICY "telemetry_archive_read_privileged" ON storage.objects
+DROP POLICY IF EXISTS "telemetry_archive_insert_daemon" ON storage.objects;
+DROP POLICY IF EXISTS "telemetry_archive_update_daemon" ON storage.objects;
+DROP POLICY IF EXISTS "telemetry_archive_delete_admin" ON storage.objects;
+
+DO $$
+DECLARE
+  v_left int;
+BEGIN
+  SELECT count(*) INTO v_left
+    FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'telemetry_archive_%';
+
+  IF v_left > 0 THEN
+    RAISE EXCEPTION
+      'telemetry-archive: % policy/policies survived the four DROPs above. A policy named '
+      'telemetry_archive_* that this file does not name is one nothing maintains.', v_left;
+  END IF;
+
+  RAISE NOTICE
+    'telemetry-archive policies retired (0 policies; cold telemetry goes to the configured S3 '
+    'endpoint, ingestion/cold_archive.py).';
+END $$;
+
+-- =============================================================================================
+-- asset-exports -- AAS export bundles, one .aasx per export
+-- =============================================================================================
+-- Written by the `aas-export` function as service_role, which bypasses RLS, so there is NO write
+-- policy here for any browser role and that is the point: an object in this bucket is evidence of
+-- an export that a row in `asset_exports` records, and a hand-uploaded file would be a bundle with
+-- no provenance sitting beside ones that have it.
+--
+-- READ is the same privileged set the Archives tab admits, and the download goes through a signed
+-- URL minted for a caller whose role has been checked (frontend/src/api.js). DELETE is
+-- Administrator alone: the row's tombstone points at the object, so removing one is a decision
+-- about the record, not about disk.
+--
+-- These bundles lived under `assets/` in `telemetry-archive` until cold telemetry moved to a
+-- remote endpoint. See scripts/storage-init.mjs for why they did not follow it there.
+-- =============================================================================================
+
+DROP POLICY IF EXISTS "asset_exports_read_privileged" ON storage.objects;
+CREATE POLICY "asset_exports_read_privileged" ON storage.objects
   FOR SELECT TO authenticated
   USING (
-    bucket_id = 'telemetry-archive'
-    AND (
-      public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
-      -- The daemon reads its own writes: verification is a read-back of the object it just uploaded,
-      -- and `verified_at` is what the historian's CHECK requires before a chunk may be dropped.
-      -- Without this arm nothing is ever archived, silently.
-      OR public.is_ingestion_caller()
-    )
+    bucket_id = 'asset-exports'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
   );
 
-DROP POLICY IF EXISTS "telemetry_archive_insert_daemon" ON storage.objects;
-CREATE POLICY "telemetry_archive_insert_daemon" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'telemetry-archive'
-    AND public.is_ingestion_caller()
-  );
-
--- UPDATE covers `upsert: true` on a retry. A previous attempt that uploaded and then failed
--- verification leaves an object that must be replaceable -- refusing that would strand the chunk
--- forever, since the manifest row already exists and the candidate list excludes it.
-DROP POLICY IF EXISTS "telemetry_archive_update_daemon" ON storage.objects;
-CREATE POLICY "telemetry_archive_update_daemon" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (
-    bucket_id = 'telemetry-archive'
-    AND public.is_ingestion_caller()
-  )
-  WITH CHECK (
-    bucket_id = 'telemetry-archive'
-    AND public.is_ingestion_caller()
-  );
-
-DROP POLICY IF EXISTS "telemetry_archive_delete_admin" ON storage.objects;
-CREATE POLICY "telemetry_archive_delete_admin" ON storage.objects
+DROP POLICY IF EXISTS "asset_exports_delete_admin" ON storage.objects;
+CREATE POLICY "asset_exports_delete_admin" ON storage.objects
   FOR DELETE TO authenticated
   USING (
-    bucket_id = 'telemetry-archive'
+    bucket_id = 'asset-exports'
     AND public.has_role(ARRAY['Administrator'])
   );
 
 -- ---------------------------------------------------------------------------------------------
--- Reconcile: telemetry-archive
+-- Reconcile: asset-exports
 -- ---------------------------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_policies      integer;
-  v_daemon_delete integer;
-  v_human_writes  integer;
+  v_count int;
+  v_writes int;
 BEGIN
-  SELECT count(*) INTO v_policies FROM pg_policies
+  SELECT count(*) INTO v_count
+    FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'telemetry_archive_%';
-  IF v_policies <> 4 THEN
+     AND policyname LIKE 'asset_exports_%';
+
+  IF v_count <> 2 THEN
     RAISE EXCEPTION
-      'telemetry-archive has % policy/policies, expected 4 (select, insert, update, delete). A '
-      'missing one does not error -- storage.objects is RLS-enabled, so the operation simply stops '
-      'working, and here that means archival stalls with chunks left in the hypertable.', v_policies;
+      'asset-exports has % policy/policies, expected 2 (select, delete). A policy added here '
+      'without being added to this file is one nothing maintains.', v_count;
   END IF;
 
-  -- THE DAEMON MUST NOT BE ABLE TO DELETE. It is the process that decides a chunk is safe to drop;
-  -- letting it also destroy the object that made it safe would put both halves of an irreversible
-  -- act behind one credential.
-  SELECT count(*) INTO v_daemon_delete FROM pg_policies
+  SELECT count(*) INTO v_writes
+    FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'telemetry_archive_%' AND cmd = 'DELETE'
-     AND coalesce(qual, '') LIKE '%is_ingestion_caller%';
-  IF v_daemon_delete > 0 THEN
-    RAISE EXCEPTION
-      'telemetry-archive: the ingestion daemon can DELETE. It is the process that drops the raw '
-      'chunk once this object is verified -- it must not also be able to remove the only copy.';
-  END IF;
+     AND policyname LIKE 'asset_exports_%' AND cmd IN ('INSERT', 'UPDATE');
 
-  -- AND NO HUMAN ROLE MAY WRITE ONE. An object here is only ever produced by an export whose row
-  -- count the manifest records; one uploaded by hand would be a file the catalogue describes and
-  -- nothing verified.
-  SELECT count(*) INTO v_human_writes FROM pg_policies
-   WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'telemetry_archive_%' AND cmd IN ('INSERT', 'UPDATE')
-     AND coalesce(with_check, '') LIKE '%has_role%';
-  IF v_human_writes > 0 THEN
+  IF v_writes > 0 THEN
     RAISE EXCEPTION
-      'telemetry-archive: a write policy admits a browser role. Objects here are written by the '
-      'exporter alone; a hand-uploaded file would be catalogued as verified history it is not.';
+      'asset-exports: a write policy admits a browser role. Bundles are written by the aas-export '
+      'function alone; a hand-uploaded file would be catalogued as an export nobody took.';
   END IF;
 
   RAISE NOTICE
-    'telemetry-archive policies reconciled (4 policies; the exporter writes and never deletes, no '
-    'browser role writes, Administrator alone may delete the only copy).';
+    'asset-exports policies reconciled (2 policies; the function writes as service_role, no '
+    'browser role writes, Administrator alone may delete).';
 END $$;
 
 -- =============================================================================================

@@ -449,7 +449,7 @@ const ARCHIVED_DEVICE = {
 }
 const EXPORT_ROW = {
   id: 'exp-1', entity_type: 'devices', entity_id: 'dev-1', name: 'CNC_01', sparkplug_id: 'abc123',
-  object_bucket: 'telemetry-archive', object_key: 'assets/abc123/2026-09-01T10-00-00Z.aasx',
+  object_bucket: 'asset-exports', object_key: 'assets/abc123/2026-09-01T10-00-00Z.aasx',
   taken_at: '2026-09-01T10:00:00Z', taken_by_email: 'ops@example.test'
 }
 const RETIRED_DEVICE = {

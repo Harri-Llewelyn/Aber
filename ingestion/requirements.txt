@@ -50,6 +50,21 @@ duckdb==1.1.3
 # cheaper side of that trade.
 pytz==2024.2
 
+# The S3 client cold telemetry is archived with (ingestion/cold_archive.py).
+#
+# THE PROTOCOL IS THE POINT, not the vendor. The same client reaches AWS, Cloudflare R2, Backblaze
+# B2, Wasabi and a MinIO in another building, which is what lets the destination be the operator's
+# decision and stay unknown to the code.
+#
+# WHAT IT IS USED FOR THAT A PLAIN HTTP PUT IS NOT: `ChecksumSHA256` on upload, which has the store
+# validate the payload server-side and REJECT a corrupt write, and ranged GETs, which read a
+# Parquet footer back without pulling the object across a metered link. Both are load-bearing --
+# verification is what `--drop` keys the deletion of the only other copy on.
+#
+# Imported LAZILY, inside _s3_client(), so the ingestion daemon's own start-up path never pays for
+# it. botocore comes with it and carries the retry and signing behaviour.
+boto3==1.35.76
+
 # Prometheus counters, histograms and the exposition format, for the /metrics endpoint.
 #
 # WHAT IT REPLACED. This daemon rendered the exposition itself -- a counter registry behind a lock,

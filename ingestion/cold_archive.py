@@ -37,11 +37,27 @@ rather than something an operator has to construct.
 Chunks stay in BOTH places until then, which is the only safe intermediate state.
 
 =================================================================================================
-TWO DATABASES, ON PURPOSE
+THE DESTINATION IS SOMEWHERE ELSE, AND ONLY SOMEWHERE ELSE
 
-The manifest and the chunks live on the historian; the settings and the object storage belong to
-the platform. There is no transaction spanning both and there cannot be, so every write here is
-ordered so that a crash leaves a state the next run can resolve:
+Objects go to a configured S3 endpoint. There is no filesystem path, no bucket in this cluster and
+no local fallback, because "remote" is not a property the code can check and an optional remote
+destination is one nobody tests -- it gets chosen at install by whoever wants fewest questions, and
+its worthlessness is discovered on the day it matters.
+
+This used to write to a Supabase Storage bucket on a PVC in the same cluster, usually on the node
+holding the database the rows were rescued from, after `--drop` had deleted the originals. The data
+moved from one local volume to another local volume and a site loss took both.
+
+Every object is addressed under `site=<site_key>/`, which is what makes one bucket safe for several
+sites and what an IAM policy is scoped on. See object_key_for().
+
+=================================================================================================
+TWO DATABASES AND A THIRD PARTY
+
+The manifest and the chunks live on the historian; the settings belong to the platform; the objects
+are at another provider under a credential this stack cannot mint, rotate or revoke. There is no
+transaction spanning them and there cannot be, so every write here is ordered so that a crash
+leaves a state the next run can resolve:
 
   * a claimed row with no object -> re-exported next run (object is overwritten, upsert)
   * an exported row that was never verified -> re-verified next run
@@ -51,7 +67,9 @@ The one state that must never exist is `dropped` without a readable object, and 
 CHECK constraint and `cold_tier_droppable()` exist to prevent.
 """
 import argparse
+import base64
 import csv
+import hashlib
 import io
 import os
 import sys
@@ -62,7 +80,7 @@ import psycopg2
 import psycopg2.extras
 
 # The daemon's own configuration, reused rather than re-declared: this runs in the same image and
-# must reach the same historian and the same storage identity. Importing it also means a change to
+# must reach the same historian and the same platform identity. Importing it also means a change to
 # the connection logic cannot leave this file behind.
 from ingestion import (  # noqa: E402
     SUPABASE_URL,
@@ -72,7 +90,11 @@ from ingestion import (  # noqa: E402
 )
 
 DEFAULT_TIER_AFTER_DAYS = 90
-DEFAULT_BUCKET = "telemetry-archive"
+
+# The layout version in every object key. It changes only if the key shape or the exported column
+# set has to change incompatibly: new objects go to v=2 and readers of v=1 keep working, so nothing
+# already written is ever rewritten.
+ARCHIVE_LAYOUT_VERSION = "1"
 
 
 def log(message):
@@ -82,24 +104,83 @@ def log(message):
 # -------------------------------------------------------------------------------------------------
 # Settings
 # -------------------------------------------------------------------------------------------------
-def _storage_client():
+def s3_config():
     """
-    A storage client that authenticates AS THE DAEMON.
+    The destination, from the environment. The chart renders it; the credential is a release Secret.
 
-    Same construction as capture_worker._storage_client(), and for the same reason its docstring
-    records at length: `create_client(url, key).storage` keeps the key it was built with, so
-    the obvious approach uploads as `anon` and fails against a bucket that admits the ingestion
-    principal -- an RLS refusal that names RLS and is really about identity.
+    A FOREIGN CREDENTIAL, NOT A DATABASE PRINCIPAL. We cannot mint, rotate or revoke a key at
+    another provider, so this sits where the SMTP relay password and the Grafana contact-point
+    bearer sit rather than with the principals the stack issues itself.
+
+    EVERY FIELD IS REQUIRED, INCLUDING THE ENDPOINT, which AWS would let us infer from the region.
+    An inferred destination is one nobody states, and "somewhere else" is the entire property this
+    feature has: the endpoint is written down so that reading the configuration tells you where a
+    decade of plant history went.
     """
-    from storage3 import create_client as create_storage_client
+    return {
+        "endpoint": os.environ.get("ARCHIVE_S3_ENDPOINT", "").strip(),
+        "region": os.environ.get("ARCHIVE_S3_REGION", "").strip(),
+        "bucket": os.environ.get("ARCHIVE_S3_BUCKET", "").strip(),
+        "access_key": os.environ.get("ARCHIVE_S3_ACCESS_KEY_ID", "").strip(),
+        "secret_key": os.environ.get("ARCHIVE_S3_SECRET_ACCESS_KEY", ""),
+        # MinIO and most self-hosted gateways address buckets by path; AWS, R2 and B2 take the
+        # virtual-host form. Getting this wrong fails as DNS resolution, which names nothing.
+        "path_style": os.environ.get("ARCHIVE_S3_PATH_STYLE", "").strip().lower()
+        in ("1", "true", "yes", "on"),
+    }
 
-    return create_storage_client(
-        SUPABASE_URL.rstrip("/") + "/storage/v1/",
-        {
-            "apikey": SUPABASE_GATEWAY_KEY,
-            "Authorization": "Bearer " + (SUPABASE_INGESTION_KEY or SUPABASE_GATEWAY_KEY),
-        },
-        is_async=False,
+
+def unconfigured(config, site_key):
+    """
+    What is missing before anything can be written, as a list, or [] when the destination is ready.
+
+    ONE REFUSAL FOR EVERY SUBCOMMAND, and it names all of the gaps rather than the first: an
+    operator configuring this is usually setting five things at once, and a refusal that reveals
+    one missing variable per run costs five runs.
+    """
+    missing = []
+    for field, name in (
+        ("endpoint", "ARCHIVE_S3_ENDPOINT"),
+        ("region", "ARCHIVE_S3_REGION"),
+        ("bucket", "ARCHIVE_S3_BUCKET"),
+        ("access_key", "ARCHIVE_S3_ACCESS_KEY_ID"),
+        ("secret_key", "ARCHIVE_S3_SECRET_ACCESS_KEY"),
+    ):
+        if not (config.get(field) or "").strip():
+            missing.append(name)
+    if not (site_key or "").strip():
+        missing.append("the archive.site_key setting (values.yaml archive.s3.siteKey)")
+    return missing
+
+
+def _s3_client(config):
+    """
+    A boto3 S3 client for the configured endpoint.
+
+    SIGNATURE V4 AND AN EXPLICIT ADDRESSING STYLE, both stated rather than defaulted. v4 is what
+    every current implementation expects and what the checksum headers below are signed under;
+    addressing style is the one setting that differs between AWS and a MinIO in another building,
+    which is precisely the pair this has to work against unchanged.
+
+    RETRIES ARE THE LIBRARY'S. A remote destination turns each upload into a network operation with
+    an outage window, and `standard` mode already backs off on the throttling and 5xx responses
+    that a WAN produces. What it deliberately does not retry is a checksum rejection, which is not
+    a transient condition.
+    """
+    import boto3
+    from botocore.config import Config
+
+    return boto3.client(
+        "s3",
+        endpoint_url=config["endpoint"],
+        region_name=config["region"],
+        aws_access_key_id=config["access_key"],
+        aws_secret_access_key=config["secret_key"],
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path" if config["path_style"] else "virtual"},
+            retries={"max_attempts": 5, "mode": "standard"},
+        ),
     )
 
 
@@ -116,7 +197,10 @@ def read_settings():
     settings = {
         "enabled": False,
         "tier_after_days": DEFAULT_TIER_AFTER_DAYS,
-        "bucket": DEFAULT_BUCKET,
+        # No compiled-in default, unlike the two above: the site key addresses this site's objects
+        # inside a bucket other sites may share, so a fallback would be a guess at identity. Empty
+        # means unconfigured, and every path that would write refuses on it.
+        "site_key": "",
     }
     try:
         from supabase import create_client
@@ -136,8 +220,8 @@ def read_settings():
             settings["enabled"] = bool(by_key["archive.enabled"])
         if "archive.tier_after_days" in by_key:
             settings["tier_after_days"] = int(by_key["archive.tier_after_days"])
-        if "archive.bucket" in by_key:
-            settings["bucket"] = str(by_key["archive.bucket"])
+        if "archive.site_key" in by_key:
+            settings["site_key"] = str(by_key["archive.site_key"] or "")
     except Exception as err:  # noqa: BLE001 - see the docstring
         log(f"could not read archive.* settings ({err}); using compiled-in defaults")
     return settings
@@ -146,16 +230,48 @@ def read_settings():
 # -------------------------------------------------------------------------------------------------
 # Export
 # -------------------------------------------------------------------------------------------------
-def object_key_for(chunk_name, range_start):
-    """
-    `year=YYYY/month=MM/<chunk>.parquet` — Hive-style partitioning, which is not decoration.
+def _stamp(instant):
+    """One instant as `20260302T000000Z`: sortable, filename-safe, and unambiguous about its zone."""
+    return instant.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-    DuckDB, Spark and Arrow all read those directory names as columns, so `WHERE year = 2026` can
-    skip whole prefixes without opening a file. That is the property query-in-place depends on, and
-    it has to be decided now: the layout is baked into every object the moment one is written, and
-    changing it later means either rewriting the archive or teaching every reader two schemes.
+
+def object_key_for(site_key, range_start, range_end):
     """
-    return f"year={range_start.year:04d}/month={range_start.month:02d}/{chunk_name}.parquet"
+    `site=<key>/dataset=telemetry/v=1/year=YYYY/month=MM/<from>-<to>.parquet`
+
+    Hive-style partitioning, which is not decoration: DuckDB, Spark and Arrow all read `key=value`
+    directory names as columns, so `WHERE year = 2026` skips whole prefixes without opening a file.
+
+    EACH SEGMENT IS LOAD-BEARING.
+
+      * `site=` is leftmost because an IAM policy scopes on a left-anchored prefix. Anything to its
+        left makes a per-site credential impossible to write. It also stops the collision a shared
+        bucket invites: chunk numbering is per database, so two fresh installs both start at
+        `_hyper_1_1_chunk`, and the upload overwrites without complaint.
+      * `dataset=` leaves room for a rollup or a second hypertable without renaming what is written.
+      * `v=` is the escape hatch, so an incompatible change never has to be made under pressure.
+      * The leaf is the TIME RANGE, not the chunk name. `_hyper_1_42_chunk` is a TimescaleDB
+        internal that says nothing to a human and does not survive a restore into a fresh database.
+        A range sorts lexically, describes itself, and makes a retry produce the same key -- which
+        is what keeps overwriting on retry correct rather than dangerous.
+
+    THE MONTH BOUNDARY, WRITTEN DOWN BECAUSE IT SURPRISES READERS. `year=`/`month=` are derived from
+    `range_start`, and chunks are 7 days (`timescaledb/init/001_schema.sql`), so around a dozen
+    times a year a chunk straddles a month: one beginning 29 March holds April readings under
+    `month=03`. The manifest is the authoritative index; the partitions are a convenience for a
+    reader that does not have it, and such a reader must widen by one partition on each side.
+    """
+    start = range_start.astimezone(timezone.utc)
+    return (
+        f"site={site_key}/dataset=telemetry/v={ARCHIVE_LAYOUT_VERSION}/"
+        f"year={start.year:04d}/month={start.month:02d}/"
+        f"{_stamp(range_start)}-{_stamp(range_end)}.parquet"
+    )
+
+
+def site_prefix(site_key):
+    """Everything this site has written, and the prefix an IAM policy is scoped on."""
+    return f"site={site_key}/"
 
 
 def export_chunk(conn, chunk_schema, chunk_name):
@@ -192,27 +308,113 @@ def export_chunk(conn, chunk_schema, chunk_name):
     return buffer.getvalue(), len(rows)
 
 
-def verify_object(storage, bucket, key, expected_rows, expected_bytes):
+class _S3RangeReader(io.RawIOBase):
     """
-    Download the object back and confirm it is what was recorded.
+    A seekable file over an S3 object that fetches only the bytes it is asked for.
 
-    A READ-BACK, NOT A RESPONSE CODE. The upload returning 200 says the request was accepted; it
-    does not say the bytes are retrievable, that the bucket kept them, or that RLS will let this
-    identity read them again. `verified_at` is the column the CHECK constraint keys the whole drop
-    on, so it has to mean something a 200 does not.
+    WHAT IT EXISTS FOR. `pq.ParquetFile(f).metadata` seeks to the end and reads the footer, which
+    pyarrow does as ONE ranged GET of the last 64 KiB whatever the object weighs -- measured at
+    64 KiB to verify a 15.2 MiB object, 0.4% of it, against MinIO. Handed a whole downloaded
+    payload it would do the same read against memory, after paying to move the object across a WAN.
+
+    A small object is read whole, because 64 KiB is larger than it is. That is not a special case
+    worth avoiding: it is already the cheapest possible read.
+    """
+
+    def __init__(self, s3, bucket, key, size):
+        self._s3, self._bucket, self._key, self._size = s3, bucket, key, size
+        self._pos = 0
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self._pos
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        base = {io.SEEK_SET: 0, io.SEEK_CUR: self._pos, io.SEEK_END: self._size}[whence]
+        self._pos = max(0, min(base + offset, self._size))
+        return self._pos
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = self._size - self._pos
+        size = min(size, self._size - self._pos)
+        if size <= 0:
+            return b""
+        end = self._pos + size - 1
+        body = self._s3.get_object(
+            Bucket=self._bucket, Key=self._key, Range=f"bytes={self._pos}-{end}"
+        )["Body"].read()
+        self._pos += len(body)
+        return body
+
+
+def put_object(s3, bucket, key, payload):
+    """
+    Upload one object and have the store prove it received what was sent.
+
+    `ChecksumSHA256` IS CHECKED BY THE STORE, NOT BY US. S3 recomputes the digest server-side and
+    REJECTS the write if it disagrees, so a payload corrupted in flight never becomes an object at
+    all. That is strictly more than a 200 could tell us, and it costs one header.
+
+    Returns (etag, checksum) for the manifest. `object_etag` has existed since the table was
+    created and has never been populated; this is what it was for.
+    """
+    # The precomputed digest alone, not `ChecksumAlgorithm` beside it: that parameter asks boto3 to
+    # compute one and send it as a trailer, which is a second way of saying the same thing and one
+    # more thing for a non-AWS implementation to disagree about.
+    digest = base64.b64encode(hashlib.sha256(payload).digest()).decode("ascii")
+    response = s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=payload,
+        ContentType="application/vnd.apache.parquet",
+        ChecksumSHA256=digest,
+    )
+    return (response.get("ETag") or "").strip('"'), digest
+
+
+def verify_object(s3, bucket, key, expected_rows, expected_bytes, expected_checksum=None):
+    """
+    Confirm the stored object is what was recorded, without pulling it back.
+
+    A READ-BACK, NOT A RESPONSE CODE. `verified_at` is the column the CHECK constraint keys the
+    whole drop on -- the rows are deleted because this returned true -- so it has to mean something
+    an accepted request does not: that the bytes are there, and retrievable, by this identity.
+
+    CHEAPER AND STRICTER THAN THE DOWNLOAD IT REPLACES. A HEAD and one 64 KiB ranged read instead
+    of the whole object over a metered link -- measured at 64 KiB to verify 15.2 MiB -- and it
+    checks one thing more: the digest the store computed for itself, which catches a corruption the
+    old read-back could not distinguish from a good copy.
 
     THE ROW COUNT IS RE-READ FROM THE PARQUET FOOTER rather than trusting the length recorded at
-    write time. That is what catches a truncated upload: the bytes arrive, the object exists, and
+    write time. That is what catches a truncated upload -- the bytes arrive, the object exists, and
     the footer says a different number.
     """
     import pyarrow.parquet as pq
 
-    payload = storage.from_(bucket).download(key)
-    if len(payload) != expected_bytes:
-        return False, f"downloaded {len(payload)} bytes, expected {expected_bytes}"
+    try:
+        head = s3.head_object(Bucket=bucket, Key=key, ChecksumMode="ENABLED")
+    except Exception as err:  # noqa: BLE001
+        return False, f"object is not retrievable: {err}"
+
+    actual_bytes = int(head.get("ContentLength", -1))
+    if actual_bytes != expected_bytes:
+        return False, f"object is {actual_bytes} bytes, expected {expected_bytes}"
+
+    # ABSENT IS NOT A MISMATCH. An S3 implementation that does not return the stored checksum has
+    # still validated it on write, and the footer read below is the check that does not depend on
+    # the store's feature set. A checksum that IS returned and differs is a hard failure.
+    stored = head.get("ChecksumSHA256")
+    if expected_checksum and stored and stored != expected_checksum:
+        return False, f"stored checksum {stored} does not match the payload's {expected_checksum}"
 
     try:
-        parquet = pq.ParquetFile(io.BytesIO(payload))
+        parquet = pq.ParquetFile(_S3RangeReader(s3, bucket, key, actual_bytes))
         actual_rows = parquet.metadata.num_rows
     except Exception as err:  # noqa: BLE001
         return False, f"object is not readable as Parquet: {err}"
@@ -225,7 +427,7 @@ def verify_object(storage, bucket, key, expected_rows, expected_bytes):
 # -------------------------------------------------------------------------------------------------
 # The run
 # -------------------------------------------------------------------------------------------------
-def archive(conn, storage, bucket, tier_after_days, dry_run):
+def archive(conn, s3, bucket, site_key, tier_after_days, dry_run):
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             "SELECT * FROM public.cold_tier_candidates(%s::interval)",
@@ -246,7 +448,7 @@ def archive(conn, storage, bucket, tier_after_days, dry_run):
     exported = 0
     for c in candidates:
         name = c["chunk_name"]
-        key = object_key_for(name, c["range_start"])
+        key = object_key_for(site_key, c["range_start"], c["range_end"])
         try:
             payload, row_count = export_chunk(conn, c["chunk_schema"], name)
 
@@ -268,25 +470,24 @@ def archive(conn, storage, bucket, tier_after_days, dry_run):
                 )
             conn.commit()
 
-            # `upsert` because a previous attempt may have uploaded and then failed verification.
-            # Refusing to overwrite would strand the chunk: its manifest row already exists, so the
-            # candidate list will never offer it again.
-            storage.from_(bucket).upload(
-                key,
-                payload,
-                {"content-type": "application/vnd.apache.parquet", "upsert": "true"},
-            )
+            # OVERWRITING IS CORRECT HERE, and it is the key shape that makes it so. A previous
+            # attempt may have uploaded and then failed verification; refusing to overwrite would
+            # strand the chunk, because its manifest row already exists and the candidate list will
+            # never offer it again. The key is derived from the chunk's time range, so a retry
+            # addresses the same object -- which is what stops "overwrite" meaning another site's
+            # data, as a chunk-numbered key in a shared bucket would.
+            etag, checksum = put_object(s3, bucket, key, payload)
 
             with conn.cursor() as cur:
                 cur.execute(
                     """UPDATE public.telemetry_archive_manifest
-                          SET exported_at = now(), object_bytes = %s
+                          SET exported_at = now(), object_bytes = %s, object_etag = %s
                         WHERE chunk_schema = %s AND chunk_name = %s""",
-                    (len(payload), c["chunk_schema"], name),
+                    (len(payload), etag or None, c["chunk_schema"], name),
                 )
             conn.commit()
 
-            ok, reason = verify_object(storage, bucket, key, row_count, len(payload))
+            ok, reason = verify_object(s3, bucket, key, row_count, len(payload), checksum)
             if not ok:
                 raise RuntimeError(f"verification failed: {reason}")
 
@@ -423,16 +624,15 @@ def objects_covering(conn, start, end):
         return cur.fetchall()
 
 
-def query_archive(conn, storage, bucket, start, end, asset=None, metric=None, limit=50, out_csv=None):
+def query_archive(conn, s3, bucket, start, end, asset=None, metric=None, limit=50, out_csv=None):
     """
     Answer one question from cold storage.
 
-    DOWNLOADED, THEN QUERIED, AND THAT IS A LIMITATION WORTH NAMING rather than hiding. DuckDB can
-    range-read Parquet over HTTP and fetch only the row groups a query touches -- but by default the
-    objects sit behind storage-api with STORAGE_BACKEND=file, not an S3 endpoint DuckDB can address,
-    so this pulls each relevant object whole. The manifest pruning above is what keeps that
-    reasonable: it is whole OBJECTS, not the whole archive. Pointing storage at real S3 makes this a
-    range scan with no change to the SQL below.
+    DOWNLOADED, THEN QUERIED, AND THAT IS A LIMITATION WORTH NAMING rather than hiding. DuckDB's
+    httpfs can range-read these objects where they lie and fetch only the row groups a query
+    touches; this fetches each relevant object whole and reads it from a temporary directory.
+    Issue #228 is that change. The manifest pruning above is what keeps the present behaviour
+    reasonable: it is whole OBJECTS, not the whole archive.
 
     ONLY VERIFIED OBJECTS ARE READ. An `exported` row has an object nothing has read back, and a
     `failed` one may hold a truncated upload. This answers questions about history, where a partial
@@ -466,7 +666,7 @@ def query_archive(conn, storage, bucket, start, end, asset=None, metric=None, li
     with tempfile.TemporaryDirectory(prefix="cold-archive-") as tmp:
         paths = []
         for o in usable:
-            payload = storage.from_(bucket).download(o["object_key"])
+            payload = s3.get_object(Bucket=bucket, Key=o["object_key"])["Body"].read()
             path = os.path.join(tmp, o["chunk_name"] + ".parquet")
             with open(path, "wb") as fh:
                 fh.write(payload)
@@ -543,22 +743,24 @@ def query_archive(conn, storage, bucket, start, end, asset=None, metric=None, li
 # -------------------------------------------------------------------------------------------------
 # Audit
 # -------------------------------------------------------------------------------------------------
-def audit(conn, storage, bucket):
+def audit(conn, s3, bucket, site_key):
     """
     Check that every object the manifest claims exists is still fetchable.
 
-    THE FAILURE THIS EXISTS FOR IS A RECONFIGURATION, NOT A BUG. storage-api's backend is
-    `STORAGE_BACKEND: file` by default and can be pointed at S3 instead -- and switching it does NOT
-    migrate anything. The same keys are then looked for in the new backend and 404, while the
+    THE FAILURE THIS EXISTS FOR IS A RECONFIGURATION, NOT A BUG. The destination is five variables
+    and a credential, and changing any of them -- a bucket renamed, an endpoint repointed at a new
+    provider, a site key that somebody edited in the database, a lifecycle rule that expired
+    objects nobody meant to expire -- leaves every key looked for where it is not, while the
     manifest still reads `archived` and the raw rows are already gone from the hypertable. The
     catalogue goes on saying everything is fine.
 
-    So the archive needs a way to be ASKED rather than assumed, and this is it. It is also the right
-    check after moving objects by hand, which is what a backend switch requires: keys must land
-    identically, because `object_key` is what points at them.
+    So the archive needs a way to be ASKED rather than assumed, and this is it. It is also the
+    right check after migrating a bucket by hand: keys must land identically, because `object_key`
+    is what points at them.
 
-    HEAD, NOT DOWNLOAD, where the client allows it -- this walks the whole archive and pulling every
-    object to prove it exists would make the audit itself expensive enough to skip.
+    HEAD, NOT GET. This walks the whole archive, and pulling every object to prove it exists would
+    make the audit itself expensive enough to skip -- which on a metered link is how it stops being
+    run.
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
@@ -577,14 +779,12 @@ def audit(conn, storage, bucket):
         # to audit" -- it is the most interesting state the bucket can be in, and returning early
         # here is what let four of them sit unnoticed.
         log("the manifest is empty.")
-        return 1 if audit_orphans(storage, bucket, manifest_keys) else 0
+        return 1 if audit_orphans(s3, bucket, site_key, manifest_keys) else 0
 
     missing, checked = [], 0
     for r in rows:
         try:
-            # storage3 has no HEAD; a zero-length range is the cheapest available proof of
-            # existence and costs one request rather than one object.
-            storage.from_(bucket).download(r["object_key"], {"transform": None})
+            s3.head_object(Bucket=bucket, Key=r["object_key"])
             checked += 1
         except Exception as err:  # noqa: BLE001
             missing.append((r, str(err)[:160]))
@@ -593,7 +793,7 @@ def audit(conn, storage, bucket):
         marker = "DATA LOST" if r["is_only_copy"] else "object gone"
         log(f"  {marker}: {r['chunk_name']} -> {r['object_key']} ({err})")
 
-    orphans = audit_orphans(storage, bucket, manifest_keys)
+    orphans = audit_orphans(s3, bucket, site_key, manifest_keys)
 
     if not missing:
         log(f"{checked} object(s) present and readable.")
@@ -604,12 +804,13 @@ def audit(conn, storage, bucket):
     if lost:
         rows_lost = sum(int(r["row_count"] or 0) for r in lost)
         log(f"{len(lost)} of those are the ONLY copy -- {rows_lost} row(s) of telemetry.")
-        log("If storage was recently repointed at another backend, the objects were not migrated:")
-        log("copy them across preserving their keys exactly, then re-run this.")
+        log("If the endpoint, the bucket or the site key was recently changed, the objects were")
+        log("not migrated: copy them across preserving their keys exactly, then re-run this.")
+        log("If the bucket has a lifecycle rule, check that it does not expire this prefix.")
     return 1
 
 
-def audit_orphans(storage, bucket, manifest_keys):
+def audit_orphans(s3, bucket, site_key, manifest_keys):
     """
     Objects on storage that no manifest row references.
 
@@ -622,27 +823,27 @@ def audit_orphans(storage, bucket, manifest_keys):
     cleaned up while the objects were not, which is exactly how a real one appears: a failed drop, an
     interrupted export, or a manifest restored from a backup older than the storage beside it.
 
-    REPORTED, NEVER DELETED. Removing an object is the one irreversible act in this file, this
-    process holds telemetry:read alone (0080) and the bucket admits only an Administrator to DELETE, and an orphan is
-    precisely the case where the tool is least sure what it is looking at. Naming them is the whole
-    job; deciding is a person's.
-    """
-    try:
-        found = storage.from_(bucket).list("", {"limit": 1000})
-    except Exception as err:  # noqa: BLE001
-        log(f"could not list the bucket to check for orphans ({err}); skipping that half.")
-        return 0
+    REPORTED, NEVER DELETED, and now that is the credential's position too rather than this file's
+    restraint. The archive identity is scoped to PutObject and GetObject on this site's prefix with
+    no DeleteObject (see the policy in supabase/README.md), so an orphan cannot be removed from
+    here even by a caller who decided it should be. Naming them is the whole job; deciding is a
+    person's, from a console.
 
-    # storage3's list() is one level at a time, and the layout is year=/month=/file. Walking it is
-    # three calls rather than a recursive helper, which is worth keeping literal.
+    SCOPED TO THIS SITE'S PREFIX. A bucket may hold other sites, and every key outside
+    `site=<key>/` belongs to a manifest this database has never seen -- listing them would report
+    another plant's archive as this one's orphans.
+    """
+    prefix = site_prefix(site_key)
     keys = []
-    for year in found:
-        if not year.get("name", "").startswith("year="):
-            continue
-        for month in storage.from_(bucket).list(year["name"], {"limit": 1000}):
-            prefix = f"{year['name']}/{month['name']}"
-            for obj in storage.from_(bucket).list(prefix, {"limit": 1000}):
-                keys.append(f"{prefix}/{obj['name']}")
+    try:
+        # A paginator rather than one call: list_objects_v2 returns at most 1000 keys and an
+        # archive of any age is larger, so a single page would report every key past the first
+        # thousand as an orphan -- the loudest possible false alarm.
+        for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+            keys.extend(obj["Key"] for obj in page.get("Contents", []))
+    except Exception as err:  # noqa: BLE001
+        log(f"could not list {prefix} to check for orphans ({err}); skipping that half.")
+        return 0
 
     orphans = [k for k in keys if k not in manifest_keys]
     if not orphans:
@@ -659,7 +860,7 @@ def audit_orphans(storage, bucket, manifest_keys):
 # -------------------------------------------------------------------------------------------------
 # Restore
 # -------------------------------------------------------------------------------------------------
-def restore(conn, storage, bucket, chunk_name):
+def restore(conn, s3, bucket, chunk_name):
     """
     Put an archived chunk's rows back into the hypertable.
 
@@ -699,7 +900,7 @@ def restore(conn, storage, bucket, chunk_name):
 
     import pyarrow.parquet as pq
 
-    payload = storage.from_(bucket).download(row["object_key"])
+    payload = s3.get_object(Bucket=bucket, Key=row["object_key"])["Body"].read()
     table = pq.read_table(io.BytesIO(payload))
     log(f"read {table.num_rows} row(s) from {row['object_key']}")
 
@@ -758,9 +959,34 @@ def main():
     args = parser.parse_args()
 
     settings = read_settings()
+    config = s3_config()
+
+    # There is no local destination to fall back to and deliberately so: an optional remote target
+    # is one nobody tests, chosen at install by whoever wants fewest questions, and found worthless
+    # on the day it matters. One destination type means one code path, exercised at every site.
+    missing = unconfigured(config, settings["site_key"])
+
+    def refuse_unconfigured():
+        log("cold telemetry archival is not configured. Missing:")
+        for name in missing:
+            log(f"  {name}")
+        log("See supabase/README.md, 'Cold telemetry archival', for the chart values and the")
+        log("bucket policy the credential needs.")
+        return 2
+
+    # NOT CHECKED FOR THE ARCHIVE PATH YET, and that distinction is the difference between a
+    # useful failure and a failed Job every night. The chart runs the CronJob by default while
+    # `archive.enabled` defaults OFF, so an unconfigured destination is the ORDINARY state of a
+    # stack that has not turned archiving on -- reporting it as an error would fail the Job at
+    # 03:15 on every install that simply does not use the feature. The loop below refuses only
+    # once something has actually asked for an export. Reading commands are different: they were
+    # asked for explicitly, so there is nowhere to look and saying so is the answer.
+    if args.command in ("query", "audit", "restore") and missing:
+        return refuse_unconfigured()
+
     conn = _connect_timescaledb()
     try:
-        storage = _storage_client()
+        s3 = None if missing else _s3_client(config)
 
         if args.command == "query":
             # NO `archive.enabled` CHECK. That setting governs whether telemetry is EXPORTED and has
@@ -771,7 +997,7 @@ def main():
                 log("query needs --from and --to, e.g. --from 2026-04-01 --to 2026-05-01")
                 return 2
             return query_archive(
-                conn, storage, settings["bucket"],
+                conn, s3, config["bucket"],
                 parse_instant(args.start, "--from"), parse_instant(args.end, "--to"),
                 asset=args.asset, metric=args.metric, limit=args.limit, out_csv=args.out_csv,
             )
@@ -781,14 +1007,19 @@ def main():
             # the command that tells you whether archived history still exists. Refusing to run it
             # because archiving was switched off would withhold the answer exactly when somebody has
             # turned things off to investigate.
-            return audit(conn, storage, settings["bucket"])
+            return audit(conn, s3, config["bucket"], settings["site_key"])
 
         if args.command == "restore":
             if not args.chunk:
                 log("restore needs --chunk, e.g. --chunk _hyper_1_39_chunk")
                 log("`cold_archive audit` or the Cold Storage page lists the chunk names.")
                 return 2
-            return restore(conn, storage, settings["bucket"], args.chunk)
+            return restore(conn, s3, config["bucket"], args.chunk)
+
+        # Read once, outside the loop: the site key is read-only in the database and every object
+        # already written is addressed under it, so a pass that picked up a different one would be
+        # splitting the archive rather than following a setting.
+        site_key = settings["site_key"]
 
         while True:
             # RE-READ EVERY PASS, so switching the setting off stops the next pass rather than
@@ -800,9 +1031,20 @@ def main():
                     log("Turn it on under Settings > Cold Storage, or pass --force for a one-off run.")
                     return 0
                 log("archive.enabled is off; waiting.")
+            elif missing:
+                # Archiving is ON and there is nowhere to put anything. Loud, and it stops: the
+                # alternative is a stack that believes it is tiering history while the chunks age
+                # towards a retention policy that will drop them.
+                return refuse_unconfigured()
             else:
-                log(f"bucket={settings['bucket']} tier_after_days={settings['tier_after_days']}")
-                archive(conn, storage, settings["bucket"], settings["tier_after_days"], args.dry_run)
+                log(
+                    f"destination={config['endpoint']}/{config['bucket']}/{site_prefix(site_key)}"
+                    f" tier_after_days={settings['tier_after_days']}"
+                )
+                archive(
+                    conn, s3, config["bucket"], site_key,
+                    settings["tier_after_days"], args.dry_run,
+                )
                 if args.drop and not args.dry_run:
                     drop_verified(conn)
                 elif args.drop:
