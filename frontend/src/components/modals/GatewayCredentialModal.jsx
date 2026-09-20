@@ -13,8 +13,8 @@ const COPY_FEEDBACK_MS = 1600
  * host-run gateway has no appliance, so the password must be shown to a person.
  *
  * It always confirms, with no create-time exemption: a broker holds one password per username, so
- * minting always replaces, possibly a credential a running Node-RED holds, which then fails
- * silently.
+ * minting always replaces, possibly a credential a running Node-RED holds. The broker drops that
+ * session within a second and refuses its next CONNECT.
  *
  * The password lives in this component's state until the modal closes: not in a toast, the URL or
  * `digital_thread`, and `mosquitto_passwd` stores only a hash.
@@ -120,8 +120,9 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>
                 The broker holds <strong>one password per gateway</strong>, so this{' '}
                 <strong>replaces any credential this gateway already has</strong> — including one a
-                running Node-RED is using. That connection fails afterwards with{' '}
-                <span className="mono">Connection failed to broker</span> and no further detail.
+                running Node-RED is using. That connection is{' '}
+                <strong>dropped immediately</strong>: the gateway goes stale on the dashboard
+                within 90 seconds and cannot reconnect until the new password reaches it.
                 <div style={{ marginTop: '6px' }}>
                   The password is shown <strong>once</strong> and cannot be recovered: the broker
                   stores only a hash.
