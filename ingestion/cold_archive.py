@@ -149,7 +149,7 @@ def unconfigured(config, site_key):
         if not (config.get(field) or "").strip():
             missing.append(name)
     if not (site_key or "").strip():
-        missing.append("the archive.site_key setting (values.yaml archive.s3.siteKey)")
+        missing.append("the archive.site_key setting (values.yaml coldArchive.s3.siteKey)")
     return missing
 
 
