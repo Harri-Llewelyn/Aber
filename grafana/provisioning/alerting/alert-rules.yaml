@@ -318,6 +318,84 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # -----------------------------------------------------------------------------------------
+      # 5. ARCHIVE BACKLOG: cold telemetry that should be on the remote endpoint and is not.
+      #
+      # Since 0132 the archive is somewhere else, so exporting is a network operation with an
+      # outage window measured in days. What follows an outage is one of two things: a retention
+      # policy deleting chunks the archiver never reached, or the historian's volume filling. The
+      # chart defaults retention to `never` once a destination is configured, which makes the
+      # second the one a site gets -- recoverable, and losing nothing, PROVIDED somebody is told.
+      # This is the telling.
+      #
+      # The value is DAYS PAST THE THRESHOLD, from the newest verified `range_end`. Up to one chunk
+      # interval of backlog is normal: chunks are seven days and one is not eligible until its whole
+      # span is past the threshold, so a perfectly healthy site sits between zero and seven days
+      # overdue. FOURTEEN is two of those -- comfortably beyond normal, and still two weeks before
+      # anyone is short of disk. A threshold of "any backlog" would fire on every install, every
+      # week, correctly, and be switched off.
+      #
+      # `for: 1h` because the exporter runs nightly: this number moves once a day, and a shorter
+      # window would only re-report the same reading. NoData IS OK -- the view emits this row only
+      # while `archive.enabled` is on, so its absence means a stack that does not archive.
+      # -----------------------------------------------------------------------------------------
+      - uid: acs-archive-backlog
+        title: Archive Backlog
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            Cold telemetry is {{ printf "%.1f" $values.B.Value }} days past the tiering threshold
+            and not yet verified on the remote endpoint. Check the S3 endpoint and the cold-archive
+            CronJob's last run; the Cold Storage page names the chunk and any error.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       value        AS overdue_days
+                  FROM public.platform_health
+                 WHERE condition = 'archive_backlog'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [14]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
   # ===============================================================================================
   # INGESTION PIPELINE: whether telemetry is being recorded at all.
   #

@@ -5,12 +5,15 @@ import CopyableId from '../common/CopyableId'
 import { IconDatabase, IconAlertTriangle } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import {
+  ARCHIVE_BACKLOG_TOLERANCE_DAYS,
   COLD_STATES,
+  backlogTone,
   coldStateLabel,
   coldStateMeaning,
   coldStateTone,
   coldStorageSummary,
   formatBytes,
+  overdueDays,
 } from '../../utils/coldStorage'
 
 /**
@@ -31,11 +34,19 @@ export function ColdStorageTab({ showToast, userRole }) {
   // false, matching the setting's own default, so a failed read shows the more cautious of the two.
   const archiveEnabled = useSetting('archive.enabled', false)
 
+  // The catalogue lists what HAS been exported; a stalled archiver's symptom is rows that never
+  // appear. This is the other half, and it fails SOFT: the catalogue is still worth rendering
+  // without it, so a backlog that cannot be read leaves the figure absent rather than the page.
+  const [backlog, setBacklog] = useState(null)
+
   const load = useCallback((initial = false) => {
     if (initial) setLoading(true)
     api.listColdStorage()
       .then(d => { setRows(d); setError(null); setLoading(false) })
       .catch(e => { setError(e?.message || 'Could not read the cold storage catalogue'); setLoading(false) })
+    api.coldArchiveBacklog()
+      .then(setBacklog)
+      .catch(() => setBacklog(null))
   }, [])
 
   useEffect(() => { load(true) }, [load])
@@ -74,16 +85,47 @@ export function ColdStorageTab({ showToast, userRole }) {
             </div>
           )}
 
-          {/* The summary leads: how far back the history goes is recorded only here. */}
-          {!error && summary.total > 0 && (
+          {/* The summary leads: how far back the history goes is recorded only here.
+              THE ROW SURVIVES AN EMPTY CATALOGUE, and that is not a detail. The four figures below
+              describe what reached the endpoint, so with nothing archived they have nothing to say
+              -- but "nothing archived" is precisely the state an archiver that has never reached
+              its endpoint is in, and the backlog is the only thing on this page that can say so.
+              Gating the whole row on the catalogue hid the one figure that matters most. */}
+          {!error && (summary.total > 0 || backlog?.enabled) && (
             <div className="card-body" style={{ paddingTop: 0, display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
-              <Stat label="On cold storage" value={summary.archived} />
-              <Stat label="Rows archived" value={summary.rows.toLocaleString()} />
-              <Stat label="Object storage used" value={formatBytes(summary.bytes)} />
-              <Stat
-                label="Oldest span held"
-                value={summary.oldest ? new Date(summary.oldest).toLocaleDateString() : '—'}
-              />
+              {summary.total > 0 && (
+                <>
+                  <Stat label="On cold storage" value={summary.archived} />
+                  <Stat label="Rows archived" value={summary.rows.toLocaleString()} />
+                  <Stat label="Object storage used" value={formatBytes(summary.bytes)} />
+                  <Stat
+                    label="Oldest span held"
+                    value={summary.oldest ? new Date(summary.oldest).toLocaleDateString() : '—'}
+                  />
+                </>
+              )}
+              {/* THE FIGURE THAT SAYS A LINK IS DOWN. Everything else on this row describes what
+                  reached the endpoint; this is where the data that has not begins. Rendered only
+                  while archiving is on, because with it off every chunk is unexported for ever and
+                  the number would be alarming and meaningless. */}
+              {backlog?.enabled && (
+                <Stat
+                  label="Unexported since"
+                  tone={backlogTone(backlog.overdue_seconds)}
+                  value={
+                    backlog.oldest_unexported
+                      ? new Date(backlog.oldest_unexported).toLocaleDateString()
+                      : '—'
+                  }
+                  title={
+                    `Telemetry after this point is not yet verified on the remote endpoint — ` +
+                    `${overdueDays(backlog.overdue_seconds)} day(s) past the ` +
+                    `${backlog.threshold_days}-day threshold. Up to a week is normal: a chunk is ` +
+                    `not eligible until its whole span has passed the threshold. Beyond ` +
+                    `${ARCHIVE_BACKLOG_TOLERANCE_DAYS} days the Archive Backlog alert fires.`
+                  }
+                />
+              )}
               {/* SHOWN ONLY WHEN NON-ZERO. A permanent "0 awaiting drop" trains a reader to skip the
                   row, which is the one place the number matters when it changes. */}
               {summary.verified > 0 && (
@@ -110,18 +152,22 @@ export function ColdStorageTab({ showToast, userRole }) {
                 </div>
               ) : archiveEnabled ? (
                 /* On, and still empty. Turning the setting on arms the exporter; it does not run
-                   it, and nothing on a Compose stack does. */
+                   it. The service and the command here were Compose's and outlived it: there is no
+                   `cold-archiver` container and no COLD_ARCHIVE_INTERVAL_SECONDS anywhere in the
+                   tree, so this told an operator to run something that could not work. */
                 <div className="empty-text">
                   Archiving is <strong>on</strong> and runs by itself — the{' '}
-                  <code>cold-archiver</code> service exports, verifies and drops on a timer
-                  (<code>COLD_ARCHIVE_INTERVAL_SECONDS</code>, daily by default). Nothing has been
+                  <code>cold-archive</code> CronJob exports, verifies and drops on a schedule
+                  (<code>coldArchive.schedule</code>, 03:15 daily by default). Nothing has been
                   archived yet because nothing is <strong>eligible</strong>: a chunk only qualifies
                   once its whole time range is older than the threshold in{' '}
                   <strong>Settings → Cold Storage</strong>, so on a stack whose telemetry is newer
                   than that, there is correctly nothing to move.
                   <div style={{ marginTop: '8px' }}>
-                    See what is eligible, or run a pass now, with{' '}
-                    <code>docker exec acs-cymru_ingestion python -m cold_archive --dry-run</code>.
+                    See what is eligible with{' '}
+                    <code>kubectl exec deploy/ingestion -- python -m cold_archive --dry-run</code>,
+                    or run a pass now with{' '}
+                    <code>kubectl create job --from=cronjob/acs-cymru-cold-archive archive-now</code>.
                   </div>
                 </div>
               ) : (

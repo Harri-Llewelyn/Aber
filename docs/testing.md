@@ -307,6 +307,16 @@ python supabase/migrations/test_archive_purge_cascade.py
 # thread's DELETE row, and one that was never archived leaves none; the tombstone table has one
 # SELECT policy and no way in for authenticated; an export reaches the thread as EXPORTED.
 python supabase/migrations/test_archiving_is_a_lifecycle.py
+# How far behind the cold archive is (0133), and chiefly the property the rest of the platform's
+# alerting rests on. `platform_health_rows()` is ONE UNION and postgres_fdw raises on CONNECT, not
+# on scan -- so the first version of 0133, which read the historian's manifest directly in a new
+# arm, took gateway staleness, stuck enrolments, the quarantine queue and expected publishers down
+# with it whenever the historian was unreachable: four conditions unrelated to the archive, absent
+# exactly when the database they describe is in trouble. THIS LANE HAS NO HISTORIAN, which is what
+# makes it the one that exercises that path on every run. Also that "cannot be computed" arrives as
+# an absent row rather than a reassuring zero, and that the ungated arithmetic behind the figure is
+# not callable from PostgREST.
+python supabase/migrations/test_cold_archive_backlog.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid

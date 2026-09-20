@@ -1918,6 +1918,39 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// The Cold Storage page and the Archive Backlog alert agree about what "behind" means
+//
+// The page colours a backlog and the alert fires on one, from the same number in two files. A page
+// calling a backlog fine while the alert was firing would be the more convincing of the two,
+// because it is the one somebody looks at after being paged.
+{
+  const util = read('frontend/src/utils/coldStorage.js');
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+
+  const page = util.match(/ARCHIVE_BACKLOG_TOLERANCE_DAYS\s*=\s*(\d+)/)?.[1];
+  // The evaluator inside the acs-archive-backlog rule, which is the last `params: [n]` before the
+  // next rule begins.
+  const ruleBlock = rules.slice(rules.indexOf('uid: acs-archive-backlog'));
+  const alert = ruleBlock.match(/type:\s*gt\s*\n\s*params:\s*\[(\d+)\]/)?.[1];
+
+  if (!page || !alert) {
+    fail(
+      `the archive backlog tolerance could not be read from both sides (page: ${page || 'MISSING'}, ` +
+        `alert: ${alert || 'MISSING'}). One of them has been renamed or removed, and the other is ` +
+        'now the only definition of a threshold two surfaces are meant to share.'
+    );
+  } else if (page !== alert) {
+    fail(
+      `the Cold Storage page tolerates ${page} days of archive backlog and the Archive Backlog ` +
+        `alert fires above ${alert}. Between those numbers one surface calls the archive healthy ` +
+        'while the other pages somebody.'
+    );
+  } else {
+    pass(`the archive backlog tolerance is ${page} days on the Cold Storage page and in its alert rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // The buckets agree in all three places that decide whether one works
 //
 // A bucket created with no policies is invisible to every browser role; a policy naming a bucket

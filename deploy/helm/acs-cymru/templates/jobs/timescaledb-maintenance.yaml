@@ -157,7 +157,9 @@ spec:
 {{- end }}
 
               echo 'Reconciling compression and retention policies...'
-              $PSQL -v compress_after={{ .Values.timescaledb.retention.compressAfter | quote }} -v retain_after={{ .Values.timescaledb.retention.retainFor | quote }} -f /sql/retention.sql
+              {{/* retainFor is DERIVED when empty: `never` once cold archival has a destination,
+                   90 days otherwise. See acs-cymru.timescaleRetainFor. */}}
+              $PSQL -v compress_after={{ .Values.timescaledb.retention.compressAfter | quote }} -v retain_after={{ include "acs-cymru.timescaleRetainFor" . | quote }} -f /sql/retention.sql
               {{- if .Values.timescaledb.rollups.enabled }}
 
               echo 'Reconciling telemetry rollups...'

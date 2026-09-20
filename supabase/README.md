@@ -2150,11 +2150,48 @@ database, and it belongs on local storage where the browser can sign a URL for i
 install's bundles stay where they were written; `asset_exports.object_bucket` is per row, which is
 what makes that safe to say.
 
-**Enabling it means standing retention down.** Both mechanisms drop chunks, and the timer wins the
-race for anything the archiver has not reached: set `TIMESCALE_RETAIN_FOR=never` and let
-`python -m cold_archive --drop` remove chunks once their export is verified. `retention.sql` warns
-when it sees a manifest with rows and a drop policy being added, because that combination silently
-deletes what the archiver has not got to yet.
+#### Enabling it stands retention down, and the chart now does that for you (`0133`)
+
+Both mechanisms drop chunks and the timer wins the race for anything the archiver has not reached.
+Since `0132` that race is run over a network link, where an outage is measured in days rather than
+seconds, so `timescaledb.retention.retainFor` is **derived when left empty**:
+
+| `retainFor` | `coldArchive.s3` configured | Result |
+| :--- | :--- | :--- |
+| empty (shipped default) | yes | `never` |
+| empty | no | `90 days` |
+| anything explicit | either | exactly what you wrote |
+
+An explicit `90 days` beside a configured endpoint is left alone: that is a site saying it accepts
+the deletion, and it is not the chart's decision to overrule. `retention.sql` still warns when it
+sees a manifest with rows and a drop policy being added — but a warning at boot is not read by
+whoever configured the endpoint a year later, which is why the default moved.
+
+`never` means the historian's volume grows until somebody acts. That is the better of the two
+failures — recoverable, and it loses nothing — **provided somebody is told it is coming.**
+
+#### How far behind the archive is
+
+`cold_archive_backlog()` answers it, from the newest `range_end` this site has **verified**:
+everything after that point is telemetry no object is yet known to hold. Before the first export
+there is no frontier, so the answer is the oldest raw data there is
+(`storage_footprint.oldest_data`), and an archiver that has never reached its endpoint is reported
+rather than read as a healthy zero.
+
+It surfaces in two places, from one function so they cannot disagree:
+
+- **The Cold Storage page**, as *Unexported since* — the date the unexported span begins, with the
+  overdue figure and the threshold in its tooltip. Shown only while `archive.enabled` is on.
+- **The Archive Backlog alert** (`acs-archive-backlog`), through the `archive_backlog` condition on
+  `platform_health`, firing above **14 days past the threshold**, held level with the page's
+  tolerance by `check-docs-drift.mjs`.
+
+**Up to one chunk interval of backlog is normal**, and the threshold is chosen around that. Chunks
+are seven days and `cold_tier_candidates()` bounds on `range_end`, so a chunk is not eligible until
+its whole span has passed the threshold: a perfectly healthy site sits between zero and seven days
+overdue. Fourteen is two of those — beyond anything the ordinary cadence produces, and still two
+weeks before a historian with retention off is short of disk. Alerting on any backlog at all would
+fire on every install, every week, correctly, and be switched off.
 
 ```bash
 python -m cold_archive --dry-run   # what would be exported
@@ -2221,15 +2258,27 @@ has `--csv`.
 
 ### Running it, and the switch that used to mean nothing
 
-The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_INTERVAL_SECONDS`
-(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It
-stays inert until the switch is turned on — which is what makes the switch a control rather than a
-note about a command somebody has to remember.
+**The chart runs the archiver as a CronJob** — `coldArchive`, on by default with `--drop` on: the
+ingestion image under `python -m cold_archive`, at `coldArchive.schedule` (03:15 daily). It re-reads
+`archive.enabled` every pass and does nothing while it is off, so it stays inert until the switch is
+turned on — which is what makes the switch a control rather than a note about a command somebody has
+to remember.
 
-> **The chart runs the archiver as a CronJob** (`coldArchive`, on by default, `--drop` on): the
-> ingestion image under `python -m cold_archive`, daily. `cold_archive.sql` is mirrored into the
-> chart and applied by the `timescaledb-maintenance` Job, between `storage.sql` and `roles.sql`, so
-> the manifest exists before the first run and `0068`'s self-check passes for the right reason.
+`cold_archive.sql` is mirrored into the chart and applied by the `timescaledb-maintenance` Job,
+between `storage.sql` and `roles.sql`, so the manifest exists before the first run and `0068`'s
+self-check passes for the right reason.
+
+To see what is eligible, or to force a pass:
+
+```bash
+kubectl exec deploy/ingestion -- python -m cold_archive --dry-run
+kubectl create job --from=cronjob/acs-cymru-cold-archive archive-now
+```
+
+> This paragraph described a `cold-archiver` Compose service running `--loop` on
+> `COLD_ARCHIVE_INTERVAL_SECONDS`. Both outlived Compose: no such container exists and that variable
+> is read nowhere in the tree. The Cold Storage page carried the same instruction and has been
+> corrected with it.
 
 It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
 replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.

@@ -107,3 +107,35 @@ export function coldStorageSummary(rows) {
     ),
   }
 }
+
+/**
+ * Days past the tiering threshold before a backlog is worth acting on.
+ *
+ * UP TO ONE CHUNK INTERVAL IS NORMAL. Chunks are seven days and one is not eligible for export
+ * until its whole span is past the threshold, so a perfectly healthy site sits between zero and
+ * seven days behind. Fourteen is two of those: beyond anything the ordinary cadence produces, and
+ * still two weeks before a historian with retention off is short of disk.
+ *
+ * The same number is the Archive Backlog alert rule's threshold
+ * (grafana/provisioning/alerting/alert-rules.yaml, `acs-archive-backlog`). A page that called a
+ * backlog fine while the alert was firing would be the more convincing of the two, so
+ * check-docs-drift.mjs holds them level.
+ */
+export const ARCHIVE_BACKLOG_TOLERANCE_DAYS = 14
+
+/** Seconds of overdue as whole days, for display. */
+export function overdueDays(seconds) {
+  const n = Number(seconds)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.round((n / 86400) * 10) / 10
+}
+
+/**
+ * `warning` once the backlog passes the tolerance, neutral below it.
+ *
+ * Never `success`: an archive that is up to date is the expected state, and colouring it green
+ * would make the ordinary case shout as loudly as the one that needs somebody.
+ */
+export function backlogTone(seconds) {
+  return overdueDays(seconds) > ARCHIVE_BACKLOG_TOLERANCE_DAYS ? 'warning' : 'neutral'
+}
