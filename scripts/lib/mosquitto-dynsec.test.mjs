@@ -32,6 +32,8 @@ import {
   rolesFor,
   summariseInventory,
   withPrimaryHostGrant,
+  withDirectoryGrant,
+  directoryTopicFilter,
 } from './mosquitto-dynsec.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -332,5 +334,83 @@ describe('the primary host STATE grant', () => {
     const { config } = reconcile(null, withPrimaryHostGrant(POLICY, 'Site-One'), managed);
     const ingestion = config.roles.find((r) => r.rolename === 'ingestion');
     assert.ok(ingestion.acls.some((a) => a.acltype === 'publishClientSend' && a.topic === 'spBv1.0/STATE/Site-One'));
+  });
+});
+
+describe('the Directory grant is derived from the site, not written in the policy', () => {
+  test('the ingestion role gains all three grants on the prefix subtree', () => {
+    const granted = withDirectoryGrant(POLICY, 'Plant-7/Directory/v1');
+    const ingestion = granted.roles.find((r) => r.rolename === 'ingestion');
+    for (const acltype of ['publishClientSend', 'subscribePattern', 'publishClientReceive']) {
+      assert.ok(
+        ingestion.acls.some((a) => a.acltype === acltype && a.topic === 'Plant-7/Directory/v1/#' && a.allow),
+        `ingestion is missing ${acltype}`,
+      );
+    }
+  });
+
+  test('the policy file itself names no Directory subtree', () => {
+    // The whole point: the group belongs to the site, so the repository cannot spell the topic.
+    // A literal creeping back would grant one site's subtree on every other site's broker.
+    assert.ok(
+      !JSON.stringify(POLICY.roles).includes('/Directory/'),
+      'dynsec-roles.json declares a Directory ACL; it is injected at reconcile time instead',
+    );
+  });
+
+  test('no other role gains a read of the Directory', () => {
+    // A gateway reading it would enumerate every asset on the site, and reading is silent.
+    const granted = withDirectoryGrant(POLICY, 'Plant-7/Directory/v1');
+    for (const role of granted.roles) {
+      if (role.rolename === 'ingestion') continue;
+      assert.ok(
+        !(role.acls || []).some((a) => String(a.topic).includes('/Directory/')),
+        `role ${role.rolename} may reach the Directory`,
+      );
+    }
+  });
+
+  test('a prefix with a wildcard or whitespace is refused', () => {
+    for (const bad of ['a/+/b', 'a/#', 'a b', '', null, undefined]) {
+      assert.throws(() => directoryTopicFilter(bad), (e) => e.code === 'invalid_directory_prefix', `${bad}`);
+    }
+  });
+
+  test('a trailing slash does not produce an empty level', () => {
+    assert.equal(directoryTopicFilter('Plant-7/Directory/v1/'), 'Plant-7/Directory/v1/#');
+  });
+
+  test('the argument is not mutated, so the document still matches the repository file', () => {
+    const before = JSON.stringify(POLICY);
+    withDirectoryGrant(POLICY, 'Plant-7/Directory/v1');
+    assert.equal(JSON.stringify(POLICY), before);
+  });
+
+  test('applying it twice is a no-op, which is what makes the boot reconcile idempotent', () => {
+    const once = withDirectoryGrant(POLICY, 'Plant-7/Directory/v1');
+    const twice = withDirectoryGrant(once, 'Plant-7/Directory/v1');
+    assert.deepEqual(twice, once);
+  });
+
+  test('a policy with no ingestion role is refused rather than silently ungranted', () => {
+    const stripped = { ...POLICY, roles: POLICY.roles.filter((r) => r.rolename !== 'ingestion') };
+    assert.throws(() => withDirectoryGrant(stripped, 'Plant-7/Directory/v1'), (e) => e.code === 'invalid_policy');
+  });
+
+  test('reconcile carries the grant through to the written document', () => {
+    const managed = [clientFromPasswordEntry(entry('factoryplus_ingestion'), rolesFor('ingestion', 'factoryplus_ingestion'))];
+    const { config } = reconcile(null, withDirectoryGrant(POLICY, 'Plant-7/Directory/v1'), managed);
+    const ingestion = config.roles.find((r) => r.rolename === 'ingestion');
+    assert.ok(ingestion.acls.some((a) => a.acltype === 'publishClientSend' && a.topic === 'Plant-7/Directory/v1/#'));
+  });
+
+  test('both derived grants survive each other', () => {
+    // They edit the same role, so an implementation that replaced `acls` rather than appending
+    // would drop whichever ran first and nothing else here would notice.
+    const both = withDirectoryGrant(withPrimaryHostGrant(POLICY, 'Site-One'), 'Plant-7/Directory/v1');
+    const ingestion = both.roles.find((r) => r.rolename === 'ingestion');
+    const writes = ingestion.acls.filter((a) => a.acltype === 'publishClientSend').map((a) => a.topic);
+    assert.ok(writes.includes('spBv1.0/STATE/Site-One'));
+    assert.ok(writes.includes('Plant-7/Directory/v1/#'));
   });
 });

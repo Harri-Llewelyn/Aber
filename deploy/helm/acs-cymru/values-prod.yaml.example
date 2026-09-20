@@ -196,6 +196,21 @@ secrets:
   # LEAVE EMPTY. Break-glass static token that bypasses Supabase Auth entirely.
   noderedAdminToken: ""
 
+# ---------------------------------------------------------------------------------------------
+# The two identities a site names once, and cannot comfortably change afterwards.
+# ---------------------------------------------------------------------------------------------
+# Both reach outside this chart: they go into the configuration of equipment it never sees, and
+# into the address of every message and row already written. Neither is a preference.
+ingestion:
+  # REQUIRED -- the render fails while it is empty. The Sparkplug primary host application whose
+  # `spBv1.0/STATE/<id>` every gateway on site watches to learn whether its consumer is there.
+  primaryHostId: ""
+  # The Sparkplug group: the second segment of every topic this site publishes. It defaults to
+  # `ACS-Cymru`, the platform's own name, which is a poor thing for a plant's data to live under.
+  # Name the site's own here, BEFORE the first install: db-init refuses a later boot whose value
+  # differs, because changing it re-addresses every gateway and all existing history.
+  sparkplugGroup: ACS-Cymru
+
 # publicUrls are derived from global.publicBaseDomain unless set. Override only when a service
 # lives somewhere that does not follow the pattern.
 publicUrls:

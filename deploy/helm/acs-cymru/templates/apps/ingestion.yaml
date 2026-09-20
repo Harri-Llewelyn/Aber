@@ -207,6 +207,14 @@ spec:
             - name: PRIMARY_HOST_ID
               value: {{ include "acs-cymru.primaryHostId" . | quote }}
             {{/*
+              The site's Sparkplug group. The daemon resolves every gateway on the pair
+              (group, node) read from the row, so this is not what addresses a message -- it is
+              what a log line names when a gateway's row carries no group of its own, and what
+              0131 holds the database to.
+            */}}
+            - name: SPARKPLUG_GROUP
+              value: {{ include "acs-cymru.sparkplugGroup" . | quote }}
+            {{/*
               The Directory's MQTT half. Passed unconditionally rather than behind an `if`, so that
               the daemon logs which of the two states it is in on every boot -- a publisher that is
               off and silent is indistinguishable from one that is on and failing, and only the
@@ -215,7 +223,7 @@ spec:
             - name: DIRECTORY_MQTT_ENABLED
               value: {{ .Values.ingestion.directoryMqttEnabled | quote }}
             - name: DIRECTORY_MQTT_TOPIC_PREFIX
-              value: {{ .Values.ingestion.directoryMqttTopicPrefix | quote }}
+              value: {{ include "acs-cymru.directoryTopicPrefix" . | quote }}
             - name: DIRECTORY_MQTT_INTERVAL_SECONDS
               value: {{ .Values.ingestion.directoryMqttIntervalSeconds | quote }}
             {{/* The Unified Namespace bridge, passed unconditionally for the same reason. */}}

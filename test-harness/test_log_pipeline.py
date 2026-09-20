@@ -45,7 +45,7 @@ LOKI = os.getenv("LOKI_TEST_URL", "http://127.0.0.1:3100")
 PROM = os.getenv("PROMETHEUS_TEST_URL", "http://127.0.0.1:9090")
 MQTT_HOST = os.getenv("MQTT_TEST_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_TEST_PORT", "1883"))
-GROUP = "ACS-Cymru"
+GROUP = os.getenv("SPARKPLUG_GROUP", "ACS-Cymru")
 
 # The reason this suite drives. One of the ten in ingestion.py, chosen because it is reachable
 # with a single publish and needs no fixture: an unregistered device is refused by definition.

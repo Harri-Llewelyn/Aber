@@ -141,6 +141,13 @@ spec:
               value: {{ include "acs-cymru.giteaUrl" . | quote }}
             - name: NODERED_OAUTH_CALLBACK_URL
               value: {{ printf "%s/auth/strategy/callback" (include "acs-cymru.noderedUrl" .) | quote }}
+            {{/*
+              The site's Sparkplug group. 0131 seeds it on the first boot and RAISES on any later
+              boot whose value differs, so this env is what makes the chart and the database one
+              answer rather than two. The same helper the daemon and the broker read.
+            */}}
+            - name: SPARKPLUG_GROUP
+              value: {{ include "acs-cymru.sparkplugGroup" . | quote }}
             {{- /*
               Creates the Supabase-side `grafana_reader` in archived migration 0027 -- the role Grafana
               connects as to read public.storage_footprint. THE SAME CREDENTIAL as the
@@ -256,6 +263,7 @@ spec:
                     -v supabase_anon_key="$SUPABASE_PUBLISHABLE_KEY" \
                     -v gateway_revoke_secret="$GATEWAY_REVOKE_SECRET" \
                     -v forge_sweep_secret="$FORGE_SWEEP_SECRET" \
+                    -v sparkplug_group="$SPARKPLUG_GROUP" \
                     -f "$f" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi
                   cat /tmp/migration.log
                   if [ "$attempt" -ge 3 ] || ! grep -qE "deadlock detected|due to lock timeout" /tmp/migration.log; then

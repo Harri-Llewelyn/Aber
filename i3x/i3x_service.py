@@ -122,7 +122,10 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 # 1000 is far above any real client: the conformance suite's largest batch is a few dozen, and a
 # whole demonstrator address space is under a hundred elements.
 MAX_BULK_ELEMENT_IDS = int(os.getenv("I3X_MAX_BULK_ELEMENT_IDS", "1000"))
-DEFAULT_SPARKPLUG_GROUP = os.getenv("DEFAULT_SPARKPLUG_GROUP", "ACS-Cymru")
+# The site's Sparkplug group, for keying the address space when a topic carries none. Read as
+# SPARKPLUG_GROUP since 0131, which is the one name the chart, the daemon and the database share;
+# the chart never set the older DEFAULT_SPARKPLUG_GROUP, so nothing was relying on it.
+DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "ACS-Cymru")
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
 _values: Dict[str, Dict[str, dict]] = {}

@@ -2005,7 +2005,7 @@ const apiMethods = {
     if (path.startsWith('/api/v1/settings')) {
       const { data, error } = await supabase
         .from('system_settings')
-        .select('id,key,value,value_type,category,label,description,fallback_source,min_value,max_value,updated_at,updated_by')
+        .select('id,key,value,value_type,category,label,description,fallback_source,min_value,max_value,read_only,updated_at,updated_by')
         .order('category', { ascending: true })
         .order('label', { ascending: true });
       if (error) throw error;

@@ -431,6 +431,47 @@ from one group to a request from another — precisely the collision this closes
 > **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
 > `0001` no longer carries a second, explicit-column copy of the view — see below.
 
+### The group belongs to the site, and is fixed at install (`0131`)
+
+`gateways.sparkplug_group` defaulted to the literal `ACS-Cymru` — the platform vendor's name — so
+every site published its own machine data under it. The group is the first segment of the namespace
+a plant's data lives in, and it belongs to the plant.
+
+It is now `ingestion.sparkplugGroup` in the chart. `0131` seeds it into the `sparkplug.group_id`
+setting on the first boot, and the column defaults to `sparkplug_group_default()`, which reads that
+row. The default value is unchanged, so an install that never names a group publishes exactly what
+it published before.
+
+**The setting is read-only and a mismatch raises**, which are two halves of the same decision.
+Changing the group at runtime splits the topic tree at that instant: everything published before is
+under the old group and everything after under the new one, with in-flight gateways still on the
+old one until each is reconfigured. That is a migration, not a preference. So `system_settings`
+gained a `read_only` column with a trigger that refuses a value change, and a boot whose chart value
+differs from the stored one **aborts db-init** rather than quietly re-pointing the column.
+
+Passing no `sparkplug_group` is not a mismatch: the migration falls back to the same default the
+chart ships, which is what leaves the throwaway database and the CI lanes unaffected.
+
+#### Changing it deliberately
+
+There is no supported in-place change, and the procedure below is a fleet reconfiguration rather
+than an edit. In order:
+
+1. Stop the ingestion daemon, so nothing is resolving against a moving target.
+2. `UPDATE public.system_settings SET read_only = false WHERE key = 'sparkplug.group_id';` then set
+   the value, then set `read_only` back. Both statements run as `postgres`; the guard is a trigger,
+   not a policy, so `service_role` does not bypass it.
+3. Set `ingestion.sparkplugGroup` to the same value and `helm upgrade`. The broker's Directory grant
+   and the daemon's topic prefix are both derived from it, so they move together.
+4. `UPDATE public.gateways SET sparkplug_group = ...` for every gateway that should move. The column
+   is per-row on purpose: a gateway can stay in the old group while the rest move.
+5. Re-issue a bundle for every Remote appliance. The flow template carries the group as a literal,
+   substituted at bundle time, so a running appliance goes on publishing under the old one.
+
+**History is not rewritten and cannot be.** `resolve_gateway()` resolves on `(group, node)`, so rows
+written before the change stay addressed by the old pair. That is the cost the fixed-at-install rule
+exists to make visible before it is paid.
+
 ### The Directory reports liveness it observed (`0054`)
 
 `directory_services.status` and `.last_heartbeat` were **never written by anything**. The only
