@@ -40,12 +40,10 @@
     },
     {
       "rolename": "i3x",
-      "textDescription": "The i3X server: reads the whole namespace and the Directory, publishes nothing.",
+      "textDescription": "The i3X server: reads the whole Sparkplug namespace and publishes nothing. It reads the Directory from the database over PostgREST, not from the broker, so it holds no Directory grant here.",
       "acls": [
         { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true },
-        { "acltype": "subscribePattern", "topic": "ACS-Cymru/Directory/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "ACS-Cymru/Directory/#", "allow": true }
+        { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true }
       ]
     },
     {

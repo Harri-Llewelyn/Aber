@@ -1060,14 +1060,17 @@ default.
 
 ```
 ingestion   publish, subscribe, receive   ACS-Cymru/Directory/#
-i3x         subscribe, receive            ACS-Cymru/Directory/#
 ```
+
+**Nothing else holds a Directory grant**, including the i3X server: it reads the Directory from
+the database over PostgREST, where the rows are authoritative, so a broker grant would be one it
+never exercises (issue #297).
 
 **No gateway may read it.** A gateway is otherwise confined to `spBv1.0/+/+/<its id>/#` — its own
 edge node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting
 it here would undo that confinement through the back door.
-`scripts/check-broker-config.mjs` asserts both halves: that ingestion may publish
-`ACS-Cymru/Directory/v1/device`, and that a gateway may not read it.
+`scripts/check-broker-config.mjs` asserts all three by delivery: that ingestion may publish
+`ACS-Cymru/Directory/v1/device`, and that neither a gateway nor the i3X principal may read it.
 
 **The source is the enrolment record, never a birth.** This is the point on which
 [issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)'s design was refused. A registry

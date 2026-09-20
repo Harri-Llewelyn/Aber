@@ -462,6 +462,15 @@ try {
           GATEWAY_A, 'ACS-Cymru/Directory/#')),
         false
       );
+      // The i3X server reads the Directory over PostgREST, so its role holds no grant here
+      // (issue #297). An unused grant only ever widens what arrives, so nothing else in this
+      // check would notice it coming back.
+      expect(
+        'the i3X principal may NOT read the Directory (it reads it from the database)',
+        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
+          'factoryplus_i3x', 'ACS-Cymru/Directory/#')),
+        false
+      );
 
       // The Unified Namespace (ingestion/uns_publish.py): every reading in the clear under uns/.
       // The same two halves, for the same reason: the daemon is the only writer, and a gateway
