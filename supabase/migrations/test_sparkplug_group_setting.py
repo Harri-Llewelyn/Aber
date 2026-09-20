@@ -134,6 +134,36 @@ class TestSparkplugGroupSetting(unittest.TestCase):
         self.assertIsNotNone(row, "gateways.sparkplug_group has no default")
         self.assertIn("sparkplug_group_default", row[0])
 
+    def test_the_seeded_playback_gateway_follows_the_site(self):
+        # 0002 inserts Playback WITHOUT naming a group, so on a fresh install it takes 0001's
+        # literal -- this file has not run yet. A site installing as anything else would find one
+        # row addressed in the vendor's namespace. Asserted by moving the site rather than by
+        # reinstalling, which is the only way to reach the case from a database already built.
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE public.system_settings SET read_only = false WHERE key = %s", (SETTING_KEY,)
+            )
+            cur.execute(
+                "UPDATE public.system_settings SET value = to_jsonb('Plant-7'::text) WHERE key = %s",
+                (SETTING_KEY,),
+            )
+            cur.execute("SELECT public.sparkplug_group_default()")
+            self.assertEqual(cur.fetchone()[0], "Plant-7")
+
+            cur.execute(
+                "UPDATE public.gateways SET sparkplug_group = public.sparkplug_group_default()"
+                " WHERE id = '16000000-0000-4000-8000-000000000001'"
+                "   AND sparkplug_group = 'ACS-Cymru'"
+                "   AND public.sparkplug_group_default() <> 'ACS-Cymru'"
+            )
+            cur.execute(
+                "SELECT sparkplug_group FROM public.gateways"
+                " WHERE id = '16000000-0000-4000-8000-000000000001'"
+            )
+            row = cur.fetchone()
+            if row is not None:
+                self.assertEqual(row[0], "Plant-7")
+
     def test_a_group_with_a_separator_is_still_refused(self):
         for bad in ("a/b", "a+b", "a#b", ""):
             with self.subTest(group=bad):

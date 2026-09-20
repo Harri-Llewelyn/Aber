@@ -176,7 +176,31 @@ COMMENT ON COLUMN public.gateways.sparkplug_group IS
     'issued identity.';
 
 -- ---------------------------------------------------------------------------------------------
--- 4. Self-check
+-- 4. The one gateway this repository seeds follows the site
+-- ---------------------------------------------------------------------------------------------
+-- `0002` inserts the Playback gateway WITHOUT naming a group, so it takes the column default --
+-- and on a fresh install that is still `0001`'s literal, because this file has not run yet. A site
+-- installing as `Plant-7` would otherwise find one row addressed in the vendor's namespace, with
+-- nothing to say why.
+--
+-- NARROW ON PURPOSE. It corrects the row THIS REPOSITORY SEEDS, by its pinned id, and only while
+-- that row still carries the historical literal -- an operator who deliberately moved it, or any
+-- gateway they created themselves, is left alone. The column is per-row precisely so a gateway can
+-- sit in another group.
+DO $$
+DECLARE
+    v_group text := public.sparkplug_group_default();
+BEGIN
+    UPDATE public.gateways
+       SET sparkplug_group = v_group
+     WHERE id = '16000000-0000-4000-8000-000000000001'
+       AND sparkplug_group = 'ACS-Cymru'
+       AND v_group <> 'ACS-Cymru';
+END;
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 5. Self-check
 -- ---------------------------------------------------------------------------------------------
 -- Asserts what THIS file changed and nothing absolute: no count of settings, no list of columns.
 DO $$
