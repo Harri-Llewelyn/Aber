@@ -31,6 +31,7 @@ vi.mock('../api', async () => {
       activePlaybackJob: vi.fn(),
       recentPlaybackJobs: vi.fn(),
       playbackWorkerStatus: vi.fn(),
+      playbackStaleCredentials: vi.fn(),
       ensureShadowLanes: vi.fn(),
       startPlayback: vi.fn(),
       stopPlayback: vi.fn()
@@ -109,6 +110,9 @@ beforeEach(() => {
   api.playbackWorkerStatus.mockResolvedValue({
     held_edge_nodes: ['gwy130000000000400080000'], reported_at: new Date().toISOString()
   })
+  // Nothing stale by default: a re-issue the worker has not picked up is its own case (#217),
+  // asserted below, and every other test here is about something else.
+  api.playbackStaleCredentials.mockResolvedValue([])
 })
 
 const TARGET = {
@@ -850,6 +854,62 @@ describe('publishing a capture back', () => {
     expect(await screen.findByText(/was not given/)).toBeInTheDocument()
     expect(screen.getByText(/MQTT_PLAYBACK_CREDENTIALS/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+  })
+
+  /**
+   * #217, and the ORDINARY case rather than an edge one: the broker keeps one password per gateway,
+   * so every mint after the first replaces one. The worker goes on reporting the id -- that does not
+   * change on a rotation -- so "held" cannot be the question the dialog asks.
+   */
+  it('refuses a target whose credential was re-issued after the worker last picked one up', async () => {
+    api.playbackStaleCredentials.mockResolvedValue([
+      { sparkplug_id: 'gwy130000000000400080000',
+        observed_at: new Date(Date.now() - 300000).toISOString(),
+        issued_at: new Date().toISOString() }
+    ])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+
+    expect(await screen.findByText(/was re-issued after the playback/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+  })
+
+  /** Nothing for the operator to do, so the message must not read like the missing-password one. */
+  it('says the re-issue resolves itself, rather than asking for a password to be pasted', async () => {
+    api.playbackStaleCredentials.mockResolvedValue([
+      { sparkplug_id: 'gwy130000000000400080000',
+        observed_at: new Date(Date.now() - 300000).toISOString(),
+        issued_at: new Date().toISOString() }
+    ])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+
+    expect(await screen.findByText(/nothing needs\s+doing here/)).toBeInTheDocument()
+    expect(screen.queryByText(/MQTT_PLAYBACK_CREDENTIALS/)).toBeNull()
+  })
+
+  /** The dropdown says which state a target is in before it is chosen. */
+  it('marks a stale target in the target list', async () => {
+    api.playbackStaleCredentials.mockResolvedValue([
+      { sparkplug_id: 'gwy130000000000400080000', observed_at: null, issued_at: new Date().toISOString() }
+    ])
+    await open()
+    expect(await screen.findByText(/still has the old password/)).toBeInTheDocument()
+  })
+
+  /**
+   * NARROWING ONLY. This read failing must not refuse a target the dialog would otherwise offer:
+   * start_playback_job() carries the same gate, so the server still refuses what matters.
+   */
+  it('offers what it always did when the staleness read fails', async () => {
+    api.playbackStaleCredentials.mockRejectedValue(new Error('nope'))
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+      { target: { value: 'dev310000000000400080000' } })
+
+    expect(screen.queryByText(/was re-issued after the playback/)).toBeNull()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
   })
 
   /**

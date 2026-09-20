@@ -656,13 +656,31 @@ gain about a minute after the mint. So a credential issued from the page reaches
 roughly a minute rather than "within a few seconds", and a playback started inside that window is
 refused by the dialog for a target the platform has already provisioned.
 
-**On a re-issue nothing can tell you when it has landed**, which is worth stating because it is the
-ordinary case: the broker holds one password per gateway, so every mint after the first *replaces*
-one. `playback_report_credentials()` carries edge-node ids and nothing else, so the reported set is
-identical before and after a rotation — the worker goes on reporting the target while still holding
-the previous password, and the only symptom is a job that fails at CONNACK with `rc=5`. Waiting out
-the sync period is the whole remedy; `test_playback_replay.py` does exactly that rather than
-trusting the report, and says so.
+**A re-issue is reported, which it was not before `0129`** — and it is the ordinary case, because
+the broker holds one password per gateway and every mint after the first *replaces* one.
+`playback_report_credentials()` carried edge-node ids and nothing else, so the reported set was
+identical before and after a rotation: the worker went on reporting the target while holding the
+previous password, the dialog offered it, and the job failed at CONNACK with `rc=5` a second later.
+
+The worker now also names the gateways it has picked up a **new** password for since it last
+reported, and the database stamps those with `now()` in
+`playback_worker_status.credential_observed_at`. `playback_stale_credentials()` compares that with
+the gateway's last `CREDENTIAL_ISSUED` row — which already existed, because the playback delivery is
+the same mint call with `deliver_to_playback` set — and both the dialog and `start_playback_job()`
+refuse a target whose credential was issued after the worker last saw one.
+
+Three properties of that worth keeping:
+
+- **Ids from the worker, the timestamp from the database.** A timestamp taken on the worker would be
+  compared against one taken by Postgres, so any offset between the two clocks could make a
+  credential the worker had just picked up look older than the issue that delivered it — and refuse
+  a target that works.
+- **No fingerprint of the password.** `playback_worker_status` is readable by Administrator,
+  Shopfloor_Manager and Auditor. A truncated hash is not the password but is derived from it, and a
+  sparkplug_id and a timestamp are derived from nothing.
+- **Absent is unknown, not stale.** A worker that has reported no observation — one from the release
+  before `0129` — is not refused, or the release introducing this would break playback on the
+  rollout that delivers it.
 
 **The empty file is the normal state and must not read as a fault.** The chart creates
 `playback_credentials.json` on every install and the pod projects it whether or not anything has

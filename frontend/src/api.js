@@ -1309,6 +1309,20 @@ const apiMethods = {
     return data || null;
   },
 
+  /**
+   * The gateways the worker holds a credential for that has since been RE-ISSUED (#217, `0129`).
+   * Held and current are different facts: the broker keeps one password per gateway, so every mint
+   * after the first replaces one, and the reported id set does not change when it does.
+   *
+   * Server-side, because the comparison is against `digital_thread`, which the dialog has no
+   * business reading.
+   */
+  playbackStaleCredentials: async () => {
+    const { data, error } = await supabase.rpc('playback_stale_credentials');
+    if (error) throw new Error(error.message || 'Could not read which playback credentials are stale');
+    return data || [];
+  },
+
   activePlaybackJob: async () => {
     const { data, error } = await supabase
       .from('playback_jobs')

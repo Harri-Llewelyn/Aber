@@ -28,6 +28,8 @@ const SPEEDS = [
 export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   const [targets, setTargets] = useState(null)
   const [worker, setWorker] = useState(undefined)   // undefined = not loaded, null = never reported
+  // sparkplug_ids whose credential was re-issued after the worker last picked one up (#217).
+  const [stale, setStale] = useState([])
   const [targetId, setTargetId] = useState('')
   const [deviceMap, setDeviceMap] = useState({})
   const [speed, setSpeed] = useState(1)
@@ -49,6 +51,12 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
     api.playbackWorkerStatus()
       .then(row => { if (!cancelled) setWorker(row) })
       .catch(() => { if (!cancelled) setWorker(null) })
+    // Also non-fatal, and an empty list on failure is the safe direction: this narrows what the
+    // dialog offers, so failing to read it offers what it always did and `start_playback_job()`
+    // still refuses a stale target.
+    api.playbackStaleCredentials()
+      .then(rows => { if (!cancelled) setStale(rows.map(r => r.sparkplug_id)) })
+      .catch(() => { if (!cancelled) setStale([]) })
     return () => { cancelled = true }
   }, [])
 
@@ -91,6 +99,10 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
     && (Date.now() - new Date(worker.reported_at).getTime()) < WORKER_STALE_MS
   const heldByWorker = workerLive ? (worker.held_edge_nodes || []) : []
   const workerHolds = (t) => !!t && heldByWorker.includes(t.sparkplug_id)
+  /* Held and CURRENT are different facts (#217). A re-issue replaces the password the broker will
+     accept without changing which ids the worker reports, so this is the one that decides whether a
+     playback would actually connect. */
+  const workerHoldsCurrent = (t) => workerHolds(t) && !stale.includes(t.sparkplug_id)
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
 
@@ -113,7 +125,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   // because it could not read a courtesy row would be worse than the failure it prevents.
   const ready = !!target
     && target.gateway_has_broker_credential
-    && (worker === undefined || !workerLive || workerHolds(target))
+    && (worker === undefined || !workerLive || workerHoldsCurrent(target))
     && unmapped.length === 0
 
   const submit = () => run(async () => {
@@ -192,7 +204,8 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                     {t.name} ({t.sparkplug_id})
                     {!t.gateway_has_broker_credential
                       ? ' — no broker credential'
-                      : (workerLive && !workerHolds(t) ? ' — worker has no password' : '')}
+                      : (workerLive && !workerHolds(t) ? ' — worker has no password'
+                        : (workerLive && !workerHoldsCurrent(t) ? ' — worker still has the old password' : ''))}
                   </option>
                 ))}
               </select>
@@ -212,6 +225,23 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               <strong>{target.name}</strong> holds no broker credential, so nothing can authenticate
               as it. Issue one from the Access Control page — that is also how you obtain the
               password the playback worker needs, and it is shown only once.
+            </div>
+          </div>
+        )}
+
+        {/* The re-issue case, which is the ordinary one: the broker keeps ONE password per gateway,
+            so every mint after the first replaces one and the worker holds the previous password
+            until the delivery reaches it. Nothing here is for the operator to fix (#217). */}
+        {target && workerLive && workerHolds(target) && !workerHoldsCurrent(target) && (
+          <div className="callout" style={{ borderColor: 'var(--warning)', marginTop: '10px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div style={{ fontSize: '12px' }}>
+              <strong>{target.name}</strong>&apos;s broker credential was re-issued after the playback
+              worker last picked one up, so the worker still holds the previous password and the
+              broker would refuse it.
+              <br />
+              Delivery is automatic and takes about a minute. Reopen this dialog then — nothing needs
+              doing here.
             </div>
           </div>
         )}
@@ -255,8 +285,8 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               publisher on the same edge node, so the two sets of Sparkplug sequence numbers
               interleave and the daemon reports both as losing messages.
               <br />
-              A playback target is best as a gateway <em>nothing else</em> publishes as — a virtual
-              one created for the purpose, rather than one a simulator or an appliance is driving.
+              A playback target is best as a gateway <em>nothing else</em> publishes as — a Simulated
+              one created for the purpose, rather than one a simulator or an appliance is already driving.
             </div>
           </div>
         )}
@@ -394,7 +424,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                 : !target.gateway_has_broker_credential ? 'This gateway holds no broker credential'
                   : (workerLive && !workerHolds(target))
                     ? 'The playback worker was not given this gateway’s password'
-                    : `${unmapped.length} device${unmapped.length === 1 ? '' : 's'} still to map`
+                    : (workerLive && !workerHoldsCurrent(target))
+                      ? 'This credential was re-issued after the worker last picked one up — wait about a minute'
+                      : `${unmapped.length} device${unmapped.length === 1 ? '' : 's'} still to map`
             )}
             onClick={submit}
           >

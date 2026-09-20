@@ -639,6 +639,41 @@ function that could turn a job the worker had already reported as sent into a fa
 second opinion about an event that is over. `0107`'s three arms are unchanged, and a self-check
 fails if either its `stop_requested` arm or the new column goes missing from the body.
 
+**Held and current are different facts (`0129`, [#217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)).**
+The broker keeps one password per gateway, so every mint after the first *replaces* one — and
+`playback_report_credentials()` carried edge-node ids and nothing else, which do not change on a
+rotation. The worker went on reporting a target it could no longer authenticate as, the dialog
+offered it, `start_playback_job()` accepted it because the `CREDENTIAL_ISSUED` row existed, and the
+broker answered `CONNACK rc=5` a second later.
+
+The worker now also names the gateways it has picked up a **new** password for since it last
+reported. Three decisions in that sentence:
+
+- **Ids, not a timestamp.** The database stamps them into
+  `playback_worker_status.credential_observed_at` with its own `now()` — the same clock as the
+  `CREDENTIAL_ISSUED` row they are compared against. A timestamp taken on the worker would make the
+  answer depend on the offset between two clocks, and a credential the worker had just picked up
+  could read as older than the issue that delivered it.
+- **Ids, not a fingerprint.** `playback_worker_status` is readable by Administrator,
+  Shopfloor_Manager and Auditor. A truncated HMAC of the password is not the password but is derived
+  from it; a sparkplug_id and a timestamp are derived from nothing. That was the objection recorded
+  in the issue and it is the reason this shape was chosen over the obvious one.
+- **Nothing new records the issue time.** Every mint already writes a `CREDENTIAL_ISSUED` row,
+  including the playback delivery — it is the same edge-function call with `deliver_to_playback`
+  set — so only the worker's half was missing.
+
+`playback_stale_credentials()` compares the two and is consulted in both places: the dialog, so a
+stale target is not offered, and `start_playback_job()`, so a caller that never opens the dialog is
+refused on the same terms. **Absent is unknown, not stale** — a worker that has reported no
+observation at all is one from the release before `0129`, and refusing it would break playback on
+the rollout that delivers the fix. `p_rotated` defaults for the same reason.
+
+`playback_report_credentials()` DROPs every existing declaration before creating, the way `0118`
+does: the baseline recreates the one-argument form on every boot, and two declarations make a call
+by name choose neither — which is what [#236](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/236)
+recorded for `playback_finish`. `start_playback_job()` keeps its signature, so its grants survive
+and no sweep is needed.
+
 ### What is stale, and what is merely quiet (`0029`, `0061`)
 
 `platform_health` is the one view Grafana's platform rules read, and its `gateway_stale` arm is the

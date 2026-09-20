@@ -92,16 +92,14 @@ SOURCE_DEVICE_ID = "3b000000-0000-4000-8000-000000000001"
 # mint. Anything under two minutes here would be timing the kubelet.
 CREDENTIAL_TIMEOUT = 240
 
-# How long after a mint the worker's copy of the file is assumed stale, whatever it reports.
+# A BOUND, NOT THE SIGNAL, since 0129. The status row now answers "has the worker picked up the
+# CURRENT password": it reports which gateways it has taken a new password for, the database stamps
+# those, and `playback_stale_credentials()` compares them with the last CREDENTIAL_ISSUED row. This
+# suite waits on that rather than on the clock.
 #
-# THE STATUS ROW CANNOT ANSWER THIS, and that is a property of the design rather than an oversight.
-# `playback_report_credentials()` carries edge-node ids and nothing else, so a RE-ISSUE -- the
-# ordinary case, since the broker holds one password per gateway -- leaves the reported set
-# identical before and after. The worker goes on reporting the target while still holding the
-# previous password, and the only symptom is a job that fails at CONNACK with rc=5.
-#
-# So the suite waits the projection window out rather than trusting the report. A minute is the
-# kubelet's default sync period; ninety seconds is that plus slack.
+# The margin is kept as an upper bound on how long that should take -- a minute is the kubelet's
+# default sync period for a projected Secret volume, ninety seconds is that plus slack -- so a run
+# that never clears fails with something specific rather than hanging.
 PROJECTION_MARGIN = 90
 JOB_TIMEOUT = 120
 HISTORIAN_TIMEOUT = 60
@@ -456,6 +454,19 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         return body
 
     @classmethod
+    def _credential_is_stale(cls, sparkplug_id):
+        """Has this gateway's credential been re-issued since the worker last picked one up?
+
+        `playback_stale_credentials()` (0129) is what the playback dialog and
+        `start_playback_job()` both consult. A read that fails answers True: this is a wait, and
+        proceeding on a failed read is how the suite would race the delivery it exists to wait for.
+        """
+        status, rows = cls.session.rest("/rpc/playback_stale_credentials", method="POST", body={})
+        if status != 200:
+            return True
+        return any(r.get("sparkplug_id") == sparkplug_id for r in (rows or []))
+
+    @classmethod
     def _await_worker_credential(cls):
         """
         Wait for the worker to SAY it holds the target.
@@ -474,10 +485,11 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
             if status == 200 and rows:
                 last = rows[0]
                 held = wanted in (last.get("held_edge_nodes") or [])
-                # Both conditions, and the second is not redundant: on a re-issue the id was
-                # already reported from the PREVIOUS file, so the report alone would let the
-                # replay start against a password the broker has already replaced.
-                if held and time.monotonic() - cls.minted_at >= PROJECTION_MARGIN:
+                # HELD IS NOT ENOUGH, and that is the whole of #217: on a re-issue the id was
+                # already reported from the PREVIOUS file, so the id alone would let the replay
+                # start against a password the broker has already replaced. 0129 made the
+                # difference reportable, and this asks for it rather than timing the kubelet.
+                if held and not cls._credential_is_stale(wanted):
                     return last
             time.sleep(3)
         raise AssertionError(
