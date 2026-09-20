@@ -2606,7 +2606,7 @@ expiry is still the only bound that reaches every service, which is why the 90-d
 **`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
 `SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
 the database". The extension is installed; the premise is not true — `SUPABASE_JWT_SECRET` is not in
-this database, and `vault` holds four secrets, none of them that one. Putting it there would let any
+this database, and nothing in `vault` is that one. Putting it there would let any
 path to SQL execution mint a `service_role` token, which is valid at the four services above and
 which `0074` cannot revoke. So the signing lives in
 [`mint-service-token`](functions/mint-service-token/index.ts), which already holds `JWT_SECRET`, and
