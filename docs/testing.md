@@ -317,6 +317,14 @@ python supabase/migrations/test_archiving_is_a_lifecycle.py
 # an absent row rather than a reassuring zero, and that the ungated arithmetic behind the figure is
 # not callable from PostgREST.
 python supabase/migrations/test_cold_archive_backlog.py
+# The cold archive's destination and who may see it (0134). `system_settings` is readable by every
+# signed-in user deliberately, so the five rows naming the endpoint, bucket and access key ID are
+# hidden by ONE clause on ONE policy -- `USING (NOT sensitive OR has_role(...))`. Losing it breaks
+# nothing visible: the page renders, the exporter exports, and every Operator with a login can read
+# where the plant's history is written. Asserted from both sides, because a policy that hid
+# everything would pass the negative and break the Settings page for every role but one. The
+# credential is never asserted by value -- nothing reads it back, and that is the property.
+python supabase/migrations/test_cold_archive_destination.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid

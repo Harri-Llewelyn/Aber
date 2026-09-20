@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ColdStorageTab } from '../components/tabs/ColdStorageTab'
@@ -7,7 +7,13 @@ import { coldStorageSummary, formatBytes, coldStateLabel } from '../utils/coldSt
 import { api } from '../api'
 
 vi.mock('../api', () => ({
-  api: { listColdStorage: vi.fn(), coldArchiveBacklog: vi.fn(), get: vi.fn() },
+  api: {
+    listColdStorage: vi.fn(),
+    coldArchiveBacklog: vi.fn(),
+    archiveCredentialIsSet: vi.fn(),
+    setArchiveCredential: vi.fn(),
+    get: vi.fn(),
+  },
 }))
 
 const row = (overrides = {}) => ({
@@ -41,12 +47,32 @@ const backlogRow = (overrides = {}) => ({
 const show = async (rows, userRole = 'Administrator', backlog = backlogRow()) => {
   api.listColdStorage.mockResolvedValue(rows)
   api.coldArchiveBacklog.mockResolvedValue(backlog)
+  api.setArchiveCredential.mockResolvedValue(true)
   render(<ColdStorageTab showToast={vi.fn()} userRole={userRole} />)
   await waitFor(() => expect(api.listColdStorage).toHaveBeenCalled())
 }
 
+/** The catalogue card. The Destination card above it legitimately repeats some of the same words
+ *  -- "Archiving is", "Settings -> Cold Storage" -- so an unscoped match now finds two. */
+const catalogue = () => screen.getByText(/^Cold telemetry/).closest('.card')
+
+/** Archiving on AND somewhere to write: the state the on-and-idle empty text describes. Without a
+ *  destination the page now says something else, correctly, so these rows are load-bearing. */
+const ENABLED_AND_CONFIGURED = [
+  { key: 'archive.enabled', value: true },
+  { key: 'archive.endpoint', value: 'https://s3.eu-west-2.amazonaws.com' },
+  { key: 'archive.region', value: 'eu-west-2' },
+  { key: 'archive.bucket', value: 'plant-history' },
+  { key: 'archive.access_key_id', value: 'AKIAEXAMPLE' },
+  { key: 'archive.site_key', value: 'broughton-7f3a9c21' },
+]
+
 beforeEach(() => {
+  // clearAllMocks() clears CALLS, not implementations, so a resolved value set by one test survives
+  // into the next. Re-declaring the default here rather than inside show() lets a test override it
+  // on the line before it renders.
   vi.clearAllMocks()
+  api.archiveCredentialIsSet.mockResolvedValue(false)
   // The page reads `archive.enabled` through useSetting, which calls api.get. An empty list means
   // the fallback, `false`, so tests not about the switch get the same state.
   api.get.mockResolvedValue([])
@@ -74,22 +100,38 @@ describe('the cold storage catalogue', () => {
     ).toBeInTheDocument())
   })
 
-  it('says the objects are the only copy once anything is archived', async () => {
-    // The one thing a reader must not miss, and the reason it is under the table rather than in a
-    // tooltip: for every other bucket an object is a copy; here it is the original.
+  it('says the objects are the only copy, in the tooltip that explains the feature', async () => {
+    /* The one thing a reader must not miss: for every other bucket an object is a copy; here it is
+       the original.
+
+       IT MOVED OUT OF A FOOTER. It was a paragraph of small grey text under a table that gains a
+       row a week, so on exactly the stacks where it had come true it was furthest down the page.
+       It is a standing property of cold storage rather than news, so it now sits with the rest of
+       what the card means -- where it is also reachable BEFORE anything has been archived, which
+       the footer never was. */
     await show([row()])
-    await waitFor(() => expect(screen.getByText(/only copy/i)).toBeInTheDocument())
-    // And that it is not in this cluster: the footer used to point at the storage volume and at
+    await waitFor(() => expect(screen.getByText('Oldest span held')).toBeInTheDocument())
+
+    // Not rendered until asked for, which is the whole point of moving it.
+    expect(screen.queryByText(/only copy/i)).toBeNull()
+
+    fireEvent.click(within(catalogue()).getByRole('button', { name: /about cold telemetry/i }))
+    const bubble = await screen.findByRole('tooltip')
+    expect(bubble.textContent).toMatch(/only copy/i)
+    // And that they are not in this cluster: the footer used to point at the storage volume and at
     // `dev:reset`, which stopped being where these objects live when the archive went remote.
-    expect(screen.getByText(/outside the cluster/i)).toBeInTheDocument()
+    expect(bubble.textContent).toMatch(/outside the cluster/i)
   })
 
-  it('does not claim the objects are the only copy when nothing has been dropped', async () => {
-    // A chunk that is exported but not dropped has its rows in BOTH places, which is the safest
-    // state in the sequence. Warning about it would train the reader to ignore the warning.
-    await show([row({ state: 'verified', on_cold_storage: false, dropped_at: null })])
-    await waitFor(() => expect(screen.getByText('Verified')).toBeInTheDocument())
-    expect(screen.queryByText(/only copy/i)).toBeNull()
+  it('offers that warning before anything has been archived too', async () => {
+    /* WHAT THE FOOTER COULD NOT DO, and the reason this is not just a relocation. The footer was
+       gated on summary.archived > 0 -- it appeared only once the first chunk's rows had already
+       been dropped, which is after the decision it warns about has been taken. An operator turning
+       the switch on can now read it first. */
+    await show([])
+    await waitFor(() => expect(within(catalogue()).getByRole('button', { name: /about cold telemetry/i })).toBeInTheDocument())
+    fireEvent.click(within(catalogue()).getByRole('button', { name: /about cold telemetry/i }))
+    expect((await screen.findByRole('tooltip')).textContent).toMatch(/only copy/i)
   })
 
   it('surfaces the error on a failed chunk rather than hiding it behind the badge', async () => {
@@ -117,7 +159,7 @@ describe('the cold storage catalogue', () => {
   it('tells a privileged reader that nothing is archived, and where the switch is', async () => {
     await show([], 'Administrator')
     await waitFor(() => expect(screen.getByText(/No telemetry has been archived/i)).toBeInTheDocument())
-    expect(screen.getByText(/Settings → Cold Storage/)).toBeInTheDocument()
+    expect(within(catalogue()).getByText(/Settings → Cold Storage/)).toBeInTheDocument()
   })
 
   it('surfaces a read failure rather than rendering it as an empty archive', async () => {
@@ -194,9 +236,10 @@ describe('state vocabulary', () => {
 describe('the empty state distinguishes off from on-and-idle', () => {
 
   it('does not claim archiving is off when it is on', async () => {
-    api.get.mockResolvedValue([{ key: 'archive.enabled', value: true }])
+    api.get.mockResolvedValue(ENABLED_AND_CONFIGURED)
+    api.archiveCredentialIsSet.mockResolvedValue(true)
     await show([])
-    await waitFor(() => expect(screen.getByText(/Archiving is/)).toBeInTheDocument())
+    await waitFor(() => expect(within(catalogue()).getByText(/Archiving is/)).toBeInTheDocument())
     expect(screen.queryByText(/Cold storage is off/i)).toBeNull()
   })
 
@@ -207,17 +250,18 @@ describe('the empty state distinguishes off from on-and-idle', () => {
        IT NAMES THE THING THAT ACTUALLY RUNS. This asserted `cold-archiver`, a Compose service that
        has not existed since Compose was dropped -- so the page told an operator to look for a
        container that is not there, and the test held it that way. */
-    api.get.mockResolvedValue([{ key: 'archive.enabled', value: true }])
+    api.get.mockResolvedValue(ENABLED_AND_CONFIGURED)
+    api.archiveCredentialIsSet.mockResolvedValue(true)
     await show([])
-    await waitFor(() => expect(screen.getByText(/runs by itself/i)).toBeInTheDocument())
+    await waitFor(() => expect(within(catalogue()).getByText(/runs by itself/i)).toBeInTheDocument())
     // Exact: the CronJob is named twice on this page, once alone and once inside the kubectl line.
-    expect(screen.getByText('cold-archive')).toBeInTheDocument()
+    expect(within(catalogue()).getByText('cold-archive')).toBeInTheDocument()
     expect(screen.queryByText(/cold-archiver/)).toBeNull()
     expect(screen.queryByText(/docker exec/)).toBeNull()
     // "eligible" appears twice by design -- as the cause, and again in the command that lists it --
     // so this asserts the cause rather than either occurrence.
-    expect(screen.getByText(/nothing is/i).textContent).toMatch(/eligible/i)
-    expect(screen.queryByText(/nothing schedules it/i)).toBeNull()
+    expect(within(catalogue()).getByText(/nothing is/i).textContent).toMatch(/eligible/i)
+    expect(within(catalogue()).queryByText(/nothing schedules it/i)).toBeNull()
   })
 
   it('says where the switch is when it really is off', async () => {
@@ -253,6 +297,42 @@ describe('how far behind the archive is', () => {
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
     // And the catalogue's own figures stay away: they describe what reached the endpoint.
     expect(screen.queryByText('Oldest span held')).toBeNull()
+  })
+
+  it('leads the empty state with it rather than stranding it in a row of one', async () => {
+    /* WHERE it is, not just that it is. The stats strip is a left-aligned flex row, so a catalogue
+       with nothing in it put this figure alone at the far left above centred text -- reading as a
+       stray label rather than the headline it is. Inside `.empty-state` it inherits the centring.
+
+       Asserted through the DOM because that is the whole of the change: the figure renders from
+       one definition either way, and a regression would move it, not reword it. */
+    await show([], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 30 * 86400 }))
+    await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
+    expect(screen.getByText('Unexported since').closest('.empty-state')).not.toBeNull()
+    // And it takes the decorative icon's place rather than stacking above it: one anchor, not two.
+    expect(catalogue().querySelector('.empty-icon')).toBeNull()
+  })
+
+  it('keeps it in the strip once there is a catalogue to sit beside', async () => {
+    // The other half. Centring it there would break the column the other figures line up in.
+    await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 30 * 86400 }))
+    await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
+    expect(screen.getByText('Unexported since').closest('.empty-state')).toBeNull()
+    expect(screen.getByText('Oldest span held')).toBeInTheDocument()
+  })
+
+  it('withholds it from a reader who cannot see the catalogue', async () => {
+    /* cold_archive_backlog() gates on the same three roles as cold_storage_rows(), so this reader
+       gets nothing from it anyway -- but the mock cannot know that, and a page that rendered a
+       backlog headline above "this list is empty because of your role" would be telling two
+       stories at once. The role arm keeps its icon. */
+    await show([], 'Operator', backlogRow({ enabled: true, overdue_seconds: 30 * 86400 }))
+    await waitFor(() => expect(screen.getByText(/because of your role/i)).toBeInTheDocument())
+    expect(screen.queryByText('Unexported since')).toBeNull()
+    // Not via catalogue(): this arm's own text opens "Cold telemetry is readable by ...", so the
+    // helper's /^Cold telemetry/ finds two elements here and nowhere else.
+    const state = screen.getByText(/because of your role/i).closest('.empty-state')
+    expect(state.querySelector('.empty-icon')).not.toBeNull()
   })
 
   it('says nothing about a backlog when archiving is off', async () => {
@@ -291,5 +371,180 @@ describe('how far behind the archive is', () => {
     render(<ColdStorageTab showToast={vi.fn()} userRole="Administrator" />)
     await waitFor(() => expect(screen.getByText('Oldest span held')).toBeInTheDocument())
     expect(screen.queryByText('Unexported since')).toBeNull()
+  })
+})
+
+describe('the destination card', () => {
+
+  /** The settings the card reads come back through api.get, which useSetting calls. */
+  const withDestination = (rows) => api.get.mockResolvedValue(rows)
+
+  it('is not rendered for a reader who cannot see the destination', async () => {
+    // 0134 flags these rows `sensitive`, so an Auditor's reads return the fallbacks -- and a card
+    // built from fallbacks would report a configured stack as unconfigured. Not rendering is the
+    // only honest option, because the page cannot tell the two apart.
+    withDestination([])
+    await show([], 'Auditor')
+    await waitFor(() => expect(screen.getByText(/^Cold telemetry/)).toBeInTheDocument())
+    expect(screen.queryByText('Destination')).toBeNull()
+  })
+
+  it('names where objects go once the destination is set', async () => {
+    withDestination([
+      { key: 'archive.endpoint', value: 'https://s3.eu-west-2.amazonaws.com' },
+      { key: 'archive.bucket', value: 'plant-history' },
+      { key: 'archive.site_key', value: 'broughton-7f3a9c21' },
+    ])
+    await show([], 'Administrator')
+    await waitFor(() => expect(
+      screen.getByText('https://s3.eu-west-2.amazonaws.com/plant-history/site=broughton-7f3a9c21/')
+    ).toBeInTheDocument())
+  })
+
+  it('says archiving is on and cannot run when the destination is incomplete', async () => {
+    // THE STATE THIS CARD EXISTS FOR. The switch is an ordinary setting, so nothing stops it being
+    // turned on before a destination exists; what follows is a CronJob that fails nightly and
+    // deletes its own pod, and a page that used to say everything was fine.
+    withDestination([{ key: 'archive.enabled', value: true }])
+    await show([], 'Administrator')
+    await waitFor(() => expect(screen.getByText(/cannot run/i)).toBeInTheDocument())
+    // On the callout's whole text: the list is interpolated beside sibling nodes, so a text
+    // matcher looking for one field finds a fragment rather than the sentence.
+    const warning = screen.getByText(/cannot run/i).closest('.callout')
+    expect(warning.textContent).toMatch(/S3 endpoint/)
+    expect(warning.textContent).toMatch(/S3 bucket/)
+    expect(warning.textContent).toMatch(/the secret access key/)
+  })
+
+  it('does not nag when archiving is off and nothing is configured', async () => {
+    // An unconfigured destination is the ordinary state of a stack that does not archive. Warning
+    // about it would put a permanent amber callout on every install that never uses the feature.
+    withDestination([{ key: 'archive.enabled', value: false }])
+    await show([], 'Administrator')
+    await waitFor(() => expect(screen.getByText('Destination')).toBeInTheDocument())
+    expect(screen.queryByText(/cannot run/i)).toBeNull()
+  })
+
+  it('writes the credential and never reads one back', async () => {
+    withDestination([])
+    await show([], 'Administrator')
+    // Nothing to type into until the dialog is opened: the field is no longer sitting on the card.
+    await waitFor(() => expect(screen.getByRole('button', { name: /set key/i })).toBeInTheDocument())
+    expect(screen.queryByLabelText(/secret access key/i)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /set key/i }))
+    // Straight to the field: there is no key to destroy, so nothing to confirm.
+    const input = await screen.findByLabelText(/secret access key/i)
+    // A password field: nothing in the DOM ever holds the stored value, because no API returns it.
+    expect(input).toHaveAttribute('type', 'password')
+
+    fireEvent.change(input, { target: { value: 'wJalrXUtnFEMI' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(api.setArchiveCredential).toHaveBeenCalledWith('wJalrXUtnFEMI'))
+    // The dialog closes, taking the typed key out of the DOM with it.
+    await waitFor(() => expect(screen.queryByLabelText(/secret access key/i)).toBeNull())
+  })
+
+  it('asks before replacing a key that already exists', async () => {
+    /* THE ACT WITH NO UNDO. set_archive_credential() calls vault.update_secret() when a secret is
+       already there, so Save overwrites in place -- and since nothing reads either value back, a
+       mistyped replacement is not discovered until the CronJob fails to authenticate, with the
+       original unrecoverable from this stack. The field does not appear until that is acknowledged. */
+    withDestination([])
+    api.archiveCredentialIsSet.mockResolvedValue(true)
+    await show([], 'Administrator')
+    await waitFor(() => expect(screen.getByRole('button', { name: /replace/i })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /^replace$/i }))
+    await waitFor(() => expect(screen.getByText(/overwrites it in the vault/i)).toBeInTheDocument())
+    // The gate is the point: no way to type a key while the warning is unanswered.
+    expect(screen.queryByLabelText(/secret access key/i)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /replace it/i }))
+    expect(await screen.findByLabelText(/secret access key/i)).toBeInTheDocument()
+  })
+
+  it('lets a first key through without that question', async () => {
+    // The other half. A dialog that always asked would pass the test above and make every new
+    // install answer for a vault with nothing in it.
+    withDestination([])
+    await show([], 'Administrator')
+    fireEvent.click(await screen.findByRole('button', { name: /set key/i }))
+    expect(await screen.findByLabelText(/secret access key/i)).toBeInTheDocument()
+    expect(screen.queryByText(/overwrites it in the vault/i)).toBeNull()
+  })
+
+  it('keeps the typed key when the write is refused', async () => {
+    /* A refused save must not throw the secret away. It cannot be pasted back from anywhere -- the
+       operator has it from the provider's console, once -- so closing the dialog on a 403 would
+       cost them the trip back to fetch it again. */
+    withDestination([])
+    api.setArchiveCredential.mockRejectedValue(new Error('not permitted'))
+    const toast = vi.fn()
+    api.listColdStorage.mockResolvedValue([])
+    api.coldArchiveBacklog.mockResolvedValue(backlogRow())
+    render(<ColdStorageTab showToast={toast} userRole="Administrator" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /set key/i }))
+    const input = await screen.findByLabelText(/secret access key/i)
+    fireEvent.change(input, { target: { value: 'wJalrXUtnFEMI' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('not permitted', 'error'))
+    expect(screen.getByLabelText(/secret access key/i).value).toBe('wJalrXUtnFEMI')
+  })
+
+  it('does not blame eligibility when the destination is the problem', async () => {
+    // THE PAGE CONTRADICTED ITSELF. The Destination card said "cannot run" while the catalogue
+    // below said "runs by itself ... nothing is eligible" -- which sends a reader to check their
+    // retention threshold when the actual cause is that there is nowhere to write.
+    withDestination([{ key: 'archive.enabled', value: true }])
+    await show([], 'Administrator')
+    await waitFor(() => expect(screen.getByText(/nowhere to write it yet/i)).toBeInTheDocument())
+    expect(within(catalogue()).queryByText(/runs by itself/i)).toBeNull()
+    expect(within(catalogue()).queryByText(/eligible/i)).toBeNull()
+  })
+
+  it('still explains eligibility once the destination is complete', async () => {
+    // The other side: with somewhere to write, an empty catalogue really IS about eligibility, and
+    // that explanation must not have been thrown away with the wrong one.
+    withDestination([
+      { key: 'archive.enabled', value: true },
+      { key: 'archive.endpoint', value: 'https://s3.eu-west-2.amazonaws.com' },
+      { key: 'archive.region', value: 'eu-west-2' },
+      { key: 'archive.bucket', value: 'plant-history' },
+      { key: 'archive.access_key_id', value: 'AKIAEXAMPLE' },
+      { key: 'archive.site_key', value: 'broughton-7f3a9c21' },
+    ])
+    api.archiveCredentialIsSet.mockResolvedValue(true)
+    await show([], 'Administrator')
+    await waitFor(() => expect(within(catalogue()).getByText(/runs by itself/i)).toBeInTheDocument())
+    expect(screen.queryByText(/cannot run/i)).toBeNull()
+  })
+
+  it('will not submit an empty credential', async () => {
+    // set_archive_credential() refuses an empty string too -- a vault holding one authenticates
+    // against nothing -- but the button is the cheaper of the two places to say so.
+    withDestination([])
+    await show([], 'Administrator')
+    fireEvent.click(await screen.findByRole('button', { name: /set key/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled())
+    // Whitespace is not a key either.
+    fireEvent.change(screen.getByLabelText(/secret access key/i), { target: { value: '   ' } })
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
+    expect(api.setArchiveCredential).not.toHaveBeenCalled()
+  })
+
+  it('copies the destination rather than making it be retyped', async () => {
+    /* The address goes into an IAM policy, an `aws s3 ls` and a ticket to whoever runs the bucket.
+       Retyping it invites a wrong site prefix, which does not fail -- it reads back as an empty
+       archive under a key nobody is looking at. */
+    withDestination(ENABLED_AND_CONFIGURED)
+    await show([], 'Administrator')
+    const copy = await screen.findByRole('button', { name: /copy destination/i })
+    expect(copy).toHaveAccessibleName(
+      /https:\/\/s3\.eu-west-2\.amazonaws\.com\/plant-history\/site=broughton-7f3a9c21\//,
+    )
   })
 })

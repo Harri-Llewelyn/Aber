@@ -7,6 +7,7 @@ import CopyableId from '../common/CopyableId'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { downloadBlob } from '../../utils/downloadBlob'
+import { PageHeading } from '../common/PageHeading'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 
@@ -155,8 +156,13 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
 
   return (
     <>
-      {/* This page has no actions of its own, so it starts directly on its table; the count is in
-          the card header. */}
+      <PageHeading icon={<IconArchive size={15} />} title="Archived entities">
+        Cells, gateways and devices taken out of commission without being deleted. An archived
+        entity keeps its identity and its history, leaves the asset pages, and runs a retention
+        timer to an auto-purge date; Restore returns it to service with everything intact.
+      </PageHeading>
+
+      {/* The count stays in the card header: it describes this table rather than the page. */}
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">

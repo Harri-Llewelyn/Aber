@@ -2024,18 +2024,53 @@ code can check, and an optional remote destination is one nobody tests: it gets 
 by whoever wants fewest questions, and its worthlessness is discovered on the day it matters. One
 destination type means one code path, exercised at every site.
 
+#### Configuring it, which is a page and not a values file (`0134`)
+
+**Settings → Cold Storage**, as an Administrator: the S3 endpoint, region, bucket and access key
+ID. The **secret access key** is set on the Cold Storage page itself, because it is not a setting —
+it goes into the vault, and nothing reads it back.
+
+Those five rows are flagged `sensitive`, which is a column `0134` adds to `system_settings` and one
+clause on its SELECT policy: `USING (NOT sensitive OR has_role(ARRAY['Administrator']))`. Every
+other setting is unflagged, so an Operator's Settings page is unchanged; these five are invisible to
+them. That mechanism is the answer to a question `0132` got wrong — it put the whole destination in
+`values.yaml` because *one* of its fields is a secret, when an endpoint, a region, a bucket and a
+path style are not credentials and an access key *id* is an identifier (issue #351).
+
+**The chart values are a seed, not the source.** A new install can still be configured from
+`values.yaml`, and `0134` writes each field into its settings row *only while that row is empty* —
+so a chart value configures a fresh stack and never overwrites what an Administrator later set from
+the page:
+
 ```yaml
 coldArchive:
   s3:
-    siteKey: "broughton-7f3a9c21"          # frozen at the first boot that sets it
+    siteKey: "broughton-7f3a9c21"          # frozen at the first boot that sets it; NOT editable
     endpoint: "https://s3.eu-west-2.amazonaws.com"
     region: "eu-west-2"
     bucket: "plant-history"
     accessKeyId: "AKIA..."
     pathStyle: false                       # true for MinIO and most self-hosted gateways
 secrets:
-  archiveS3SecretAccessKey: "..."
+  archiveS3SecretAccessKey: "..."          # seeded into the vault on the first boot only
 ```
+
+The **site key** is the exception and stays install-time: it is the IAM prefix every object is
+already addressed under, so it is frozen read-only by `0132` and changing it is a procedure rather
+than an edit.
+
+**Re-pointing a destination that has been written to is refused.** Change the bucket while `--drop`
+is on and the next run writes into an empty bucket while still deleting originals; `cold_archive
+audit` then reports every earlier object missing, and those objects are the only copies. So
+`archive_destination_guard()` refuses a change to the endpoint or bucket once the manifest holds
+anything. Setting one for the first time is not a change. If the historian cannot be reached the
+change is allowed with a warning rather than refused — an unrelated outage must not block
+first-time configuration.
+
+**The page reports the state it is in.** With archiving switched on and the destination incomplete,
+the Cold Storage page says so and lists what is missing, in the same words the exporter's own
+refusal uses. That combination — on, and unable to run — is otherwise a CronJob that fails nightly
+and deletes its own pod.
 
 "S3" names a protocol, not a vendor — AWS, Cloudflare R2, Backblaze B2, Wasabi and a MinIO in
 another building all serve it, and the code never knows which. Leave any of it unset and nothing is

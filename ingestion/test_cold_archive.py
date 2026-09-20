@@ -156,10 +156,15 @@ def test_an_unconfigured_destination_names_every_gap(cold_archive):
     refusal that reveals one missing variable per run costs five runs.
     """
     missing = cold_archive.unconfigured({}, "")
-    assert "ARCHIVE_S3_ENDPOINT" in missing
-    assert "ARCHIVE_S3_BUCKET" in missing
-    assert "ARCHIVE_S3_SECRET_ACCESS_KEY" in missing
-    assert any("site_key" in m for m in missing)
+    # NAMED AS THE PAGE NAMES THEM, not as the columns behind them. This refusal ends up in a
+    # CronJob log, and an operator matching it against Settings > Cold Storage should not have to
+    # translate. check-docs-drift.mjs holds these labels level with the frontend's own list.
+    assert "S3 endpoint" in missing
+    assert "S3 region" in missing
+    assert "S3 bucket" in missing
+    assert "S3 access key ID" in missing
+    assert "the secret access key" in missing
+    assert any("site key" in m for m in missing)
 
 
 def test_a_complete_destination_is_not_refused(cold_archive):

@@ -142,7 +142,33 @@ $$;
 -- from scripts/storage-init.mjs along with its four policies. Leaving the row would offer an
 -- operator a destination that no longer exists, editable in a page, above a table of objects
 -- written somewhere else.
-DELETE FROM public.system_settings WHERE key = 'archive.bucket';
+--
+-- ONCE, NOT ON EVERY BOOT, and the guard is the whole point of this block rather than a bare
+-- DELETE. 0134 gives this key a SECOND, unrelated meaning -- the S3 bucket, set from the page --
+-- and every migration here is replayed by db-init on every start. Unconditional, this statement
+-- therefore deleted the operator's S3 bucket on each `helm upgrade`, 0134 re-seeded it from the
+-- chart's empty default, and the stack came back up with archiving switched on and nowhere to
+-- write: a nightly CronJob refusing, telemetry silently accumulating past its threshold, and one
+-- field to look at out of six to find out why. MEASURED, not theorised -- it happened on the dev
+-- cluster during an unrelated frontend rebuild.
+--
+-- `sensitive` is 0134's column, so its absence is exactly "the new meaning does not exist here
+-- yet", which is the only state in which the old row should be removed. Fresh install: the column
+-- is absent when this runs, the DELETE finds nothing, 0134 then seeds the key. Upgrade from before
+-- 0132: absent, the stale Storage bucket name is removed as intended. Every replay after that: the
+-- column exists and this is a no-op.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'system_settings'
+           AND column_name = 'sensitive'
+    ) THEN
+        DELETE FROM public.system_settings WHERE key = 'archive.bucket';
+    END IF;
+END;
+$$;
 
 -- ---------------------------------------------------------------------------------------------
 -- 3. What `archive.enabled` now means

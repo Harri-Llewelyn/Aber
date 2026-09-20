@@ -1918,6 +1918,47 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// The exporter and the page call the destination's fields the same thing
+//
+// `unconfigured()` in cold_archive.py names what is missing into a CronJob log; the Cold Storage
+// page names the same gaps on screen. An operator reading a failed job and then opening the page is
+// matching one list against the other, so the words have to be identical -- and they live in two
+// languages, which is exactly the kind of pair that drifts silently and is only noticed by somebody
+// already having a bad day.
+{
+  const py = read('ingestion/cold_archive.py');
+  const js = read('frontend/src/utils/coldStorage.js');
+
+  // The tuple pairs inside unconfigured(): ("endpoint", "S3 endpoint"), ...
+  const block = py.slice(py.indexOf('def unconfigured('), py.indexOf('def _s3_client('));
+  const fromPy = [...block.matchAll(/\("[a-z_]+",\s*"([^"]+)"\)/g)].map((m) => m[1]);
+
+  const fromJs = [...js.matchAll(/\{\s*key:\s*'archive\.[a-z_]+',\s*label:\s*'([^']+)'\s*\}/g)]
+    .map((m) => m[1]);
+
+  // The page's list covers the four settings; the exporter's adds the credential, which is not a
+  // setting and has no row of its own.
+  const pyFields = fromPy.filter((l) => l.startsWith('S3 '));
+
+  if (!pyFields.length || !fromJs.length) {
+    fail(
+      `the destination field labels could not be read from both sides (exporter: ${pyFields.length}, ` +
+        `page: ${fromJs.length}). One of the lists has been renamed or restructured, and the other ` +
+        'is now the only place the operator-facing wording is defined.'
+    );
+  } else if (pyFields.join('|') !== fromJs.join('|')) {
+    fail(
+      'the exporter and the Cold Storage page name the destination fields differently:\n' +
+        `        cold_archive.py: ${pyFields.join(', ')}\n` +
+        `        coldStorage.js:  ${fromJs.join(', ')}\n` +
+        '      An operator matching a failed job against the page has to translate between them.'
+    );
+  } else {
+    pass(`the exporter and the page name all ${pyFields.length} destination fields identically`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // The Cold Storage page and the Archive Backlog alert agree about what "behind" means
 //
 // The page colours a backlog and the alert fires on one, from the same number in two files. A page
