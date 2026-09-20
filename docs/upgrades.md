@@ -265,6 +265,8 @@ checks are ones to run while the upgrade is still fresh.
 
 ## Related
 
+- [`releases.md`](releases.md) — the other half of this document: how long a release is supported,
+  what makes a version major, and how a site learns that a release matters to it
 - [`remote-gateways.md`](remote-gateways.md) — the appliance runbook, including re-issuing a
   bundle and what it invalidates
 - [`kubernetes-architecture.md`](kubernetes-architecture.md) — the chart, and how a release is

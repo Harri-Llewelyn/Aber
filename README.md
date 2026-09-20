@@ -315,6 +315,7 @@ administrator, who can set a password through the Auth API or Studio instead.
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
 | [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the three places that is not the whole truth |
+| [`docs/releases.md`](docs/releases.md) | What a release promises: the supported window, what makes a version major, deprecation, and how a site learns a release matters to it |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 99 superseded migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
@@ -751,6 +752,7 @@ are in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Working rules, and what to run before opening a pull request |
 | [`docs/testing.md`](docs/testing.md) | Every suite and what it needs, the six CI jobs, the release workflow |
 | [`docs/handover.md`](docs/handover.md) | Packaging a hand-off — what to purge before transferring a tree |
-| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability privately |
+| [`docs/releases.md`](docs/releases.md) | What a release promises — the supported window, the version policy and the deprecation path |
+| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability privately, and the supported version window |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
 | [`NOTICE.md`](NOTICE.md) | Third-party licences, and what the MIT grant here does and does not cover |

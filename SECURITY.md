@@ -1,5 +1,13 @@
 # Security policy
 
+## Supported versions
+
+**The latest minor release.** A security fix lands there and is not backported to an earlier one.
+That is a light obligation in practice, because any 1.x upgrades directly to any later 1.x — the
+migration chain replays every file on every boot, so there is no ladder to climb before taking a
+fix. [`docs/releases.md`](docs/releases.md) states the window, what makes a release major, and how
+a site learns that one matters to it; this document does not invent a second answer.
+
 ## Reporting a vulnerability
 
 **Please do not open a public issue for a security vulnerability.**

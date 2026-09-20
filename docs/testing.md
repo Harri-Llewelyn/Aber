@@ -640,13 +640,17 @@ never on a branch:
 | Job | Covers |
 | :--- | :--- |
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
-| **build-images** | The three independent images, in parallel, pushed to GHCR |
+| **build-images** | The eight independent images, in parallel, pushed to GHCR |
 | **build-ingestion-chain** | `ingestion`, then `test-runner` **on the same runner** — the latter is built `FROM` the former, so the base must be in the local image store |
 | **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back |
 
-The tag is the single place the version is written — it stamps the five image tags, the chart
+The tag is the single place the version is written — it stamps the ten image tags, the chart
 `version` and `appVersion` in one run. **Images publish before the chart**, because a chart naming
-images that do not exist yet does not fail: `helm install` succeeds and six workloads sit in
+images that do not exist yet does not fail: `helm install` succeeds and the workloads sit in
 `ImagePullBackOff` while everything else comes up healthy. Installation, the one-time GHCR
 visibility step, and what a release deliberately does *not* do (no `latest`, no arm64, no signing)
 are in [`deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release).
+
+**What the release promises a site** — the supported window, what makes a version major, the
+deprecation path and the release-note headings — is [`releases.md`](releases.md). This section is
+what the workflow builds; that one is what a site is signing up for.
