@@ -8,55 +8,25 @@ Run on demand or from a scheduler:
     python -m cold_archive               # export, verify, record; drop nothing
     python -m cold_archive --drop        # ... and drop the chunks that verification cleared
 
-=================================================================================================
-WHAT THIS REPLACES, STATED AS IT ACTUALLY IS
-
-`timescaledb/retention.sql` adds a TimescaleDB retention policy that DROPS raw chunks older than
-TIMESCALE_RETAIN_FOR. That is a permanent deletion of plant history, run by a background job, with
-nothing written down about what went.
-
-This turns `delete` into `move`. The ordering is the entire feature:
+THE ORDERING IS THE ENTIRE FEATURE, and nothing here may shorten it:
 
     claim -> export -> upload -> VERIFY -> record -> drop
 
-and it is enforced in three independent places, deliberately:
+It is enforced in three independent places rather than by a careful sequence in this file:
+`telemetry_archive_manifest`'s CHECK constraints refuse to RECORD a drop that was not verified;
+`cold_tier_droppable()` is the only supported source of what may be dropped, so this file cannot
+assemble its own list; and `--drop` is opt-in, so the destructive half never happens as a side
+effect of an export. Chunks stay in BOTH places until then, which is the only safe intermediate
+state.
 
-  * `telemetry_archive_manifest` CHECK constraints refuse to RECORD a drop that was not verified;
-  * `cold_tier_droppable()` is the only supported source of what may be dropped, so this file
-    cannot assemble its own list;
-  * `--drop` is opt-in, so the destructive half never happens as a side effect of an export.
+THE DESTINATION IS SOMEWHERE ELSE, AND ONLY SOMEWHERE ELSE. Objects go to a configured S3 endpoint:
+no filesystem path, no bucket in this cluster, no local fallback. Every object is addressed under
+`site=<site_key>/`, which is what makes one bucket safe for several sites and what an IAM policy is
+scoped on -- see object_key_for().
 
-=================================================================================================
-WHY DROPPING IS A SEPARATE FLAG RATHER THAN THE END OF THE SAME RUN
-
-Because the two halves fail differently. An export that fails costs a retry. A drop that happens
-against an object which is not really readable costs the data. Splitting them means the normal
-cadence -- export nightly, drop weekly once somebody has seen the catalogue -- is the default
-rather than something an operator has to construct.
-
-Chunks stay in BOTH places until then, which is the only safe intermediate state.
-
-=================================================================================================
-THE DESTINATION IS SOMEWHERE ELSE, AND ONLY SOMEWHERE ELSE
-
-Objects go to a configured S3 endpoint. There is no filesystem path, no bucket in this cluster and
-no local fallback, because "remote" is not a property the code can check and an optional remote
-destination is one nobody tests -- it gets chosen at install by whoever wants fewest questions, and
-its worthlessness is discovered on the day it matters.
-
-This used to write to a Supabase Storage bucket on a PVC in the same cluster, usually on the node
-holding the database the rows were rescued from, after `--drop` had deleted the originals. The data
-moved from one local volume to another local volume and a site loss took both.
-
-Every object is addressed under `site=<site_key>/`, which is what makes one bucket safe for several
-sites and what an IAM policy is scoped on. See object_key_for().
-
-=================================================================================================
-TWO DATABASES AND A THIRD PARTY
-
-The manifest and the chunks live on the historian; the settings belong to the platform; the objects
-are at another provider under a credential this stack cannot mint, rotate or revoke. There is no
-transaction spanning them and there cannot be, so every write here is ordered so that a crash
+TWO DATABASES AND A THIRD PARTY, WITH NO TRANSACTION SPANNING THEM. The manifest and the chunks are
+on the historian, the settings belong to the platform, and the objects are at another provider under
+a credential this stack cannot mint, rotate or revoke. So every write is ordered so that a crash
 leaves a state the next run can resolve:
 
   * a claimed row with no object -> re-exported next run (object is overwritten, upsert)
@@ -65,6 +35,9 @@ leaves a state the next run can resolve:
 
 The one state that must never exist is `dropped` without a readable object, and that is what the
 CHECK constraint and `cold_tier_droppable()` exist to prevent.
+
+Related: supabase/README.md -> "Cold telemetry archival" (what this replaces, why dropping is a
+         separate flag, why the manifest lives on the historian, and the settings this reads).
 """
 import argparse
 import base64

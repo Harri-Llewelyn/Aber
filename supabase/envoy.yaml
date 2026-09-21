@@ -64,8 +64,8 @@ static_resources:
                       # CORS: the only statement of origin policy in the stack. The edge functions
                       # declare none. An origin missing from the substituted list presents as a
                       # dashboard that logs in and shows empty tables while the gateway returns 200.
-                      # Not moved to a Gateway API HTTPRoute filter: that exists on Kubernetes only
-                      # and would state origin policy a second way on one of two targets.
+                      # Not moved to a Gateway API HTTPRoute filter: this is the one statement of
+                      # origin policy in the stack and a filter would make a second.
                       typed_per_filter_config:
                         envoy.filters.http.cors:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.CorsPolicy

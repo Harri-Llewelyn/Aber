@@ -2007,9 +2007,12 @@ remove a row of its own choosing.
 **Its settings arrive with their reader**, which is `0031`'s rule: `archive.enabled` (off by
 default), `archive.tier_after_days` and `archive.site_key`, all read by
 `ingestion/cold_archive.py`. **No credential key will ever be added** — every authenticated user
-can read `system_settings`, so the S3 credential is a release Secret and the endpoint and bucket
-are chart values, not settings. `archive.bucket` was a setting and is retired with the local
-bucket it named (`0132`).
+can read `system_settings`, so no credential key is declared there and the endpoint and bucket are
+chart values rather than settings. The S3 secret itself lives in the Vault: `0134` seeds it once
+from `secrets.archiveS3SecretAccessKey` and never again, because an Administrator may have set it
+since through `set_archive_credential()` from the Cold Storage page, and `cold_archive.py` reads it
+back through `cold_archive_destination()`. #353 is where the rule that admits that writer is being
+settled. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
 
 #### The destination is somewhere else, and only somewhere else (`0132`)
 
@@ -4177,7 +4180,7 @@ Administrator-only `SELECT` would break that page for everyone else in a way tha
 
 **Secrets belong in Supabase Vault, managed through Supabase Studio.** The mechanism is already in
 use here — `0002` and `0006` store the Node-RED admin token and webhook secret through
-`vault.create_secret()` — and Studio ships a Vault UI on both deployment targets. Building a second
+`vault.create_secret()` — and Studio ships a Vault UI. Building a second
 secrets interface would duplicate a maintained upstream component and put a security-sensitive
 surface into this codebase to own. **Note the trust boundary:** Studio is not gated by this
 schema's RLS or `user_roles`. It is protected by network placement and grants database-level
