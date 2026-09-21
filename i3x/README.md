@@ -120,7 +120,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 
 The full request and response reference is [`docs/i3x-openapi.yaml`](../docs/i3x-openapi.yaml),
 which swagger-ui serves in the same dropdown as the platform spec. It is a **separate document
-from `docs/openapi.yaml` on purpose**: this server is not behind Kong, takes no `apikey`, and
+from `docs/openapi.yaml` on purpose**: this server is not behind the gateway, takes no `apikey`, and
 `/v1/schema` already means something else there.
 
 ### Subscriptions

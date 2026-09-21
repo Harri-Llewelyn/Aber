@@ -13,7 +13,7 @@ import { CredentialError, GATEWAY_ID_PATTERN, assertEntry, isGatewayId } from '.
 export const CONTROL_TOPIC = '$CONTROL/dynamic-security/v1';
 export const CONTROL_RESPONSE_TOPIC = '$CONTROL/dynamic-security/v1/response';
 
-/** Where both targets keep the plugin's document. mosquitto.conf names this path. */
+/** Where the plugin keeps its document. mosquitto.conf names this path. */
 export const DYNSEC_FILE = '/mosquitto/data/dynamic-security.json';
 
 /**

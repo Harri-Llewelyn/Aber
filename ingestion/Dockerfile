@@ -40,8 +40,8 @@ COPY ingestion/capture.py .
 # A SECOND IMAGE IS NOT NEEDED. What playback requires that is genuinely new is a separate
 # PROCESS with a separate Supabase principal and its own broker credentials --
 # none of which an image boundary provides. It publishes using capture.py's own `plan_playback()`,
-# which is already here, so a second image would be this one minus two files plus a second build,
-# a second tag to keep in step, and a second entry in check-image-tag-parity.mjs.
+# which is already here, so a second image would be this one minus two files plus a second build
+# and a second tag to keep in step.
 COPY ingestion/playback_worker.py .
 
 # The Directory's MQTT half. SAME RULE AS metrics.py AND capture_worker.py ABOVE, and this file is

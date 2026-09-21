@@ -651,7 +651,7 @@ function edgeFunctionNames() {
     // and no sweep is needed; the body is carried whole because plpgsql cannot be patched.
     'public.start_playback_job': '0129 refuses a target whose credential the worker has not picked up yet; the baseline holds the pre-#217 form',
     // 0103 names the gateway's scrape job as the chart's collector labels it (supabase-envoy);
-    // the baseline holds the Compose-era `envoy`.
+    // the baseline holds the older `envoy`.
     'public.directory_liveness_job_map': '0103 renames the gateway job to supabase-envoy; the baseline holds envoy',
     // 0074 creates it with the token denylist arm; 0076 rewrites it to add the principal arm, whose
     // check runs first so its message wins once a principal revocation has cascaded to its tokens.
@@ -1331,12 +1331,12 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists, on both targets.
+// 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists.
 //
 // Measured against postgrest/postgrest:v14.12: a hook naming a missing function boots, answers
 // 200 on /live and /ready, and fails every data request with 404 42883. A typo here is a total
-// API outage that every health check calls healthy, so it is caught statically in the two
-// places the name is written.
+// API outage that every health check calls healthy, so it is caught statically: the chart sets
+// the name, and a migration has to declare it.
 // -------------------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------------------
 // 11c-ter. The playback credential delivery path is the same string in all four places.
@@ -2082,6 +2082,237 @@ function edgeFunctionNames() {
       `all ${created.length} storage bucket(s) are created, policed and documented: ` +
         created.join(', ')
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 17. Every script path named anywhere in the tree names a script that exists.
+//
+// A comment citing a deleted script is the shape #339 went looking for: internally coherent,
+// naming a real-looking path, and false. A reader auditing a coupling follows the pointer, finds
+// nothing, and cannot tell whether the guard moved or was dropped. Seven live files named
+// `scripts/check-image-tag-parity.mjs` when this check was written; it had gone with the second
+// deployment target, and four of the seven were the only statement of a coupling that still
+// mattered.
+//
+// A DELIBERATE MENTION OF A DEAD SCRIPT IS ALLOWED, and has to say so on its own line: a line
+// carrying "deleted", "retired", "removed", "replaced" or "gone" is history rather than a
+// pointer. That is the whole exemption, so a stale citation cannot hide behind a file's reputation.
+// The two records that are history by definition are exempt wholesale -- `docs/incidents.md`,
+// where naming the script an incident happened to is the point, and `supabase/migrations/archive/`,
+// which is never executed. `backups/` is gitignored and holds artefacts, not prose.
+//
+// A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `./` or `../` against the
+// citing file's own directory; anything else against the repository root and then against each
+// directory above the citing file, because a path can be written relative to a root that is not
+// this repository's -- a Helm template names `files/scripts/...` relative to the chart.
+// -------------------------------------------------------------------------------------------------
+{
+  const PAST = /\b(deleted|retired|removed|replaced|gone|superseded)\b/i;
+  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md'];
+  const scanned = allFiles.filter(
+    (f) =>
+      !EXEMPT.includes(f) &&
+      !f.startsWith('supabase/migrations/archive/') &&
+      !f.startsWith('frontend/dist/') &&
+      !f.startsWith('.claude/') &&
+      !f.startsWith('backups/') &&
+      !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
+  );
+
+  const dead = [];
+  let citations = 0;
+  for (const file of scanned) {
+    let text;
+    try { text = read(file); } catch { continue; }
+    if (text.includes('\0')) continue;
+    const here = posix.dirname(file);
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      for (const m of lines[i].matchAll(/((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g)) {
+        const cited = m[1];
+        citations += 1;
+        const candidates = [];
+        if (/^\.{1,2}\//.test(cited)) {
+          candidates.push(posix.normalize(posix.join(here, cited)));
+        } else {
+          candidates.push(cited);
+          for (let d = here; d !== '.' && d !== '/'; d = posix.dirname(d)) {
+            candidates.push(posix.normalize(posix.join(d, cited)));
+          }
+        }
+        if (candidates.some((c) => existsSync(join(REPO, c)))) continue;
+        if (PAST.test(lines[i])) continue;
+        dead.push(`${file}:${i + 1} cites ${cited}, which does not exist`);
+      }
+    }
+  }
+
+  if (dead.length) {
+    fail(
+      'a comment or document cites a script that is not in the tree:\n' +
+        [...new Set(dead)].map((d) => `        ${d}`).join('\n') +
+        '\n        (if the script is deliberately gone, say so on the same line)'
+    );
+  } else {
+    pass(`all ${citations} script citation(s) name a script that exists`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 18. A Dockerfile built FROM an image the chart also runs is pinned to the chart's tag.
+//
+// THE COUPLING IS REAL AND SILENT WHEN BROKEN. `backup-service` and `db-init` are built FROM
+// `supabase/postgres` for their `pg_dump` and their `psql`: a client older than the server
+// mis-handles what it is given, and a backup taken by an older `pg_dump` restores wrong rather
+// than failing. `gateway-credential` is built FROM `eclipse-mosquitto` for `mosquitto_passwd` and
+// `mosquitto_rr`, whose hash format and control protocol are the broker's own.
+//
+// This is what `check-image-tag-parity.mjs` held against the retired Compose file. The chart is
+// the only remaining declaration of these versions, so the check belongs here (#339).
+// -------------------------------------------------------------------------------------------------
+{
+  const dockerfiles = allFiles.filter((f) => f.endsWith('Dockerfile') && !f.startsWith('frontend/dist/'));
+  const offences = [];
+  let coupled = 0;
+  for (const file of dockerfiles) {
+    for (const m of read(file).matchAll(/^FROM\s+(\S+)/gm)) {
+      const ref = m[1];
+      if (ref.includes('${')) continue;           // a build arg, resolved by the caller
+      const at = ref.indexOf('@');                // a digest pin carries its own guarantee
+      const bare = at === -1 ? ref : ref.slice(0, at);
+      const colon = bare.lastIndexOf(':');
+      if (colon === -1) continue;
+      const repo = bare.slice(0, colon);
+      const tag = bare.slice(colon + 1);
+      if (!chartPins.has(repo)) continue;
+      coupled += 1;
+      if (chartPins.get(repo) !== tag) {
+        offences.push(
+          `${file} is FROM ${repo}:${tag}, but the chart runs ${repo}:${chartPins.get(repo)}`
+        );
+      }
+    }
+  }
+  if (offences.length) {
+    fail(
+      'an image is built FROM a different version than the chart runs:\n' +
+        offences.map((o) => `        ${o}`).join('\n')
+    );
+  } else if (coupled === 0) {
+    fail(
+      'no Dockerfile is built FROM an image the chart pins. Either a base moved off a pinned ' +
+        'image or this check has stopped finding them; both remove a guard silently.'
+    );
+  } else {
+    pass(`all ${coupled} image base(s) shared with the chart agree with its pins`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 19. Nothing outside the historical record describes a second deployment target.
+//
+// Docker Compose was the second target and was removed in September 2026. The prose describing it
+// outlived it by a year in thirty-odd files, and the failure is not cosmetic: the strings reached
+// operators. The Gateways page told them to run `npm run setup` against a `.env` that does not
+// exist, and the bundle function's 503 named the same file.
+//
+// IN SCOPE IS THE CLAIM, NOT THE WORD. The gateway appliance genuinely runs Docker Compose, and
+// `docker compose up` in the remote-gateway runbook is correct. What cannot be true is a SECOND
+// target for the platform, so the phrases below are the ones that assert one.
+//
+// The four documents that carry the comparison as history are exempt, each opening with a note
+// saying so, and this file is exempt because it has to name the phrases to look for them.
+// -------------------------------------------------------------------------------------------------
+{
+  const HISTORY = [
+    'docs/incidents.md',
+    'docs/roadmap.md',
+    'docs/kubernetes-architecture.md',
+    'docs/postgres-17-migration-plan.md',
+    'scripts/check-docs-drift.mjs',
+  ];
+  const PHRASES = [
+    /\bboth targets\b/i,
+    /\bneither target\b/i,
+    /\beither target\b/i,
+    /\bon Compose\b/,
+    /\bsecond (?:deployment )?target\b/i,
+  ];
+  const scanned = allFiles.filter(
+    (f) =>
+      !HISTORY.includes(f) &&
+      !f.startsWith('supabase/migrations/archive/') &&
+      !f.startsWith('frontend/dist/') &&
+      !f.startsWith('.claude/') &&
+      !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
+  );
+
+  const offences = [];
+  for (const file of scanned) {
+    let text;
+    try { text = read(file); } catch { continue; }
+    if (text.includes('\0')) continue;
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      for (const p of PHRASES) {
+        if (p.test(lines[i])) {
+          offences.push(`${file}:${i + 1} ${lines[i].trim().slice(0, 90)}`);
+          break;
+        }
+      }
+    }
+  }
+  if (offences.length) {
+    fail(
+      'prose describes a second deployment target, which the platform has not had since ' +
+        'September 2026:\n' +
+        offences.map((o) => `        ${o}`).join('\n') +
+        '\n        (the appliance does run Compose; the platform does not)'
+    );
+  } else {
+    pass(`no live file describes a second deployment target (${scanned.length} scanned)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 20. The release workflow names every image the chart resolves from `appVersion`, and no other.
+//
+// The chart marks an image it builds here with an empty tag and resolves it to `Chart.AppVersion`
+// (check 8). An image added to the chart but not to the release's lists publishes nothing and
+// installs into an ImagePullBackOff at the version it claims to ship; one removed from the chart
+// and left in the lists fails the release's own verification step. Both lists are spelled out in
+// `release.yml` because a shell loop cannot read the chart, so they are what drifts.
+// -------------------------------------------------------------------------------------------------
+{
+  const RELEASE = '.github/workflows/release.yml';
+  const release = read(RELEASE);
+  const built = new Set(
+    [...CHART_VALUES.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm)]
+      .map((m) => m[1].split('/').pop())
+  );
+  const lists = [...release.matchAll(/for img in ([a-z0-9 -]+); do/g)].map((m) => m[1].trim().split(/\s+/));
+
+  if (!lists.length) {
+    fail(`${RELEASE} has no \`for img in …\` list; check 20 can no longer see what is published`);
+  } else {
+    const offences = [];
+    lists.forEach((list, n) => {
+      for (const img of list) {
+        if (!built.has(img)) offences.push(`list ${n + 1} names ${img}, which the chart does not resolve from appVersion`);
+      }
+      for (const img of built) {
+        if (!list.includes(img)) offences.push(`list ${n + 1} omits ${img}, which the chart resolves from appVersion`);
+      }
+    });
+    if (offences.length) {
+      fail(
+        'the release workflow and the chart disagree about which images ship:\n' +
+          [...new Set(offences)].map((o) => `        ${o}`).join('\n')
+      );
+    } else {
+      pass(`the release workflow publishes all ${built.size} image(s) the chart builds here`);
+    }
   }
 }
 

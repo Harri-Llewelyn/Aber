@@ -186,7 +186,7 @@ spec:
 The reconcile's and the credential service's code, mirrored from scripts/ by
 scripts/sync-helm-chart-files.mjs. Mounted rather than baked into the image, unlike node-red-init and
 storage-init are: the image supplies the runtime (node, mosquitto_passwd, mosquitto_rr) and the
-chart supplies the code, so a script change needs no image rebuild on either target.
+chart supplies the code, so a script change needs no image rebuild.
 
 Unconditional, because the initContainer runs the reconcile whether or not the credential service
 is enabled. The `lib/` subdirectory is flattened into keys (a ConfigMap key cannot hold a slash)

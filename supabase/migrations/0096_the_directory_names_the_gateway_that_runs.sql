@@ -2,7 +2,7 @@
 --
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
--- Both targets run Envoy and the seeded directory row still said Kong. The seed now spells the
+-- The stack runs Envoy and the seeded directory row still said Kong. The seed now spells the
 -- current name, and its INSERT for this row conflicts on id rather than service_name for the
 -- reason the Node-RED row does: a database from before this rename holds the id under the old
 -- name, and a name-targeted clause raises on the primary key every boot. This migration renames

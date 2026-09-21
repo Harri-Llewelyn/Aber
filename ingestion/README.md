@@ -1044,7 +1044,7 @@ and reads nothing back.
 | `<prefix>/schema` | Locally minted schema identifiers |
 | `<prefix>/service` | Stack service endpoints |
 
-**It is off by default.** `DIRECTORY_MQTT_ENABLED` is unset on both targets, and the daemon logs
+**It is off by default.** `DIRECTORY_MQTT_ENABLED` is unset in the chart, and the daemon logs
 which state it is in at startup rather than staying silent — an unconfigured deployment should be
 able to tell that the tree is empty on purpose.
 
@@ -1318,15 +1318,15 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `TELEMETRY_BATCH_MAX_MESSAGES` | `500` | Messages per historian transaction, at most — see [The historian writer](#the-historian-writer) |
 | `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop |
 | `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` | `5` | How long a full queue holds the callback thread before dropping |
-| `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM waits for the queue to drain. Inside the container grace period on both targets |
+| `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM waits for the queue to drain. Inside the pod's termination grace period |
 | `INGESTION_STATS_INTERVAL` | `60` | Seconds between `STATS` log lines. `0` disables the reporter |
 | `INGESTION_METRICS_PORT` | `9108` | Prometheus endpoint. `0` disables it — see [Metrics](#metrics) |
 | `LOG_LEVEL` | `INFO` | Any level name; an unrecognised one falls back to `INFO` |
-| `LOG_FORMAT` | `text` in code, **`json` in both deployments** | `json` emits one object per line with the drop fields promoted to top level — see [Log fields](#log-fields). An unrecognised value is `text` |
+| `LOG_FORMAT` | `text` in code, **`json` in the chart** | `json` emits one object per line with the drop fields promoted to top level — see [Log fields](#log-fields). An unrecognised value is `text` |
 
 The first three are the chart's `ingestion.*` values —
 `validate.py`'s watchdog check reads them from its own environment to decide whether the window is
-short enough to wait for, and it runs against both targets.
+short enough to wait for, and it runs against the deployed stack.
 
 ### Log fields
 

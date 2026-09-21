@@ -827,8 +827,8 @@ the same way as an empty one.
 
 **The Gateways page says remote gateways cannot be enrolled on this deployment.**
 One of the two addresses in §7 is unset or in-stack; the notice names which. Set it where the
-deployment is configured (`.env` on Compose, `global.publicBaseDomain` on the chart) and restart
-the functions service. The notice clears on the next visit to the page.
+deployment is configured (`global.publicBaseDomain` in the chart's values) and restart the
+functions service. The notice clears on the next visit to the page.
 
 **`docker compose logs bootstrap` says the token was refused (`401`).**
 Unknown, expired or already redeemed. Re-issue from the dashboard.

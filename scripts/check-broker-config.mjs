@@ -145,7 +145,7 @@ const INIT_ENV = {
 };
 
 /**
- * Run the real reconcile in the credential service's image, as both targets do before the broker
+ * Run the real reconcile in the credential service's image, as the chart does before the broker
  * starts. `outDir` is where the document lands; `preamble` runs first in the same shell.
  */
 function runInit({ outDir = dynsecDir, preamble = '' } = {}) {
@@ -187,7 +187,7 @@ function assemble({ withTls }) {
  * Start the broker on the composed config and the reconciled document, and return its log plus
  * whether it reached "running". The document is COPIED into the container rather than mounted:
  * the plugin rewrites it on every change, and each broker here must start from the same one. It
- * is chowned to 1883 at 0600 as both targets do; the plugin warns on anything wider.
+ * is chowned to 1883 at 0600 as the chart does; the plugin warns on anything wider.
  */
 function startBroker({ withTls, certsDir, ports = [] }) {
   assemble({ withTls });
@@ -944,7 +944,7 @@ if (problems.length) {
   console.error(
     `\nThis is checked against ${IMAGE} -- the tag the chart pins -- because mosquitto's\n` +
       'accepted syntax and the plugin\'s behaviour CHANGE BETWEEN MINOR VERSIONS. A config that works\n' +
-      'on `latest` can take the broker down on both targets the moment the image is pinned, and the\n' +
+      'on `latest` can take the broker down the moment the image is pinned, and the\n' +
       'plugin\'s treatment of `%u`, of a deleted role and of a disabled session is measured, not\n' +
       'assumed (mosquitto/README.md).\n'
   );

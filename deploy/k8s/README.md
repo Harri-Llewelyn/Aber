@@ -120,9 +120,9 @@ adds the in-cluster conformance Jobs.
 The port-forwards carry the port numbers every host-side script and suite defaults to (`5433` for the historian,
 `54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
 tool keeps its defaults. `test` builds the suites' environment from `.env.example` for the
-non-secret settings and from the release's own Secret for every credential, and sets
-`ACS_STACK=k8s`, which tells the suites that reach into a container (`test-harness/stack_exec.py`)
-to use `kubectl exec` against the workload rather than `docker exec` against a container name.
+non-secret settings and from the release's own Secret for every credential. The suites that reach
+into a container (`test-harness/stack_exec.py`) run `kubectl exec` against the workload, choosing
+the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 
 ## Install
 
@@ -826,15 +826,15 @@ from the node CIDR via `networkPolicy.extraEgress`.
 
 **Two rules are load-bearing and easy to miss:** DNS egress on **both** UDP and TCP 53 (a response
 over 512 bytes falls back to TCP, so a UDP-only rule fails *intermittently*), and
-`supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through Kong, and
+`supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through the
+gateway, and
 pg_net has no retries or DLQ, so blocking it drops every notification silently.
 
 **The forge's login depends on a policy, so it gets one whether or not you enable this layer.** Gitea
 runs with reverse-proxy authentication and signs in whoever the `X-WEBAUTH-USER` header names, from
 any peer (`REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For` only). Access to `gitea:3000` is
-therefore not exposure control but *authentication* control — and on Compose that boundary exists
-without anyone opting in, because the `forge` Docker network is joined only by the gateway and the
-edge runtime.
+therefore not exposure control but *authentication* control, and nothing else confines the pod by
+default.
 
 So `gitea.enabled: true` renders **one** NetworkPolicy even with `networkPolicy.enabled: false`
 (#172): ingress-only on the Gitea pod, port 3000 from the gateway and `supabase-functions`, port 22
@@ -1378,8 +1378,7 @@ global section above the first `listener` line**. Do not move them under a liste
 it looks: a `plugin` line under a listener is refused outright without `per_listener_settings`, and
 a duplicated security option is fatal on 2.0.x and accepted on 2.1.x. That second trap has bitten:
 when the config still declared `password_file`, it was declared twice, and the pin from `latest` to
-`2.0.20` broke the broker on both targets with a stack of unrelated-looking health timeouts as the
-only symptom.
+`2.0.20` broke the broker with a stack of unrelated-looking health timeouts as the only symptom.
 
 Declaring them once is also what *guarantees* all three listeners are authorised identically —
 nothing above the first `listener` can be listener-specific, so no listener can come up anonymous.
@@ -1447,7 +1446,7 @@ The two browser-facing URLs are set with `GF_*` environment variables rather tha
 `GF_SERVER_ROOT_URL` and `GF_AUTH_GENERIC_OAUTH_AUTH_URL`. `token_url` and `api_url` inside the
 file are in-cluster (`http://supabase-kong:8000`) and are correct untouched.
 
-Its datasource is rendered by an initContainer, same as Kong's config and for the same reason — with
+Its datasource is rendered by an initContainer, same as the gateway's config and for the same reason — with
 `existingSecret` the chart cannot see the password, and Helm would substitute an empty string. That
 so Grafana runs its stock `/run.sh`.
 

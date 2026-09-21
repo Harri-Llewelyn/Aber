@@ -596,7 +596,6 @@ function testEnvironment () {
   return {
     ...process.env,
     ...secrets,
-    ACS_STACK: 'k8s',
     KUBE_NAMESPACE: NS,
     HELM_RELEASE: RELEASE,
     DB_HOST: 'localhost', DB_PORT: '5433',

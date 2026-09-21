@@ -112,10 +112,10 @@ re-run.
 ## The document, and who writes it
 
 `dynamic-security.json` is mutable state. It lives on a PersistentVolumeClaim, which pins the single-replica broker to a node and is the
-cost the roadmap entry accepted.
+cost the plugin's inventory and revocation are bought with (`docs/kubernetes-architecture.md` §5.1).
 
-**Boot reconciles; it never rewrites.** `scripts/mosquitto-dynsec-init.mjs` runs before the broker
-on both targets, in the credential service's image, and:
+**Boot reconciles; it never rewrites.** `scripts/mosquitto-dynsec-init.mjs` runs before the broker,
+in the credential service's image, and:
 
 - replaces every role `dynsec-roles.json` declares with the declared one, and regenerates
   `gateway-<id>` for every gateway client; any other stored role is kept;
@@ -140,7 +140,7 @@ commands through `docker exec` or `kubectl exec`.
 ## Adding a principal
 
 A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`, an env
-pair `MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` on both targets, an entry in
+pair `MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` in the chart's values, an entry in
 `PLATFORM_PRINCIPALS` in `scripts/lib/mosquitto-dynsec.mjs`, a purpose line in
 `frontend/src/utils/serviceIdentities.js`, and an assertion in `scripts/check-broker-config.mjs`.
 `scripts/check-docs-drift.mjs` holds the roles file and the page's list to each other.

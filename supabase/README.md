@@ -2592,7 +2592,7 @@ that matters (the relations the i3X address space is assembled from are
 every RLS policy in the schema. **The fourth design is PostgREST's `db-pre-request`** — a function
 run in the caller's role before every request, which can `RAISE` and abort it, and which touches no
 policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
-`revoke_service_token()`; `PGRST_DB_PRE_REQUEST` names the hook on both targets.
+`revoke_service_token()`; `PGRST_DB_PRE_REQUEST` names the hook.
 
 **The key it needs had been recorded since `0043`.** Both host scripts stamp a `jti` and hand it to
 `record_service_token_issued()`, for an inventory that could not act on it.
@@ -3330,7 +3330,7 @@ password** while `pg_hba.conf` trusts `127.0.0.1` and requires `scram-sha-256` f
 network. Read-only mode was not too powerful; it did not work.
 
 That also inverts what the fix is. Setting `POSTGRES_USER_READ_ONLY` explicitly changes no
-behaviour — it names the value the image already defaults to, and is set on both targets so the
+behaviour — it names the value the image already defaults to, and is set explicitly so the
 dependency is visible rather than inherited. **What makes the difference is the password**, and it
 is issued in the roles-init step rather than here: `supabase_read_only_user` is a RESERVED role
 (`only superusers can modify it`), and `db-init` connects as `postgres`, which is not a superuser on
@@ -4097,7 +4097,7 @@ This is what surfaces the chart's port-free hostnames on the page.
 
 ## The Directory names the gateway that runs (`0096`)
 
-Both targets run Envoy, and the seeded directory row still read *Supabase API Gateway (Kong)*.
+The stack runs Envoy, and the seeded directory row still read *Supabase API Gateway (Kong)*.
 The name is display text and also the key `directory_liveness_job_map()` joins the `envoy` scrape
 job to, so the two change together: `0001` maps `envoy` to *Supabase API Gateway (Envoy)* and is
 replayed every boot, `0002` seeds the new name, and `0096` renames the row on a database that

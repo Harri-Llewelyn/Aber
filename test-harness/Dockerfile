@@ -35,9 +35,9 @@
 # The default below is a convenience for a bare `docker build` and nothing more -- both CI and
 # release.yml pass INGESTION_IMAGE explicitly, because at release time the base is the ingestion
 # image built minutes earlier under the version being released, which no committed default can
-# name. Its tag is asserted equal to the chart's appVersion by scripts/check-image-tag-parity.mjs:
-# left to drift, a bare build here would silently extend a DIFFERENT ingestion image than the one
-# the chart deploys, and the suite would then be testing a stack it is not running beside.
+# name. The default is the last released tag rather than a floating one: left to drift, a bare
+# build here would silently extend a DIFFERENT ingestion image than the one the chart deploys, and
+# the suite would then be testing a stack it is not running beside.
 ARG INGESTION_IMAGE=ghcr.io/harri-llewelyn/acs-cymru/ingestion:0.1.0
 FROM ${INGESTION_IMAGE}
 

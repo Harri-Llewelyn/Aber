@@ -426,7 +426,7 @@ class MultilineTestCase(unittest.TestCase):
         format instead of the format.
 
         THE SHAPE IS A CRASH, WHICH IS NOT THE `exc_info=True` CASE. Under `LOG_FORMAT=json` --
-        what both targets set -- a HANDLED exception is not multi-line at all: `JSONFormatter` puts
+        what the chart sets -- a HANDLED exception is not multi-line at all: `JSONFormatter` puts
         it in the `exc` field and `json.dumps` escapes the newlines. The stage earns its place on
         the UNHANDLED case, where Python writes a raw traceback straight to stderr with no
         formatter in the path. That is a daemon dying, which is when the log is worth most, and it

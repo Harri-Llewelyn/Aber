@@ -35,8 +35,8 @@
  *   /mosquitto/certs/tls.key   the broker key   (0600, uid 1883)
  *
  * `ca.crt` / `tls.crt` / `tls.key` are the kubernetes.io/tls key names cert-manager projects, and
- * mosquitto-tls.conf names those three paths for BOTH targets. Using different names here would
- * mean a second TLS stanza, and the two would drift.
+ * mosquitto-tls.conf names those three paths. Using different names here would mean a second TLS
+ * stanza, and the two would drift.
  *
  * Usage (normally run by the mosquitto-tls-init service, not by hand):
  *   node scripts/mosquitto-tls-init.mjs
@@ -91,8 +91,8 @@ const LEAF_RENEW_BEFORE_DAYS = 90;
 /**
  * The three names every deployment needs, before anything the operator adds.
  *
- * `mosquitto` is how every in-network client addresses the broker on BOTH targets (see the Service
- * name note in the chart). `localhost` and `127.0.0.1` are for the published port -- a gateway
+ * `mosquitto` is how every in-network client addresses the broker (see the Service name note in
+ * the chart). `localhost` and `127.0.0.1` are for the published port -- a gateway
  * being commissioned on the same machine, and `scripts/check-broker-config.mjs`, both dial it that
  * way. Omitting them makes the check fail with a hostname mismatch that reads as a broken CA.
  */

@@ -11,7 +11,7 @@
 #   eclipse-mosquitto:2.0.20  neither
 #
 # So the choice was a runtime `apk add` in the entrypoint -- which makes first boot depend on
-# reaching a package mirror, and fails at `docker compose up` rather than at build time -- or this.
+# reaching a package mirror, and fails on the first pod start rather than at build time -- or this.
 # Every other service in this stack that needs a package builds an image for it (see
 # node-red/Dockerfile, which exists for exactly the same reason with different packages).
 #
@@ -23,5 +23,5 @@ FROM node:24-alpine
 
 RUN apk add --no-cache openssl
 
-# No CMD: docker-compose.yml supplies `node /scripts/mosquitto-tls-init.mjs`, keeping the script
-# bind-mounted and editable without a rebuild -- the same arrangement as node-red-init.
+# No CMD: the caller supplies `node /scripts/mosquitto-tls-init.mjs` and mounts the script, keeping
+# it editable without a rebuild -- the same arrangement as node-red-init.

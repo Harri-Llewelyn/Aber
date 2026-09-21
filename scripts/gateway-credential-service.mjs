@@ -60,8 +60,8 @@ const ADMIN_PASSWORD = process.env.MQTT_DYNSEC_ADMIN_PASSWORD || '';
  * The broker's CA, returned alongside the credential.
  *
  * An appliance needs three things that must all describe the SAME broker: a username, a password,
- * and the root that signs the certificate it will be shown. This service sits beside the broker on
- * both targets, so it is the one component that can read the CA the broker is actually presenting.
+ * and the root that signs the certificate it will be shown. This service sits beside the broker,
+ * so it is the one component that can read the CA the broker is actually presenting.
  * It is not a secret: a root certificate contains no private key. `ca.key` sits beside it and is
  * deliberately not read.
  */

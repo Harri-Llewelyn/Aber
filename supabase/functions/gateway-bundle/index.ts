@@ -295,7 +295,8 @@ export default async function handler(req: Request): Promise<Response> {
         error: "Bundle generation is not configured on this deployment",
         details:
           `SUPABASE_PUBLIC_URL is ${platform.problem} -- set it to the URL Remote gateways ` +
-          "reach the platform on, in .env on Compose. No enrolment token was minted.",
+          "reach the platform on (global.publicBaseDomain in the chart's values). " +
+          "No enrolment token was minted.",
       });
     }
     const publicUrl = platform.value;

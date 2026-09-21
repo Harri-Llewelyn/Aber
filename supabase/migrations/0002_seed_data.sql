@@ -7528,7 +7528,7 @@ SELECT cron.schedule('sweep-gateway-credential-revocations', '*/15 * * * *',
 -- Node-RED authentication
 --
 -- Closes the Node-RED admin API and webhook receiver on port 1880. The application half lives
--- in node-red/Dockerfile, scripts/node-red-init.mjs and supabase/functions/nodered-userinfo.
+-- in node-red/Dockerfile, node-red/node-red-init.mjs and supabase/functions/nodered-userinfo.
 -- This provides the two things only the database can: the OAuth client Node-RED authenticates
 -- humans with (auth.oauth_clients), and the signing key for the quarantine webhook's token in
 -- Vault, plus a dispatch function that mints a short-lived token per event.
