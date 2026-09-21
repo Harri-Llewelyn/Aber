@@ -343,3 +343,25 @@ this; the fault needs a row of the newer lane to exist.
 after, it counted 14 and aborted. `npm run test:db` builds a database from nothing, so 0069 always runs before
 0086 grants and always counts 13; only a second boot reproduces it, which is why it shipped green. A self-check
 asserts the claim its migration makes, which stays true whatever is granted later.
+
+## The horizons view was created before the rollups it reads
+
+**Where the fix lives:** `timescaledb/aggregates.sql`, section 2b, which now follows the rollups
+it selects from.
+**Symptom:** a fresh install failed at the `timescaledb-maintenance` post-install hook with
+`relation "telemetry_1m" does not exist`. Every upgrade of an existing stack passed.
+
+`telemetry_horizons` reads the three rollups. It was added on 2026-09-16 (`28e6694`) as section
+1b, beside `telemetry_latest`, because both are views evaluated on the historian for
+postgres_fdw's sake and the grouping read naturally. The file runs top to bottom on every boot,
+and on a historian that has never booted the rollups are created by section 2, after it.
+
+Every stack the change was tested on already had them: `dev:up` upgrades a cluster whose
+historian volume persists, and the CI job that installs from nothing had been failing in four
+seconds since 2026-09-08 for want of Actions minutes. Five days of commits landed on a chart that
+could not be installed fresh, and the restore rehearsal, whose second install is always fresh,
+was the first thing to run that path.
+
+The order of statements in a file replayed on every boot is a dependency, not a reading order.
+The weekly rehearsal now installs from nothing twice a run, so the fresh path is exercised even
+while the per-commit job is not.
