@@ -519,3 +519,19 @@ after a credential is re-minted and the worker is not restarted, which is the or
 rotating one, and how this was found. `rc` 4 and 5 are named separately from the rest because they
 are the two an operator fixes by rotating the credential and restarting, rather than by looking at
 the broker.
+
+## A recorder that understood one encoding reported the fleet as idle
+
+**Where the fix lives:** `ingestion/capture.py`, whose recorder keeps whatever arrived and whose
+`play` re-encodes each message into the encoding it was recorded in.
+**Symptom:** a capture of a busy stack came back empty, and the tool reported the fleet as idle.
+
+The first version understood protobuf only. Both encodings are live traffic here — the Node-RED
+simulator flow publishes JSON, Remote gateways publish protobuf — and they enter the daemon down
+different branches of `parse_sparkplug_payload()`. The recorder skipped every message the seeded
+fleet published and said nothing was there.
+
+That both were in use was not obvious and was found by recording. It is also why playback re-encodes
+rather than normalising: replaying a JSON fleet as protobuf would mean a fault reproduced through
+this tool could be one the playback introduced, or one it silently repaired. The encoding is part of
+what was observed, so it is part of what is replayed.
