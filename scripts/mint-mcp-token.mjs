@@ -52,9 +52,8 @@ const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
 /**
  * THE CEILING, MIRRORED BY `service_token_max_days()` IN 0043.
  *
- * 90 was the DEFAULT before the Access Control work and is now the maximum, with 30 the default. The change is
- * not cosmetic: the header explains that these tokens cannot be revoked, so the expiry is the only
- * bound that exists -- and a bound that only applies when somebody remembers to pass a flag is not
+ * 90 IS THE MAXIMUM AND 30 THE DEFAULT. These tokens cannot be revoked, so the expiry is the only
+ * bound that exists -- and a bound that applies only when somebody remembers to pass a flag is not
  * one. Asking for more is an error rather than a clamp, because silently issuing something shorter
  * than requested is how an operator ends up surprised by an expiry.
  */

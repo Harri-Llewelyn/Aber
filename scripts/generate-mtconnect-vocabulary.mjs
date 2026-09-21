@@ -25,13 +25,11 @@ const SCHEMA_URL =
   `https://raw.githubusercontent.com/mtconnect/schema/master/MTConnectDevices_${SCHEMA_VERSION}_draft-04.schema.json`;
 
 /**
- * THE LIVE SEED, not the archived migration this used to write.
- *
- * It wrote `supabase/migrations/archive/20260101000018_mtconnect_vocabulary.sql` — a file
- * `supabase-db-init` never executes, because the glob `/migrations/*.sql` does not recurse. So the
- * documented procedure for adopting a newer MTConnect release ("bump SCHEMA_VERSION and re-run")
- * changed nothing on any database, on any target, and said so nowhere. The archived file stays
- * exactly as it is: it is the historical migration and the reasoning behind it, not an output.
+ * THE LIVE SEED (`0002`), AND IT HAS TO BE. `supabase-db-init` globs `/migrations/*.sql`, which
+ * does not recurse, so anything written into `archive/` is never executed -- and the documented
+ * procedure for adopting a newer MTConnect release ("bump SCHEMA_VERSION and re-run") would change
+ * nothing on any database and say so nowhere. The archived file is a historical record, not an
+ * output, and is never written here.
  *
  * Only the delimited block is rewritten. Everything else in 0002 — the commentary above the block,
  * the ISO 22400 and OPC UA vocabularies, every operator-facing row — is hand-maintained and must
@@ -136,10 +134,9 @@ for (const [name] of dataItemTypes) {
 /**
  * One statement per row, matching the seed's existing form exactly.
  *
- * NOT a single multi-row INSERT, which is what this generator used to emit for its own migration.
- * The per-row form is what 0002 already contains, so regenerating produces a clean diff instead of
- * rewriting 598 lines into 3 — and each row carries its own `ON CONFLICT`, which is what lets the
- * seed replay on every boot.
+ * NOT a single multi-row INSERT. The per-row form is what 0002 already contains, so regenerating
+ * produces a clean diff rather than rewriting 598 lines into 3, and each row carries its own
+ * `ON CONFLICT`, which is what lets the seed replay on every boot.
  *
  * `DO UPDATE SET category` ONLY, and that asymmetry is deliberate and load-bearing. `category` is
  * upstream fact and should be corrected on an existing database when MTConnect changes it.
