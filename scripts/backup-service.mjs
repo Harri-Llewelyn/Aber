@@ -24,11 +24,19 @@
  * older than BACKUP_RETENTION_DAYS is deleted and forgotten; a requested one is pinned until an
  * Administrator releases it.
  *
+ * A RUNNING job that no process is running is failed before each claim, not only at start. The
+ * service is one replica, so such a row is a previous process's, or it came back in a restore
+ * from a backup taken while that job ran; left standing it would refuse every new backup.
+ *
  * THE FILES. One directory per backup, named by the UTC stamp, holding what backup-databases.sh
- * writes plus the forge: supabase-db-<stamp>.sql.gz, timescaledb-<stamp>.sql.gz,
- * storage-objects-<stamp>.tar.gz, forge-<stamp>.tar.gz, manifest-<stamp>.txt (the text manifest
- * restore-databases.sh reads) and manifest.json (digests). Written under .partial-<stamp> and
- * renamed on success, so a directory named by a stamp is a complete backup or absent.
+ * writes plus the keys and the volumes: supabase-db-<stamp>.sql.gz, timescaledb-<stamp>.sql.gz,
+ * vault-key-<stamp>.txt (pgsodium's root key, read through the dump's own session; Vault is
+ * ciphertext under it), storage-objects-<stamp>.tar.gz, forge-<stamp>.tar.gz,
+ * broker-<stamp>.tar.gz (the broker's data volume, which is the Dynamic Security document),
+ * ca-<stamp>.tar.gz (the internal CA's key pair, read from its Secret through the API),
+ * manifest-<stamp>.txt (the text manifest restore-databases.sh reads) and manifest.json
+ * (digests). Written under .partial-<stamp> and renamed on success, so a directory named by a
+ * stamp is a complete backup or absent.
  *
  * THE FORGE'S SQLITE DATABASE is copied with sqlite3's online backup, which is consistent while
  * Gitea writes, and falls back to a raw copy of the db, -wal and -shm files followed by a
@@ -40,10 +48,11 @@
 import { spawnSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  createReadStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync,
-  copyFileSync,
+  createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync,
+  writeFileSync, copyFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { join, resolve, sep } from 'node:path';
 
 // -------------------------------------------------------------------------------------------------
@@ -79,6 +88,15 @@ const TIMESCALE = {
 // manifest says so. An empty string disables one deliberately.
 const STORAGE_PATH = process.env.STORAGE_PATH ?? '/storage';
 const FORGE_PATH = process.env.FORGE_PATH ?? '/forge';
+const BROKER_PATH = process.env.BROKER_PATH ?? '/broker';
+// The CA behind the broker's and the databases' certificates, read from its Secret through the
+// API with the pod's ServiceAccount. Either empty: no CA to keep (an ACME issuer, or no TLS).
+const CA_SECRET_NAME = process.env.CA_SECRET_NAME || '';
+const CA_SECRET_NAMESPACE = process.env.CA_SECRET_NAMESPACE || '';
+const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
+// pgsodium's root key, relative to the database's data directory, where the chart's getkey script
+// keeps it. Vault's rows are ciphertext under it and nothing else. Empty: not archived.
+const VAULT_KEY_FILE = process.env.VAULT_KEY_FILE ?? 'pgsodium_root.key';
 
 const log = (...args) => console.log(`[backup-service] ${new Date().toISOString()}`, ...args);
 
@@ -251,6 +269,73 @@ async function archiveForge(dir, stamp) {
   }
 }
 
+/**
+ * A Secret, read through the API with the pod's ServiceAccount. The token is read on every call:
+ * a projected token is short-lived and rotated in place.
+ */
+function readSecret(namespace, name) {
+  const token = readFileSync(join(SA_DIR, 'token'), 'utf8').trim();
+  const ca = readFileSync(join(SA_DIR, 'ca.crt'));
+  return new Promise((resolvePromise, reject) => {
+    const req = httpsRequest({
+      host: process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc',
+      port: process.env.KUBERNETES_SERVICE_PORT || 443,
+      path: `/api/v1/namespaces/${encodeURIComponent(namespace)}/secrets/${encodeURIComponent(name)}`,
+      method: 'GET',
+      ca,
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 200) resolvePromise(JSON.parse(data));
+        else reject(new Error(`GET secret ${namespace}/${name} -> ${res.statusCode}: ${data.slice(0, 200)}`));
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/**
+ * The CA's key pair, as the files cert-manager keeps in its Secret (tls.crt, tls.key, ca.crt),
+ * staged at 0600 under ca/ and archived. A named CA that cannot be read fails the backup rather
+ * than going absent: the values named it, and a backup without it is a fleet-wide re-enrolment.
+ */
+async function archiveCa(dir, stamp) {
+  const secret = await readSecret(CA_SECRET_NAMESPACE, CA_SECRET_NAME);
+  const keys = Object.keys(secret.data || {}).filter((k) => /^[A-Za-z0-9._-]+$/.test(k));
+  if (!keys.includes('tls.crt') || !keys.includes('tls.key')) {
+    throw new Error(`secret ${CA_SECRET_NAMESPACE}/${CA_SECRET_NAME} holds no tls.crt and tls.key, so it is not a CA's key pair`);
+  }
+  const stage = join(dir, '.ca-stage');
+  try {
+    mkdirSync(join(stage, 'ca'), { recursive: true });
+    for (const key of keys) {
+      writeFileSync(join(stage, 'ca', key), Buffer.from(secret.data[key], 'base64'), { mode: 0o600 });
+    }
+    const component = await tarDirectory('ca', stage, dir, stamp);
+    return { ...component, secret: `${CA_SECRET_NAMESPACE}/${CA_SECRET_NAME}`, keys };
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+/**
+ * pgsodium's root key, read through the same superuser session the dump uses: pg_read_file
+ * resolves a relative path against the data directory. A dump without it restores a Vault that
+ * nothing can decrypt, since a fresh server mints its own key; the file is written as read, with
+ * no newline, so a restore can put it back byte for byte.
+ */
+async function archiveVaultKey(dir, stamp) {
+  const key = sql("SELECT pg_read_file(:'path')", { path: VAULT_KEY_FILE });
+  if (!/^[0-9a-f]{64}$/.test(key)) throw new Error(`${VAULT_KEY_FILE} does not hold a 32-byte hex key`);
+  const file = `vault-key-${stamp}.txt`;
+  const out = join(dir, file);
+  writeFileSync(out, key, { mode: 0o600 });
+  return { name: 'vault-key', file, size_bytes: statSync(out).size, sha256: await sha256(out) };
+}
+
 // -------------------------------------------------------------------------------------------------
 // One backup
 // -------------------------------------------------------------------------------------------------
@@ -269,6 +354,13 @@ async function takeBackup(job) {
   components.push(await dumpDatabase('supabase-db', SUPABASE, partialDir, stamp));
   components.push(await dumpDatabase('timescaledb', TIMESCALE, partialDir, stamp));
 
+  if (VAULT_KEY_FILE) {
+    log('archiving the pgsodium root key');
+    components.push(await archiveVaultKey(partialDir, stamp));
+  } else {
+    log('vault key: no file named; component absent');
+  }
+
   if (STORAGE_PATH && existsSync(STORAGE_PATH) && statSync(STORAGE_PATH).isDirectory()) {
     log('archiving the storage objects');
     components.push(await tarDirectory('storage-objects', STORAGE_PATH, partialDir, stamp));
@@ -283,6 +375,20 @@ async function takeBackup(job) {
     log('forge: no volume mounted; component absent');
   }
 
+  if (BROKER_PATH && existsSync(BROKER_PATH) && statSync(BROKER_PATH).isDirectory()) {
+    log("archiving the broker's document");
+    components.push(await tarDirectory('broker', BROKER_PATH, partialDir, stamp));
+  } else {
+    log('broker: no volume mounted; component absent');
+  }
+
+  if (CA_SECRET_NAME && CA_SECRET_NAMESPACE) {
+    log(`archiving the CA from secret ${CA_SECRET_NAMESPACE}/${CA_SECRET_NAME}`);
+    components.push(await archiveCa(partialDir, stamp));
+  } else {
+    log('ca: no secret named; component absent');
+  }
+
   // The text manifest restore-databases.sh reads, in its format, and a JSON one with the digests.
   const byName = Object.fromEntries(components.map((c) => [c.name, c]));
   const text = [
@@ -291,8 +397,11 @@ async function takeBackup(job) {
     `format=${FORMAT}`,
     `supabase_db=${byName['supabase-db'].file}`,
     `timescaledb=${byName['timescaledb'].file}`,
+    byName['vault-key'] ? `vault_key=${byName['vault-key'].file}` : null,
     byName['storage-objects'] ? `storage=${byName['storage-objects'].file}` : null,
     byName['forge'] ? `forge=${byName['forge'].file}` : null,
+    byName['broker'] ? `broker=${byName['broker'].file}` : null,
+    byName['ca'] ? `ca=${byName['ca'].file}` : null,
     'created_by=scripts/backup-service.mjs',
   ].filter(Boolean).join('\n') + '\n';
   writeFileSync(join(partialDir, `manifest-${stamp}.txt`), text);
@@ -350,7 +459,13 @@ let stopping = false;
 async function tick() {
   if (stopping || current) return;
   let job;
-  try { job = db.claim(); } catch (err) { log(`claim: ${err.message}`); return; }
+  try {
+    // A RUNNING row while this process runs nothing is a job no process is running: a previous
+    // process's, or restored with the database from a backup taken while it ran.
+    const stale = db.reconcile('no backup service was running this job: the service restarted, or the database was restored from a backup taken while it ran');
+    if (Number(stale) > 0) log(`failed ${stale} job(s) that no service was running`);
+    job = db.claim();
+  } catch (err) { log(`claim: ${err.message}`); return; }
   if (!job) return;
   try {
     await takeBackup(job);
@@ -373,8 +488,7 @@ async function waitForDatabase() {
 async function main() {
   await waitForDatabase();
   sweepPartials();
-  const failed = db.reconcile('the backup service restarted while this backup was running');
-  if (Number(failed) > 0) log(`failed ${failed} job(s) left RUNNING by a previous process`);
+  // A job left RUNNING by a previous process is failed by the first tick, with every other.
   const scheduled = db.schedule(SCHEDULE);
   log(scheduled === 't' ? `scheduled backups: ${SCHEDULE}` : 'scheduled backups: off (BACKUP_SCHEDULE is empty)');
   log(`retention: ${RETENTION_DAYS > 0 ? `${RETENTION_DAYS} days` : 'off'}; format: ${FORMAT}; polling every ${POLL_SECONDS}s`);

@@ -1396,6 +1396,19 @@ backup:
   # host keys appliances pin. The same ReadWriteOnce caveat as includeStorage, and including
   # both pins the pod to a node holding both PVCs. Read by the backup service only.
   includeForge: false
+  # Also archive the broker's PVC: the Dynamic Security document, which is every issued gateway
+  # account and the only copy of it. The same ReadWriteOnce caveat. Read by the backup service
+  # only.
+  includeBroker: false
+  # Also archive the CA behind mosquitto.tls and postgresTls: every appliance pins it, so losing
+  # it is a fleet-wide re-enrolment. The Secret lives in the ClusterIssuer's namespace
+  # (deploy/k8s/internal-ca.yaml puts acs-cymru-ca-key-pair in cert-manager's); the chart gives
+  # the backup service `get` on that one name there and nothing else. Empty name: not archived,
+  # which is right for an ACME issuer, whose CA is nobody's to keep. Read by the backup service
+  # only.
+  ca:
+    secretName: ""
+    namespace: cert-manager
 
 # The backup service (apps/backup-service.yaml) in place of the CronJob: backups an
 # Administrator asks for on the Backups page, and `backup.schedule` through pg_cron, with

@@ -8,15 +8,25 @@
 {{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
       .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
 {{- $includeForge := and .Values.backup.includeForge .Values.gitea.enabled -}}
+{{- $includeBroker := and .Values.backup.includeBroker .Values.mosquitto.enabled -}}
+{{- $brokerClaim := .Values.mosquitto.persistence.existingClaim | default (printf "%s-mosquitto-data" $fullname) -}}
+{{- $ca := .Values.backup.ca -}}
+{{- $includeCa := and $ca.secretName $ca.namespace -}}
 {{/*
 =================================================================================================
 The backup service: a backup_jobs row (0101) becomes a tier 1 backup on the backup PVC.
 
 Replaces the CronJob when enabled (backup-cronjob.yaml renders the PVC alone): the schedule moves
 into pg_cron, registered by the service on backup.schedule, and a backup an Administrator asks
-for on the Backups page runs the same way. Both dumps as their superusers, the storage objects
-and the forge, one directory per backup, manifest included; retention from backup.retentionDays
-for scheduled backups, and a requested one is pinned until released.
+for on the Backups page runs the same way. Both dumps as their superusers, the storage objects,
+the forge, the broker's data volume (its Dynamic Security document) and the internal CA's key
+pair, one directory per backup, manifest included; retention from backup.retentionDays for
+scheduled backups, and a requested one is pinned until released.
+
+THE CA IS A SECRET IN ANOTHER NAMESPACE (the ClusterIssuer's; deploy/k8s/internal-ca.yaml keeps
+it in cert-manager's), so it is read through the API rather than mounted: a ServiceAccount, and a
+Role in that namespace granting `get` on that one Secret by name. Nothing wider: not `list`, which
+resourceNames cannot restrict, and nothing in this namespace.
 
 THE SAME BASE IMAGE AS THE DATABASE, for its pg_dump (the client must be at least the server's
 version), plus node, sqlite3 and GNU tar. The code is projected from a ConfigMap, as the
@@ -65,13 +75,17 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if or $includeStorage $includeForge }}
+      {{- if $includeCa }}
+      serviceAccountName: {{ printf "%s-backup-service" $fullname }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- if or $includeStorage $includeForge $includeBroker }}
       {{/*
-        The storage and forge volumes are ReadWriteOnce, so this pod has to sit on their node. ONE
-        term naming every component it follows: two required terms, one per component, leave the
-        pod Pending on k3s v1.35 ("didn't match pod affinity rules") even on a single node where
-        both run, measured 2026-09-12. A node-bound volume (local-path) pins the pod as well; this
-        is what carries the intent where the storage class does not.
+        The storage, forge and broker volumes are ReadWriteOnce, so this pod has to sit on their
+        node. ONE term naming every component it follows: two required terms, one per component,
+        leave the pod Pending on k3s v1.35 ("didn't match pod affinity rules") even on a single
+        node where both run, measured 2026-09-12. A node-bound volume (local-path) pins the pod as
+        well; this is what carries the intent where the storage class does not.
       */}}
       affinity:
         podAffinity:
@@ -90,6 +104,9 @@ spec:
                       {{- end }}
                       {{- if $includeForge }}
                       - gitea
+                      {{- end }}
+                      {{- if $includeBroker }}
+                      - mosquitto
                       {{- end }}
       {{- end }}
       containers:
@@ -126,6 +143,13 @@ spec:
               value: {{ ternary "/storage" "" $includeStorage | quote }}
             - name: FORGE_PATH
               value: {{ ternary "/forge" "" $includeForge | quote }}
+            - name: BROKER_PATH
+              value: {{ ternary "/broker" "" $includeBroker | quote }}
+            # Both empty disables the component; the manifest records its absence.
+            - name: CA_SECRET_NAME
+              value: {{ ternary $ca.secretName "" (not (not $includeCa)) | quote }}
+            - name: CA_SECRET_NAMESPACE
+              value: {{ ternary $ca.namespace "" (not (not $includeCa)) | quote }}
           ports:
             - name: healthz
               containerPort: 9020
@@ -155,6 +179,16 @@ spec:
               mountPath: /forge
               readOnly: true
             {{- end }}
+            {{- if $includeBroker }}
+            - name: broker
+              mountPath: /broker
+              readOnly: true
+            {{- end }}
+            {{- if $includeCa }}
+            - name: sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            {{- end }}
       volumes:
         {{- with include "acs-cymru.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
         - name: scripts
@@ -175,4 +209,67 @@ spec:
             claimName: {{ printf "%s-gitea" $fullname }}
             readOnly: true
         {{- end }}
+        {{- if $includeBroker }}
+        - name: broker
+          persistentVolumeClaim:
+            claimName: {{ $brokerClaim }}
+            readOnly: true
+        {{- end }}
+        {{- if $includeCa }}
+        # Projected, so the token is short-lived and rotated in place; the service reads it on
+        # every call rather than caching it (the same arrangement as the credential service's).
+        - name: sa-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+        {{- end }}
+{{- if $includeCa }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ printf "%s-backup-service" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+automountServiceAccountToken: false
+---
+# In the CA's namespace, not the release's: a Role reaches only the namespace it is in.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-%s-backup-service-ca" .Release.Namespace $fullname }}
+  namespace: {{ $ca.namespace }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ $ca.secretName | quote }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-%s-backup-service-ca" .Release.Namespace $fullname }}
+  namespace: {{ $ca.namespace }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-%s-backup-service-ca" .Release.Namespace $fullname }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ printf "%s-backup-service" $fullname }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}
