@@ -16,9 +16,9 @@
 # hundred statements in; see it for which roles come from where. Do not "fix" this with --no-owner.
 #
 # RESTORE INTO A FRESHLY INITIALISED DATABASE. --clean lets the dump replace the auth and storage
-# schemas the image ships, but it cannot drop an INHERITED constraint on Realtime's daily
-# realtime.messages_* partitions, so a second restore over the first fails with `cannot drop
-# inherited constraint`. Drop the volume first.
+# schemas the image ships. What it cannot drop is a partition's inherited primary key, and a fresh
+# stack always has partitions (Realtime's daily ones, digital_thread's monthly ones); the
+# preflight below drops every partition first.
 #
 # Full runbook:  supabase/README.md -> "Backup and Recovery"
 #
@@ -169,6 +169,67 @@ migration. Do NOT work around this with --no-owner: RLS policies reference roles
 dump stripped of ownership restores into a database where every policy denies."
 log "  ok -- all $(echo "$REQUIRED_ROLES" | wc -w | tr -d ' ') present"
 
+# --- 0b. Every partition of every partitioned table ------------------------------------------------
+#
+# A partition's primary key is inherited from its parent and cannot be dropped on its own, and
+# `--clean` tries to, before any DROP TABLE:
+#
+#     ERROR:  cannot drop inherited constraint "messages_2026_09_24_pkey" of relation "messages_2026_09_24"
+#     ERROR:  cannot drop inherited constraint "digital_thread_default_pkey" of relation "digital_thread_default"
+#
+# A freshly installed stack always holds partitions with the dump's names: Realtime creates its
+# daily realtime.messages_* on every start, and 0001 creates digital_thread's monthly partitions
+# and its DEFAULT. So every partition of every partitioned table is dropped first; the dump
+# recreates each with its rows. CASCADE, because a view may read a partition by name
+# (digital_thread_partition_health does), and the dump recreates the view too. Found by the first
+# rehearsal to reach this step (docs/incidents.md, "The restore path never met a partitioned
+# table").
+log "preflight: dropping every partition the dump will recreate"
+sb_query "DO \$\$ DECLARE r record; BEGIN
+  FOR r IN SELECT c.oid::regclass AS p
+             FROM pg_inherits i
+             JOIN pg_class c ON c.oid = i.inhrelid
+             JOIN pg_class parent ON parent.oid = i.inhparent
+            WHERE parent.relkind = 'p'
+            ORDER BY c.relkind = 'p' DESC
+  LOOP
+    EXECUTE format('DROP TABLE IF EXISTS %s CASCADE', r.p);
+  END LOOP;
+END \$\$" >/dev/null
+log "  ok"
+
+# --- 0c. Default privileges, suspended for the replay --------------------------------------------
+#
+# The supabase/postgres image declares default privileges: every table, sequence and function
+# created in `public` by supabase_admin or postgres is granted ALL to anon, authenticated and
+# service_role at creation. A dump's GRANT and REVOKE statements are a diff from PostgreSQL's
+# built-in default, not from those, so a replay creates each object with the surplus and then
+# grants what the source had on top of it: service_role could UPDATE digital_thread after a
+# restore, and anon could execute every function 0101 revoked from PostgREST roles. Every default
+# ACL is revoked here for every grantee but its owner and PUBLIC; the dump's own
+# ALTER DEFAULT PRIVILEGES statements, which pg_dump writes after every object and grant,
+# put them back. Found by the first rehearsal to reach the assertions (docs/incidents.md,
+# "The restored schema was more permissive than the dumped one").
+log "preflight: suspending default privileges, which the dump re-declares last"
+sb_query "DO \$\$ DECLARE r record; BEGIN
+  FOR r IN SELECT d.defaclrole::regrole AS owner, n.nspname AS schema, d.defaclobjtype AS kind,
+                  a.grantee::regrole AS grantee
+             FROM pg_default_acl d
+             LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace,
+                  LATERAL aclexplode(d.defaclacl) a
+            WHERE a.grantee <> 0 AND a.grantee <> d.defaclrole
+            GROUP BY 1, 2, 3, 4
+  LOOP
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %s %s REVOKE ALL ON %s FROM %s',
+      r.owner,
+      CASE WHEN r.schema IS NULL THEN '' ELSE format('IN SCHEMA %I', r.schema) END,
+      CASE r.kind WHEN 'r' THEN 'TABLES' WHEN 'S' THEN 'SEQUENCES' WHEN 'f' THEN 'FUNCTIONS'
+                  WHEN 'T' THEN 'TYPES' WHEN 'n' THEN 'SCHEMAS' END,
+      r.grantee);
+  END LOOP;
+END \$\$" >/dev/null
+log "  ok"
+
 # --- 1. Supabase first -----------------------------------------------------------------------
 restore_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
            "$SUPABASE_DB_HOST" "$SUPABASE_DB_PORT" "$SUPABASE_DB_PASSWORD" "$SUPABASE_FILE"
@@ -228,6 +289,14 @@ sb_query "SELECT count(*) FROM public.telemetry WHERE time > now() - interval '1
 # for every actual caller.
 sb_query "SET ROLE authenticated; SELECT count(*) FROM public.telemetry WHERE time > now() - interval '1 hour'" >/dev/null \
   || die "public.telemetry is unreachable as 'authenticated' -- grants or RLS did not survive the restore"
+
+# --- 5. Verify Vault decrypts ------------------------------------------------------------------
+# Every row present and none readable is what a root key other than the dump's looks like. The
+# key is on the data volume, not in the dump; the backup service carries it as vault-key-<stamp>,
+# and it goes onto the target's volume, with a server restart, BEFORE this script runs.
+log "verifying Vault decrypts under this server's pgsodium root key"
+sb_query "SELECT count(decrypted_secret) FROM vault.decrypted_secrets" >/dev/null \
+  || die "vault.decrypted_secrets cannot be read: this server's pgsodium root key is not the one the dump was encrypted under. Put the backup's vault-key file at /var/lib/postgresql/data/pgsodium_root.key, restart the server, and restore again (supabase/README.md, Backup and Recovery)."
 
 log "PASS: both databases restored and public.telemetry is queryable through postgres_fdw."
 log "Sign in again -- auth.sessions was replaced, so every existing browser session is void."
