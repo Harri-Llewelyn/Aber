@@ -1,39 +1,20 @@
 """
-Projection of the Factory+ model onto the i3X 1.0 address space.
+Projection of the platform's model onto the i3X 1.0 address space.
 
-i3X INTRODUCES NO NEW TYPE SYSTEM, which is why this is a projection rather than a schema. ObjectTypes
-ARE JSON Schema, and `schemas.schema_definition` already stores JSON Schema -- so a schema row is an
-ObjectType with no translation at all. That was the stated reason for rejecting native AAS Submodel
-tables, and it is why i3X costs a read-side adapter where AAS cost an exporter plus a metamodel.
+i3X INTRODUCES NO NEW TYPE SYSTEM, which is why this is a projection rather than a schema.
+ObjectTypes ARE JSON Schema and `schemas.schema_definition` already stores JSON Schema, so a schema
+row is an ObjectType with no translation at all.
 
-FOUR MAPPINGS THAT ARE NOT MECHANICAL, each of which is a decision:
+The mappings that are decisions rather than mechanics -- elementId is `sparkplug_id` and displayName
+is `name`, so renaming an asset does not move it here; `parentId` is the CELL and the data path is a
+separate relationship pair; Unassigned is a SYNTHETIC object with no table behind it; `HasComponent`
+is carried alongside `HasChildren` and Unassigned is a child but not a component; and `quality` is
+derived at READ TIME, never stored -- are set out in README.md -> "Address space".
 
-  elementId is `sparkplug_id`. i3X requires an elementId that is unique and persistent, and is only
-  "human-readable when practical" -- which is exactly the split this repository already makes between
-  `sparkplug_id` (immutable, on the wire) and `name` (a freely editable display label). So elementId
-  is the sparkplug_id and displayName is the name. Renaming an asset therefore does not move it in the
-  i3X address space, for the same reason it does not detach its telemetry.
-
-  parentId is the CELL, not the gateway. i3X gives an Object exactly one parentId, and a device here
-  has two parents: a cell (where it is) and a gateway (how its data arrives). HasParent is
-  organizational hierarchy, so the cell wins; the data path is modelled as a separate relationship
-  pair with a `reverseOf`, which is what relationships are for. Collapsing them would make a Host
-  gateway -- a connector with no honest cell -- unrepresentable.
-
-  Unassigned is a SYNTHETIC object. `parentId: null` means root, so a device with no cell would
-  otherwise be a second root beside the site. A synthetic object is legitimate here in a way a magic
-  `cells` row is not: it exists only in this projection, has no table behind it, and so cannot be
-  edited, deleted, or picked up by the pg_cron purge that runs past RLS.
-
-  quality is derived at READ TIME, never stored -- the same rule as `gateway_status` and device tags.
-  A quarantined device or a stale gateway is `Uncertain`; a metric that has never been published is
-  `GoodNoData` with no value; anything else is `Good`. A `quality` column on the telemetry hypertable
-  would be a stored verdict that goes stale the moment the gateway does.
-
-EVERY READ HERE GOES THROUGH PostgREST AS THE CALLER. There is no service-role key in this process --
-see `PostgrestClient`. That is what makes the i3X address space obey the same RLS as the dashboard,
-and it is the reason values are gated on a metadata read rather than served straight from the MQTT
-cache (which has no RLS of its own).
+EVERY READ HERE GOES THROUGH PostgREST AS THE CALLER. There is no service-role key in this process
+(see `PostgrestClient`), which is what makes the i3X address space obey the same RLS as the
+dashboard, and it is why values are gated on a metadata read rather than served straight from the
+MQTT cache -- that cache has no RLS of its own.
 """
 from __future__ import annotations
 

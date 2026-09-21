@@ -1,30 +1,21 @@
 """
 i3X 1.0 subscription engine -- sync (MUST), streaming (MAY), TTL and overflow.
 
-DELIBERATELY FREE OF HTTP AND MQTT. Everything here is pure state machine over an injected clock,
+DELIBERATELY FREE OF HTTP AND MQTT. Everything here is a pure state machine over an injected clock,
 which is what lets the spec's timing rules -- queue overflow, TTL expiry, sequence-number
 acknowledgement -- be tested without sleeping and without a broker. `i3x_service.py` owns the
 transport; this owns the semantics.
 
-THE FOUR RULES THAT ARE EASY TO GET WRONG, all from the Implementation Guide's Subscribe Methods:
+THE RULES THIS ENFORCES, all from the Implementation Guide's Subscribe Methods, each of which fails
+quietly when got wrong (README.md -> "Subscriptions" says how):
 
   1. `/sync` MUST NOT clear the queue when `lastSequenceNumber` is omitted or invalid, MUST clear
      everything at or below it when valid, and MUST clear the WHOLE queue for the sentinel `-1`.
-     Treating "omitted" as "acknowledge everything" is the obvious implementation and it silently
-     loses every update a client crashed before processing -- which is the exact failure the
-     acknowledgement protocol exists to prevent.
-
-  2. Overflow is reported, not hidden. When the queue is full the OLDEST batches are dropped and the
-     next `/sync` MUST answer HTTP 206. A client can then compute the gap exactly, from
-     `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`, and backfill from history. Dropping
-     silently would leave a client believing it had a complete series.
-
-  3. ONE stream per subscription. Opening a second MUST close the first. There is no fan-out in i3X
-     -- a second consumer creates its own subscription. A shared stream would also break rule 1,
-     because SSE is at-most-once with no acknowledgement.
-
-  4. Sync and stream are mutually exclusive. `/sync` MUST error while a stream is open, because the
-     stream has already delivered (and discarded) the queue the sync caller is asking to acknowledge.
+  2. Overflow is reported, not hidden: the OLDEST batches drop and the next `/sync` answers 206, so
+     a client can compute the gap and backfill from history.
+  3. ONE stream per subscription. Opening a second MUST close the first, cleanly and with no error.
+  4. Sync and stream are mutually exclusive: `/sync` MUST error while a stream is open, because the
+     stream has already delivered -- and discarded -- the queue the sync caller is acknowledging.
 
 Sequence numbers are 64-bit unsigned and never reused within a subscription.
 """

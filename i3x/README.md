@@ -125,7 +125,7 @@ from `docs/openapi.yaml` on purpose**: this server is not behind the gateway, ta
 
 ### Subscriptions
 
-Three rules are easy to get wrong and each fails quietly:
+Five rules are easy to get wrong and each fails quietly:
 
 1. **`/sync` must not clear the queue when `lastSequenceNumber` is omitted or invalid**, must clear
    at-or-below a valid one, and must clear everything for `-1`. Treating "omitted" as "acknowledge
@@ -144,6 +144,9 @@ Three rules are easy to get wrong and each fails quietly:
    ("delete deletes the subscription") failed — reported as a 15-second timeout on an endpoint that
    was never reached, which reads as a hung server rather than as a stream that had not noticed it
    was over. It reproduces only against a client that pools connections.
+5. **Sync and stream are mutually exclusive.** `/sync` must error while a stream is open, because
+   the stream has already delivered — and discarded — the queue the sync caller is asking to
+   acknowledge.
 
 ### Writes are refused
 
