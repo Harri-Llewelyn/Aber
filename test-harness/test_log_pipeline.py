@@ -326,11 +326,10 @@ class DropPairTestCase(unittest.TestCase):
         self.assertIn(REASON, labels,
                       f"Prometheus exports no reason={REASON}; exported: {sorted(labels)}")
 
-        # POLLED, FOR THE REASON THE SIBLING ABOVE IS. This used to query once, and it runs
-        # BEFORE the polling test alphabetically -- so on a stack where the drop had happened but
-        # the line had not yet travelled daemon -> Docker -> Alloy -> Loki, this failed with "no
-        # logged drop reasons", which reads as a broken drill-down contract rather than as a race.
-        # Observed doing exactly that: the line was in the store, correct, seconds later.
+        # POLLED, FOR THE REASON THE SIBLING ABOVE IS. A single query runs BEFORE the polling test
+        # alphabetically, so on a stack where the drop has happened but the line has not yet
+        # travelled daemon -> Docker -> Alloy -> Loki it fails with "no logged drop reasons" --
+        # which reads as a broken drill-down contract rather than as the race it is.
         expr = f'{{service="ingestion"}} | json | reason != ""'
         deadline = time.time() + PROPAGATION_TIMEOUT
         fields = set()
