@@ -1,6 +1,6 @@
-# Release: publish the eight images this repository builds, then the Helm chart, to GHCR over OCI.
+# Release: publish the ten images this repository builds, then the Helm chart, to GHCR over OCI.
 # Images first, chart last, and the chart job `needs` them: the chart names the images at
-# `Chart.AppVersion`, and a chart published before its images installs successfully into eight
+# `Chart.AppVersion`, and a chart published before its images installs successfully into ten
 # ImagePullBackOffs. The `v*` tag is the single source of version: it stamps the image tags, the
 # chart `version` and `appVersion` in this run, and Chart.yaml's committed values serve only the
 # untagged path. No `latest` tag is pushed, so a chart release can only run the images built beside

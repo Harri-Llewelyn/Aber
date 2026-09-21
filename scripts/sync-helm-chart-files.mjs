@@ -116,15 +116,15 @@ const MIRRORS = [
     // mosquitto.conf declares `allow_anonymous` and the Dynamic Security `plugin` ONCE in its
     // global section, which is what guarantees the TCP, WebSocket and TLS listeners authenticate
     // and authorise identically. dynsec-roles.json is the policy the plugin enforces, written into
-    // its document by the boot reconcile on both targets. The three files are one policy and must
-    // travel together.
+    // its document by the boot reconcile. The three files are one policy and must travel
+    // together.
     //
     // mosquitto-tls.conf is the 8883 listener, APPENDED to mosquitto.conf only where certificates
     // exist. It is mirrored unconditionally because the chart decides whether to append it at
     // render time; a missing file would fail the render instead of turning the listener off.
     match: (name) =>
       name === 'mosquitto.conf' || name === 'dynsec-roles.json' || name === 'mosquitto-tls.conf',
-    why: 'Broker config, the plugin\'s roles and the optional MQTTS listener; repository-managed policy, mounted read-only on both targets',
+    why: 'Broker config, the plugin\'s roles and the optional MQTTS listener; repository-managed policy, mounted read-only',
   },
   {
     source: 'scripts',
@@ -176,7 +176,7 @@ const MIRRORS = [
     source: 'loki',
     dest: 'loki',
     match: (name) => name === 'loki.yaml',
-    why: 'The log store: retention and the ingest ceilings, one file for both targets',
+    why: 'The log store: retention and the ingest ceilings',
   },
   {
     source: 'grafana',

@@ -34,9 +34,9 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 
 
 # Pinned so a failed run leaves rows that the next setUpClass reclaims rather than accumulating.
-# The 2f/2e prefixes continue the convention in scripts/provision-gateways.mjs and cannot collide
-# with the simulator (12-15…) or validator (11…) blocks -- and, per that script's warning, they
-# differ in the FIRST group because sparkplug_id is derived from the leading 21 hex characters.
+# The 2f/2e prefixes cannot collide with the simulator (12-15…) or validator (11…) blocks, and
+# they differ in the FIRST group because sparkplug_id is GENERATED from the leading 21 hex
+# characters (0001): ids differing only in a later group collide on the generated column.
 REMOTE_GW = "2f000000-0000-4000-8000-000000000001"
 HOST_GW = "2e000000-0000-4000-8000-000000000001"
 

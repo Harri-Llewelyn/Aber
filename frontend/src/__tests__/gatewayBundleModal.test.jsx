@@ -419,7 +419,7 @@ describe('GatewayBundleModal — failure on open', () => {
     // names the variable. The gateway row exists, which the dialog says rather than leaves implied.
     const refusal = new Error('Bundle generation is not configured on this deployment')
     refusal.status = 503
-    refusal.details = 'SUPABASE_PUBLIC_URL is unset -- set it to the URL Remote gateways reach the platform on, in .env on Compose. No enrolment token was minted.'
+    refusal.details = "SUPABASE_PUBLIC_URL is unset -- set it to the URL Remote gateways reach the platform on (global.publicBaseDomain in the chart's values). No enrolment token was minted."
     api.downloadGatewayBundle.mockRejectedValue(refusal)
     renderModal()
 

@@ -1592,7 +1592,7 @@ def verify_results():
             except Exception as err:
                 return 0, str(err)
 
-        # 12. Unauthenticated /info -- a spec MUST, and the health probe both targets use.
+        # 12. Unauthenticated /info -- a spec MUST, and the health probe the chart uses.
         status, body = i3x("GET", "/info")
         info = json.loads(body) if status == 200 else {}
         result = info.get("result", info)

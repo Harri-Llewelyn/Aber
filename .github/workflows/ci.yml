@@ -1351,7 +1351,7 @@ jobs:
           pip install jsonschema pytest
 
       # `ingestion/*_pb2.py` is gitignored and built from sparkplug_b.proto at image build, so a fresh
-      # checkout has none. Same two steps as e2e-validation.
+      # checkout has none.
       - name: Generate Sparkplug B Protobuf Module
         run: |
           sudo apt-get update
@@ -1398,7 +1398,8 @@ jobs:
         run: node scripts/run-python-suites.mjs --lane db
 
       # The `unit` lane: no database, no broker, no stack. A suite that skips itself without a stack
-      # reports `OK (skipped=N)` and exits 0, so those are in the `stack` lane in e2e-validation.
+      # reports `OK (skipped=N)` and exits 0, so those are in the `stack` lane, which runs against
+      # a live cluster (`npm run dev:test`) rather than here.
       - name: Run Python Unit Suites
         run: node scripts/run-python-suites.mjs --lane unit
 
@@ -1411,9 +1412,9 @@ jobs:
         run: npm run test:lib
 
   # =============================================================================================
-  # The in-cluster half of the two-target guarantee. Runs alongside e2e-validation, never instead
-  # of it: validate.py is the conformance check for either target. k3d, not kind, so Traefik,
-  # ServiceLB and local-path behave as they will on the target.
+  # validate.py is the conformance check for a deployed stack, and this is where CI runs it against
+  # a real one. k3d, not kind, so Traefik, ServiceLB and local-path behave as they will on the
+  # target.
   # =============================================================================================
   k8s-validation:
     # Gated on the diff: most of this workflow's minutes are this job, and a documentation change

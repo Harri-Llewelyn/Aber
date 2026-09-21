@@ -222,9 +222,8 @@ export function ColdStorageTab({ showToast, userRole }) {
                 </div>
               ) : archiveEnabled ? (
                 /* On, and still empty. Turning the setting on arms the exporter; it does not run
-                   it. The service and the command here were Compose's and outlived it: there is no
-                   `cold-archiver` container and no COLD_ARCHIVE_INTERVAL_SECONDS anywhere in the
-                   tree, so this told an operator to run something that could not work. */
+                   it. Name only what the tree actually has: there is no `cold-archiver` workload
+                   and no COLD_ARCHIVE_INTERVAL_SECONDS, so neither may be named here. */
                 <>
                   {/* TWO SENTENCES, down from a paragraph and a half. What the schedule is called
                       in values.yaml, and that a stack younger than the threshold correctly has

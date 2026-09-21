@@ -505,8 +505,9 @@ supabaseFunctions:
     #   docker build -f supabase/functions/Dockerfile -t <repo>:<tag> .
     repository: ghcr.io/harri-llewelyn/acs-cymru/edge-runtime
     # Empty resolves to Chart.AppVersion (an image this repository builds and publishes).
-    # check-image-tag-parity.mjs reads exactly that to decide which images must appear in the
-    # release workflow, so pinning a tag here removes it from the release.
+    # check-docs-drift.mjs reads exactly that to decide which images need a documented build
+    # command and must be built by the release workflow, so pinning a tag here removes it from
+    # both.
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1

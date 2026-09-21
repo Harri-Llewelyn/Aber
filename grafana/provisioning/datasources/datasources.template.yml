@@ -45,9 +45,9 @@ datasources:
     uid: supabase
     type: postgres
     access: proxy
-    # In-network service name and the STANDARD port, not the host-published 54322. Identical on
-    # both targets, which is what lets this file be mirrored into a Helm ConfigMap verbatim -- the
-    # renderer substitutes the password and nothing else, so it cannot use a chart helper here.
+    # In-network service name and the STANDARD port, not the host-published 54322. The renderer
+    # substitutes the password and nothing else, which is what lets this file be mirrored into a
+    # Helm ConfigMap verbatim -- so it cannot use a chart helper here.
     url: supabase-db:5432
     user: grafana_reader
     database: postgres

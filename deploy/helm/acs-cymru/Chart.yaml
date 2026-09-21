@@ -17,7 +17,8 @@ version: 0.1.0
 # this repository builds -- the tag those five images are pulled at. That coupling is the point:
 # the chart and the images it names ship from one tag and cannot drift apart. Third-party images
 # keep their own explicit pins, which must NOT float, since several of them carry a schema
-# migration or a version coupling (see scripts/check-image-tag-parity.mjs).
+# migration or a version coupling -- the couplings to an image this repository builds FROM are
+# held by check-docs-drift.mjs.
 #
 # Quoted because Helm requires a string here and an unquoted 0.1.0 is fine but 1.0 would become
 # a float.

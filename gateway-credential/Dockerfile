@@ -10,8 +10,8 @@
 # Dynamic Security plugin over $CONTROL/dynamic-security/v1. Taking both from the image the broker
 # runs removes the question of compatibility entirely.
 #
-# THE TAG MUST MATCH docker-compose.yml AND THE CHART. scripts/check-image-tag-parity.mjs asserts
-# this FROM against Compose's pin, as it does for the edge runtime and the database image.
+# THE TAG MUST MATCH THE CHART'S mosquitto PIN. check-docs-drift.mjs asserts this FROM against
+# `mosquitto.image.tag` in values.yaml, as it does for the database image.
 FROM eclipse-mosquitto:2.0.22
 
 # The image is Alpine-based; only a runtime for the scripts is missing.
@@ -22,5 +22,5 @@ RUN apk add --no-cache nodejs
 # service holds no database credential and is not published outside the container network.
 USER root
 
-# No CMD: both targets supply the script to run, keeping it bind-mounted (Compose) or
-# ConfigMap-mounted (Kubernetes) so it is editable without a rebuild.
+# No CMD: the chart supplies the script to run and mounts it from a ConfigMap, so it is editable
+# without a rebuild.

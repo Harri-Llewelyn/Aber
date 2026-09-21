@@ -381,9 +381,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <span>
             <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
             {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
-            the deployment rather than here: on Compose, <span className="mono">npm run setup</span> asks
-            for the host on a fresh .env, or set both and restart (docs/remote-gateways.md, section 7).
-            Host-run and simulated gateways are unaffected.
+            the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
+            in the chart&rsquo;s values and restart the functions service (docs/remote-gateways.md,
+            section 7). Host-run and simulated gateways are unaffected.
           </span>
         </div>
       )}

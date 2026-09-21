@@ -17,10 +17,10 @@ COPY . .
 
 # TWO WAYS TO CONFIGURE THIS IMAGE, and the build arg below picks between them.
 #
-#   1. BAKED (the default, and what Docker Compose uses). The values below are inlined into the
-#      bundle by Vite. Simple, and correct when the image is built against the stack it serves.
+#   1. BAKED (the default for a bare build). The values below are inlined into the bundle by
+#      Vite. Simple, and correct when the image is built against the stack it serves.
 #
-#   2. RUNTIME (VITE_RUNTIME_CONFIG=true, and what Kubernetes uses). Nothing is baked; the
+#   2. RUNTIME (VITE_RUNTIME_CONFIG=true, and what the chart uses). Nothing is baked; the
 #      deployment mounts a ConfigMap over /usr/share/nginx/html/config.js and src/config.js reads
 #      it from window.__ACS_CYMRU_CONFIG__ at load. This is what allows ONE image to serve any
 #      environment, which a baked bundle cannot do.
@@ -66,12 +66,14 @@ ARG VITE_GITHUB_REPO_URL
 ARG VITE_GRAFANA_URL
 # Supabase Studio's door, used ONLY to end Studio's own session when the user signs out -- the
 # gateway holds that session, not this bundle, so nothing else here ends it. Unset is survivable:
-# constants.js falls back to 127.0.0.1:54323, which is right on Compose and simply unreachable
-# anywhere else. The HOST must match STUDIO_PUBLIC_URL's, not merely the port -- see constants.js.
+# constants.js falls back to 127.0.0.1:54323, the port `npm run dev:forward` publishes and
+# unreachable anywhere else. The HOST must match STUDIO_PUBLIC_URL's, not merely the port -- see
+# constants.js.
 ARG VITE_STUDIO_URL
 # The forge's door -- the gateway drawer links to a gateway's repository under it, and sign-out ends
 # the session the gateway holds there. Unset is survivable: constants.js falls back to
-# localhost:3003, which is right on Compose and nowhere else. HOST must match GITEA_ROOT_URL's.
+# localhost:3003, the port `npm run dev:forward` publishes and nowhere else. HOST must match
+# GITEA_ROOT_URL's.
 ARG VITE_GITEA_URL
 # Storage bucket names, matching STORAGE_BUCKET / CAPTURE_BUCKET in scripts/storage-init.mjs. Unset
 # is the ordinary case: src/api.js defaults to the same names those default to. They are build args
