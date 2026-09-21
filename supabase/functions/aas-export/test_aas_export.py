@@ -56,10 +56,9 @@ DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 # provision-gateways.mjs has been run. It replaced `Simulated_CNC_01`, which 0020 deletes.
 # THE SUITE PROVISIONS ITS OWN SUBJECT, and this is the point of it rather than a detail.
 #
-# It used to be `Sim_CNC_Mill_01`, seeded by 0002 as part of the demonstration shopfloor -- so a
-# CONFORMANCE suite depended on DEMO DATA the seed no longer creates. That coupling has already bitten
-# once: 0020 exists partly because the previous subject, `Simulated_CNC_01`, quietly stopped receiving
-# a DBIRTH while this suite went on naming it and reporting success.
+# A CONFORMANCE SUITE MUST NOT DEPEND ON SEEDED DEMONSTRATION DATA. A subject the seed stops
+# creating, or stops sending a DBIRTH for, leaves the suite naming a device that is not there and
+# reporting success anyway -- which is part of why 0020 exists.
 #
 # `AAS_TEST_DEVICE` still overrides it, and then NOTHING IS PROVISIONED -- the escape hatch for
 # pointing the suite at a real asset is deliberately not also a way to half-create a fixture.

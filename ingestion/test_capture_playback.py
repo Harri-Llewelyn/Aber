@@ -53,13 +53,11 @@ sys.path.insert(0, INGESTION_DIR)
 # generated protobuf module registers its descriptors a second time and raises.
 # =============================================================================================
 #
-# DROPPING THE STUB IS NOT ENOUGH, AND THE REASON IS THE IMPORT GRAPH. `capture` used to be
-# reachable only from this file, so deleting `sparkplug_b_pb2` and importing it fresh was the whole
-# dance. ingestion.py now imports `capture_worker`, which imports `capture` -- so by the time this
-# file runs, a sibling that imported the daemon has ALREADY loaded `capture` bound to the stub, and
-# `import capture` below would hand back that cached module. Every encoding test then fails with
-# "'object' object has no attribute 'timestamp'", exactly as before, from a cause one import
-# further away.
+# DROPPING THE STUB IS NOT ENOUGH, AND THE REASON IS THE IMPORT GRAPH. ingestion.py imports
+# `capture_worker`, which imports `capture`, so by the time this file runs a sibling that imported
+# the daemon has ALREADY loaded `capture` bound to the stub, and `import capture` below would hand
+# back that cached module. Every encoding test then fails with "'object' object has no attribute
+# 'timestamp'", from a cause one import away.
 #
 # Neither module registers protobuf descriptors of its own, so re-importing them is free -- unlike
 # the generated module, which is why only a STUB of that is ever displaced.
@@ -625,9 +623,9 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         ])
 
     def test_a_playback_that_would_write_nothing_is_refused(self):
-        # THE BUG. Every message out of window is a total no-op, and the worker used to publish it
-        # and report success. Refused before the broker is contacted, so `sent` is zero and the
-        # error is what the Capture page shows.
+        # A playback whose every message is out of window can write nothing, so it is refused
+        # BEFORE the broker is contacted: `sent` is zero and the error is what the Capture page
+        # shows, rather than a run that reports success and moves nothing.
         sent, out_of_window, error = self._run(self._stale(1_000, count=3))
         self.assertEqual(sent, 0)
         self.assertEqual(out_of_window, 3)

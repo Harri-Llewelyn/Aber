@@ -43,6 +43,37 @@ it turns up that `check-docs-drift.mjs` could verify earns a check there, so a s
 rather than a snapshot. Two surfaces are never swept: `supabase/migrations/archive/` is a historical
 record that is never executed, and `supabase/config.toml` is the Supabase CLI's stock file.
 
+### What the 1.0 audit (#339) learned, so the next sweep starts from it
+
+**Read the component README before trimming anything.** By far the commonest finding was a module
+header restating its own README section by section, in several cases under the same headings — the
+README said it better and at more length, so the duplicate came out and a pointer went in. Where
+the substance existed *only* in the source, it moved to the README or to
+[`docs/incidents.md`](docs/incidents.md) and the comment kept the constraint and named the entry.
+The order matters: check where the substance lives, then decide between trimming and moving.
+
+**Find the violations, do not re-read everything.** Grepping comments for history markers — *used
+to*, *previously*, *the first version*, *the symptom was*, *turned out*, *it cost* — locates the
+rule-breaking comments directly. Beware the false friends: "used to" also means "used in order
+to", and a long header is not a violation. A header stating spec requirements, a CLI's usage and
+environment, or a constraint a reader changing that line needs, is doing its job at any length.
+
+**Compare against the working tree, not the index.** `git show :path` reads the index, so a
+comparison built on it reports every unstaged file as clean. Diff the file on disk against
+`git show HEAD:path`.
+
+**A comment inside a mirrored file is data.** The chart's `files/` copies are projected into
+ConfigMaps, so editing a comment in one of those sources changes the rendered manifest and moves
+the workload's `checksum/…` annotation. Rendered documents differing for that reason is the
+correct outcome, not a failed comparison — confirm that every changed line inside the ConfigMap is
+a comment, and that nothing else moved.
+
+**A new check has to be precise before it is useful.** Two of this audit's checks were wrong on
+their first run and both were fixed rather than shipped noisy: a phrase list that flagged "two
+targets" where a playback job's targets were meant, and a list-counting check whose parser could
+not see a bullet carrying a table. Test a check by breaking the thing it guards, and test that it
+*allows* the nearest legitimate case.
+
 ## Two rules worth stating up front
 
 - **`metric_catalog.name` is immutable.** Changing a metric is deprecate-and-supersede, never a
