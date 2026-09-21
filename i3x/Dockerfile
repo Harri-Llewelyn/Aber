@@ -9,7 +9,9 @@
 # building both on one runner or pulling a base that may not be published yet -- the exact problem
 # `build-ingestion-chain` exists to work around in release.yml. One more independent image is
 # cheaper than one more ordering constraint.
-FROM python:3.10-slim
+# 3.13-slim rather than 3.10 so the base stops bundling `setuptools` and `wheel` into
+# site-packages. ingestion/Dockerfile carries the reasoning; both images make the same choice.
+FROM python:3.13-slim
 
 # protobuf-compiler generates sparkplug_b_pb2 at build time; without it every DDATA arrives
 # undecodable. It does NOT match the pinned runtime and does not need to -- apt supplies libprotoc
@@ -22,7 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY i3x/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pip is removed once it has installed: nothing here installs at run time, and its vendored tree is
+# the last reported CVE source in the image. ingestion/Dockerfile carries the reasoning.
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -m pip uninstall -y pip
 
 COPY sparkplug_b.proto .
 COPY i3x/i3x_service.py i3x/address_space.py i3x/subscriptions.py ./
