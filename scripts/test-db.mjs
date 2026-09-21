@@ -417,15 +417,12 @@ if (noRun) {
 // -------------------------------------------------------------------------------------------
 // THE `db` LANE, FROM scripts/python-suites.mjs -- not a second discovery of its own.
 //
-// This used to readdirSync `supabase/migrations` and run whatever it found, which was right about
-// discovery and wrong about scope: three suites needing exactly this database live under
-// `supabase/functions/`, and a rule shaped like "the migrations directory" could never reach them.
-// They ran in CI and not here, so `npm run test:db` passing locally did not mean the db-lane job
-// would pass -- which is the specific way a local runner stops being trusted.
-//
-// The manifest is now the one place that answers "which suites need a migrated Postgres", and both
-// callers read it. It is also checked against the tree in both directions, so a new suite added to
-// this directory and forgotten fails the runner by name instead of silently not running.
+// NOT A DIRECTORY SCAN. Three suites needing exactly this database live under
+// `supabase/functions/`, so a rule shaped like "the migrations directory" cannot reach them, and a
+// local runner that misses what CI runs stops being trusted. The manifest is the one place that
+// answers "which suites need a migrated Postgres" and both callers read it. It is checked against
+// the tree in both directions, so a suite added here and forgotten fails the runner by name
+// instead of silently not running.
 let suites = suitesInLane('db')
 if (filter) suites = suites.filter(f => f.includes(filter))
 if (suites.length === 0) die(`no suites matched ${filter}.`)

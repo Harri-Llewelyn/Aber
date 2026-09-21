@@ -140,7 +140,7 @@ function openssl(argv, { quiet = true } = {}) {
 /**
  * Escape a DN attribute VALUE for `openssl req -subj`.
  *
- * THIS COST A DEBUGGING SESSION AND IS NOT OPTIONAL. OpenSSL 3 reads `+` inside a -subj string as
+ * NOT OPTIONAL. OpenSSL 3 reads `+` inside a -subj string as
  * the separator between the components of a MULTI-VALUED RDN. The organisation here is literally
  * "Factory+", so the unescaped form
  *

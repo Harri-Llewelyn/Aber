@@ -346,14 +346,12 @@ const STRUCTURE_BASE = 'i=22';
  * ABSTRACT `Number` BECOMES `Double`. `Number` is not instantiable; a device publishes a concrete
  * type, and Double is the only one that cannot lose range against the alternatives.
  *
- * STRUCTURES ARE REFUSED, which is the rule PackML forced. This function used to map ANY
- * specification-defined DataType to `String` on the assumption it was an enumeration -- true for
- * MachineTool and Additive, and false the moment OPC 30050 arrived with PackMLCountDataType,
- * PackMLProductDataType and three more structures. Flattening a structure to a string would have
- * produced a vocabulary row that looks ordinary and cannot be published: Sparkplug B has no
- * composite type, so a device has to decompose it into separate metrics, and which decomposition
- * is a modelling decision no generator should make silently. A structure therefore stops the
- * build, and the curated list leaves it out.
+ * STRUCTURES ARE REFUSED, AND A STRUCTURE STOPS THE BUILD. Treating any specification-defined
+ * DataType as an enumeration holds for MachineTool and Additive and fails for OPC 30050, which
+ * carries PackMLCountDataType, PackMLProductDataType and three more structures. Flattening one to a
+ * string produces a vocabulary row that looks ordinary and cannot be published: Sparkplug B has no
+ * composite type, so a device has to decompose it into separate metrics, and which decomposition is
+ * a modelling decision no generator should make silently. The curated list leaves them out.
  */
 function resolveDataType(node, doc, where) {
   const declared = node.dataType;

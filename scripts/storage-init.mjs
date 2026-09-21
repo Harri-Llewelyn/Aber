@@ -24,27 +24,21 @@
  * by status. The settings are then reconciled either way, so changing the size limit in .env takes
  * effect on the next boot rather than needing the bucket dropped.
  *
- * ---------------------------------------------------------------------------------------------
- * THIS SCRIPT USED TO CREATE EXACTLY ONE BUCKET, named by STORAGE_BUCKET. It now creates a LIST,
- * because the second bucket differs from the first in the one setting that matters most -- it is
- * PRIVATE -- and a single-bucket script parameterised by environment variables would have had to
- * express that as another variable, leaving "is this bucket public?" answerable only by reading a
- * .env file. The list below states it per bucket, in code, next to the reason.
+ * THE BUCKETS ARE A LIST IN CODE, NOT PARAMETERS. They differ in the setting that matters most --
+ * whether they are public -- and expressing that as an environment variable would leave "is this
+ * bucket public?" answerable only by reading a .env file. Each entry states it next to its reason.
  */
 
 const STORAGE_URL = process.env.STORAGE_URL || 'http://supabase-storage:5000';
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY || '';
 /**
- * The 3D-model bucket's OWN limit, and no longer the global one.
+ * The 3D-model bucket's OWN limit, which is NOT `STORAGE_FILE_SIZE_LIMIT`.
  *
- * It used to read `STORAGE_FILE_SIZE_LIMIT`, which is storage-api's GLOBAL CEILING for every
- * bucket -- so one variable meant two different things and raising the ceiling silently raised
- * this bucket with it. That surfaced the moment the ceiling had to move: `broker-captures` asks
- * for 100 MiB, and storage-api refuses to create a bucket whose limit exceeds the ceiling, so the
- * ceiling had to rise -- which would have taken 3D models up with it as a side effect nobody
- * asked for.
- *
- * Two jobs, two variables. The ceiling is the largest bucket; this is what a model may be.
+ * That variable is storage-api's GLOBAL CEILING for every bucket, and storage-api refuses to create
+ * a bucket whose limit exceeds it -- so the ceiling has to be at least the largest bucket
+ * (`broker-captures`, 100 MiB). Reading it here would mean raising the ceiling for one bucket
+ * silently raised this one too. Two jobs, two variables: the ceiling is the largest bucket, and
+ * this is what a model may be.
  */
 const FILE_SIZE_LIMIT = Number.parseInt(
   process.env.STORAGE_MODEL_FILE_SIZE_LIMIT || '52428800',
@@ -183,12 +177,11 @@ const BUCKETS = [
     // AAS export bundles. Fixed, not an environment variable, for the reason floor-plans gives
     // below: the name is also in storage-policies.sql and in the function that writes here.
     //
-    // ITS OWN BUCKET SINCE THE COLD ARCHIVE LEFT THE CLUSTER. These used to sit under `assets/`
-    // in `telemetry-archive`, which was a convenience while both were local. They are not the
-    // same kind of object: a bundle is a COPY somebody asked for, derived from rows that are
-    // still in the database, and it belongs on local storage where the browser can sign a URL
-    // for it. A cold telemetry object is the only remaining copy of history and now goes to a
-    // remote endpoint the browser never touches. One retention decision cannot serve both.
+    // ITS OWN BUCKET, NOT THE COLD ARCHIVE'S. They are not the same kind of object: a bundle is a
+    // COPY somebody asked for, derived from rows still in the database, so it belongs on local
+    // storage where the browser can sign a URL for it. A cold telemetry object is the only
+    // remaining copy of that history and goes to a remote endpoint the browser never touches
+    // (`0132`). One retention decision cannot serve both.
     id: 'asset-exports',
     // Private. The bundle carries a device's whole history -- every reading, every thread entry
     // -- so a guessable unauthenticated URL would hand over the plant's record of one machine.

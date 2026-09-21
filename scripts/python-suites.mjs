@@ -789,12 +789,9 @@ export const SUITES = {
       'enrolment then redeems. Skips without a stack.',
   },
   'gateway-credential/test_gateway_credential.py': {
-    // BRIEFLY `manual`, AND THE REASON STOPPED BEING TRUE. It skipped all thirteen checks in e2e
-    // because the demonstration credentials once left MQTT_CREDENTIAL_SERVICE_TOKEN
-    // empty -- so it was declared manual rather than left as a green
-    // step over nothing. Then test_enroll_gateway.py turned out to need the SAME token, which made
-    // provisioning it in e2e necessary anyway rather than a change to avoid. The suite asserts
-    // properly once it is set (13/13 against a provisioned stack), so it comes back.
+    // NEEDS MQTT_CREDENTIAL_SERVICE_TOKEN PROVISIONED, and skips all thirteen checks without it --
+    // a green step over nothing. test_enroll_gateway.py needs the same token, so a stack lane that
+    // runs either has to provide it; 13/13 against a provisioned stack.
     lanes: ['stack'],
     why:
       "Broker credential issuance -- needs the stack up AND the service's own bearer token, which " +
