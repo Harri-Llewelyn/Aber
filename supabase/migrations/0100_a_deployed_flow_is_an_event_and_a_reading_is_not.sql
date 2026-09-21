@@ -294,20 +294,20 @@ DECLARE
 BEGIN
     IF pg_get_functiondef('public.log_digital_thread_event()'::regprocedure)
        NOT LIKE '%audit_telemetry_columns()%' THEN
-        v_problems := v_problems || 'log_digital_thread_event() does not subtract the telemetry columns';
+        v_problems := v_problems || 'log_digital_thread_event() does not subtract the telemetry columns'::text;
     END IF;
 
     IF pg_get_functiondef('public.ingest_record_gateway_health(uuid, text, timestamptz, jsonb)'::regprocedure)
        NOT LIKE '%FLOW_DEPLOYED%' THEN
-        v_problems := v_problems || 'ingest_record_gateway_health() does not record FLOW_DEPLOYED';
+        v_problems := v_problems || 'ingest_record_gateway_health() does not record FLOW_DEPLOYED'::text;
     END IF;
 
     IF NOT ('flow_hash' = ANY (public.audit_telemetry_columns())) THEN
-        v_problems := v_problems || 'flow_hash is not a telemetry column, so a deploy would be recorded twice';
+        v_problems := v_problems || 'flow_hash is not a telemetry column, so a deploy would be recorded twice'::text;
     END IF;
 
     IF has_function_privilege('anon', 'public.ingest_record_gateway_health(uuid, text, timestamptz, jsonb)', 'EXECUTE') THEN
-        v_problems := v_problems || 'ingest_record_gateway_health() is callable by anon';
+        v_problems := v_problems || 'ingest_record_gateway_health() is callable by anon'::text;
     END IF;
 
     IF array_length(v_problems, 1) > 0 THEN

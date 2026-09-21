@@ -58,10 +58,10 @@ DECLARE
 BEGIN
     IF has_function_privilege('anon', 'public.peek_gateway_enrollment_token(text)', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.peek_gateway_enrollment_token(text)', 'EXECUTE') THEN
-        v_problems := v_problems || 'peek_gateway_enrollment_token() is callable by a browser-facing role';
+        v_problems := v_problems || 'peek_gateway_enrollment_token() is callable by a browser-facing role'::text;
     END IF;
     IF NOT has_function_privilege('service_role', 'public.peek_gateway_enrollment_token(text)', 'EXECUTE') THEN
-        v_problems := v_problems || 'peek_gateway_enrollment_token() is not callable by service_role';
+        v_problems := v_problems || 'peek_gateway_enrollment_token() is not callable by service_role'::text;
     END IF;
     IF array_length(v_problems, 1) > 0 THEN
         RAISE EXCEPTION '0105 self-check failed: %', array_to_string(v_problems, '; ');

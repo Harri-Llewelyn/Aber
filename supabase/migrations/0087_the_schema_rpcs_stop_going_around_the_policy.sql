@@ -202,10 +202,10 @@ BEGIN
          WHERE n.nspname = 'public' AND p.proname IN ('fork_schema', 'publish_schema_version')
     LOOP
         IF v_def LIKE '%Shopfloor_Manager%' THEN
-            v_problems := v_problems || 'a schema RPC still names Shopfloor_Manager in its gate';
+            v_problems := v_problems || 'a schema RPC still names Shopfloor_Manager in its gate'::text;
         END IF;
         IF v_def NOT LIKE '%schema:manage%' THEN
-            v_problems := v_problems || 'a schema RPC does not gate on schema:manage';
+            v_problems := v_problems || 'a schema RPC does not gate on schema:manage'::text;
         END IF;
     END LOOP;
 
@@ -217,7 +217,7 @@ BEGIN
           JOIN public.permissions p ON p.id = rp.permission_id
          WHERE p.name = 'schema:manage' AND rp.role_id <> 1
     ) THEN
-        v_problems := v_problems || 'schema:manage is granted to a role other than Administrator';
+        v_problems := v_problems || 'schema:manage is granted to a role other than Administrator'::text;
     END IF;
 
     IF array_length(v_problems, 1) IS NOT NULL THEN

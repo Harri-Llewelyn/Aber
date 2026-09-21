@@ -562,21 +562,21 @@ DECLARE
     v_fn       text;
 BEGIN
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.backup_jobs'::regclass) THEN
-        v_problems := v_problems || 'backup_jobs is not behind RLS';
+        v_problems := v_problems || 'backup_jobs is not behind RLS'::text;
     END IF;
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.backups'::regclass) THEN
-        v_problems := v_problems || 'backups is not behind RLS';
+        v_problems := v_problems || 'backups is not behind RLS'::text;
     END IF;
 
     IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
          WHERE schemaname = 'public' AND tablename = 'backup_jobs' AND indexname = 'backup_jobs_single_flight'
     ) THEN
-        v_problems := v_problems || 'backup_jobs_single_flight is missing';
+        v_problems := v_problems || 'backup_jobs_single_flight is missing'::text;
     END IF;
 
     IF has_function_privilege('anon', 'public.request_backup(text)', 'EXECUTE') THEN
-        v_problems := v_problems || 'request_backup() is callable by anon';
+        v_problems := v_problems || 'request_backup() is callable by anon'::text;
     END IF;
 
     FOREACH v_fn IN ARRAY ARRAY[

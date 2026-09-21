@@ -84,16 +84,16 @@ DECLARE
     v_problems text[] := ARRAY[]::text[];
 BEGIN
     IF (SELECT count(*) FROM cron.job WHERE jobname = 'sweep_forge') <> 1 THEN
-        v_problems := v_problems || 'sweep_forge is not scheduled exactly once';
+        v_problems := v_problems || 'sweep_forge is not scheduled exactly once'::text;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'forge_sweep_secret') THEN
-        v_problems := v_problems || 'forge_sweep_secret is not in Vault; 0002 seeds it';
+        v_problems := v_problems || 'forge_sweep_secret is not in Vault; 0002 seeds it'::text;
     END IF;
 
     IF has_function_privilege('anon', 'public.sweep_forge()', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.sweep_forge()', 'EXECUTE') THEN
-        v_problems := v_problems || 'sweep_forge() is callable by a user';
+        v_problems := v_problems || 'sweep_forge() is callable by a user'::text;
     END IF;
 
     IF array_length(v_problems, 1) > 0 THEN
