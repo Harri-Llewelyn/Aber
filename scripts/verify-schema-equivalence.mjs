@@ -79,8 +79,9 @@
  *   node scripts/verify-schema-equivalence.mjs <dir-a> <dir-b>
  *
  * Both arguments are directories of `*.sql` applied in glob order, the way db-init applies them.
- * Requires Docker and a running stack (for the auth fixture). Leaves nothing behind: both probe
- * containers are removed on exit, including on failure.
+ * Requires Docker (the two probe containers), kubectl, and a running stack to read the auth
+ * fixture from. No port-forward: the fixture comes through the API server. Leaves nothing behind
+ * -- both probe containers are removed on exit, including on failure.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -89,7 +90,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const IMAGE = 'supabase/postgres:17.6.1.160';
-const LIVE_DB = 'acs-cymru_supabase_db';
+// The running stack's Supabase Postgres, which the auth fixture is taken from. A POD, not a
+// container: this read was `docker exec acs-cymru_supabase_db` until Compose was dropped, and that
+// name then existed nowhere else in the repository -- so this script could not run at all, which
+// is how a squash's acceptance test comes to be unavailable to the squash that needs it.
+const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru';
+const LIVE_DB_POD = process.env.ACS_CYMRU_DB_POD || 'supabase-db-0';
+const LIVE_DB_CONTAINER = 'supabase-db';
 
 // The psql variables db-init passes. FIXED DUMMIES, and that is safe: every one of them is
 // interpolated into DATA (a vault secret, an OAuth client hash, an FDW user mapping), never into
@@ -132,14 +139,25 @@ function docker(args, opts) {
   return r;
 }
 
+function kubectl(args, opts) {
+  // MSYS_NO_PATHCONV because Git Bash rewrites any argument that looks like an absolute path into
+  // a Windows one, which mangles `kubectl exec -- <cmd>` the moment an argument begins with `/`.
+  // Nothing passed here does today; it is set so that adding such an argument is not a puzzle.
+  const r = run('kubectl', args, { ...opts, env: { ...process.env, MSYS_NO_PATHCONV: '1' } });
+  if (r.error) throw new Error(`kubectl not runnable: ${r.error.message}`);
+  return r;
+}
+
 /** GoTrue's schema, taken from the running stack. See the header for why it is not committed. */
 function authFixture() {
-  const r = docker(['exec', LIVE_DB, 'pg_dump', '-U', 'postgres', '-d', 'postgres',
-                    '--schema-only', '--schema=auth']);
+  const r = kubectl(['exec', '-n', NAMESPACE, LIVE_DB_POD, '-c', LIVE_DB_CONTAINER, '--',
+                     'pg_dump', '-U', 'postgres', '-d', 'postgres',
+                     '--schema-only', '--schema=auth']);
   if (r.status !== 0 || !r.stdout.includes('CREATE TABLE')) {
     throw new Error(
-      `could not dump the auth schema from ${LIVE_DB}. This script needs a running stack to take ` +
-      `GoTrue's schema from -- bring one up with \`npm run dev:up\` and forward it with \`npm run dev:forward\` first.`);
+      `could not dump the auth schema from ${NAMESPACE}/${LIVE_DB_POD}. This script needs a ` +
+      `running stack to take GoTrue's schema from -- bring one up with \`npm run dev:up\`. ` +
+      `No port-forward is needed; this reads through the API server.`);
   }
   return r.stdout;
 }
@@ -231,14 +249,28 @@ function dumpSchema(name) {
 // -- `digital_thread` stamps recorded_at, and the two liveness tables exist to hold a timestamp.
 // Two databases built a minute apart legitimately differ there, and digesting it would produce a
 // check that fails for the wrong reason every time it is run.
+//
+// THESE ARE PARTITION ROOTS, not table names. `digital_thread` is partitioned by month and its
+// rows live in the partitions, which is what `seedRows` resolves before matching here.
 const VOLATILE = ['digital_thread', 'directory_liveness_probe', 'playback_worker_status'];
 
 function seedRows(container) {
   // Built as one query per table through a DO block would need a temp table to return from, so
   // the list is assembled client-side instead: one round trip per table, on a local container.
-  const names = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
-    "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"])
+  // EACH TABLE COMES BACK WITH ITS PARTITION ROOT, because VOLATILE names parents and `pg_tables`
+  // lists partitions. `digital_thread` is partitioned by month, so the rows are in
+  // `digital_thread_2026_09` -- a name no VOLATILE entry matches, which had the check digesting
+  // `recorded_at` after all and reporting a difference between a chain and ITSELF.
+  const listed = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+    `SELECT t.tablename, coalesce(r.relname, t.tablename)
+       FROM pg_tables t
+       JOIN pg_class c ON c.relname = t.tablename AND c.relnamespace = 'public'::regnamespace
+       LEFT JOIN pg_class r ON r.oid = pg_partition_root(c.oid)
+      WHERE t.schemaname = 'public'
+      ORDER BY 1`])
     .stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  const names = listed.map((line) => line.split('|')[0]);
+  const rootOf = new Map(listed.map((line) => { const [t, r] = line.split('|'); return [t, r]; }));
 
   const rows = new Map();
   for (const t of names) {
@@ -267,7 +299,7 @@ function seedRows(container) {
     const cols = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
                          colsQ]).stdout.trim();
 
-    const q = (VOLATILE.includes(t) || !cols)
+    const q = (VOLATILE.includes(rootOf.get(t) || t) || !cols)
       ? `SELECT count(*)::text || '|-' FROM public."${t}"`
       : `SELECT count(*)::text || '|' || md5(coalesce(string_agg(x::text, '~' ORDER BY x::text), ''))
            FROM (SELECT ${cols} FROM public."${t}") x`;
@@ -317,7 +349,7 @@ const B = 'acs-schema-equiv-b';
 try {
   console.log('\n  Schema equivalence\n');
   const fixture = authFixture();
-  note(`auth fixture: ${fixture.split('\n').length} lines from ${LIVE_DB}`);
+  note(`auth fixture: ${fixture.split('\n').length} lines from ${NAMESPACE}/${LIVE_DB_POD}`);
 
   buildProbe(A, dirA, fixture);
   buildProbe(B, dirB, fixture);
