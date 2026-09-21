@@ -1,45 +1,34 @@
 """
 i3X 1.0 server for the ACS-Cymru Asset Tracking Platform.
 
-WHAT THIS IS. A read-side adapter. It owns no data: metadata comes from PostgREST and current values
-come from the MQTT broker. Nothing upstream knows i3X exists, exactly as nothing upstream knows AAS
-exists -- and for the same reason, the two are different artefacts rather than rival formats. An AAS
-shell is a document handed over; i3X is a live endpoint queried.
+A read-side adapter owning no data: metadata comes from PostgREST, current values from the MQTT
+broker. It is a long-lived service rather than an edge function because i3X requires the server to
+accumulate value changes between client polls, and those values can only come from a held
+subscription to `spBv1.0/#`.
 
-WHY IT IS A SEPARATE LONG-LIVED SERVICE RATHER THAN AN EDGE FUNCTION. Subscriptions. i3X requires the
-server to accumulate value changes between client polls, which means state that outlives a request,
-and it requires those values to come from somewhere. They cannot come from Supabase Realtime:
-`telemetry` is a `postgres_fdw` foreign table whose rows enter TimescaleDB's WAL and never Supabase's,
-so adding it to the publication emits nothing at all -- silently, which is the worse failure. The
-values therefore have to be read from MQTT directly, and that needs a process holding a subscription
-to `spBv1.0/#`. Everything else here is projection; this is the part that is real engineering.
+THE SECURITY MODEL IS THE MOST IMPORTANT THING IN THIS FILE.
 
-THE SECURITY MODEL, WHICH IS THE MOST IMPORTANT THING IN THIS FILE.
+  NO SERVICE-ROLE KEY. `main()` refuses to start if one is in its environment, and `ingestion.py`
+  is deliberately not imported because it constructs a service-role client at import time whenever
+  the key is set. Every metadata read carries the CALLER's bearer token, so RLS decides what the
+  address space contains.
 
-  This process holds NO service-role key, and `main()` refuses to start if one is present in its
-  environment. Every metadata read is a PostgREST request carrying the CALLER's bearer token, so the
-  i3X address space is exactly what that caller could see in the dashboard -- RLS decides, not this
-  code. `ingestion.py` is deliberately not imported for the same reason: it constructs a service-role
-  client at import time whenever the key is set, and an accidental import would hand this process the
-  authority the design exists to withhold.
+  THE MQTT VALUE CACHE HAS NO RLS, and that is the trap this file closes. It is a dict keyed by
+  sparkplug_id, so serving from it directly would hand any authenticated caller live values for
+  every device on the site. A value request therefore resolves its elementIds through PostgREST AS
+  THE CALLER first and serves only the ids that came back; anything else reports as not found.
 
-  THE MQTT VALUE CACHE HAS NO RLS. That is the trap this file has to close, and it is not obvious:
-  metadata is safe because PostgREST enforces RLS, but the in-memory cache is just a dict keyed by
-  sparkplug_id, and serving from it directly would let any authenticated caller read live values for
-  every device on the site regardless of policy. So a value request is answered in two steps --
-  resolve the requested elementIds through PostgREST AS THE CALLER first, then serve only the ids
-  that came back. An element the caller cannot see is reported as not found, indistinguishable from
-  one that does not exist.
+  `GET /info` is unauthenticated because the spec says it MUST be, and it doubles as the health
+  check. It reports capabilities and nothing about the address space.
 
-  `GET /info` is unauthenticated, because the spec says it MUST be and because it doubles as the
-  health check. It reports capabilities and nothing about the address space.
+WRITES ARE NOT IMPLEMENTED. `PUT /objects/value` and `PUT /objects/history` answer 405 and `GET
+/info` declares `update.current: false` / `update.history: false`. Update is a MAY, so this is
+fully conformant, and a server that does not implement the verb cannot be talked into it by a
+client-side flag.
 
-WHAT IS DELIBERATELY NOT IMPLEMENTED. `PUT /objects/value` and `PUT /objects/history` answer 405, and
-`GET /info` declares `update.current: false` / `update.history: false`. Update is a MAY in the
-compliance table, so this is fully conformant -- and it is the durable control. The MCP server has an
-`--enable-writes` flag, but that is a client-side switch; a server that does not implement the verb
-cannot be talked into it. Writes belong on the Sparkplug/NCMD path, where they are auditable, not on
-a read API.
+Related: README.md -> "Why this is an adapter, not a feature", "Why it is a separate long-lived
+         service" (including why Supabase Realtime cannot carry the values), "Security" and
+         "Writes are refused".
 """
 from __future__ import annotations
 
@@ -277,15 +266,9 @@ def _read_address_space(pg: PostgrestClient) -> dict:
     """
     Read the whole visible address space in six queries.
 
-    Six reads rather than one per object: the object graph needs cross-references (a cell's
-    children, a gateway's devices) that no single embed expresses, and the Overview tab already
-    established that fetching a table twice per refresh is the thing to avoid. Everything is joined
-    in memory here.
-
-    (It said "five" until this was counted: cells, gateways, devices, device_locations, schemas and
-    metric_catalog. The number is the whole reason `_load_address_space()` above exists, so a
-    docstring undercounting it was the one place a reader would go to decide the cache was not
-    worth building.)
+    Six reads rather than one per object -- cells, gateways, devices, device_locations, schemas and
+    metric_catalog: the object graph needs cross-references (a cell's children, a gateway's
+    devices) that no single embed expresses, so everything is joined in memory here.
 
     UNCACHED. Every caller should go through `_load_address_space()`; this is the cold read behind
     it, separated so the cache has something to call and so a test can measure the difference.
@@ -353,16 +336,15 @@ def _modelled_metrics(schema_definition) -> set:
     supabase/functions/aas-export/index.ts. This one is asserted by
     `ModelledMetricsContractTest` in test_i3x_service.py.
 
-    `!isinstance(props, dict)` IS LOAD-BEARING. An array `properties` must contribute nothing: the
-    JS mirror once read one through `Object.keys` and got its INDICES, modelling metrics named
-    "0" and "1". Python's `isinstance` closes that by construction rather than by remembering to
-    check, which is why this reads as an accident of the language and is not one.
+    `!isinstance(props, dict)` IS LOAD-BEARING: an array `properties` must contribute nothing, and
+    `isinstance` closes that by construction rather than by remembering to check.
+    (docs/incidents.md -- "Array `properties` read as metric names")
 
     RETURNS AN EMPTY SET, NOT None, where the mirrors distinguish "declares neither, cannot be
     evaluated" from "models nothing". i3X has no caller that asks -- `_build_objects` iterates the
-    result to decide what to project, and the address space has no way to express the difference.
-    The NAMES agree exactly with the other three; only that one distinction is dropped, and the
-    contract test asserts the collapse rather than leaving it implied.
+    result to decide what to project -- so the NAMES agree exactly with the other three and only
+    that distinction is dropped. The contract test asserts the collapse rather than leaving it
+    implied.
     """
     if not isinstance(schema_definition, dict):
         return set()
@@ -426,16 +408,13 @@ def _build_objects(space: dict) -> Dict[str, dict]:
     # ---------------------------------------------------------------------------------------------
     # THE VALUE-PATH INDEXES, BUILT ONCE HERE RATHER THAN PER LOOKUP.
     #
-    # `_current_value()` needs "is this elementId a gateway, a device, or a container?", and it was
-    # answering by rebuilding {sparkplug_id: row} for the whole fleet from `space["gateways"]` and
-    # `space["devices"]` on EVERY CALL. That call is per requested elementId and again per
-    # composition child, so a bulk read of N elements with C children each rebuilt both dictionaries
-    # N x (1 + C) times over the entire address space -- quadratic in the fleet, in the one code
-    # path a client is expected to poll.
+    # `_current_value()` asks "is this elementId a gateway, a device, or a container?" once per
+    # requested elementId and again per composition child, so deriving the answer from `space` on
+    # each call is quadratic in the fleet on the one path a client is expected to poll.
     #
-    # Cached on `space` rather than returned separately because `space` is already the thing both
-    # halves are derived from, and the two must describe the same read: an index built from a later
-    # fetch than the objects would resolve an elementId the caller was never shown.
+    # Cached on `space` rather than returned separately because the two must describe the SAME
+    # read: an index built from a later fetch than the objects would resolve an elementId the
+    # caller was never shown.
     # ---------------------------------------------------------------------------------------------
     space["_gateways_by_sid"] = {g["sparkplug_id"]: g for g in space["gateways"]}
     space["_devices_by_sid"] = {d["sparkplug_id"]: d for d in space["devices"]}
@@ -1404,17 +1383,11 @@ def h_sub_stream(req: Handler) -> None:
     # Hold the connection open. The reaper treats an open stream as activity, so a quiet machine does
     # not have its subscription deleted underneath a healthy connection.
     #
-    # WAIT ON THE SOCKET, NOT ON THE CLOCK. This loop used to `time.sleep(SSE_KEEPALIVE_SECONDS)` and
-    # discover the client had gone only when the next keepalive write failed -- so an abandoned
-    # stream pinned its thread and its TCP connection for up to a full keepalive interval.
-    #
-    # That is not a tidiness point, because HTTP/1.1 keep-alive SERIALISES a connection: a client
-    # that abandons a stream and immediately issues another request can have that request queued
-    # behind the corpse of the first on the same pooled connection. The official suite's SUB-10
-    # ("delete deletes the subscription") failed exactly this way -- the delete never reached a
-    # handler at all, and reported as a 15s client timeout, which reads as a hung server rather
-    # than as a stream that had not noticed it was over. It was reproducible only against a client
-    # that pools connections; a probe opening a fresh socket per request never sees it.
+    # WAIT ON THE SOCKET, NOT ON THE CLOCK. Sleeping discovers an abandoned stream only when the
+    # next keepalive write fails, which pins the thread and its TCP connection for up to a full
+    # interval -- and HTTP/1.1 keep-alive SERIALISES a connection, so a pooling client's next
+    # request queues behind the corpse of the stream it just abandoned.
+    # (README.md -> "Subscriptions", rule 4, which records how that failed SUB-10)
     #
     # A readable stream socket means EOF here: the request body was fully consumed at dispatch and
     # no client sends more on an SSE connection. Either way -- orderly close, reset, or a client

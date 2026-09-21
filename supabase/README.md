@@ -4239,7 +4239,7 @@ kubectl -n acs-cymru exec statefulset/supabase-db -- \
   pg_dump -Fp -Z6 -U supabase_admin -d postgres > supabase-db.sql.gz
 ```
 
-Four things about these dumps are not obvious and each has bitten someone:
+Eight things about these dumps are not obvious and each has bitten someone:
 
 - **Ownership and privileges stay in the dump, and nine roles must already exist.** A dump contains
   **no `CREATE ROLE`** at all, yet objects are owned by roles and RLS policies reference them **by
