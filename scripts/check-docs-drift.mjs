@@ -1341,9 +1341,10 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 // 11c-ter. The playback credential delivery path is the same string in all four places.
 //
-// The credential is written at one path and read at another, and neither end complains when
-// they differ. The two ends cannot share a constant (JavaScript beside the broker, Python in the
-// ingestion image) and the two mounts are in a third and fourth language.
+// The credential is written at one path and read at another, and neither end complains when they
+// differ. The two ends cannot share a constant -- JavaScript beside the broker, Python in the
+// ingestion image -- and the chart states the same path twice more, as the mount and as the
+// Secret key projected into it.
 // -------------------------------------------------------------------------------------------------
 {
   const lib = read('scripts/lib/mosquitto-credentials.mjs');
@@ -2232,10 +2233,18 @@ function edgeFunctionNames() {
     'docs/postgres-17-migration-plan.md',
     'scripts/check-docs-drift.mjs',
   ];
+  // AN INTERVENING WORD IS THE HOLE THE FIRST PASS LEFT. "both deployment targets" and "one of
+  // two targets" say exactly what "both targets" says and matched none of these until they were
+  // written to allow it, so the optional group is load-bearing rather than tidy.
   const PHRASES = [
-    /\bboth targets\b/i,
-    /\bneither target\b/i,
-    /\beither target\b/i,
+    /\bboth (?:deployment )?targets\b/i,
+    /\bneither (?:deployment )?target\b/i,
+    /\beither (?:deployment )?target\b/i,
+    // NOT a bare "two targets": a playback job has targets, and test_playback_credentials.py
+    // says "Two targets, one configured each way" about two gateways. Only the phrasings that
+    // can only mean a deployment are listed.
+    /\btwo deployment targets\b/i,
+    /\bone of two targets\b/i,
     /\bon Compose\b/,
     /\bsecond (?:deployment )?target\b/i,
   ];

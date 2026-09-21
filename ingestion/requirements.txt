@@ -7,8 +7,8 @@ psycopg2-binary==2.9.10
 # THE RUNTIME AND `protoc` ARE TWO MAJORS APART, ON PURPOSE, AND NOTHING IS WRONG.
 # `sparkplug_b_pb2.py` is generated at image build by whatever protoc apt supplies -- on
 # python:3.10-slim (Debian) that is libprotoc 3.21.12, and Debian offers nothing newer. The 5.x
-# Python runtime loads that gencode: verified 2026-08-22 on both deployment targets, by
-# validate.py publishing real Sparkplug payloads through encode and decode.
+# Python runtime loads that gencode: verified 2026-08-22 by validate.py publishing real Sparkplug
+# payloads through encode and decode.
 #
 # SO DO NOT GO HUNTING FOR A MATCHING protoc when this pin moves. The nominally paired compiler
 # for a 5.29 runtime is protoc 29.x, which apt cannot install; chasing it means fetching a release

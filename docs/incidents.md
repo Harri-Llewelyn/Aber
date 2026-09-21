@@ -453,3 +453,69 @@ The rehearsal found it on its first pass through the assertions, with every coun
 either side of the restore, because it decrypts a canary it wrote before the backup rather than
 counting the rows that hold it. The key was never going to be in a dump; it had to be made a
 component of the backup.
+
+## A worker that logged nothing looked like one nobody had asked for
+
+**Where the fix lives:** `ingestion/capture_worker.py` and `ingestion/playback_worker.py`, which
+take their logger from `logging_config.get_logger()` rather than `logging.getLogger(__name__)`.
+**Symptom:** the capture worker started, ran and said nothing at all.
+
+The daemon configures **named** loggers and sets `propagate = False` on them. A module logger made
+the standard-library way is not one of those names, so it has no handler, propagates to a root that
+has none either, and its INFO and DEBUG lines are discarded. Only WARNING and above escape, through
+Python's `lastResort` handler, unformatted and on stderr.
+
+That is the failure the feature exists to avoid arriving in the feature itself: a stack where
+captures were quietly failing looked exactly like a stack where nobody had asked for a capture.
+Both workers log under the `ingestion` name rather than one of their own, so a capture or playback
+line appears in the same stream, with the same format, as the ingestion happening alongside it.
+
+## A storage client that quietly read as `anon`
+
+**Where the fix lives:** `ingestion/capture_worker.py` and `ingestion/playback_worker.py`, which
+build a second Supabase client for storage with the worker's key rather than reusing the shared one.
+**Symptom:** a refusal naming row-level security, on a bucket whose policy was correct.
+
+`client.storage` keeps the key the client was **constructed** with. Calling `.auth()` on the
+PostgREST sub-client re-authenticates that sub-client and nothing else, so a worker that signed in
+correctly still reached storage as `anon` — and said nothing about it. The policy was right, the
+identity was wrong, and the error named the policy.
+
+The same shape is why `.auth()` is called on the PostgREST sub-client rather than by setting a
+session header: `ingestion.py` records at length that setting the header instead silently sends the
+gateway key.
+
+## An empty credential file is the normal state, and reading it as malformed logged forever
+
+**Where the fix lives:** `ingestion/playback_worker.py`, whose credential reader treats an empty
+file exactly as it treats a missing one.
+**Symptom:** `ERROR` every three seconds, forever, on any stack that had never issued a playback
+credential.
+
+The reader handled a missing file as the ordinary "nothing delivered yet" case and reasoned about
+it at length. On a cluster the file is never missing: the chart creates `playback_credentials.json`
+as a key of the broker's credential Secret on every install, and the projection mounts it whether or
+not anything has been delivered. So the state a fresh stack actually presents is **present and
+empty**, which fell through to the malformed arm and logged an error on every poll.
+
+Absent has two forms and both are normal. Unreadable or malformed is still an error, because that
+is a delivery that happened and did not arrive — but training an operator to ignore this log would
+have cost them the real refusals carried in the same stream.
+
+## A playback published an entire capture into a closed socket and reported success
+
+**Where the fix lives:** `ingestion/playback_worker.py`, which captures the CONNACK return code on
+paho's network thread and waits for it before a single message counts as sent.
+**Symptom:** a job that ran to completion, reported the full `messages_sent`, and moved nothing.
+
+`client.connect()` returns once the TCP handshake is done; the CONNACK arrives later, on the network
+loop. A **wrong** password therefore gets past a check for a missing one, connects at the socket
+level, is refused with `rc=5` — and every QoS 0 publish after that is dropped locally, with no error
+anywhere to catch.
+
+The credential check that precedes it cannot see this case and its own comment says so: it refuses a
+password it does not hold, and a stale password is not a missing one. That is the ordinary state
+after a credential is re-minted and the worker is not restarted, which is the ordinary way of
+rotating one, and how this was found. `rc` 4 and 5 are named separately from the rest because they
+are the two an operator fixes by rotating the credential and restarting, rather than by looking at
+the broker.

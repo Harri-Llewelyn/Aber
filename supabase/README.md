@@ -4177,7 +4177,7 @@ Administrator-only `SELECT` would break that page for everyone else in a way tha
 
 **Secrets belong in Supabase Vault, managed through Supabase Studio.** The mechanism is already in
 use here — `0002` and `0006` store the Node-RED admin token and webhook secret through
-`vault.create_secret()` — and Studio ships a Vault UI on both deployment targets. Building a second
+`vault.create_secret()` — and Studio ships a Vault UI. Building a second
 secrets interface would duplicate a maintained upstream component and put a security-sensitive
 surface into this codebase to own. **Note the trust boundary:** Studio is not gated by this
 schema's RLS or `user_roles`. It is protected by network placement and grants database-level

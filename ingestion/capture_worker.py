@@ -1,39 +1,25 @@
 """
 Recording the broker on behalf of the dashboard.
 
-=================================================================================================
-WHY THIS LIVES IN THE INGESTION DAEMON
-=================================================================================================
-
-`capture.py record` opens its own MQTT subscription from a terminal. A browser cannot: mosquitto
-listens on 1883 TCP with no WebSocket listener, and the recording principal's password is a
-server-side secret that a bundle would publish -- which is the exact thing the broker's per-gateway role was
-rewritten to prevent. So a capture started from the Capture page has to be performed by something
-already inside the stack, and the daemon is the obvious candidate for a reason beyond convenience.
-
-THERE IS NO SECOND SUBSCRIBER, AND THERE MUST NOT BE. The daemon already holds `spBv1.0/#` and the
-credential, so a capture costs no new broker connection -- `observe()` appends to a buffer when a
-job is active and the topic matches. A separate capture service would need its own broker account
-AND would split the `seq` stream: `_last_seq` in ingestion.py is keyed `(group, edge_node)`, so a
-second consumer of the same topics makes the daemon's own gap detection fire permanently. Shared
-subscriptions do not help here for the same reason, from the other direction.
-
-=================================================================================================
-THE SHAPE OF THE LOOP
-=================================================================================================
-
-One daemon thread. While idle it asks `ingest_claim_capture_job()` for work every few seconds;
-while recording it reports progress once a second and is told, in the same round trip, whether to
-stop. The stop flag is a COLUMN rather than an endpoint because this daemon serves exactly one HTTP
-endpoint -- Prometheus `/metrics` -- and because a flag survives a page reload.
+THERE IS NO SECOND SUBSCRIBER, AND THERE MUST NOT BE. This runs as one thread inside the ingestion
+daemon, which already holds `spBv1.0/#` and the credential, so a capture opens no broker connection
+of its own: `observe()` appends to a buffer when a job is active and the topic matches. A separate
+consumer of the same topics would split the `seq` stream -- `_last_seq` in ingestion.py is keyed
+`(group, edge_node)` -- and make the daemon's own gap detection fire permanently.
 
 `observe()` runs on paho's network thread, on the hot path for every message the whole fleet
-publishes. It does the least it can: a tuple comparison, an append, and two counters, under a lock
-held for the length of an append.
+publishes, so it does the least it can: a tuple comparison, an append, and two counters, under a
+lock held for the length of an append.
+
+THE STOP FLAG IS A COLUMN, not an endpoint: this daemon serves exactly one HTTP endpoint,
+Prometheus `/metrics`, and a flag survives a page reload. While idle the thread asks
+`ingest_claim_capture_job()` for work every few seconds; while recording it reports progress once a
+second and is told, in the same round trip, whether to stop.
 
 Related: supabase/migrations/archive/0055_capture_orchestration.sql (the tables and every gate
          called here), capture.py (the file format, and the encoding preservation this reuses),
-         README.md -> "Recording from the dashboard".
+         README.md -> "Recording from the dashboard" (why the daemon hosts this, the two tables,
+         and the three caps a job auto-terminates on).
 """
 
 import json
@@ -45,18 +31,11 @@ from datetime import datetime, timezone
 import capture
 from logging_config import get_logger
 
-# `get_logger`, NOT `logging.getLogger(__name__)`, AND THE DIFFERENCE IS NOT COSMETIC. This daemon
-# configures NAMED loggers and sets `propagate = False` on them, so a module logger created the
-# standard-library way has no handler, propagates to a root that has none either, and its INFO and
-# DEBUG lines are silently discarded -- only WARNING and above escape, through Python's lastResort
-# handler, unformatted and on stderr.
-#
-# The first version of this file did exactly that, and the symptom was the one this whole feature
-# is written to avoid: the worker started, ran, and said nothing at all, so a stack where captures
-# were quietly failing would look identical to one where nobody had asked for a capture.
-#
-# Under the "ingestion" name rather than one of its own, so a capture line appears in the same
-# stream, with the same format, as the ingestion it is happening alongside.
+# `get_logger`, NOT `logging.getLogger(__name__)`. This daemon configures NAMED loggers with
+# `propagate = False`, so a module logger made the standard-library way has no handler and its INFO
+# and DEBUG lines are discarded. Under the "ingestion" name rather than one of its own, so a capture
+# line appears in the same stream, with the same format, as the ingestion it happens alongside.
+# (docs/incidents.md -- "A worker that logged nothing looked like one nobody had asked for")
 logger = get_logger("ingestion")
 
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
