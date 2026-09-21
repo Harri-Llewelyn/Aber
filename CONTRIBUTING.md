@@ -103,6 +103,15 @@ node scripts/check-migration-idempotency.mjs
 node scripts/check-image-sources.mjs    # a new .py in ingestion/ is a TWO-file change
 ```
 
+**A runtime image does not ship the tools that built it.** The Python images `pip install` their
+requirements and then remove pip (`python -m pip uninstall -y pip`), and the base is
+`python:3.13-slim` because 3.12 onwards stopped bundling `setuptools` and `wheel` into
+site-packages. Every `apt-get install` passes `--no-install-recommends` for the same reason —
+without it apt adds `linux-libc-dev`, kernel headers nothing here compiles against and 66 reported
+CVEs. Those three habits are what takes `ingestion`, `i3x-service` and `test-runner` to zero
+HIGH/CRITICAL findings; no guard enforces them, because `check-image-sources.mjs` asserts what a
+Dockerfile must contain and nothing asserts what it must not.
+
 **Adding a Python module to `ingestion/` or `i3x/` means editing the Dockerfile as well.** Those
 images `COPY` their sources one file at a time, and the suites import from the working tree where
 the file plainly exists — so a forgotten `COPY` passes every test and every other guard, and then

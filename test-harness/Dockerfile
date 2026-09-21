@@ -48,7 +48,13 @@ WORKDIR /app
 
 # Draft 2019-09 is what the IDTA schema declares; the version is pinned so a resolver change cannot
 # quietly turn a conformance failure into a pass.
-RUN pip install --no-cache-dir jsonschema==4.23.0
+#
+# The ingestion image removes pip after its own install, so this restores it, uses it and removes
+# it again. `ensurepip` ships inside CPython and carries its own pip wheel, so this reaches no
+# index for pip itself.
+RUN python -m ensurepip \
+    && python -m pip install --no-cache-dir jsonschema==4.23.0 \
+    && python -m pip uninstall -y pip
 
 # parents[3] of /app/supabase/functions/aas-export/test_aas_export.py is /app -- so these paths, and
 # only these paths, make the suites' lookups resolve.
