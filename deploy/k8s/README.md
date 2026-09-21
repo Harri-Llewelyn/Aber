@@ -916,12 +916,14 @@ release is exactly when the backups are most wanted.
 **Or the backup service, from the dashboard.** With `backupService.enabled=true` (and the
 `backup-service` image built, above) the CronJob yields to a Deployment that takes the same backup
 when an Administrator asks on the **Backups** page, and on `backup.schedule` through pg_cron, one
-directory per backup on the same PVC, with the storage objects (`backup.includeStorage`) and the
-forge's volume (`backup.includeForge`) beside the two dumps. Retention (`backup.retentionDays`)
-applies to scheduled backups; a requested one is pinned until released on the page. Both
-`include*` flags mount a ReadWriteOnce PVC, so each pins the pod to that pod's node — on a cluster
-where the storage and forge pods sit on different nodes, enable one or the other. The mechanism,
-the tables and the restore runbook are in
+directory per backup on the same PVC, with pgsodium's root key (without which every Vault row
+restores as unreadable ciphertext), the storage objects (`backup.includeStorage`), the forge's
+volume (`backup.includeForge`), the broker's document (`backup.includeBroker`) and the internal
+CA's key pair (`backup.ca`, read from its Secret in cert-manager's namespace) beside the two
+dumps. Retention (`backup.retentionDays`) applies to scheduled backups; a requested one is
+pinned until released on the page. Each `include*` flag mounts a ReadWriteOnce PVC, so each pins
+the pod to that pod's node — on a cluster where those pods sit on different nodes, enable the
+ones that share one. The mechanism, the tables and the restore runbook are in
 [`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-0101).
 
 Ad hoc, without waiting for the schedule:
@@ -984,8 +986,9 @@ kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
 #### Rehearsing the restore, weekly and by hand
 
 **`.github/workflows/restore-rehearsal.yml` performs a full cycle every Sunday** against a
-disposable k3d cluster: seed known data → back up → **destroy the namespace and its volumes** →
-reinstall → restore → assert. It also runs on `workflow_dispatch`, which is what to use before a
+disposable k3d cluster: seed known data → back up **through the backup service**, as the seeded
+Administrator through PostgREST → **destroy the namespace and its volumes** → reinstall → restore
+→ assert → back up again. It also runs on `workflow_dispatch`, which is what to use before a
 migration you are nervous about.
 
 **Destroying the volumes is the point.** A restore into a namespace that still has its PVCs proves
@@ -1025,6 +1028,10 @@ because every one of these can be missing while the counts agree:
 | Retention and refresh jobs registered **and scheduled** | present in every catalogue view, never running |
 | A user seeded before the backup can still sign in | GoTrue's schema or the JWT secret did not survive |
 | The storage object round-trips byte for byte | `devices.model_3d_path` pointing at objects that are gone |
+| The seeded gateway repository is back with its commit, and `main` is still closed to pushes behind its status check | a fleet whose flows are gone, or whose rules are open |
+| The forge's published SSH host key has the same digest as before the backup | every appliance refuses to clone: a host-key mismatch, which reads as an attack |
+| The seeded broker account is in the restored document and the plugin answers for it | every gateway re-issued |
+| The job the dump carried as RUNNING is FAILED, and a second backup completes | a restored stack that refuses every new backup |
 
 **A failure files itself.** A weekly job nobody watches is the same as no job, so a scheduled failure
 opens an issue labelled `restore-rehearsal` — or comments on the existing one rather than opening a
@@ -1032,12 +1039,15 @@ second, since a restore path broken for six weeks is one fact, not six. The dump
 is attached to it for seven days, so the next person diagnoses from the actual artefact instead of
 re-running and hoping it fails the same way.
 
-**What it does not rehearse.** The rehearsal installs the data layer and switches off the
-application layer — frontend, Node-RED, i3X, ingestion, edge functions, Grafana, Studio, Swagger and
-the broker (`.github/rehearsal-values.yaml` lists each with its reason). None of them holds state a
-dump carries. `supabase-realtime` stays **on** despite holding none, because it creates
-`supabase_realtime_admin` on first start and the restore refuses without it. Read a green run as
-"the data came back", not as "the whole stack came back".
+**What it does not rehearse.** The rehearsal installs the data layer — the two databases, the
+backup service, the forge and the broker — and switches off the application layer: frontend,
+Node-RED, i3X, ingestion, playback, the cold archive, edge functions, Grafana, Studio, Swagger,
+Prometheus, Loki, Alloy and the credential sidecar (`.github/rehearsal-values.yaml` lists each
+with its reason). None of them holds state a tier 1 backup carries. `supabase-realtime` stays
+**on** despite holding none, because it creates `supabase_realtime_admin` on first start and the
+restore refuses without it. The internal CA (`backup.ca`) is not rehearsed either: the rehearsal
+installs no cert-manager. Read a green run as "the data came back", not as "the whole stack came
+back".
 
 #### Tier 2: infrastructure and disaster recovery
 

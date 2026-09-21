@@ -132,5 +132,16 @@ BEGIN
     RAISE EXCEPTION 'authenticated lost SELECT on devices';
   END IF;
 
+  -- 9. And they hold no more than they did --------------------------------------------------------
+  --
+  -- The image's default privileges grant ALL on every new object in public to the PostgREST roles,
+  -- and a dump's grants are a diff from PostgreSQL's built-in default, not from those. A restore
+  -- that let them apply hands anon the service's gates, which 0101 revoked from every such role.
+  IF has_function_privilege('anon', 'public.backup_claim_job()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.backup_claim_job()', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public.backup_claim_job()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'a PostgREST role can execute backup_claim_job() after the restore -- the schema''s default privileges were applied over the dump''s grants';
+  END IF;
+
   RAISE NOTICE 'restore rehearsal: every Supabase assertion passed';
 END $rehearsal$;
