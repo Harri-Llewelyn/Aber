@@ -189,11 +189,14 @@ function assemble({ withTls }) {
  * the plugin rewrites it on every change, and each broker here must start from the same one. It
  * is chowned to 1883 at 0600 as the chart does; the plugin warns on anything wider.
  */
-function startBroker({ withTls, certsDir, ports = [] }) {
+function startBroker({ withTls, certsDir }) {
   assemble({ withTls });
   const name = `fp-broker-check-${Date.now()}`;
+  // NO PUBLISHED PORT. Every client below joins this container's network namespace with
+  // `--network container:<name>` or runs under `docker exec`, so nothing on the host connects to
+  // the broker. A published port only collides: two runs at once, and the second dies with
+  // "Bind for 0.0.0.0:21883 failed", which reads as the config failing to start.
   const args = ['run', '-d', '--name', name];
-  for (const p of ports) args.push('-p', p);
   args.push('-v', `${cfg}:/cfgsrc:ro`, '-v', `${dynsecDir}:/dynsrc:ro`);
   if (certsDir) args.push('-v', `${certsDir}:/mosquitto/certs:ro`);
   args.push(
@@ -311,7 +314,7 @@ try {
 
   // 1. The base policy starts on the pinned version.
   {
-    const r = startBroker({ withTls: false, ports: ['21883:1883'] });
+    const r = startBroker({ withTls: false });
     started.push(r.name);
     if (!r.running) {
       problems.push(`mosquitto.conf does NOT start on ${IMAGE}:\n         ${startFailure(r)}`);
@@ -770,7 +773,7 @@ try {
       chmodSync(join(certs, 'tls.key'), 0o644);
       chmodSync(join(certs, 'tls.crt'), 0o644);
       chmodSync(join(certs, 'ca.crt'), 0o644);
-      const r = startBroker({ withTls: true, certsDir: certs, ports: ['28883:8883'] });
+      const r = startBroker({ withTls: true, certsDir: certs });
       started.push(r.name);
       if (!r.running) {
         problems.push(
@@ -861,7 +864,7 @@ try {
         // (a) + (b): the broker serves the issued leaf, and TLS does not relax authentication. The
         // generator chowns the key to uid 1883 itself, so this also exercises the ownership logic
         // the real deployment depends on.
-        const r = startBroker({ withTls: true, certsDir: certs, ports: ['28884:8883'] });
+        const r = startBroker({ withTls: true, certsDir: certs });
         started.push(r.name);
 
         if (!r.running) {
