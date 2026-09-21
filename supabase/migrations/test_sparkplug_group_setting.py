@@ -83,8 +83,8 @@ class TestSparkplugGroupSetting(unittest.TestCase):
         self.assertIn("fixed at install", str(caught.exception))
 
     def test_metadata_can_still_be_refreshed(self):
-        # seed_setting() rewrites the label and description on every boot. A guard that refused
-        # the whole row would make a read-only setting impossible to correct.
+        # seed_setting() rewrites the label and description whenever a migration corrects them. A
+        # guard that refused the whole row would make a read-only setting impossible to correct.
         with self.conn.cursor() as cur:
             cur.execute(
                 "UPDATE public.system_settings SET description = description WHERE key = %s",

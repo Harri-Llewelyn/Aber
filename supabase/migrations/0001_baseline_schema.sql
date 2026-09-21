@@ -4500,7 +4500,13 @@ BEGIN
         category        = EXCLUDED.category,
         label           = EXCLUDED.label,
         description     = EXCLUDED.description,
-        fallback_source = EXCLUDED.fallback_source;
+        fallback_source = EXCLUDED.fallback_source
+    WHERE (public.system_settings.value_type, public.system_settings.category,
+           public.system_settings.label, public.system_settings.description,
+           public.system_settings.fallback_source)
+        IS DISTINCT FROM
+          (EXCLUDED.value_type, EXCLUDED.category,
+           EXCLUDED.label, EXCLUDED.description, EXCLUDED.fallback_source);
 END;
 $$;
 
@@ -4509,7 +4515,7 @@ $$;
 -- FUNCTION seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) :: COMMENT
 --
 
-COMMENT ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) IS 'Declare a setting from a migration. Inserts on first boot and refreshes only the metadata afterwards, so an operator''s value survives every replay. Not reachable through PostgREST.';
+COMMENT ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) IS 'Declare a setting from a migration. Inserts on first boot and afterwards refreshes only the metadata, and only where it differs, so an operator''s value survives every replay and an unchanged declaration writes no row. Not reachable through PostgREST.';
 
 --
 

@@ -70,9 +70,12 @@ def _retirement_stanza():
 
     marker = "2. The bucket setting goes with the bucket"
     start = text.index(marker)
-    # Past the header's own closing rule, then up to the one that opens section 3.
+    # Past the header's own closing rule, then up to the rule that opens the next section -- or
+    # to the end of the file, because this is the last section since `archive.enabled` was folded
+    # back into 0002 (#356) and nothing follows it.
     body = text[text.index(_SECTION, start) + len(_SECTION):]
-    return body[:body.index(_SECTION)]
+    end = body.find(_SECTION)
+    return body if end == -1 else body[:end]
 
 
 def ensure_auth_user(cur, user_id):

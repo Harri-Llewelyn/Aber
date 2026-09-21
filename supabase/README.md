@@ -107,6 +107,26 @@ They are written **once, on first boot** — every statement is `ON CONFLICT`, s
 rows and adds nothing, and the count holds across restarts. Treat them as a receipt that the seed
 ran and what it inserted, not as a per-boot health signal.
 
+#### A setting is declared once
+
+`seed_setting()` is the one seed whose `ON CONFLICT` is `DO UPDATE` rather than `DO NOTHING`: an
+operator's `value` has to survive a replay, but the label and the prose beside it have to be
+correctable from a migration. The `UPDATE` is guarded on all five metadata columns, so a
+declaration that changes nothing writes nothing — no row version, no stamp trigger, no audit row.
+
+That guard does not make a **second declaration** safe, and nothing can. Two files declaring the
+same key with different prose both write a real change, in file order, on every boot: the later
+sentence lands, the next boot puts the earlier one back, and `digital_thread` — append-only and
+partitioned by month because it only grows — accumulates two edits a boot to a setting nobody
+touched. `archive.enabled` did this between `0002` and `0132` until the sentence was folded back
+into `0002` (#356). Correct a setting's prose **where it is declared**; a second `seed_setting()`
+for a key already declared is the defect, not the fix.
+
+Two guards report it. `scripts/check-docs-drift.mjs` reads the declarations out of the chain and
+fails on a key declared twice, which is the one that runs at pull-request time and needs no cluster;
+`scripts/check-migration-idempotency.mjs` catches it as rows appended to `digital_thread` across a
+replay, which is later but does not depend on the declaration being recognisable to a regex.
+
 ### Prefixes must be unique, and the order is the filename
 
 `supabase-db-init` applies `/migrations/*.sql` in **glob order** with no applied-migrations
