@@ -262,7 +262,7 @@ BEGIN
         SELECT 1 FROM pg_trigger
          WHERE tgname = 'trg_change_proposals_author' AND NOT tgisinternal
     ) THEN
-        v_problems := v_problems || 'the author stamp trigger is missing';
+        v_problems := v_problems || 'the author stamp trigger is missing'::text;
     END IF;
 
     -- THE PROPERTY THAT MAKES IT EVIDENCE RATHER THAN A FORM FIELD. A DEFAULT here instead of the
@@ -274,7 +274,7 @@ BEGIN
            AND column_name = 'proposed_by_email' AND column_default IS NOT NULL
     ) THEN
         v_problems := v_problems ||
-            'proposed_by_email carries a DEFAULT, which a client-supplied value would survive';
+            'proposed_by_email carries a DEFAULT, which a client-supplied value would survive'::text;
     END IF;
 
     IF array_length(v_problems, 1) IS NOT NULL THEN

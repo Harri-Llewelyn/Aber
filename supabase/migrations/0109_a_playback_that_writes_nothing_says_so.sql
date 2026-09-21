@@ -139,7 +139,7 @@ BEGIN
     IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = 'public' AND p.proname = 'playback_finish') <> 1 THEN
         v_problems := v_problems
-            || 'playback_finish() is overloaded, so every call to it is ambiguous';
+            || 'playback_finish() is overloaded, so every call to it is ambiguous'::text;
     END IF;
 
     SELECT prosrc INTO v_src
@@ -155,13 +155,13 @@ BEGIN
     IF position('stop_requested' IN v_src) = 0 THEN
         v_problems := v_problems
             || 'playback_finish() no longer reads stop_requested, so an interrupted playback is '
-               'recorded as one that ran to the end';
+               'recorded as one that ran to the end'::text;
     END IF;
 
     IF position('messages_out_of_window' IN v_src) = 0 THEN
         v_problems := v_problems
             || 'playback_finish() does not write messages_out_of_window, so a playback the daemon '
-               'will discard reports an unqualified success';
+               'will discard reports an unqualified success'::text;
     END IF;
 
     IF array_length(v_problems, 1) > 0 THEN

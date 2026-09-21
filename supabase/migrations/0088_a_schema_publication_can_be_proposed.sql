@@ -397,19 +397,19 @@ DECLARE
     v_problems text[] := ARRAY[]::text[];
 BEGIN
     IF NOT ('publish' = ANY (public.proposable_columns('schemas'))) THEN
-        v_problems := v_problems || 'the schema lane cannot propose a publication';
+        v_problems := v_problems || 'the schema lane cannot propose a publication'::text;
     END IF;
 
     -- THE ASYMMETRY THIS MIGRATION EXISTS FOR. If the two gates ever collapse into one, a
     -- Shopfloor_Manager approves schema publications again and nothing else here would say so.
     IF pg_get_functiondef('public.may_decide_proposal(text)'::regprocedure) NOT LIKE '%schema:manage%' THEN
-        v_problems := v_problems || 'the schema lane does not gate on schema:manage';
+        v_problems := v_problems || 'the schema lane does not gate on schema:manage'::text;
     END IF;
 
     -- The gate this lane's apply path depends on. 0087 narrowed it; if something widens it again,
     -- the queue would be the only thing standing in front of a publication.
     IF pg_get_functiondef('public.publish_schema_version(uuid)'::regprocedure) LIKE '%Shopfloor_Manager%' THEN
-        v_problems := v_problems || 'publish_schema_version() admits Shopfloor_Manager again';
+        v_problems := v_problems || 'publish_schema_version() admits Shopfloor_Manager again'::text;
     END IF;
 
     IF array_length(v_problems, 1) IS NOT NULL THEN

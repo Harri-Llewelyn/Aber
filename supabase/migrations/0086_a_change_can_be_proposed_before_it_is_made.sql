@@ -797,7 +797,7 @@ BEGIN
           JOIN public.permissions p ON p.id = rp.permission_id
          WHERE p.name = 'proposal:create' AND rp.role_id = 3
     ) THEN
-        v_problems := v_problems || 'Operator does not hold proposal:create';
+        v_problems := v_problems || 'Operator does not hold proposal:create'::text;
     END IF;
 
     -- THE PROPERTY THE WHOLE ITEM RESTS ON. If a proposable column ever names something ingestion
@@ -807,7 +807,7 @@ BEGIN
         'gateway_id', 'schema_id', 'sparkplug_id', 'is_archived', 'conformance_policy'
     ] THEN
         v_problems := v_problems ||
-            'proposable_columns(devices) admits a column ingestion or the platform owns';
+            'proposable_columns(devices) admits a column ingestion or the platform owns'::text;
     END IF;
 
     -- The floor. A zero here is a working configuration in which the feature silently does nothing.
@@ -815,7 +815,7 @@ BEGIN
         SELECT 1 FROM public.system_settings
          WHERE key = 'proposals.open_expiry_days' AND min_value >= 1
     ) THEN
-        v_problems := v_problems || 'proposals.open_expiry_days has no floor of at least 1';
+        v_problems := v_problems || 'proposals.open_expiry_days has no floor of at least 1'::text;
     END IF;
 
     -- Both caps present: one index, one trigger. Either alone is a cap with a way around it.
@@ -824,13 +824,13 @@ BEGIN
          WHERE schemaname = 'public'
            AND indexname = 'change_proposals_one_open_per_asset_per_person'
     ) THEN
-        v_problems := v_problems || 'the per-asset cap index is missing';
+        v_problems := v_problems || 'the per-asset cap index is missing'::text;
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_trigger
          WHERE tgname = 'trg_change_proposals_cap' AND NOT tgisinternal
     ) THEN
-        v_problems := v_problems || 'the per-person cap trigger is missing';
+        v_problems := v_problems || 'the per-person cap trigger is missing'::text;
     END IF;
 
     IF array_length(v_problems, 1) IS NOT NULL THEN

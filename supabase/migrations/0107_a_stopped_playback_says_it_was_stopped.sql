@@ -77,7 +77,7 @@ BEGIN
          WHERE n.nspname = 'public' AND p.proname = 'playback_finish') > 1 THEN
         v_problems := v_problems
             || 'playback_finish() is declared more than once, so a call naming three arguments is '
-               'ambiguous for the rest of this boot';
+               'ambiguous for the rest of this boot'::text;
     END IF;
 
     SELECT prosrc INTO v_src
@@ -92,7 +92,7 @@ BEGIN
     IF position('stop_requested' IN v_src) = 0 THEN
         v_problems := v_problems
             || 'playback_finish() no longer reads stop_requested, so an interrupted playback is '
-               'recorded as one that ran to the end';
+               'recorded as one that ran to the end'::text;
     END IF;
 
     -- CANCELLED has to remain admissible, or the new arm writes a status the CHECK refuses and
@@ -104,7 +104,7 @@ BEGIN
            AND pg_get_constraintdef(oid) LIKE '%CANCELLED%'
     ) THEN
         v_problems := v_problems
-            || 'playback_jobs_status_valid does not admit CANCELLED';
+            || 'playback_jobs_status_valid does not admit CANCELLED'::text;
     END IF;
 
     IF array_length(v_problems, 1) > 0 THEN
