@@ -7317,9 +7317,11 @@ SELECT public.seed_setting(
     'boolean',
     'Cold Storage',
     'Archive telemetry before dropping it',
-    'When on, telemetry chunks past the threshold below are exported to Parquet on object storage '
-    'and verified before the raw rows are dropped. When off, TimescaleDB''s retention policy drops '
-    'them outright and they are not recoverable.',
+    'When on, telemetry chunks past the threshold below are exported to Parquet on the configured '
+    'S3 endpoint and verified there before the raw rows are dropped. When off, TimescaleDB''s '
+    'retention policy drops them outright and they are not recoverable. Exporting also requires a '
+    'site key and an endpoint in the chart: without them nothing is written and the exporter says '
+    'so.',
     'off — retention.sql drops chunks with no archive'
 );
 
