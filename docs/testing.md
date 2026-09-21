@@ -607,9 +607,11 @@ databases, the Supabase role set, the pgsodium root key and the migration chain,
 those changes. A restore that worked in August fails in November, and nothing else would notice
 until it was needed.
 
-It runs a full cycle against a disposable k3d cluster — seed → back up → **destroy the namespace
-and its volumes** → reinstall → restore → assert — driven by `scripts/rehearse-restore.sh`, which
-an operator can also run by hand against any cluster. Destroying the volumes is what makes it
+It runs a full cycle against a disposable k3d cluster — seed → back up through the backup service
+→ **destroy the namespace and its volumes** → reinstall → restore → assert → back up again — driven
+by `scripts/rehearse-restore.sh`, which an operator can also run by hand against any cluster. The
+backup is the service's, asked for the way the Backups page asks, and it carries the two dumps,
+the storage objects, the forge's volume and the broker's document. Destroying the volumes is what makes it
 meaningful; a restore over surviving data proves nothing, so the workflow fails if a
 `PersistentVolume` outlives the namespace or if the reinstalled stack is not empty before the
 restore.

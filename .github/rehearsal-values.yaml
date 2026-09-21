@@ -1,59 +1,76 @@
-# What the restore rehearsal switches off, and why each one is safe to switch off.
+# What the restore rehearsal installs, and what it switches off.
 #
 # LAYERED OVER values-dev.yaml, NOT INSTEAD OF IT. The credentials, the resource sizes and the dev
-# domain all come from that file; this one only subtracts. Keeping it separate is what stops the
-# rehearsal's trimming leaking into the fixture the k8s-validation job installs with.
+# domain all come from that file; this one adds the backup service and subtracts the rest. Kept
+# separate so the rehearsal's trimming does not leak into the fixture the k8s-validation job
+# installs with.
 #
-# THE RULE FOR WHAT MAY BE OFF: a component may be disabled here only if it holds no state that
-# `pg_dump` or the storage volume carries. That is the whole test -- a frontend cannot fail to be
-# restored. Anything the RESTORE ITSELF depends on stays on, even when it holds no state of its own,
-# and supabase-realtime is the example that matters: nothing in this repository creates
-# `supabase_realtime_admin`, the Realtime container does on first start, and restore-databases.sh
-# refuses without it.
+# THE RULE FOR WHAT MAY BE OFF: a component may be disabled here only if it holds no state that a
+# tier 1 backup carries. That is the whole test. Anything the RESTORE ITSELF depends on stays on,
+# even when it holds no state of its own; supabase-realtime is the example that matters: nothing
+# in this repository creates `supabase_realtime_admin`, the Realtime container does on first
+# start, and restore-databases.sh refuses without it.
 #
-# Disabling these also removes seven image builds, which is what keeps the rehearsal inside a
-# runtime that lets it stay enabled. That is the benefit, not the reason.
+# Off also means unbuilt: the rehearsal builds db-init, backup-service and gateway-credential and
+# nothing else, which is what keeps it inside a runtime that lets it stay enabled.
 
-# --- The application layer: no database state of its own ----------------------------------------
+# --- The backup service takes the rehearsal's backup ---------------------------------------------
+# The Backups page's path, with every component the service can carry. The format is the chart's
+# default (custom, .dump), so the rehearsal restores what a default install writes.
+backup:
+  enabled: true
+  destination: pvc
+  includeStorage: true
+  includeForge: true
+  includeBroker: true
+backupService:
+  enabled: true
+
+# --- The state the backup carries, beyond the two databases --------------------------------------
+# Storage (the 3D model objects), the forge (every gateway's repository and the SSH host keys) and
+# the broker (the Dynamic Security document: every issued gateway account) are on by default and
+# stay on. The broker's credential sidecar is not needed to seed or read the document.
+gatewayCredential:
+  enabled: false
+
+# --- The application layer: no tier 1 state of its own -------------------------------------------
 frontend:
   enabled: false
 nodeRed:
-  # Node-RED has a PVC, and it is deliberately out of scope. Its flows are configuration deployed
-  # by the chart, not user data recovered from a dump, and `scripts/backup-databases.sh` does not
-  # claim to carry them. Rehearsing a volume the backup never touches would assert nothing.
+  # Node-RED has a PVC, and it is deliberately out of scope: its flows are configuration deployed
+  # by the chart, and the forge holds every gateway's flow.
   enabled: false
 i3xService:
   enabled: false
 grafana:
+  # Grafana's PVC holds no authored state: every dashboard and rule is provisioned by the chart.
   enabled: false
 supabaseStudio:
   enabled: false
+supabaseMeta:
+  enabled: false
 swaggerUi:
   enabled: false
+observability:
+  # Prometheus, Loki and Alloy: thirty days of metrics and logs, not a database of record, and
+  # not in tier 1 (supabase/README.md, "The log store is deliberately not in tier 1").
+  enabled: false
+databaseMetrics:
+  enabled: false
 
-# --- The data-plane workloads: they WRITE state, they do not HOLD it ----------------------------
+# --- The data-plane workloads: they WRITE state, they do not HOLD it ------------------------------
 ingestion:
-  # The daemon's output is rows in the two databases, which the rehearsal seeds directly instead.
-  # Running it would add a live writer racing the backup -- a moving target for a job whose whole
-  # assertion is that a count did not change.
+  # The daemon's output is rows in the two databases, which the rehearsal seeds directly. A live
+  # writer racing the backup would be a moving target for a job that asserts a count did not move.
   enabled: false
-mosquitto:
-  # Nothing publishes with ingestion off, and the broker's own state is credentials the chart
-  # generates rather than data a dump carries.
+playback:
   enabled: false
-gatewayCredential:
+coldArchive:
+  # A CronJob on the ingestion image, which the rehearsal does not build.
   enabled: false
 supabaseFunctions:
-  # The edge runtime serves functions; it stores nothing. `supabase_functions_admin` -- which the
-  # restore preflight requires -- comes from `CREATE EXTENSION pg_net` in 0001, not from this
-  # container, so disabling it does not remove a required role.
+  # The edge runtime serves functions; it stores nothing. `supabase_functions_admin`, which the
+  # restore preflight requires, comes from `CREATE EXTENSION pg_net` in 0001, not from here.
   enabled: false
 e2e:
-  enabled: false
-
-# --- Off because it would compete with the rehearsal ---------------------------------------------
-backup:
-  # The chart's own backup CronJob. The rehearsal drives scripts/backup-databases.sh explicitly and
-  # asserts on the artefact it produces; a second, scheduled writer into the same story would make
-  # a failure ambiguous about which backup was being tested.
   enabled: false

@@ -267,8 +267,11 @@ function RecentFailures({ jobs }) {
 const COMPONENT_LABELS = {
   'supabase-db': 'platform database',
   'timescaledb': 'historian',
+  'vault-key': 'Vault root key',
   'storage-objects': '3D models',
-  'forge': 'forge'
+  'forge': 'forge',
+  'broker': 'broker accounts',
+  'ca': 'internal CA'
 }
 
 function componentSummary(components) {

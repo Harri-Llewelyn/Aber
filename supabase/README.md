@@ -4259,11 +4259,21 @@ Four things about these dumps are not obvious and each has bitten someone:
   first of them with `must be owner of event trigger pgrst_drop_watch`. Both scripts default to
   `supabase_admin` for this reason.
 
-- **Restore into a freshly initialised database, not over a previously restored one.** The plain
-  format carries `--clean --if-exists`, which is what lets it replace the `auth` and `storage`
-  schemas the image ships. It cannot, however, drop an *inherited* constraint on Realtime's
-  daily `realtime.messages_*` partitions — a second restore over the first fails with
-  `cannot drop inherited constraint`. Drop the volume, or the database, first.
+- **Restore into a freshly initialised database.** The plain format carries `--clean --if-exists`,
+  which is what lets it replace the `auth` and `storage` schemas the image ships. It cannot,
+  however, drop a partition's *inherited* primary key, and a fresh stack always has partitions:
+  Realtime creates its daily `realtime.messages_*` on every start, and `0001` creates
+  `digital_thread`'s monthly ones and its DEFAULT. So `restore-databases.sh` drops every partition
+  of every partitioned table first, and the dump recreates each with its rows. The first rehearsal
+  to reach the restore step found that; before it, the runbook failed on every fresh stack with
+  `cannot drop inherited constraint`.
+- **The image's default privileges are suspended for the replay.** They grant ALL on every new
+  object in `public` to anon, authenticated and service_role, and a dump's grants are a diff from
+  PostgreSQL's built-in default, not from those — so a plain replay creates every table and
+  function with the surplus and grants the source's rights on top: `service_role` could write the
+  audit trail, and anon could call the backup service's gates. `restore-databases.sh` revokes the
+  defaults first; the dump re-declares them last, after every object and grant, so the restored
+  ACLs are exactly the dumped ones. The rehearsal asserts it on `backup_claim_job()`.
 
 - **The historian's password travels inside the dump.** `public.telemetry`'s user mapping carries
   the credential `0001` registered. Restore into a historian whose password differs and the
@@ -4298,11 +4308,13 @@ those lines that matters beyond the incident is already kept as a row and alread
 records that are captured properly, plus a great deal of noise the retention window exists to
 expire.
 
-So `docker volume rm <project>_loki_data` costs up to thirty days of logs and nothing else — the
-stack returns with an empty store and works. That is worth stating next to `mosquitto_certs`, where
-the same command is a fleet-wide re-enrolment: the two sit in the same volume list and are not the
-same kind of thing. A tier 2 snapshot does capture `loki_data`, because it captures the machine,
-but that is a side effect rather than a promise and no retention story should be built on it.
+So deleting Loki's PVC costs up to thirty days of logs and nothing else — the stack returns with an
+empty store and works. That is worth stating next to the broker's volume and the internal CA's
+Secret, where the same deletion is a fleet-wide re-enrolment: they sit in the same list of things
+on disk and are not the same kind of thing, which is why those two are in tier 1
+(`backup.includeBroker`, `backup.ca`) and the log store is not. A tier 2 snapshot does capture the
+log store, because it captures the machine, but that is a side effect rather than a promise and no
+retention story should be built on it.
 
 ### Backups from the dashboard (0101)
 
@@ -4314,24 +4326,42 @@ The shape is the Capture page's: the job is the act, the row is the artefact, an
 both and writes neither.
 
 **What the service takes.** Both databases as their superusers (`supabase_admin`, for the reason
-above), the storage objects, and the forge, into one directory per backup on its own volume
-(the backup PVC), named by the UTC stamp:
+above), the storage objects, the forge, the broker's volume and the internal CA, into one
+directory per backup on its own volume (the backup PVC), named by the UTC stamp:
 
 ```
 /backups/20260911T143000Z/
-  supabase-db-20260911T143000Z.sql.gz       # or .dump, with BACKUP_FORMAT=custom
-  timescaledb-20260911T143000Z.sql.gz
+  supabase-db-20260911T143000Z.dump         # or .sql.gz, with backupService.format=plain
+  timescaledb-20260911T143000Z.dump
+  vault-key-20260911T143000Z.txt            # pgsodium's root key, read through the dump's session
   storage-objects-20260911T143000Z.tar.gz   # absent when no storage volume is mounted
   forge-20260911T143000Z.tar.gz             # absent when no forge volume is mounted
+  broker-20260911T143000Z.tar.gz            # absent when no broker volume is mounted
+  ca-20260911T143000Z.tar.gz                # absent when backup.ca names no Secret
   manifest-20260911T143000Z.txt             # what restore-databases.sh reads
   manifest.json                             # sizes and SHA-256 digests, as the row records them
 ```
 
-The forge archive is `gitea_data` minus its logs, with `gitea.db` replaced by a copy taken through
-sqlite3's online backup (consistent while Gitea writes), or, when the read-only mount refuses that,
-a raw copy of the database with its WAL folded in and an integrity check passed. `manifest.json`
-says which. The SSH host keys are in it: a forge recreated without them is a fleet-wide
-re-enrolment, because every appliance pins them.
+The forge archive is the forge's volume minus its logs, with `gitea.db` replaced by a copy taken
+through sqlite3's online backup (consistent while Gitea writes), or, when the read-only mount
+refuses that, a raw copy of the database with its WAL folded in and an integrity check passed.
+`manifest.json` says which. The SSH host keys are in it: a forge recreated without them is a
+fleet-wide re-enrolment, because every appliance pins them.
+
+The Vault key is pgsodium's root key, read through the same superuser session as the dump
+(`pg_read_file` against the data directory, where the chart's getkey script keeps it). Every
+Vault secret is ciphertext under it and nothing else, a fresh server mints its own, and a dump
+carries the ciphertext only: the first rehearsal to reach the assertions restored every Vault row
+and could decrypt none of them. The cold archive's S3 secret, typed on the page, is one of those
+rows and no chart value can re-seed it.
+
+The broker archive is the broker's data volume (`backup.includeBroker`): the Dynamic Security
+document, which is every issued gateway account and the only copy of it. The CA archive
+(`backup.ca`) is the key pair behind the broker's and the databases' certificates, read from its
+Secret in the ClusterIssuer's namespace through the API with a Role granting `get` on that one
+name, and staged under `ca/` as cert-manager keeps it (`tls.crt`, `tls.key`, `ca.crt`). Both are
+in tier 1 for the same reason as the host keys: every appliance pins the CA, so losing it is a
+fleet-wide re-enrolment; losing the document is every gateway re-issued.
 
 **How the service talks to the database.** Through `psql`, as `supabase_admin`, the session
 `pg_dump` needs anyway. The gates it calls (`backup_claim_job()`, `backup_finalise()`,
@@ -4373,40 +4403,79 @@ where an act on the whole database belongs.
   chart deploys, and is a separate piece of work. This is the floor, not the ceiling, as the
   CronJob's header says.
 
-**Restoring from a service-made backup** is the tier 1 runbook with two differences: the files are
-in a directory on the volume, and there is a forge archive.
+**Restoring from a service-made backup** is the tier 1 runbook with three differences: the files
+are in a directory on the volume, there are volume archives beside the dumps, and the dump was
+taken while a backup job was RUNNING, so the restored database carries that row. The service
+fails it on its next poll (`BACKUP_POLL_SECONDS`, 15 s), as it fails any RUNNING job no process
+is running; until then `request_backup()` refuses, naming it. This is the runbook
+`scripts/rehearse-restore.sh` runs, step for step.
 
 ```bash
-# Copy the directory off the backup PVC, then restore as above (.dump files by default,
-# backupService.format, so the restore is pg_restore as the cluster runbook shows).
+# The directory, off the backup PVC as a streamed tar (a directory `kubectl cp` may land the
+# directory or its contents, and the two restore differently). Then the two databases as above:
+# .dump files by default (backupService.format), so restore-databases.sh runs pg_restore.
 POD=$(kubectl -n acs-cymru get pod -l app.kubernetes.io/component=backup-service -o jsonpath='{.items[0].metadata.name}')
-kubectl -n acs-cymru cp "$POD:/backups/<stamp>" ./backups/<stamp>
+kubectl -n acs-cymru exec "$POD" -- tar -czf - -C /backups <stamp> | tar -xzf - -C ./backups
+
+# pgsodium's root key FIRST, onto the fresh database's volume, and a restart so the server reads
+# it: Vault's rows are ciphertext under this key, and the fresh server minted its own.
+# restore-databases.sh verifies Vault decrypts and names this step if it does not.
+kubectl -n acs-cymru exec -i statefulset/supabase-db -c supabase-db -- \
+  sh -c 'umask 077; cat > /var/lib/postgresql/data/pgsodium_root.key' < ./backups/<stamp>/vault-key-<stamp>.txt
+kubectl -n acs-cymru delete pod supabase-db-0 --wait
+kubectl -n acs-cymru rollout status statefulset/supabase-db
+
 BACKUP_DIR=./backups/<stamp> BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 
-# The forge: scale Gitea to zero, replace the volume's contents through a helper pod that holds
-# the same claim, scale it back. Restoring the archive restores the host keys, so appliances
-# keep cloning.
-kubectl -n acs-cymru scale deploy/gitea --replicas=0
-kubectl -n acs-cymru apply -f - <<'EOF'
+# The storage objects, into the storage pod's volume.
+POD=$(kubectl -n acs-cymru get pod -l app.kubernetes.io/component=supabase-storage -o jsonpath='{.items[0].metadata.name}')
+kubectl -n acs-cymru exec -i "$POD" -- tar -xzf - -C /var/lib/storage < ./backups/<stamp>/storage-objects-<stamp>.tar.gz
+
+# A volume the workload holds open (the forge, then the broker): scale it to zero, replace the
+# volume's contents through a helper pod holding the same claim, scale it back. The forge archive
+# restores the host keys, so appliances keep cloning; the broker archive restores the document,
+# and the boot reconcile keeps every account it holds.
+restore_volume() {   # <deployment> <archive>; the claim is the deployment's "data" volume
+  CLAIM=$(kubectl -n acs-cymru get "deploy/$1" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')
+  IMAGE=$(kubectl -n acs-cymru get "deploy/$1" -o jsonpath='{.spec.template.spec.containers[0].image}')
+  kubectl -n acs-cymru scale "deploy/$1" --replicas=0
+  kubectl -n acs-cymru wait --for=delete pod -l "app.kubernetes.io/component=$1" --timeout=5m
+  kubectl -n acs-cymru apply -f - <<EOF
 apiVersion: v1
 kind: Pod
-metadata: { name: forge-restore }
+metadata: { name: volume-restore-$1 }
 spec:
   restartPolicy: Never
-  containers: [{ name: sh, image: alpine, command: [sleep, "3600"], volumeMounts: [{ name: data, mountPath: /data }] }]
-  volumes: [{ name: data, persistentVolumeClaim: { claimName: acs-cymru-gitea } }]
+  securityContext: { runAsUser: 0 }
+  containers: [{ name: restore, image: "$IMAGE", command: [sleep, "3600"], volumeMounts: [{ name: data, mountPath: /volume }] }]
+  volumes: [{ name: data, persistentVolumeClaim: { claimName: $CLAIM } }]
 EOF
-kubectl -n acs-cymru wait --for=condition=Ready pod/forge-restore
-kubectl -n acs-cymru cp ./backups/<stamp>/forge-<stamp>.tar.gz forge-restore:/tmp/forge.tar.gz
-kubectl -n acs-cymru exec forge-restore -- sh -c 'rm -rf /data/* && tar -xzf /tmp/forge.tar.gz -C /data'
-kubectl -n acs-cymru delete pod forge-restore
-kubectl -n acs-cymru scale deploy/gitea --replicas=1
+  kubectl -n acs-cymru wait --for=condition=Ready "pod/volume-restore-$1" --timeout=5m
+  kubectl -n acs-cymru exec -i "volume-restore-$1" -- sh -c 'rm -rf /volume/* /volume/.[!.]*; tar -xzf - -C /volume' < "$2"
+  kubectl -n acs-cymru delete pod "volume-restore-$1"
+  kubectl -n acs-cymru scale "deploy/$1" --replicas=1
+  kubectl -n acs-cymru rollout status "deploy/$1"
+}
+restore_volume gitea     ./backups/<stamp>/forge-<stamp>.tar.gz
+restore_volume mosquitto ./backups/<stamp>/broker-<stamp>.tar.gz
+
+# The CA, on a NEW cluster, before deploy/k8s/internal-ca.yaml is applied: cert-manager then finds
+# a key pair matching the Certificate and issues nothing new, so every leaf certificate is issued
+# from the CA the appliances already pin. Applied after cert-manager has minted a fresh CA, the
+# broker and both databases have to be re-issued and every appliance re-enrolled anyway.
+tar -xzf ./backups/<stamp>/ca-<stamp>.tar.gz
+kubectl -n cert-manager create secret generic acs-cymru-ca-key-pair \
+  --from-file=tls.crt=ca/tls.crt --from-file=tls.key=ca/tls.key --from-file=ca.crt=ca/ca.crt
+kubectl apply -f deploy/k8s/internal-ca.yaml
 ```
 
-**Not yet rehearsed.** The service's backups have been taken and their digests checked; no restore
-has yet run from one, and the weekly CI rehearsal still restores the CronJob's files. That is the
-roadmap entry *A restore is rehearsed from a backup the service took*, and until it lands the line
-at the end of this section applies to these backups as much as to any.
+**Rehearsed weekly, from a backup the service took.** `.github/workflows/restore-rehearsal.yml`
+asks for its backup the way the Backups page does, restores both databases and the three volumes
+into a fresh install, asserts what a count cannot catch, and asks for a second backup, so a green
+run also says the restored stack can back itself up
+([`deploy/k8s/README.md`](../deploy/k8s/README.md#rehearsing-the-restore-weekly-and-by-hand)
+lists the assertions). The CA is the one component it does not rehearse: the rehearsal installs
+no cert-manager.
 
 ### Tier 2: infrastructure snapshots
 

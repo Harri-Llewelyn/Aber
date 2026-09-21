@@ -103,7 +103,7 @@ CREATE INDEX IF NOT EXISTS backups_taken_at_idx ON public.backups (taken_at DESC
 COMMENT ON TABLE public.backups IS 'One row per backup that EXISTS on the backup volume; the row is deleted when the service prunes the files, and BACKUP_PRUNED in digital_thread is the record that it did. Written only by backup_finalise() and released only by release_backup(). Readable by Administrator only. The bytes never leave the volume: nothing serves them to a browser.';
 COMMENT ON COLUMN public.backups.stamp IS 'The UTC stamp the files carry, YYYYMMDDTHHMMSSZ, and the name of the directory under the backup volume holding them. What BACKUP_STAMP takes in restore-databases.sh.';
 COMMENT ON COLUMN public.backups.location IS 'The directory holding this backup''s files, as a path inside the backup service''s container. Informational: a restore is run from a shell against the volume, not from this row.';
-COMMENT ON COLUMN public.backups.components IS 'What the backup holds: an array of {name, file, size_bytes, sha256}. Names are supabase-db, timescaledb, storage-objects and forge; a component the service was not given a volume for is absent, not empty.';
+COMMENT ON COLUMN public.backups.components IS 'What the backup holds: an array of {name, file, size_bytes, sha256}. Names are supabase-db, timescaledb, vault-key, storage-objects, forge, broker and ca; a component the service was not given a volume, a file or a Secret for is absent, not empty.';
 COMMENT ON COLUMN public.backups.pinned IS 'True keeps the backup out of the retention prune. Set at creation for a requested backup, cleared by release_backup(). A scheduled backup is never pinned.';
 
 ALTER TABLE public.backups ENABLE ROW LEVEL SECURITY;
@@ -363,7 +363,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.backup_reconcile_jobs(p_reason text) IS 'Fail every RUNNING job with the given reason. Called once by the backup service at start: a job left RUNNING was interrupted, and its files are partial.';
+COMMENT ON FUNCTION public.backup_reconcile_jobs(p_reason text) IS 'Fail every RUNNING job with the given reason. Called by the backup service at start and before each claim: a RUNNING job no service is running was interrupted, or came back in a restore from a backup taken while it ran; its files are partial or gone.';
 
 CREATE OR REPLACE FUNCTION public.backup_claim_job() RETURNS jsonb
     LANGUAGE plpgsql

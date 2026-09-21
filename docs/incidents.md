@@ -365,3 +365,91 @@ was the first thing to run that path.
 The order of statements in a file replayed on every boot is a dependency, not a reading order.
 The weekly rehearsal now installs from nothing twice a run, so the fresh path is exercised even
 while the per-commit job is not.
+
+## The restore path never met a partitioned table
+
+**Where the fix lives:** `scripts/restore-databases.sh`, preflight 0b, which drops every partition
+of every partitioned table before the dump is replayed.
+**Symptom:** every restore into a freshly installed stack failed part-way through the Supabase
+dump with `cannot drop inherited constraint "messages_2026_09_24_pkey"`, and with that table
+cleared, with `cannot drop inherited constraint "digital_thread_default_pkey"`.
+
+The script's header had said, since the hand rehearsal of 2026-08-15, that a *second* restore over
+the first fails this way and that the answer is to drop the volume. The first restore fails the
+same way, and the volume is not the reason. A partition's primary key is inherited from its parent
+and cannot be dropped on its own, `--clean` reaches that `ALTER TABLE ... DROP CONSTRAINT` before
+any `DROP TABLE`, and a fresh stack always has partitions with the dump's names: the Realtime
+container creates its daily `realtime.messages_*` on every start, and `0001` creates
+`digital_thread`'s monthly partitions and its DEFAULT on every boot. The hand rehearsal had
+restored into a database that had not booted the stack, which is the one shape the runbook says
+not to use.
+
+Nobody had seen it because nobody had run it: the weekly rehearsal's first run failed at the backup
+step (`scripts/backup-databases.sh` had never had its executable bit), and every run after it fell
+to the exhausted Actions allowance. The restore step first executed on 2026-09-21, locally, and
+found both on its first two attempts. Dropping the partitions loses nothing the restore was going
+to keep: the dump recreates each with its rows, and Realtime creates the next day's.
+
+## The restored schema was more permissive than the dumped one
+
+**Where the fix lives:** `scripts/restore-databases.sh`, preflight 0c, which revokes every default
+privilege for every grantee but its owner and PUBLIC before the dump is replayed, and
+`test-harness/restore-rehearsal/assert-supabase.sql`, section 9, which checks a function the
+migrations revoked from every PostgREST role.
+**Symptom:** after a restore, `service_role` could UPDATE and DELETE `digital_thread`, and anon
+could execute `backup_claim_job()`; the dump granted neither.
+
+The supabase/postgres image declares default privileges: every table, sequence and function that
+`supabase_admin` or `postgres` creates in `public` is granted ALL to anon, authenticated and
+service_role at the moment of creation. `pg_dump` writes each object's GRANT and REVOKE statements
+as a difference from PostgreSQL's built-in default, not from those declarations, so a replay
+creates the object with the surplus and grants what the source had on top of it. The dump does
+carry the default privileges themselves, as `ALTER DEFAULT PRIVILEGES` statements, but writes them
+after every object and grant, which is what makes suspending them for the replay correct: the
+dump puts them back.
+
+The migration chain would have corrected the tables it names, since every file states its own
+REVOKEs and the chain replays on every boot; it would not have run, because a restore does not
+boot the stack. The row counts matched either side of the restore, the sign-in worked, and the
+foreign wrapper answered. Only the assertion on a grant caught it, which is the case for having
+that kind of assertion.
+
+## The rehearsal reported a user it had never created
+
+**Where the fix lives:** `scripts/rehearse-restore.sh`, `seed`, which creates the rehearsal user
+through GoTrue's admin API as the service role and signs in as it before returning.
+**Symptom:** the seed logged `already present (re-run)` on a cluster created minutes earlier, and
+the first backup step to run after it could not sign in.
+
+Self-service signup is closed on this stack (`GOTRUE_DISABLE_SIGNUP`), so `/signup` answers 422
+whether or not the user exists. The seed had been written to read 422 as "already registered",
+which is what GoTrue answers a duplicate with when signup is open, and it never checked that the
+user it reported could sign in. The 6 September CI run carries the same line on a fresh cluster.
+Every assertion that rested on that user, the post-restore sign-in above all, was going to fail
+with a message blaming the restore.
+
+A fixture that reports success it did not verify is the same fault as a guard that does
+(`check-mirror-drift.mjs`, above). The seed now proves the user signs in, so a sign-in failure
+after the restore is the restore's.
+
+## A restored Vault decrypted nothing
+
+**Where the fix lives:** `scripts/backup-service.mjs`, which archives pgsodium's root key as the
+`vault-key` component through the dump's own superuser session (`pg_read_file` against the data
+directory); `scripts/rehearse-restore.sh`, which puts it on the fresh volume and restarts the
+server before the dump; `scripts/restore-databases.sh`, step 5, which reads
+`vault.decrypted_secrets` and names the missing step when it cannot.
+**Symptom:** after a restore into a fresh stack, every Vault row was present and
+`pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext` answered any read of it.
+
+The root key is on the database's data volume, where an earlier incident moved it from the
+container. A pg_dump carries the ciphertext and not the key, a fresh server mints a key of its own
+on first start, and the two never meet: the rows restore, and nothing can read them. Most of
+Vault's rows are re-seeded from the chart's values by the migration chain on the next boot; the
+cold archive's S3 secret, typed on the page, is not, and a restore that loses it loses the
+archive.
+
+The rehearsal found it on its first pass through the assertions, with every count identical
+either side of the restore, because it decrypts a canary it wrote before the backup rather than
+counting the rows that hold it. The key was never going to be in a dump; it had to be made a
+component of the backup.

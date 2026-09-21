@@ -346,6 +346,7 @@ async function installChart ({ tls, e2e }) {
     // everything a full backup takes; the stack lane asserts on the set of components.
     '--set', 'backup.enabled=true', '--set', 'backupService.enabled=true',
     '--set', 'backup.includeStorage=true', '--set', 'backup.includeForge=true',
+    '--set', 'backup.includeBroker=true',
     '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`]
   // What an appliance is told to dial. The browser-facing hosts stay on the loopback domain, which
   // resolves on this machine whatever the resolver does; the two functions that hand an appliance
@@ -364,7 +365,9 @@ async function installChart ({ tls, e2e }) {
     console.log('  no LAN address found: enrolment stays unconfigured, as the dev values leave it')
   }
   // The broker's listener and both databases, from the one internal CA.
-  if (tls) sets.push('--set', 'mosquitto.tls.enabled=true', '--set', 'postgresTls.enabled=true')
+  if (tls) sets.push('--set', 'mosquitto.tls.enabled=true', '--set', 'postgresTls.enabled=true',
+    // The CA the two listeners are issued from joins the backup (ensureCertManager names it).
+    '--set', 'backup.ca.secretName=acs-cymru-ca-key-pair')
   if (e2e) {
     // The validate Job follows browser-facing URLs, which resolve to the pod itself under the dev
     // domain; hostAliases point them at Traefik instead.
