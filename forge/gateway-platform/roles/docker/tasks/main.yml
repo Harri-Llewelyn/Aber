@@ -15,7 +15,7 @@
     name: docker
     state: started
     enabled: true
-  when: acs_systemd
+  when: aber_systemd
 
 - name: The architecture this appliance builds for, for the record
   ansible.builtin.debug:

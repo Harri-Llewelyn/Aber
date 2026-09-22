@@ -803,7 +803,7 @@ was correct until `0060` seeded a gateway that is *never* expected to heartbeat.
 
 **Nothing publishes as the `Playback` gateway until a playback runs**, which is deliberate — it is
 why `start_playback_job()` gates on credential possession rather than on `status = 'ONLINE'`. So it
-was permanently stale, permanently in the view, and `acs-gateway-stale` fired five minutes after
+was permanently stale, permanently in the view, and `aber-gateway-stale` fired five minutes after
 every boot and never cleared. `0061` adds `AND NOT g.is_shadow`, for exactly the reason `0029`
 already gives for archived appliances: *"alerting on it would train an operator to ignore the
 rule."*
@@ -2280,7 +2280,7 @@ It surfaces in two places, from one function so they cannot disagree:
 
 - **The Cold Storage page**, as *Unexported since* — the date the unexported span begins, with the
   overdue figure and the threshold in its tooltip. Shown only while `archive.enabled` is on.
-- **The Archive Backlog alert** (`acs-archive-backlog`), through the `archive_backlog` condition on
+- **The Archive Backlog alert** (`aber-archive-backlog`), through the `archive_backlog` condition on
   `platform_health`, firing above **14 days past the threshold**, held level with the page's
   tolerance by `check-docs-drift.mjs`.
 
@@ -3036,7 +3036,7 @@ default applies only when the column is omitted, so a client that *sends* `propo
 keep its own value — and this table takes a direct PostgREST INSERT from any `Operator` by design.
 The trigger overwrites unconditionally, which is what `system_settings_stamp()` does to `updated_by`
 for the same reason. Measured on the shipped stack: a client sending `ceo@example.com` alongside a
-token for `stamp.probe@acs-cymru.test` stores the second. `0089`'s self-check fails if a `DEFAULT`
+token for `stamp.probe@aber.test` stores the second. `0089`'s self-check fails if a `DEFAULT`
 is ever added, because that would quietly turn the column back into a form field.
 
 **It is a label, not an identity.** Nothing authorises on it, `proposed_by` remains the key, and an
@@ -3728,9 +3728,9 @@ card is *Archived* and the second *Retired*, and no column was added to say so.
 
 **An asset can be taken away before it is taken out of service.** `aas-export?format=bundle`
 returns the same AASX as `format=aasx`, the same Environment and OPC chain, with supplementary
-parts under `aasx/files/acs-cymru/`: the device's digital thread as JSON, the readings still in
+parts under `aasx/files/aber/`: the device's digital thread as JSON, the readings still in
 the live historian at raw and hourly resolution as CSV, and a manifest
-(`acs-cymru/asset-bundle/1`) that says what each part holds, where it was cut, and which cold-tier
+(`aber/asset-bundle/1`) that says what each part holds, where it was cut, and which cold-tier
 objects hold what the live historian no longer does. **The bundle states rather than reaches for.**
 Cold telemetry keeps its no-read-back rule, so the manifest names the objects whose range overlaps
 the device's life and fetches none of them; both telemetry parts are capped, newest first
@@ -3831,9 +3831,9 @@ stale.
 [`_shared/forge.ts`](functions/_shared/forge.ts) creates the organisation, a `readers` team with
 read on every repository in it (both dashboard teams are seated there by `forge-membership` at the
 door and by the sweep), and the repository with `main` admitting pushes from the machine account
-and nobody else, deploy keys not whitelisted. It reads `.acs/manifest.json` at `main`; when the
+and nobody else, deploy keys not whitelisted. It reads `.aber/manifest.json` at `main`; when the
 digest there is not this build's it reads the tree and makes one commit through the contents API
-that creates, updates and deletes whatever differs. The tag comes from `ACS_PLATFORM_VERSION`,
+that creates, updates and deletes whatever differs. The tag comes from `ABER_PLATFORM_VERSION`,
 which the chart sets to its `appVersion`, so the playbook an appliance converges to and the images
 it reports to ship from one tag. **A tag is created once and never moved:** a tag found at other
 content than this build ships is reported in the sweep's `warnings` and left where it is, because a
@@ -3852,7 +3852,7 @@ modes; measured), and the enrolment response carries `platform_ssh_url` and `pla
 `bootstrap.mjs` records in `repository.json` for the converge script on the host. The sweep keeps
 both links per gateway and removes the platform one when the gateway is archived or gone.
 
-**What the appliance does with it** is the converge role's: `acs-gateway-converge`, on an hourly
+**What the appliance does with it** is the converge role's: `aber-gateway-converge`, on an hourly
 timer, reads the tag from the puller's checkout of the gateway's `main`, runs `ansible-pull`
 against the platform repository at that tag with the deploy key and the pinned host key, and
 records the outcome in `/data/gitops/converged.json`, which the puller adds to the `appliance`
@@ -3893,7 +3893,7 @@ off the air, and keeping an expired one costs nothing.
 `rotationPolicy: Never`, so a re-issue keeps the same public key and changes only the certificate —
 the case the fleet most needs to be given, and the one a set comparison would miss.
 
-**The appliance refuses a bundle that would cut it off.** `acs-gateway-converge` offers each root
+**The appliance refuses a bundle that would cut it off.** `aber-gateway-converge` offers each root
 to the live broker with `openssl s_client -verify_return_error` and installs nothing unless one
 verifies; then it writes `/data/certs/ca.crt` and `ca.json` and restarts Node-RED once, only if the
 bytes changed. The flow reads `ca.json` every minute through a file-in node — the `deployed.json`
@@ -3970,7 +3970,7 @@ Four things were measured against `gitea/gitea:1.27.3`: the machine account may 
 a repository it owns (`PATCH /repos/{owner}/{name}`); `POST /repos/{owner}/{name}/generate` into
 the `gateways` organisation answers 201; a generated repository is **not** itself a template and
 carries **no** branch protection, so enrolment's is the first; and generation copies the whole
-tree, `.acs/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
+tree, `.aber/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
 file in the same window it commits the incident template — the one moment the machine account may
 still write `main` — since a manifest stating the digest and date of the *example* is a file
 about the wrong repository. It is not fatal if the removal fails: a stray file reads badly and
@@ -3981,7 +3981,7 @@ template would be deployed over the one enrolment installed, taking the gateway'
 it; and `seedPlatformPointer()` keeps a pointer that already exists, so a copied `platform.yml`
 would pin every gateway seeded from it to whatever tag was current when the example was written.
 
-**What the operator sees.** `acs-gateway-converge` records both outcomes in `converged.json`,
+**What the operator sees.** `aber-gateway-converge` records both outcomes in `converged.json`,
 which the puller already pushes to the `appliance` branch under the allowlist it never widens. On
 that push `forge-events` reads the file at the pushed commit the way it reads `flows.json`'s
 digest, and `0106` records five columns: the platform tag and outcome, when the appliance recorded
@@ -4021,12 +4021,12 @@ leaves the token live and refuses what redemption refuses.
 **The pin.** [`_shared/caPin.ts`](functions/_shared/caPin.ts) walks the root's DER to its
 SubjectPublicKeyInfo and hashes it, which is what `openssl x509 -pubkey | openssl pkey -outform
 DER | openssl dgst -sha256` prints on the appliance (measured equal on the dev cluster's root).
-The root reaches the functions as `ACS_CA_PEM`, read at start by the image's entrypoint from the
+The root reaches the functions as `ABER_CA_PEM`, read at start by the image's entrypoint from the
 ingress TLS Secret's `ca.crt`, which the chart mounts as one projected key when ingress TLS is on:
 that is the root that signs the API's own certificate, the one an appliance must trust to reach
 the installer, and not the broker's, which is allowed to differ. The same key is served over plain
-HTTP by the frontend at `/.well-known/acs-cymru/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
-where stage 0 fetches it; the chart hands the functions that address as `ACS_CA_URL`. The mount is
+HTTP by the frontend at `/.well-known/aber/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
+where stage 0 fetches it; the chart hands the functions that address as `ABER_CA_URL`. The mount is
 optional so the pods start before cert-manager has issued; a functions pod that started before
 the issue offers no command until it is restarted, and the readiness answer says so.
 
@@ -4121,7 +4121,7 @@ apply to those rows, which is what the page could already do on its own.
 depends on which machine the *reader* is at — a fact that differs per viewer rather than per service.
 `viewerIsOnDeploymentHost` reads it off the dashboard's own hostname: a page served from `localhost`
 is being read on the host, so its sibling `localhost` addresses resolve; one served from
-`acs-server.factory.local` is not. The case this gets wrong is a reader who tunnelled the dashboard
+`aber-server.factory.local` is not. The case this gets wrong is a reader who tunnelled the dashboard
 alone, and it is the right trade — the alternative withholds a working link from everyone developing
 on the host to protect a reader who already knows what a tunnel is.
 
@@ -4537,7 +4537,7 @@ restore_volume mosquitto ./backups/<stamp>/broker-<stamp>.tar.gz
 # from the CA the appliances already pin. Applied after cert-manager has minted a fresh CA, the
 # broker and both databases have to be re-issued and every appliance re-enrolled anyway.
 tar -xzf ./backups/<stamp>/ca-<stamp>.tar.gz
-kubectl -n cert-manager create secret generic acs-cymru-ca-key-pair \
+kubectl -n cert-manager create secret generic aber-ca-key-pair \
   --from-file=tls.crt=ca/tls.crt --from-file=tls.key=ca/tls.key --from-file=ca.crt=ca/ca.crt
 kubectl apply -f deploy/k8s/internal-ca.yaml
 ```

@@ -98,7 +98,7 @@ spec:
             # The CA as the SUPABASE server sees it, for the postgres_fdw link it opens to the
             # historian; empty means the link is not verified, which is only right with TLS off.
             - name: TS_SSLROOTCERT
-              value: {{ ternary "/etc/acs-cymru/postgres/tls/ca.crt" "" .Values.postgresTls.enabled | quote }}
+              value: {{ ternary "/etc/aber/postgres/tls/ca.crt" "" .Values.postgresTls.enabled | quote }}
             - name: TS_DBNAME
               value: {{ .Values.timescaledb.database | quote }}
             - name: TS_USER

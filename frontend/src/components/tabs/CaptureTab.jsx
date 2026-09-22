@@ -1079,7 +1079,7 @@ const FAILURE_VISIBLE_MS = 15 * 60 * 1000
  * about one person at one browser, so `localStorage` rather than the database. Every accessor is
  * wrapped because a private window or a browser refusing storage throws.
  */
-const DISMISSED_KEY = 'acs-cymru.capture.dismissed-failures'
+const DISMISSED_KEY = 'aber.capture.dismissed-failures'
 
 function readDismissed() {
   try {

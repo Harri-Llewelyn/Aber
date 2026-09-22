@@ -63,7 +63,7 @@ keeps 30 days or 8 GB of metrics, whichever comes first. Size for the retention 
 ### Local cluster with k3d
 
 ```bash
-k3d cluster create acs-cymru \
+k3d cluster create aber \
   --agents 0 \
   --port "80:80@loadbalancer" \
   --port "1883:1883@loadbalancer" \
@@ -74,7 +74,7 @@ k3d cluster create acs-cymru \
 `--port 80:80@loadbalancer` is what makes Traefik reachable from the host, so the ingress can be
 exercised through its real path rather than by port-forwarding straight to a Service.
 
-Teardown is `k3d cluster delete acs-cymru` — it takes the PVCs with it, which is exactly what you
+Teardown is `k3d cluster delete aber` — it takes the PVCs with it, which is exactly what you
 want for a throwaway cluster and never what you want on k3s.
 
 `--port 1883:1883@loadbalancer` does the same for the `mosquitto-external` LoadBalancer, so a gateway
@@ -83,10 +83,10 @@ on the LAN, or a simulator on the host, reaches the broker at the host address.
 On Windows, k3d may write the API endpoint into the kubeconfig as `host.docker.internal:<port>`,
 which some adapters resolve to an unreachable address; `kubectl` then times out against a healthy
 cluster. Point the context at loopback instead, with the port `docker ps` shows for the
-`k3d-acs-cymru-serverlb` container:
+`k3d-aber-serverlb` container:
 
 ```bash
-kubectl config set-cluster k3d-acs-cymru --server=https://127.0.0.1:<port>
+kubectl config set-cluster k3d-aber --server=https://127.0.0.1:<port>
 ```
 
 ### The development loop
@@ -136,9 +136,9 @@ speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
 # What versions exist?
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/aber --version 0.1.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.1.0
 
-helm install aber oci://ghcr.io/harri-llewelyn/acs-cymru/aber \
+helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --version 0.1.0 \
   --namespace aber --create-namespace \
   --values my-values.yaml \
@@ -223,7 +223,7 @@ the `appVersion` default:
 ```yaml
 ingestion:
   image:
-    repository: registry.internal/acs-cymru/ingestion
+    repository: registry.internal/aber/ingestion
     tag: "0.1.0-hotfix.2"
 ```
 
@@ -354,11 +354,11 @@ as a broken manifest rather than a race.
 
 ```bash
 kubectl apply -f deploy/k8s/internal-ca.yaml
-kubectl -n cert-manager wait --for=condition=Ready certificate/acs-cymru-ca --timeout=120s
-kubectl get clusterissuer acs-cymru-ca     # must reach Ready=True, "Signing CA verified"
+kubectl -n cert-manager wait --for=condition=Ready certificate/aber-ca --timeout=120s
+kubectl get clusterissuer aber-ca     # must reach Ready=True, "Signing CA verified"
 ```
 
-The `ClusterIssuer` reports `Ready=False, secret "acs-cymru-ca-key-pair" not found` for a few
+The `ClusterIssuer` reports `Ready=False, secret "aber-ca-key-pair" not found` for a few
 seconds while the root is being signed. That is normal; if it *persists*, the root Certificate is in
 the wrong namespace — a `ClusterIssuer` resolves its keypair in cert-manager's own namespace
 (`--cluster-resource-namespace`, default `cert-manager`), never in the application's.
@@ -380,9 +380,9 @@ It is also cluster-scoped and shared, and a 10-year artefact against a chart upg
 helm upgrade ... \
   --set global.scheme=https \
   --set ingress.tls.enabled=true \
-  --set ingress.tls.certManager.clusterIssuer=acs-cymru-ca \
+  --set ingress.tls.certManager.clusterIssuer=aber-ca \
   --set mosquitto.tls.enabled=true \
-  --set mosquitto.tls.clusterIssuer=acs-cymru-ca \
+  --set mosquitto.tls.clusterIssuer=aber-ca \
   --set 'mosquitto.tls.extraIpSans={10.20.0.50}'      # the broker's external address
 ```
 
@@ -398,8 +398,8 @@ means seven certificates renewing independently.
 This is the real cost of an internal CA, and skipping it is worse than it looks.
 
 ```bash
-kubectl -n cert-manager get secret acs-cymru-ca-key-pair \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d > acs-cymru-ca.crt
+kubectl -n cert-manager get secret aber-ca-key-pair \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > aber-ca.crt
 ```
 
 Install it in the trust store of every browser, operator laptop and gateway — GPO on Windows, MDM
@@ -572,7 +572,7 @@ kubectl -n aber logs job/aber-e2e-validate
   Note its live checks **skip themselves and report success** when the device is absent, which is
   why CI asserts on the absence of the skip line rather than on the Job's exit status.
 
-Both need the **`acs-cymru/test-runner`** image (`test-harness/Dockerfile`). It extends the ingestion image
+Both need the **`aber/test-runner`** image (`test-harness/Dockerfile`). It extends the ingestion image
 with `jsonschema` and the AAS suite; jsonschema is deliberately *not* in the production ingestion
 image, and without it the schema-conformance tests — the ones that caught three real IDTA metamodel
 violations — skip themselves while the suite still reports success.
@@ -619,19 +619,19 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 ### Images you must build
 
 Ten images are built from this repository rather than pulled from a vendor. **They are published**
-to `ghcr.io/harri-llewelyn/acs-cymru/`, so an ordinary install needs none of this — the chart pulls
+to `ghcr.io/harri-llewelyn/aber/`, so an ordinary install needs none of this — the chart pulls
 them at its own `appVersion`.
 
 Build them yourself when you are **changing** one, when you are on **arm64** (the published images
 are amd64 only), or when the cluster **cannot reach GHCR**.
 
 **Tag them exactly as the chart names them**, or the build is ignored: the pods ask for
-`ghcr.io/harri-llewelyn/acs-cymru/<name>:<appVersion>`, and anything else means Kubernetes falls
+`ghcr.io/harri-llewelyn/aber/<name>:<appVersion>`, and anything else means Kubernetes falls
 through to pulling the published image and your change silently does not run. `NS` and `V` below
 exist to make that hard to get wrong.
 
 ```bash
-NS=ghcr.io/harri-llewelyn/acs-cymru
+NS=ghcr.io/harri-llewelyn/aber
 V=$(grep -E '^appVersion:' deploy/helm/aber/Chart.yaml | head -1 \
     | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
@@ -735,11 +735,11 @@ After the first successful release, once per package:
 ```bash
 for p in aber edge-runtime ingestion node-red frontend test-runner; do
   gh api --method PATCH -H "Accept: application/vnd.github+json" \
-    "/user/packages/container/acs-cymru%2F$p" -f visibility=public
+    "/user/packages/container/aber%2F$p" -f visibility=public
 done
 ```
 
-The `%2F` is required — the package name is `acs-cymru/edge-runtime` and the slash must be encoded
+The `%2F` is required — the package name is `aber/edge-runtime` and the slash must be encoded
 or the path resolves to a different endpoint. This needs a `gh auth login` with the `write:packages`
 scope; `gh auth refresh -s write:packages` adds it to an existing login. The same thing is four
 clicks per package under *Profile → Packages → <package> → Package settings → Change visibility*.
@@ -747,7 +747,7 @@ clicks per package under *Profile → Packages → <package> → Package setting
 Verify from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/aber --version 0.2.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.2.0
 ```
 
 ### What the release does not do

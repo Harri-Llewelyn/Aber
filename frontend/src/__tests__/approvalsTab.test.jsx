@@ -38,7 +38,7 @@ const deviceProposal = (over = {}) => ({
   rationale: 'the label on the machine says so',
   status: 'open',
   proposed_by: OPERATOR_ID,
-  proposed_by_email: 'ops.person@acs-cymru.test',
+  proposed_by_email: 'ops.person@aber.test',
   proposed_at: new Date().toISOString(),
   decided_by: null,
   decided_at: null,
@@ -58,7 +58,7 @@ const schemaProposal = (over = {}) => ({
   rationale: null,
   status: 'open',
   proposed_by: OPERATOR_ID,
-  proposed_by_email: 'ops.person@acs-cymru.test',
+  proposed_by_email: 'ops.person@aber.test',
   proposed_at: new Date().toISOString(),
   decided_by: null,
   decided_at: null,
@@ -482,7 +482,7 @@ describe('the columns say one thing each', () => {
     // A manager reading somebody else's proposal is the case the uuid failed at.
     renderTab({ currentUserId: MANAGER_ID })
     await selectRow()
-    expect(screen.getByText('ops.person@acs-cymru.test')).toBeInTheDocument()
+    expect(screen.getByText('ops.person@aber.test')).toBeInTheDocument()
   })
 
   it('still says "you" on your own, which needed no lookup', async () => {

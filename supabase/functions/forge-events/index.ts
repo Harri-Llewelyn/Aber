@@ -43,7 +43,7 @@ const WEBHOOK_SECRET = Deno.env.get("GITEA_WEBHOOK_SECRET") ?? "";
 
 const NO_COMMIT = /^0+$/;
 const FLOW_FILE = "flows.json";
-/** What acs-gateway-converge records, carried on the same branch by the same allowlist. */
+/** What aber-gateway-converge records, carried on the same branch by the same allowlist. */
 const CONVERGED_FILE = "converged.json";
 
 interface Commit {
@@ -214,7 +214,7 @@ function field(source: Record<string, unknown> | null, name: string, max = 200):
 
 /**
  * What the appliance converged to, from `converged.json` at the head of the `appliance` branch.
- * The file is written by `acs-gateway-converge` on the appliance and pushed here by the puller.
+ * The file is written by `aber-gateway-converge` on the appliance and pushed here by the puller.
  *
  * EVERY FIELD IS TREATED AS UNTRUSTED. It is JSON from a box in a cabinet, arriving over a deploy
  * key: absent, malformed and unexpected shapes all resolve to nulls rather than to a failed

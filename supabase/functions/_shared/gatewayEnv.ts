@@ -2,8 +2,8 @@
  * The appliance's .env: the one file that differs per gateway and the only one carrying the
  * enrolment token. Rendered here because two functions hand it out, the ZIP bundle
  * (gateway-bundle) and the one-liner's token-gated fetch (gateway-install), and the appliance's
- * bootstrap.mjs reads one shape. Every name here is read by bootstrap.mjs: ACS_SUPABASE_URL,
- * ACS_SUPABASE_PUBLISHABLE_KEY, ACS_ENROLLMENT_TOKEN, ACS_AGENT_VERSION, ACS_GATEWAY_NAME and
+ * bootstrap.mjs reads one shape. Every name here is read by bootstrap.mjs: ABER_SUPABASE_URL,
+ * ABER_SUPABASE_PUBLISHABLE_KEY, ABER_ENROLLMENT_TOKEN, ABER_AGENT_VERSION, ABER_GATEWAY_NAME and
  * NODERED_CREDENTIAL_SECRET.
  */
 
@@ -50,11 +50,11 @@ export function renderGatewayEnv(input: GatewayEnvInput): string {
 # =============================================================================
 
 # The platform, as reached FROM THIS APPLIANCE.
-ACS_SUPABASE_URL=${input.publicUrl}
+ABER_SUPABASE_URL=${input.publicUrl}
 
 # Public by construction -- the same key every browser running the dashboard holds. It gets the
 # enrolment request past the gateway's key check; the token below is what actually authorises it.
-ACS_SUPABASE_PUBLISHABLE_KEY=${input.publishableKey}
+ABER_SUPABASE_PUBLISHABLE_KEY=${input.publishableKey}
 
 # SINGLE USE. Redeemed by bootstrap.mjs on first boot and spent thereafter, whether or not that boot
 # succeeded. If bootstrap reports the token was RELEASED (a transient broker outage), this same
@@ -62,7 +62,7 @@ ACS_SUPABASE_PUBLISHABLE_KEY=${input.publishableKey}
 #
 # THERE IS NO BROKER PASSWORD IN THIS FILE, and there must never be one. The appliance obtains its
 # own at first boot, which is the whole reason this is a short-lived claim instead of a credential.
-ACS_ENROLLMENT_TOKEN=${input.token}
+ABER_ENROLLMENT_TOKEN=${input.token}
 
 # Encrypts /data/flows_cred.json on the appliance, where the broker password ends up. GENERATED FOR
 # THIS APPLIANCE ALONE: a shared value would let one appliance's credential file be decrypted with
@@ -71,10 +71,10 @@ ACS_ENROLLMENT_TOKEN=${input.token}
 NODERED_CREDENTIAL_SECRET=${input.credentialSecret}
 
 # Recorded on the gateway at enrolment, so the fleet's vintage is visible from the dashboard.
-ACS_AGENT_VERSION=${BUNDLE_VERSION}
+ABER_AGENT_VERSION=${BUNDLE_VERSION}
 
 # Display name only -- used in the Node-RED editor's title and in bootstrap's output. The gateway's
 # real identity is its sparkplug_id, which arrives from enrolment and cannot be set here.
-ACS_GATEWAY_NAME=${input.gatewayName}
+ABER_GATEWAY_NAME=${input.gatewayName}
 `;
 }

@@ -66,7 +66,7 @@ const openMenu = async () => {
 
 /** What the chart's ConfigMap does: assign the global before the bundle reads it. */
 const deployedRelease = (version) => {
-  globalThis.__ACS_CYMRU_CONFIG__ = { VITE_RELEASE_VERSION: version }
+  globalThis.__ABER_CONFIG__ = { VITE_RELEASE_VERSION: version }
 }
 
 beforeEach(() => {
@@ -78,7 +78,7 @@ beforeEach(() => {
   supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
 })
 
-afterEach(() => { delete globalThis.__ACS_CYMRU_CONFIG__ })
+afterEach(() => { delete globalThis.__ABER_CONFIG__ })
 
 // The comparison
 

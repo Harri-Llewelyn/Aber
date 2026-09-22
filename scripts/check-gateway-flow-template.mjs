@@ -9,7 +9,7 @@
  * heartbeat is driven only by its injects, and all three collector branches terminate in the cache;
  * 5. every `env.get()` the flow reads is a variable `bootstrap.mjs` writes into /data/gateway.env;
  * 6. the deployed-flow branch reads the file `bootstrap.mjs` and `flow-sync.mjs` agree on, and the
- * broker-root branch the one `bootstrap.mjs` and `acs-gateway-converge` agree on. It does not check
+ * broker-root branch the one `bootstrap.mjs` and `aber-gateway-converge` agree on. It does not check
  * that the flow works; that needs a broker, an enrolment and hardware.
  *
  * Usage: node scripts/check-gateway-flow-template.mjs [--verbose]
@@ -157,7 +157,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   if (dangling.length) fail(`wire(s) pointing at nothing: ${dangling.join(', ')}`);
   else pass('every wire resolves to a declared node');
 
-  const HEARTBEAT = 'acs-node-msg';
+  const HEARTBEAT = 'aber-node-msg';
   if (!byId[HEARTBEAT]) {
     fail(`the heartbeat node '${HEARTBEAT}' is gone; it is what makes a gateway show ONLINE.`);
   } else {
@@ -165,7 +165,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     // reported STALE and then OFFLINE. A host-metric collector writes to a cache the heartbeat
     // reads instead of being chained into its path.
     const feeds = flow.filter((n) => (n.wires?.[0] || []).includes(HEARTBEAT)).map((n) => n.id).sort();
-    const expected = ['acs-birth-tick', 'acs-data-tick'];
+    const expected = ['aber-birth-tick', 'aber-data-tick'];
     if (JSON.stringify(feeds) !== JSON.stringify(expected)) {
       fail(
         `the heartbeat is fed by [${feeds.join(', ')}]; expected only its two injects `
@@ -182,9 +182,9 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   // Both collector branches write a cache the heartbeat reads. A wire out of either would be a
   // second path to the broker, or a way to make the heartbeat wait on a collector.
   for (const [cache, what] of [
-    ['acs-host-parse', 'host-metric'],
-    ['acs-deployed-parse', 'deployed-flow'],
-    ['acs-ca-parse', 'broker-root'],
+    ['aber-host-parse', 'host-metric'],
+    ['aber-deployed-parse', 'deployed-flow'],
+    ['aber-ca-parse', 'broker-root'],
   ]) {
     if (!byId[cache]) {
       fail(`the ${what} cache node '${cache}' is gone; the heartbeat reads what it writes.`);
@@ -202,7 +202,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
 {
   const FLOW_SYNC = 'forge/gateway-platform/appliance/flow-sync.mjs';
   // BY ID, not by type: there are two `file in` nodes and the other one reads the broker root.
-  const reader = byId['acs-deployed-read'];
+  const reader = byId['aber-deployed-read'];
   const placeholder = '__DEPLOYED_FILE__';
   if (!reader) {
     fail('no `file in` node reads deployed.json, so the heartbeat cannot report what was deployed.');
@@ -227,8 +227,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
 // of it, and the Gateways page puts that beside the platform root's own: a branch reading some
 // other file would report the enrolment root's date forever, which is the case this replaced.
 {
-  const CONVERGE = 'forge/gateway-platform/roles/converge/files/acs-gateway-converge';
-  const reader = byId['acs-ca-read'];
+  const CONVERGE = 'forge/gateway-platform/roles/converge/files/aber-gateway-converge';
+  const reader = byId['aber-ca-read'];
   const placeholder = '__CA_JSON_FILE__';
   if (!reader) {
     fail('no `file in` node reads ca.json, so the heartbeat cannot report when the root expires.');
@@ -240,7 +240,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     const inBootstrap = (read(BOOTSTRAP).match(/const CA_JSON = join\(DATA_DIR, 'certs', '([^']+)'\)/) || [])[1];
     const inConverge = (read(CONVERGE).match(/^CA_JSON="\$CERTS\/([^"]+)"$/m) || [])[1];
     if (!inBootstrap || !inConverge || inBootstrap !== inConverge) {
-      fail(`bootstrap.mjs and acs-gateway-converge disagree on the root record's file name `
+      fail(`bootstrap.mjs and aber-gateway-converge disagree on the root record's file name `
         + `('${inBootstrap}' vs '${inConverge}'); the flow would read one and the converge script `
         + 'write the other, so a re-issued root would never be reported.');
     } else {

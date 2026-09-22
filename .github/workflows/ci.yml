@@ -284,7 +284,7 @@ jobs:
       #
       # In a container, so the second run meets the state the first left. `--skip-tags docker`
       # because Docker's engine does not install under one; the OS assert needs an Ubuntu image;
-      # and the service and timer tasks gate themselves on `acs_systemd`, which is false where PID
+      # and the service and timer tasks gate themselves on `aber_systemd`, which is false where PID
       # 1 is a shell. Gated on the playbook having changed (the `changes` job): roughly three
       # minutes, nearly all of it apt, on a directory that changes rarely.
       - name: Verify The Platform Playbook Converges Twice To The Same State
@@ -314,7 +314,7 @@ jobs:
       - name: Build Production Bundle
         env:
           VITE_SUPABASE_URL: http://127.0.0.1:54321
-          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_acscymru_dev_0000000000000000
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_aber_dev_00000000000000000000
         run: |
           cd frontend
           npm run build
@@ -936,7 +936,7 @@ jobs:
               spec = sts['spec']['template']['spec']
               main = next(c for c in spec['containers'] if c['name'] == db)
               args = main.get('args') or []
-              for flag in ('ssl=on', 'hba_file=/etc/acs-cymru/postgres/pg_hba.conf'):
+              for flag in ('ssl=on', 'hba_file=/etc/aber/postgres/pg_hba.conf'):
                   if flag not in args:
                       errors.append(f"{db} does not start with -c {flag}")
               if not any(c['name'] == 'certificate-reload' for c in spec['containers']):
@@ -947,7 +947,7 @@ jobs:
           sb = next(d for d in docs if d['kind'] == 'StatefulSet' and d['metadata']['name'] == 'supabase-db')
           sb_args = next(c for c in sb['spec']['template']['spec']['containers'] if c['name'] == 'supabase-db').get('args') or []
           for guc in ('pgsodium.getkey_script', 'vault.getkey_script'):
-              if f'{guc}=/etc/acs-cymru/postgres/pgsodium_getkey.sh' not in sb_args:
+              if f'{guc}=/etc/aber/postgres/pgsodium_getkey.sh' not in sb_args:
                   errors.append(f"supabase-db does not point {guc} at the chart's key script; a recreated pod would mint a new root key")
           # Every workload that opens a database connection carries the CA one way or another.
           MARKERS = ('PGSSLROOTCERT', 'DATABASE_SSL_ROOT_CERT', 'PG_META_DB_SSL_ROOT_CERT', 'DB_SSL_CA_CERT', 'sslrootcert=',
@@ -1507,7 +1507,7 @@ jobs:
       # reclaim before the suites run.
       - name: Reclaim The Host Image Copies
         run: |
-          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr.io/harri-llewelyn/acs-cymru/' \
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr.io/harri-llewelyn/aber/' \
             | xargs -r docker image rm -f || true
           docker builder prune -af || true
           docker image prune -af || true
@@ -1751,4 +1751,4 @@ jobs:
 
       - name: Tear Down
         if: always()
-        run: k3d cluster delete acs-cymru || true
+        run: k3d cluster delete aber || true

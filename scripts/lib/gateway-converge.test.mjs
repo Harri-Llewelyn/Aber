@@ -1,5 +1,5 @@
 /**
- * What `acs-gateway-converge` does with the state an enrolled appliance holds.
+ * What `aber-gateway-converge` does with the state an enrolled appliance holds.
  *
  *     node --test scripts/lib/gateway-converge.test.mjs
  *
@@ -23,7 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SCRIPT = join(REPO, 'forge', 'gateway-platform', 'roles', 'converge', 'files', 'acs-gateway-converge');
+const SCRIPT = join(REPO, 'forge', 'gateway-platform', 'roles', 'converge', 'files', 'aber-gateway-converge');
 
 /** Every tool the script itself invokes. A missing one is a skipped suite, never a failure. */
 const MISSING = ['bash', 'jq', 'python3', 'git'].filter(
@@ -95,7 +95,7 @@ function appliance({
   key = 'PRIVATE KEY', knownHosts = 'forge ssh-ed25519 AAAA', repository, pointer, custom,
   bundle = null, installedCa = 'the root enrolment installed\n',
 } = {}) {
-  const state = posix(mkdtempSync(join(tmpdir(), 'acs-converge-')));
+  const state = posix(mkdtempSync(join(tmpdir(), 'aber-converge-')));
   const gitops = `${state}/data/gitops`;
   mkdirSync(gitops, { recursive: true });
   mkdirSync(`${state}/data/certs`, { recursive: true });
@@ -180,9 +180,9 @@ function converge({ state, gitops }, { exit = 0, customExit = 0, connects = true
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
-      ACS_STATE_DIR: state,
-      ACS_DATA_DIR: `${state}/data`,
-      ACS_COMPOSE_DIR: `${state}/opt`,
+      ABER_STATE_DIR: state,
+      ABER_DATA_DIR: `${state}/data`,
+      ABER_COMPOSE_DIR: `${state}/opt`,
     },
   });
 
@@ -337,11 +337,11 @@ test("hands custom.yml the platform's paths, after the gateway's own vars", { sk
   assert.deepEqual(given[0], { chrony_servers: ['server ntp.plant.example iburst'] });
   // LAST, so a custom.yml cannot move the directories the platform owns by declaring them itself.
   assert.deepEqual(given[1], {
-    acs_state_dir: state.state,
-    acs_data_dir: `${state.state}/data`,
-    acs_compose_dir: `${state.state}/opt`,
-    acs_repo_dir: `${state.gitops}/repo`,
-    acs_platform_tag: 'v1.2.3',
+    aber_state_dir: state.state,
+    aber_data_dir: `${state.state}/data`,
+    aber_compose_dir: `${state.state}/opt`,
+    aber_repo_dir: `${state.gitops}/repo`,
+    aber_platform_tag: 'v1.2.3',
   });
 });
 
@@ -375,7 +375,7 @@ test('custom.yml is not attempted when the platform run failed', { skip: SKIP },
 // The roots published on the platform repository's main
 
 test('installs the published roots and restarts the flow that reads them', { skip: SKIP }, () => {
-  const dir = posix(mkdtempSync(join(tmpdir(), 'acs-roots-')));
+  const dir = posix(mkdtempSync(join(tmpdir(), 'aber-roots-')));
   const current = root(dir, 'current');
   const previous = root(dir, 'previous');
   const state = appliance({ pointer: 'platform:\n  tag: v1.2.3\n', bundle: `${current}${previous}` });
@@ -413,7 +413,7 @@ test('changes nothing when the platform publishes no bundle', { skip: SKIP }, ()
 test('refuses a bundle no root of which verifies the broker', { skip: SKIP }, () => {
   // THE REFUSAL THIS WHOLE MECHANISM TURNS ON. Installing a bundle that verifies nothing takes the
   // appliance off the air at the next restart, and there is no path back that is not a visit.
-  const dir = posix(mkdtempSync(join(tmpdir(), 'acs-roots-')));
+  const dir = posix(mkdtempSync(join(tmpdir(), 'aber-roots-')));
   const state = appliance({ pointer: 'platform:\n  tag: v1.2.3\n', bundle: root(dir, 'stranger') });
   const result = converge(state, { connects: false });
 
@@ -434,7 +434,7 @@ test('refuses a bundle carrying a block that is not a certificate', { skip: SKIP
 
 test('installs nothing and restarts nothing when the bundle is what is already held', { skip: SKIP }, () => {
   // The ordinary hourly pass: one clone, one connection, no write and no dropped session.
-  const dir = posix(mkdtempSync(join(tmpdir(), 'acs-roots-')));
+  const dir = posix(mkdtempSync(join(tmpdir(), 'aber-roots-')));
   const current = root(dir, 'current');
   const result = converge(appliance({
     pointer: 'platform:\n  tag: v1.2.3\n', bundle: current, installedCa: current,
@@ -447,7 +447,7 @@ test('installs nothing and restarts nothing when the bundle is what is already h
 });
 
 test('does not look at the roots when the platform run failed', { skip: SKIP }, () => {
-  const dir = posix(mkdtempSync(join(tmpdir(), 'acs-roots-')));
+  const dir = posix(mkdtempSync(join(tmpdir(), 'aber-roots-')));
   const result = converge(
     appliance({ pointer: 'platform:\n  tag: v1.2.3\n', bundle: root(dir, 'current') }),
     { exit: 3 },
@@ -462,7 +462,7 @@ test('does not look at the roots when the platform run failed', { skip: SKIP }, 
 test('the broker address is read out of gateway.env without sourcing it', { skip: SKIP }, () => {
   // Sourcing that file would put NODERED_CREDENTIAL_SECRET into the environment of every
   // ansible-playbook this script runs, including a gateway's own custom.yml.
-  const dir = posix(mkdtempSync(join(tmpdir(), 'acs-roots-')));
+  const dir = posix(mkdtempSync(join(tmpdir(), 'aber-roots-')));
   const state = appliance({
     pointer: 'platform:\n  tag: v1.2.3\n', bundle: root(dir, 'current'), custom: '- hosts: localhost\n',
   });
@@ -478,8 +478,8 @@ test('the script is the one the playbook installs', { skip: SKIP }, () => {
     join(REPO, 'forge', 'gateway-platform', 'roles', 'converge', 'tasks', 'main.yml'),
     'utf8',
   );
-  assert.match(installed, /src: acs-gateway-converge/);
-  assert.match(installed, /dest: \/usr\/local\/bin\/acs-gateway-converge/);
+  assert.match(installed, /src: aber-gateway-converge/);
+  assert.match(installed, /dest: \/usr\/local\/bin\/aber-gateway-converge/);
 });
 
 if (SKIP) console.log(`# gateway-converge: SKIPPED -- ${SKIP}`);

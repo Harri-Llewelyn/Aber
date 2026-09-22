@@ -100,7 +100,7 @@ spec:
         - name: node-red-init
           image: {{ include "aber.image" (dict "image" .Values.nodeRed.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.nodeRed.image.pullPolicy }}
-          command: ["node", "/opt/acs-cymru/node-red-init.mjs"]
+          command: ["node", "/opt/aber/node-red-init.mjs"]
           env:
             {{/*
               THE SHARED AUTH BLOCK, included here AND in the main container below.

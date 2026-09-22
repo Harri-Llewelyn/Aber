@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path'
  * SUPABASE_GATEWAY_KEY are resolved once at module load.
  */
 
-const GLOBAL_KEY = '__ACS_CYMRU_CONFIG__'
+const GLOBAL_KEY = '__ABER_CONFIG__'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLACEHOLDER_FILE = resolve(HERE, '../../public/config.js')

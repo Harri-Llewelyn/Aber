@@ -1,6 +1,6 @@
 ---
 # The compose project: the bundle template as this platform version ships it, under
-# /opt/acs-gateway, with its volume bound to the state directory. `.env` is never written here: it
+# /opt/aber-gateway, with its volume bound to the state directory. `.env` is never written here: it
 # carries the enrolment token and the credential secret, and the installer (or a person copying
 # the bundle's .env) puts it in place. Without it, compose is not started.
 
@@ -10,14 +10,14 @@
     state: directory
     mode: "0750"
   loop:
-    - "{{ acs_state_dir }}"
-    - "{{ acs_data_dir }}"
-    - "{{ acs_compose_dir }}"
+    - "{{ aber_state_dir }}"
+    - "{{ aber_data_dir }}"
+    - "{{ aber_compose_dir }}"
 
 - name: The compose project files, from this tag
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/appliance/{{ item }}"
-    dest: "{{ acs_compose_dir }}/{{ item }}"
+    dest: "{{ aber_compose_dir }}/{{ item }}"
     mode: "0644"
   loop:
     - docker-compose.yml
@@ -33,7 +33,7 @@
 # deploy key, the host key and the repository checkout bootstrap.mjs writes under /data/gitops.
 - name: The volume bound to the state directory
   ansible.builtin.copy:
-    dest: "{{ acs_compose_dir }}/docker-compose.override.yml"
+    dest: "{{ aber_compose_dir }}/docker-compose.override.yml"
     mode: "0644"
     content: |
       # Managed by the Aber platform playbook (roles/appliance).
@@ -43,18 +43,18 @@
           driver_opts:
             type: none
             o: bind
-            device: {{ acs_data_dir }}
+            device: {{ aber_data_dir }}
   register: appliance_override
 
 - name: Whether this appliance holds its .env
   ansible.builtin.stat:
-    path: "{{ acs_compose_dir }}/.env"
+    path: "{{ aber_compose_dir }}/.env"
   register: appliance_env
 
 - name: Say so when it does not
   ansible.builtin.debug:
     msg: >-
-      {{ acs_compose_dir }}/.env is absent, so the compose project is not started. The installer
+      {{ aber_compose_dir }}/.env is absent, so the compose project is not started. The installer
       writes it; by hand, copy the bundle's .env there and run this again.
   when: not appliance_env.stat.exists
 
@@ -63,18 +63,18 @@
 - name: Whether the project is running
   ansible.builtin.command:
     cmd: docker compose ps --status running --quiet
-    chdir: "{{ acs_compose_dir }}"
+    chdir: "{{ aber_compose_dir }}"
   register: appliance_running
   changed_when: false
   failed_when: false
-  when: appliance_env.stat.exists and acs_systemd
+  when: appliance_env.stat.exists and aber_systemd
 
 - name: Build and start the project
   ansible.builtin.command:
     cmd: docker compose up -d --build
-    chdir: "{{ acs_compose_dir }}"
+    chdir: "{{ aber_compose_dir }}"
   when:
     - appliance_env.stat.exists
-    - acs_systemd
+    - aber_systemd
     - appliance_files.changed or appliance_override.changed or (appliance_running.stdout | default('')) == ''
   changed_when: true

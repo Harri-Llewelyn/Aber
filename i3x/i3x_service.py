@@ -62,7 +62,7 @@ logging.basicConfig(
 logger = logging.getLogger("i3x")
 
 SPEC_VERSION = "1.0"
-SERVER_NAME = os.getenv("I3X_SERVER_NAME", "acs-cymru-i3x")
+SERVER_NAME = os.getenv("I3X_SERVER_NAME", "aber-i3x")
 SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "0.1.0")
 
 LISTEN_HOST = os.getenv("I3X_HOST", "0.0.0.0")
@@ -680,7 +680,7 @@ def _require_client_id(body: dict) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = f"acs-cymru-i3x/{SERVER_VERSION}"
+    server_version = f"aber-i3x/{SERVER_VERSION}"
     protocol_version = "HTTP/1.1"
 
     # -- plumbing ----------------------------------------------------------------------------

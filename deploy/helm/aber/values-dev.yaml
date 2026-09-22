@@ -28,8 +28,8 @@ secrets:
   anonKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
   serviceRoleKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJleHAiOjIwMDAwMDAwMDB9.GWSHLKn253lfP0FAYobjuXvQkQGcYhKVJ6Y0IJOo-lA
   # The keys callers present; demo values, as the two JWTs above are.
-  publishableKey: sb_publishable_acscymru_dev_0000000000000000
-  secretKey: sb_secret_acscymru_dev_00000000000000000000
+  publishableKey: sb_publishable_aber_dev_00000000000000000000
+  secretKey: sb_secret_aber_dev_000000000000000000000000
   postgresPassword: postgres
   timescalePassword: postgres
 
@@ -39,8 +39,8 @@ secrets:
   # before it reached the step. Distinct values rather than one shared password: the whole point of
   # the pair is that the FDW mapping and the ingestion daemon authenticate as different roles, and
   # a fixture that gives them the same secret cannot catch a mix-up between them.
-  ingestWriterPassword: acscymru-ingest-writer
-  fdwReaderPassword: acscymru-fdw-reader
+  ingestWriterPassword: aber-ingest-writer
+  fdwReaderPassword: aber-fdw-reader
 
   # THE TWO MACHINE-PRINCIPAL KEYS, and their absence is a CRASH LOOP rather than a render error.
   # The chart has always carried the plumbing -- secret.yaml maps both, and the two Deployments
@@ -57,7 +57,7 @@ secrets:
   playbackKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZXhwIjoyMDAwMDAwMDAwfQ.40LLl4zKVmdJOBBkG-sKUZjXkhESdgzEg8c0aK-DVr4
 
   # Realtime's own metrics endpoint, separate from the session JWT secret.
-  realtimeMetricsJwtSecret: acscymru_realtime_metrics_jwt_secret_development_only
+  realtimeMetricsJwtSecret: aber_realtime_metrics_jwt_secret_development_only
 
   # EXACTLY 16 characters, and AT LEAST 64 characters. The chart asserts both.
   realtimeDbEncKey: supabaserealtime
@@ -94,10 +94,10 @@ secrets:
   # sidecar CrashLoopBackOffs, which takes the whole mosquitto POD out of Ready and stalls every
   # workload that waits on the broker. The symptom is i3x-service and ingestion timing out, naming
   # neither this value nor the container that refused to start.
-  mqttCredentialServiceToken: acs-cymru-dev-credential-service-token-not-a-secret
+  mqttCredentialServiceToken: aber-dev-credential-service-token-not-a-secret
 
   giteaAdminPassword: gitea-admin
-  giteaMachinePassword: acs-platform-machine-account
+  giteaMachinePassword: aber-platform-machine-account
   # The forge's door (0094).
   giteaOAuthClientSecret: change-me-gitea-oauth-client-secret
   giteaProxyHmacSecret: change-me-gitea-proxy-hmac-secret
@@ -113,7 +113,7 @@ secrets:
   # Grafana connects to the historian as `powerbi_reader`, never as `postgres`.
   biReaderPassword: aber123
 
-  noderedCredentialSecret: acscymrusecret
+  noderedCredentialSecret: abersecret
   noderedOAuthClientSecret: change-me-nodered-oauth-client-secret
   noderedWebhookJwtSecret: change-me-nodered-webhook-signing-key-min-32-chars
   # Break-glass path stays shut by default.

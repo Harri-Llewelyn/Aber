@@ -81,8 +81,8 @@ def delete_broker_account(username):
 TEST_GW_ID = "2d000000-0000-4000-8000-000000000001"
 
 
-ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@aber.local")
-ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "aber123")
+ADMIN_EMAIL = os.getenv("ABER_ADMIN_EMAIL", "admin@aber.local")
+ADMIN_PASSWORD = os.getenv("ABER_ADMIN_PASSWORD", "aber123")
 
 
 def rest(path, method="GET", body=None, bearer=None, prefer=None):
@@ -488,9 +488,9 @@ class TestForgeProvisioning(EnrollGatewayBase):
     def setUpClass(cls):
         super().setUpClass()
         cls.forge_url = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
-        cls.machine_user = os.getenv("GITEA_MACHINE_USER", "acs_platform")
+        cls.machine_user = os.getenv("GITEA_MACHINE_USER", "aber_platform")
         cls.machine_password = os.getenv(
-            "GITEA_MACHINE_PASSWORD", "acs-platform-machine-account"
+            "GITEA_MACHINE_PASSWORD", "aber-platform-machine-account"
         )
         # Every gateway repository lives in this organisation (forge.ts); the machine account owns
         # it, which is exactly the authority to create a repository in it and no more.
@@ -542,7 +542,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         super().setUp()
         self.delete_repo()
         # A throwaway keypair per test, so one test's key cannot satisfy another's assertion.
-        self.key_dir = tempfile.mkdtemp(prefix="acs-deploy-key-")
+        self.key_dir = tempfile.mkdtemp(prefix="aber-deploy-key-")
         self.key_path = os.path.join(self.key_dir, "id_ed25519")
         subprocess.run(
             ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", self.key_path],

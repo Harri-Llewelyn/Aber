@@ -4,8 +4,8 @@ The startup recovery loop: the work a dependency that was not up yet prevented, 
 WHY THIS IS WORTH A SUITE. The fault it guards is one this stack reached, and both of its
 consequences were silent in opposite directions.
 
-    acs-cymru_ingestion    started 20:08:52.370   restarts=0   policy=always
-    acs-cymru_timescaledb  started 20:08:52.823   restarts=0   policy=always
+    aber_ingestion    started 20:08:52.370   restarts=0   policy=always
+    aber_timescaledb  started 20:08:52.823   restarts=0   policy=always
 
 Nothing orders a whole-host restart, so when the stack came back it started ingestion 453ms
 before the historian and the dependency graph had no say.

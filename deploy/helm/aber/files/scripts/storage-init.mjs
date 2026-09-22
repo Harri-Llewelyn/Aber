@@ -75,7 +75,7 @@ const MODEL_MIME_TYPES = [
  * `text/plain` and `application/octet-stream` are here for the same reason they are in the list
  * above and NOT because anything else is allowed: a browser handing back a `.json` picked from
  * disk reports its type inconsistently across platforms. The uploader checks that the payload IS
- * a capture -- that it carries `acs_capture_version` and a `messages` array -- before it is sent,
+ * a capture -- that it carries `aber_capture_version` and a `messages` array -- before it is sent,
  * so this list is the coarse outer bound rather than the check.
  */
 const CAPTURE_MIME_TYPES = [

@@ -4,7 +4,7 @@
 # Served by the platform's gateway-install function to the command the dashboard shows, which has
 # already fetched the platform's root over plain HTTP, checked it against the pin the dashboard
 # minted beside the token, and installed it; everything this script fetches is over TLS that pin
-# has verified. The token arrives as ACS_ENROLMENT_TOKEN in the environment, never in this text.
+# has verified. The token arrives as ABER_ENROLMENT_TOKEN in the environment, never in this text.
 #
 # INSTALL FIRST, ENROL LAST. Packages, Docker and the playbook take minutes and can fail; every
 # step before enrolment is idempotent and can be re-run with the same command, and the token is
@@ -14,21 +14,21 @@
 # __PLATFORM_URL__ and __PUBLISHABLE_KEY__ are substituted by the platform when it serves this;
 # both are public. __GATEWAY_NAME__ and __SPARKPLUG_ID__ say which gateway the token was minted for.
 
-acs_install() {
+aber_install() {
   set -euo pipefail
 
   local PLATFORM_URL="__PLATFORM_URL__"
   local PUBLISHABLE_KEY="__PUBLISHABLE_KEY__"
   local GATEWAY="__GATEWAY_NAME__ (__SPARKPLUG_ID__)"
-  local TOKEN="${ACS_ENROLMENT_TOKEN:-}"
-  local PIN="${ACS_CA_PIN:-}"
-  local STATE_DIR="${ACS_STATE_DIR:-/var/lib/acs-gateway}"
+  local TOKEN="${ABER_ENROLMENT_TOKEN:-}"
+  local PIN="${ABER_CA_PIN:-}"
+  local STATE_DIR="${ABER_STATE_DIR:-/var/lib/aber-gateway}"
   local DATA_DIR="$STATE_DIR/data"
-  local COMPOSE_DIR="/opt/acs-gateway"
+  local COMPOSE_DIR="/opt/aber-gateway"
   local WORK_DIR="$STATE_DIR/install"
 
-  say() { echo "[acs-gateway-install] $*"; }
-  die() { echo "[acs-gateway-install] FAILED: $*" >&2; exit 1; }
+  say() { echo "[aber-gateway-install] $*"; }
+  die() { echo "[aber-gateway-install] FAILED: $*" >&2; exit 1; }
   fetch() {
     # $1 query, $2 destination. The apikey passes the platform's key check; the token authorises.
     curl -fsSL -H "apikey: $PUBLISHABLE_KEY" -H "X-Enrolment-Token: $TOKEN" \
@@ -36,7 +36,7 @@ acs_install() {
   }
 
   [ "$(id -u)" -eq 0 ] || die "run as root: the command the dashboard shows ends in 'sudo ... bash'"
-  [ -n "$TOKEN" ] || die "ACS_ENROLMENT_TOKEN is not set; paste the whole command the dashboard shows"
+  [ -n "$TOKEN" ] || die "ABER_ENROLMENT_TOKEN is not set; paste the whole command the dashboard shows"
   command -v curl >/dev/null || die "curl is not installed"
 
   if [ -f "$DATA_DIR/.enrolled.json" ]; then
@@ -102,13 +102,13 @@ acs_install() {
 
   # The first convergence from the forge, with the key enrolment just registered. Not fatal: the
   # timer the playbook installed tries again within the hour.
-  if command -v acs-gateway-converge >/dev/null; then
+  if command -v aber-gateway-converge >/dev/null; then
     say "converging from the forge"
-    acs-gateway-converge || say "the first convergence from the forge failed; the timer retries hourly, and journalctl -u acs-gateway-converge says why"
+    aber-gateway-converge || say "the first convergence from the forge failed; the timer retries hourly, and journalctl -u aber-gateway-converge says why"
   fi
 
   say "done. The Node-RED editor password was printed ONCE above, by bootstrap; the gateway shows ONLINE in the dashboard within a minute."
   ( cd "$COMPOSE_DIR" && docker compose logs --no-log-prefix bootstrap 2>/dev/null | grep -A 4 "NODE-RED EDITOR LOGIN" ) || true
 }
 
-acs_install "$@"
+aber_install "$@"

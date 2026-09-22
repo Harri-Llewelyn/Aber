@@ -8,7 +8,7 @@ one, identically; none of those fetches consumes the token, which enrolment then
 as it would a bundle's; and the served installer is the platform playbook's install.sh with the
 public values substituted and the token nowhere in its text.
 
-Needs the stack and, on a plain-HTTP platform, ACS_INSTALLER_ALLOW_HTTP on the functions (the dev
+Needs the stack and, on a plain-HTTP platform, ABER_INSTALLER_ALLOW_HTTP on the functions (the dev
 values set it). Skips without the stack; a 503 from the command mint skips the class and says why.
 
     SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \\
@@ -32,7 +32,7 @@ from test_enroll_gateway import (  # noqa: E402
 # Differs from every other suite's fixture id in its FIRST block (sparkplug_id is the first 21 hex
 # characters of the uuid).
 TEST_GW_ID = "f7a11000-0000-4000-8000-000000000001"
-OPERATOR_EMAIL = os.getenv("ACS_OPERATOR_EMAIL", "operator@aber.local")
+OPERATOR_EMAIL = os.getenv("ABER_OPERATOR_EMAIL", "operator@aber.local")
 
 
 def mint(bearer, gateway_id=TEST_GW_ID):
@@ -106,7 +106,7 @@ class TestTheCommand(InstallerBase):
         self.assertIn("/functions/v1/gateway-install", minted["install_url"])
         command = minted["command"]
         self.assertIn(f'X-Enrolment-Token: {minted["token"]}', command)
-        self.assertIn(f"ACS_ENROLMENT_TOKEN={minted['token']}", command)
+        self.assertIn(f"ABER_ENROLMENT_TOKEN={minted['token']}", command)
         self.assertIn(minted["install_url"], command)
         self.assertTrue(command.endswith(" bash"), command)
         # Stage 0 is present exactly when there is a root to pin.
@@ -114,7 +114,7 @@ class TestTheCommand(InstallerBase):
             self.assertIn(minted["ca_url"], command)
             self.assertIn(f'= "{minted["ca_pin"]}"', command)
             self.assertIn("update-ca-certificates", command)
-            self.assertIn(f"ACS_CA_PIN={minted['ca_pin']}", command)
+            self.assertIn(f"ABER_CA_PIN={minted['ca_pin']}", command)
             self.assertTrue(minted["install_url"].startswith("https://"), "a pinned command must fetch the installer over TLS")
         else:
             self.assertNotIn("update-ca-certificates", command)
@@ -139,7 +139,7 @@ class TestWhatIsServed(InstallerBase):
         self.assertIn("no-store", headers.get("cache-control", ""))
         script = body.decode()
         self.assertTrue(script.startswith("#!/bin/bash"))
-        self.assertTrue(script.rstrip().endswith('acs_install "$@"'), "the body must be a function invoked on the last line")
+        self.assertTrue(script.rstrip().endswith('aber_install "$@"'), "the body must be a function invoked on the last line")
         self.assertNotIn("__PLATFORM_URL__", script)
         self.assertNotIn("__PUBLISHABLE_KEY__", script)
         self.assertIn(self.sparkplug_id, script)
@@ -151,9 +151,9 @@ class TestWhatIsServed(InstallerBase):
         self.assertEqual(status, 200, first)
         self.assertIn("no-store", headers.get("cache-control", ""))
         text = first.decode()
-        self.assertIn(f"ACS_ENROLLMENT_TOKEN={self.minted['token']}", text)
-        self.assertIn("ACS_GATEWAY_NAME=Test_Installer", text)
-        self.assertIn(f"ACS_SUPABASE_PUBLISHABLE_KEY={PUBLISHABLE_KEY}", text)
+        self.assertIn(f"ABER_ENROLLMENT_TOKEN={self.minted['token']}", text)
+        self.assertIn("ABER_GATEWAY_NAME=Test_Installer", text)
+        self.assertIn(f"ABER_SUPABASE_PUBLISHABLE_KEY={PUBLISHABLE_KEY}", text)
         secret = re.search(r"^NODERED_CREDENTIAL_SECRET=([0-9a-f]{64})$", text, re.M)
         self.assertIsNotNone(secret, "no credential secret in the .env")
         status, second, _ = fetch(self.minted["token"], "?file=env")
@@ -167,7 +167,7 @@ class TestWhatIsServed(InstallerBase):
         self.assertEqual(headers.get("content-type"), "application/zip")
         with zipfile.ZipFile(io.BytesIO(body)) as archive:
             names = set(archive.namelist())
-        for expected in ("site.yml", "install.sh", "roles/converge/files/acs-gateway-converge", "appliance/bootstrap.mjs", "appliance/docker-compose.yml"):
+        for expected in ("site.yml", "install.sh", "roles/converge/files/aber-gateway-converge", "appliance/bootstrap.mjs", "appliance/docker-compose.yml"):
             self.assertIn(expected, names)
 
     def test_an_unknown_file_is_a_404(self):

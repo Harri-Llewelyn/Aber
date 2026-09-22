@@ -97,7 +97,7 @@ def message(offset_ms, msg_type, device=CAPTURED_DEV, metrics=None, **payload):
 def capture_file(messages=None):
     messages = messages if messages is not None else [message(0, "DDATA")]
     return {
-        "acs_capture_version": capture.CAPTURE_VERSION,
+        "aber_capture_version": capture.CAPTURE_VERSION,
         "recorded_at": "2026-08-27T12:00:00+00:00",
         "capture_epoch_ms": EPOCH,
         "duration_ms": messages[-1]["offset_ms"],
@@ -326,10 +326,17 @@ class PlanTests(unittest.TestCase):
 
     def test_an_unknown_capture_version_is_refused(self):
         bad = capture_file()
-        bad["acs_capture_version"] = 99
+        bad["aber_capture_version"] = 99
         with self.assertRaises(capture.CaptureError) as ctx:
             self._plan(capture=bad)
         self.assertIn("99", str(ctx.exception))
+
+    def test_a_capture_recorded_before_the_rename_is_still_read(self):
+        # The key carried the platform's former name until 1.0; the format did not change, so a
+        # file a site recorded before then plays under either key.
+        old = capture_file()
+        old["acs_capture_version"] = old.pop("aber_capture_version")
+        self.assertTrue(self._plan(capture=old))
 
     def test_a_gateway_id_of_the_wrong_shape_is_refused(self):
         # sparkplug_id is a GENERATED column, so a friendly name cannot be one -- and passing it

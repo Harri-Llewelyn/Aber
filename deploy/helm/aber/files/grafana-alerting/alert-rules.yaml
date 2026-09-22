@@ -39,7 +39,7 @@ groups:
       # tolerate it. `for: 5m` on top, so a couple of missed heartbeats across a broker reconnect do
       # not fire.
       # -----------------------------------------------------------------------------------------
-      - uid: acs-gateway-stale
+      - uid: aber-gateway-stale
         title: Gateway Stale
         condition: C
         for: 5m
@@ -111,7 +111,7 @@ groups:
       # published. `for: 0s` because the view already carries the delay (one hour of `enrolled_at`
       # age).
       # -----------------------------------------------------------------------------------------
-      - uid: acs-enrolment-stuck
+      - uid: aber-enrolment-stuck
         title: Enrolment Stuck
         condition: C
         for: 0s
@@ -177,7 +177,7 @@ groups:
       # hence `entity_type: platform`. The view emits this row at zero, so "the queue is empty" and
       # "the datasource is down" are distinguishable. Five is a demonstrator threshold.
       # -----------------------------------------------------------------------------------------
-      - uid: acs-quarantine-depth
+      - uid: aber-quarantine-depth
         title: Quarantine Queue Depth
         condition: C
         for: 5m
@@ -249,7 +249,7 @@ groups:
       # Read from the database, not Prometheus: the metrics endpoint is unauthenticated and
       # deliberately does not export the certificate date (ingestion/metrics.py).
       # -----------------------------------------------------------------------------------------
-      - uid: acs-gateway-ca-expiring
+      - uid: aber-gateway-ca-expiring
         title: Gateway CA Expiring
         condition: C
         for: 0s
@@ -339,7 +339,7 @@ groups:
       # window would only re-report the same reading. NoData IS OK -- the view emits this row only
       # while `archive.enabled` is on, so its absence means a stack that does not archive.
       # -----------------------------------------------------------------------------------------
-      - uid: acs-archive-backlog
+      - uid: aber-archive-backlog
         title: Archive Backlog
         condition: C
         for: 1h
@@ -427,7 +427,7 @@ groups:
       # clause is a reason a device legitimately publishes nothing. Zero devices disables the rule;
       # the first device someone registers re-arms it.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-silent
+      - uid: aber-ingestion-silent
         title: Ingestion Consuming Nothing
         condition: F
         for: 10m
@@ -518,7 +518,7 @@ groups:
       # refused, and under report-by-exception nothing restates it. `for: 5m` absorbs a restart or a
       # momentary directory outage. Multi-dimensional on `reason`.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-drops
+      - uid: aber-ingestion-drops
         title: Telemetry Being Dropped
         condition: C
         for: 5m
@@ -577,7 +577,7 @@ groups:
       # A misconfigured gateway republishing another's devices looks identical to forged telemetry, so
       # this is separated from the drop rule at a higher severity.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-binding-rejections
+      - uid: aber-ingestion-binding-rejections
         title: Gateway Binding Rejections Rising
         condition: C
         for: 15m
@@ -635,7 +635,7 @@ groups:
       # daemon does not retry these, so recovery waits on the next rebirth timer or an operator's
       # request.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-birth-drops
+      - uid: aber-ingestion-birth-drops
         title: Ingestion Dropping Birth Certificates
         condition: C
         for: 5m
@@ -695,7 +695,7 @@ groups:
       # condition is `default_rows > 0`, because a row filed outside its month is never detached with
       # it. `for: 30m`, since the job runs daily at 03:20 and the minutes after a boundary are noise.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-digital-thread-partitions
+      - uid: aber-digital-thread-partitions
         title: Digital Thread Partitions Falling Behind
         condition: C
         for: 30m
@@ -762,7 +762,7 @@ groups:
       # `db_connected` cannot see a connection dropped by the server; the drop rule catches that
       # consequence.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-db-down
+      - uid: aber-ingestion-db-down
         title: Historian Unreachable From Ingestion
         condition: F
         for: 2m
@@ -842,7 +842,7 @@ groups:
       # historian off the message path and could not; a stack that has not written yet cannot produce
       # it. `for: 10m` against a 30s loop: twenty consecutive failures.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-db-unreachable-idle
+      - uid: aber-ingestion-db-unreachable-idle
         title: Historian Unreachable From Ingestion (No Traffic)
         condition: C
         for: 10m
@@ -900,7 +900,7 @@ groups:
       # loss. Messages published while the daemon is down are not replayed, so a deploy produces a
       # real gap at every node; `for: 15m` rides that out.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-sequence-gaps
+      - uid: aber-ingestion-sequence-gaps
         title: Sparkplug Message Loss
         condition: C
         for: 15m
@@ -964,7 +964,7 @@ groups:
       # daemon's sanity window (-24h/+5m), so this fires while the data is still being accepted.
       # `for: 15m` because a broker or network stall reads as a negative offset for its duration.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-gateway-clock-skew
+      - uid: aber-gateway-clock-skew
         title: Gateway Clock Skew
         condition: C
         for: 15m
@@ -1027,7 +1027,7 @@ groups:
       # only once the writer is already behind, and a full queue's drops reach rule 2 anyway.
       # `for: 10m` rides out a backlog flush, which is meant to run hot.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-ingestion-writer-saturating
+      - uid: aber-ingestion-writer-saturating
         title: Historian Writer Saturating
         condition: C
         for: 10m
@@ -1102,7 +1102,7 @@ groups:
       # 1. THE COLLECTOR IS GONE. `up`, because Prometheus can state this directly. Warning, not
       # critical: no telemetry is lost, only the record, and only for as long as this lasts.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-log-collector-down
+      - uid: aber-log-collector-down
         title: Log Collector Down
         condition: C
         for: 5m
@@ -1160,7 +1160,7 @@ groups:
       # itself (the ingestion daemon writes a STATS line every 60s), so a silent quarter-hour is a
       # fault. A rate rather than an absence: `lt 0.001` distinguishes nothing from very little.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-log-collection-stalled
+      - uid: aber-log-collection-stalled
         title: Log Collection Stalled
         condition: C
         for: 15m
@@ -1219,7 +1219,7 @@ groups:
       # on purpose: that counts the "entry too far behind" refusals a collector produces when it first
       # attaches to long-running containers, which is self-limiting (see loki/loki.yaml).
       # -------------------------------------------------------------------------------------------
-      - uid: acs-log-store-refusing
+      - uid: aber-log-store-refusing
         title: Log Store Refusing Lines
         condition: C
         for: 10m
@@ -1292,7 +1292,7 @@ groups:
       # a write error somewhere else. `mountpoint="/"` is where every data directory here lives;
       # a deployment that mounts data elsewhere edits this selector.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-host-disk-filling
+      - uid: aber-host-disk-filling
         title: Host Disk Filling
         condition: C
         for: 15m
@@ -1368,7 +1368,7 @@ groups:
       # the broker's session gone with it. Ten minutes at 90%: a checkpoint or a compaction peaks
       # and falls back; a leak does not.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-cluster-container-memory
+      - uid: aber-cluster-container-memory
         title: Container Near Memory Limit
         condition: C
         for: 10m
@@ -1430,7 +1430,7 @@ groups:
       # runtime ids are dropped at collection, so a restart is a new value on one series). A
       # rollout is one; a crash loop is many, with the kubelet's back-off spacing them out.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-cluster-container-restarting
+      - uid: aber-cluster-container-restarting
         title: Container Restarting
         condition: C
         for: 5m
@@ -1490,7 +1490,7 @@ groups:
       # tracks Host Disk Filling; on a provisioner that sizes volumes it is the per-claim figure,
       # and a full claim stops one store while the node still has room.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-cluster-volume-filling
+      - uid: aber-cluster-volume-filling
         title: Volume Filling
         condition: C
         for: 15m
@@ -1550,7 +1550,7 @@ groups:
       # pods by priority, and everything here has the same priority; below the kernel's it OOM
       # kills. Ten minutes under 10%: page cache is reclaimed first and that alone dips it.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-cluster-node-memory
+      - uid: aber-cluster-node-memory
         title: Node Memory Pressure
         condition: C
         for: 10m
@@ -1609,7 +1609,7 @@ groups:
       # CPU; everything slows, and the first thing to slow is the ingestion writer, whose own
       # rule fires next. This one says why.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-cluster-node-cpu
+      - uid: aber-cluster-node-cpu
         title: Node CPU Saturated
         condition: C
         for: 15m
@@ -1694,7 +1694,7 @@ groups:
       # `for: 5m` because a connection count is spiky by nature: a rollout opens a pool, a backup
       # opens its own. Five minutes at 80% is a pool that is not going to drain on its own.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-db-connections
+      - uid: aber-db-connections
         title: Database Connections Near Limit
         condition: C
         for: 5m
@@ -1760,7 +1760,7 @@ groups:
       # persist, and a single deadlock does not persist -- it happens once and the rule would never
       # fire. The same reasoning as the enrolment and CA-expiry rules above.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-db-deadlocks
+      - uid: aber-db-deadlocks
         title: Database Deadlocks
         condition: C
         for: 0s
@@ -1831,7 +1831,7 @@ groups:
       # `for: 15m` is a scrape-blip guard and nothing more. This number moves in one direction, over
       # days; waiting longer would only delay a warning that is already deliberately early.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-db-wraparound
+      - uid: aber-db-wraparound
         title: Transaction ID Wraparound Approaching
         condition: C
         for: 15m
@@ -1912,7 +1912,7 @@ groups:
       # look up in `timescaledb_information.jobs` and not find -- which reads as the alert being
       # wrong rather than as the job having been replaced.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-db-historian-job-failing
+      - uid: aber-db-historian-job-failing
         title: Historian Policy Job Failing
         condition: C
         for: 0s
@@ -1983,7 +1983,7 @@ groups:
       # `for: 5m` rides out a rolling restart of the database StatefulSet, which is a normal upgrade
       # and takes well under that.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-db-not-answering
+      - uid: aber-db-not-answering
         title: Database Not Answering
         condition: C
         for: 5m
@@ -2053,7 +2053,7 @@ groups:
       # `for: 10m` because a collector can fail once on a statement timeout during a checkpoint and
       # recover by itself; ten minutes of continuous failure is configuration, not load.
       # -------------------------------------------------------------------------------------------
-      - uid: acs-db-collector-failing
+      - uid: aber-db-collector-failing
         title: Database Collector Failing
         condition: C
         for: 10m

@@ -131,9 +131,9 @@ spec:
             - -D
             - /etc/postgresql
             - -c
-            - pgsodium.getkey_script=/etc/acs-cymru/postgres/pgsodium_getkey.sh
+            - pgsodium.getkey_script=/etc/aber/postgres/pgsodium_getkey.sh
             - -c
-            - vault.getkey_script=/etc/acs-cymru/postgres/pgsodium_getkey.sh
+            - vault.getkey_script=/etc/aber/postgres/pgsodium_getkey.sh
             {{- if .Values.postgresTls.enabled }}
             {{- include "aber.dbTlsServerArgs" . | nindent 12 }}
             {{- end }}
@@ -219,7 +219,7 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
             - name: scripts
-              mountPath: /etc/acs-cymru/postgres/pgsodium_getkey.sh
+              mountPath: /etc/aber/postgres/pgsodium_getkey.sh
               subPath: pgsodium_getkey.sh
               readOnly: true
             {{- if .Values.postgresTls.enabled }}

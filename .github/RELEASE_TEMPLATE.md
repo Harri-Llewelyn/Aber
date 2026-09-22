@@ -29,7 +29,7 @@
 ## Images and chart
 
 ```
-ghcr.io/harri-llewelyn/acs-cymru/aber  <version>   (chart)
+ghcr.io/harri-llewelyn/aber/aber  <version>   (chart)
 ```
 
 <!--

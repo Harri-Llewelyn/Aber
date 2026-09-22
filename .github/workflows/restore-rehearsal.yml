@@ -94,7 +94,7 @@ jobs:
       # psql calls and the chart cannot disagree about them.
       POSTGRES_PASSWORD: postgres
       DB_PASSWORD: postgres
-      SUPABASE_PUBLISHABLE_KEY: sb_publishable_acscymru_dev_0000000000000000
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_aber_dev_00000000000000000000
 
     steps:
       - name: Checkout Code
@@ -125,7 +125,7 @@ jobs:
 
       - name: Create k3d Cluster
         run: |
-          k3d cluster create acs-cymru \
+          k3d cluster create aber \
             --agents 0 \
             --k3s-arg "--disable=metrics-server@server:0" \
             --k3s-arg "--disable=traefik@server:0" \
@@ -150,16 +150,16 @@ jobs:
       # import` can report success it did not achieve (docs/incidents.md).
       - name: Build And Import db-init, backup-service And gateway-credential
         env:
-          IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
+          IMG_NS: ghcr.io/harri-llewelyn/aber
           V: ${{ steps.appversion.outputs.version }}
         run: |
           set -eu
           docker build -f supabase/db-init/Dockerfile -t "$IMG_NS/db-init:$V" supabase
           docker build -f backup-service/Dockerfile -t "$IMG_NS/backup-service:$V" backup-service
           docker build -f gateway-credential/Dockerfile -t "$IMG_NS/gateway-credential:$V" gateway-credential
-          k3d image import -c acs-cymru "$IMG_NS/db-init:$V" "$IMG_NS/backup-service:$V" "$IMG_NS/gateway-credential:$V"
+          k3d image import -c aber "$IMG_NS/db-init:$V" "$IMG_NS/backup-service:$V" "$IMG_NS/gateway-credential:$V"
           for img in db-init backup-service gateway-credential; do
-            docker exec k3d-acs-cymru-server-0 ctr -n k8s.io images ls -q \
+            docker exec k3d-aber-server-0 ctr -n k8s.io images ls -q \
               | grep -q "$img:$V" || { echo "::error::$img was not imported into the node"; exit 1; }
           done
 
@@ -344,7 +344,7 @@ jobs:
 
       - name: Delete The Cluster
         if: always()
-        run: k3d cluster delete acs-cymru || true
+        run: k3d cluster delete aber || true
 
       # A WEEKLY JOB NOBODY WATCHES IS THE SAME AS NO JOB. The badge on a scheduled workflow is not
       # on anybody's route, so a failure files itself. Updated rather than duplicated: a restore

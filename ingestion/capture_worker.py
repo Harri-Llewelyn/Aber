@@ -306,7 +306,7 @@ def _finish(state, reason):
     edge_nodes, devices = capture.capture_identities(messages)
 
     document = {
-        "acs_capture_version": capture.CAPTURE_VERSION,
+        "aber_capture_version": capture.CAPTURE_VERSION,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "recorded_from": {
             "broker": "%s:%d" % (capture.MQTT_HOST, capture.MQTT_PORT),

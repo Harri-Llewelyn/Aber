@@ -112,7 +112,7 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 # Ten images are built from this repository. They are published to GHCR at the chart's
 # appVersion, and the chart pulls them under exactly these names: a local build that is
 # tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
-NS=ghcr.io/harri-llewelyn/acs-cymru
+NS=ghcr.io/harri-llewelyn/aber
 V=0.1.0                                       # appVersion in deploy/helm/aber/Chart.yaml
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
@@ -127,7 +127,7 @@ docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestio
 
 # A local cluster: k3d is k3s in Docker, with the Traefik, ServiceLB and local-path that
 # production has. Port 80 is the Ingress; 1883 is the broker for gateways on the LAN.
-k3d cluster create acs-cymru --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
+k3d cluster create aber --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" --wait
 k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
   gateway-credential backup-service db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c aber
@@ -341,21 +341,21 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | :--- | :--- | :--- |
 | `alloy` | `grafana/alloy:v1.11.2` | the one collector: logs, metrics and host metrics; `alloy:12345` |
 | `backup` | `supabase/postgres:17.6.1.160` | the nightly CronJob, when the backup service is off |
-| `backup-service` | `ghcr.io/harri-llewelyn/acs-cymru/backup-service` | the Backups page's worker (`backupService.enabled`) |
-| `cold-archive` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | CronJob: exports, verifies and drops cold chunks |
-| `db-init` | `ghcr.io/harri-llewelyn/acs-cymru/db-init` | hook Job: the migration chain, on every install and upgrade |
+| `backup-service` | `ghcr.io/harri-llewelyn/aber/backup-service` | the Backups page's worker (`backupService.enabled`) |
+| `cold-archive` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: exports, verifies and drops cold chunks |
+| `db-init` | `ghcr.io/harri-llewelyn/aber/db-init` | hook Job: the migration chain, on every install and upgrade |
 | `db-roles-init` | `supabase/postgres:17.6.1.160` | hook Job: the Supabase roles and their passwords |
-| `e2e-aas-export` | `ghcr.io/harri-llewelyn/acs-cymru/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
-| `e2e-validate` | `ghcr.io/harri-llewelyn/acs-cymru/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
-| `frontend` | `ghcr.io/harri-llewelyn/acs-cymru/frontend` | `app.<domain>` |
+| `e2e-aas-export` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
+| `e2e-validate` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
+| `frontend` | `ghcr.io/harri-llewelyn/aber/frontend` | `app.<domain>` |
 | `gitea` | `gitea/gitea:1.27.3` | `git.<domain>` through the gateway's forge listener; SSH on `gitea-external:22` (LoadBalancer) |
 | `grafana` | `grafana/grafana:13.2.0` | `grafana.<domain>` |
-| `i3x-service` | `ghcr.io/harri-llewelyn/acs-cymru/i3x-service` | `i3x.<domain>` |
-| `ingestion` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | no route; `ingestion-metrics:9108` is scraped |
+| `i3x-service` | `ghcr.io/harri-llewelyn/aber/i3x-service` | `i3x.<domain>` |
+| `ingestion` | `ghcr.io/harri-llewelyn/aber/ingestion` | no route; `ingestion-metrics:9108` is scraped |
 | `loki` | `grafana/loki:3.5.7` | `loki:3100`, read by Grafana |
 | `mosquitto` | `eclipse-mosquitto:2.0.22`, the `gateway-credential` sidecar, `sapcc/mosquitto-exporter:0.8.0` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
-| `node-red` | `ghcr.io/harri-llewelyn/acs-cymru/node-red` | `nodered.<domain>` |
-| `playback` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | the broker playback worker (`playback.enabled`) |
+| `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |
+| `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
 | `prometheus` | `prom/prometheus:v3.14.0` | `prometheus:9090`, read by Grafana |
 | `realtime` | `supabase/realtime:v2.102.3` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
 | `storage-init` | `node:24-alpine` | hook Job: the storage buckets |
@@ -363,12 +363,12 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `supabase-auth` | `supabase/gotrue:v2.189.0` | behind `api.<domain>/auth/v1` |
 | `supabase-db` | `supabase/postgres:17.6.1.160`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
 | `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (Service `supabase-kong:8000`), Studio on 8001, the forge on 8002 |
-| `supabase-functions` | `ghcr.io/harri-llewelyn/acs-cymru/edge-runtime` | behind `api.<domain>/functions/v1` |
+| `supabase-functions` | `ghcr.io/harri-llewelyn/aber/edge-runtime` | behind `api.<domain>/functions/v1` |
 | `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
 | `supabase-rest` | `postgrest/postgrest:v14.12` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
 | `supabase-storage` | `supabase/storage-api:v1.60.4` | behind `api.<domain>/storage/v1` |
 | `supabase-studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `studio.<domain>`, off by default, behind the gateway's login |
-| `swagger-ui` | `ghcr.io/harri-llewelyn/acs-cymru/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
+| `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
 | `test-db-tls` | `supabase/postgres:17.6.1.160` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
 | `timescaledb` | `timescale/timescaledb:2.29.2-pg17`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `timescaledb:5432`; `:9187` is scraped |

@@ -238,6 +238,6 @@ describe('mergeDelivery', () => {
   test('the delivery path is absolute and matches the mount the chart provides', () => {
     // playback_worker.py defaults to this same string, and the two cannot import from each other --
     // check-docs-drift.mjs is what holds them together. This pins the value it checks against.
-    assert.equal(PLAYBACK_CREDENTIAL_FILE, '/var/lib/acs-cymru/playback/credentials.json');
+    assert.equal(PLAYBACK_CREDENTIAL_FILE, '/var/lib/aber/playback/credentials.json');
   });
 });

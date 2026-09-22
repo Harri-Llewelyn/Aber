@@ -395,7 +395,7 @@ describe('Directory reachability (archived migration 0084)', () => {
     })
 
     it('treats a real hostname as somewhere else', () => {
-      for (const h of ['acs-server.factory.local', '10.4.1.9', 'app.plant.example', '']) {
+      for (const h of ['aber-server.factory.local', '10.4.1.9', 'app.plant.example', '']) {
         expect(viewerIsOnDeploymentHost(h)).toBe(false)
       }
     })

@@ -25,10 +25,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://localhost:3003")
-MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "acs_platform")
-MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "acs-platform-machine-account")
+MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "aber_platform")
+MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "aber-platform-machine-account")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
-PASSWORD = os.getenv("ACS_SEED_PASSWORD", "aber123")
+PASSWORD = os.getenv("ABER_SEED_PASSWORD", "aber123")
 
 # See test_enroll_gateway.py, which carries the reasoning: where the caller installed the forge, an
 # unreachable one is a fault, and a setUpClass skip removes the class from a run that still reports

@@ -115,7 +115,7 @@
   // repository coins for its own ideas (unauditable, unprobeable, greppable, requarantine).
   // -----------------------------------------------------------------------------------------------
   "words": [
-    "aaaabbbbccccdddd", "aasenv", "aasx", "acao", "aclexplode", "acreateserial", "acscymru", "acscymrusecret",
+    "aaaabbbbccccdddd", "aasenv", "aasx", "acao", "aclexplode", "acreateserial", 
     "activatable", "addext", "aflags", "aggs", "agnostically", "amrc", "andon", "apca", "apikey", "arwd",
     "asgi", "ashrae", "askable", "assertable", "attisdropped", "attname", "attnotnull", "attnum", "attrelid",
     "autofs", "automounted", "autoscalable", "autovacuum", "badbulk", "badname", "ballscrew", "barchart",

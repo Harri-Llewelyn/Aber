@@ -28,12 +28,14 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
     file.text()
       .then(text => {
         const doc = JSON.parse(text)
-        if (doc?.acs_capture_version === undefined) {
-          throw new Error('That file carries no acs_capture_version, so it is not a broker capture.')
+        // A capture recorded before 1.0 carries the key under the platform's former name.
+        const version = doc?.aber_capture_version ?? doc?.acs_capture_version
+        if (version === undefined) {
+          throw new Error('That file carries no aber_capture_version, so it is not a broker capture.')
         }
-        if (doc.acs_capture_version !== CAPTURE_VERSION) {
+        if (version !== CAPTURE_VERSION) {
           throw new Error(
-            `That capture is version ${doc.acs_capture_version} and this stack reads version ` +
+            `That capture is version ${version} and this stack reads version ` +
             `${CAPTURE_VERSION}. capture.py refuses a version it does not know rather than ` +
             'guessing at the difference.'
           )

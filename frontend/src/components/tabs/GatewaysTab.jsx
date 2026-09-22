@@ -974,7 +974,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               title: 'The platform playbook tag this appliance last converged to, and how that run '
                 + 'ended. It converges hourly and after boot. "failed" means ansible-pull did not '
                 + 'complete and the timer will try again; the appliance\'s own journal '
-                + '(journalctl -u acs-gateway-converge) says why. The tag is changed by a pull '
+                + '(journalctl -u aber-gateway-converge) says why. The tag is changed by a pull '
                 + 'request on platform.yml in this gateway\'s repository, so a fleet mid-rollout '
                 + 'shows different tags here. Empty on an appliance that runs the bundle alone.'
             },

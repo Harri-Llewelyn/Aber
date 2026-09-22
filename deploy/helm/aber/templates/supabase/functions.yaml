@@ -124,11 +124,11 @@ spec:
                    which serves the ingress TLS Secret's ca.crt at this path (frontend.yaml). The
                    pin the command carries is computed from the same Secret, mounted below. */}}
             {{- if .Values.ingress.tls.enabled }}
-            - name: ACS_CA_URL
-              value: {{ printf "http://%s/.well-known/acs-cymru/ca.pem" (include "aber.hostOf" (dict "ctx" . "name" "frontend")) | quote }}
+            - name: ABER_CA_URL
+              value: {{ printf "http://%s/.well-known/aber/ca.pem" (include "aber.hostOf" (dict "ctx" . "name" "frontend")) | quote }}
             {{- end }}
             {{- if .Values.supabaseFunctions.gatewayEnrolment.allowPlaintextInstaller }}
-            - name: ACS_INSTALLER_ALLOW_HTTP
+            - name: ABER_INSTALLER_ALLOW_HTTP
               value: "true"
             {{- end }}
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
@@ -158,7 +158,7 @@ spec:
                    playbook under in the forge and the tag a new gateway's platform.yml points at.
                    The chart's appVersion, the same value the images are pulled at, so the playbook
                    an appliance converges to and the platform it reports to ship from one tag. */}}
-            - name: ACS_PLATFORM_VERSION
+            - name: ABER_PLATFORM_VERSION
               value: {{ .Chart.AppVersion | quote }}
             {{- end }}
             - name: MQTT_PUBLIC_HOST

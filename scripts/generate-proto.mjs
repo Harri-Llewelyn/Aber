@@ -68,7 +68,7 @@ if (!quiet('docker', ['info'])) {
 // and this script build the same thing and neither has to guess a project-prefixed name.
 const chart = readFileSync(join(REPO, 'deploy', 'helm', 'aber', 'Chart.yaml'), 'utf8');
 const version = chart.match(/^appVersion:\s*"?([^"\s]+)"?/m)?.[1] || 'dev';
-const image = `ghcr.io/harri-llewelyn/acs-cymru/ingestion:${version}`;
+const image = `ghcr.io/harri-llewelyn/aber/ingestion:${version}`;
 if (!quiet('docker', ['image', 'inspect', image])) {
   console.log(`${image} is not built yet; building it (this is a one-off).`);
   run('docker', ['build', '-f', 'ingestion/Dockerfile', '-t', image, '.'], { stdio: 'inherit', cwd: REPO });

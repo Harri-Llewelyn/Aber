@@ -1226,17 +1226,19 @@ const apiMethods = {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('A capture is a JSON object. This file is not one.');
     }
-    if (parsed.acs_capture_version === undefined) {
+    // A capture recorded before 1.0 carries the key under the platform's former name.
+    const version = parsed.aber_capture_version ?? parsed.acs_capture_version;
+    if (version === undefined) {
       // The likeliest wrong file in this dialog by a distance, since both are JSON and both are
       // things an engineer downloads from this same application.
       if (Array.isArray(parsed)) {
         throw new Error('That looks like a Node-RED flow export, not a capture.');
       }
-      throw new Error('That file carries no acs_capture_version, so it is not a broker capture.');
+      throw new Error('That file carries no aber_capture_version, so it is not a broker capture.');
     }
-    if (parsed.acs_capture_version !== CAPTURE_VERSION) {
+    if (version !== CAPTURE_VERSION) {
       throw new Error(
-        `That capture is version ${parsed.acs_capture_version} and this stack reads version ${CAPTURE_VERSION}. ` +
+        `That capture is version ${version} and this stack reads version ${CAPTURE_VERSION}. ` +
         'capture.py refuses a version it does not know rather than guessing at the difference.'
       );
     }
