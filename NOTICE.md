@@ -5,6 +5,8 @@
 The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
+The one exception is [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20), which
+keeps its own licence.
 
 It does **not** cover the third-party software this configuration deploys. Those images are pulled
 from their own registries at deploy time under their own licences. **This repository redistributes
@@ -15,6 +17,17 @@ Licences do not propagate across a process boundary. Every component below runs 
 container and is reached over a network protocol — the Postgres wire protocol, MQTT, HTTP. Nothing
 here is linked into, statically or dynamically, and nothing here is a derivative work of, any of
 them. The MIT grant over this repository's own contents is unaffected by anything in this file.
+
+## `sparkplug_b.proto` — Eclipse Public License 2.0
+
+The one third-party file in this repository. It is Eclipse Tahu's Sparkplug B payload definition,
+copyright Cirrus Link Solutions and others, under EPL-2.0, and its licence header is kept intact.
+The MIT licence above does not cover it. It differs from the current Tahu file only in its
+compile-instructions comment, which adds the Python command.
+
+The ingestion and i3X images compile it with `protoc` at build time, so both carry code generated
+from it; this file, in this repository, is its source. Upstream:
+[`github.com/eclipse-tahu/tahu`](https://github.com/eclipse-tahu/tahu), `sparkplug_b/sparkplug_b.proto`.
 
 ## TimescaleDB — Timescale License
 
