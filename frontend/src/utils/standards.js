@@ -60,7 +60,7 @@ export const DEFAULT_SEMANTIC_ID_TYPE = 'IRI'
  * nor ISO publishes resolvable per-concept IRIs, and an id in their namespace would assert an
  * interoperability that does not exist.
  */
-export const LOCAL_SEMANTIC_NAMESPACE = 'https://acs-cymru.local/semantics'
+export const LOCAL_SEMANTIC_NAMESPACE = 'https://aber.local/semantics'
 
 /**
  * MTConnect concept namespace, pinned to the major version: the vocabulary is generated from schema
@@ -73,7 +73,7 @@ export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400
 
 /**
  * The semantic id for an MTConnect metric, from its full name. Mirror of the SQL in
- * 0002_seed_data.sql: `'https://acs-cymru.local/semantics/mtconnect/v2.0/' || name`. The whole
+ * 0002_seed_data.sql: `'https://aber.local/semantics/mtconnect/v2.0/' || name`. The whole
  * name, because a catalog entry is a data item on a component path, which is what an AAS
  * SubmodelElement corresponds to.
  */

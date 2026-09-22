@@ -536,7 +536,7 @@ supabaseFunctions:
   # can reach.
   aas:
     # Namespaces every globalAssetId and submodel id the shell carries.
-    baseIri: https://acs-cymru.local/ids/asset/
+    baseIri: https://aber.local/ids/asset/
     # Where a consumer fetches the samples a Time Series LinkedSegment points at. Derived from
     # publicUrls.supabase when empty.
     historianEndpoint: ""

@@ -637,7 +637,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 [`supabase/README.md`](supabase/README.md#adding-a-vocabulary).
 
 > Adopting the MTConnect vocabulary is not a compliance claim; that requires the Implementer
-> License. Locally-minted semantic ids live under `https://acs-cymru.local/semantics/…` — the
+> License. Locally-minted semantic ids live under `https://aber.local/semantics/…` — the
 > namespace is the honesty mechanism, and an id under `mtconnect.org` would assert an
 > interoperability that does not exist.
 

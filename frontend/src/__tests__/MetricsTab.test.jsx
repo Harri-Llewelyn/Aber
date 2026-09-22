@@ -28,12 +28,12 @@ const ISO_VOCABULARY = [
   {
     name: 'AVAILABILITY', kpi_id: 'A', category: 'OEE', unit: 'PERCENT',
     formula: 'A = APT / PBT', description: 'Availability ratio',
-    semantic_id: 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY'
+    semantic_id: 'https://aber.local/semantics/iso22400/AVAILABILITY'
   },
   {
     name: 'MTBF', kpi_id: 'MTBF', category: 'Maintenance', unit: 'HOUR',
     formula: 'MTBF = APT / number of failures', description: 'Mean operating time between failures',
-    semantic_id: 'https://acs-cymru.local/semantics/iso22400/MTBF'
+    semantic_id: 'https://aber.local/semantics/iso22400/MTBF'
   }
 ]
 
@@ -386,7 +386,7 @@ describe('Metric builder — vocabulary prefill', () => {
     fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'AVAILABILITY' } })
 
     expect(unitsSelect().value).toBe('PERCENT')
-    expect(semanticIdInput().value).toBe('https://acs-cymru.local/semantics/iso22400/AVAILABILITY')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/iso22400/AVAILABILITY')
     expect(referenceTypeSelect().value).toBe('IRI')
     // The group comes from the KPI family, so the composed name matches what the catalog uses.
     expect(within(namePreview()).getByText('OEE/AVAILABILITY')).toBeTruthy()
@@ -474,7 +474,7 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
     fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
     fireEvent.change(screen.getByTitle(/The category this metric belongs to/), { target: { value: 'Axes' } })
 
-    expect(semanticIdInput().value).toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/Axes/ANGLE')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/Axes/ANGLE')
     expect(referenceTypeSelect().value).toBe('IRI')
   })
 
@@ -488,10 +488,10 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
   it('tracks the name as the rest of it is filled in', async () => {
     await openForm()
     fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
-    expect(semanticIdInput().value).toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/ANGLE')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/ANGLE')
 
     fireEvent.change(screen.getByPlaceholderText('e.g. C'), { target: { value: 'C' } })
-    expect(semanticIdInput().value).toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/C/ANGLE')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/C/ANGLE')
   })
 
   it('stops deriving once the operator types their own', async () => {
@@ -543,7 +543,7 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
     const mapped = [{
       metric_uuid: 'm5', name: 'OEE/AVAILABILITY', metric_group: 'OEE', datatype: 10,
       category: 'SAMPLE', units: 'PERCENT', standard: 'ISO 22400', deprecated: false,
-      semantic_id: 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY',
+      semantic_id: 'https://aber.local/semantics/iso22400/AVAILABILITY',
       semantic_id_type: 'IRI'
     }]
     api.get.mockImplementation((path) =>
@@ -579,7 +579,7 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     await waitForCatalog()
 
     expect(standardSelect().value).toBe('ISO 22400')
-    expect(semanticIdInput().value).toBe('https://acs-cymru.local/semantics/iso22400/AVAILABILITY')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/iso22400/AVAILABILITY')
     expect(within(namePreview()).getByText('OEE/AVAILABILITY')).toBeTruthy()
   })
 

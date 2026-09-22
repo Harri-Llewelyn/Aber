@@ -141,11 +141,11 @@ class TestSeededRows(SeedTestCase):
 #
 # SCOPED DELIBERATELY, and the reason is a real difference this suite found. The rows 0002 seeded
 # mint their semantic ids PATH-SHAPED --
-#   https://acs-cymru.local/semantics/mtconnect/v2.0/Axes/C/ANGLE
+#   https://aber.local/semantics/mtconnect/v2.0/Axes/C/ANGLE
 # -- where mtconnect_vocabulary mints them TYPE-SHAPED --
-#   https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ANGLE
+#   https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE
 #
-# Both live under the locally-minted `acs-cymru.local` namespace, so neither asserts an
+# Both live under the locally-minted `aber.local` namespace, so neither asserts an
 # interoperability that does not exist and neither is wrong; they are two conventions for the same
 # thing, and 0002's predates the vocabulary tables. Reconciling them is a deprecate-and-supersede
 # exercise with its own reasoning to write, not something to do silently here. A group-wide

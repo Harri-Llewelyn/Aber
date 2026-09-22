@@ -14,8 +14,8 @@ import { modelContentType, modelFileName } from "./model3dContentType.ts";
 // declare the AAS_* set.
 
 /** Namespace for asset and submodel ids. Configurable because an IRI must be resolvable for the
- *  organisation publishing it, and `acs-cymru.local` is only right for this stack. */
-export const BASE_IRI = (Deno.env.get("AAS_BASE_IRI") ?? "https://acs-cymru.local/ids/asset/")
+ *  organisation publishing it, and `aber.local` is only right for this stack. */
+export const BASE_IRI = (Deno.env.get("AAS_BASE_IRI") ?? "https://aber.local/ids/asset/")
   .replace(/\/+$/, "") + "/";
 
 /** Where a consumer fetches the actual samples. The shell points at this; it never embeds them. */

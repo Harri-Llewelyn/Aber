@@ -4165,7 +4165,7 @@ components:
         description: { type: string, nullable: true }
         deprecated: { type: boolean, default: false }
         superseded_by: { type: string, format: uuid, nullable: true, description: 'Changing a metric is deprecate-and-supersede, never a rename.' }
-        semantic_id: { type: string, nullable: true, description: 'Locally-minted ids sit under `https://acs-cymru.local/semantics/…` — the namespace is the honesty mechanism. Mutable, unlike the name.' }
+        semantic_id: { type: string, nullable: true, description: 'Locally-minted ids sit under `https://aber.local/semantics/…` — the namespace is the honesty mechanism. Mutable, unlike the name.' }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
         created_at: { type: string, format: date-time, readOnly: true }
 

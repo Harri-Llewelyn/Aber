@@ -111,7 +111,7 @@ project's own repository.
 ## Standards and vocabularies
 
 Adopting a standard's vocabulary is not a compliance claim. Locally-minted semantic ids live under
-`https://acs-cymru.local/semantics/…` precisely so that no identifier asserts an interoperability
+`https://aber.local/semantics/…` precisely so that no identifier asserts an interoperability
 that has not been certified. The MTConnect Implementer License, and the equivalent programmes for
 the other bodies, are separate from anything granted here. See
 [`docs/vocabularies.md`](docs/vocabularies.md).

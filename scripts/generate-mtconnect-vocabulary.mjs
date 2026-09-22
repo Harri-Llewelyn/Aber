@@ -54,14 +54,14 @@ const END_MARKER = '-- <<< END GENERATED mtconnect_vocabulary';
  * The form matches 0032's SQL expression exactly, and both are mirrored by `mtconnectSemanticId()`
  * in `frontend/src/utils/standards.js`:
  *
- *     https://acs-cymru.local/semantics/mtconnect/v2.0/<Kind>/<name>
+ *     https://aber.local/semantics/mtconnect/v2.0/<Kind>/<name>
  *
  * SCOPED BY KIND, because a component and a data item type could share a name and `(kind, name)`
  * is the table's key. **The namespace pins `v2.0`, the major line — deliberately NOT
  * SCHEMA_VERSION.** An id that changed every time the vocabulary was regenerated would defeat the
  * point of being a stable handle, and `semantic_id` is the one column downstream systems key on.
  *
- * The namespace is `acs-cymru.local` and must stay that way: an id under `mtconnect.org` would
+ * The namespace is `aber.local` and must stay that way: an id under `mtconnect.org` would
  * assert an interoperability nobody has agreed to. See the header of
  * supabase/migrations/archive/20260101000029_semantic_identifiers.sql.
  */
@@ -72,7 +72,7 @@ const KIND_SEGMENT = {
   NATIVE_UNIT: 'NativeUnit',
   COMPONENT: 'Component',
 };
-const SEMANTIC_BASE = 'https://acs-cymru.local/semantics/mtconnect/v2.0';
+const SEMANTIC_BASE = 'https://aber.local/semantics/mtconnect/v2.0';
 const semanticId = (kind, name) => {
   const segment = KIND_SEGMENT[kind];
   if (!segment) throw new Error(`no semantic-id segment defined for kind: ${kind}`);
