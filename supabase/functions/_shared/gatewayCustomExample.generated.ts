@@ -4,7 +4,7 @@
 // What forge-sweep publishes as platform/gateway-custom-example, a template repository a
 // person copies when a gateway needs code of its own: a custom.yml and the compose project
 // it builds. Untagged, and never handed to an appliance by the platform.
-// The digest is what the published repository carries in .acs/manifest.json, so one read says
+// The digest is what the published repository carries in .aber/manifest.json, so one read says
 // whether the forge holds this build's copy.
 
 export const GATEWAY_CUSTOM_EXAMPLE_DIGEST = "fe9a7bda89316f463c0889eff14286910b5ce4997d2df2861d51708ca4a71678";

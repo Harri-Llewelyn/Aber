@@ -158,7 +158,7 @@ export const PLATFORM_READERS_TEAM = "readers";
 /** The file in a gateway's repository naming the tag its appliance converges to. */
 export const PLATFORM_POINTER_PATH = "platform.yml";
 /** The digest of what the published repository holds, so a sweep compares in one read. */
-const PLATFORM_MANIFEST_PATH = ".acs/manifest.json";
+const PLATFORM_MANIFEST_PATH = ".aber/manifest.json";
 /**
  * The roots an appliance should trust, on `main` of the platform repository and nowhere else.
  *
@@ -396,7 +396,7 @@ async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> 
 }
 
 /**
- * Remove `.acs/manifest.json` from a gateway's repository, in the same window as the template
+ * Remove `.aber/manifest.json` from a gateway's repository, in the same window as the template
  * above. A repository generated from `platform/gateway-custom-example` carries a copy of it
  * (measured against gitea/gitea:1.27.3: `POST /generate` copies the whole tree), and that file
  * states the digest and publication date of the *example*, about a repository that is now one

@@ -547,7 +547,7 @@ class TestThePlatform(ForgeSweepBase):
         self.assertEqual(status, 200, "the platform repository does not exist after a sweep")
         self.assertTrue(repo["private"])
 
-        status, manifest = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.acs/manifest.json")
+        status, manifest = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.aber/manifest.json")
         self.assertEqual(status, 200, "main carries no manifest")
         published = json.loads(base64.b64decode(manifest["content"]).decode())
         self.assertRegex(published["digest"], r"^[0-9a-f]{64}$")
@@ -559,7 +559,7 @@ class TestThePlatform(ForgeSweepBase):
         self.assertEqual(status, 200, tags)
         tag = next((t for t in tags if t["name"] == f"v{published['version']}"), None)
         self.assertIsNotNone(tag, f"no tag v{published['version']}: {[t['name'] for t in tags]}")
-        status, at_tag = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.acs/manifest.json?ref={tag['name']}")
+        status, at_tag = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.aber/manifest.json?ref={tag['name']}")
         self.assertEqual(status, 200)
         at_tag_digest = json.loads(base64.b64decode(at_tag["content"]).decode())["digest"]
         # A TAG IS CREATED ONCE AND NEVER MOVED, so there are exactly two states the sweep promises
@@ -727,7 +727,7 @@ class TestTheTrustBundle(ForgeSweepBase):
         """
         sweep()
         # Force a republication of the playbook by making main's manifest disagree with the build.
-        path = f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.acs/manifest.json"
+        path = f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/.aber/manifest.json"
         status, manifest = forge(path)
         self.assertEqual(status, 200, manifest)
         forge(path, method="PUT", body={

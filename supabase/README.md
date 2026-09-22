@@ -3831,7 +3831,7 @@ stale.
 [`_shared/forge.ts`](functions/_shared/forge.ts) creates the organisation, a `readers` team with
 read on every repository in it (both dashboard teams are seated there by `forge-membership` at the
 door and by the sweep), and the repository with `main` admitting pushes from the machine account
-and nobody else, deploy keys not whitelisted. It reads `.acs/manifest.json` at `main`; when the
+and nobody else, deploy keys not whitelisted. It reads `.aber/manifest.json` at `main`; when the
 digest there is not this build's it reads the tree and makes one commit through the contents API
 that creates, updates and deletes whatever differs. The tag comes from `ABER_PLATFORM_VERSION`,
 which the chart sets to its `appVersion`, so the playbook an appliance converges to and the images
@@ -3970,7 +3970,7 @@ Four things were measured against `gitea/gitea:1.27.3`: the machine account may 
 a repository it owns (`PATCH /repos/{owner}/{name}`); `POST /repos/{owner}/{name}/generate` into
 the `gateways` organisation answers 201; a generated repository is **not** itself a template and
 carries **no** branch protection, so enrolment's is the first; and generation copies the whole
-tree, `.acs/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
+tree, `.aber/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
 file in the same window it commits the incident template — the one moment the machine account may
 still write `main` — since a manifest stating the digest and date of the *example* is a file
 about the wrong repository. It is not fatal if the removal fails: a stray file reads badly and

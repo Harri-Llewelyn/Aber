@@ -6,7 +6,7 @@
  * forge, and what `gateway-bundle` and `gateway-install` hand to an appliance, has to reach them
  * as code: this writes every file of each published directory under `forge/` into its own module
  * under `supabase/functions/_shared/`, with a digest over the lot that the published repository
- * carries in `.acs/manifest.json`, so a sweep can tell in one read whether the forge holds what
+ * carries in `.aber/manifest.json`, so a sweep can tell in one read whether the forge holds what
  * this build ships. A generated module rather than environment variables: a directory of files
  * does not fit one variable per file, and a module import needs no entry in main/index.ts's
  * allow-list.
@@ -89,7 +89,7 @@ function render({ source, module, prefix, what }) {
 // DO NOT EDIT: edit the sources and run the script. CI fails when this file is stale.
 //
 ${what.map((line) => `// ${line}`).join('\n')}
-// The digest is what the published repository carries in .acs/manifest.json, so one read says
+// The digest is what the published repository carries in .aber/manifest.json, so one read says
 // whether the forge holds this build's copy.
 
 export const ${prefix}_DIGEST = ${JSON.stringify(digest)};

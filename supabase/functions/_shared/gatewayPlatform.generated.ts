@@ -4,7 +4,7 @@
 // What forge-sweep publishes as platform/gateway-platform, and what gateway-bundle and
 // gateway-install hand to an appliance: every file of the platform playbook, the installer,
 // and the compose project under appliance/.
-// The digest is what the published repository carries in .acs/manifest.json, so one read says
+// The digest is what the published repository carries in .aber/manifest.json, so one read says
 // whether the forge holds this build's copy.
 
 export const GATEWAY_PLATFORM_DIGEST = "70471244305aa0604e9226937920603db1b89c068132a52c19554d6ebf5276e7";
