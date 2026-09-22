@@ -49,8 +49,8 @@ ID_SHORT_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
-DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
+DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
+DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
 # The machining cell's first CNC on the `Simulated Shopfloor` flow, seeded by 0002 and given its
 # schema and nameplate by 0020 -- so it exists wherever the migrations run, not only where
 # provision-gateways.mjs has been run. It replaced `Simulated_CNC_01`, which 0020 deletes.

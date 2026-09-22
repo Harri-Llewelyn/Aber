@@ -6,7 +6,7 @@ import App from '../App'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@acs-cymru.local',
+    email: 'admin@aber.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -73,7 +73,7 @@ describe('App Component', () => {
     // The account control is an icon button with no text, so its `title` is both the hover text and
     // its accessible name; the address is asserted on the attribute.
     expect(screen.getByRole('button', { name: /account menu/i })).toHaveAttribute(
-      'title', expect.stringContaining('admin@acs-cymru.local')
+      'title', expect.stringContaining('admin@aber.local')
     )
   })
 

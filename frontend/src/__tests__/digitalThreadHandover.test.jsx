@@ -21,7 +21,7 @@ const events = [
   {
     event_id: 'dt-1', entity_type: 'DEVICE', entity_id: DEVICE_ID, event_type: 'UPDATE',
     description: 'Device renamed', timestamp: '2026-08-10T10:00:00Z',
-    changed_by: 'admin@acs-cymru.local', actor_source: 'user',
+    changed_by: 'admin@aber.local', actor_source: 'user',
     old_data: { id: DEVICE_ID, name: 'CNC_01' },
     new_data: { id: DEVICE_ID, name: 'Simulated_CNC_01' }
   }

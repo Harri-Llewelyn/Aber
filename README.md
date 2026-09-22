@@ -281,14 +281,14 @@ deploy, every other role gets a read-only editor. Deploying a flow is `gitops:ma
 the Directory page's Sync button and the `deploy-nodered` function were retired with the
 demonstrator, it is the only one.
 
-**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `acscymru123`:
+**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `aber123`:
 
 | Email | Role | Access |
 | :--- | :--- | :--- |
-| `admin@acs-cymru.local` | `Administrator` | Full CRUD |
-| `manager@acs-cymru.local` | `Shopfloor_Manager` | Full CRUD |
-| `operator@acs-cymru.local` | `Operator` | Read-only + telemetry |
-| `auditor@acs-cymru.local` | `Auditor` | Digital Thread read-only |
+| `admin@aber.local` | `Administrator` | Full CRUD |
+| `manager@aber.local` | `Shopfloor_Manager` | Full CRUD |
+| `operator@aber.local` | `Operator` | Read-only + telemetry |
+| `auditor@aber.local` | `Auditor` | Digital Thread read-only |
 
 Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
 `Administrator` must promote them.

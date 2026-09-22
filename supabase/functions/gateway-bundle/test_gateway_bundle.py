@@ -37,12 +37,12 @@ REMOTE_GW = "2c000000-0000-4000-8000-000000000001"
 HOST_GW = "2b000000-0000-4000-8000-000000000001"
 
 ACCOUNTS = {
-    "Administrator": "admin@acs-cymru.local",
-    "Shopfloor_Manager": "manager@acs-cymru.local",
-    "Operator": "operator@acs-cymru.local",
-    "Auditor": "auditor@acs-cymru.local",
+    "Administrator": "admin@aber.local",
+    "Shopfloor_Manager": "manager@aber.local",
+    "Operator": "operator@aber.local",
+    "Auditor": "auditor@aber.local",
 }
-PASSWORD = os.getenv("ACS_DEMO_PASSWORD", "acscymru123")
+PASSWORD = os.getenv("ACS_DEMO_PASSWORD", "aber123")
 
 
 def rest(path, method="GET", body=None, bearer=None, prefer=None):

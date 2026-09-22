@@ -627,7 +627,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     # Self-seeded and never committed: the grant, the job and the backup all go in on the owner's
     # connection and roll back with everything else, so this asserts the matcher's ANSWERS without
     # leaving a role assignment behind in an append-only table. CI's RLS job applies the migrations
-    # and not seed.sql, so a suite leaning on `admin@acs-cymru.local` would fail there with a
+    # and not seed.sql, so a suite leaning on `admin@aber.local` would fail there with a
     # failure that looks like the gate and is really the fixture.
     ADMIN_ID = "a0d17070-0000-4000-8000-0000000d7318"
     AUDITOR_ID = "a0d17070-0000-4000-8000-0000000d7418"

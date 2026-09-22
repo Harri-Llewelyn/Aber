@@ -31,7 +31,7 @@ somebody else's plant in it. What that floor knew is in this file instead.
 
 ### 1. Sign in, and start with the dashboard
 
-Sign in at `http://localhost:3000` as `admin@acs-cymru.local` (password `acscymru123` on a seeded
+Sign in at `http://localhost:3000` as `admin@aber.local` (password `aber123` on a seeded
 development stack). **Do this before opening Node-RED or Grafana**: both federate to Supabase Auth,
 and GoTrue ships no consent UI, so the dashboard serves one at `/oauth/consent` and needs a session
 of its own first.

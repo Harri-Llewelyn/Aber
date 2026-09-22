@@ -155,7 +155,7 @@ describe('hashArgv', () => {
     assert.throws(() => hashArgvForUsername('has space', password), CredentialError);
     // An operator's own value: short and outside base64url is theirs to choose, because the
     // value is a positional parameter and never a command line.
-    assert.equal(hashArgvForUsername('factoryplus_ingestion', 'acscymru123')[4], 'acscymru123');
+    assert.equal(hashArgvForUsername('factoryplus_ingestion', 'aber123')[4], 'aber123');
     assert.equal(hashArgvForUsername('factoryplus_ingestion', "it's fine!")[4], "it's fine!");
     assert.throws(() => hashArgvForUsername('factoryplus_ingestion', ''), CredentialError);
     assert.throws(() => hashArgvForUsername('factoryplus_ingestion', 'has\nnewline'), CredentialError);

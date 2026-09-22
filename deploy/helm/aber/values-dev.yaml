@@ -68,23 +68,23 @@ secrets:
   # The platform principals; see values.yaml for why the validator's username is a sparkplug_id
   # and not free text. One shared password here only because this file is the CI fixture.
   mqttIngestionUser: factoryplus_ingestion
-  mqttIngestionPassword: acscymru123
+  mqttIngestionPassword: aber123
   mqttI3xUser: factoryplus_i3x
-  mqttI3xPassword: acscymru123
+  mqttI3xPassword: aber123
   mqttValidatorUser: gwy110000000000400080000
-  mqttValidatorPassword: acscymru123
+  mqttValidatorPassword: aber123
   mqttMonitorUser: factoryplus_monitor
-  mqttMonitorPassword: acscymru123
+  mqttMonitorPassword: aber123
   # The plugin's admin. Required: the broker's initContainer exits without it.
   mqttDynsecAdminUser: dynsec-admin
-  mqttDynsecAdminPassword: acscymru123dynsecadmin
+  mqttDynsecAdminPassword: aber123dynsecadmin
   # The four simulated cell gateways. Set here because node-red-init fails closed on a broker node
   # whose declared `acsCredentialsEnv` pair is missing -- without these the init container exits 1
   # and Node-RED never starts, which on k3d reads as a stuck rollout rather than as a credential.
-  mqttGwCncMachiningPassword: acscymru123
-  mqttGwRoboticAssemblyPassword: acscymru123
-  mqttGwAgvFleetPassword: acscymru123
-  mqttGwFacilityBmsPassword: acscymru123
+  mqttGwCncMachiningPassword: aber123
+  mqttGwRoboticAssemblyPassword: aber123
+  mqttGwAgvFleetPassword: aber123
+  mqttGwFacilityBmsPassword: aber123
 
   # The bearer token supabase-functions presents to the gateway-credential sidecar.
   #
@@ -111,7 +111,7 @@ secrets:
   grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret
   grafanaAlertWebhookSecret: change-me-grafana-alert-webhook-bearer-min-32-chars
   # Grafana connects to the historian as `powerbi_reader`, never as `postgres`.
-  biReaderPassword: acscymru123
+  biReaderPassword: aber123
 
   noderedCredentialSecret: acscymrusecret
   noderedOAuthClientSecret: change-me-nodered-oauth-client-secret

@@ -32,7 +32,7 @@ the outage has already started.
 
 =================================================================================================
 SELF-SEEDED, NOT THE DEMO PERSONAS. CI's RLS job applies the migrations and deliberately not
-seed.sql, so `admin@acs-cymru.local` does not exist there -- a suite depending on it passes locally
+seed.sql, so `admin@aber.local` does not exist there -- a suite depending on it passes locally
 and fails in CI with a failure that looks like the policy and is actually the fixture. Same
 approach, and the same teardown obligation, as test_system_settings_rls.py.
 """

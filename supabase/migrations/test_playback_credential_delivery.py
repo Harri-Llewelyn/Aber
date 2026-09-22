@@ -54,7 +54,7 @@ class PlaybackCredentialDelivery(unittest.TestCase):
     def setUp(self):
         self.cur = self.conn.cursor()
         # Self-seeded rather than the demo personas: CI's RLS job applies the migrations and
-        # deliberately not seed.sql, so a suite depending on `admin@acs-cymru.local` fails there
+        # deliberately not seed.sql, so a suite depending on `admin@aber.local` fails there
         # with a failure that looks like the gate and is really the fixture.
         self.cur.execute(
             "INSERT INTO auth.users (id, email) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",

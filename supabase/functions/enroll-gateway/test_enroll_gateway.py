@@ -81,8 +81,8 @@ def delete_broker_account(username):
 TEST_GW_ID = "2d000000-0000-4000-8000-000000000001"
 
 
-ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@acs-cymru.local")
-ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "acscymru123")
+ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@aber.local")
+ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "aber123")
 
 
 def rest(path, method="GET", body=None, bearer=None, prefer=None):

@@ -1654,7 +1654,7 @@ jobs:
           KEY=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
           TOKEN=$(curl -s -X POST "http://127.0.0.1:18080/auth/v1/token?grant_type=password" \
             -H "apikey: $KEY" -H "Content-Type: application/json" \
-            -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
+            -d '{"email":"admin@aber.local","password":"aber123"}' \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
           test -n "$TOKEN"
 

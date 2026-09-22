@@ -43,8 +43,8 @@ OPENAPI = REPO_ROOT / "docs" / "openapi.yaml"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-DEMO_EMAIL = os.getenv("DIRECTORY_TEST_EMAIL", "admin@acs-cymru.local")
-DEMO_PASSWORD = os.getenv("DIRECTORY_TEST_PASSWORD", "acscymru123")
+DEMO_EMAIL = os.getenv("DIRECTORY_TEST_EMAIL", "admin@aber.local")
+DEMO_PASSWORD = os.getenv("DIRECTORY_TEST_PASSWORD", "aber123")
 
 # THE UNPREFIXED PATHS, not /functions/v1/fplus-directory. Both reach the same handler, but only
 # this one is exempt from the gateway's key-auth -- so an anonymous request tested here is refused
