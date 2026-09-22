@@ -14,8 +14,8 @@
 #
 set -euo pipefail
 
-NS="${NS:-acs-cymru}"
-RELEASE="${RELEASE:-acs-cymru}"
+NS="${NS:-aber}"
+RELEASE="${RELEASE:-aber}"
 
 log() { printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 

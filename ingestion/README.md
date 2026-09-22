@@ -1655,9 +1655,9 @@ npm run dev:test          # validate.py, then the stack lane
 **In-cluster, as a Job in the namespace:**
 
 ```bash
-helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru \
-  -f deploy/helm/acs-cymru/values-dev.yaml --set e2e.enabled=true
-kubectl -n acs-cymru logs -f job/acs-cymru-e2e-validate
+helm upgrade aber deploy/helm/aber -n aber \
+  -f deploy/helm/aber/values-dev.yaml --set e2e.enabled=true
+kubectl -n aber logs -f job/aber-e2e-validate
 ```
 
 **No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-kong` *are* the

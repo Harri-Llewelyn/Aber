@@ -1,0 +1,235 @@
+{{- if .Values.supabaseFunctions.enabled }}
+{{- $component := "supabase-functions" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $supabasePublic := include "aber.supabaseUrl" . -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-functions
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      # The gateway routes /functions/v1/ here on port 9000, including the two exact-path
+      # exemptions for grafana-userinfo and nodered-userinfo.
+      port: 9000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-functions
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.supabaseFunctions.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: edge-runtime
+          # BUILT FROM supabase/functions/Dockerfile, not pulled. The functions and the Remote
+          # gateway bundle template are baked in: there is no repository on a cluster node to
+          # mount, and baking is what makes "which revision of aas-export is running" a property
+          # of the deployed artefact -- so a rollback rolls the functions back too.
+          #
+          # The image also carries the entrypoint that reads those templates into the environment,
+          # so this Deployment needs no command override at all.
+          image: {{ include "aber.image" (dict "image" .Values.supabaseFunctions.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.supabaseFunctions.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9000
+              protocol: TCP
+          # EVERY VALUE HERE MUST BE DECLARED ON THIS SERVICE, not merely present somewhere in the
+          # release. An edge-runtime user worker is sandboxed and sees NOTHING but the environment
+          # variables main/index.ts forwards to it -- a value in a ConfigMap the pod does not mount,
+          # or a file on disk, is invisible to the function that needs it.
+          env:
+            # The gateway as reached from INSIDE the cluster. Functions call back through it, so
+            # they inherit its routing and its key check.
+            - name: SUPABASE_URL
+              value: {{ include "aber.supabase.internalUrl" . | quote }}
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine and
+            # deploy-nodered allow-list Administrator/Shopfloor_Manager; aas-export additionally
+            # allows the read-scoped roles. Verifying here would be a second, coarser gate that
+            # could only ever be wrong about one of them.
+            - name: VERIFY_JWT
+              value: {{ .Values.supabaseFunctions.verifyJwt | quote }}
+            - name: NODERED_URL
+              value: http://node-red:1880/flows
+            {{- include "aber.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") | nindent 12 }}
+            # --- AAS export ---------------------------------------------------------------
+            # Namespaces every globalAssetId and submodel id the shell carries, so it must name
+            # the organisation publishing the document. The default is only correct for a local
+            # stack.
+            - name: AAS_BASE_IRI
+              value: {{ .Values.supabaseFunctions.aas.baseIri | quote }}
+            # Where a consumer fetches the samples a Time Series LinkedSegment points at -- never
+            # the rows themselves. An OUTBOUND REFERENCE, so it must name an address the recipient
+            # can reach: the ingress, not the in-cluster gateway.
+            - name: AAS_HISTORIAN_ENDPOINT
+              value: {{ .Values.supabaseFunctions.aas.historianEndpoint | default (printf "%s/rest/v1/telemetry" $supabasePublic) | quote }}
+            # Public base for the 3D models a VisualRepresentation submodel points at. It CANNOT be
+            # derived from SUPABASE_URL above: in-cluster that is http://supabase-kong:8000, which
+            # resolves for this worker and for nothing outside the cluster, so a shell handed to a
+            # partner would carry a dead link.
+            - name: AAS_MODEL_PUBLIC_BASE
+              value: {{ .Values.supabaseFunctions.aas.modelPublicBase | default (printf "%s/storage/v1/object/public/%s" $supabasePublic .Values.supabaseStorage.bucket) | quote }}
+            - name: STORAGE_MODEL_BUCKET
+              value: {{ .Values.supabaseStorage.bucket | quote }}
+            {{- /* int64 first -- see supabase/storage.yaml. Rendered as "3.3554432e+07" this
+                   parses as 3, so every 3D model exceeded the bundling cap and the exporter fell
+                   back to a URL reference. The .aasx still validated, which is why nothing failed. */}}
+            - name: AAS_MAX_BUNDLED_MODEL_BYTES
+              value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | int64 | quote }}
+            {{/*
+              =====================================================================================
+              REMOTE GATEWAY ENROLMENT (enroll-gateway, gateway-bundle).
+
+              EVERY ONE OF THESE IS AN OUTBOUND ADDRESS OR A NARROW CREDENTIAL, and none can be
+              derived from SUPABASE_URL above -- that is `supabase-kong:8000`, which resolves
+              inside this cluster and nowhere a shopfloor appliance lives. A bundle carrying it
+              enrols nothing: bootstrap fails at its first fetch against a plausible-looking URL.
+
+              BOTH FUNCTIONS REFUSE RATHER THAN DEFAULT. gateway-bundle answers 503 and mints no
+              token when SUPABASE_PUBLIC_URL is unset or in-stack; enroll-gateway answers 503
+              WITHOUT CONSUMING THE TOKEN when MQTT_PUBLIC_HOST is. A chart installed without these
+              fails legibly at the point of use rather than producing a fleet of appliances that
+              enrol and then cannot connect.
+              =====================================================================================
+            */}}
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ .Values.supabaseFunctions.gatewayEnrolment.supabasePublicUrl | default (include "aber.supabaseUrl" .) | quote }}
+            {{- /* THE ONE-LINER (docs/remote-gateways.md). Where a fresh appliance fetches the
+                   platform's root over plain HTTP before it trusts anything: the dashboard's host,
+                   which serves the ingress TLS Secret's ca.crt at this path (frontend.yaml). The
+                   pin the command carries is computed from the same Secret, mounted below. */}}
+            {{- if .Values.ingress.tls.enabled }}
+            - name: ACS_CA_URL
+              value: {{ printf "http://%s/.well-known/acs-cymru/ca.pem" (include "aber.hostOf" (dict "ctx" . "name" "frontend")) | quote }}
+            {{- end }}
+            {{- if .Values.supabaseFunctions.gatewayEnrolment.allowPlaintextInstaller }}
+            - name: ACS_INSTALLER_ALLOW_HTTP
+              value: "true"
+            {{- end }}
+            {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
+                   already derives for the external broker route, which is the address the
+                   certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
+            {{- /* THE FORGE, for enrolment's fourth step (docs/remote-gateways.md). The in-cluster Service, not
+                   the ingress hostname: the clone URL an appliance is handed comes from the forge's
+                   own answer, which is built from its ROOT_URL and SSH_DOMAIN, so these two never
+                   have to agree.
+
+                   Rendered only when the forge is deployed. With no machine-account password the
+                   function skips its fourth step and says so in the response -- a gateway still
+                   enrols and still gets its broker credential. */}}
+            {{- if .Values.gitea.enabled }}
+            - name: GITEA_INTERNAL_URL
+              value: "http://gitea:3000"
+            - name: GITEA_MACHINE_USER
+              value: {{ .Values.gitea.machineUser | quote }}
+            {{- include "aber.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
+            {{- /* The push webhook enrolment registers on each gateway repository (0095): this
+                   Service, reached by Gitea over the NetworkPolicy edge gitea -> supabase-functions,
+                   and the secret forge-events verifies deliveries with. Optional: unset is no hook. */}}
+            - name: GITEA_WEBHOOK_URL
+              value: "http://supabase-functions:9000/forge-events"
+            {{- include "aber.optionalSecretEnv" (dict "name" "GITEA_WEBHOOK_SECRET" "secretName" $secretName "key" "GITEA_WEBHOOK_SECRET") | nindent 12 }}
+            {{- /* The platform's version, which is the tag forge-sweep publishes the platform
+                   playbook under in the forge and the tag a new gateway's platform.yml points at.
+                   The chart's appVersion, the same value the images are pulled at, so the playbook
+                   an appliance converges to and the platform it reports to ship from one tag. */}}
+            - name: ACS_PLATFORM_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            {{- end }}
+            - name: MQTT_PUBLIC_HOST
+              value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost
+                        | default (include "aber.hostOf" (dict "ctx" . "name" "mqtt")) | quote }}
+            - name: MQTT_PUBLIC_TLS_PORT
+              value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicTlsPort | int64 | quote }}
+            {{- /* The credential-issuing sidecar, addressed through its own Service -- NOT the
+                   broker's. It publishes no external route and a NetworkPolicy admits only this
+                   Deployment; see templates/messaging/gateway-credential.yaml. */}}
+            - name: MQTT_CREDENTIAL_SERVICE_URL
+              value: {{ printf "http://%s-gateway-credential:%v" (include "aber.fullname" .) .Values.gatewayCredential.port | quote }}
+            {{- include "aber.secretEnv" (dict "name" "MQTT_CREDENTIAL_SERVICE_TOKEN" "secretName" $secretName "key" "MQTT_CREDENTIAL_SERVICE_TOKEN") | nindent 12 }}
+            {{- /* Verified by revoke-gateway-credential. The edge runtime boots with
+                   VERIFY_JWT=false, so a function that does not check its own secret is an open
+                   endpoint -- the gateway's key check proves only that the caller holds the
+                   publishable key. */}}
+            {{- include "aber.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
+            {{- /* Verified by forge-sweep, for the same reason (0099). */}}
+            {{- include "aber.secretEnv" (dict "name" "FORGE_SWEEP_SECRET" "secretName" $secretName "key" "FORGE_SWEEP_SECRET") | nindent 12 }}
+          # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
+          # supabase/edge-runtime:v1.74.2 by probing it directly:
+          #
+          #   /_internal/health  404   "rejected request for unregistered function '_internal'"
+          #   /health            404   same -- the allow-list treats it as a function name
+          #   /                  400   the main service answering an empty service name
+          #   /grafana-userinfo  401   a worker spawned and refused an unauthenticated caller
+          #
+          # Every one of those is a HEALTHY response, and httpGet scores all of them as failures
+          # (it accepts 200-399 only), so the pod never becomes ready and the event says
+          # "readiness probe failed: HTTP 404" -- which reads as a missing function. There is
+          # nothing to exec with either: the image carries no curl or wget.
+          #
+          # So the honest probe is "is the listener accepting connections", which for a request
+          # router holding no state and no upstream pool is a fair readiness signal. Anything
+          # stronger would invoke a real function on every probe, spawning a worker isolate and
+          # hitting the database on a 10s period forever.
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.supabaseFunctions.resources | nindent 12 }}
+          {{- if .Values.ingress.tls.enabled }}
+          volumeMounts:
+            {{- /* The platform's root, for the one-liner's pin: the CA that signs the API's own
+                   certificate, which is the one an appliance must trust to reach this function.
+                   One projected key, never the Secret whole (it also holds tls.key). Optional so
+                   the pod starts before cert-manager has issued; the entrypoint reads the file at
+                   start, so a pod that started before the issue offers no one-liner until it is
+                   restarted, and the dashboard says so. */}}
+            - name: platform-root
+              mountPath: /home/deno/ca
+              readOnly: true
+          {{- end }}
+      {{- if .Values.ingress.tls.enabled }}
+      volumes:
+        - name: platform-root
+          secret:
+            secretName: {{ .Values.ingress.tls.secretName }}
+            optional: true
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
+{{- end }}

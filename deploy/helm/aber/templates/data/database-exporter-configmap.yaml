@@ -1,0 +1,42 @@
+{{- if .Values.databaseMetrics.enabled }}
+{{/*
+The custom exporter queries, one ConfigMap per database.
+
+`--extend.query-path` TAKES A FILE, NOT A DIRECTORY, so each database gets ONE file and the shared
+queries are concatenated into it rather than mounted alongside. That is why `common.yaml` appears
+twice below instead of being a ConfigMap of its own.
+
+THE HISTORIAN'S FILE IS THE LONGER ONE, and the difference is not stylistic: every query in
+`timescaledb-exporter/queries.yaml` reads `timescaledb_information` or the storage footprint view,
+neither of which exists on supabase-db. A custom-query file naming a missing relation does not fail
+the scrape -- the collector errors, the exporter keeps serving, and the series are simply absent --
+so each file is mounted only where its queries can run.
+
+A CHANGE HERE ROLLS THE POD. The exporter reads its query file once at startup, so the checksum
+annotation on each StatefulSet is what makes an edit take effect rather than sit unread.
+*/}}
+{{- if .Values.supabaseDb.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-supabase-db-exporter" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "supabase-db") | nindent 4 }}
+data:
+  queries.yaml: |
+{{ .Files.Get "files/database-exporter/common.yaml" | indent 4 }}
+{{- end }}
+{{- if .Values.timescaledb.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-timescaledb-exporter" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "timescaledb") | nindent 4 }}
+data:
+  queries.yaml: |
+{{ .Files.Get "files/database-exporter/common.yaml" | indent 4 }}
+{{ .Files.Get "files/timescaledb-exporter/queries.yaml" | indent 4 }}
+{{- end }}
+{{- end }}

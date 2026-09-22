@@ -4,12 +4,12 @@
  * values-dev.yaml ships working demo values that are in git and in every self-host guide, and the
  * gateway's key filter admits the anon and service-role JWTs as API keys, so a stack installed
  * from it accepts published credentials at its edge. This writes
- * deploy/helm/acs-cymru/values-local.yaml (gitignored) with every secret minted here:
+ * deploy/helm/aber/values-local.yaml (gitignored) with every secret minted here:
  *
  *   npm run setup                        # asks one question on a terminal
  *   npm run setup -- --domain=acs.example.com
- *   helm upgrade --install acs-cymru deploy/helm/acs-cymru -n acs-cymru \
- *     -f deploy/helm/acs-cymru/values-local.yaml
+ *   helm upgrade --install aber deploy/helm/aber -n aber \
+ *     -f deploy/helm/aber/values-local.yaml
  *
  * The JWTs are a set: the anon and service-role keys are HS256 JWTs signed by the JWT secret, and
  * rotating the secret without re-minting both yields a stack that comes up healthy and rejects
@@ -38,7 +38,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const outArg = process.argv.find((a) => a.startsWith('--out='));
-const outPath = path.resolve(rootDir, outArg ? outArg.slice('--out='.length) : 'deploy/helm/acs-cymru/values-local.yaml');
+const outPath = path.resolve(rootDir, outArg ? outArg.slice('--out='.length) : 'deploy/helm/aber/values-local.yaml');
 
 /** Hex: these values land in connection strings, psql `-v` variables and YAML, and hex needs no
  *  escaping in any of them. */
@@ -175,7 +175,7 @@ const yamlLines = [
   '# ignored). Every credential below was generated for this file and is shared with nothing;',
   '# the anon and service-role JWTs are signed by jwtSecret, so the three are a matching set.',
   '#',
-  '#   helm upgrade --install acs-cymru deploy/helm/acs-cymru -n acs-cymru -f ' + path.relative(rootDir, outPath).replace(/\\/g, '/'),
+  '#   helm upgrade --install aber deploy/helm/aber -n aber -f ' + path.relative(rootDir, outPath).replace(/\\/g, '/'),
   '#',
   '# For a stack other people reach, move these into an externally managed Secret and set',
   '# secrets.existingSecret instead (values-prod.yaml.example).',
@@ -216,4 +216,4 @@ console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.loc
 console.log('   other three accounts are seeded by supabase/seed.sql. Change them before anyone else');
 console.log('   can reach this stack.');
 console.log('');
-console.log(`🎉 helm upgrade --install acs-cymru deploy/helm/acs-cymru -n acs-cymru -f ${rel}`);
+console.log(`🎉 helm upgrade --install aber deploy/helm/aber -n aber -f ${rel}`);

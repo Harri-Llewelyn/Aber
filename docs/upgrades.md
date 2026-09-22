@@ -19,11 +19,11 @@ and — in §4 — the three places where that is not the whole truth.
 V=<the version you are upgrading to>
 
 # Does it exist? This reads GHCR anonymously and needs no credentials.
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version "$V"
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/aber --version "$V"
 
-helm upgrade acs-cymru oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru \
+helm upgrade aber oci://ghcr.io/harri-llewelyn/acs-cymru/aber \
   --version "$V" \
-  --namespace acs-cymru \
+  --namespace aber \
   --values my-values.yaml \
   --wait --timeout 15m
 ```
@@ -40,6 +40,11 @@ Three things about that command:
 - **`--wait` is safe here and is not safe on the first install.** The install deadlocks on it — the
   bootstrap hooks set the database roles the workloads wait for — and `deploy/k8s/README.md` gives
   that failure in full. On an upgrade the roles already have their passwords, so there is no cycle.
+- **A release installed from the `acs-cymru` chart cannot be upgraded to this one.** The chart is
+  `aber` now, and the chart name is in every workload's `spec.selector.matchLabels`, which Kubernetes
+  refuses to change in place. That path is uninstall and reinstall: take a backup, `helm uninstall`
+  the old release (the claims survive by policy), install `aber` into a fresh namespace, and restore
+  from the backup. The same wall stood between `factoryplus` and `acs-cymru` (issue #367).
 
 Everything below is what that one command does and does not disturb.
 
@@ -260,9 +265,9 @@ checks are ones to run while the upgrade is still fresh.
 
 | Check | Where |
 | :--- | :--- |
-| Every migration applied cleanly | `kubectl -n acs-cymru logs job/acs-cymru-db-init` — it exits non-zero on any failure |
-| The historian's extension matches its image | `kubectl -n acs-cymru logs job/acs-cymru-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
-| Policy jobs are getting workers | `kubectl -n acs-cymru logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
+| Every migration applied cleanly | `kubectl -n aber logs job/aber-db-init` — it exits non-zero on any failure |
+| The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
+| Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
 | Telemetry still landing | Grafana → *Stack & Ingestion Health* → rows ingested per second |
 | The daemon is not dropping anything new | `curl localhost:9108/metrics \| grep dropped` — every reason is a separate series |

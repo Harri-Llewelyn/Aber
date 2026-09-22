@@ -258,7 +258,7 @@ if (RUNTIME) {
     if (!anonKey) {
       console.error(
         '\n--authenticated needs SUPABASE_PUBLISHABLE_KEY to present a valid credential.\n'
-        + 'Export it: kubectl -n acs-cymru get secret acs-cymru-secrets -o jsonpath={.data.SUPABASE_PUBLISHABLE_KEY} | base64 -d\n'
+        + 'Export it: kubectl -n aber get secret aber-secrets -o jsonpath={.data.SUPABASE_PUBLISHABLE_KEY} | base64 -d\n'
         + 'Refusing rather than skipping: a pass that\n'
         + 'silently checked nothing is the failure this whole mode exists to prevent.\n'
       );
@@ -381,7 +381,7 @@ if (RUNTIME) {
 // boot failure). The route surface is asserted by `--runtime`.
 
 const ENVOY_TEMPLATE = 'supabase/envoy.yaml';
-const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
+const CHART_ENVOY = 'deploy/helm/aber/templates/supabase/envoy.yaml';
 
 /** Substituted by the chart's initContainer. */
 const TEMPLATE_PLACEHOLDERS = [

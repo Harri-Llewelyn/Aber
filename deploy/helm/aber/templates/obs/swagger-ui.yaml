@@ -1,0 +1,87 @@
+{{- if .Values.swaggerUi.enabled }}
+{{- $component := "swagger-ui" -}}
+{{/*
+Swagger UI, serving the two curated API specifications.
+
+THE SPECS ARE IN THE IMAGE, not in a ConfigMap: they are read by this pod and by nothing else, and
+at ~270 KB they were the largest single thing in Helm's 1 MiB release Secret, which holds the chart
+archive and the rendered manifest both. swagger-ui/Dockerfile copies them from docs/, the way
+supabase/db-init/Dockerfile carries the migrations. An edit to docs/*.yaml therefore reaches a
+cluster with the next image build rather than the next upgrade.
+*/}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-ui
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-ui
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.swaggerUi.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: swagger-ui
+          image: {{ include "aber.image" (dict "image" .Values.swaggerUi.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.swaggerUi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Two curated specs, both served from this image's document root.
+            #
+            # There is deliberately no PostgREST live-schema entry: it pointed at /rest/v1/, which
+            # the gateway gates, so the browser fetched it without an apikey and the definition
+            # failed to load as an authorization error. It duplicated openapi.yaml, which
+            # check-docs-drift.mjs holds against every published relation and edge function.
+            #
+            # The i3X spec loads from this origin like the other file, but its "Try it out" cannot
+            # work: the i3X server sends no CORS headers and answers OPTIONS with 501, so the
+            # browser cannot reach :8090 cross-origin. The document says so in its description.
+            - name: URLS
+              value: >-
+                [{"url":"/openapi.yaml","name":"ACS-Cymru Platform API"},
+                 {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"}]
+            - name: URLS_PRIMARY_NAME
+              value: ACS-Cymru Platform API
+            - name: DEEP_LINKING
+              value: "true"
+            - name: DISPLAY_REQUEST_DURATION
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.swaggerUi.resources | nindent 12 }}
+{{- end }}

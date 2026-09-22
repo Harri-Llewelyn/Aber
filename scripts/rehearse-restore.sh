@@ -25,14 +25,14 @@
 #
 # Needs kubectl, psql, pg_restore, curl, jq, tar and sha256sum on the machine it runs on.
 #
-# Environment: NS (namespace, default acs-cymru), RELEASE (default acs-cymru), and the credentials
+# Environment: NS (namespace, default aber), RELEASE (default aber), and the credentials
 # the chart was installed with. The defaults match values-dev.yaml, which is what CI installs;
 # the forge and broker credentials are read from the release Secret when not set.
 #
 set -euo pipefail
 
-NS="${NS:-acs-cymru}"
-RELEASE="${RELEASE:-acs-cymru}"
+NS="${NS:-aber}"
+RELEASE="${RELEASE:-aber}"
 FIXTURES="${FIXTURES:-$(cd "$(dirname "$0")/../test-harness/restore-rehearsal" && pwd)}"
 
 # Local ports for the tunnels. Deliberately not 54322/5433: those are the dev loop's forwards,

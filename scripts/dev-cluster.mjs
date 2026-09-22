@@ -52,10 +52,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const CHART = 'deploy/helm/acs-cymru'
+const CHART = 'deploy/helm/aber'
 const CLUSTER = process.env.ACS_DEV_CLUSTER || 'acs-cymru'
-const NS = process.env.ACS_DEV_NAMESPACE || 'acs-cymru'
-const RELEASE = 'acs-cymru'
+const NS = process.env.ACS_DEV_NAMESPACE || 'aber'
+const RELEASE = 'aber'
 const IMG_NS = 'ghcr.io/harri-llewelyn/acs-cymru'
 // The runbook's pin. cert-manager is cluster administration, installed once, not a chart dependency.
 const CERT_MANAGER_VERSION = 'v1.16.2'

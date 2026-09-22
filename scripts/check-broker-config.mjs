@@ -41,7 +41,7 @@ const ok = [];
 
 /** The tag the chart pins, so this tests what actually runs -- never `latest`. */
 function pinnedTag() {
-  const values = readFileSync(join(REPO, 'deploy', 'helm', 'acs-cymru', 'values.yaml'), 'utf8');
+  const values = readFileSync(join(REPO, 'deploy', 'helm', 'aber', 'values.yaml'), 'utf8');
   const m = values.match(/repository:\s*eclipse-mosquitto\s*\n\s*tag:\s*["']?([^\s"']+)/);
   if (!m) {
     throw new Error('could not find the eclipse-mosquitto image pin in values.yaml');

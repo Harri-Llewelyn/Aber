@@ -122,7 +122,7 @@ const noRun = args.includes('--no-run')
 const history = args.includes('--with-history') || args.some(a => a.startsWith('--history-file='))
 const historyFile = args.find(a => a.startsWith('--history-file='))?.split('=').slice(1).join('=') || null
 const historyOut = args.find(a => a.startsWith('--history-out='))?.split('=').slice(1).join('=') || null
-const HISTORY_NS = process.env.ACS_NAMESPACE || 'acs-cymru'
+const HISTORY_NS = process.env.ACS_NAMESPACE || 'aber'
 const HISTORY_POD = process.env.ACS_DB_POD || 'supabase-db-0'
 const filterIdx = args.findIndex(a => a === '-k')
 const filter = filterIdx !== -1 ? args[filterIdx + 1] : null

@@ -215,7 +215,7 @@ carry named a package that does not exist.
 // claude_desktop_config.json, or any MCP host's equivalent
 {
   "mcpServers": {
-    "acs-cymru": {
+    "aber": {
       "command": "npx",
       "args": ["-y", "i3x-mcp@0.1.0"],
       "env": {
@@ -405,7 +405,7 @@ and discover it during their own integration.
 
 | | Commitment |
 | :--- | :--- |
-| Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/acs-cymru/templates/apps/i3x-service.yaml) |
+| Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/aber/templates/apps/i3x-service.yaml) |
 | Endpoint reachability across a restart | **None.** `Recreate` stops the old pod before starting the new one, so there is a window with no i3X endpoint at all rather than a degraded one |
 | Subscription survival across a restart | **None.** Queues, sequence numbers and open SSE streams are process memory |
 | Current values immediately after a restart | **Cold, and reported as cold.** The MQTT cache refills from `spBv1.0/#` as devices publish; until a device next publishes, `/objects/value` answers `quality: "GoodNoData"` with a null value for it |
@@ -481,7 +481,7 @@ than minutes, and why `0` disables the cache outright.
 
   The suite runs against a port-forward — `http://127.0.0.1:8090/v1` — which is a loopback
   socket, not a deployment surface. In the cluster i3X rides the shared Ingress like every other
-  service (`acs-cymru.ingressRoutes` appends it), which terminates TLS against one wildcard
+  service (`aber.ingressRoutes` appends it), which terminates TLS against one wildcard
   certificate issued by cert-manager, so a production endpoint is served over HTTPS and the
   advisory does not apply to it. The TLS edge is browser-only, as it is for every other service.
 

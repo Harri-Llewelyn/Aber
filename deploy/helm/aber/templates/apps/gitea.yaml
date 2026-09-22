@@ -1,0 +1,370 @@
+{{/*
+THE FORGE CONFIGURATION, DEFINED ONCE BECAUSE TWO CONTAINERS BUILD FROM IT.
+
+Gitea assembles /data/gitea/conf/app.ini from these `GITEA__section__KEY` variables, and BOTH the
+init container and the server run that assembly -- the init container because no `gitea` subcommand
+will run without a config file. A variable set on one and not the other means the account is created
+in one database and the server opens another, with nothing reporting a fault.
+*/}}
+{{- define "aber.giteaEnv" -}}
+- name: USER_UID
+  value: "1000"
+- name: USER_GID
+  value: "1000"
+- name: GITEA__server__PROTOCOL
+  value: http
+- name: GITEA__server__HTTP_PORT
+  value: "3000"
+{{- with (include "aber.giteaUrl" .) }}
+{{/* WHAT A CLONE URL SAYS. Derived from the same helper the Ingress rule takes its host
+     from, so the address a repository page hands an engineer cannot disagree with the
+     address that actually routes. */}}
+- name: GITEA__server__ROOT_URL
+  value: {{ printf "%s/" . | quote }}
+- name: GITEA__server__DOMAIN
+  value: {{ include "aber.hostOf" (dict "ctx" $ "name" "gitea") | quote }}
+{{- end }}
+{{/* SSH IS SERVED BY THE IMAGE'S OWN sshd on 22, with Gitea writing the git user's
+     authorized_keys, so Gitea's built-in SSH server is turned OFF -- it would bind
+     the same port inside the pod, lose the race, and exit with "address already in
+     use", which is a CrashLoopBackOff on a Deployment that is otherwise correct.
+
+     ASSERTED FALSE rather than omitted: environment-to-ini MERGES into the app.ini
+     already on the volume, so a key written by an earlier revision survives every
+     later one that stops mentioning it. */}}
+- name: GITEA__server__START_SSH_SERVER
+  value: "false"
+{{/* THE PORT AND HOST A CLONE URL ADVERTISES, which are the EXTERNAL Service's and not
+     the container's. Gitea cannot know it is behind a LoadBalancer, so left at the
+     listen port it would hand an appliance a clone URL naming a port nothing
+     publishes -- which fails on the appliance, after enrolment, as a network error. */}}
+- name: GITEA__server__SSH_PORT
+  value: {{ .Values.gitea.ssh.external.port | quote }}
+{{- with (or .Values.gitea.ssh.domain (include "aber.hostOf" (dict "ctx" . "name" "gitea"))) }}
+- name: GITEA__server__SSH_DOMAIN
+  value: {{ . | quote }}
+{{- end }}
+- name: GITEA__database__DB_TYPE
+  value: sqlite3
+- name: GITEA__database__PATH
+  value: /data/gitea/gitea.db
+# No web installer; the other half of the initContainer's decision above.
+- name: GITEA__security__INSTALL_LOCK
+  value: "true"
+# THE FOUR THAT KEEP IT OFF THE IDENTITY PLANE. Nobody signs themselves up, nobody reads
+# a repository without an account, and no repository is public by accident: a flows.json
+# names the plant's brokers and devices.
+- name: GITEA__service__DISABLE_REGISTRATION
+  value: "true"
+- name: GITEA__service__REQUIRE_SIGNIN_VIEW
+  value: "true"
+- name: GITEA__repository__FORCE_PRIVATE
+  value: "true"
+- name: GITEA__repository__DEFAULT_PRIVATE
+  value: private
+# THE LOGIN, WHICH IS THE GATEWAY'S `forge` LISTENER AND NOT GITEA'S OWN. The argument and the
+# measurements are in supabase/README.md (the forge). What this adds is the NetworkPolicy edge
+# list: the identity
+# header is trusted from ANY peer (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only,
+# measured), so the gateway and the edge runtime are the only pods allowed to reach port 3000.
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_EMAIL
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_FULL_NAME
+  value: "true"
+- name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION_API
+  value: "false"
+- name: GITEA__service__ENABLE_PASSWORD_SIGNIN_FORM
+  value: "false"
+- name: GITEA__security__REVERSE_PROXY_TRUSTED_PROXIES
+  value: "*"
+- name: GITEA__security__REVERSE_PROXY_LIMIT
+  value: "1"
+# Off: a runner executes whatever a repository tells it to, and a registry is a fourth credential
+# plane. The required status check on a proposed flow is posted by the platform, not built by a
+# runner (supabase/README.md, "The forge checks a flow before it is merged").
+- name: GITEA__actions__ENABLED
+  value: {{ .Values.gitea.actions.enabled | quote }}
+- name: GITEA__packages__ENABLED
+  value: {{ .Values.gitea.packages.enabled | quote }}
+- name: GITEA__cron.update_checker__ENABLED
+  value: "false"
+# Projects and Packages are hidden from every repository; the wiki and issues stay.
+- name: GITEA__repository__DISABLED_REPO_UNITS
+  value: "repo.projects,repo.packages"
+# Webhooks may call private addresses: the one they call is the edge runtime (forge-events), a
+# cluster-internal Service. Gitea's default admits public addresses only.
+- name: GITEA__webhook__ALLOWED_HOST_LIST
+  value: "private"
+- name: GITEA__log__LEVEL
+  value: {{ .Values.gitea.logLevel | quote }}
+{{- end -}}
+
+{{- if .Values.gitea.enabled }}
+{{- $component := "gitea" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $giteaPublic := include "aber.giteaUrl" . -}}
+{{- $initScript := .Files.Get "files/gitea-scripts/gitea-init.sh" -}}
+{{- if not $initScript }}
+{{- fail "\n\naber: files/gitea-scripts/gitea-init.sh is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nWithout it the forge starts with its web installer LOCKED and no account able to open it -- a\nforge nobody can log into, on a pod that reports Ready.\n" }}
+{{- end }}
+{{/*
+=================================================================================================
+GITEA -- the forge: one private repository per enrolled gateway, cloned by the appliance's puller.
+The argument for it is in supabase/README.md. What this file adds is what the Kubernetes shape has
+to answer.
+
+ONE: SSH IS NOT AN INGRESS CONCERN. Every appliance holds a per-gateway deploy key confined by
+branch rules to pulling `main` and pushing `appliance`, and a Gitea deploy key is an SSH key --
+there is no per-repository HTTP token to use instead. An HTTP Ingress cannot carry SSH, so the
+split mosquitto already makes applies: a plain ClusterIP for in-cluster resolution and a SECOND
+Service for the fleet. Getting it wrong is quiet -- the web UI works and appliances cannot clone.
+
+TWO: SINGLE WRITER, SO `Recreate`. The backend is SQLite on a ReadWriteOnce PVC and the
+repositories are a directory on that same volume, so two replicas is two processes writing one
+SQLite file. Declared in `aber.singleWriterWorkloads` so the autoscaling guard refuses it
+rather than discovering it.
+
+THREE: THE ADMIN ACCOUNT IS AN initContainer running the mirrored gitea-init.sh, idempotent.
+`INSTALL_LOCK` closes the web installer, so the first account has to be created out of band or a
+forge on a plant network is one request away from anybody making themselves its administrator.
+=================================================================================================
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-gitea-scripts" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  gitea-init.sh: |
+{{ $initScript | indent 4 }}
+---
+{{- if .Values.gitea.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-gitea" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # KEPT ACROSS `helm uninstall`, and this is the volume in the chart where that matters most
+    # after the databases. It holds every repository -- the only copy of every gateway's edge
+    # flow -- plus the SSH host keys appliances carry in known_hosts. Losing those does not
+    # merely lose data: every gateway
+    # refuses to clone with a host-key mismatch, which reads as an attack rather than as a restore.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - {{ .Values.gitea.persistence.accessMode }}
+  {{- include "aber.storageClass" (dict "ctx" . "component" .Values.gitea.persistence) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.gitea.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      # 3000 in the container; the forge is reached through the gateway, not by this port.
+      port: 3000
+      targetPort: http
+      protocol: TCP
+    - name: ssh
+      port: 22
+      targetPort: ssh
+      protocol: TCP
+{{- if .Values.gitea.ssh.external.enabled }}
+---
+{{/*
+Git over SSH from OUTSIDE the cluster.
+
+A SECOND Service and not a change of type on the one above, exactly as mosquitto-external is: the
+in-cluster name must stay a plain ClusterIP so `gitea:3000` keeps resolving for in-cluster
+clients, and mixing the two would tie service discovery to an external IP allocation.
+
+WHY SSH RATHER THAN AN HTTP TOKEN, restated here because this Service is what pays for it: a Gitea
+deploy key is per-repository, and branch rules confine it to one branch it may write, which is the
+credential model enrolment issues (docs/remote-gateways.md). An
+HTTP token is per-USER and carries that user's access to EVERY repository, so using one would hand
+each appliance the whole fleet's flows in order to save a port.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea-external
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  {{- with .Values.gitea.ssh.external.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.gitea.ssh.external.type }}
+  {{- with .Values.gitea.ssh.external.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: ssh
+      port: {{ .Values.gitea.ssh.external.port }}
+      targetPort: ssh
+      protocol: TCP
+      {{- if and (eq .Values.gitea.ssh.external.type "NodePort") .Values.gitea.ssh.external.nodePort }}
+      nodePort: {{ .Values.gitea.ssh.external.nodePort }}
+      {{- end }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    # Single writer: SQLite plus a repository directory on one ReadWriteOnce PVC. RollingUpdate
+    # would start the new pod before the old one released the volume, which on a RWO claim is a pod
+    # that never schedules -- and on a filesystem that did allow it, two writers on one SQLite file.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # fsGroup 1000 to match USER_UID/USER_GID below. A storage class that ignores fsGroup gives
+      # "permission denied" on a volume that mounted perfectly -- global.storageClass says so too.
+      securityContext:
+        {{- toYaml .Values.gitea.podSecurityContext | nindent 8 }}
+      initContainers:
+        {{/*
+          The administrator, created once and then left alone.
+
+          IDEMPOTENT BY INSPECTION rather than by `|| true`. "User already exists" is the ordinary
+          state of every boot after the first and exits non-zero; every OTHER non-zero exit -- an
+          unwritable volume, a corrupt database -- has to keep failing, and swallowing the code
+          would report both as provisioned.
+
+          THE PASSWORD COMES FROM THE SECRET, never from a values default, so an externally-managed
+          Secret (External Secrets, SOPS) satisfies it with no template change.
+        */}}
+        - name: gitea-init
+          image: "{{ .Values.gitea.image.repository }}:{{ .Values.gitea.image.tag }}"
+          imagePullPolicy: {{ .Values.gitea.image.pullPolicy }}
+          env:
+            {{- include "aber.giteaEnv" . | nindent 12 }}
+            # Read by /etc/s6/gitea/setup, which chowns what it writes to this account.
+            - name: USER
+              value: git
+            - name: GITEA_WORK_DIR
+              value: /data/gitea
+            - name: GITEA_ADMIN_USER
+              value: {{ .Values.gitea.adminUser | quote }}
+            - name: GITEA_ADMIN_EMAIL
+              value: {{ .Values.gitea.adminEmail | quote }}
+            {{- include "aber.secretEnv" (dict "name" "GITEA_ADMIN_PASSWORD" "secretName" $secretName "key" "GITEA_ADMIN_PASSWORD") | nindent 12 }}
+            {{/* THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and deliberately not an admin: it owns
+                 the per-gateway repositories and can attach a deploy key and branch rules to one,
+                 which is all the authority enroll-gateway needs. An admin credential here would be able to
+                 rewrite every repository in the forge -- including the playbook the whole fleet
+                 converges to -- and it would be held by a function reachable from the network.
+
+                 OPTIONAL at both ends: no password means no machine account and no gateway
+                 repositories, which is a deployment without the forge integration rather than a
+                 broken one. */}}
+            - name: GITEA_MACHINE_USER
+              value: {{ .Values.gitea.machineUser | quote }}
+            - name: GITEA_MACHINE_EMAIL
+              value: {{ .Values.gitea.machineEmail | quote }}
+            {{- include "aber.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
+          {{/* THE SCRIPT IS MIRRORED, NOT INLINE. Which accounts the forge has -- and that the
+               machine account is NOT an admin -- is provisioning policy, and policy copied into a
+               shell block drifts. */}}
+          command: ["/bin/bash", "/seed/gitea-init.sh"]
+          volumeMounts:
+            - name: init-script
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /data
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      containers:
+        - name: gitea
+          image: "{{ .Values.gitea.image.repository }}:{{ .Values.gitea.image.tag }}"
+          imagePullPolicy: {{ .Values.gitea.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+            - name: ssh
+              containerPort: 22
+              protocol: TCP
+          env:
+            # Every GITEA__section__KEY is written into app.ini at start, so app.ini stays Gitea's
+            # to own across upgrades and the security posture is stated in ONE place -- here.
+            {{- include "aber.giteaEnv" . | nindent 12 }}
+          startupProbe:
+            # /api/healthz reports the database and the internal caches rather than merely that a
+            # socket is open, which matters when the database is a file on the mounted volume.
+            httpGet:
+              path: /api/healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.gitea.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: init-script
+          configMap:
+            name: {{ printf "%s-gitea-scripts" $fullname }}
+            defaultMode: 0755
+        - name: data
+          {{- if .Values.gitea.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-gitea" $fullname }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

@@ -34,7 +34,7 @@ import logging_config  # noqa: E402
 # The collector's config lives in the chart template; the River is a YAML block scalar there,
 # so the regexes below read it as text.
 ALLOY_TEMPLATE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "helm", "acs-cymru",
+    os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "helm", "aber",
     "templates", "obs", "alloy.yaml")
 
 INGESTION_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ingestion.py")

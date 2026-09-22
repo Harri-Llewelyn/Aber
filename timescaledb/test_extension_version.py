@@ -35,8 +35,8 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 REPO = Path(__file__).resolve().parent.parent
-HELM_JOB = REPO / "deploy" / "helm" / "acs-cymru" / "templates" / "jobs" / "timescaledb-maintenance.yaml"
-MIRROR = REPO / "deploy" / "helm" / "acs-cymru" / "files" / "timescaledb-maintenance" / "extension.sql"
+HELM_JOB = REPO / "deploy" / "helm" / "aber" / "templates" / "jobs" / "timescaledb-maintenance.yaml"
+MIRROR = REPO / "deploy" / "helm" / "aber" / "files" / "timescaledb-maintenance" / "extension.sql"
 
 
 class ExtensionVersionTestCase(unittest.TestCase):

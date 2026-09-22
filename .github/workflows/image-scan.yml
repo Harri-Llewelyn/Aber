@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           # Every image a full render names, with the optional workloads switched on so their
           # images are scanned too; the chart's own builds are the release workflow's to scan.
-          helm template acs-cymru deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml \
+          helm template aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml \
             --set backup.enabled=true --set backupService.enabled=true --set playback.enabled=true \
             --set e2e.enabled=true \
             | grep -hoE '^[[:space:]]+image:[[:space:]]+"?[^"[:space:]]+' \

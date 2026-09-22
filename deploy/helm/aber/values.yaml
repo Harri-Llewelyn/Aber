@@ -1,0 +1,1430 @@
+# =============================================================================================
+# ACS-Cymru — default values
+#
+# These defaults are NOT a working configuration: the Supabase credentials in `secrets` are
+# empty and the chart refuses to render without them (`aber.validateSecrets`). Use
+# `-f values-dev.yaml` for a local k3s stack, or copy values-prod.yaml.example.
+# =============================================================================================
+
+global:
+  # The DNS suffix every ingress hostname is built from (app., api., nodered., grafana.,
+  # studio., docs., git., mqtt.). Subdomains, not paths: Grafana, Node-RED and Studio assume they
+  # own a root, and Node-RED's webhook path is registered in the database (architecture §7.1).
+  # Required when `ingress.enabled`.
+  publicBaseDomain: ""
+
+  # http | https. Decides the scheme in every browser-facing URL the chart composes.
+  scheme: http
+
+  # EXTRA browser origins for the gateway's CORS policy, appended to the derived ones (the
+  # dashboard's and Swagger UI's, from `publicBaseDomain` / `publicUrls.*`). For a reverse proxy
+  # or tunnel that presents the browser with a hostname the chart cannot know. Scheme and host
+  # only, no path. An origin missing here presents as a dashboard that logs in and shows empty
+  # tables while the gateway reports 200.
+  #   corsExtraOrigins:
+  #     - https://acs.example.com
+  corsExtraOrigins: []
+
+  # PVC storage class for every stateful component. `local-path` (k3s's provisioner) is
+  # NODE-LOCAL: lose the node, lose the volume. Replace it on a multi-node or production
+  # cluster with a class that supports ReadWriteOnce and fsGroup remapping.
+  # See deploy/k8s/README.md, "Storage classes and what a node loss costs".
+  storageClass: local-path
+
+  # Applied to every pod.
+  imagePullSecrets: []
+
+  # Merged onto every object the chart creates.
+  commonLabels: {}
+  commonAnnotations: {}
+
+# ---------------------------------------------------------------------------------------------
+# Refusals made before anything is created
+# ---------------------------------------------------------------------------------------------
+preflight:
+  # Refuse `helm install` onto a cluster whose schedulable nodes cannot cover the requests this
+  # chart makes (`aber.validateCapacity`). The floor is derived from the `resources.requests`
+  # further down, so lowering those or disabling components lowers it too.
+  #
+  # Checked on install only, and skipped whenever `lookup` returns nothing -- under `helm template`,
+  # under `--dry-run`, and when the installing credential may not list nodes. Set false to install
+  # onto a node that cannot fit the stack and accept pods that stay Pending.
+  capacityCheck: true
+
+# ---------------------------------------------------------------------------------------------
+# Credentials
+#
+# The Supabase values are a SET: `anonKey`, `serviceRoleKey`, `ingestionKey` and `playbackKey`
+# are JWTs signed by `jwtSecret`, so none is generated and the render fails if any is missing.
+# Claims: {"iss":"supabase","role":"anon"} / {"iss":"supabase","role":"service_role"}, HS256.
+# External secret management attaches through `existingSecret`.
+# ---------------------------------------------------------------------------------------------
+secrets:
+  # Reference an EXISTING Secret instead of rendering one; every value below is then ignored
+  # and the named Secret must carry the same keys.
+  existingSecret: ""
+
+  # HS256 signing key shared by GoTrue, PostgREST, Realtime, Storage, the gateway and Node-RED.
+  jwtSecret: ""
+  # The JWTs the upstreams require. No caller presents them: the gateway substitutes them for
+  # the two keys below and refuses them as an apikey.
+  anonKey: ""
+  serviceRoleKey: ""
+
+  # The API keys callers present (`sb_publishable_*` / `sb_secret_*`). Not JWTs: the gateway
+  # matches them as strings and hands upstreams the JWT each stands for. Required.
+  publishableKey: ""
+  secretKey: ""
+  # The ingestion daemon's credential: claims {"iss":"supabase","role":"authenticated",
+  # "sub":"b0000000-0000-4000-8000-000000000002"} (Service_Ingestor). Part of the matching set.
+  ingestionKey: ""
+
+  # The playback worker's credential, subject b0000000-0000-4000-8000-000000000003
+  # (Service_Playback). A separate identity because its broker rights differ from ingestion's.
+  playbackKey: ""
+
+  # The broker passwords the playback worker holds, keyed by gateway sparkplug_id:
+  #   mqttPlaybackCredentials: '{"gwy130000000000400080000":"..."}'
+  # Empty is valid: the worker refuses each job naming the gateway it lacks a credential for.
+  mqttPlaybackCredentials: ""
+
+  # Superuser password for Supabase Postgres, and the password set on the scoped roles by the
+  # roles-init Job.
+  postgresPassword: ""
+
+  # The SMTP relay's password, for supabaseAuth.smtp. Empty is valid: the relay is optional.
+  smtpPassword: ""
+
+  # The secret half of coldArchive.s3.accessKeyId. A FOREIGN CREDENTIAL, like the SMTP password
+  # above: the stack cannot mint, rotate or revoke a key at another provider, so it is given to
+  # the chart rather than issued by the database. Empty is valid -- remote archiving is then
+  # unconfigured and nothing is exported.
+  #
+  # Scope it to PutObject and GetObject on site=<siteKey>/* with NO DeleteObject: the exporter
+  # writes and never deletes, and a credential that cannot delete makes that an invariant the
+  # gateway is unable to break. supabase/README.md carries the policy.
+  archiveS3SecretAccessKey: ""
+
+  # TimescaleDB (the historian): a separate database with its own credentials.
+  timescalePassword: ""
+
+  # Realtime. Lengths are enforced by the container and asserted by the chart:
+  #   dbEncKey       EXACTLY 16 characters
+  #   secretKeyBase  AT LEAST 64 characters
+  realtimeDbEncKey: ""
+  realtimeSecretKeyBase: ""
+  # Mandatory from realtime v2.102.3; signs the bearer its /metrics endpoint requires.
+  realtimeMetricsJwtSecret: ""
+
+  # postgres-meta encrypts stored connection strings with this; Studio must be given the same.
+  pgMetaCryptoKey: aber-pg-meta-crypto-key
+
+  # --- MQTT: the platform principals, no wildcard account ------------------------------------
+  # The broker's roles (mosquitto/dynsec-roles.json) confine each account. The validator's
+  # username is its row's GENERATED `sparkplug_id` ('gwy' + the first 21 hex characters of the
+  # UUID), which is why that row has a pinned UUID; `aber.validateMqttPrincipals` fails the
+  # render otherwise:
+  #   11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)
+  # Each password is independent.
+
+  # Reads spBv1.0/#; publishes only rebirth NCMDs.
+  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionPassword: ""
+  # Read-only at the broker; the i3X server refuses writes in code too.
+  mqttI3xUser: factoryplus_i3x
+  mqttI3xPassword: ""
+  # ingestion/validate.py's gateway. A fixture: leave empty with e2e.enabled false.
+  mqttValidatorUser: gwy110000000000400080000
+  mqttValidatorPassword: ""
+  # $SYS only, for the broker probes and the exporter sidecar. Required: without it the
+  # healthcheck never passes.
+  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorPassword: ""
+  # The account the credential service administers the broker's Dynamic Security plugin as:
+  # $CONTROL/dynamic-security/# and nothing else. Required; the broker's initContainer writes it
+  # on every start.
+  mqttDynsecAdminUser: dynsec-admin
+  mqttDynsecAdminPassword: ""
+  # No gateway accounts are declared here: a gateway's credential is issued once its row exists
+  # (dashboard, or the enrolment bundle) and lives in the plugin's document on the broker's PVC.
+  # See tutorial/README.md.
+  # The bearer token supabase-functions presents to the gateway-credential sidecar. Its own
+  # value, never shared: that service can issue a credential for any edge node. It refuses to
+  # start below 32 characters.
+  mqttCredentialServiceToken: ""
+
+  # Authorises the gateways trigger's call to revoke-gateway-credential (0038). Separate from
+  # the minting token above. Empty leaves revocation inert.
+  gatewayRevokeSecret: ""
+
+  # Authorises pg_cron's fifteen-minute call to forge-sweep (0099), which reconciles the forge's
+  # teams with user_roles and re-furnishes its repositories. Empty leaves the sweep inert.
+  forgeSweepSecret: ""
+
+  # The forge administrator. Empty makes the initContainer refuse rather than create an
+  # account with a blank password.
+  giteaAdminPassword: ""
+  # The machine account enroll-gateway authenticates as. Empty turns the forge integration off
+  # at both ends.
+  giteaMachinePassword: ""
+  # The forge's door: the OAuth client the gateway's `forge` listener uses (hashed into
+  # auth.oauth_clients by 0094) and its cookie-signing key. The route is on by default. Empty is
+  # fail-closed: the migration skips the registration and the forge answers every browser with
+  # a login it cannot complete. Appliances (SSH) and enroll-gateway (the API) are unaffected.
+  giteaOAuthClientSecret: ""
+  giteaProxyHmacSecret: ""
+  # The push webhook's signing secret (0095). Empty: enrolment registers no hook, and the dashboard
+  # learns of a merge on the appliance's next tick rather than at once.
+  giteaWebhookSecret: ""
+
+  grafanaAdminUser: admin
+  grafanaAdminPassword: ""
+  grafanaOAuthClientSecret: ""
+  # Grafana -> grafana-alert-webhook. Its own value, so Grafana is not handed the service-role key.
+  grafanaAlertWebhookSecret: ""
+
+  # Studio's door: the OAuth client the gateway uses (hashed by 0081) and its cookie-signing key.
+  # Empty by default, consistent with `routes.studio: false`. Fail-closed at both ends.
+  studioOAuthClientSecret: ""
+  studioProxyHmacSecret: ""
+
+  # The read-only historian role external BI tools and Grafana connect as, created by
+  # timescaledb/roles.sql. Empty means no role; with Grafana enabled the render fails instead.
+  # It may SELECT the rollups and is revoked on raw `telemetry`, `assets` and `telemetry_latest`.
+  biReaderPassword: ""
+
+  # --- Historian least privilege ---------------------------------------------
+  # Empty means no role for both (roles.sql skips it).
+  #
+  # `ingest_writer`: INSERT and SELECT on telemetry, upsert on assets, no UPDATE, DELETE or
+  # TRUNCATE. `ingestion.dbUser` decides whether the daemon connects as it.
+  ingestWriterPassword: ""
+  # `fdw_reader`: what Supabase's postgres_fdw user mapping authenticates as. Unset, the mapping
+  # falls back to the historian superuser.
+  fdwReaderPassword: ""
+
+  noderedCredentialSecret: ""
+  noderedOAuthClientSecret: ""
+  noderedWebhookJwtSecret: ""
+  # Break-glass only; empty means the static-token path is shut.
+  noderedAdminToken: ""
+
+# ---------------------------------------------------------------------------------------------
+# Data tier
+# ---------------------------------------------------------------------------------------------
+
+timescaledb:
+  enabled: true
+  image:
+    repository: timescale/timescaledb
+    # A version, not a floating tag.
+    tag: 2.29.2-pg17
+    pullPolicy: IfNotPresent
+  database: postgres
+  username: postgres
+  persistence:
+    enabled: true
+    size: 20Gi
+    # Inherits global.storageClass when empty.
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  # The image's `postgres` user is uid/gid 70 (Alpine). The entrypoint runs as root and chowns,
+  # so this only becomes load-bearing if `runAsUser` is ever set.
+  podSecurityContext:
+    fsGroup: 70
+    fsGroupChangePolicy: OnRootMismatch
+  # Worker pool. The template computes max_worker_processes = 1 + background + parallel
+  # (upstream's arithmetic); with the defaults, policy jobs fail to launch and refresh and
+  # retention windows are silently skipped. Raise `background` for a fleet with more rollups.
+  workers:
+    background: 16
+    parallel: 8
+  # The extension's daily usage report. Off because this stack has no egress to it; `basic`
+  # restores the upstream default.
+  telemetryLevel: "off"
+  # --- Telemetry lifecycle --------------------------------------------------------------------
+  # Applied by the `timescaledb-retention` hook Job on every install and upgrade, so these are
+  # authoritative against a database that already holds data. Any PostgreSQL interval; `never`
+  # removes the policy.
+  retention:
+    enabled: true
+    # How old a chunk must be before it is converted to the columnstore. Does NOT bound the
+    # late-arrival window (inserts into compressed chunks succeed); only the daemon's
+    # TELEMETRY_MAX_AGE_SECONDS does.
+    compressAfter: "7 days"
+    # A HARD DELETE with no undo, and DERIVED when left empty rather than defaulted in place.
+    #
+    #   empty + a configured coldArchive.s3 destination  ->  never
+    #   empty + no destination                           ->  90 days
+    #   anything else                                    ->  exactly what you wrote
+    #
+    # Because the two mechanisms both drop chunks and the timer wins the race for anything the
+    # archiver has not reached -- and since 0132 that race is run over a network link, so an
+    # outage is measured in days rather than seconds. Archiving replaces retention; it does not
+    # run beside it. `timescaledb/retention.sql` has warned about the combination since it was
+    # written, and a warning at boot is not read by whoever configured the endpoint a year later.
+    #
+    # `never` means the volume grows until somebody acts, which is the better of the two failures:
+    # it is recoverable and it loses nothing. The Cold Storage page and the Archive Backlog alert
+    # (0133) are what say it is coming. 90 days is a starting point, not a compliance decision.
+    retainFor: ""
+  # --- Rollups (continuous aggregates) ---------------------------------------------------------
+  # 1m -> 5m -> 1h buckets, read by Grafana's trend panels and long-window queries. They outlive
+  # the raw data on purpose. Disabling stops reconciling them; it does not drop them.
+  rollups:
+    enabled: true
+    oneMinuteRetainFor: "180 days"
+    fiveMinuteRetainFor: "1 year"
+    oneHourRetainFor: "5 years"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+supabaseDb:
+  enabled: true
+  image:
+    repository: supabase/postgres
+    tag: 17.6.1.160
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  # supabase/postgres:17.6.1.160 is Alpine; its `postgres` user is uid 100 / gid 101. Same
+  # caveat as timescaledb: the entrypoint chowns, so this matters only with `runAsUser`.
+  podSecurityContext:
+    fsGroup: 101
+    fsGroupChangePolicy: OnRootMismatch
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 4Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# TLS between every service and the two databases. Off by default for the broker's reason: it
+# needs cert-manager and a ClusterIssuer the chart cannot create (deploy/k8s/internal-ca.yaml).
+# On, each database is issued a certificate naming its Service, serves TLS, refuses plaintext
+# from anything but loopback at pg_hba, and every client verifies the certificate against the CA
+# (`verify-full`). There is no unverified mode.
+postgresTls:
+  enabled: false
+  clusterIssuer: acs-cymru-ca
+  issuerKind: ClusterIssuer
+  # 90 days with 30 days' notice. Postgres re-reads its certificate on a reload, which the
+  # reload sidecar in each database pod sends, so a renewal does not restart the server.
+  duration: 2160h
+  renewBefore: 720h
+  watchIntervalSeconds: 15
+  # Names clients dial beyond the Service names. The dev loop's port-forward dials `localhost`.
+  extraDnsSans: []
+
+# Server-side metrics for both databases: a postgres_exporter sidecar in each database pod,
+# scraped as `job="supabase-db"` and `job="timescaledb"`. Without it neither database reports a
+# connection count, a WAL figure, a cache hit ratio or a deadlock, and the historian reports
+# nothing about chunks, compression or its policy jobs -- on a platform whose subject is a
+# time-series historian.
+#
+# A SIDECAR, NOT A DEPLOYMENT. Both pg_hba files trust loopback (postgres-tls.yaml keeps that line
+# with TLS on), so sharing the pod's network namespace means no password, no client certificate,
+# no Service and no database edge in the NetworkPolicy. A Deployment would need all four.
+#
+# ONE FLAG PER SIDECAR, NOT `observability.enabled`. The exporters are useful to an external
+# Prometheus that scrapes the ServiceMonitors with the chart's own observability stack switched
+# off, which gating them on `observability.enabled` would deny. Same reasoning as
+# `mosquitto.metrics`, and the ServiceMonitors read this flag.
+databaseMetrics:
+  enabled: true
+  image:
+    repository: quay.io/prometheuscommunity/postgres-exporter
+    # A version, not a floating tag.
+    tag: v0.20.1
+    pullPolicy: IfNotPresent
+  # 9187 is the exporter's registered default and what its own documentation assumes.
+  port: 9187
+  # THREE DEFAULT COLLECTORS ARE OFF, and each is a measurement rather than a preference. With
+  # the defaults a scrape of the historian is 2,505 series and of supabase-db 3,489; without
+  # these three it is ~265 and ~309, and no panel or rule loses an input.
+  #
+  #   settings              one series per GUC (355 / 325). Server configuration does not vary
+  #                         between scrapes; it is not a time series.
+  #   stat_user_tables      21 series per table (1,365 / 2,079).
+  #   statio_user_tables    8 series per table (520 / 776).
+  #
+  # The per-table pair is worse than chatty ON THE HISTORIAN SPECIFICALLY: 37 of its 65 "user
+  # tables" are `_timescaledb_internal` chunks, 29 series each, and the chunk count grows with
+  # retention and with every hypertable added. That is unbounded cardinality attached to the one
+  # component whose table count is a function of how long the platform has been running.
+  #
+  # Re-enable any of them through `extraArgs` (`--collector.settings`), knowing the cost above.
+  extraArgs: []
+  # Per-statement timing from `pg_stat_statements`: calls, total time, rows and block I/O for the
+  # busiest statements, which is the ONLY server-side view of how long a write actually took.
+  # `acs_ingestion_write_seconds` measures the same write from the client and cannot tell a slow
+  # disk from lock contention from a saturated pool; these series can.
+  #
+  # ON THE HISTORIAN THIS COSTS ONE POD RESTART, once. `shared_preload_libraries` is a postmaster
+  # setting, so adding the library rolls the StatefulSet -- and the historian's image preloads
+  # `timescaledb` alone. supabase/postgres already preloads it and tracks ~2,000 statements, so
+  # that side costs nothing. Turning this off rolls the historian back the same way.
+  #
+  # BOUNDED BY CONSTRUCTION: the exporter reports the top 100 statements (its own default), so this
+  # is ~500 series per database however many statements the server has tracked. The statement TEXT
+  # is NOT exported -- the label is `queryid`, a hash -- which keeps both the cardinality and the
+  # query literals out of Prometheus.
+  statementStats: true
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+# ---------------------------------------------------------------------------------------------
+# Realtime
+# ---------------------------------------------------------------------------------------------
+realtime:
+  enabled: true
+  image:
+    repository: supabase/realtime
+    tag: v2.102.3
+    pullPolicy: IfNotPresent
+  # Never more than one: Realtime holds a logical replication slot, which is per-instance state.
+  replicas: 1
+  # DO NOT RENAME. Realtime resolves its tenant from the leading hostname label of the Host
+  # header, and `realtime-dev` is the tenant SEED_SELF_HOST creates. The one Service whose name
+  # is not its component name (architecture §3.4).
+  serviceName: realtime-dev
+  port: 4000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# ---------------------------------------------------------------------------------------------
+# Browser-facing URLs
+#
+# In-cluster URLs are not configurable: the Service names are the ones every in-cluster URL
+# carries, so `http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` are constants. Each
+# value below is derived from global.publicBaseDomain unless overridden.
+# ---------------------------------------------------------------------------------------------
+publicUrls:
+  frontend: ""
+  supabase: ""
+  # Feeds both the OAuth client's redirect_uris (db-init) and GF_SERVER_ROOT_URL.
+  grafana: ""
+  # Feeds the Node-RED OAuth client's redirect_uris and settings.js's callbackURL.
+  nodered: ""
+  studio: ""
+  docs: ""
+  # The forge. Defaults to git.<publicBaseDomain>. Feeds the Ingress rule and the ROOT_URL Gitea
+  # prints in clone commands.
+  gitea: ""
+  # MQTT over WebSockets (9001). Raw MQTT is TCP and is exposed by the mosquitto-external
+  # LoadBalancer instead.
+  mqtt: ""
+
+# ---------------------------------------------------------------------------------------------
+# Supabase control plane
+#
+# Every image tag is pinned; realtime and storage-api migrate shared schemas on boot, and studio
+# is Zod-coupled to a postgres-meta version, so the set moves together.
+# ---------------------------------------------------------------------------------------------
+
+supabaseAuth:
+  enabled: true
+  image:
+    repository: supabase/gotrue
+    tag: v2.189.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # Whether GoTrue refuses self-registration at POST /auth/v1/signup. True is closed, and it is
+  # the only signup control: the dashboard offers no sign-up form. Accounts arrive from
+  # seed.sql, an admin invite, or an upstream identity provider.
+  disableSignup: true
+  jwtExpiry: 3600
+  # The relay GoTrue sends "forgot your password" links through. Empty host: a reset request
+  # fails and the sign-in card tells the user to ask an administrator. The password is
+  # secrets.smtpPassword. Sign-up confirmation is off, so this is the only mail the stack sends.
+  smtp:
+    host: ""
+    port: 587
+    user: ""
+    from: ""
+    senderName: Aber
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+supabaseRest:
+  enabled: true
+  image:
+    repository: postgrest/postgrest
+    tag: v14.12
+    pullPolicy: IfNotPresent
+  # Stateless; an HPA candidate.
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# -----------------------------------------------------------------------------------------------
+# The gateway (Envoy; docs/gateway.md). Its Service is named `supabase-kong`, the name every
+# in-cluster consumer carries in `http://supabase-kong:8000`.
+# -----------------------------------------------------------------------------------------------
+supabaseEnvoy:
+  enabled: true
+  image:
+    repository: envoyproxy/envoy
+    # Minimum 1.34: the oauth2 filter gained PKCE there, and GoTrue requires it.
+    tag: "v1.39.1"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  logLevel: info
+  serviceName: supabase-kong
+  metrics:
+    enabled: true
+    # Envoy's admin listener serves /ready and /stats/prometheus. Unauthenticated; not on the
+    # Ingress (it can drain listeners and dump the config, keys included).
+    port: 9901
+
+supabaseFunctions:
+  enabled: true
+  image:
+    # Built from supabase/functions/Dockerfile (the functions and the appliance bundle template
+    # are baked in, since there is no repository on a cluster node):
+    #   docker build -f supabase/functions/Dockerfile -t <repo>:<tag> .
+    repository: ghcr.io/harri-llewelyn/acs-cymru/edge-runtime
+    # Empty resolves to Chart.AppVersion (an image this repository builds and publishes).
+    # check-docs-drift.mjs reads exactly that to decide which images need a documented build
+    # command and must be built by the release workflow, so pinning a tag here removes it from
+    # both.
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # Each function checks its own role claim, which is why the runtime does not.
+  verifyJwt: false
+  # Remote gateway enrolment addresses (enroll-gateway, gateway-bundle): what an APPLIANCE
+  # dials. SUPABASE_PUBLIC_URL is derived from global.publicBaseDomain; only the broker's
+  # address needs stating, and only when it differs from `mqtt.<domain>`. Both functions answer
+  # 503 rather than guess. The address must also be in the broker certificate's SAN
+  # (mosquitto.tls.extraDnsSans).
+  gatewayEnrolment:
+    # Empty = the `mqtt.<publicBaseDomain>` host the chart derives.
+    mqttPublicHost: ""
+    mqttPublicTlsPort: 8883
+    # The API an appliance dials, embedded in its bundle. Empty = the browser-facing Supabase
+    # URL; set it where that is a loopback domain, which gateway-bundle refuses to embed.
+    supabasePublicUrl: ""
+    # DEVELOPMENT ONLY. The one-liner's installer carries the enrolment token and the credential
+    # secret, so gateway-install serves it over TLS alone and refuses a plain-HTTP public URL.
+    # True lets a laptop cluster with no ingress TLS mint and serve the command over plain HTTP,
+    # which values-dev.yaml sets and nothing else should.
+    allowPlaintextInstaller: false
+
+  # AAS export. Declared on this service because an edge worker sees only the variables
+  # main/index.ts forwards. Outbound references must name addresses the recipient of a shell
+  # can reach.
+  aas:
+    # Namespaces every globalAssetId and submodel id the shell carries.
+    baseIri: https://acs-cymru.local/ids/asset/
+    # Where a consumer fetches the samples a Time Series LinkedSegment points at. Derived from
+    # publicUrls.supabase when empty.
+    historianEndpoint: ""
+    # Public base for the 3D models a VisualRepresentation submodel points at.
+    modelPublicBase: ""
+    # Above this, an .aasx falls back to a URL reference rather than bundling the bytes.
+    maxBundledModelBytes: 33554432
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+supabaseStorage:
+  enabled: true
+  image:
+    repository: supabase/storage-api
+    tag: v1.60.4
+    pullPolicy: IfNotPresent
+  # One replica on the file backend (a single-writer ReadWriteOnce PVC). s3 lifts that.
+  replicas: 1
+  bucket: asset-3d-models
+  # `fileSizeLimit` is storage-api's GLOBAL ceiling; it refuses to create a bucket whose own
+  # limit exceeds it, so it must clear the largest per-bucket limit below. `modelFileSizeLimit`
+  # is what a 3D model may be.
+  fileSizeLimit: 1073741824
+  modelFileSizeLimit: 52428800
+  # Bucket names must match supabase/storage-policies.sql: a bucket with no policies is
+  # invisible to every browser role, and a policy naming an absent bucket is dead text.
+  # Broker captures, private, keyed <sparkplug_id>/ of the subject recorded.
+  captureBucket: broker-captures
+  # Must exceed the 50 MiB cap `capture_jobs` puts on a recording.
+  captureFileSizeLimit: 104857600
+  # file | s3. See docs/kubernetes-architecture.md §4.4 and §11.
+  backend: file
+  persistence:
+    enabled: true
+    size: 10Gi
+    # The one PVC whose contents are in no database dump. `devices.model_3d_path` IS backed up,
+    # so losing this volume alone leaves rows pointing at nothing, and an AAS export then emits
+    # a File element with a dead URL. See backup.includeStorage and the annotations below.
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    # Merged onto the PVC, for a snapshotter driven off the claim.
+    annotations: {}
+  # Merged onto the storage POD. Velero's file-level annotation belongs here, and the volume
+  # NAME is `data` (not the PVC or bucket name; an unresolvable name is skipped silently):
+  #   podAnnotations:
+  #     backup.velero.io/backup-volumes: data
+  podAnnotations: {}
+  # node:alpine-derived image running as uid/gid 1000.
+  podSecurityContext:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+supabaseMeta:
+  enabled: true
+  image:
+    # The version the official stack pairs with the Studio tag below (Zod-coupled).
+    repository: supabase/postgres-meta
+    tag: v0.96.6
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+supabaseStudio:
+  enabled: true
+  image:
+    repository: supabase/studio
+    tag: 2026.07.07-sha-a6a04f2
+    pullPolicy: IfNotPresent
+  replicas: 1
+  organizationName: Aber
+  projectName: Aber
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# The API documentation site. Built FROM swaggerapi/swagger-ui with docs/openapi.yaml and
+# docs/i3x-openapi.yaml copied in, because the specs are read by this pod alone and the release
+# Secret carries a ConfigMap's bytes twice. A spec edit ships with the next image build.
+swaggerUi:
+  enabled: true
+  image:
+    repository: ghcr.io/harri-llewelyn/acs-cymru/swagger-ui
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# ---------------------------------------------------------------------------------------------
+# Initialisation Jobs: post-install/post-upgrade hooks, ordered by weight, all safe to re-run
+# (the migrations replay on every boot).
+# ---------------------------------------------------------------------------------------------
+initJobs:
+  enabled: true
+  backoffLimit: 3
+  # How long the wait-for initContainers poll a dependency, in seconds.
+  waitTimeout: 600
+  # Kept after success so `kubectl logs job/...` still answers "what did the migrations say".
+  ttlSecondsAfterFinished: 3600
+
+# ---------------------------------------------------------------------------------------------
+# db-init -- supabase/postgres with supabase/migrations/*.sql copied in. An image because a
+# ConfigMap is capped at 1 MiB. Pinning it to an older version is a SCHEMA rollback.
+# ---------------------------------------------------------------------------------------------
+dbInit:
+  image:
+    repository: ghcr.io/harri-llewelyn/acs-cymru/db-init
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------------------------
+# Messaging
+# ---------------------------------------------------------------------------------------------
+mosquitto:
+  enabled: true
+  image:
+    repository: eclipse-mosquitto
+    tag: "2.0.22"
+    pullPolicy: IfNotPresent
+  # Always one. Mosquitto does not cluster; Sparkplug state is per-connection.
+  replicas: 1
+  # The `mosquitto` user in eclipse-mosquitto is uid/gid 1883.
+  podSecurityContext:
+    fsGroup: 1883
+    fsGroupChangePolicy: OnRootMismatch
+  # Broker metrics via an exporter sidecar (Mosquitto publishes its statistics to `$SYS/#`
+  # and has no HTTP endpoint). The metric prefix is `broker_`, not `mosquitto_`; 48 series.
+  # Authenticates with the monitor account.
+  #
+  # ON BY DEFAULT since the databases' exporters were added, and for the same reason: these three
+  # exporters describe the platform's own subject -- the broker the fleet publishes to and the two
+  # databases the telemetry lands in -- and a stack that cannot say whether it is receiving or
+  # storing anything is not observing itself. Being a third-party image was the earlier argument
+  # for leaving it off; 48 series behind one flag is not the cost that argument assumed.
+  metrics:
+    enabled: true
+    port: 9234
+    image:
+      repository: sapcc/mosquitto-exporter
+      tag: "0.8.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { memory: 64Mi }
+  # The Dynamic Security plugin's document: every issued gateway account, rewritten by the
+  # broker on each change. The only copy, so the only volume the broker keeps. `resource-policy:
+  # keep` on the claim; deleting it disconnects the fleet and each gateway must be re-issued.
+  persistence:
+    size: 1Gi
+    # Empty for the cluster default.
+    storageClass: ""
+    # A claim you manage yourself, in place of the one the chart creates.
+    existingClaim: ""
+  # The Secret the credential service patches: the playback delivery file (0078), read by
+  # playback through its own projection, and a `password_file` left by a release from before
+  # the plugin, which the broker's initContainer imports once. Created empty if absent and never
+  # overwritten.
+  credentials:
+    secretName: mosquitto-passwords
+  # MQTTS on 8883. Off by default: needs cert-manager and a ClusterIssuer the chart cannot
+  # create (deploy/k8s/internal-ca.yaml). With it on, every in-cluster client moves to 8883
+  # (`internalClients`) and 1883 stays published externally until the fleet has moved
+  # (`external.plaintext`); once both say so, 1883 binds to loopback and only the broker's own
+  # sidecars reach it.
+  tls:
+    enabled: false
+    # How often the certificate-reload sidecar compares the projected certificate against the
+    # one it last saw, and SIGHUPs the broker on a change. The kubelet's own sync period
+    # (60-90s) precedes this.
+    watchIntervalSeconds: 15
+    # `acs-cymru-ca` is what deploy/k8s/internal-ca.yaml creates. An ACME issuer works too.
+    clusterIssuer: acs-cymru-ca
+    # Set if your issuer is a namespaced Issuer rather than a ClusterIssuer.
+    issuerKind: ClusterIssuer
+    # Where the issued keypair lands; mounted read-only at /mosquitto/certs.
+    secretName: mosquitto-tls
+    # 90 days with 30 days' notice. Mosquitto reloads certificates on SIGHUP, which the reload
+    # sidecar sends, so a renewal does not restart the broker.
+    duration: 2160h
+    renewBefore: 720h
+    # THE LOADBALANCER IP OR PLANT DNS NAME MUST BE LISTED HERE. Gateways dial the broker by
+    # address; a certificate carrying only `mosquitto` verifies in-cluster and fails on every
+    # gateway with a hostname mismatch the broker does not log. `external.loadBalancerIP` is
+    # added automatically.
+    extraIpSans: []
+    #  - 10.20.0.50
+    extraDnsSans: []
+    #  - mqtt.plant.example.com
+    # The in-cluster clients (ingestion, i3X, Node-RED, playback, the e2e validator) on 8883 too.
+    # One switch for all of them, and the supported posture; each fails closed if the CA is
+    # unreadable. False keeps them on 1883 over the pod network.
+    internalClients: true
+  # External exposure for shopfloor gateways. MQTT is raw TCP and cannot ride an HTTP Ingress.
+  external:
+    enabled: true
+    # LoadBalancer works on k3s without MetalLB (ServiceLB binds the port on a node, so 1883
+    # must be free on the host). NodePort is the fallback for `--disable=servicelb`.
+    type: LoadBalancer
+    # Only set when type is NodePort.
+    nodePort: null
+    # Only set when type is NodePort and mosquitto.tls.enabled; 8883 needs its own node port.
+    tlsNodePort: null
+    # Empty means whatever the cluster assigns. Added to the certificate's IP SANs when TLS is on.
+    loadBalancerIP: ""
+    # Publish plaintext 1883 externally. Set false only once every gateway is on 8883. With this
+    # false and `tls.internalClients` on, nothing outside the broker's pod dials 1883 and the
+    # listener binds to loopback.
+    plaintext: true
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# The broker playback worker. Runs from `ingestion.image` under a different command (it uses
+# capture.py's plan_playback(), which is in that image), so the two cannot disagree about the
+# capture format.
+playback:
+  # Off by default: a diagnostic tool, and a cluster with no simulated gateways has nothing for
+  # it to publish as.
+  enabled: false
+  # How often an idle worker looks for a queued job.
+  pollIntervalSeconds: 3
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { memory: 256Mi }
+
+# Cold telemetry archival (ingestion/cold_archive.py): the retention policy as move rather than
+# delete. Runs from `ingestion.image` under a different command, like playback. Each run exports
+# the chunks past the hot window, verifies the objects, records them in the manifest, and with
+# `drop` on removes the chunks it verified. See supabase/README.md, "Cold telemetry archival".
+coldArchive:
+  enabled: true
+  schedule: "15 3 * * *"
+  drop: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  # WHERE THE ONLY REMAINING COPY GOES. An archived object is not a backup: the raw chunk was
+  # dropped because this object was verified, so the destination has to be somewhere a site loss
+  # does not reach. There is no local fallback and no default endpoint -- an unset destination
+  # means nothing is exported, and the exporter says which fields are missing.
+  #
+  # A SEED, NOT THE SOURCE, since 0134. These configure a NEW stack: each is written into its
+  # settings row only while that row is empty, so an install can be described here and an
+  # Administrator can change it afterwards from Settings > Cold Storage without the next
+  # `helm upgrade` quietly putting it back. Leaving them empty is now the ordinary case.
+  #
+  # siteKey is the exception and belongs here: it is the IAM prefix every object is addressed
+  # under, frozen read-only at first boot, and changing it is a procedure rather than an edit.
+  #
+  # "S3" names a protocol, not a vendor: AWS, Cloudflare R2, Backblaze B2, Wasabi and a MinIO in
+  # another building all serve it. Which one is the operator's decision and the code never knows.
+  #
+  # UNDER networkPolicy.enabled THIS NEEDS AN EGRESS RULE. The chart cannot express a peer outside
+  # the cluster, so add the endpoint to networkPolicy.extraEgress -- otherwise every export fails
+  # at connect time, on a schedule, at 03:15.
+  s3:
+    # This site's identity in every object key: site=<siteKey>/dataset=telemetry/v=1/...
+    #
+    # FROZEN AT THE FIRST BOOT THAT SETS IT (archived migration 0132) and refused afterwards: objects
+    # already written live under the old prefix and renaming does not move them. It is also the
+    # prefix the bucket policy is scoped on, which is why it is set here rather than derived at
+    # the first export -- the policy has to exist before the first object does.
+    #
+    # Lower-case letters, digits and hyphens, 3-48 characters. A slug of the site plus a few
+    # random hex characters reads well in a console and cannot collide with another install:
+    #   siteKey: "broughton-7f3a9c21"
+    siteKey: ""
+    # The full URL, including scheme. AWS is https://s3.<region>.amazonaws.com; a MinIO is
+    # whatever it is reachable at. Stated rather than inferred from the region: reading the
+    # configuration should tell an operator where a decade of plant history went.
+    endpoint: ""
+    region: ""
+    bucket: ""
+    accessKeyId: ""
+    # MinIO and most self-hosted gateways address buckets by path; AWS, R2 and B2 take the
+    # virtual-host form. Wrong, this fails as DNS resolution, which names nothing useful.
+    pathStyle: false
+
+ingestion:
+  # Which role the daemon connects to the historian as. `ingest_writer` cannot UPDATE, DELETE or
+  # TRUNCATE; secrets.ingestWriterPassword is required while this is set. Override to the admin
+  # user only for a recovery (the daemon refuses a superuser unless ALLOW_HISTORIAN_SUPERUSER is
+  # also set).
+  dbUser: "ingest_writer"
+  enabled: true
+  image:
+    # Built from ingestion/Dockerfile with the REPOSITORY ROOT as context (sparkplug_b.proto):
+    #   docker build -f ingestion/Dockerfile -t <repo>:<tag> .
+    repository: ghcr.io/harri-llewelyn/acs-cymru/ingestion
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Liveness: ingestion.py writes this file every `healthIntervalSeconds` while its MQTT
+  # connection is up, so a wedged daemon goes stale and is restarted.
+  healthFile: /tmp/ingestion-health
+  healthIntervalSeconds: 15
+  # The Prometheus exposition endpoint. On by default (a pod-network port costs nothing);
+  # whether a Prometheus scrapes it is telemetry.serviceMonitor below. No credential, so it
+  # carries counters only: no metric values, no device names (ingestion/metrics.py).
+  metrics:
+    enabled: true
+    port: 9108
+  # Device liveness watchdog: a device that stops publishing emits no DDEATH. Writes only on the
+  # ONLINE -> OFFLINE transition. 0 disables. validate.py check 10 reads these from its own
+  # environment.
+  deviceOfflineTimeoutSeconds: 300
+  deviceWatchdogIntervalSeconds: 30
+  # Rate limit on NCMD rebirth requests, per edge node.
+  rebirthRequestIntervalSeconds: 300
+  # The Sparkplug primary host application id. REQUIRED, and deliberately without a default: this
+  # is the name a third-party gateway is configured to watch on `spBv1.0/STATE/<id>` to learn
+  # whether the historian is consuming, so it belongs to the site rather than to this chart, and a
+  # stack inheriting a word nobody chose would put it in every vendor's configuration screen.
+  # Rendering fails while it is empty.
+  #
+  # NOT AN ON/OFF SWITCH, unlike directoryMqttEnabled and unsMqttEnabled below. Those publish the
+  # address space and every reading, so enabling them is an exposure decision; this publishes two
+  # booleans on a topic the broker already grants every gateway read of. It is always on.
+  #
+  # One topic level: no `/`, `+`, `#` or whitespace. The broker grants the ingestion role write on
+  # exactly this one topic, so a value with a separator in it publishes where nothing is granted.
+  primaryHostId: ""
+  # The Sparkplug group id: the second segment of every topic this site publishes
+  # (`spBv1.0/<group>/<TYPE>/<node>`) and the enterprise segment of its Unified Namespace.
+  #
+  # FIXED AT INSTALL, and 0131 enforces that. It is seeded into the read-only `sparkplug.group_id`
+  # setting on the first boot, shown on the Settings page, and db-init REFUSES a later boot whose
+  # value differs -- because changing the group re-addresses every gateway, every appliance bundle
+  # and every row of history keyed on the old pair. That is a migration, not a preference.
+  #
+  # Unlike primaryHostId this has a default: an install predating the key has published under
+  # `ACS-Cymru` since its first message and must go on doing so. One topic level: no `/`, `+`, `#`
+  # or whitespace.
+  sparkplugGroup: ACS-Cymru
+  # The Directory's MQTT half. Off by default: a topic has no caller, so publishing puts the
+  # whole address space behind the broker's roles alone.
+  #
+  # EMPTY DERIVES `<sparkplugGroup>/Directory/v1`. The broker's ingestion role is granted
+  # `<prefix>/#` from this same value at reconcile time, so the two cannot disagree -- which they
+  # could when the prefix was a literal here and another literal in dynsec-roles.json.
+  directoryMqttEnabled: false
+  directoryMqttTopicPrefix: ""
+  directoryMqttIntervalSeconds: 60
+  # The Unified Namespace bridge (ingestion/uns_publish.py). Off by default for the same reason:
+  # every decoded reading, retained under uns/..., behind the broker's roles alone. The root MUST
+  # stay inside the ingestion role's `uns/#` publish rule. The TTL bounds how long a relocation on the
+  # dashboard takes to move a device's topic.
+  unsMqttEnabled: false
+  unsMqttTopicRoot: uns
+  unsContextTtlSeconds: 60
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# ---------------------------------------------------------------------------------------------
+# i3X 1.0 server: a read-side adapter over the model this stack already holds, with a live
+# query surface and subscriptions. CESMII's conformance suite runs in CI (1.0 Compatible; the
+# optional Update methods are deliberately not implemented).
+# ---------------------------------------------------------------------------------------------
+i3xService:
+  enabled: true
+  image:
+    # Built from i3x/Dockerfile with the REPOSITORY ROOT as context (sparkplug_b.proto):
+    #   docker build -f i3x/Dockerfile -t <repo>:<tag> .
+    repository: ghcr.io/harri-llewelyn/acs-cymru/i3x-service
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Reported by GET /info as `serverName`; a client browsing several sites has no other way to
+  # tell two servers apart.
+  serverName: acs-cymru-i3x
+  # A spec MUST: a subscription with neither an open stream nor a /sync call inside this window
+  # is deleted. An open SSE stream counts as activity.
+  subscriptionTtlSeconds: 300
+  # How many update batches one subscription may queue before the oldest are dropped. Dropping
+  # is reported: the next /sync answers 206 and the client backfills from /objects/history.
+  subscriptionQueueLimit: 10000
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    # Sized for connection handling; the value cache and queues are bounded.
+    limits: { memory: 512Mi }
+
+# ---------------------------------------------------------------------------------------------
+# Edge and frontend
+# ---------------------------------------------------------------------------------------------
+nodeRed:
+  enabled: true
+  image:
+    # Built from node-red/Dockerfile. A custom image is required: settings.js lives on the data
+    # volume and resolves require() from there, and it depends on internals pinned by the base tag.
+    #   docker build -f node-red/Dockerfile -t <repo>:<tag> node-red
+    repository: ghcr.io/harri-llewelyn/acs-cymru/node-red
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  oauthClientId: c0ffee00-0000-4000-8000-000000000002
+  # Re-seed the flow even though /data is already provisioned. Destructive to editor changes;
+  # node-red-init backs the previous flow up to flows.json.pre-seed first.
+  forceSeed: false
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  # The `node-red` user is uid/gid 1000; local-path hands over a root-owned directory.
+  podSecurityContext:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+frontend:
+  enabled: true
+  image:
+    # Built from frontend/Dockerfile with VITE_RUNTIME_CONFIG=true, so one image serves any
+    # environment and reads its configuration from the /config.js ConfigMap:
+    #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
+    #     -t <repo>:<tag> frontend
+    repository: ghcr.io/harri-llewelyn/acs-cymru/frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  # NGINX serving static files; scales freely.
+  replicas: 2
+  # Delivered through the /config.js ConfigMap, not baked into the image.
+  #
+  # Gates every supabase.channel() subscription; off, the tabs fall back to a 3s poll.
+  enableRealtime: true
+  # Where the Report Bug button files issues.
+  githubRepoUrl: https://github.com/Harri-Llewelyn/ACS-Cymru
+  # There is no `allowSignup` (a frontend flag is not an access control; see
+  # supabaseAuth.disableSignup) and no `grafanaUrl` (derived from publicUrls.grafana, the same
+  # value Grafana's root_url and OAuth redirect come from).
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+# ---------------------------------------------------------------------------------------------
+# Observability and exposure
+# ---------------------------------------------------------------------------------------------
+grafana:
+  enabled: true
+  # The Prometheus and Loki the datasources point at. Empty resolves to the chart's own
+  # (observability.enabled); with that off, both must be set or the render fails, because a
+  # datasource pointed at nothing reports DatasourceError on every rule while the stack looks fine.
+  #
+  # LABEL CONTRACT for an external Loki: every log query this repository ships selects on
+  # `{service="<name>"}`. The chart's own collector sets it from app.kubernetes.io/component; a
+  # stock cluster log stack sets namespace/pod/container and no `service`, so the datasource
+  # connects and every query returns nothing. Relabel `service` to the workload name in that
+  # collector.
+  prometheusUrl: ""
+  lokiUrl: ""
+  image:
+    repository: grafana/grafana
+    # Pinned: grafana.ini depends on
+    # `use_pkce`, `auth_style` and the env-override mapping, which have moved between releases.
+    tag: "13.2.0"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    # Grafana's SQLite: SSO-created users, org roles and dashboards saved in the UI.
+    size: 2Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  # grafana/grafana runs as uid/gid 472.
+  podSecurityContext:
+    fsGroup: 472
+    fsGroupChangePolicy: OnRootMismatch
+  # 1Gi: 13.2 runs its own apiserver, Zanzana and unified storage in-process, and installs a
+  # bundled plugin on every boot. Under 512Mi the container sits against its ceiling, reclaim
+  # stalls /api/health past the liveness probe's 5s timeout, and the kill lands mid-session as
+  # exit 137 with reason Error -- no OOM kill is recorded, so nothing names memory as the cause.
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 1Gi }
+
+# =================================================================================================
+# GITEA -- the forge. One private repository per enrolled gateway, cloned over SSH with a
+# per-gateway deploy key that may pull `main` and push `appliance` and nothing else. Self-hosted, and not an identity store: roles stay in
+# Postgres, the platform reaches it through one machine account, and only Administrator and
+# Shopfloor_Manager hold a login (through the gateway's `forge` listener).
+# =================================================================================================
+gitea:
+  enabled: true
+  image:
+    repository: gitea/gitea
+    tag: "1.27.3"
+    pullPolicy: IfNotPresent
+  # The local administrator, reachable only through `gitea admin` on the volume: the password
+  # form is off and the web login is the gateway's `forge` listener. The password is
+  # `secrets.giteaAdminPassword`.
+  adminUser: gitea_admin
+  adminEmail: gitea-admin@acs-cymru.invalid
+  # The one account the platform authenticates as. Not an admin: it owns the per-gateway
+  # repositories and may attach a deploy key and branch rules. The password is
+  # `secrets.giteaMachinePassword`; empty means no forge integration.
+  machineUser: acs_platform
+  machineEmail: acs-platform@acs-cymru.invalid
+  logLevel: info
+  # Off, and nothing here needs them. Actions is a build runner that executes whatever a
+  # repository tells it to, on a host beside the database; the registry is a fourth credential
+  # plane. The one thing that looked like it needed a runner -- the required status check on a
+  # proposed flows.json -- is posted by the platform instead (supabase/README.md, "The forge
+  # checks a flow before it is merged"). Turning either on is a decision.
+  actions:
+    enabled: false
+  packages:
+    enabled: false
+  ssh:
+    # The hostname a clone URL advertises. Empty means the forge's ingress hostname, which is
+    # wrong the moment the LoadBalancer below has an address of its own.
+    domain: ""
+    external:
+      # The fleet's only way in: git over SSH is TCP, so no Ingress can carry it. The same
+      # second-Service arrangement as mosquitto.external.
+      enabled: true
+      # NodePort is the fallback where no controller exists; `ssh.domain`/`port` must then
+      # advertise the 30000+ port.
+      type: LoadBalancer
+      # What clients dial and what Gitea prints. Not the host's sshd.
+      port: 22
+      # Only when type is NodePort.
+      nodePort: null
+      loadBalancerIP: ""
+      annotations: {}
+  persistence:
+    enabled: true
+    # The SQLite database, every repository, and the SSH host keys appliances pin in
+    # known_hosts. Sized for flow repositories and one playbook; a package registry is what
+    # would change this, and it is off.
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  # gitea/gitea runs as uid/gid 1000 (USER_UID/USER_GID in the workload).
+  podSecurityContext:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+ingress:
+  enabled: true
+  # k3s ships Traefik; ingress-nginx needs only this value changed.
+  className: traefik
+  # Merged onto the Ingress. The cert-manager issuer annotation is added automatically when
+  # `tls.certManager.clusterIssuer` is set.
+  annotations: {}
+  tls:
+    enabled: false
+    # One wildcard certificate for *.<publicBaseDomain>.
+    secretName: aber-tls
+    certManager:
+      # e.g. letsencrypt-prod. Setting it makes cert-manager issue into `secretName`.
+      clusterIssuer: ""
+  # Per-route overrides, keyed by the route names in aber.ingressRoutes: frontend,
+  # supabase, nodered, grafana, studio, docs, gitea, mqtt.
+  #
+  # Studio is off by default as an EXPOSURE decision: the route points at the gateway's studio
+  # listener (an Administrator login), but a database console on a public hostname is reachable
+  # by anyone who can reach the ingress. Turning it on requires secrets.studioOAuthClientSecret
+  # and secrets.studioProxyHmacSecret (the render fails naming them). Without the route:
+  #   kubectl -n <ns> port-forward svc/<release>-aber-supabase-studio 54323:3000
+  #
+  # The studio and gitea logins set Secure cookies, which a browser keeps only on an https origin
+  # or on localhost / *.localhost. Over plain http on any other domain the render refuses either
+  # route: terminate TLS (ingress.tls) or turn the route off.
+  routes:
+    studio: false
+  #  docs: false
+
+# ---------------------------------------------------------------------------------------------
+# In-cluster conformance suites. Off by default: they seed and delete fixtures, drive real MQTT
+# traffic and take minutes. `helm test` runs the fast postgres_fdw check separately.
+#   helm upgrade ... --set e2e.enabled=true
+#   kubectl -n <ns> wait --for=condition=complete job/<release>-aber-e2e-validate --timeout=15m
+# ---------------------------------------------------------------------------------------------
+e2e:
+  enabled: false
+  image:
+    # Built from test-harness/Dockerfile with the REPOSITORY ROOT as context. Extends the
+    # ingestion image with jsonschema and the AAS suite (jsonschema is deliberately not in the
+    # production image, and without it the schema-conformance tests skip themselves).
+    #   docker build -f test-harness/Dockerfile -t <repo>:<tag> .
+    repository: ghcr.io/harri-llewelyn/acs-cymru/test-runner
+    tag: ""
+    pullPolicy: IfNotPresent
+  # How long the AAS Job waits for the validate Job; validate.py drives MQTT round trips.
+  waitTimeout: 900
+  # Kept well after success: the value of a conformance run is its output.
+  ttlSecondsAfterFinished: 86400
+  # The ingress controller's ClusterIP, used only to add hostAliases to the validate Job. Check
+  # 7b signs in through the real OAuth chain and follows browser-facing URLs; with the dev
+  # domain `localhost` those resolve to the pod itself, or to nothing. On k3d:
+  #   kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}'
+  # Leave empty where the public domain resolves from inside the cluster.
+  ingressIp: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# ---------------------------------------------------------------------------------------------
+# Hardening
+# ---------------------------------------------------------------------------------------------
+
+# =================================================================================================
+# The chart's own observability stack: Prometheus (metrics store), Loki (log store) and Alloy
+# (the one collector). Alloy runs as a DaemonSet and does three jobs: it scrapes every pod in the
+# release annotated `prometheus.io/scrape: "true"` and remote-writes the series to Prometheus; it
+# tails every container in the release through the API server and ships the lines to Loki
+# labelled `service` (the component) and `container`; and it serves the node's own metrics
+# (prometheus.exporter.unix, the node_exporter collectors) from /proc, /sys and / on the host.
+#
+# On by default: a single k3s node has no monitoring stack of its own, and a chart whose
+# dashboards are empty until one is installed does not demonstrate anything. Off for a cluster
+# that already runs Prometheus and Loki: set grafana.prometheusUrl and grafana.lokiUrl, and use
+# telemetry.serviceMonitor for the Operator, or the same pod annotations for a Prometheus that
+# reads them.
+#
+# Stores are ClusterIP only and unauthenticated (Prometheus's remote-write receiver included);
+# Grafana is the only intended reader, behind its own login. Retention: Prometheus 30d/8GB,
+# Loki 30d (loki.yaml, mirrored from the repository's), both by design the same window.
+# =================================================================================================
+observability:
+  enabled: true
+  prometheus:
+    image:
+      repository: prom/prometheus
+      tag: "v3.14.0"
+      pullPolicy: IfNotPresent
+    retentionTime: 30d
+    retentionSize: 8GB
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { memory: 1Gi }
+  loki:
+    image:
+      repository: grafana/loki
+      tag: "3.5.7"
+      pullPolicy: IfNotPresent
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { memory: 1Gi }
+  alloy:
+    image:
+      repository: grafana/alloy
+      tag: "v1.11.2"
+      pullPolicy: IfNotPresent
+    # Node metrics from the host's /proc, /sys and /, mounted read-only. Disk is the one that
+    # matters: the databases, the metrics store and the log store share the node's volume, and
+    # the Host Disk Filling rule reads node_filesystem_avail_bytes. Off leaves the DaemonSet with
+    # no hostPath mounts at all.
+    hostMetrics: true
+    # The node's kubelet, over its TLS port with the pod's ServiceAccount token: the kubelet's own
+    # metrics (running pods, per-PVC volume stats) and cAdvisor's (CPU, memory, network, restarts
+    # and OOM kills per container), kept to the series the Cluster dashboard and the Cluster
+    # alert group read. No kube-state-metrics: the object inventory it adds is what kubectl and
+    # Headlamp show. Under networkPolicy.enabled the edge is networkPolicy.kubeletCidr.
+    kubeletMetrics: true
+    # 15s matches the interval every dashboard and rule assumes for rate() windows.
+    scrapeInterval: 15s
+    # 768Mi: hostMetrics and kubeletMetrics together hold enough of a WAL to sit against a 512Mi
+    # ceiling, where reclaim stalls /-/ready past the liveness probe and the container is killed
+    # as exit 137 with reason Error. Same shape as the Grafana limit above.
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 768Mi }
+
+# ---------------------------------------------------------------------------------------------
+# ServiceMonitors for a cluster that runs the Prometheus Operator instead of the chart's own
+# stack (observability.enabled=false). Requires the ServiceMonitor CRD, hence off by default:
+# with it absent `helm install` fails outright. Targets and reasoning:
+#   deploy/k8s/README.md -> "Self-monitoring"
+# ---------------------------------------------------------------------------------------------
+telemetry:
+  serviceMonitor:
+    enabled: false
+    # The label Prometheus Operator selects on (kube-prometheus-stack defaults to
+    # `release: <its release name>`). Without a matching label the objects are created and
+    # silently ignored. Check yours:
+    #   kubectl get prometheus -A -o jsonpath='{.items[*].spec.serviceMonitorSelector}'
+    labels: {}
+    #  release: kube-prometheus-stack
+    interval: 30s
+    scrapeTimeout: 10s
+
+# ===============================================================================================
+# Broker credential service: the narrow authority the edge functions call to issue a gateway's
+# Mosquitto account, disable one, or list what the broker holds. A sidecar in the broker's pod,
+# speaking to the Dynamic Security plugin over loopback. Disabling it removes automated
+# enrolment and revocation and the Access Control page's live inventory;
+# scripts/mosquitto-provision-gateway.mjs remains the manual path. The image is used regardless:
+# the broker's initContainer runs the boot reconcile on it.
+# ===============================================================================================
+gatewayCredential:
+  enabled: true
+  image:
+    repository: ghcr.io/harri-llewelyn/acs-cymru/gateway-credential
+    # Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and mosquitto_rr.
+    tag: ""
+    pullPolicy: IfNotPresent
+  port: 9010
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 96Mi }
+
+# Default-deny both directions, with one explicit allow per flow. The flow graph is declared
+# ONCE as edges in templates/networkpolicy.yaml and both directions are generated from it.
+# Off by default: the two namespace values below cannot be inferred, and a wrong one produces a
+# stack where every pod is healthy and nothing reaches anything.
+networkPolicy:
+  enabled: false
+  # ONE POLICY THAT IS RENDERED EVEN WITH `enabled` OFF, and the only one: the forge's web port.
+  #
+  # Gitea runs with reverse-proxy authentication so the gateway's `forge` listener can hand a
+  # verified identity down as a header, and Gitea trusts that header FROM ANY PEER
+  # (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only; measured). A network policy is
+  # the only control -- so with the line above at its default, ONE HTTP request to gitea:3000 from
+  # any pod in the namespace signs in as any user, Node-RED included, which runs whatever
+  # JavaScript a flow author writes. The API path
+  # is unaffected (ENABLE_REVERSE_PROXY_AUTHENTICATION_API is off) and SSH is a separate principal;
+  # the exposure is the web UI, its approve control on `main`, and through `administrators` every
+  # gateway's flow.
+  #
+  # Ingress-only, on port 3000, from the two components that are meant to reach it. Gitea's egress
+  # is untouched, SSH is allowed on port 22 from `giteaSshAllowedCidrs` below -- open to anything at
+  # its default -- and turning `enabled` on replaces this with the generated pair.
+  #
+  # A NETWORKPOLICY IS ONLY AS GOOD AS THE CNI, IN BOTH DIRECTIONS. A cluster whose CNI does not
+  # enforce them accepts this object and ignores it -- so on one of those, put the forge somewhere
+  # else or do not enable it. A cluster that enforces them differently can read a CIDR peer more
+  # narrowly than intended, which is why port 22 names no peer while the list is open. That is true
+  # of every policy in this chart; it is said here because this is the one a deployment gets without
+  # asking. See issue #172.
+  protectForge: true
+  # Where CoreDNS/kube-dns runs. Without DNS egress nothing resolves ("could not translate host name").
+  dnsNamespace: kube-system
+  # Where the ingress controller runs (kube-system on k3s). Wrong means every route 502s.
+  ingressControllerNamespace: kube-system
+  # Shopfloor gateways are not pods, so only an ipBlock describes them. Narrow this: the broker
+  # is the one service deliberately reachable from the plant network. Traffic arrives SNAT'd by
+  # ServiceLB, so the source seen is the node's.
+  mqttAllowedCidrs:
+    - 0.0.0.0/0
+  # Where appliances clone from. Defence in depth behind a per-gateway deploy key and the branch
+  # rules that confine it.
+  #
+  # APPLIES WHETHER OR NOT `enabled` IS ON: `protectForge` above takes its port 22 peers from this
+  # same list, so the two policies cannot disagree about who may clone. Narrowing it with the layer
+  # off still narrows how appliances reach the forge, and a gateway that cannot reach gitea:22 does
+  # not converge and nothing reports that as a policy decision. Left open (or emptied) the rule is
+  # rendered with no peer at all, which is every source in every CNI.
+  giteaSshAllowedCidrs:
+    - 0.0.0.0/0
+  # For Alloy (pod discovery and log tailing go through the API server) and the e2e-aas-export
+  # initContainer (reads a Job's status with kubectl). Empty removes the rule: Alloy then
+  # collects nothing and that Job cannot run under policy.
+  apiServerCidr: 0.0.0.0/0
+  apiServerPorts: [443, 6443]
+  # For Alloy's kubelet scrape (observability.alloy.kubeletMetrics): the nodes' addresses, port
+  # 10250. Empty removes the rule and the Cluster dashboard's workload and volume panels go blank.
+  kubeletCidr: 0.0.0.0/0
+  # Raw NetworkPolicy spec for flows the chart cannot express (SMTP relay, S3 endpoint, proxy).
+  extraEgress: {}
+  # The ingress half of the same escape hatch, for anything reaching in from outside the chart
+  # (a cluster Prometheus when observability.enabled is off; kubelet probes if your CNI does not
+  # exempt them).
+  # (deploy/k8s/README.md -> "NetworkPolicies (M4)")
+  #  extraIngress:
+  #    podSelector:
+  #      matchLabels:
+  #        app.kubernetes.io/part-of: aber
+  #    policyTypes: [Ingress]
+  #    ingress:
+  #      - from:
+  #          - namespaceSelector:
+  #              matchLabels:
+  #                kubernetes.io/metadata.name: monitoring
+  #        ports:
+  #          - protocol: TCP
+  #            port: 9100
+  extraIngress: {}
+
+# PodDisruptionBudgets, only for workloads with more than one replica. A PDB on a single-replica
+# workload makes `kubectl drain` hang; the chart refuses to create one for those.
+podDisruptionBudgets:
+  enabled: false
+  # maxUnavailable rather than minAvailable, so it stays correct as replicas change.
+  maxUnavailable: 1
+
+# HPAs for the stateless components only. The chart refuses one for a single-writer workload
+# (aber.validateAutoscaling): scaling `ingestion` duplicates every telemetry row.
+# Needs metrics-server, which CI's k3d cluster disables.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  # Adding a single-writer component here fails the render rather than the cluster.
+  components:
+    - supabase-rest
+    - supabase-kong
+    - supabase-functions
+    - frontend
+
+# Scheduled logical backups, opt-in, and the only recovery path this stack has: `local-path` has
+# no replication and neither database is replicated.
+backup:
+  enabled: false
+  # 02:30 daily; not "@daily" (midnight), the same minute as every other default job.
+  schedule: "30 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Dumps older than this are pruned by the same Job that writes them.
+  retentionDays: 14
+  # Also archive the 3D model objects from supabase-storage's PVC. The pg_dumps capture
+  # `devices.model_3d_path` but not the bytes it points at. Off by default because the PVC is
+  # ReadWriteOnce: the Job must land on the storage pod's node (the chart adds a podAffinity),
+  # and on a full or cordoned node it stays Pending. Check the first run completed. Prefer
+  # Velero or a CSI snapshotter where available (supabaseStorage.podAnnotations).
+  includeStorage: false
+  # pvc | s3
+  destination: pvc
+  persistence:
+    size: 20Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  s3:
+    # destination: s3 only. The bucket must already exist.
+    bucket: ""
+    # e.g. https://s3.eu-west-2.amazonaws.com, or a MinIO endpoint.
+    endpoint: ""
+    region: ""
+    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are read from this Secret, kept out of the
+    # chart's own Secret because backup credentials have a different lifetime.
+    existingSecret: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  # Also archive the forge's PVC: the SQLite database, every gateway's repository and the SSH
+  # host keys appliances pin. The same ReadWriteOnce caveat as includeStorage, and including
+  # both pins the pod to a node holding both PVCs. Read by the backup service only.
+  includeForge: false
+  # Also archive the broker's PVC: the Dynamic Security document, which is every issued gateway
+  # account and the only copy of it. The same ReadWriteOnce caveat. Read by the backup service
+  # only.
+  includeBroker: false
+  # Also archive the CA behind mosquitto.tls and postgresTls: every appliance pins it, so losing
+  # it is a fleet-wide re-enrolment. The Secret lives in the ClusterIssuer's namespace
+  # (deploy/k8s/internal-ca.yaml puts acs-cymru-ca-key-pair in cert-manager's); the chart gives
+  # the backup service `get` on that one name there and nothing else. Empty name: not archived,
+  # which is right for an ACME issuer, whose CA is nobody's to keep. Read by the backup service
+  # only.
+  ca:
+    secretName: ""
+    namespace: cert-manager
+
+# The backup service (apps/backup-service.yaml) in place of the CronJob: backups an
+# Administrator asks for on the Backups page, and `backup.schedule` through pg_cron, with
+# `backup.retentionDays` applied to scheduled backups only. Needs backup.enabled, destination=pvc
+# and the image below. Off until the image is built; with it off the CronJob runs as before.
+backupService:
+  enabled: false
+  image:
+    # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar.
+    repository: ghcr.io/harri-llewelyn/acs-cymru/backup-service
+    tag: ""
+    pullPolicy: IfNotPresent
+  # custom -> .dump, the artefact the CronJob writes and pg_restore reads selectively;
+  # plain -> .sql.gz, what scripts/restore-databases.sh replays.
+  format: custom
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 1Gi }

@@ -1,0 +1,47 @@
+{{- if .Values.realtime.enabled }}
+{{- $component := "realtime" -}}
+{{- /*
+=================================================================================================
+THE ONE SERVICE WHOSE NAME IS NOT ITS COMPONENT NAME.
+
+Everywhere else this chart names a Service for its component, so every in-cluster URL resolves
+unchanged. Realtime is the exception, and the exception is what makes it work:
+
+  * Realtime resolves WHICH TENANT a request belongs to from the LEADING HOSTNAME LABEL of the Host
+    header -- not from the JWT, not from a setting. `realtime-dev` is the tenant SEED_SELF_HOST
+    creates, and TENANT_NAME is ignored.
+  * The gateway rewrites the upstream Host header to the Service name. Point it at a Service called
+    `supabase-realtime` and no tenant matches, so EVERY WebSocket handshake is rejected with a bare
+    403 mentioning neither tenants nor hostnames.
+
+NAMING THE SERVICE FOR THE TENANT makes the leading label fall out of ordinary in-cluster DNS, so
+`http://realtime-dev:4000/socket/` is correct with no header rewriting -- which is why
+supabase/envoy.yaml carries `__REALTIME_UPSTREAM_HOST__` as a placeholder rather than a literal.
+
+aber.validateRealtimeServiceName refuses any other name. The Service name is the decision here
+and the thing later work must not undo; the workload behind it is ordinary.
+=================================================================================================
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.realtime.serviceName }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    aber.io/tenant-note: >-
+      Named for the Realtime TENANT, not the workload. Renaming breaks every WebSocket handshake
+      with a bare 403. See architecture §3.4.
+    {{- with .Values.global.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.realtime.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

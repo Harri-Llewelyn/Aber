@@ -1,0 +1,496 @@
+{{/*
+The collector config, one text for two readers: the ConfigMap below, and the DaemonSet's pod
+checksum. Alloy does not reload on a ConfigMap change, and a config that only the ConfigMap read
+rolled the pods on a values change and never on an edit to the text itself.
+*/}}
+{{- define "aber.alloyConfig" -}}
+{{- $cfg := .Values.observability.alloy -}}
+{{- $name := include "aber.name" . -}}
+logging {
+  // WARN: Alloy's own stdout is collected by Alloy, so an info-level default writes about
+  // writing, forever.
+  level  = "warn"
+  format = "logfmt"
+}
+
+// ------------------------------------------------------------------------------------------
+// Discovery: the pods of this release on this node. Each DaemonSet pod covers its own node,
+// so a pod is scraped and tailed exactly once however many nodes there are.
+// ------------------------------------------------------------------------------------------
+discovery.kubernetes "pods" {
+  role = "pod"
+  namespaces {
+    own_namespace = true
+  }
+  selectors {
+    role  = "pod"
+    field = "spec.nodeName=" + sys.env("NODE_NAME")
+  }
+}
+
+discovery.relabel "release" {
+  targets = discovery.kubernetes.pods.targets
+
+  // This release only. Other people's pods in the namespace are not ours to collect.
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+    regex         = {{ .Release.Name | quote }}
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+    regex         = {{ $name | quote }}
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_phase"]
+    regex         = "Running"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+    target_label  = "service"
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+// Logs.
+// ------------------------------------------------------------------------------------------
+discovery.relabel "logs" {
+  targets = discovery.relabel.release.output
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+}
+
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.logs.output
+  forward_to = [loki.process.pods.receiver]
+}
+
+loki.process "pods" {
+  forward_to = [loki.write.local.receiver]
+
+  // The source adds `job` (namespace/pod:container) and `instance` of its own. The stream
+  // contract is `service` and `container`, nothing else: a per-pod label means a new stream
+  // set on every restart, and the dashboards and rules select on the two alone.
+  stage.label_drop {
+    values = ["job", "instance"]
+  }
+
+  // Rejoin Python tracebacks for the two services that emit logging_config.py's formats:
+  // a line that starts with neither a `{` nor an ISO timestamp belongs to the record above.
+  stage.match {
+    selector = "{service=~\"ingestion|playback\"}"
+
+    stage.multiline {
+      firstline     = "^(\\{|\\d{4}-\\d{2}-\\d{2}T)"
+      max_wait_time = "3s"
+      max_lines     = 200
+    }
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+
+    // Loki answers 429 when a burst exceeds its ingest ceiling; this turns that into a delay
+    // rather than a loss, up to the last retry. See loki.yaml for the ceilings.
+    max_backoff_period  = "5m"
+    max_backoff_retries = 20
+  }
+
+  // The write-ahead log makes a container restart lossless. It lives on the pod's emptyDir,
+  // so a pod replaced on a rollout starts afresh; that is the trade for no hostPath writes.
+  wal {
+    enabled = true
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+// Metrics: every pod annotated prometheus.io/scrape, on the port and path it names. A pod
+// yields one discovery target per container port; after relabelling those share a label
+// set and the scraper keeps one. Pod-level labels only, for that reason.
+// ------------------------------------------------------------------------------------------
+discovery.relabel "metrics" {
+  targets = discovery.relabel.release.output
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+    regex         = "true"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+    regex         = "(.+)"
+    target_label  = "__metrics_path__"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_ip", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+    separator     = ":"
+    regex         = "(.+):(\\d+)"
+    replacement   = "$1:$2"
+    target_label  = "__address__"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+  // `job` and `component` both carry the component name, which is what the dashboards and
+  // rules select on.
+  rule {
+    source_labels = ["service"]
+    target_label  = "job"
+  }
+  rule {
+    source_labels = ["service"]
+    target_label  = "component"
+  }
+}
+
+prometheus.scrape "pods" {
+  targets         = discovery.relabel.metrics.output
+  forward_to      = [prometheus.remote_write.local.receiver]
+  scrape_interval = {{ $cfg.scrapeInterval | quote }}
+  scrape_timeout  = "10s"
+}
+{{- if $cfg.hostMetrics }}
+
+// ------------------------------------------------------------------------------------------
+// The node. node_exporter's collectors, in-process, reading the host's filesystems mounted
+// read-only. Container and pseudo filesystems are excluded, or every overlay mount appears
+// as a disk.
+// ------------------------------------------------------------------------------------------
+prometheus.exporter.unix "host" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/host/root"
+  // diskstats reads udev properties from this directory, which is on the host, not in
+  // the pod; the default path logs an error on every start and disables them.
+  udev_data_path = "/host/root/run/udev/data"
+
+  filesystem {
+    mount_points_exclude = "^/(sys|proc|dev|host|etc|run|var/lib/kubelet)($|/)"
+    fs_types_exclude     = "^(autofs|binfmt_misc|cgroup.*|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+  }
+}
+
+discovery.relabel "host" {
+  targets = prometheus.exporter.unix.host.targets
+
+  rule {
+    target_label = "job"
+    replacement  = "node"
+  }
+  rule {
+    target_label = "component"
+    replacement  = "host"
+  }
+  rule {
+    target_label = "instance"
+    replacement  = sys.env("NODE_NAME")
+  }
+}
+
+prometheus.scrape "host" {
+  targets         = discovery.relabel.host.output
+  forward_to      = [prometheus.remote_write.local.receiver]
+  scrape_interval = {{ $cfg.scrapeInterval | quote }}
+}
+{{- end }}
+{{- if $cfg.kubeletMetrics }}
+
+// ------------------------------------------------------------------------------------------
+// The kubelet on this node: its own metrics (pod counts, per-PVC volume stats) and cAdvisor's
+// (CPU, memory, network, start times and OOM kills per container), over its TLS port with
+// the pod's ServiceAccount token. The kubelet's serving certificate is signed by no CA the
+// pod holds, so it is not verified; the token is what authenticates. Both are cut down to
+// the series the Cluster dashboard and the Cluster alert group read: the kubelet serves tens
+// of thousands, most of them its own latency histograms. `up` is kept for both, so a
+// scrape that stops is a 0 rather than an absence.
+// ------------------------------------------------------------------------------------------
+discovery.kubernetes "node" {
+  role = "node"
+  selectors {
+    role  = "node"
+    field = "metadata.name=" + sys.env("NODE_NAME")
+  }
+}
+
+discovery.relabel "kubelet" {
+  targets = discovery.kubernetes.node.targets
+
+  // The same `instance` as the host block, so a node's series join by name.
+  rule {
+    source_labels = ["__meta_kubernetes_node_name"]
+    target_label  = "instance"
+  }
+  rule {
+    target_label = "component"
+    replacement  = "kubelet"
+  }
+}
+
+prometheus.scrape "kubelet" {
+  targets           = discovery.relabel.kubelet.output
+  job_name          = "kubelet"
+  scheme            = "https"
+  bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+  tls_config {
+    insecure_skip_verify = true
+  }
+  forward_to      = [prometheus.relabel.kubelet.receiver]
+  scrape_interval = {{ $cfg.scrapeInterval | quote }}
+  scrape_timeout  = "10s"
+}
+
+prometheus.relabel "kubelet" {
+  forward_to = [prometheus.remote_write.local.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "kubelet_volume_stats_.*|kubelet_running_pods|kubelet_running_containers|kubelet_restarted_pods_total|kubelet_started_containers_total|kubelet_evictions|kubelet_node_name|up"
+    action        = "keep"
+  }
+}
+
+prometheus.scrape "cadvisor" {
+  targets           = discovery.relabel.kubelet.output
+  job_name          = "cadvisor"
+  metrics_path      = "/metrics/cadvisor"
+  scheme            = "https"
+  bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+  tls_config {
+    insecure_skip_verify = true
+  }
+  forward_to      = [prometheus.relabel.cadvisor.receiver]
+  scrape_interval = {{ $cfg.scrapeInterval | quote }}
+  scrape_timeout  = "10s"
+}
+
+prometheus.relabel "cadvisor" {
+  forward_to = [prometheus.remote_write.local.receiver]
+
+  // Pods only. The node's own cgroups carry pod="" and the host block already has the node;
+  // `up` has no pod label and is not a cgroup.
+  rule {
+    source_labels = ["__name__", "pod"]
+    regex         = "container_.*;"
+    action        = "drop"
+  }
+  rule {
+    source_labels = ["__name__"]
+    regex         = "container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_spec_memory_limit_bytes|container_cpu_cfs_periods_total|container_cpu_cfs_throttled_periods_total|container_network_receive_bytes_total|container_network_transmit_bytes_total|container_start_time_seconds|container_oom_events_total|up"
+    action        = "keep"
+  }
+  // `id` is the cgroup path and `name` the runtime's container id; both change on every
+  // restart, which would make each restart a new series. Without them a restart is a change
+  // of container_start_time_seconds on one series, which is what the restart panel and the
+  // Container Restarting rule count.
+  rule {
+    regex  = "id|name|image"
+    action = "labeldrop"
+  }
+}
+{{- end }}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+{{- end -}}
+{{- if .Values.observability.enabled }}
+{{- $component := "alloy" -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $cfg := .Values.observability.alloy -}}
+{{- $name := include "aber.name" . -}}
+{{/*
+=================================================================================================
+Alloy -- the one collector. A DaemonSet, one pod per node, and each pod handles the pods on
+its own node: it scrapes the ones annotated `prometheus.io/scrape` and remote-writes the
+series to Prometheus, tails every container in the release and ships the lines to Loki, serves
+the node's own metrics from the host's /proc, /sys and /, and scrapes the node's kubelet for the
+container and volume figures the Cluster dashboard reads.
+
+DISCOVERY GOES THROUGH THE API SERVER, which is why there is a ServiceAccount and a ClusterRole
+below and no hostPath under /var/log. Pod logs come the way `kubectl logs` gets them, with the
+pod and container names attached by the kubelet, so nothing here has to be told what a
+container is called. The ClusterRole is read-only and lists exactly what discovery and log
+tailing need.
+
+LABELS ARE TWO, `service` AND `container`, AND STAY TWO. Loki indexes by label set, so every
+label is a cardinality budget; `service` is the pod's component and is what every shipped log
+query selects on, `container` is what `kubectl logs -c` calls it. `reason`, `device` and
+`edge_node` are fields in the JSON lines and are queried at read time: {service="ingestion"} |
+json | reason = "gateway_binding".
+
+LINES ARE FORWARDED WHOLE. What the store holds is what the container printed. The one
+exception is the traceback rejoin for the two services whose format this repository controls;
+its firstline regex describes logging_config.py's formats and nothing else, and applying it to
+a mixed stream swallows unrelated lines into the wrong record (measured).
+=================================================================================================
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ printf "%s-alloy" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  # Cluster-scoped, so namespaced by name: two installs in two namespaces must not share one.
+  name: {{ printf "%s-%s-alloy" .Release.Namespace $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+rules:
+  # discovery.kubernetes, role=pod.
+  - apiGroups: [""]
+    resources: [pods, nodes, namespaces]
+    verbs: [get, list, watch]
+  # loki.source.kubernetes reads container logs through the API server.
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get, list, watch]
+  # The kubelet's /metrics and /metrics/cadvisor, which it authorizes as this subresource.
+  - apiGroups: [""]
+    resources: [nodes/metrics]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-%s-alloy" .Release.Namespace $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-%s-alloy" .Release.Namespace $fullname }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ printf "%s-alloy" $fullname }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-alloy-config" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  config.alloy: |
+{{ include "aber.alloyConfig" . | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 12345
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Alloy does not reload on a ConfigMap change, so the rendered config rolls the pods.
+        checksum/config: {{ include "aber.alloyConfig" . | sha256sum }}
+        {{- include "aber.scrapeAnnotations" (dict "port" 12345 "path" "/metrics") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ printf "%s-alloy" $fullname }}
+      containers:
+        - name: alloy
+          image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
+          imagePullPolicy: {{ $cfg.image.pullPolicy }}
+          args:
+            - run
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --storage.path=/var/lib/alloy/data
+            - /etc/alloy/config.alloy
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: http
+              containerPort: 12345
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 20
+            failureThreshold: 4
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/alloy/data
+            {{- if $cfg.hostMetrics }}
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: host-root
+              mountPath: /host/root
+              readOnly: true
+              mountPropagation: HostToContainer
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ printf "%s-alloy-config" $fullname }}
+        - name: data
+          emptyDir: {}
+        {{- if $cfg.hostMetrics }}
+        - name: host-proc
+          hostPath:
+            path: /proc
+        - name: host-sys
+          hostPath:
+            path: /sys
+        - name: host-root
+          hostPath:
+            path: /
+        {{- end }}
+{{- end }}

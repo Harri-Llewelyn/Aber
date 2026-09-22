@@ -87,8 +87,8 @@ jobs:
     # wait burning an hour, not the expectation.
     timeout-minutes: 45
     env:
-      RELEASE: acs-cymru
-      NS: acs-cymru
+      RELEASE: aber
+      NS: aber
       BACKUP_DIR: ${{ github.workspace }}/rehearsal-backups
       # values-dev.yaml's credentials, which is what this installs with. Named here so the script's
       # psql calls and the chart cannot disagree about them.
@@ -139,7 +139,7 @@ jobs:
         id: appversion
         run: |
           set -eu
-          V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml \
+          V=$(grep -E '^appVersion:' deploy/helm/aber/Chart.yaml \
               | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
           test -n "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
@@ -176,9 +176,9 @@ jobs:
         run: |
           set -eu
           kubectl create namespace "$NS"
-          helm install "$RELEASE" deploy/helm/acs-cymru \
+          helm install "$RELEASE" deploy/helm/aber \
             --namespace "$NS" \
-            --values deploy/helm/acs-cymru/values-dev.yaml \
+            --values deploy/helm/aber/values-dev.yaml \
             --values .github/rehearsal-values.yaml \
             --timeout 15m
 
@@ -268,9 +268,9 @@ jobs:
         run: |
           set -eu
           kubectl create namespace "$NS"
-          helm install "$RELEASE" deploy/helm/acs-cymru \
+          helm install "$RELEASE" deploy/helm/aber \
             --namespace "$NS" \
-            --values deploy/helm/acs-cymru/values-dev.yaml \
+            --values deploy/helm/aber/values-dev.yaml \
             --values .github/rehearsal-values.yaml \
             --timeout 15m
 

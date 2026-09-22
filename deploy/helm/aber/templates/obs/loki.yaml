@@ -1,0 +1,142 @@
+{{- if .Values.observability.enabled }}
+{{- $component := "loki" -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $cfg := .Values.observability.loki -}}
+{{- $lokiYaml := .Files.Get "files/loki/loki.yaml" -}}
+{{- if not $lokiYaml }}
+{{- fail "\n\naber: files/loki/loki.yaml is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- end }}
+{{/*
+=================================================================================================
+Loki -- the log store. Single binary, filesystem storage on one PVC, the configuration mirrored
+from loki/loki.yaml: retention, the ingest ceilings and the reasons for them are in that file.
+Alloy (obs/alloy.yaml) writes to it; Grafana reads it; nothing else can reach it. These logs are
+not the audit trail; that is `digital_thread`.
+=================================================================================================
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-loki-config" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  loki.yaml: |
+{{ $lokiYaml | indent 4 }}
+---
+{{- if $cfg.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-loki" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # Thirty days of every container's lines: the evidence for whatever fails next.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - {{ $cfg.persistence.accessMode }}
+  {{- include "aber.storageClass" (dict "ctx" . "component" $cfg.persistence) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ $cfg.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 3100
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    # Single writer on a ReadWriteOnce store.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        checksum/config: {{ $lokiYaml | sha256sum }}
+        {{- include "aber.scrapeAnnotations" (dict "port" 3100 "path" "/metrics") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # grafana/loki runs as loki (10001); local-path provisions a root-owned directory.
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: loki
+          image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
+          imagePullPolicy: {{ $cfg.image.pullPolicy }}
+          args:
+            - -config.file=/etc/loki/loki.yaml
+          ports:
+            - name: http
+              containerPort: 3100
+              protocol: TCP
+          # /ready answers 200 only once the ingester accepts writes, which on a fresh store is
+          # about fifteen seconds after start.
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 20
+            failureThreshold: 4
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+              readOnly: true
+            - name: data
+              mountPath: /loki
+      volumes:
+        - name: config
+          configMap:
+            name: {{ printf "%s-loki-config" $fullname }}
+        - name: data
+          {{- if $cfg.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-loki" $fullname }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}
