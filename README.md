@@ -1,6 +1,6 @@
 # Aber - the shopfloor data platform
 
-[![CI Pipeline](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml)
+[![CI Pipeline](https://github.com/Harri-Llewelyn/Aber/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/Aber/actions/workflows/ci.yml)
 
 Aber is Welsh for a river mouth, where many streams converge and leave as one. That is the
 ingestion topology: telemetry from every gateway on the shopfloor converges on one broker and one
@@ -518,7 +518,7 @@ The mechanism and its limits are in
 [`supabase/README.md`](supabase/README.md#the-access-control-page-states-what-is-outstanding).
 
 **Known issues** — things that can be worked on — are tracked as
-[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues). **Accepted risks are not**, and
+[GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues). **Accepted risks are not**, and
 live below.
 
 ### Accepted risks
@@ -718,10 +718,10 @@ port-forwards**, and the two agreeing is the wiring check.
 
 ## Roadmap & Future Extensions
 
-**The roadmap is the [1.0 milestone](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/1)**, and none of
+**The roadmap is the [1.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/1)**, and none of
 it is speculative: every issue on it names the code it would build on, so a reader can tell how far
 away each is. A thing that is not built and that 1.0 does not need competes for
-[2.0](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/2) rather than sitting in the release's critical
+[2.0](https://github.com/Harri-Llewelyn/Aber/milestone/2) rather than sitting in the release's critical
 path.
 
 **[`docs/roadmap.md`](docs/roadmap.md) is what the roadmap left behind:** every entry that has
@@ -729,7 +729,7 @@ retired and the documentation its substance moved into. Work does not stay on a 
 — it becomes the component's own documentation, and that file says which.
 
 **Defects and accepted risks are separate.** A known issue is a `bug` in
-[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues); **accepted risks** live under
+[GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues); **accepted risks** live under
 [Accepted risks](#accepted-risks).
 
 ---

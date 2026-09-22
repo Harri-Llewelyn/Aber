@@ -103,7 +103,7 @@ info:
 
   contact:
     name: Aber
-    url: https://github.com/Harri-Llewelyn/ACS-Cymru
+    url: https://github.com/Harri-Llewelyn/Aber
 
 servers:
   - url: http://127.0.0.1:54321

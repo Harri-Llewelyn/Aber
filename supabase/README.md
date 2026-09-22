@@ -759,7 +759,7 @@ function that could turn a job the worker had already reported as sent into a fa
 second opinion about an event that is over. `0107`'s three arms are unchanged, and a self-check
 fails if either its `stop_requested` arm or the new column goes missing from the body.
 
-**Held and current are different facts (`0129`, [#217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)).**
+**Held and current are different facts (`0129`, [#217](https://github.com/Harri-Llewelyn/Aber/issues/217)).**
 The broker keeps one password per gateway, so every mint after the first *replaces* one — and
 `playback_report_credentials()` carried edge-node ids and nothing else, which do not change on a
 rotation. The worker went on reporting a target it could no longer authenticate as, the dialog
@@ -790,7 +790,7 @@ the rollout that delivers the fix. `p_rotated` defaults for the same reason.
 
 `playback_report_credentials()` DROPs every existing declaration before creating, the way `0118`
 does: the baseline recreates the one-argument form on every boot, and two declarations make a call
-by name choose neither — which is what [#236](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/236)
+by name choose neither — which is what [#236](https://github.com/Harri-Llewelyn/Aber/issues/236)
 recorded for `playback_finish`. `start_playback_job()` keeps its signature, so its grants survive
 and no sweep is needed.
 
@@ -939,7 +939,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Multi-factor authentication ([#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184)) and the audit-domain work both depended on this split — the MFA reset is gated on
+deploys flows. The repair is to make that person an `Administrator`. Multi-factor authentication ([#184](https://github.com/Harri-Llewelyn/Aber/issues/184)) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
 
@@ -2592,7 +2592,7 @@ the wild with no record of it.
 
 The middle row used to read *10 years*, alongside a note that a short expiry would take the stack
 off the air "on a date nobody wrote down, and there is no refresh path". Half of that was right and
-the other half was the defect ([#101](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/101)):
+the other half was the defect ([#101](https://github.com/Harri-Llewelyn/Aber/issues/101)):
 
 * **There is a refresh path**, and building it was cheap because these keys are signed with
   `SUPABASE_JWT_SECRET` and **re-signing them does not rotate that secret**. A new token with a
@@ -2939,7 +2939,7 @@ that warning.
 
 Because each worker is isolated, shared code **cannot** be imported from a sibling directory — a
 worker only reads files beneath its own service path. That is why `resolveUserRole` and
-`sparkplugToXsd` are duplicated rather than extracted ([issue #9](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/9)).
+`sparkplugToXsd` are duplicated rather than extracted ([issue #9](https://github.com/Harri-Llewelyn/Aber/issues/9)).
 
 ### `approve_quarantined_device()`
 
@@ -3200,7 +3200,7 @@ entirely, so its own check is the only one there is.
 
 ### An archived schema stops taking new devices (`0093`)
 
-[Issue #167](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/167). Publishing v2 archives v1 and
+[Issue #167](https://github.com/Harri-Llewelyn/Aber/issues/167). Publishing v2 archives v1 and
 repoints every attached device in one transaction, so no machine is judged against a contract the
 platform has moved past. The Edit Details dropdown then offered v1 back — one device at a time, with
 nothing that would ever sweep it forward again. On a device set to `enforce`, being judged against
@@ -3622,7 +3622,7 @@ gateway's key, and the archive mark below.
 ### Archiving a gateway reaches the forge (`0114`)
 
 **Archiving a gateway archives its repository, which is the fourth thing it loses**
-([#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197)). The key stops the appliance
+([#197](https://github.com/Harri-Llewelyn/Aber/issues/197)). The key stops the appliance
 reaching the repository and does nothing about the repository itself, which went on reading in the
 forge's own listing exactly like one in service — and the forge is where a gateway's flow and a
 plant's notes about it live, so it was the one place the archive was invisible. The sweep now sets
@@ -3662,7 +3662,7 @@ it: a sweep that could not reach the forge must not read as *the repository is g
 range older than the raw retention window returned nothing and reported *"No telemetry in that range
 for the selected metrics"* — a sentence describing a device that published nothing, when what
 happened is that the chunks were dropped and the data is still held in a rollup
-([#160](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/160)). To offer that rollup the dialog has
+([#160](https://github.com/Harri-Llewelyn/Aber/issues/160)). To offer that rollup the dialog has
 to know what each resolution still covers, and **the retention settings cannot answer it**: they say
 what will eventually be dropped, not what is there. A stack installed three weeks ago holds three
 weeks of raw however `retainFor` is set, and widening a policy does not restore deleted chunks.

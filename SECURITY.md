@@ -13,7 +13,7 @@ a site learns that one matters to it; this document does not invent a second ans
 **Please do not open a public issue for a security vulnerability.**
 
 Report it privately through GitHub's
-[private vulnerability reporting](https://github.com/Harri-Llewelyn/ACS-Cymru/security/advisories/new)
+[private vulnerability reporting](https://github.com/Harri-Llewelyn/Aber/security/advisories/new)
 — the **Security** tab, then **Report a vulnerability**. That opens a draft advisory visible only to
 the maintainers.
 

@@ -90,7 +90,7 @@ re-run.
   the better outcome: the holder goes stale on the dashboard inside the 90s threshold rather than
   failing quietly at some later reconnect. The playback worker is the one holder this does not
   reach — it keeps no session (`ingestion/playback_worker.py` polls), so there is nothing for the
-  broker to drop, which is why [issue #217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)
+  broker to drop, which is why [issue #217](https://github.com/Harri-Llewelyn/Aber/issues/217)
   is a playback problem and not a fleet one.
 - A `$7$` hash written by `mosquitto_passwd` authenticates when transplanted into a client's
   `password`, `salt` and `iterations` fields. The boot reconcile relies on this for the platform
