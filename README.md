@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/aber-mark-dark.svg">
+  <img src="docs/assets/aber-mark.svg" alt="The Aber emblem: three streams meeting the sea under an open sky" width="112">
+</picture>
+
 # Aber - the shopfloor data platform
 
 [![CI Pipeline](https://github.com/Harri-Llewelyn/Aber/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/Aber/actions/workflows/ci.yml)

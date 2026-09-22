@@ -234,20 +234,17 @@ html, body, #root {
 .topbar-brand:hover { background: var(--bg-glass); }
 .topbar-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* The emblem stands on the bar without a plate. --accent-strong is the deeper blue in the light
+   theme, which a filled shape needs; in the dark theme it is the same cyan as --accent. */
 .brand-icon {
   width: 28px;
   height: 28px;
-  /* The filled-button pair, not bare --accent with white ink. In the light theme --accent is
-     #0284c7, on which white measures APCA Lc 36.6 -- the "passes WCAG 2, unreadable on screen"
-     case the button tokens exist to avoid. */
-  background: var(--accent-strong);
-  color: var(--accent-contrast);
-  border-radius: 7px;
+  color: var(--accent-strong);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 0 14px var(--accent-glow);
+  filter: drop-shadow(0 0 6px var(--accent-glow));
 }
 
 .brand-text {
