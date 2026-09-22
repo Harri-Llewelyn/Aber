@@ -72,7 +72,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_WEBHOOK_SECRET",
     // The platform's version: the tag a new gateway's platform.yml points at, and the platform
     // repository the same key is registered read-only on. Unset means no platform repository.
-    "ACS_PLATFORM_VERSION",
+    "ABER_PLATFORM_VERSION",
   ],
 
   // Disables a decommissioned gateway's broker account, dropping its live session, which is how
@@ -97,9 +97,9 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     // The one-liner: the platform's root (the pin is computed from it), where an appliance fetches
     // that root over plain HTTP, and the development-only switch that lets the command be minted
     // for a plain-HTTP platform.
-    "ACS_CA_PEM",
-    "ACS_CA_URL",
-    "ACS_INSTALLER_ALLOW_HTTP",
+    "ABER_CA_PEM",
+    "ABER_CA_URL",
+    "ABER_INSTALLER_ALLOW_HTTP",
     // The readiness probe reports when the BROKER's root expires, which is a different root and
     // is read where it is presented. `GET /ca` alone: a root certificate, never a private key.
     "MQTT_CREDENTIAL_SERVICE_URL",
@@ -113,7 +113,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   "gateway-install": [
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPABASE_PUBLIC_URL",
-    "ACS_INSTALLER_ALLOW_HTTP",
+    "ABER_INSTALLER_ALLOW_HTTP",
   ],
 
   // Composes an AAS shell. Needs the service-role key to read across the tables a shell
@@ -194,7 +194,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_MACHINE_PASSWORD",
     "GITEA_WEBHOOK_URL",
     "GITEA_WEBHOOK_SECRET",
-    "ACS_PLATFORM_VERSION",
+    "ABER_PLATFORM_VERSION",
     "MQTT_CREDENTIAL_SERVICE_URL",
     "MQTT_CREDENTIAL_SERVICE_TOKEN",
   ],

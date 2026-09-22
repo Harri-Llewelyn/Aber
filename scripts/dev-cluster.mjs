@@ -53,10 +53,10 @@ import { fileURLToPath } from 'node:url'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CHART = 'deploy/helm/aber'
-const CLUSTER = process.env.ACS_DEV_CLUSTER || 'acs-cymru'
-const NS = process.env.ACS_DEV_NAMESPACE || 'aber'
+const CLUSTER = process.env.ABER_DEV_CLUSTER || 'aber'
+const NS = process.env.ABER_DEV_NAMESPACE || 'aber'
 const RELEASE = 'aber'
-const IMG_NS = 'ghcr.io/harri-llewelyn/acs-cymru'
+const IMG_NS = 'ghcr.io/harri-llewelyn/aber'
 // The runbook's pin. cert-manager is cluster administration, installed once, not a chart dependency.
 const CERT_MANAGER_VERSION = 'v1.16.2'
 
@@ -214,9 +214,9 @@ function lbPublishes (port) {
 
 function ensureCertManager () {
   step('cert-manager and the internal CA')
-  const ready = () => capture('kubectl', ['get', 'clusterissuer', 'acs-cymru-ca',
+  const ready = () => capture('kubectl', ['get', 'clusterissuer', 'aber-ca',
     '-o', 'jsonpath={.status.conditions[?(@.type=="Ready")].status}']).out === 'True'
-  if (ready()) { console.log('  ClusterIssuer acs-cymru-ca is Ready'); return }
+  if (ready()) { console.log('  ClusterIssuer aber-ca is Ready'); return }
   if (!capture('kubectl', ['get', 'namespace', 'cert-manager']).ok) {
     must('kubectl', ['apply', '-f',
       `https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml`],
@@ -227,9 +227,9 @@ function ensureCertManager () {
   must('kubectl', ['-n', 'cert-manager', 'wait', '--for=condition=Available', 'deployment', '--all', '--timeout=300s'],
     'cert-manager did not become available')
   must('kubectl', ['apply', '-f', 'deploy/k8s/internal-ca.yaml'], 'the internal CA did not apply')
-  must('kubectl', ['-n', 'cert-manager', 'wait', '--for=condition=Ready', 'certificate/acs-cymru-ca', '--timeout=120s'],
+  must('kubectl', ['-n', 'cert-manager', 'wait', '--for=condition=Ready', 'certificate/aber-ca', '--timeout=120s'],
     'the root certificate was not issued')
-  must('kubectl', ['wait', '--for=condition=Ready', 'clusterissuer/acs-cymru-ca', '--timeout=120s'],
+  must('kubectl', ['wait', '--for=condition=Ready', 'clusterissuer/aber-ca', '--timeout=120s'],
     'the ClusterIssuer did not become Ready')
 }
 
@@ -367,7 +367,7 @@ async function installChart ({ tls, e2e }) {
   // The broker's listener and both databases, from the one internal CA.
   if (tls) sets.push('--set', 'mosquitto.tls.enabled=true', '--set', 'postgresTls.enabled=true',
     // The CA the two listeners are issued from joins the backup (ensureCertManager names it).
-    '--set', 'backup.ca.secretName=acs-cymru-ca-key-pair')
+    '--set', 'backup.ca.secretName=aber-ca-key-pair')
   if (e2e) {
     // The validate Job follows browser-facing URLs, which resolve to the pod itself under the dev
     // domain; hostAliases point them at Traefik instead.
@@ -569,7 +569,7 @@ function dbTlsEnvironment () {
   if (releaseValues().postgresTls?.enabled !== true) return {}
   const r = kubectl('get', 'secret', 'supabase-db-tls', '-o', 'jsonpath={.data.ca\\.crt}')
   if (!r.ok || !r.out) die('postgresTls is on but the supabase-db-tls Secret holds no ca.crt yet; is the Certificate issued?')
-  const file = path.join(os.tmpdir(), 'acs-cymru-db-ca.crt')
+  const file = path.join(os.tmpdir(), 'aber-db-ca.crt')
   writeFileSync(file, Buffer.from(r.out, 'base64'))
   return { PGSSLMODE: 'verify-full', PGSSLROOTCERT: file }
 }

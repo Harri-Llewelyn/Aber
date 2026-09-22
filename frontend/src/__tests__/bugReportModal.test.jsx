@@ -47,12 +47,12 @@ describe('BugReportModal target repository', () => {
 
   // The specific regression. Asserted by name so reinstating the literal fails loudly rather
   // than quietly resuming misrouted reports.
-  it('never files against the stale acs-cymru-asset-tracking repository', () => {
+  it('never files against the stale aber repository', () => {
     renderModal()
     setTitle('anything')
     submit()
 
-    expect(open.mock.calls[0][0]).not.toMatch(/acs-cymru-asset-tracking/)
+    expect(open.mock.calls[0][0]).not.toMatch(/aber/)
   })
 
   it('defaults to this repository when VITE_GITHUB_REPO_URL is unset', async () => {

@@ -204,7 +204,7 @@ if (asJson) {
     JSON.stringify(
       {
         mcpServers: {
-          'acs-cymru-i3x': {
+          'aber-i3x': {
             command: 'npx',
             // PINNED, not @latest. Upstream documents `i3x-mcp@latest`, which executes freshly
             // published code holding a credential to the plant API.

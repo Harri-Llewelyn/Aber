@@ -493,7 +493,7 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
   const version = platformVersion();
   if (!version) {
     if (!saidNoVersion) {
-      console.warn("forge-sweep: ACS_PLATFORM_VERSION is unset, so the platform playbook is not published");
+      console.warn("forge-sweep: ABER_PLATFORM_VERSION is unset, so the platform playbook is not published");
       saidNoVersion = true;
     }
     return false;

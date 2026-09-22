@@ -395,7 +395,7 @@ read. It also only ever covered gateways, and a device is now a subject in its o
 | Auditor | yes | **no** — a read-only role that can remove evidence is not one |
 | Operator | no | no |
 
-**The upload checks that the file is a capture**, not merely that it is JSON — `acs_capture_version`
+**The upload checks that the file is a capture**, not merely that it is JSON — `aber_capture_version`
 present, matching the version this stack reads, and a non-empty `messages` array. The bucket has to
 accept several JSON-ish MIME types because browsers report a hand-picked `.json` inconsistently, so
 the type is close to no check at all, and a wrong file is otherwise discovered when somebody tries to
@@ -967,7 +967,7 @@ batch arriving mid-heal never waits on a network round trip. It stays resident s
 
 Sparkplug binds each metric name to an **integer alias** in a birth certificate, and thereafter
 publishes DATA carrying the alias alone with no name. That is the normal production configuration
-for a real gateway — including upstream ACS's `acs-edge`.
+for a real gateway — including upstream ACS's `aber-edge`.
 
 Until this was implemented the daemon read only `metric.name`, so an alias-optimised gateway
 **ingested zero metrics and logged nothing**. It was a total, silent data-loss path for any

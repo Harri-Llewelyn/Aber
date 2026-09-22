@@ -667,7 +667,7 @@ spec:
               value: {{ .Values.gatewayCredential.port | quote }}
             - name: MOSQUITTO_SECRET
               value: {{ .Values.mosquitto.credentials.secretName | quote }}
-            - name: ACS_CYMRU_NAMESPACE
+            - name: ABER_NAMESPACE
               value: {{ .Release.Namespace | quote }}
             # Loopback: the broker is in this pod, and 1883 always listens there whatever the
             # Services publish.

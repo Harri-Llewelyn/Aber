@@ -93,7 +93,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 # share a constant, and a mismatch is silent at BOTH ends -- the write succeeds and the read finds
 # nothing -- so scripts/check-docs-drift.mjs asserts all four agree.
 PLAYBACK_CREDENTIAL_FILE = os.getenv(
-    "PLAYBACK_CREDENTIAL_FILE", "/var/lib/acs-cymru/playback/credentials.json"
+    "PLAYBACK_CREDENTIAL_FILE", "/var/lib/aber/playback/credentials.json"
 )
 
 
@@ -240,12 +240,12 @@ def _connect(edge_node_id, password):
     `rc` is recorded rather than raised from the callback: it arrives on paho's thread, where an
     exception would be swallowed and logged by the library rather than reaching the caller.
     """
-    client = mqtt.Client(client_id="acs-playback-%s" % edge_node_id)
+    client = mqtt.Client(client_id="aber-playback-%s" % edge_node_id)
     client.username_pw_set(edge_node_id, password)
     # A list because the callback closes over it; `rc` stays None until the broker answers, which
     # is itself the third outcome -- no answer at all.
-    client.acs_connack = []
-    client.on_connect = lambda _c, _u, _f, rc, *args: client.acs_connack.append(rc)
+    client.aber_connack = []
+    client.on_connect = lambda _c, _u, _f, rc, *args: client.aber_connack.append(rc)
     if os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
         import ssl
         ca = os.getenv("MQTT_TLS_CA_FILE", "").strip()
@@ -370,10 +370,10 @@ def _run_job(supabase, storage, credentials, job):
     # authorised. They are named rather than lumped in, because they are the ones an operator fixes
     # by rotating MQTT_PLAYBACK_CREDENTIALS and restarting rather than by looking at the broker.
     deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
-    while not client.acs_connack and time.monotonic() < deadline:
+    while not client.aber_connack and time.monotonic() < deadline:
         time.sleep(0.05)
 
-    if not client.acs_connack:
+    if not client.aber_connack:
         client.loop_stop()
         return 0, out_of_window, (
             "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
@@ -381,7 +381,7 @@ def _run_job(supabase, storage, credentials, job):
             % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
         )
 
-    rc = client.acs_connack[0]
+    rc = client.aber_connack[0]
     if rc != 0:
         client.loop_stop()
         detail = {

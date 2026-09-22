@@ -247,7 +247,7 @@ absence proves nothing.
 Settle it from inside the Node-RED container:
 
 ```bash
-docker exec acs-cymru_node_red node -e "
+docker exec aber_node_red node -e "
   const mqtt=require('/usr/src/node-red/node_modules/mqtt');
   const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
   c.on('connect',()=>{console.log('CONNECTED');c.end()});

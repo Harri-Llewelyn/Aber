@@ -827,7 +827,7 @@ components:
       properties:
         specVersion: { type: string, example: '1.0' }
         serverVersion: { type: string, example: 0.1.0 }
-        serverName: { type: string, example: acs-cymru-i3x }
+        serverName: { type: string, example: aber-i3x }
         capabilities:
           type: object
           properties:

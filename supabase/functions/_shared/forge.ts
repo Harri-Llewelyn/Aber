@@ -174,12 +174,12 @@ export const TRUST_BUNDLE_PATH = `${TRUST_PREFIX}ca-bundle.pem`;
 export const TRUST_MANIFEST_PATH = `${TRUST_PREFIX}manifest.json`;
 
 /**
- * The platform's version, from ACS_PLATFORM_VERSION (the chart's appVersion), or null when unset
+ * The platform's version, from ABER_PLATFORM_VERSION (the chart's appVersion), or null when unset
  * or not a version. The tag is `v<version>`, the same form the release workflow tags this
  * repository with.
  */
 export function platformVersion(): string | null {
-  const raw = (Deno.env.get("ACS_PLATFORM_VERSION") ?? "").trim().replace(/^v/, "");
+  const raw = (Deno.env.get("ABER_PLATFORM_VERSION") ?? "").trim().replace(/^v/, "");
   return /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(raw) ? raw : null;
 }
 
@@ -1261,7 +1261,7 @@ export async function provisionGatewayRepository(
       await ensureDeployKey(cfg, { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY }, sparkplugId, publicKey, true);
       platform = { ssh_url: platformRepo.ssh_url, tag: platformTag(version) };
     } else {
-      console.warn(`forge: ACS_PLATFORM_VERSION is unset, so ${sparkplugId} gets no platform repository to converge to`);
+      console.warn(`forge: ABER_PLATFORM_VERSION is unset, so ${sparkplugId} gets no platform repository to converge to`);
     }
     // After the key, and not on the path to `return null`: a wiki the forge could not seed costs a
     // log line, never the repository the appliance is about to clone.

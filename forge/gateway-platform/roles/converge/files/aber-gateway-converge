@@ -13,9 +13,9 @@
 # checkout back, because what is on main is what was approved either way.
 set -u
 
-STATE_DIR=${ACS_STATE_DIR:-/var/lib/acs-gateway}
-DATA_DIR=${ACS_DATA_DIR:-$STATE_DIR/data}
-COMPOSE_DIR=${ACS_COMPOSE_DIR:-/opt/acs-gateway}
+STATE_DIR=${ABER_STATE_DIR:-/var/lib/aber-gateway}
+DATA_DIR=${ABER_DATA_DIR:-$STATE_DIR/data}
+COMPOSE_DIR=${ABER_COMPOSE_DIR:-/opt/aber-gateway}
 GITOPS="$DATA_DIR/gitops"
 KEY="$GITOPS/id_ed25519"
 KNOWN_HOSTS="$GITOPS/known_hosts"
@@ -41,7 +41,7 @@ CUSTOM_RECORD=null
 # What happened to the published roots this pass. `null` means the platform run failed first.
 TRUST_RECORD=null
 
-log() { echo "[acs-gateway-converge] $*"; }
+log() { echo "[aber-gateway-converge] $*"; }
 
 record() {
   # $1 outcome, $2 tag, $3 detail. Read by nothing on this box; pushed by flow-sync.mjs.
@@ -249,7 +249,7 @@ run_custom() {
   # becomes one command-line argument, and jq prints an object over several lines by default.
   paths=$(jq -c -n --arg state "$STATE_DIR" --arg data "$DATA_DIR" --arg compose "$COMPOSE_DIR" \
     --arg repo "$REPO_DIR" --arg tag "$TAG" \
-    '{acs_state_dir: $state, acs_data_dir: $data, acs_compose_dir: $compose, acs_repo_dir: $repo, acs_platform_tag: $tag}')
+    '{aber_state_dir: $state, aber_data_dir: $data, aber_compose_dir: $compose, aber_repo_dir: $repo, aber_platform_tag: $tag}')
 
   log "running this gateway's own custom.yml at ${revision:-an unknown revision}"
   # From the checkout, so roles/, files/ and templates/ beside custom.yml resolve.

@@ -34,7 +34,7 @@
 
 # Required by SDS (the listeners' client secrets and cookie keys); labels only.
 node:
-  id: acs-cymru-gateway
+  id: aber-gateway
   cluster: aber
 
 admin:
@@ -435,7 +435,7 @@ static_resources:
                             typed_config:
                               "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
                         text_format_source:
-                          inline_string: "acs-studio method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
+                          inline_string: "aber-studio method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
                 # Nothing upgrades here today (Studio's one websocket goes to the API listener);
                 # kept so a future Studio that opens one does not fail with a 426.
                 upgrade_configs:
@@ -571,7 +571,7 @@ static_resources:
                             typed_config:
                               "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
                         text_format_source:
-                          inline_string: "acs-forge method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
+                          inline_string: "aber-forge method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
                 route_config:
                   name: forge
                   virtual_hosts:

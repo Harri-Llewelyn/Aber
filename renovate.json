@@ -36,7 +36,7 @@
     {
       "description": "Images built from this repository. The tag is set at deploy time and is empty in values.yaml, so there is no upstream to track.",
       "matchDatasources": ["docker"],
-      "matchPackageNames": ["/^ghcr\\.io\\/harri-llewelyn\\/acs-cymru\\//"],
+      "matchPackageNames": ["/^ghcr\\.io\\/harri-llewelyn\\/aber\\//"],
       "enabled": false
     },
     {

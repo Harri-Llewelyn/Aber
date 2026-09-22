@@ -319,7 +319,7 @@ supabaseDb:
 # (`verify-full`). There is no unverified mode.
 postgresTls:
   enabled: false
-  clusterIssuer: acs-cymru-ca
+  clusterIssuer: aber-ca
   issuerKind: ClusterIssuer
   # 90 days with 30 days' notice. Postgres re-reads its certificate on a reload, which the
   # reload sidecar in each database pod sends, so a renewal does not restart the server.
@@ -503,7 +503,7 @@ supabaseFunctions:
     # Built from supabase/functions/Dockerfile (the functions and the appliance bundle template
     # are baked in, since there is no repository on a cluster node):
     #   docker build -f supabase/functions/Dockerfile -t <repo>:<tag> .
-    repository: ghcr.io/harri-llewelyn/acs-cymru/edge-runtime
+    repository: ghcr.io/harri-llewelyn/aber/edge-runtime
     # Empty resolves to Chart.AppVersion (an image this repository builds and publishes).
     # check-docs-drift.mjs reads exactly that to decide which images need a documented build
     # command and must be built by the release workflow, so pinning a tag here removes it from
@@ -624,7 +624,7 @@ supabaseStudio:
 swaggerUi:
   enabled: true
   image:
-    repository: ghcr.io/harri-llewelyn/acs-cymru/swagger-ui
+    repository: ghcr.io/harri-llewelyn/aber/swagger-ui
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
@@ -650,7 +650,7 @@ initJobs:
 # ---------------------------------------------------------------------------------------------
 dbInit:
   image:
-    repository: ghcr.io/harri-llewelyn/acs-cymru/db-init
+    repository: ghcr.io/harri-llewelyn/aber/db-init
     tag: ""
     pullPolicy: IfNotPresent
 
@@ -714,8 +714,8 @@ mosquitto:
     # one it last saw, and SIGHUPs the broker on a change. The kubelet's own sync period
     # (60-90s) precedes this.
     watchIntervalSeconds: 15
-    # `acs-cymru-ca` is what deploy/k8s/internal-ca.yaml creates. An ACME issuer works too.
-    clusterIssuer: acs-cymru-ca
+    # `aber-ca` is what deploy/k8s/internal-ca.yaml creates. An ACME issuer works too.
+    clusterIssuer: aber-ca
     # Set if your issuer is a namespaced Issuer rather than a ClusterIssuer.
     issuerKind: ClusterIssuer
     # Where the issued keypair lands; mounted read-only at /mosquitto/certs.
@@ -832,7 +832,7 @@ ingestion:
   image:
     # Built from ingestion/Dockerfile with the REPOSITORY ROOT as context (sparkplug_b.proto):
     #   docker build -f ingestion/Dockerfile -t <repo>:<tag> .
-    repository: ghcr.io/harri-llewelyn/acs-cymru/ingestion
+    repository: ghcr.io/harri-llewelyn/aber/ingestion
     tag: ""
     pullPolicy: IfNotPresent
   # Liveness: ingestion.py writes this file every `healthIntervalSeconds` while its MQTT
@@ -909,12 +909,12 @@ i3xService:
   image:
     # Built from i3x/Dockerfile with the REPOSITORY ROOT as context (sparkplug_b.proto):
     #   docker build -f i3x/Dockerfile -t <repo>:<tag> .
-    repository: ghcr.io/harri-llewelyn/acs-cymru/i3x-service
+    repository: ghcr.io/harri-llewelyn/aber/i3x-service
     tag: ""
     pullPolicy: IfNotPresent
   # Reported by GET /info as `serverName`; a client browsing several sites has no other way to
   # tell two servers apart.
-  serverName: acs-cymru-i3x
+  serverName: aber-i3x
   # A spec MUST: a subscription with neither an open stream nor a /sync call inside this window
   # is deleted. An open SSE stream counts as activity.
   subscriptionTtlSeconds: 300
@@ -935,7 +935,7 @@ nodeRed:
     # Built from node-red/Dockerfile. A custom image is required: settings.js lives on the data
     # volume and resolves require() from there, and it depends on internals pinned by the base tag.
     #   docker build -f node-red/Dockerfile -t <repo>:<tag> node-red
-    repository: ghcr.io/harri-llewelyn/acs-cymru/node-red
+    repository: ghcr.io/harri-llewelyn/aber/node-red
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
@@ -963,7 +963,7 @@ frontend:
     # environment and reads its configuration from the /config.js ConfigMap:
     #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
     #     -t <repo>:<tag> frontend
-    repository: ghcr.io/harri-llewelyn/acs-cymru/frontend
+    repository: ghcr.io/harri-llewelyn/aber/frontend
     tag: ""
     pullPolicy: IfNotPresent
   # NGINX serving static files; scales freely.
@@ -1037,12 +1037,12 @@ gitea:
   # form is off and the web login is the gateway's `forge` listener. The password is
   # `secrets.giteaAdminPassword`.
   adminUser: gitea_admin
-  adminEmail: gitea-admin@acs-cymru.invalid
+  adminEmail: gitea-admin@aber.invalid
   # The one account the platform authenticates as. Not an admin: it owns the per-gateway
   # repositories and may attach a deploy key and branch rules. The password is
   # `secrets.giteaMachinePassword`; empty means no forge integration.
-  machineUser: acs_platform
-  machineEmail: acs-platform@acs-cymru.invalid
+  machineUser: aber_platform
+  machineEmail: aber-platform@aber.invalid
   logLevel: info
   # Off, and nothing here needs them. Actions is a build runner that executes whatever a
   # repository tells it to, on a host beside the database; the registry is a fourth credential
@@ -1129,7 +1129,7 @@ e2e:
     # ingestion image with jsonschema and the AAS suite (jsonschema is deliberately not in the
     # production image, and without it the schema-conformance tests skip themselves).
     #   docker build -f test-harness/Dockerfile -t <repo>:<tag> .
-    repository: ghcr.io/harri-llewelyn/acs-cymru/test-runner
+    repository: ghcr.io/harri-llewelyn/aber/test-runner
     tag: ""
     pullPolicy: IfNotPresent
   # How long the AAS Job waits for the validate Job; validate.py drives MQTT round trips.
@@ -1252,7 +1252,7 @@ telemetry:
 gatewayCredential:
   enabled: true
   image:
-    repository: ghcr.io/harri-llewelyn/acs-cymru/gateway-credential
+    repository: ghcr.io/harri-llewelyn/aber/gateway-credential
     # Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and mosquitto_rr.
     tag: ""
     pullPolicy: IfNotPresent
@@ -1405,7 +1405,7 @@ backup:
   includeBroker: false
   # Also archive the CA behind mosquitto.tls and postgresTls: every appliance pins it, so losing
   # it is a fleet-wide re-enrolment. The Secret lives in the ClusterIssuer's namespace
-  # (deploy/k8s/internal-ca.yaml puts acs-cymru-ca-key-pair in cert-manager's); the chart gives
+  # (deploy/k8s/internal-ca.yaml puts aber-ca-key-pair in cert-manager's); the chart gives
   # the backup service `get` on that one name there and nothing else. Empty name: not archived,
   # which is right for an ACME issuer, whose CA is nobody's to keep. Read by the backup service
   # only.
@@ -1421,7 +1421,7 @@ backupService:
   enabled: false
   image:
     # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar.
-    repository: ghcr.io/harri-llewelyn/acs-cymru/backup-service
+    repository: ghcr.io/harri-llewelyn/aber/backup-service
     tag: ""
     pullPolicy: IfNotPresent
   # custom -> .dump, the artefact the CronJob writes and pg_restore reads selectively;

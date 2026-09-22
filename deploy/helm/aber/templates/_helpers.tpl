@@ -653,7 +653,7 @@ unrepresentable. Same reasoning as the NetworkPolicy edge list.
 {{- /* Projected from the broker's certificate Secret -- see aber.brokerClientCaVolume for
        why only ca.crt is mounted and not the whole Secret. */}}
 - name: MQTT_TLS_CA_FILE
-  value: /etc/acs-cymru/broker-ca/ca.crt
+  value: /etc/aber/broker-ca/ca.crt
 {{- else }}
 - name: MQTT_PORT
   value: "1883"
@@ -681,7 +681,7 @@ never written into either pod's filesystem.
 
 {{- define "aber.brokerClientCaMount" -}}
 - name: broker-ca
-  mountPath: /etc/acs-cymru/broker-ca
+  mountPath: /etc/aber/broker-ca
   readOnly: true
 {{- end -}}
 
@@ -719,7 +719,7 @@ PostgREST, so it reads as a schema fault; `helm test` (M6) queries the foreign t
 {{- define "aber.dbCaSecretName" -}}
 {{- ternary "supabase-db-tls" "timescaledb-tls" .Values.supabaseDb.enabled -}}
 {{- end -}}
-{{- define "aber.dbCaPath" -}}/etc/acs-cymru/db-ca/ca.crt{{- end -}}
+{{- define "aber.dbCaPath" -}}/etc/aber/db-ca/ca.crt{{- end -}}
 
 {{/* Each of these renders nothing while TLS is off, so a caller adds them to an existing list
      unconditionally and only wraps a list that would otherwise be empty. */}}
@@ -738,7 +738,7 @@ PostgREST, so it reads as a schema fault; `helm test` (M6) queries the foreign t
 {{- define "aber.dbClientCaMount" -}}
 {{- if .Values.postgresTls.enabled }}
 - name: db-ca
-  mountPath: /etc/acs-cymru/db-ca
+  mountPath: /etc/aber/db-ca
   readOnly: true
 {{- end }}
 {{- end -}}
@@ -789,10 +789,10 @@ Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "po
     - /bin/sh
     - -c
     - |
-      lastcert=$(md5sum < /etc/acs-cymru/postgres/tls/tls.crt)
+      lastcert=$(md5sum < /etc/aber/postgres/tls/tls.crt)
       while :; do
         sleep {{ .ctx.Values.postgresTls.watchIntervalSeconds }}
-        nowcert=$(md5sum < /etc/acs-cymru/postgres/tls/tls.crt)
+        nowcert=$(md5sum < /etc/aber/postgres/tls/tls.crt)
         [ "$nowcert" = "$lastcert" ] && continue
         lastcert="$nowcert"
         echo "database certificate changed (renewal); reloading"
@@ -804,7 +804,7 @@ Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "po
       done
   volumeMounts:
     - name: tls
-      mountPath: /etc/acs-cymru/postgres/tls
+      mountPath: /etc/aber/postgres/tls
       readOnly: true
   resources:
     requests: { cpu: 10m, memory: 16Mi }
@@ -896,11 +896,11 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
 - -c
 - ssl=on
 - -c
-- ssl_cert_file=/etc/acs-cymru/postgres/tls/tls.crt
+- ssl_cert_file=/etc/aber/postgres/tls/tls.crt
 - -c
-- ssl_key_file=/etc/acs-cymru/postgres/tls/tls.key
+- ssl_key_file=/etc/aber/postgres/tls/tls.key
 - -c
-- hba_file=/etc/acs-cymru/postgres/pg_hba.conf
+- hba_file=/etc/aber/postgres/pg_hba.conf
 {{- end -}}
 
 {{/* The server-side mounts and volumes. `tls` is the cert-manager Secret, 0440 so the key is
@@ -908,10 +908,10 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
      accepts a root-owned key at that mode. `hba` is the chart's pg_hba.conf. */}}
 {{- define "aber.dbTlsServerMounts" -}}
 - name: tls
-  mountPath: /etc/acs-cymru/postgres/tls
+  mountPath: /etc/aber/postgres/tls
   readOnly: true
 - name: hba
-  mountPath: /etc/acs-cymru/postgres/pg_hba.conf
+  mountPath: /etc/aber/postgres/pg_hba.conf
   subPath: {{ printf "%s.pg_hba.conf" .db }}
   readOnly: true
 {{- end -}}

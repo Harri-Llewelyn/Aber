@@ -284,7 +284,7 @@ function settingsAreCorrect() {
     return (
       loaded?.credentialSecret === credentialSecret &&
       loaded?.flowFile === FLOW_FILE &&
-      loaded?.acsCymruSettingsVersion === SETTINGS_VERSION &&
+      loaded?.aberSettingsVersion === SETTINGS_VERSION &&
       loaded?.adminAuth?.type === 'strategy' &&
       typeof loaded?.adminAuth?.tokens === 'function' &&
       typeof loaded?.adminAuth?.authenticate === 'function' &&
@@ -451,7 +451,7 @@ function cachePut(token, user) {
 }
 
 module.exports = {
-  acsCymruSettingsVersion: ${SETTINGS_VERSION},
+  aberSettingsVersion: ${SETTINGS_VERSION},
 
   flowFile: ${JSON.stringify(FLOW_FILE)},
   credentialSecret: ${JSON.stringify(credentialSecret)},

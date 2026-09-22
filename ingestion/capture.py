@@ -385,7 +385,9 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     with no broker and no clock, so the tests can assert it and `play --dry-run` can show it.
     Publishing is then a loop that cannot make a new decision.
     """
-    version = capture.get("acs_capture_version")
+    # A capture recorded before 1.0 carries the key under the platform's former name; the format
+    # is the same, so it is read under either.
+    version = capture.get("aber_capture_version", capture.get("acs_capture_version"))
     if version != CAPTURE_VERSION:
         raise CaptureError(
             "capture file is version %r, this tool reads version %d. Refusing to guess at the "
@@ -577,7 +579,7 @@ def cmd_record(args):
         if args.verbose:
             print("  %6dms  %s" % (now_ms - started_ms, msg.topic))
 
-    client = _connect(RECORD_USER, RECORD_PASSWORD, "acs-capture-record")
+    client = _connect(RECORD_USER, RECORD_PASSWORD, "aber-capture-record")
     client.on_message = on_message
     client.subscribe(args.topic, qos=0)
     client.loop_start()
@@ -620,7 +622,7 @@ def cmd_record(args):
 
     edge_nodes, devices = capture_identities(messages)
     capture = {
-        "acs_capture_version": CAPTURE_VERSION,
+        "aber_capture_version": CAPTURE_VERSION,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "recorded_from": {"broker": "%s:%d" % (MQTT_HOST, MQTT_PORT), "topic": args.topic},
         "capture_epoch_ms": capture_epoch_ms,
@@ -720,7 +722,7 @@ def cmd_play(args):
     if not PLAY_PASSWORD:
         raise CaptureError("MQTT_PLAYBACK_PASSWORD is not set; the broker runs allow_anonymous false")
 
-    client = _connect(PLAY_USER, PLAY_PASSWORD, "acs-capture-play")
+    client = _connect(PLAY_USER, PLAY_PASSWORD, "aber-capture-play")
     client.loop_start()
 
     print("Playing %d messages as %s at %.3fx..." % (len(plan), args.as_gateway, args.speed))
@@ -758,7 +760,7 @@ def cmd_inspect(args):
     with open(args.capture, encoding="utf-8") as fh:
         capture = json.load(fh)
     print("%s (version %s, recorded %s)"
-          % (args.capture, capture.get("acs_capture_version"), capture.get("recorded_at")))
+          % (args.capture, capture.get("aber_capture_version"), capture.get("recorded_at")))
     _print_summary(capture)
     return 0
 

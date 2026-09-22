@@ -1065,7 +1065,7 @@ function edgeFunctionNames() {
 
 // -------------------------------------------------------------------------------------------------
 // 10e. The CA-expiry warning window is one decision, declared twice: Grafana's
-// `acs-gateway-ca-expiring` rule and the Gateways page's CERT_EXPIRY_WARN_DAYS. A UI that warns
+// `aber-gateway-ca-expiring` rule and the Gateways page's CERT_EXPIRY_WARN_DAYS. A UI that warns
 // at a different day count than the rule fires sends an operator looking for an alert that has
 // not been raised, or trains them to ignore the colour.
 // -------------------------------------------------------------------------------------------------
@@ -1075,13 +1075,13 @@ function edgeFunctionNames() {
 
   // The threshold node of the CA rule, found by walking forward from its uid so a `params: [30]`
   // belonging to some other rule cannot answer for it.
-  const ruleAt = rules.indexOf('uid: acs-gateway-ca-expiring');
+  const ruleAt = rules.indexOf('uid: aber-gateway-ca-expiring');
   const ruleBody = ruleAt === -1 ? '' : rules.slice(ruleAt, ruleAt + 4000);
   const ruleDays = ruleBody.match(/type:\s*lt\s*\n\s*params:\s*\[(\d+)\]/);
   const uiDays = util.match(/CERT_EXPIRY_WARN_DAYS\s*=\s*(\d+)/);
 
   if (ruleAt === -1) {
-    fail('grafana alert rule `acs-gateway-ca-expiring` is gone. It is the only warning that a '
+    fail('grafana alert rule `aber-gateway-ca-expiring` is gone. It is the only warning that a '
       + 'gateway\'s\n      hand-distributed CA is about to expire, which takes the whole fleet '
       + 'offline at once.');
   } else if (!ruleDays || !uiDays) {
@@ -1957,9 +1957,9 @@ function edgeFunctionNames() {
   const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
 
   const page = util.match(/ARCHIVE_BACKLOG_TOLERANCE_DAYS\s*=\s*(\d+)/)?.[1];
-  // The evaluator inside the acs-archive-backlog rule, which is the last `params: [n]` before the
+  // The evaluator inside the aber-archive-backlog rule, which is the last `params: [n]` before the
   // next rule begins.
-  const ruleBlock = rules.slice(rules.indexOf('uid: acs-archive-backlog'));
+  const ruleBlock = rules.slice(rules.indexOf('uid: aber-archive-backlog'));
   const alert = ruleBlock.match(/type:\s*gt\s*\n\s*params:\s*\[(\d+)\]/)?.[1];
 
   if (!page || !alert) {

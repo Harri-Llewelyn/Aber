@@ -53,7 +53,7 @@ function pinnedTag() {
 const TAG = pinnedTag();
 const IMAGE = `eclipse-mosquitto:${TAG}`;
 /** The credential service's image, built from the repository so the check runs the real reconcile. */
-const CREDENTIAL_IMAGE = 'acs-cymru-gateway-credential:check';
+const CREDENTIAL_IMAGE = 'aber-gateway-credential:check';
 
 function docker(args, opts = {}) {
   return spawnSync('docker', args, { encoding: 'utf8', ...opts });
@@ -809,7 +809,7 @@ try {
   // refused on 8883 as on 1883; and re-running the generator does not mint a new root, asserted by
   // fingerprint, since the root is distributed by hand to every appliance.
   {
-    const TLS_INIT_IMAGE = 'acs-cymru-mosquitto-tls-init:check';
+    const TLS_INIT_IMAGE = 'aber-mosquitto-tls-init:check';
     const build = docker(['build', '-q', '-t', TLS_INIT_IMAGE, join(REPO, 'mosquitto', 'tls-init')]);
 
     if (build.status !== 0) {

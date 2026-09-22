@@ -44,8 +44,8 @@ env:
   # Lowercased explicitly rather than interpolating github.repository_owner: OCI reference names are
   # case-sensitive and must be lowercase, and the interpolated form pushes fine and produces a
   # reference nothing can pull.
-  IMAGE_NAMESPACE: ghcr.io/harri-llewelyn/acs-cymru
-  CHART_REPO: oci://ghcr.io/harri-llewelyn/acs-cymru
+  IMAGE_NAMESPACE: ghcr.io/harri-llewelyn/aber
+  CHART_REPO: oci://ghcr.io/harri-llewelyn/aber
 
 jobs:
   # Resolve and validate the version once, so the image jobs and the chart job cannot disagree, and

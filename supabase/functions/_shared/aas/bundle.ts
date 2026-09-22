@@ -1,7 +1,7 @@
 /**
  * The per-asset bundle: what `aas-export` adds to an AASX when a device is taken away before it is
  * taken out of service. The package stays an AASX -- the same Environment, the same OPC chain --
- * and gains supplementary parts under aasx/files/acs-cymru/: the device's digital thread, the
+ * and gains supplementary parts under aasx/files/aber/: the device's digital thread, the
  * telemetry still in the live historian at two resolutions, and a manifest that says what each
  * part holds, where it was cut off, and which cold-tier objects hold what the live historian no
  * longer does. A reader that knows nothing of the parts ignores them.
@@ -17,7 +17,7 @@
  * Node from this file's own source; the loaders take a Supabase client.
  */
 
-export const BUNDLE_SCHEMA = "acs-cymru/asset-bundle/1";
+export const BUNDLE_SCHEMA = "aber/asset-bundle/1";
 
 /** Where the parts sit inside the package. `aasx/files/` is where AASX readers expect supplements. */
 export const BUNDLE_PART_DIR = "aasx/files/aber";

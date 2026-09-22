@@ -21,7 +21,7 @@
           textually ahead of anything left in <body>. Declaring this in <head> keeps the built
           index.html reading in the same order it executes, so the two never appear to disagree.
 
-      window.__ACS_CYMRU_CONFIG__ is therefore populated before src/config.js evaluates. In a
+      window.__ABER_CONFIG__ is therefore populated before src/config.js evaluates. In a
       baked build this is the shipped no-op placeholder and the build-time values win; the chart
       mounts a ConfigMap over it, which is what lets one image serve any environment.
     -->

@@ -238,7 +238,7 @@ describe('the playback lane', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     const doc = {
-      acs_capture_version: 1,
+      aber_capture_version: 1,
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
@@ -1229,7 +1229,7 @@ describe('the playback card', () => {
     await screen.findByText('Line 1 Gateway')
 
     const doc = {
-      acs_capture_version: 1,
+      aber_capture_version: 1,
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
@@ -1254,7 +1254,7 @@ describe('the playback card', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     const doc = {
-      acs_capture_version: 1,
+      aber_capture_version: 1,
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', payload: {} }],
       identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
     }

@@ -71,7 +71,7 @@ secrets:
   #       name: aber-secrets     # <- the name to put in existingSecret below
   #       creationPolicy: Owner
   #     dataFrom:
-  #       - extract: { key: acs-cymru/prod }   # one vault entry, keys as above
+  #       - extract: { key: aber/prod }   # one vault entry, keys as above
   #
   # ROTATION IS NOT AUTOMATIC EVEN WITH ESO. Most of these are read into a pod's environment at
   # START, so a refreshed Secret reaches nothing until the pod restarts. Two need more than that:
@@ -334,20 +334,20 @@ ingress:
     enabled: true
     secretName: aber-tls
     certManager:
-      # `acs-cymru-ca` is the internal CA. Swap for an ACME issuer (letsencrypt-prod) ONLY if the
+      # `aber-ca` is the internal CA. Swap for an ACME issuer (letsencrypt-prod) ONLY if the
       # domain is genuinely public -- ACME cannot validate an internal one at all.
-      clusterIssuer: acs-cymru-ca
+      clusterIssuer: aber-ca
 
 # TLS to both databases, from the same issuer. Every client verifies the server; each database
 # refuses plaintext from anything but its own loopback.
 postgresTls:
   enabled: true
-  clusterIssuer: acs-cymru-ca
+  clusterIssuer: aber-ca
 
 mosquitto:
   tls:
     enabled: true
-    clusterIssuer: acs-cymru-ca
+    clusterIssuer: aber-ca
     # ==========================================================================================
     # SET THIS TO THE BROKER'S EXTERNAL ADDRESS. Gateways dial the broker by IP, and a certificate
     # without an IP SAN fails verification on every one of them while the in-cluster clients --

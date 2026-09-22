@@ -2,7 +2,7 @@
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT, because `sparkplug_b.proto` lives there and this image has to
 # compile it -- the same reason the ingestion and edge-function images take the root:
-#   docker build -f i3x/Dockerfile -t ghcr.io/harri-llewelyn/acs-cymru/i3x-service:<tag> .
+#   docker build -f i3x/Dockerfile -t ghcr.io/harri-llewelyn/aber/i3x-service:<tag> .
 #
 # BUILT SEPARATELY FROM THE INGESTION IMAGE, not FROM it, even though both decode Sparkplug B and
 # both would work as a chain. A chained base has to be resolvable at build time, which means either

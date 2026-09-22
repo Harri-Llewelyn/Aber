@@ -117,7 +117,7 @@ export function coldStorageSummary(rows) {
  * still two weeks before a historian with retention off is short of disk.
  *
  * The same number is the Archive Backlog alert rule's threshold
- * (grafana/provisioning/alerting/alert-rules.yaml, `acs-archive-backlog`). A page that called a
+ * (grafana/provisioning/alerting/alert-rules.yaml, `aber-archive-backlog`). A page that called a
  * backlog fine while the alert was firing would be the more convincing of the two, so
  * check-docs-drift.mjs holds them level.
  */

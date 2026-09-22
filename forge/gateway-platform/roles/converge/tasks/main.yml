@@ -8,13 +8,13 @@
 
 - name: The converge script
   ansible.builtin.copy:
-    src: acs-gateway-converge
-    dest: /usr/local/bin/acs-gateway-converge
+    src: aber-gateway-converge
+    dest: /usr/local/bin/aber-gateway-converge
     mode: "0755"
 
 - name: The converge service
   ansible.builtin.copy:
-    dest: /etc/systemd/system/acs-gateway-converge.service
+    dest: /etc/systemd/system/aber-gateway-converge.service
     mode: "0644"
     content: |
       [Unit]
@@ -24,14 +24,14 @@
 
       [Service]
       Type=oneshot
-      ExecStart=/usr/local/bin/acs-gateway-converge
+      ExecStart=/usr/local/bin/aber-gateway-converge
       # ansible-pull clones over SSH with the appliance's own key; nothing here needs a terminal.
       Environment=GIT_TERMINAL_PROMPT=0
   register: converge_service
 
 - name: The converge timer, hourly and after boot
   ansible.builtin.copy:
-    dest: /etc/systemd/system/acs-gateway-converge.timer
+    dest: /etc/systemd/system/aber-gateway-converge.timer
     mode: "0644"
     content: |
       [Unit]
@@ -51,12 +51,12 @@
   ansible.builtin.systemd:
     daemon_reload: true
   when:
-    - acs_systemd
+    - aber_systemd
     - converge_service.changed or converge_timer.changed
 
 - name: The timer enabled and started
   ansible.builtin.systemd:
-    name: acs-gateway-converge.timer
+    name: aber-gateway-converge.timer
     state: started
     enabled: true
-  when: acs_systemd
+  when: aber_systemd

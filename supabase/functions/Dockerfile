@@ -8,7 +8,7 @@
 # lets a rollback actually roll the functions back. See docs/kubernetes-architecture.md §2.2.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT, as the release workflow and the dev loop build it:
-#   docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:<tag> .
+#   docker build -f supabase/functions/Dockerfile -t aber/edge-runtime:<tag> .
 # Nothing outside supabase/functions/ is copied any more (the appliance's files reach the functions
 # as a generated module under _shared/), so the context is a convention the two build sites share
 # rather than a requirement.
@@ -32,10 +32,10 @@ RUN rm -f /home/deno/functions/Dockerfile
 # delivery that needs no entry in main/index.ts's allow-list.
 #
 # A user worker has NO FILESYSTEM ACCESS to anything in this image -- edge-runtime sandboxes it,
-# and main/index.ts forwards only environment variables to each worker it spawns. ACS_CA_PEM is
+# and main/index.ts forwards only environment variables to each worker it spawns. ABER_CA_PEM is
 # the platform's root, read here in the plain container shell before edge-runtime starts, from the
 # ingress TLS Secret the chart mounts at /home/deno/ca when ingress TLS is on: gateway-bundle
 # computes the one-liner's pin from it. Absent on a deployment without ingress TLS, and the
 # dashboard then offers the ZIP bundle alone. Exec form with a literal script, so the quoting
 # survives.
-ENTRYPOINT ["/bin/sh", "-e", "-c", "export ACS_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
+ENTRYPOINT ["/bin/sh", "-e", "-c", "export ABER_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]

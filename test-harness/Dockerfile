@@ -30,7 +30,7 @@
 # aas-export. They are copied from there now; their parity contract with the frontend is unchanged.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT:
-#   docker build -f test-harness/Dockerfile -t ghcr.io/harri-llewelyn/acs-cymru/test-runner:<tag> .
+#   docker build -f test-harness/Dockerfile -t ghcr.io/harri-llewelyn/aber/test-runner:<tag> .
 #
 # The default below is a convenience for a bare `docker build` and nothing more -- both CI and
 # release.yml pass INGESTION_IMAGE explicitly, because at release time the base is the ingestion
@@ -38,7 +38,7 @@
 # name. The default is the last released tag rather than a floating one: left to drift, a bare
 # build here would silently extend a DIFFERENT ingestion image than the one the chart deploys, and
 # the suite would then be testing a stack it is not running beside.
-ARG INGESTION_IMAGE=ghcr.io/harri-llewelyn/acs-cymru/ingestion:0.1.0
+ARG INGESTION_IMAGE=ghcr.io/harri-llewelyn/aber/ingestion:0.1.0
 FROM ${INGESTION_IMAGE}
 
 # The ingestion image's WORKDIR is /app and it holds ingestion.py, validate.py and

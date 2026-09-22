@@ -1,5 +1,5 @@
 {
-  "name": "acs-cymru-asset-tracking",
+  "name": "aber",
   "version": "1.0.0",
   "description": "Aber, the shopfloor data platform (Supabase BaaS + standalone TimescaleDB)",
   "private": true,

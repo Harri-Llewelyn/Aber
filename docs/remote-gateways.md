@@ -72,7 +72,7 @@ A fresh **Ubuntu** or **Ubuntu Server** machine (amd64 or arm64) with a user who
 route to the platform. Paste the command. It is two stages in one line:
 
 - **Stage 0 carries no secret.** It fetches the platform's root certificate over plain HTTP from
-  the dashboard's host (`/.well-known/acs-cymru/ca.pem`, inert bytes), computes the SHA-256 of
+  the dashboard's host (`/.well-known/aber/ca.pem`, inert bytes), computes the SHA-256 of
   the root's public key, compares it with the **pin** the dashboard minted beside the token over
   your authenticated session (the trusted channel), and installs the root only when they match.
   A mismatch stops there and nothing has been sent. The public key rather than the certificate is
@@ -96,7 +96,7 @@ what lets the appliance trust the root it fetched without trusting the network i
 over.
 
 **A plant that images its own appliances plants the root at build time**, and nothing here changes.
-Put the PEM from `/.well-known/acs-cymru/ca.pem` into the image's `#cloud-config`:
+Put the PEM from `/.well-known/aber/ca.pem` into the image's `#cloud-config`:
 
 ```yaml
 #cloud-config
@@ -127,7 +127,7 @@ The bundle is for a machine that already has Docker, or one set up by hand. Copy
 unpacked folder to the machine, then:
 
 ```bash
-cd acs-gateway-<name>-<sparkplug_id>
+cd aber-gateway-<name>-<sparkplug_id>
 docker compose up -d --build          # ~1 minute; builds on the appliance, see §4
 docker compose logs bootstrap         # prints the Node-RED editor password, ONCE
 ```
@@ -139,7 +139,7 @@ bundle-installed appliance until somebody runs the platform playbook on it once 
 
 * For the command: Ubuntu, `curl` and `openssl` (both in a default install), and `sudo`.
 * For the bundle: Docker and the Compose plugin.
-* A route to the platform's API — the address in `ACS_SUPABASE_URL`, which the server refuses to set
+* A route to the platform's API — the address in `ABER_SUPABASE_URL`, which the server refuses to set
   to anything in-stack (§7).
 * A route to the broker on **8883**. Remote gateways use MQTTS exclusively; 1883 is published only
   for gateways not yet moved, and is not used here.
@@ -150,7 +150,7 @@ bundle-installed appliance until somebody runs the platform playbook on it once 
 ## 3. What is in the bundle
 
 ```
-acs-gateway-<name>-<sparkplug_id>/
+aber-gateway-<name>-<sparkplug_id>/
 ├── .env                  generated per gateway — the only file that differs between bundles
 ├── GATEWAY.txt           which gateway this is, and the two commands. Self-identifying on a USB stick
 ├── docker-compose.yml     bootstrap (one-shot) + node-red
@@ -167,12 +167,12 @@ Everything except `.env` and `GATEWAY.txt` is mirrored verbatim from
 
 | Key | Purpose |
 | :--- | :--- |
-| `ACS_SUPABASE_URL` | the platform, as reachable **from the appliance** |
-| `ACS_SUPABASE_PUBLISHABLE_KEY` | gets the request past the gateway's key check; public by construction |
-| `ACS_ENROLLMENT_TOKEN` | the single-use claim |
+| `ABER_SUPABASE_URL` | the platform, as reachable **from the appliance** |
+| `ABER_SUPABASE_PUBLISHABLE_KEY` | gets the request past the gateway's key check; public by construction |
+| `ABER_ENROLLMENT_TOKEN` | the single-use claim |
 | `NODERED_CREDENTIAL_SECRET` | encrypts `flows_cred.json` on the appliance; **generated per bundle** |
-| `ACS_AGENT_VERSION` | recorded on the gateway so the fleet's vintage is visible |
-| `ACS_GATEWAY_NAME` | display name only |
+| `ABER_AGENT_VERSION` | recorded on the gateway so the fleet's vintage is visible |
+| `ABER_GATEWAY_NAME` | display name only |
 
 `NODERED_CREDENTIAL_SECRET` being per-bundle matters: a shared value would let one appliance's
 credential file be decrypted with another's `.env`.
@@ -404,7 +404,7 @@ you what each **client** will accept, and the fleet-wide outage happens on the d
 agreeing — so this is the version worth alerting on.
 
 **The reported date follows the file.** `bootstrap.mjs` writes `/data/certs/ca.json` beside the
-root at enrolment, and `acs-gateway-converge` rewrites both whenever the platform publishes a root
+root at enrolment, and `aber-gateway-converge` rewrites both whenever the platform publishes a root
 this appliance does not already hold. The flow reads that file every minute, so the number on the
 page is the root the appliance is holding now and not the one it was given once.
 
@@ -553,7 +553,7 @@ available and distribute in its own right — but it has a consequence worth sta
 
 **If the root's private key were ever exposed, the only remedy is to mint a new root and repeat the
 distribution above for the entire fleet.** There is no faster path. What keeps that acceptable is
-that the key never leaves cert-manager's `acs-cymru-ca-key-pair` Secret, is never mounted into an application pod, and is never copied to an appliance —
+that the key never leaves cert-manager's `aber-ca-key-pair` Secret, is never mounted into an application pod, and is never copied to an appliance —
 appliances receive `ca.crt` and only `ca.crt`. Treat that Secret as the most sensitive object in the
 deployment, because it is the one thing here with no revocation story.
 
@@ -752,7 +752,7 @@ and a canary is one gateway. Nothing tracks `main` of the platform repository, a
 admits pushes from the platform's machine account and nobody else: the playbook is changed in
 the platform's own repository and reviewed there.
 
-**`ansible-pull`, not Ansible.** The appliance runs `acs-gateway-converge` hourly and after boot:
+**`ansible-pull`, not Ansible.** The appliance runs `aber-gateway-converge` hourly and after boot:
 it reads the tag from the puller's checkout of the gateway's `main`, runs `ansible-pull` against
 the platform repository at that tag over SSH with the same deploy key and the same pinned host
 key the puller uses (the key is read-only there; measured to be refused when it pushes), and
@@ -762,7 +762,7 @@ branch. Outbound only, no inventory, self-healing on a timer, idempotent by cons
 **What it decides** is in the playbook's README: Ubuntu and Ubuntu Server, amd64 and arm64;
 `unattended-upgrades` without automatic reboot, with Docker's packages held out of it; Docker
 from Ubuntu's own archive; `chrony` pointed at what `platform.yml` names (`vars.chrony_servers`)
-or Ubuntu's pool; and the compose volume bound to `/var/lib/acs-gateway/data`, so the host's
+or Ubuntu's pool; and the compose volume bound to `/var/lib/aber-gateway/data`, so the host's
 converge script can reach what `bootstrap.mjs` wrote inside the container.
 
 **The first run is a person's** (or the installer's, when the one-liner lands): the playbook
@@ -774,8 +774,8 @@ sudo ansible-pull -U ssh://git@<forge>/platform/gateway-platform.git -C v<versio
   -i localhost, site.yml
 ```
 
-That expects an enrolled `/data` under `/var/lib/acs-gateway/data` and the bundle's `.env` at
-`/opt/acs-gateway/.env`; without the `.env` the playbook sets the host up and says the compose
+That expects an enrolled `/data` under `/var/lib/aber-gateway/data` and the bundle's `.env` at
+`/opt/aber-gateway/.env`; without the `.env` the playbook sets the host up and says the compose
 project was not started.
 
 ### A playbook of the gateway's own
@@ -787,17 +787,17 @@ an addition to it and never an alternative, and it arrives the way a flow does �
 installed by.
 
 It is given that gateway's `platform.yml` variables and then the paths the platform owns
-(`acs_state_dir`, `acs_data_dir`, `acs_compose_dir`, `acs_repo_dir`, `acs_platform_tag`), in that
+(`aber_state_dir`, `aber_data_dir`, `aber_compose_dir`, `aber_repo_dir`, `aber_platform_tag`), in that
 order, so it can find what the platform put where and cannot move it.
 
 **A broken one is never mistaken for a broken platform.** Its outcome is a separate field in
 `converged.json`, which the puller pushes to the `appliance` branch, and it is not attempted at all
 when the platform run failed. It does fail the convergence's exit status, so
-`systemctl status acs-gateway-converge` and the unit's journal show it on the appliance:
+`systemctl status aber-gateway-converge` and the unit's journal show it on the appliance:
 
 ```bash
-journalctl -u acs-gateway-converge -n 50        # what the last convergence did
-jq .custom /var/lib/acs-gateway/data/gitops/converged.json
+journalctl -u aber-gateway-converge -n 50        # what the last convergence did
+jq .custom /var/lib/aber-gateway/data/gitops/converged.json
 ```
 
 ### Two rows in the drawer, and what each is for

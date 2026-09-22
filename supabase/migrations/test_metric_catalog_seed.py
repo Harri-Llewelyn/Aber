@@ -268,13 +268,13 @@ class TestIdempotency(SeedTestCase):
         env = {**os.environ, "PGPASSWORD": DB_PASSWORD}
         return subprocess.run(
             ["docker", "exec", "-e", f"PGPASSWORD={DB_PASSWORD}",
-             os.getenv("SUPABASE_DB_CONTAINER", "acs-cymru_supabase_db"),
+             os.getenv("SUPABASE_DB_CONTAINER", "aber_supabase_db"),
              "psql", "-v", "ON_ERROR_STOP=1", "-U", DB_USER, "-d", DB_NAME, "-f", "/tmp/0018.sql"],
             capture_output=True, text=True, env=env,
         )
 
     def test_reapplying_adds_no_rows_and_does_not_error(self):
-        container = os.getenv("SUPABASE_DB_CONTAINER", "acs-cymru_supabase_db")
+        container = os.getenv("SUPABASE_DB_CONTAINER", "aber_supabase_db")
         copy = subprocess.run(
             ["docker", "cp", str(MIGRATION), f"{container}:/tmp/0018.sql"],
             capture_output=True, text=True,
@@ -298,7 +298,7 @@ class TestIdempotency(SeedTestCase):
         self.assertEqual(after_second, after_first, "a second replay inserted rows")
 
     def test_self_check_passes_on_replay(self):
-        container = os.getenv("SUPABASE_DB_CONTAINER", "acs-cymru_supabase_db")
+        container = os.getenv("SUPABASE_DB_CONTAINER", "aber_supabase_db")
         copy = subprocess.run(
             ["docker", "cp", str(MIGRATION), f"{container}:/tmp/0018.sql"],
             capture_output=True, text=True,

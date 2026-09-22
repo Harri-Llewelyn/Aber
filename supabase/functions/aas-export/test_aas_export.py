@@ -1182,10 +1182,10 @@ console.log(JSON.stringify({
     # -- buildBundleManifest ----------------------------------------------------------------------
     def test_manifest_names_its_schema_and_every_part_under_the_supplement_directory(self):
         m = self.out["manifest"]
-        self.assertEqual(m["schema"], "acs-cymru/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/1")
         self.assertEqual(m["schema"], self.out["schema"])
         for name, path in self.out["parts"].items():
-            self.assertTrue(path.startswith("aasx/files/acs-cymru/"), f"{name}: {path}")
+            self.assertTrue(path.startswith("aasx/files/aber/"), f"{name}: {path}")
         self.assertEqual(m["parts"]["environment"], "aasx/aasenv-root.json")
         self.assertEqual(m["parts"]["digital_thread"], self.out["parts"]["thread"])
         self.assertEqual(m["parts"]["telemetry_raw"], self.out["parts"]["raw"])
@@ -1278,7 +1278,7 @@ class TestAssetBundle(unittest.TestCase):
             return json.loads(res.read())
 
     def manifest(self) -> dict:
-        return json.loads(self.zip.read("aasx/files/acs-cymru/manifest.json"))
+        return json.loads(self.zip.read("aasx/files/aber/manifest.json"))
 
     def test_is_still_an_aasx_with_a_bundle_filename(self):
         self.assertEqual(self.status, 200)
@@ -1292,28 +1292,28 @@ class TestAssetBundle(unittest.TestCase):
     def test_carries_the_four_supplementary_parts(self):
         names = self.zip.namelist()
         for part in (
-            "aasx/files/acs-cymru/manifest.json",
-            "aasx/files/acs-cymru/digital-thread.json",
-            "aasx/files/acs-cymru/telemetry-raw.csv",
-            "aasx/files/acs-cymru/telemetry-1h.csv",
+            "aasx/files/aber/manifest.json",
+            "aasx/files/aber/digital-thread.json",
+            "aasx/files/aber/telemetry-raw.csv",
+            "aasx/files/aber/telemetry-1h.csv",
         ):
             self.assertIn(part, names)
 
     def test_manifest_describes_this_device_and_agrees_with_the_parts(self):
         m = self.manifest()
-        self.assertEqual(m["schema"], "acs-cymru/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/1")
         self.assertEqual(m["device"]["id"], DEVICE_ID)
         self.assertEqual(m["telemetry"]["asset_id"], m["device"]["sparkplug_id"])
-        thread = json.loads(self.zip.read("aasx/files/acs-cymru/digital-thread.json"))
+        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
         self.assertIsInstance(thread, list)
         self.assertEqual(m["digital_thread"]["rows"], len(thread))
         # A CSV part's rows are its lines less the header; both parts are oldest-first.
-        raw_lines = self.zip.read("aasx/files/acs-cymru/telemetry-raw.csv").decode().split("\r\n")
+        raw_lines = self.zip.read("aasx/files/aber/telemetry-raw.csv").decode().split("\r\n")
         self.assertEqual(raw_lines[0], "time,metric_name,val_double,val_string,val_bool")
         self.assertEqual(m["telemetry"]["raw"]["rows"], len([l for l in raw_lines[1:] if l]))
         # The hourly header is the rollup's own columns: the first live run of this class found a
         # column the view does not have, and PostgREST fails the whole request for one.
-        hourly_lines = self.zip.read("aasx/files/acs-cymru/telemetry-1h.csv").decode().split("\r\n")
+        hourly_lines = self.zip.read("aasx/files/aber/telemetry-1h.csv").decode().split("\r\n")
         self.assertEqual(hourly_lines[0], "bucket,metric_name,avg_double,min_double,max_double,last_double,last_string,last_bool,n_double,n_rows")
         self.assertEqual(m["telemetry"]["hourly"]["rows"], len([l for l in hourly_lines[1:] if l]))
         # The fixture just arrived: nothing has been read from it, so the fixture also proves the
@@ -1323,7 +1323,7 @@ class TestAssetBundle(unittest.TestCase):
     def test_the_thread_part_holds_the_fixture_s_own_creation(self):
         # The fixture INSERTed the device through PostgREST, which the audit trigger recorded, so
         # the part is never empty for a device that exists at all.
-        thread = json.loads(self.zip.read("aasx/files/acs-cymru/digital-thread.json"))
+        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
         self.assertTrue(any(row.get("entity_id") == DEVICE_ID for row in thread), thread[:3])
 
     def test_reports_the_stored_copy_in_the_stats_header(self):

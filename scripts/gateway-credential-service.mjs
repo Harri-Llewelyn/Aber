@@ -183,7 +183,7 @@ function k8sRequest(method, path, body) {
 }
 
 function namespace() {
-  return process.env.ACS_CYMRU_NAMESPACE
+  return process.env.ABER_NAMESPACE
     || readFileSync(`${SA_DIR}/namespace`, 'utf8').trim();
 }
 

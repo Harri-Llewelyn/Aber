@@ -447,7 +447,7 @@ class MultilineTestCase(unittest.TestCase):
         # so a per-run name would mint a new Loki stream on every run -- the unbounded cardinality
         # the collector config refuses for `device`, arriving through the back door of a test. One
         # name means one stream however often this runs; the token separates the runs inside it.
-        name = "acs-cymru_multiline_probe"
+        name = "aber_multiline_probe"
 
         # THE SLEEP IS DISCOVERY, NOT PADDING. Pod discovery refreshes every 15s, so a
         # pod that starts and dies inside one interval is never seen and collects nothing.

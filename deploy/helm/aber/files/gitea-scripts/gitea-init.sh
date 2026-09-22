@@ -161,8 +161,8 @@ create_account "$GITEA_ADMIN_USER" "$GITEA_ADMIN_PASSWORD" "$GITEA_ADMIN_EMAIL" 
 # reach rather than silently skipping.
 # -------------------------------------------------------------------------------------------------
 if [ -n "$GITEA_MACHINE_PASSWORD" ]; then
-  create_account "${GITEA_MACHINE_USER:-acs_platform}" "$GITEA_MACHINE_PASSWORD" \
-    "${GITEA_MACHINE_EMAIL:-acs-platform@acs-cymru.invalid}" standard
+  create_account "${GITEA_MACHINE_USER:-aber_platform}" "$GITEA_MACHINE_PASSWORD" \
+    "${GITEA_MACHINE_EMAIL:-aber-platform@aber.invalid}" standard
 else
   echo '[gitea-init] GITEA_MACHINE_PASSWORD is unset, so no machine account was created and the'
   echo '[gitea-init] platform will not create gateway repositories. This is a deployment choice,'

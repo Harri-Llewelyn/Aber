@@ -86,7 +86,7 @@ actually doing" is answerable from the dashboard instead of by getting a shell o
 | 1-minute load, available memory, free disk on `/` | `node_exporter`, polled locally |
 | bundle version | recorded by `bootstrap` at enrolment |
 | flow hash | `/data/gitops/deployed.json`, written by `flow-sync` after every deploy and by `bootstrap` for the enrolment flow |
-| broker root expiry | `/data/certs/ca.json`, written by `bootstrap` for the root enrolment installed and by `acs-gateway-converge` for every bundle the platform publishes afterwards |
+| broker root expiry | `/data/certs/ca.json`, written by `bootstrap` for the root enrolment installed and by `aber-gateway-converge` for every bundle the platform publishes afterwards |
 
 **`node_exporter` runs here and is never scraped from the centre.** It has no published port. The
 platform's Prometheus does not reach into plants: this appliance dials out to the broker and
@@ -107,7 +107,7 @@ signal but absence. Reporting the date *this* appliance holds turns the worst fl
 into a dated warning, and after a re-issue it is also how the platform says which appliances have
 been given the new root and which have not.
 
-**The root follows the bundle, not the enrolment.** `acs-gateway-converge` reads
+**The root follows the bundle, not the enrolment.** `aber-gateway-converge` reads
 `trust/ca-bundle.pem` from `main` of the platform repository on every pass, tries each root in it
 against the broker this appliance actually dials, and installs the bundle only if one of them
 verifies. Then it writes `/data/certs/ca.json` and restarts Node-RED, which is what makes the

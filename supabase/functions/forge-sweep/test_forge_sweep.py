@@ -228,7 +228,7 @@ class TestRepositories(ForgeSweepBase):
         forge(f"/repos/{ORGANISATION}/{HAND_MADE_REPOSITORY}", method="DELETE")
 
     def enrol(self):
-        key_dir = tempfile.mkdtemp(prefix="acs-forge-sweep-")
+        key_dir = tempfile.mkdtemp(prefix="aber-forge-sweep-")
         try:
             key_path = os.path.join(key_dir, "id_ed25519")
             subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", key_path], check=True, capture_output=True)
@@ -551,7 +551,7 @@ class TestThePlatform(ForgeSweepBase):
         self.assertEqual(status, 200, "main carries no manifest")
         published = json.loads(base64.b64decode(manifest["content"]).decode())
         self.assertRegex(published["digest"], r"^[0-9a-f]{64}$")
-        for path in ("site.yml", "roles/converge/files/acs-gateway-converge", "appliance/flow-sync.mjs", "appliance/bootstrap.mjs"):
+        for path in ("site.yml", "roles/converge/files/aber-gateway-converge", "appliance/flow-sync.mjs", "appliance/bootstrap.mjs"):
             status, _ = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/contents/{path}")
             self.assertEqual(status, 200, f"{path} is not published")
 

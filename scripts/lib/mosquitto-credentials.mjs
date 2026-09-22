@@ -29,7 +29,7 @@ export const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
  * end cannot import this, so scripts/check-docs-drift.mjs asserts the two agree along with the two
  * mount paths that carry them.
  */
-export const PLAYBACK_CREDENTIAL_FILE = '/var/lib/acs-cymru/playback/credentials.json';
+export const PLAYBACK_CREDENTIAL_FILE = '/var/lib/aber/playback/credentials.json';
 
 /**
  * Fold one delivered credential into the map already held, keyed by `sparkplug_id`.

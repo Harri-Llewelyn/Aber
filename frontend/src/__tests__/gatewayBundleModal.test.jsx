@@ -16,7 +16,7 @@ const GATEWAY = {
   sparkplug_id: 'gwy2a0000000000400080000'
 }
 
-const FILENAME = 'acs-gateway-Cell-4-Press-Line-gwy2a0000000000400080000.zip'
+const FILENAME = 'aber-gateway-Cell-4-Press-Line-gwy2a0000000000400080000.zip'
 const FOLDER = FILENAME.replace(/\.zip$/, '')
 
 /** A blob URL and an anchor click are the download mechanism; both are stubbed so nothing navigates. */
@@ -450,14 +450,14 @@ describe('GatewayBundleModal — failure on open', () => {
 describe('GatewayBundleModal — the install command', () => {
   const TOKEN = 'ab'.repeat(32)
   const PIN = '4QWPm3Uecer26J9fhP3nas82cSZFdFpBn8uRIAwrYCM='
-  const COMMAND = `curl -fsSL http://app.plant/.well-known/acs-cymru/ca.pem -o /tmp/acs-cymru-ca.pem && [ "$(openssl x509 -in /tmp/acs-cymru-ca.pem -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)" = "${PIN}" ] && sudo install -m 644 /tmp/acs-cymru-ca.pem /usr/local/share/ca-certificates/acs-cymru.crt && sudo update-ca-certificates >/dev/null && curl -fsSL -H "apikey: sb_publishable_x" -H "X-Enrolment-Token: ${TOKEN}" https://api.plant/functions/v1/gateway-install | sudo env ACS_ENROLMENT_TOKEN=${TOKEN} ACS_CA_PIN=${PIN} bash`
+  const COMMAND = `curl -fsSL http://app.plant/.well-known/aber/ca.pem -o /tmp/aber-ca.pem && [ "$(openssl x509 -in /tmp/aber-ca.pem -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)" = "${PIN}" ] && sudo install -m 644 /tmp/aber-ca.pem /usr/local/share/ca-certificates/aber.crt && sudo update-ca-certificates >/dev/null && curl -fsSL -H "apikey: sb_publishable_x" -H "X-Enrolment-Token: ${TOKEN}" https://api.plant/functions/v1/gateway-install | sudo env ABER_ENROLMENT_TOKEN=${TOKEN} ABER_CA_PIN=${PIN} bash`
   const commandResponse = (overrides = {}) => ({
     command: COMMAND,
     expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
     sparkplugId: GATEWAY.sparkplug_id,
     bundleVersion: '1.2.0',
     caPin: PIN,
-    caUrl: 'http://app.plant/.well-known/acs-cymru/ca.pem',
+    caUrl: 'http://app.plant/.well-known/aber/ca.pem',
     installUrl: 'https://api.plant/functions/v1/gateway-install',
     ...overrides
   })
@@ -484,7 +484,7 @@ describe('GatewayBundleModal — the install command', () => {
   })
 
   it('says when the command is unpinned, which only a development deployment allows', async () => {
-    api.installCommand.mockResolvedValue(commandResponse({ caPin: null, caUrl: null, command: 'curl ... | sudo env ACS_ENROLMENT_TOKEN=x bash' }))
+    api.installCommand.mockResolvedValue(commandResponse({ caPin: null, caUrl: null, command: 'curl ... | sudo env ABER_ENROLMENT_TOKEN=x bash' }))
     renderModal({ installer: { available: true, reason: null } })
     await waitFor(() => expect(api.installCommand).toHaveBeenCalledTimes(1))
     expect(screen.getByText(/served over plain HTTP, which only a development deployment allows/i)).toBeInTheDocument()

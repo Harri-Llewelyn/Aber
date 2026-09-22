@@ -113,7 +113,7 @@ spec:
             # three", the property that it cannot authenticate as a gateway whose password it was
             # not given -- so a writable mount would let a compromised worker hand itself one.
             - name: playback-credentials
-              mountPath: /var/lib/acs-cymru/playback
+              mountPath: /var/lib/aber/playback
               readOnly: true
       volumes:
         {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}

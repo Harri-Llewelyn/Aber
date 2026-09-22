@@ -22,7 +22,7 @@ COPY . .
 #
 #   2. RUNTIME (VITE_RUNTIME_CONFIG=true, and what the chart uses). Nothing is baked; the
 #      deployment mounts a ConfigMap over /usr/share/nginx/html/config.js and src/config.js reads
-#      it from window.__ACS_CYMRU_CONFIG__ at load. This is what allows ONE image to serve any
+#      it from window.__ABER_CONFIG__ at load. This is what allows ONE image to serve any
 #      environment, which a baked bundle cannot do.
 #
 # Both paths run the same code -- src/config.js prefers the runtime value and falls through to the

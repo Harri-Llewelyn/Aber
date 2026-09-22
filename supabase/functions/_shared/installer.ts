@@ -6,13 +6,13 @@ import { platformPublicUrl } from "./publicAddresses.ts";
  * is never minted for a route that would refuse it.
  *
  * HTTPS or nothing: the token and the credential secret cross the installer route, so a public
- * URL that is plain HTTP is refused, unless ACS_INSTALLER_ALLOW_HTTP says otherwise, which the
+ * URL that is plain HTTP is refused, unless ABER_INSTALLER_ALLOW_HTTP says otherwise, which the
  * development values do and nothing else should.
  */
 export function installerTransport(): { ok: boolean; reason: string | null; publicUrl: string } {
   const platform = platformPublicUrl();
   if (platform.problem) return { ok: false, reason: `SUPABASE_PUBLIC_URL is ${platform.problem}`, publicUrl: platform.value };
-  const allowHttp = (Deno.env.get("ACS_INSTALLER_ALLOW_HTTP") ?? "").toLowerCase() === "true";
+  const allowHttp = (Deno.env.get("ABER_INSTALLER_ALLOW_HTTP") ?? "").toLowerCase() === "true";
   if (!platform.value.startsWith("https://") && !allowHttp) {
     return {
       ok: false,

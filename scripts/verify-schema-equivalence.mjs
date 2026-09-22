@@ -91,11 +91,11 @@ import path from 'node:path';
 
 const IMAGE = 'supabase/postgres:17.6.1.160';
 // The running stack's Supabase Postgres, which the auth fixture is taken from. A POD, not a
-// container: this read was `docker exec acs-cymru_supabase_db` until Compose was dropped, and that
+// container: this read was `docker exec aber_supabase_db` until Compose was dropped, and that
 // name then existed nowhere else in the repository -- so this script could not run at all, which
 // is how a squash's acceptance test comes to be unavailable to the squash that needs it.
-const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'aber';
-const LIVE_DB_POD = process.env.ACS_CYMRU_DB_POD || 'supabase-db-0';
+const NAMESPACE = process.env.ABER_NAMESPACE || 'aber';
+const LIVE_DB_POD = process.env.ABER_DB_POD || 'supabase-db-0';
 const LIVE_DB_CONTAINER = 'supabase-db';
 
 // The psql variables db-init passes. FIXED DUMMIES, and that is safe: every one of them is
@@ -360,8 +360,8 @@ if (!dirA || !dirB) {
   process.exit(2);
 }
 
-const A = 'acs-schema-equiv-a';
-const B = 'acs-schema-equiv-b';
+const A = 'aber-schema-equiv-a';
+const B = 'aber-schema-equiv-b';
 
 try {
   console.log('\n  Schema equivalence\n');
@@ -388,7 +388,7 @@ try {
 
     // The dump is written to disk rather than printed: a schema diff runs to hundreds of lines,
     // and a terminal-truncated one is exactly as useless as no diff at all.
-    const out = mkdtempSync(path.join(tmpdir(), 'acs-schema-equiv-'));
+    const out = mkdtempSync(path.join(tmpdir(), 'aber-schema-equiv-'));
     writeFileSync(path.join(out, 'a.sql'), a.body);
     writeFileSync(path.join(out, 'b.sql'), b.body);
 

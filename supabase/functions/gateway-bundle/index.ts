@@ -73,7 +73,7 @@ function slug(name: string): string {
 /**
  * Whether stage 0 would actually get the root, asked by fetching it the way the appliance does.
  *
- * WHY THIS IS WORTH A REQUEST. Stage 0 is `curl -fsSL <ACS_CA_URL>` over plain HTTP, and `curl`
+ * WHY THIS IS WORTH A REQUEST. Stage 0 is `curl -fsSL <ABER_CA_URL>` over plain HTTP, and `curl`
  * here follows no redirect: a deployment that redirects HTTP to HTTPS on the dashboard's host --
  * which is an ordinary thing for somebody to put in front of this -- makes that fetch stop with
  * nothing fetched. The command then fails on its first clause, on the appliance, in front of
@@ -127,7 +127,7 @@ async function rootIsFetchable(caUrl: string): Promise<string | null> {
 async function installerAvailability(): Promise<{ available: boolean; reason: string | null; pin: string | null; caUrl: string | null }> {
   const transport = installerTransport();
   if (!transport.ok) return { available: false, reason: transport.reason, pin: null, caUrl: null };
-  const caUrl = (Deno.env.get("ACS_CA_URL") ?? "").trim() || null;
+  const caUrl = (Deno.env.get("ABER_CA_URL") ?? "").trim() || null;
   const pem = platformRootPem();
   const pin = pem ? await spkiPin(pem) : null;
   if (transport.publicUrl.startsWith("https://") && (!pin || !caUrl)) {
@@ -135,7 +135,7 @@ async function installerAvailability(): Promise<{ available: boolean; reason: st
       available: false,
       reason: !pin
         ? "the platform's root is not mounted into the functions (ingress TLS issued after the pod started: restart supabase-functions)"
-        : "ACS_CA_URL is unset, so an appliance has nowhere to fetch the root from",
+        : "ABER_CA_URL is unset, so an appliance has nowhere to fetch the root from",
       pin,
       caUrl,
     };
@@ -213,13 +213,13 @@ export function installCommand(input: {
   caUrl: string | null;
 }): string {
   const stage0 = input.pin && input.caUrl
-    ? `curl -fsSL ${input.caUrl} -o /tmp/acs-cymru-ca.pem && ` +
-      `[ "$(openssl x509 -in /tmp/acs-cymru-ca.pem -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)" = "${input.pin}" ] && ` +
-      "sudo install -m 644 /tmp/acs-cymru-ca.pem /usr/local/share/ca-certificates/acs-cymru.crt && sudo update-ca-certificates >/dev/null && "
+    ? `curl -fsSL ${input.caUrl} -o /tmp/aber-ca.pem && ` +
+      `[ "$(openssl x509 -in /tmp/aber-ca.pem -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)" = "${input.pin}" ] && ` +
+      "sudo install -m 644 /tmp/aber-ca.pem /usr/local/share/ca-certificates/aber.crt && sudo update-ca-certificates >/dev/null && "
     : "";
   const stage1 = `curl -fsSL -H "apikey: ${input.publishableKey}" -H "X-Enrolment-Token: ${input.token}" ` +
-    `${input.publicUrl}/functions/v1/gateway-install | sudo env ACS_ENROLMENT_TOKEN=${input.token}` +
-    (input.pin ? ` ACS_CA_PIN=${input.pin}` : "") + " bash";
+    `${input.publicUrl}/functions/v1/gateway-install | sudo env ABER_ENROLMENT_TOKEN=${input.token}` +
+    (input.pin ? ` ABER_CA_PIN=${input.pin}` : "") + " bash";
   return stage0 + stage1;
 }
 
@@ -404,7 +404,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     // Assemble the archive. One top-level folder named for the gateway, so four downloads in one
     // place stay distinguishable and do not overwrite each other on unpacking.
-    const folder = `acs-gateway-${slug(gateway.name)}-${gateway.sparkplug_id}`;
+    const folder = `aber-gateway-${slug(gateway.name)}-${gateway.sparkplug_id}`;
 
     const files: Record<string, Uint8Array> = {};
     for (const name of APPLIANCE_FILES) {

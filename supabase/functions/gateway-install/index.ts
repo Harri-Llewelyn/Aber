@@ -23,7 +23,7 @@ import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts"
  * enrolment changes nothing.
  *
  * HTTPS or nothing. The token and the credential secret cross this route, so a deployment whose
- * public URL is plain HTTP is refused, unless ACS_INSTALLER_ALLOW_HTTP says otherwise, which the
+ * public URL is plain HTTP is refused, unless ABER_INSTALLER_ALLOW_HTTP says otherwise, which the
  * development values do and nothing else should.
  */
 

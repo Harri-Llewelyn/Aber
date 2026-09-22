@@ -998,7 +998,7 @@ Three things it does that a plain `grep` would not:
 - **It checks a coupling a repository-name comparison structurally cannot see.**
   `supabase/functions/Dockerfile` builds `FROM supabase/edge-runtime:<tag>`, and Compose runs that
   same base image *directly* — it bind-mounts the functions instead of baking them. The chart pins
-  `acs-cymru/edge-runtime`, which is our own tag, so the shared tag appears in a Dockerfile and a
+  `aber/edge-runtime`, which is our own tag, so the shared tag appears in a Dockerfile and a
   compose file and nowhere else. Bump one and the targets run different runtimes against identical
   function code.
 - **Locally-built images are excluded by name, not by heuristic.** They have no tag in Compose at all
@@ -1259,7 +1259,7 @@ both halves must move together or the handshake fails with `invalid_credentials`
 Four features that came after the first working chart, each with a design note worth keeping (see
 `deploy/k8s/README.md` for the operational detail):
 
-- **Internal CA** (`deploy/k8s/internal-ca.yaml`) — a self-signed root booting a `acs-cymru-ca`
+- **Internal CA** (`deploy/k8s/internal-ca.yaml`) — a self-signed root booting a `aber-ca`
   `ClusterIssuer`, deliberately outside Helm so `helm uninstall` cannot take the root private key.
   The chart was already issuer-agnostic, so this needed no template change; ACME remains the option
   for a genuinely public domain, and cannot work for an internal one.

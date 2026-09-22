@@ -38,4 +38,4 @@ RUN npm install --no-audit --no-fund --no-update-notifier --save \
 # caller, and Helm stores the chart archive and the rendered manifest in one release Secret under a
 # 1 MiB cap. The chart runs it as the initContainer's command; an edit to it therefore needs this
 # image rebuilt, which the dev loop does on `up`.
-COPY node-red-init.mjs /opt/acs-cymru/node-red-init.mjs
+COPY node-red-init.mjs /opt/aber/node-red-init.mjs

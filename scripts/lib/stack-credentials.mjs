@@ -10,12 +10,12 @@
  *   import { stackCredentials } from './lib/stack-credentials.mjs';
  *   const { SUPABASE_JWT_SECRET } = stackCredentials(['SUPABASE_JWT_SECRET']);
  *
- * ACS_CYMRU_NAMESPACE and ACS_CYMRU_RELEASE select the release (default aber, aber).
+ * ABER_NAMESPACE and ABER_RELEASE select the release (default aber, aber).
  */
 import { spawnSync } from 'node:child_process';
 
-export const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'aber';
-export const RELEASE = process.env.ACS_CYMRU_RELEASE || 'aber';
+export const NAMESPACE = process.env.ABER_NAMESPACE || 'aber';
+export const RELEASE = process.env.ABER_RELEASE || 'aber';
 
 let cached = null;
 
@@ -52,5 +52,5 @@ export function stackCredentials(names) {
 export function missingCredentialAdvice(name) {
   return `${name} is not set and the release Secret ${RELEASE}-secrets in namespace ${NAMESPACE} ` +
     'does not carry it (or the cluster is unreachable: is the kube context right?). Export it, or ' +
-    'point ACS_CYMRU_NAMESPACE/ACS_CYMRU_RELEASE at the release.';
+    'point ABER_NAMESPACE/ABER_RELEASE at the release.';
 }

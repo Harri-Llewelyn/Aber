@@ -67,7 +67,7 @@ const FIXTURES = [
   // A node with no `type` beside one that has it is a malformed flow, not a credential file.
   { what: 'one typeless node among typed ones', value: [{ id: 'a', type: 'tab' }, { id: 'b' }], refused: false },
 
-  { what: 'flows_cred.json', value: { 'acs-broker': { user: 'x', password: 'y' } }, refused: true },
+  { what: 'flows_cred.json', value: { 'aber-broker': { user: 'x', password: 'y' } }, refused: true },
   { what: 'an array of credential entries', value: [{ user: 'x' }, { user: 'y' }], refused: true },
   { what: 'an object', value: { flows: [] }, refused: true },
   { what: 'a string', value: 'not a flow', refused: true },

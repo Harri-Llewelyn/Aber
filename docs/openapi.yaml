@@ -2267,7 +2267,7 @@ paths:
           headers:
             Content-Disposition:
               schema: { type: string }
-              description: 'attachment; filename="acs-gateway-<name>.zip"'
+              description: 'attachment; filename="aber-gateway-<name>.zip"'
             X-Aber-Token-Expires-At:
               schema: { type: string, format: date-time }
               description: When the embedded enrolment token stops working.
@@ -2725,7 +2725,7 @@ paths:
             text/plain:
               schema:
                 type: string
-              example: "ACS_SUPABASE_URL=https://api.plant.example\nACS_ENROLLMENT_TOKEN=...\n"
+              example: "ABER_SUPABASE_URL=https://api.plant.example\nACS_ENROLLMENT_TOKEN=...\n"
             application/zip:
               schema:
                 type: string
@@ -2761,9 +2761,9 @@ paths:
 
         `?format=bundle` returns the same AASX with the device's history inside, for taking an
         asset away before it is taken out of service: supplementary parts under
-        `aasx/files/acs-cymru/` hold the digital thread (JSON), the readings still in the live
+        `aasx/files/aber/` hold the digital thread (JSON), the readings still in the live
         historian at raw and hourly resolution (CSV, oldest first, capped newest-first), and a
-        manifest (`acs-cymru/asset-bundle/1`) that says what each part holds, where it was cut,
+        manifest (`aber/asset-bundle/1`) that says what each part holds, where it was cut,
         and which cold-tier objects hold the rest — named, never read back. A copy is stored in the
         cold tier's bucket under `assets/<sparkplug_id>/<stamp>.aasx` and recorded in
         `asset_exports`; `X-AAS-Stats.bundle` says whether that copy was stored, and the file is

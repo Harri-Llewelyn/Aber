@@ -10,12 +10,12 @@
  * up in the catalog: `to_regclass` does not say the foreign table can be reached.
  *
  * Usage: node scripts/check-schema-surface.mjs, against the cluster the kube context points at.
- * Environment: ACS_CYMRU_NAMESPACE (default aber), DB_USER_NAME (postgres), DB_NAME (postgres).
+ * Environment: ABER_NAMESPACE (default aber), DB_USER_NAME (postgres), DB_NAME (postgres).
  */
 import { spawnSync } from 'node:child_process';
 
-const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'aber';
-const RELEASE = process.env.ACS_CYMRU_RELEASE || 'aber';
+const NAMESPACE = process.env.ABER_NAMESPACE || 'aber';
+const RELEASE = process.env.ABER_RELEASE || 'aber';
 const DB_USER_NAME = process.env.DB_USER_NAME || 'postgres';
 const DB_NAME = process.env.DB_NAME || 'postgres';
 
