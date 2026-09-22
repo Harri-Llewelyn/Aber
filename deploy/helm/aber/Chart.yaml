@@ -26,9 +26,9 @@ appVersion: "0.1.0"
 
 kubeVersion: ">=1.25.0-0"
 
-home: https://github.com/Harri-Llewelyn/ACS-Cymru
+home: https://github.com/Harri-Llewelyn/Aber
 sources:
-  - https://github.com/Harri-Llewelyn/ACS-Cymru
+  - https://github.com/Harri-Llewelyn/Aber
 
 keywords:
   - factory-plus

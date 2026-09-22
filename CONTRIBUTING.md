@@ -7,7 +7,7 @@ states the rule for what goes where. **Cite the document that holds the substanc
 that produced it: a branch, a pull request or a planning note is stale by the time somebody reads
 the line. A GitHub issue is the exception, because its number never changes — `#340` names the same
 work in five years. The roadmap's numbers were reading order and never citable, which is one of the
-reasons its queue moved to the [1.0 milestone](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/1);
+reasons its queue moved to the [1.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/1);
 [`docs/roadmap.md`](docs/roadmap.md) is the record of what has already left it.
 
 Some logic is **mirrored across languages** and must be kept in step: `frontend/src/utils/` mirrors

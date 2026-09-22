@@ -1078,7 +1078,7 @@ it here would undo that confinement through the back door.
 `Aber/Directory/v1/device`, and that neither a gateway nor the i3X principal may read it.
 
 **The source is the enrolment record, never a birth.** This is the point on which
-[issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)'s design was refused. A registry
+[issue #64](https://github.com/Harri-Llewelyn/Aber/issues/64)'s design was refused. A registry
 built by writing a topic binding on each NBIRTH/DBIRTH would make the Directory a record of what
 devices *claim*, and a self-declared marker is not evidence: an address that answers is not an
 address that is authorised, and nothing would ever remove a device that stopped birthing. The
@@ -1111,7 +1111,7 @@ interoperability claim would become false the moment the payload left HTTP.
 `uns_publish.py` republishes every metric a DDATA wrote to the historian on a plain, retained topic,
 as JSON, for the consumer that has a broker connection and no Sparkplug decoder: a BI tool, a SCADA
 client, a dashboard. It runs on the historian writer thread, after the commit, so what it
-publishes is exactly what was recorded ([issue #66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66)).
+publishes is exactly what was recorded ([issue #66](https://github.com/Harri-Llewelyn/Aber/issues/66)).
 
 **The topic is ISA-95's hierarchy, and the path is fixed at the level the asset honestly occupies.**
 

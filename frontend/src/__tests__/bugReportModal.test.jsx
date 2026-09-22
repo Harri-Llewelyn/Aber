@@ -57,7 +57,7 @@ describe('BugReportModal target repository', () => {
 
   it('defaults to this repository when VITE_GITHUB_REPO_URL is unset', async () => {
     // The suite runs with the variable unset, so the exported constant IS the fallback path.
-    expect(GITHUB_REPO_URL).toBe('https://github.com/Harri-Llewelyn/ACS-Cymru')
+    expect(GITHUB_REPO_URL).toBe('https://github.com/Harri-Llewelyn/Aber')
   })
 
   it('honours VITE_GITHUB_REPO_URL when a fork sets it', async () => {

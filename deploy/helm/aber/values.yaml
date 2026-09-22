@@ -973,7 +973,7 @@ frontend:
   # Gates every supabase.channel() subscription; off, the tabs fall back to a 3s poll.
   enableRealtime: true
   # Where the Report Bug button files issues.
-  githubRepoUrl: https://github.com/Harri-Llewelyn/ACS-Cymru
+  githubRepoUrl: https://github.com/Harri-Llewelyn/Aber
   # There is no `allowSignup` (a frontend flag is not an access control; see
   # supabaseAuth.disableSignup) and no `grafanaUrl` (derived from publicUrls.grafana, the same
   # value Grafana's root_url and OAuth redirect come from).
