@@ -273,8 +273,8 @@ click it to copy. It never changes, so an asset can be renamed freely without br
 
 **Nothing seeds these ids.** A fresh install has no gateways and no devices, so the pair you publish
 under is the pair the dashboard issued you in steps 3 and 6 — that is the whole reason those steps
-come first. [`0040_retire_demonstration_seed.sql`](../supabase/migrations/0040_retire_demonstration_seed.sql)
-and [`0073_the_shopfloor_ships_empty.sql`](../supabase/migrations/0073_the_shopfloor_ships_empty.sql)
+come first. [`0040_retire_demonstration_seed.sql`](../supabase/migrations/archive/0040_retire_demonstration_seed.sql)
+and [`0073_the_shopfloor_ships_empty.sql`](../supabase/migrations/archive/0073_the_shopfloor_ships_empty.sql)
 between them removed the last of the seeded assets and schemas from databases that still had them.
 
 The examples below use `gwy120000000000400080000` and `dev220000000000400080000` as stand-ins for

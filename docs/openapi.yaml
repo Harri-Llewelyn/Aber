@@ -3446,7 +3446,7 @@ paths:
       tags: [Edge Functions]
       summary: Gitea's push webhook; records the head of main on the gateway's row
       description: |
-        Registered on each gateway repository at enrolment (migration 0095). Gitea delivers every push
+        Registered on each gateway repository at enrolment (archived migration 0095). Gitea delivers every push
         to `main` here, signed: `X-Gitea-Signature` is the hex HMAC-SHA256 of the raw body under
         `GITEA_WEBHOOK_SECRET`, and the signature is the whole of the authentication -- Envoy's key-auth
         proves only that the caller holds the publishable key. On a verified push the gateway named by the
@@ -3488,7 +3488,7 @@ paths:
       summary: Place the caller in the forge team their role warrants (the forge listener's ext_authz step)
       description: |
         Called by the gateway's `forge` listener on every non-static request through the forge's door,
-        carrying the verified access token (migration 0094). Resolves the caller's role from
+        carrying the verified access token (archived migration 0094). Resolves the caller's role from
         `user_roles` and ensures they are in exactly the team of the `gateways` organisation that role
         maps to -- `administrators` or `managers` -- through the machine account that owns it. A role
         that has been removed since the token was signed is refused and taken out of both teams on the
@@ -4537,7 +4537,7 @@ components:
             published and lost; a job that would lose EVERY reading is refused by the worker and
             arrives FAILED. Counted per message, while that refusal is decided per metric: the
             daemon judges each metric on its own timestamp and falls back to the payload's only
-            when it has none, so a job can carry a count on every message and still have written. Zero on every job written before migration 0109, which means
+            when it has none, so a job can carry a count on every message and still have written. Zero on every job written before archived migration 0109, which means
             "nobody counted" rather than "none were discarded".
         elapsed_seconds: { type: integer }
         stop_requested:

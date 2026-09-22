@@ -44,7 +44,7 @@ export const TELEMETRY_PAGE_SIZE = 5_000;
  * FIXED, NOT CONFIGURABLE. `supabase/storage-policies.sql` and `scripts/storage-init.mjs` name
  * this bucket too, and a name that can be changed in one place is a bucket with no policies.
  * It used to be read from the `archive.bucket` setting, which is retired with the local cold
- * tier (migration 0132) -- a stored bundle is a copy somebody asked for, not the only remaining
+ * tier (archived migration 0132) -- a stored bundle is a copy somebody asked for, not the only remaining
  * copy of anything, so it stays on local storage where a signed URL reaches it.
  */
 export const EXPORT_BUCKET = "asset-exports";

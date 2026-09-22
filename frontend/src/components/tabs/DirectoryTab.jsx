@@ -267,7 +267,7 @@ function ExposureCell({ exposure }) {
     )
   }
   return (
-    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Nothing recorded where this service can be reached from. Registered by something that predates the exposure column, or by something that does not set it — see migration 0084.">
+    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Nothing recorded where this service can be reached from. Registered by something that predates the exposure column, or by something that does not set it — see archived migration 0084.">
       not recorded
     </span>
   )
@@ -288,7 +288,7 @@ function ServiceTable({ rows, onNotify }) {
             <th title="Service name">Service Name</th>
             <th title="Architecture category">Service Type</th>
             <th title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
-            <th title="Where the service can be reached from, as a property of its port binding. Set by migration 0084 and describing the Compose deployment; a deployment that publishes differently updates it">Reach</th>
+            <th title="Where the service can be reached from, as a property of its port binding. Set by archived migration 0084 and describing the seeded loopback bindings; a deployment that publishes differently updates it">Reach</th>
             <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
           </tr>
         </thead>

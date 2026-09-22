@@ -386,7 +386,7 @@ describe('DirectoryTab refresh', () => {
  * so `viewerIsOnDeploymentHost` is true for all of them and the exposure column's case has to be
  * asked for explicitly.
  */
-describe('Directory reachability (migration 0084)', () => {
+describe('Directory reachability (archived migration 0084)', () => {
   describe('viewerIsOnDeploymentHost', () => {
     it('recognises every spelling of this machine, including the bracketed IPv6 form', () => {
       for (const h of ['localhost', '127.0.0.1', '::1', '[::1]']) {

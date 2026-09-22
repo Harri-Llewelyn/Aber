@@ -9,13 +9,14 @@ Requires the Supabase database (54322 by default) and archived migration 0063 ap
 THE REGRESSION THIS EXISTS FOR, demonstrated end to end before it was fixed: create a host-run
 gateway, give it a broker account with a known password, publish, DELETE the gateway row, and the
 credential went on publishing. `revoke_credential_on_decommission()` gated on
-`gateway_holds_a_credential()` -- `NOT is_virtual AND enrolled_at IS NOT NULL` -- which is false for
-every gateway a provisioned stack has, so the revocation path was dead code in practice.
+`gateway_holds_a_credential()` -- then `NOT is_virtual AND enrolled_at IS NOT NULL`, and since the
+rename `deployment = 'remote' AND enrolled_at IS NOT NULL` -- which is false for every gateway a
+provisioned stack has, so the revocation path was dead code in practice.
 
 BOTH DIRECTIONS ARE ASSERTED, and the second is the one that keeps 0040's guarantee alive.
-Revocation asks the credential service to disable the account at the broker. `0040` gated on
-`is_virtual` so that a gateway with no recorded credential is passed over rather than producing a
-request for an account that was never issued, and the fix must not undo it.
+Revocation asks the credential service to disable the account at the broker. `0040` gated on the
+retired `is_virtual` flag so that a gateway with no recorded credential is passed over rather than
+producing a request for an account that was never issued, and the fix must not undo it.
 
 WHY THE REQUESTS NEVER LEAVE. `net.http_post()` queues into `net.http_request_queue` inside the
 caller's transaction, so a test that rolls back un-queues its own requests -- nothing is sent, and
@@ -164,7 +165,7 @@ class TestWhatItStillPassesOver(RevocationBase):
             self.queue_depth(),
             before,
             "a gateway with no credential on record had one revoked. The service would CREATE the "
-            "account being 'revoked' -- which is what 0040's is_virtual guard was protecting, and "
+            "account being 'revoked' -- which is what 0040's guard was protecting, and "
             "0063 keeps that protection by reading the record rather than the flag.",
         )
 

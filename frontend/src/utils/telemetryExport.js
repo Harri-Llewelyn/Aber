@@ -11,7 +11,7 @@
 /**
  * The four choices the picker offers, finest first.
  *
- * `relation` matches the `relation` column of `public.telemetry_horizons` (migration 0111).
+ * `relation` matches the `relation` column of `public.telemetry_horizons` (archived migration 0111).
  * `param` is what goes on the wire as `?resolution=`; raw sends nothing, because absent means raw
  * and an explicit `raw` is not a value queryTelemetry accepts.
  *

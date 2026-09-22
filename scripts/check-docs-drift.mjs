@@ -640,9 +640,9 @@ function edgeFunctionNames() {
     if (dangling.length > 12) fail(`...and ${dangling.length - 12} more dangling migration citation(s)`);
     fail(
       'A citation must name an APPLIED migration, or say "archived migration NNNN" for one in\n' +
-        '      supabase/migrations/archive/ -- which never executes and whose files are named\n' +
-        '      20260101000NNN_*.sql. A bare number that is not applied points a reader at nothing,\n' +
-        '      and will point them at the WRONG file once that number is issued for real.'
+        '      supabase/migrations/archive/, which never executes. A bare number that is not\n' +
+        '      applied points a reader at nothing, and will point them at the WRONG file once\n' +
+        '      that number is issued for real -- the archive already holds two different 0074s.'
     );
   } else {
     pass(`every inline migration citation across ${scanned.length} files names an applied migration or is marked archived`);
@@ -667,72 +667,12 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
-    // 0075 adds a fifth argument, `p_actor_id`, and DROPs the four-argument form first so a
-    // four-argument call is not ambiguous.
-    'public.record_service_token_issued': '0075 adds p_actor_id; the baseline holds the pre-0075 form',
-    // 0125 takes the name and purpose the Access Control page records, and DROPs 0080's
-    // two-argument form first: an overload whose extra arguments default makes every RPC call
-    // ambiguous at PostgREST.
-    'public.create_machine_principal': '0125 adds p_name and p_purpose and writes machine_principals; 0080 holds the permissions-and-note form',
-    // 0129 adds p_rotated, which is what makes a RE-ISSUE reportable (#217), and DROPs every
-    // existing declaration first: the baseline recreates the one-argument form on every boot, so
-    // without the sweep a call by name could choose neither. The argument defaults, so a worker
-    // from the previous release still resolves to it during a rollout.
-    'public.playback_report_credentials': '0129 adds p_rotated so a re-issue moves the row; the baseline holds the ids-only form',
-    // 0129 adds the staleness gate to the credential tier. Same signature, so the grants survive
-    // and no sweep is needed; the body is carried whole because plpgsql cannot be patched.
-    'public.start_playback_job': '0129 refuses a target whose credential the worker has not picked up yet; the baseline holds the pre-#217 form',
-    // 0103 names the gateway's scrape job as the chart's collector labels it (supabase-envoy);
-    // the baseline holds the older `envoy`.
-    'public.directory_liveness_job_map': '0103 renames the gateway job to supabase-envoy; the baseline holds envoy',
-    // 0074 creates it with the token denylist arm; 0076 rewrites it to add the principal arm, whose
-    // check runs first so its message wins once a principal revocation has cascaded to its tokens.
-    'public.auth_pre_request': '0076 adds the principal arm; 0074 holds the token-only form',
-    // Each adds defaulted arguments and DROPs EVERY existing declaration first, because CREATE OR
-    // REPLACE cannot change an argument list and a file that names one list stops owning the
-    // function as soon as another adds an argument after it -- see supabase/README.md, "A migration
-    // that adds an argument breaks the one before it".
-    'public.digital_thread_page':
-      '0121 makes a bare-integer search match the row id and the causation id; 0118 adds the backup-job disjunct and the origin field; 0117 admits schemas and device nameplates to the purged rule; 0115 returns total_matching, adds p_search and admits areas; 0077 adds the keyset cursor; the baseline holds the unpaged form',
-    // 0086 adds `device_nameplate` and `change_proposals` to the ASSET lane, which would otherwise
-    // take the fail-closed 'security' branch. Rewritten in full because the classifier is one CASE.
-    'public.platform_health_rows': '0092 narrows expected_publishers to devices behind a gateway that has reported at least once; 0001 holds the bound-to-a-gateway form that alerted on edge nodes nobody had deployed',
-    'public.audit_domain_for': '0120 adds schemas to the asset lane, the one entity whose own table is readable by every authenticated user; 0086 adds device_nameplate and change_proposals; 0090 adds the three *_links lanes; 0097 adds areas; 0098 holds the form without area_floors, which 0113 retires',
-    // 0087 narrows both gates from has_role(Administrator, Shopfloor_Manager) to
-    // has_authority(schema:manage); the bodies are otherwise the baseline's.
-    'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
-    // 0100 subtracts every column a heartbeat writes (audit_telemetry_columns()) before deciding
-    // whether an UPDATE is an event; the baseline subtracts last_heartbeat alone, which recorded
-    // every health-carrying heartbeat as an event.
-    'public.log_digital_thread_event': '0100 subtracts audit_telemetry_columns() where the baseline subtracts last_heartbeat alone; 0122 reads the entity id from the column a trigger argument names, defaulting to id',
-    // 0100 records a changed flow hash as a FLOW_DEPLOYED row, since the trigger no longer sees
-    // that column; the writes to the seven health columns are the baseline's.
-    'public.ingest_record_gateway_health': '0100 adds the FLOW_DEPLOYED row on a changed flow hash; the baseline holds the health writes alone',
-    'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
-    // 0107 reads `stop_requested` so a playback the operator interrupted is CANCELLED rather than
-    // COMPLETED; the baseline decides on the error alone and cannot tell the two apart. 0109 then
-    // drops that three-argument form outright and redeclares it with the out-of-window count --
-    // an overload would make every three-argument call ambiguous, so this is the one declaration
-    // that has to REPLACE 0107's rather than layer on it.
-    'public.playback_finish': '0109 drops the three-argument form and adds p_messages_out_of_window, keeping 0107\'s three arms; 0107 read stop_requested; the baseline holds the error-only form',
-    // 0108 withdraws the three *_links proposal lanes 0090 opened: no page ever filed one, and a
-    // link is attached directly through link:manage. Each of these is the prior body with the link
-    // arms removed, so the last declaration wins and the lanes stay shut.
-    'public.proposal_is_already_true': '0108 drops the link branch; every remaining lane is an UPDATE, so containment is the whole test again',
-    // 0088 adds the queue's second lane and the functions that admit it in the same file; 0090
-    // replaces the withdrawn schema lane with the asset and link lanes.
-    'public.may_decide_proposal': '0090 replaces the withdrawn schema lane with cells, gateways and the three *_links lanes, all resolving authority rather than role names; 0088 holds the form that introduced it',
-    'public.proposable_columns': '0108 holds the form 0113 leaves, with plan_x and plan_y and no floor_id; 0098 replaces floor with the place on cells; 0097 admits area_id on devices and gateways and area_id and floor on cells; 0090 adds cells, gateways and the three *_links lanes and empties the schema lane to withdraw it; 0088 added that lane; 0086 holds the asset-only form',
-    'public.validate_change_proposal': '0124 tests is_archived on the areas arm, which 0123 could not because the column did not exist; 0123 adds the areas arm; 0090 resolves the target table per lane and adds the create-shaped link checks; 0088 branched it by lane; 0086 holds the device-only form',
-    'public.reject_proposal': '0090 widens the outer gate to the lanes that replaced schemas; 0088 gates on may_decide_proposal(); 0086 holds the single-gate form',
-    'public.approve_proposal': '0108 holds the form 0113 leaves, assigning the place on cells and no floor; 0098 assigns the place; 0097 assigns the area and floor columns the lanes now admit; 0090 adds the cell, gateway and link branches, drops the withdrawn publish branch and refuses a proposal already in place; 0088 added the per-lane gate and 0089 the author stamp; 0086 holds the asset-only form',
-    // 0097 adds the area_wide scope and its area_id to a move; the baseline holds the two-scope form.
-    'public.relocate_devices': '0097 adds area_wide and area_id to a move; the baseline holds the cell-or-site_wide form',
-    'public.approve_quarantined_device': '0097 drops the baseline signature and redeclares it with p_area_id and p_set_area for area_wide; the baseline holds the cell-or-site_wide form',
-    // 0089 adds proposed_by_email to the columns a proposer may NOT move. The guard names every
-    // immutable column explicitly, so a new one has to join the list or an UPDATE could
-    // re-attribute a proposal an approver is already reading.
-    'public.guard_change_proposal_transition': '0089 makes the author stamp immutable too; 0086 holds the pre-stamp form',
+    // EMPTY, AND THAT IS THE EXPECTED STATE just after a squash. The baseline is generated from
+    // a dump of the finished database, so every function appears in it exactly once, in its
+    // final form -- there is nothing left for a later migration to replace. Entries return as
+    // soon as a migration added after the fold redeclares something the baseline holds, and
+    // each one records WHY that replacement is meant. See README.md, "There is no 0017", for
+    // the case where an unrecorded one would have regressed audit attribution.
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

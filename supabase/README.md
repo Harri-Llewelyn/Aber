@@ -16,25 +16,17 @@ foreign-data-wrapper view.
 
 ## Migration Baseline
 
-Squashed **twice**. The pre-beta chain became `0001`/`0002` for the public beta; the 72-file chain
-that grew on top of it was squashed back into the same two files, leaving a short corrective tail.
+Squashed **three times**. The pre-beta chain became `0001`/`0002` for the public beta; the 72-file
+chain that grew on top of it was squashed back into the same two files with a tail of nine; and the
+70 files that grew on top of *that* were squashed back into the same two again, with a tail of one.
 
 | File | Contents |
 | :--- | :--- |
+| `0000_a_database_from_before_the_fold.sql` | The whole corrective tail: every subtraction the baseline cannot express, plus the one conversion it cannot describe |
 | `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants, the FDW, the Realtime publication |
 | `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalogue, settings, secrets, cron, the Playback gateway |
-| `0004_drop_gateway_ip_address.sql` | Removes a column nothing read |
-| `0005_digital_thread_signal_and_attribution.sql` | Purges audit rows that record no change |
-| `0016_directory_service_cleanup.sql` | Removes and renames seeded directory entries |
-| `0020_cleanup_legacy_simulator_seed.sql` | Deletes the single-device simulator's assets |
-| `0028_platform_alerts_migration.sql` | Drops `device_alerts` after moving its rows |
-| `0040_retire_demonstration_seed.sql` | The one-shot purge of the four-cell demonstration floor |
-| `0049_documents_become_links.sql` | Drops `documents` after the rename to `links` |
-| `0053_one_shot_ledger_is_not_writable.sql` | Withdraws write access to the one-shot ledger |
-| `0069_the_two_roles_stop_being_the_same.sql` | Removes the permissions that made two roles one |
-| `0073_the_shopfloor_ships_empty.sql` | Retires the last demonstration schemas |
 
-### Why those nine survived the squash, and nothing else did
+### Why the tail is one file, and why it sorts before the baseline
 
 **A squash can only fold what a fresh install would do anyway.** The baseline states the shape a
 new database is built into, so anything ADDITIVE — a table, a column, a function, a seeded row —
@@ -42,19 +34,33 @@ folds into it and the old file is redundant. What cannot fold is a SUBTRACTION: 
 NOT EXISTS` does not remove a column that already exists, and a baseline that simply never mentions
 `gateways.ip_address` leaves the column sitting on every database that already has one.
 
-So every file above either drops something, deletes rows, or withdraws a privilege. Each is a
-no-op on a fresh install and the repair on an existing one. `0053` is the subtle member: `0040`
-creates the one-shot ledger and grants `service_role` full rights on it, and `0053` is what takes
-them away — fold `0053` and the grant comes back on every boot.
+The second squash kept nine files applied for that reason, and it could, because each of those nine
+was a small file whose *only* content was its subtraction. **The third could not.** Its
+subtractions live inside large feature migrations, and a feature migration replayed after the
+baseline **reverts** it: `0108` declares `may_decide_proposal()` as it stood at `0108`, the baseline
+declares it as it stands now, and the chain runs the baseline first. Kept as they were, the seven
+candidate files left nine functions, two comments and a lane list at their older definitions —
+which is exactly what the equivalence check reported the first time it was run against the fold.
 
-### The four rules the next fold carries in
+So the subtractions were lifted out into `0000`, which holds nothing else. It sorts **before**
+`0001` rather than after, and has to: it converts `digital_thread` from an ordinary table into a
+partitioned one, and the baseline describes it already partitioned — `CREATE TABLE … PARTITION OF`
+fails against a database that has not been converted. Once the first block has to run early they
+all may as well, and running early is what makes the `archive.bucket` block correct: it decides by
+asking whether `system_settings.sensitive` exists yet, which is precisely "has the new schema
+arrived", and only `0000` can still ask it.
 
-Three more were found the hard way after the second squash, and a fold that ignores any of them
-rebuilds the thing it was run to remove. The tail already holds two examples: `0088` drops and
-re-adds `change_proposals_entity_type_known` with three lanes and `0090` widens it to seven two
-files later, so on a database holding a cells proposal the re-add scans the rows, fails, and aborts
-db-init with every file after it; and `0097` re-adds the integer `cells.floor` on every boot while
-`0098` drops it again.
+`0000` is not a precedent for a second pre-baseline file. It is a tail like any other, meant to be
+folded away by the next squash.
+
+### The five rules the next fold carries in
+
+Four were found the hard way across the second and third squashes, and a fold that ignores any of
+them rebuilds the thing it was run to remove. The second squash's tail held two examples: `0088`
+dropped and re-added `change_proposals_entity_type_known` with three lanes and `0090` widened it to
+seven two files later, so on a database holding a cells proposal the re-add scanned the rows,
+failed, and aborted db-init with every file after it; and `0097` re-added the integer `cells.floor`
+on every boot while `0098` dropped it again.
 
 1. **An additive change folds; a subtractive one waits.** A new table, column, function or seeded
    row goes in a new numbered migration and folds into the baseline at the next squash, because a
@@ -69,6 +75,13 @@ db-init with every file after it; and `0097` re-adds the integer `cells.floor` o
 4. **No file re-asserts an absolute set that a later file widens.** A `CHECK` naming every legal
    value, or a self-check counting every expected permission, is correct on the boot it is written
    and wrong on the first boot after something is added.
+5. **A tail file carries its subtraction and nothing else.** Anything additive left in it is
+   replayed *after* the baseline and silently reverts whatever the baseline had brought forward.
+   The corollary is where the tail earns its keep: a fold that NARROWS a view or a function
+   signature cannot be reached by the baseline at all, because `CREATE OR REPLACE VIEW` will not
+   drop a column and `CREATE OR REPLACE FUNCTION` will not change a return type. The tail drops;
+   the baseline rebuilds.
+
 
 ### The baseline is generated, and the equivalence is checked
 
@@ -77,9 +90,27 @@ into idempotent form. That is what makes every function appear **exactly once, i
 — `log_digital_thread_event()` was declared five times across the chain, so four of the five bodies
 a reader could find were dead, with nothing in the file to say which.
 
-`scripts/verify-schema-equivalence.mjs` is the acceptance test: it builds a database from each of
-two chains and asserts they arrive at the same schema and the same seed rows. The squash was landed
-on its verdict — 72 files and 11 build the identical schema `623d6f6059e2`.
+`scripts/generate-baseline-section.mjs` performs the rewrite, and exists because the first two
+squashes did it by hand and left nothing behind — so the form had to be re-derived from the
+previous baseline each time, and the traps below had to be rediscovered with it.
+`supabase/migrations/archive/README.md` has the procedure and the eight faults only the acceptance
+test caught.
+
+`scripts/verify-schema-equivalence.mjs` is that acceptance test: it builds a database from each of
+two chains and asserts they arrive at the same schema and the same seed rows. Each squash was
+landed on its verdict — 72 files and 11 built the identical schema `623d6f6059e2`; 73 and 3 build
+`f2b23af251f4`, over 19 non-empty seed tables. The 73rd is `gateways.is_virtual` being retired,
+which this fold performs and the chain it replaces did not, so the oracle carries it too.
+
+**And a database UPGRADED through the fold reaches the same digest**, which is new: a floor-era
+database given `0000`/`0001`/`0002` dumps identically to a fresh install of them. Neither earlier
+squash could have done that, and the rehearsal that proves it is what found out why — see
+`supabase/migrations/archive/README.md`, "What an upgrade needs that a dump does not contain".
+
+**One table is deliberately not compared.** `one_shot_migrations` records which one-shot migrations
+have *run*, not what the schema declares; a one-shot folded into the baseline has no claim left to
+make, and seeding a row on its behalf would forge a claim for a file that is not in the chain. The
+counts are printed under their own heading rather than passed over in silence.
 
 **Five things a dump cannot express**, all of them hand-carried into `0001` and each found by a
 failing run rather than by inspection:
@@ -601,7 +632,8 @@ target gateway**, so the database says what it may do and the broker ACL says wh
 See [Machine identities](#machine-identities) for why the two never collapse into one credential.
 
 **`gateway_has_broker_credential()` exists because `gateway_holds_a_credential()` (`0038`) answers
-the opposite question.** The older predicate is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` —
+the opposite question.** The older predicate was `NOT g.is_virtual AND g.enrolled_at IS NOT NULL`, since translated to
+`deployment = 'remote'` —
 "a Remote gateway that completed enrolment" — which refuses every host-run gateway and admits
 only real hardware. For a playback target that is inverted twice over: the target is normally
 host-run, and real hardware is exactly what a playback must never publish as. `0041` had already
@@ -769,8 +801,8 @@ already gives for archived appliances: *"alerting on it would train an operator 
 rule."*
 
 **`is_shadow`, and not one of the other three flags.** `is_simulated` is carried by every simulator
-gateway, and those do heartbeat — their silence is a real fault. `is_virtual` answers whether an
-appliance exists at all, not whether anything publishes as it. `is_archived` would mean
+gateway, and those do heartbeat — their silence is a real fault. `deployment` answers where the connector runs, not
+whether anything publishes as it. `is_archived` would mean
 archiving the gateway, which `0060`'s trigger forbids: it requires exactly one live shadow gateway
 to exist.
 
@@ -2376,14 +2408,14 @@ between verification and the drop: data in **both** places, `verified_at` still 
 special case, it is the safest state in the flow, so `--drop` will remove the chunk again with no
 further work. The round trip closes rather than being one-way.
 
-### `deployment`, and the word it is replacing (`0064`)
+### `deployment`, and the word it replaced (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this
 row"* (`0025`, provisioning), *"this connector runs on the app host"* (`GatewaysTab.jsx`), and
 *"(Cloud / Server-Simulated)"* (the checkbox, which contradicts the second) — while **every**
 behaviour branching on it is about a fourth thing: whether there is a machine out on the plant
 network. That was a roadmap item, retired into
-[`deployment`, and the word it is replacing](#deployment-and-the-word-it-is-replacing-0064) below;
+[`deployment`, and the word it replaced](#deployment-and-the-word-it-replaced-0064) below;
 the bill arrived separately, as
 `gateway_holds_a_credential()` being the wrong predicate three times in `0056`, `0062` and `0063`.
 
@@ -2393,23 +2425,31 @@ runs, and a remote one is not something it can provision or reason about. Two co
 three-way enum, so the fourth combination stays *sayable*: folding them together would make a
 simulator on a separate load-generation box inexpressible.
 
-**The rename is not in that migration**, deliberately — 126 references across 47 files, and §15's
-own rule is that a rename beside a feature is a rename nobody reviews. Until it completes,
-`sync_gateway_deployment()` keeps the two columns in agreement in both directions, so every writer
-that still names `is_virtual` keeps working and gets the new column filled correctly.
+**The rename was not in that migration**, deliberately — 126 references across 47 files, and §15's
+own rule is that a rename beside a feature is a rename nobody reviews. For the releases it took to
+complete, `sync_gateway_deployment()` kept the two columns in agreement in both directions, so
+every writer that still named `is_virtual` went on working and got the new column filled
+correctly.
 
-**`0066` finishes it**: `gateway_health_rows()` moves last, because `is_virtual` was in its
+**`0000` finished it, at the third baseline squash**, which is where `0064` said the column would
+go: it survived that long only because two archived migrations named it in a function signature and
+replayed on every boot. `gateway_health_rows()` moves last, because `is_virtual` was in its
 `RETURNS TABLE` signature and a return type cannot be replaced in place — the function and the view
-built on it are dropped and recreated together. Then the transitional trigger goes, and the column
-with it. `gateway_status` has to be dropped first and rebuilt after: it is `SELECT g.*`, which
-PostgreSQL freezes into an explicit column list, and that frozen list is a hard dependency. The same
-fact that makes `ensure_gateway_status_view()` necessary when a column is *added* is what blocks a
-drop.
+built on it are dropped and recreated together, and the tail has to do the dropping because a
+generated baseline only ever declares. Then the transitional trigger goes, and the column with it.
+`gateway_status` has to be dropped first and rebuilt after: it is `SELECT g.*`, which PostgreSQL
+freezes into an explicit column list, and that frozen list is a hard dependency. The same fact that
+makes `ensure_gateway_status_view()` necessary when a column is *added* is what blocks a drop.
+
+One thing the drop had to carry with it: `deployment` is `NOT NULL` and had **no default**, because
+the trigger derived it from `is_virtual` on every INSERT. Removing the trigger without giving the
+column `DEFAULT 'remote'` — exactly what the trigger produced from `is_virtual`'s own default —
+breaks every writer that names neither, which is most of the test estate and `relocate_devices()`.
 
 Two things keep the old word: migration filenames (the chain is immutable) and every
 `CREDENTIAL_ISSUED` row written before `0065`. The third was
 `authorize_virtual_gateway_credential()`, held back because an RPC name is client-visible and
-renaming it is its own change. [`0130`](migrations/0130_the_gateway_types_keep_their_names.sql) is
+renaming it is its own change. [`0130`](migrations/archive/0130_the_gateway_types_keep_their_names.sql) is
 that change.
 
 ### The credential gate is named after the type it accepts (`0130`)
@@ -2450,12 +2490,14 @@ Two things `0065` records that are easy to miss:
   used to read `is_virtual`. A check that cannot tell a mention from a use forces documentation to
   be thinned to keep it quiet.
 
-**On UPDATE there is no conflict to resolve, and that is arithmetic rather than policy.** Both
-columns are two-valued and every row starts in agreement, so an update changing both necessarily
-flips both, which agrees again; a caller restating one column at its current value is
+**On UPDATE there was no conflict to resolve, and that was arithmetic rather than policy.** Both
+columns were two-valued and every row started in agreement, so an update changing both necessarily
+flipped both, which agreed again; a caller restating one column at its current value was
 indistinguishable from one that never mentioned it. The first version of the trigger guarded
-against a disagreement that cannot occur. On INSERT the rule is real, because `is_virtual` has a
-default: a row naming only `deployment` arrives with both set, and the one the caller chose wins.
+against a disagreement that could not occur. On INSERT the rule was real, because `is_virtual` had
+a default: a row naming only `deployment` arrived with both set, and the one the caller chose won.
+Recorded because the reasoning outlives the trigger — the same shape recurs whenever two columns
+are kept in step through a rename.
 
 ### Revocation reads that record, which is why it never worked (`0063`)
 
@@ -3087,7 +3129,7 @@ device lanes keep their role pair, because `device:manage` is held by exactly th
 rewriting them would be a no-op with a migration's blast radius.
 
 **What a gateway proposal may not name** is the security half, restated for a new table: not
-`deployment`, `is_virtual`, `is_simulated`, `is_shadow` or `sparkplug_group` — those describe what
+`deployment`, `is_simulated`, `is_shadow` or `sparkplug_group` — those describe what
 the gateway *is* and what it publishes under, and moving one re-points a broker topic namespace —
 and not `status`, `last_heartbeat`, `agent_version`, `cert_expires_at` or any health column, which
 are what the platform **observed**. A proposal able to edit those would let somebody assert a

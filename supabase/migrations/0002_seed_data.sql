@@ -39,7 +39,7 @@ INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only audit trace and digita
 ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
--- RBAC permissions  (13 rows)
+-- RBAC permissions  (14 rows)
 -- -------------------------------------------------------------------------------------------
 -- The permission UUIDs are mirrored by PERMISSION_UUIDS in frontend/src/constants.js.
 
@@ -74,12 +74,17 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'digital_thread:read', 'View continuous Digital Thread audit log entries')
 ON CONFLICT (id) DO NOTHING;
 
+-- Granted to all three working roles below, which no other permission is: a manager drafting a
+-- change for a colleague to check is the same act as an operator doing it.
+INSERT INTO public.permissions VALUES ('b678f901-2345-4c1d-8706-933e08544e43', 'proposal:create', 'Propose a change to an asset for an approver to apply')
+ON CONFLICT (id) DO NOTHING;
+
 -- -------------------------------------------------------------------------------------------
--- RBAC role/permission grants  (26 rows)
+-- RBAC role/permission grants  (29 rows)
 -- -------------------------------------------------------------------------------------------
--- 13 Administrator, 10 Shopfloor_Manager, 2 Operator, 1 Auditor. `authz:manage`,
--- `schema:manage` and `gitops:manage` belong to Administrator alone; 0069 withdraws them from
--- databases seeded before the split, and its DELETE matches no rows on a new stack.
+-- 14 Administrator, 11 Shopfloor_Manager, 3 Operator, 1 Auditor. `authz:manage`,
+-- `schema:manage` and `gitops:manage` belong to Administrator alone and are simply not granted
+-- to role 2 here.
 --
 -- Mirrored by DEFAULT_ROLE_PERMISSIONS_MAP in frontend/src/hooks/usePermissions.js and
 -- compared by scripts/check-mirror-drift.mjs.
@@ -129,8 +134,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (2, 'a012b345-6789-4c1d-8706-933e08544e38')
 ON CONFLICT DO NOTHING;
 -- Not granted to role 2: `authz:manage` (...e39), `schema:manage` (...e40) and `gitops:manage`
--- (...e41) are Administrator's. Adding one back here does not restore it: 0069 replays after
--- this file and deletes exactly these three from role 2.
+-- (...e41) are Administrator's.
 INSERT INTO public.role_permissions VALUES (2, 'd345e678-9012-4c1d-8706-933e08544e42')
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (3, 'f012a345-6789-4c1d-8706-933e08544e36')
@@ -138,6 +142,15 @@ ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (3, 'cb46a943-42e1-4c1d-8706-933e08544e30')
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (4, 'd345e678-9012-4c1d-8706-933e08544e42')
+ON CONFLICT DO NOTHING;
+
+-- `proposal:create` to all three working roles, and the first write grant `Operator` has ever
+-- held. Auditor (4) is deliberately absent: an auditor reads the trail and does not add to it.
+INSERT INTO public.role_permissions VALUES (1, 'b678f901-2345-4c1d-8706-933e08544e43')
+ON CONFLICT DO NOTHING;
+INSERT INTO public.role_permissions VALUES (2, 'b678f901-2345-4c1d-8706-933e08544e43')
+ON CONFLICT DO NOTHING;
+INSERT INTO public.role_permissions VALUES (3, 'b678f901-2345-4c1d-8706-933e08544e43')
 ON CONFLICT DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
@@ -2322,7 +2335,7 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
 -- (tests/aas_fixture.py), so nothing depends on seeded assets.
 
 -- -------------------------------------------------------------------------------------------
--- Service directory  (12 rows)
+-- Service directory  (16 rows)
 -- The dashboard itself is not among them; f1111111-...0002 held it and is retired, not reused.
 -- -------------------------------------------------------------------------------------------
 
@@ -2373,6 +2386,161 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://localhost:9108/metrics', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
+
+-- ---------------------------------------------------------------------------------------------
+-- The forge's door, which is the one row here whose address is not a constant
+-- ---------------------------------------------------------------------------------------------
+-- GITEA_ROOT_URL, the gateway's forge listener. NETWORK because the gateway publishes that port on
+-- every interface behind a login. `SOURCE_CONTROL` is filed beside GRAPHICAL_UI on the page.
+-- `status` stays UNKNOWN because nothing observes the forge.
+--
+-- NOT A LITERAL, AND SO NOT AN INSERT LIKE THE REST: the address comes from the deployment, and
+-- an operator who moves the forge has to see the move here on the next boot. That is the UPDATE
+-- below -- the row is kept current rather than seeded once.
+-- DEFAULTED FIRST, and this is the earliest the four are read. psql leaves an unset variable as
+-- the literal `:'name'`, which is a syntax error rather than an empty string, and the callers that
+-- pass none of them are the ones that matter: scripts/test-db.mjs and ci.yml's migration loop both
+-- supply only what scripts/migration-vars.mjs declares. Setting a variable twice is harmless, so
+-- the OAuth section further down re-guards these and finds them already defined.
+\if :{?grafana_public_url}   \else \set grafana_public_url   '' \endif
+\if :{?studio_public_url}    \else \set studio_public_url    '' \endif
+\if :{?nodered_redirect_uri} \else \set nodered_redirect_uri '' \endif
+\if :{?gitea_public_url}     \else \set gitea_public_url     '' \endif
+
+SELECT set_config('acs_cymru.dir_gitea_public_url', :'gitea_public_url', false);
+
+DO $$
+DECLARE
+  v_forge TEXT := rtrim(
+                    COALESCE(
+                      NULLIF(current_setting('acs_cymru.dir_gitea_public_url', true), ''),
+                      'http://localhost:3003'),
+                    '/');
+  v_moved INT := 0;
+BEGIN
+  INSERT INTO public.directory_services (id, service_name, service_type, endpoint_url, status, exposure)
+  VALUES ('f1111111-0000-0000-0000-000000000011', 'Forge (Gitea)', 'SOURCE_CONTROL', v_forge, 'UNKNOWN', 'NETWORK')
+  ON CONFLICT (id) DO NOTHING;
+
+  UPDATE public.directory_services
+     SET endpoint_url = v_forge
+   WHERE id = 'f1111111-0000-0000-0000-000000000011'::uuid
+     AND endpoint_url IS DISTINCT FROM v_forge;
+  GET DIAGNOSTICS v_moved = ROW_COUNT;
+  IF v_moved > 0 THEN
+    RAISE NOTICE 'directory: the forge now advertised at %, from GITEA_ROOT_URL', v_forge;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Who can reach each of them
+-- ---------------------------------------------------------------------------------------------
+-- `exposure` describes the PORT, not the URL, and the column defaults to UNKNOWN -- so it has to
+-- be stated per row rather than inferred from the address above. Keyed on id, because a name is
+-- a display string and two of these have been renamed. Every value is the seed's loopback
+-- deployment as it was bound: 127.0.0.1 is HOST, no published port at all is INTERNAL.
+UPDATE public.directory_services SET exposure = v.exposure
+FROM (VALUES
+    -- NETWORK -- published on every interface.
+    ('f1111111-0000-0000-0000-000000000001'::uuid, 'NETWORK'),  -- Studio, via envoy's 54323 listener
+    ('f1111111-0000-0000-0000-000000000003'::uuid, 'NETWORK'),  -- Node-RED, 1880
+    ('f1111111-0000-0000-0000-000000000004'::uuid, 'NETWORK'),  -- Mosquitto, 1883/9001/8883
+    ('f1111111-0000-0000-0000-000000000006'::uuid, 'NETWORK'),  -- Grafana, 3002
+    ('f1111111-0000-0000-0000-000000000007'::uuid, 'NETWORK'),  -- the gateway itself, 54321
+    ('f1111111-0000-0000-0000-000000000008'::uuid, 'NETWORK'),  -- GoTrue, through that gateway
+    ('f1111111-0000-0000-0000-000000000009'::uuid, 'NETWORK'),  -- PostgREST, likewise
+    ('f1111111-0000-0000-0000-00000000000a'::uuid, 'NETWORK'),  -- Edge Functions, likewise
+    ('f1111111-0000-0000-0000-00000000000d'::uuid, 'NETWORK'),  -- Swagger UI, 8088
+
+    -- HOST -- bound to 127.0.0.1. All four were narrowed together, against the rule stated beside
+    -- prometheus's port: a port is published broadly because it either AUTHENTICATES a browser
+    -- session or is a PROTOCOL ENDPOINT that has to be reachable. None of these four is either.
+    ('f1111111-0000-0000-0000-000000000005'::uuid, 'HOST'),     -- TimescaleDB, 127.0.0.1:5433
+    ('f1111111-0000-0000-0000-00000000000b'::uuid, 'HOST'),     -- Supabase Postgres, 127.0.0.1:54322
+    ('f1111111-0000-0000-0000-00000000000e'::uuid, 'HOST'),     -- Prometheus, 127.0.0.1:9090
+    ('f1111111-0000-0000-0000-000000000010'::uuid, 'HOST'),     -- ingestion metrics, 127.0.0.1:9108
+
+    -- INTERNAL -- no host port. Both already rendered as copy buttons because their hosts are
+    -- container names; this records WHY, rather than leaving the page to infer it from the spelling.
+    ('f1111111-0000-0000-0000-00000000000c'::uuid, 'INTERNAL'), -- ingestion's broker subscription
+    ('f1111111-0000-0000-0000-00000000000f'::uuid, 'INTERNAL')  -- node_exporter, deliberately unpublished
+) AS v(id, exposure)
+WHERE public.directory_services.id = v.id
+  AND public.directory_services.exposure IS DISTINCT FROM v.exposure;
+
+-- ---------------------------------------------------------------------------------------------
+-- Three addresses the deployment names, not this file
+-- ---------------------------------------------------------------------------------------------
+-- The literals above are the loopback defaults. Where the chart publishes one of these behind a
+-- real hostname, the Directory has to advertise the address the BROWSER uses -- an operator
+-- copying `http://localhost:3002` out of a page served from another machine gets nothing.
+--
+-- Staged through session GUCs because psql does not substitute `:variables` inside dollar-quoted
+-- blocks (archived migration 0026), which is the same staging this file uses for its OAuth rows.
+SELECT set_config('acs_cymru.dir_grafana_public_url', :'grafana_public_url',   false);
+SELECT set_config('acs_cymru.dir_studio_public_url',  :'studio_public_url',    false);
+SELECT set_config('acs_cymru.dir_nodered_redirect',   :'nodered_redirect_uri', false);
+
+DO $$
+DECLARE
+  v_grafana TEXT := NULLIF(current_setting('acs_cymru.dir_grafana_public_url', true), '');
+  v_studio  TEXT := NULLIF(current_setting('acs_cymru.dir_studio_public_url',  true), '');
+  v_nodered TEXT := NULLIF(current_setting('acs_cymru.dir_nodered_redirect',   true), '');
+  v_moved   INT  := 0;
+
+  -- The Node-RED value arrives as the callback (the chart builds
+  -- `<nodered URL>/auth/strategy/callback` for the client registration below), so exactly that
+  -- fixed suffix is stripped. Not a general "strip the path": Grafana and Studio are passed
+  -- origins, and a deployment may legitimately put either behind a subpath.
+  v_nodered_origin TEXT := rtrim(
+                             regexp_replace(COALESCE(v_nodered, ''), '/auth/strategy/callback/?$', ''),
+                             '/');
+BEGIN
+  -- The trailing slash is trimmed for the same reason it is trimmed on the OAuth rows: a value
+  -- copied out of a browser address bar carries one, and `http://host/` in this column renders as
+  -- a link with a stray character rather than failing in a way anyone would notice.
+
+  IF v_grafana IS NOT NULL THEN
+    UPDATE public.directory_services
+       SET endpoint_url = rtrim(v_grafana, '/')
+     WHERE id = 'f1111111-0000-0000-0000-000000000006'::uuid
+       AND endpoint_url IS DISTINCT FROM rtrim(v_grafana, '/');
+    GET DIAGNOSTICS v_moved = ROW_COUNT;
+    IF v_moved > 0 THEN
+      RAISE NOTICE 'directory: Grafana now advertised at %, from GRAFANA_PUBLIC_URL', rtrim(v_grafana, '/');
+    END IF;
+  END IF;
+
+  IF v_studio IS NOT NULL THEN
+    UPDATE public.directory_services
+       SET endpoint_url = rtrim(v_studio, '/')
+     WHERE id = 'f1111111-0000-0000-0000-000000000001'::uuid
+       AND endpoint_url IS DISTINCT FROM rtrim(v_studio, '/');
+    GET DIAGNOSTICS v_moved = ROW_COUNT;
+    IF v_moved > 0 THEN
+      RAISE NOTICE 'directory: Studio now advertised at %, from STUDIO_PUBLIC_URL', rtrim(v_studio, '/');
+    END IF;
+  END IF;
+
+  -- Guarded on the DERIVED origin, not on the raw setting: a redirect_uri that is somehow only the
+  -- suffix would strip to the empty string, and writing that into a NOT NULL display column would
+  -- put a blank cell on the page where an address belongs.
+  IF v_nodered_origin <> '' THEN
+    UPDATE public.directory_services
+       SET endpoint_url = v_nodered_origin
+     WHERE id = 'f1111111-0000-0000-0000-000000000003'::uuid
+       AND endpoint_url IS DISTINCT FROM v_nodered_origin;
+    GET DIAGNOSTICS v_moved = ROW_COUNT;
+    IF v_moved > 0 THEN
+      RAISE NOTICE 'directory: Node-RED now advertised at %, from NODERED_PUBLIC_URL', v_nodered_origin;
+    END IF;
+  END IF;
+END $$;
+
+SELECT set_config('acs_cymru.dir_grafana_public_url', '', false);
+SELECT set_config('acs_cymru.dir_studio_public_url',  '', false);
+SELECT set_config('acs_cymru.dir_nodered_redirect',   '', false);
+SELECT set_config('acs_cymru.dir_gitea_public_url',   '', false);
 
 -- -------------------------------------------------------------------------------------------
 -- Outbound webhook targets  (1 row)
@@ -7268,17 +7436,36 @@ SELECT s.name, s.datatype, s.description, s.category, s.units, 'ASHRAE 223P', v.
 ON CONFLICT (name) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
--- Declared settings  (5 rows)
+-- Declared settings  (16 rows)
 -- -------------------------------------------------------------------------------------------
 -- Through seed_setting(), not as INSERTs: the function refreshes label, description and bounds
 -- on every replay while leaving the value alone, so an operator's change survives a restart.
+--
+-- Every one has a reader; a setting nothing reads is a control that does nothing.
+-- `ui.digital_thread_lane_limit` was declared here until the Digital Thread stopped capping its
+-- lanes, and `0000` removes the row from a stack that still holds it.
+--
+-- THREE OF THESE ARE NOT CONSTANTS. `sparkplug.group_id`, `archive.site_key` and the five S3
+-- fields are named by the deployment and arrive as psql variables, so their blocks read a GUC
+-- rather than a literal -- psql does not substitute `:variables` inside dollar quotes. Each is
+-- seeded only into an empty value, so the chart names a destination once and the page owns it
+-- from then on.
+\if :{?sparkplug_group}           \else \set sparkplug_group 'ACS-Cymru'  \endif
+\if :{?archive_site_key}          \else \set archive_site_key          '' \endif
+\if :{?archive_endpoint}          \else \set archive_endpoint          '' \endif
+\if :{?archive_region}            \else \set archive_region            '' \endif
+\if :{?archive_bucket}            \else \set archive_bucket            '' \endif
+\if :{?archive_access_key_id}     \else \set archive_access_key_id     '' \endif
+\if :{?archive_path_style}        \else \set archive_path_style        '' \endif
 
--- ---------------------------------------------------------------------------------------------
--- 4. The settings this migration declares
--- ---------------------------------------------------------------------------------------------
--- Few, and every one has a reader; a setting nothing reads is a control that does nothing.
--- `ui.digital_thread_lane_limit` was declared here until the Digital Thread stopped capping
--- its lanes; 0128 removes the row from stacks that already hold it.
+SELECT set_config('acs_cymru.sparkplug_group',       :'sparkplug_group',       false);
+SELECT set_config('acs_cymru.archive_site_key',      :'archive_site_key',      false);
+SELECT set_config('acs_cymru.archive_endpoint',      :'archive_endpoint',      false);
+SELECT set_config('acs_cymru.archive_region',        :'archive_region',        false);
+SELECT set_config('acs_cymru.archive_bucket',        :'archive_bucket',        false);
+SELECT set_config('acs_cymru.archive_access_key_id', :'archive_access_key_id', false);
+SELECT set_config('acs_cymru.archive_path_style',    :'archive_path_style',    false);
+
 SELECT public.seed_setting(
     'ui.digital_thread_poll_seconds',
     to_jsonb(60),
@@ -7290,9 +7477,6 @@ SELECT public.seed_setting(
     'the 60_000 ms interval in DigitalThreadTab.jsx'
 );
 
--- ---------------------------------------------------------------------------------------------
--- 2. The setting
--- ---------------------------------------------------------------------------------------------
 SELECT public.seed_setting(
     'alerts.retention_days',
     to_jsonb(7),
@@ -7307,7 +7491,113 @@ SELECT public.seed_setting(
 );
 
 -- ---------------------------------------------------------------------------------------------
--- 3. The settings, each with a reader
+-- Approvals
+-- ---------------------------------------------------------------------------------------------
+SELECT public.seed_setting(
+    'proposals.max_open_per_person',
+    to_jsonb(10),
+    'number',
+    'Approvals',
+    'Open proposals allowed per person',
+    'How many proposals one person may have awaiting a decision at once. This is the cap that '
+    'bounds reviewer load: the per-asset rule already forces one proposal per machine per person, '
+    'but that still permits one against every device on the floor. Raising it does not change who '
+    'may approve, only how much can be queued for them.',
+    NULL
+);
+
+SELECT public.seed_setting(
+    'proposals.open_expiry_days',
+    to_jsonb(7),
+    'number',
+    'Approvals',
+    'Open proposal expires after (days)',
+    'An open proposal nobody acts on closes on this timer, freeing the slot it holds under both '
+    'caps. Expiry is not rejection: it records that nobody decided, carries no reason and names '
+    'no approver, and the same change may be proposed again immediately.',
+    'the seven-day fallback in expire_open_proposals()'
+);
+
+SELECT public.seed_setting(
+    'proposals.retention_days',
+    to_jsonb(90),
+    'number',
+    'Approvals',
+    'Closed proposals kept for (days)',
+    'How long an applied, rejected, withdrawn or expired proposal is kept before the nightly '
+    'prune removes it. What an approval CHANGED lives in digital_thread under its own retention; '
+    'this governs only the queue entry and the rationale attached to it.',
+    'the ninety-day fallback in prune_closed_proposals()'
+);
+
+-- ---------------------------------------------------------------------------------------------
+-- Site
+-- ---------------------------------------------------------------------------------------------
+-- One value, because the stack models one campus. Read by the ingestion daemon's UNS bridge,
+-- which publishes nothing while it is empty: a placeholder name would put a word nobody chose in
+-- every topic, which is the trap the derived lanes exist to avoid.
+SELECT public.seed_setting(
+    'site.name',
+    to_jsonb(''::text),
+    'string',
+    'Site',
+    'Site name',
+    'The ISA-95 site -- this campus -- as the second segment of every Unified Namespace topic: '
+    'uns/<enterprise>/<site>/<area>/<cell>/<device>/<metric>. The enterprise segment is each '
+    'gateway''s Sparkplug group. The bridge publishes nothing until this is set. It cannot '
+    'contain / + or #.',
+    'none: the UNS bridge stays inert'
+);
+
+SELECT public.seed_setting(
+    'site_map.min_pin_spacing',
+    to_jsonb(0.08),
+    'number',
+    'Site',
+    'Minimum spacing between cells on an area plan',
+    'How close two cells may be placed on one area plan, as a fraction of the plan''s shorter '
+    'side: 0.08 is eight percent, about one pin''s width on a plan drawn a few hundred pixels '
+    'tall. Refused at the write, on the Cells page and on an approved proposal alike.',
+    'none: the placement is refused'
+);
+
+-- READ-ONLY ONCE SEEDED, and validated before it is: the group is one segment of
+-- spBv1.0/<group>/<TYPE>/<node>, so a separator in it addresses a subtree nothing grants.
+DO $$
+DECLARE
+    v_group text := coalesce(nullif(current_setting('acs_cymru.sparkplug_group', true), ''), 'ACS-Cymru');
+BEGIN
+    IF v_group ~ '[/+#[:space:]]' THEN
+        RAISE EXCEPTION
+            '0002: sparkplug_group % is not one topic level. The group is one segment of '
+            'spBv1.0/<group>/<TYPE>/<node>, so a separator in it addresses a subtree nothing '
+            'grants.', quote_literal(v_group);
+    END IF;
+
+    -- Inserts on the first boot and refreshes only the metadata afterwards, so the seeded value is
+    -- frozen the moment it lands.
+    PERFORM public.seed_setting(
+        'sparkplug.group_id',
+        to_jsonb(v_group),
+        'string',
+        'Site',
+        'Sparkplug group',
+        'The Sparkplug Group ID every gateway on this site publishes under -- the second segment '
+        'of spBv1.0/<group>/<TYPE>/<node> -- and the enterprise segment of the Unified Namespace. '
+        'Fixed when the stack was installed: changing it re-addresses every gateway, so it is '
+        'shown here and named in the chart.',
+        'values.yaml ingestion.sparkplugGroup'
+    );
+
+    UPDATE public.system_settings
+       SET read_only = true
+     WHERE key = 'sparkplug.group_id'
+       AND NOT read_only;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Cold Storage
 -- ---------------------------------------------------------------------------------------------
 -- Disabled by default: turning this on changes what happens to plant history when it ages out
 -- (exported, verified and then dropped, instead of dropped by a retention policy).
@@ -7340,9 +7630,161 @@ SELECT public.seed_setting(
     'TIMESCALE_RETAIN_FOR in .env (90 days)'
 );
 
--- `archive.bucket` was seeded here and is not any more. Cold telemetry goes to a configured S3
--- endpoint (0132), whose endpoint, bucket and credential are install configuration rather than a
--- setting; 0132 deletes the row from databases that still hold it.
+-- THE SITE KEY IS FIXED ONCE ANYTHING HAS BEEN WRITTEN UNDER IT. It is this site's identity in
+-- the object key of every archived chunk, and it is the prefix the bucket's IAM policy is scoped
+-- on. Renaming it does not move objects: it orphans every one already written while the manifest
+-- still points at the old prefix. Unset is not a mismatch -- a stack that never names one cannot
+-- archive remotely, and cold_archive.py refuses the run saying so, which keeps the failure where
+-- an operator is already looking rather than in db-init.
+DO $$
+DECLARE
+    v_key    text := coalesce(nullif(current_setting('acs_cymru.archive_site_key', true), ''), '');
+    v_stored text;
+BEGIN
+    SELECT value #>> '{}' INTO v_stored FROM public.system_settings WHERE key = 'archive.site_key';
+
+    -- Only two DIFFERENT non-empty values are a disagreement. Setting it for the first time,
+    -- whichever boot that happens on, is not a change.
+    IF coalesce(v_stored, '') <> '' AND v_key <> '' AND v_stored IS DISTINCT FROM v_key THEN
+        RAISE EXCEPTION
+            '0002: this site archives under key %, and the chart now says %. Objects already '
+            'written live under the first prefix and renaming does not move them -- a new key '
+            'orphans every archived chunk while the manifest still points at the old prefix. '
+            'Restore coldArchive.s3.siteKey to %, or follow the site key procedure in '
+            'supabase/README.md.',
+            quote_literal(v_stored), quote_literal(v_key), quote_literal(v_stored);
+    END IF;
+
+    PERFORM public.seed_setting(
+        'archive.site_key',
+        to_jsonb(coalesce(nullif(v_stored, ''), v_key)),
+        'string',
+        'Cold Storage',
+        'Archive site key',
+        'This site''s identity in the object key of every archived chunk: '
+        'site=<key>/dataset=telemetry/v=1/year=YYYY/month=MM/<from>-<to>.parquet. Fixed when the '
+        'stack was installed -- it is the prefix the bucket''s IAM policy is scoped on, and '
+        'changing it would orphan every object already written. Empty means remote archiving is '
+        'not configured and nothing is exported.',
+        'values.yaml coldArchive.s3.siteKey'
+    );
+
+    -- seed_setting() inserts on the first boot and refreshes only the metadata afterwards, so a
+    -- key supplied on a LATER boot than the first has to be written here.
+    --
+    -- THE ROW IS ALREADY READ-ONLY BY THEN, and the read-only trigger refuses a value change while
+    -- it is -- so the flag is lifted for the one statement that adopts the key and set again
+    -- below. That is the whole of the exception, and it is safe for the reason the guard exists:
+    -- nothing has been archived under a key that was never set, so there is nothing to orphan. A
+    -- key that is already non-empty never reaches here; it raised above.
+    IF v_key <> '' AND coalesce(v_stored, '') = '' THEN
+        UPDATE public.system_settings
+           SET read_only = false
+         WHERE key = 'archive.site_key'
+           AND read_only;
+
+        UPDATE public.system_settings
+           SET value = to_jsonb(v_key)
+         WHERE key = 'archive.site_key'
+           AND coalesce(value #>> '{}', '') = '';
+    END IF;
+
+    -- Frozen, whichever of the two paths set it.
+    UPDATE public.system_settings
+       SET read_only = true
+     WHERE key = 'archive.site_key'
+       AND NOT read_only;
+END;
+$$;
+
+-- THE DESTINATION, seeded from the chart on the boot that first supplies it. `archive.bucket` had
+-- an earlier, unrelated meaning -- a Supabase Storage bucket, retired with the bucket itself --
+-- and `0000` removes that row from a database that still holds it before this declares the key
+-- again. The guard there is the absence of `system_settings.sensitive`, which is exactly "the new
+-- meaning has not arrived yet".
+DO $$
+DECLARE
+    v_seeded int := 0;
+    spec     record;
+BEGIN
+    FOR spec IN
+        SELECT * FROM (VALUES
+            ('archive.endpoint', 'string',
+             'S3 endpoint',
+             'The full URL cold telemetry is written to, including the scheme -- AWS is '
+             'https://s3.<region>.amazonaws.com, a MinIO is whatever it is reachable at. "S3" is '
+             'a protocol here, not a vendor.',
+             nullif(current_setting('acs_cymru.archive_endpoint', true), '')),
+            ('archive.region', 'string',
+             'S3 region',
+             'The region the bucket lives in. Required even where the endpoint implies it, '
+             'because the request is signed with it.',
+             nullif(current_setting('acs_cymru.archive_region', true), '')),
+            ('archive.bucket', 'string',
+             'S3 bucket',
+             'The bucket objects are written into. Every object is addressed under '
+             'site=<site key>/ within it, which is what lets several sites share one bucket.',
+             nullif(current_setting('acs_cymru.archive_bucket', true), '')),
+            ('archive.access_key_id', 'string',
+             'S3 access key ID',
+             'The identity the exporter writes as. An identifier rather than a secret -- the '
+             'secret half is held in the vault and is never shown here.',
+             nullif(current_setting('acs_cymru.archive_access_key_id', true), ''))
+        ) AS t(key, value_type, label, description, seeded)
+    LOOP
+        PERFORM public.seed_setting(
+            spec.key,
+            to_jsonb(coalesce(spec.seeded, '')),
+            spec.value_type,
+            'Cold Storage',
+            spec.label,
+            spec.description,
+            'values.yaml coldArchive.s3'
+        );
+
+        -- Seeded on a LATER boot too, but only into an empty value: a chart that supplies a
+        -- destination to a stack already carrying one must not silently overwrite what an
+        -- Administrator set from the page. The page is the control once it has been used.
+        IF spec.seeded IS NOT NULL THEN
+            UPDATE public.system_settings
+               SET value = to_jsonb(spec.seeded)
+             WHERE key = spec.key
+               AND coalesce(value #>> '{}', '') = '';
+            v_seeded := v_seeded + 1;
+        END IF;
+    END LOOP;
+
+    PERFORM public.seed_setting(
+        'archive.path_style',
+        to_jsonb(lower(coalesce(nullif(current_setting('acs_cymru.archive_path_style', true), ''), 'false')) IN ('1', 'true', 'yes', 'on')),
+        'boolean',
+        'Cold Storage',
+        'Address the bucket by path',
+        'On for MinIO and most self-hosted gateways; off for AWS, R2 and B2, which take the '
+        'virtual-host form. Wrong, every upload fails as DNS resolution, which names nothing.',
+        'values.yaml coldArchive.s3.pathStyle'
+    );
+
+    -- Administrator-only, all five. Not secret, and not everyone's business either.
+    UPDATE public.system_settings
+       SET sensitive = true
+     WHERE key IN ('archive.endpoint', 'archive.region', 'archive.bucket',
+                   'archive.access_key_id', 'archive.path_style')
+       AND NOT sensitive;
+
+    IF v_seeded > 0 THEN
+        RAISE NOTICE '0002: seeded % archive destination field(s) from the chart.', v_seeded;
+    END IF;
+END;
+$$;
+
+SELECT set_config('acs_cymru.sparkplug_group',       '', false);
+SELECT set_config('acs_cymru.archive_site_key',      '', false);
+SELECT set_config('acs_cymru.archive_endpoint',      '', false);
+SELECT set_config('acs_cymru.archive_region',        '', false);
+SELECT set_config('acs_cymru.archive_bucket',        '', false);
+SELECT set_config('acs_cymru.archive_access_key_id', '', false);
+SELECT set_config('acs_cymru.archive_path_style',    '', false);
 
 -- -------------------------------------------------------------------------------------------
 -- Value domains, and the bounds on the two settings that have them
@@ -7383,6 +7825,32 @@ UPDATE public.system_settings
    SET min_value = 1, max_value = 3650
  WHERE key = 'archive.tier_after_days'
    AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 3650);
+
+-- MIN 1 on the expiry: zero would auto-close every proposal at creation, silently. The ceiling
+-- is a typo guard.
+UPDATE public.system_settings
+   SET min_value = 1, max_value = 90
+ WHERE key = 'proposals.open_expiry_days'
+   AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 90);
+
+-- MIN 1 for the same reason pointing the other way: a ceiling of zero would refuse every
+-- proposal, which reads to an operator as a broken button rather than as a policy somebody chose.
+UPDATE public.system_settings
+   SET min_value = 1, max_value = 200
+ WHERE key = 'proposals.max_open_per_person'
+   AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 200);
+
+UPDATE public.system_settings
+   SET min_value = 7, max_value = 3650
+ WHERE key = 'proposals.retention_days'
+   AND (min_value IS DISTINCT FROM 7 OR max_value IS DISTINCT FROM 3650);
+
+-- A FLOOR OF ZERO IS MEANINGFUL HERE and is the only one of these that has one: nothing stops
+-- two cells sharing a point if an operator decides the drawing should allow it.
+UPDATE public.system_settings
+   SET min_value = 0, max_value = 0.5
+ WHERE key = 'site_map.min_pin_spacing'
+   AND (min_value IS DISTINCT FROM 0 OR max_value IS DISTINCT FROM 0.5);
 
 -- -------------------------------------------------------------------------------------------
 -- The three machine principals  (3 auth users)
@@ -7443,6 +7911,28 @@ ON CONFLICT (id) DO NOTHING;
 -- not among this principal's grants: the worker holds broker publish rights and neither writes
 -- nor reads the audit trail.
 
+-- ---------------------------------------------------------------------------------------------
+-- What the three of them may actually do  (3 grants)
+-- ---------------------------------------------------------------------------------------------
+-- `telemetry:read` and nothing else, keyed on the permission's NAME rather than its uuid. Each
+-- had `quarantine:view` while these were role holders and none of them needed it: the MCP client
+-- has no surface for the quarantine queue, Service_Ingestor quarantines devices through SECURITY
+-- DEFINER gates and never had to SELECT the queue, and Service_Playback touches onboarding not
+-- at all.
+--
+-- ON `principal_permissions`, NOT `user_roles`, and that is the whole point of the table --
+-- refuse_role_for_machine_principal() refuses a role for an account that cannot sign in. A
+-- database seeded before the split still holds the roles, and `0000` takes them away.
+INSERT INTO public.principal_permissions (principal_id, permission_id)
+SELECT u.id, p.id
+  FROM (VALUES
+          ('b0000000-0000-4000-8000-000000000001'::uuid),   -- MCP read-only client
+          ('b0000000-0000-4000-8000-000000000002'::uuid),   -- Service_Ingestor
+          ('b0000000-0000-4000-8000-000000000003'::uuid)    -- Service_Playback
+       ) AS u(id)
+  JOIN public.permissions p ON p.name = 'telemetry:read'
+ON CONFLICT (principal_id, permission_id) DO NOTHING;
+
 -- -------------------------------------------------------------------------------------------
 -- The playback gateway, and the two singleton rows that track workers
 -- -------------------------------------------------------------------------------------------
@@ -7454,24 +7944,25 @@ ON CONFLICT (id) DO NOTHING;
 -- 2. The gateway
 -- ---------------------------------------------------------------------------------------------
 -- A pinned UUID, because `sparkplug_id` is generated from the primary key and the broker
--- account name must be predictable (`gwy160000000000400080000`). is_virtual, is_simulated and
+-- account name must be predictable (`gwy160000000000400080000`). `deployment`, is_simulated and
 -- is_shadow are all stated: gateways_shadow_is_simulated requires the middle one. No cell and
--- no site-wide assertion: it is not anywhere.
-INSERT INTO public.gateways (id, name, description, is_virtual, is_simulated, is_shadow, location_scope)
+-- no site-wide assertion: it is not anywhere. `deployment = 'host'` is what the retired
+-- `is_virtual = true` meant here -- the worker runs inside this stack and there is no appliance.
+INSERT INTO public.gateways (id, name, description, deployment, is_simulated, is_shadow, location_scope)
 VALUES (
     '16000000-0000-4000-8000-000000000001',
     'Playback',
     'Publishes recorded captures. Nothing else publishes as this edge node, which is the point: '
     'two publishers sharing one Sparkplug identity interleave their seq counters and the daemon '
     'reads that as permanent message loss.',
-    true, true, true, 'cell'
+    'host', true, true, 'cell'
 )
 ON CONFLICT (id) DO UPDATE
     -- RECONCILED, NOT LEFT AS FOUND. The flags are what the gate below tests, so a row that lost
     -- one -- an edit, a partial restore -- would silently make every playback impossible with an
     -- error naming the gateway rather than the flag. The NAME is deliberately not reconciled:
     -- renaming a gateway is an operator's to do, and 0059's lane does not read the name.
-    SET is_virtual = true, is_simulated = true, is_shadow = true, cell_id = NULL;
+    SET deployment = 'host', is_simulated = true, is_shadow = true, cell_id = NULL;
 
 INSERT INTO public.playback_worker_status (id, held_edge_nodes, reported_at)
 VALUES (true, '{}', 'epoch')
@@ -7480,13 +7971,14 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_liveness_probe (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
--- Scheduled maintenance  (3 jobs)
+-- Scheduled maintenance  (7 jobs)
 -- -------------------------------------------------------------------------------------------
 -- Unscheduled before scheduled: `cron.schedule` appends rather than reconciling.
+--
+-- The nightly ones are spaced so a morning reading of the cron history has one thing at a time:
+-- 03:00 prune_cron_history, 03:15 prune_platform_alerts, 03:20 digital_thread_partitions,
+-- 03:30 purge_expired_archives, 03:45 expire_open_proposals, 03:50 prune_closed_proposals.
 
--- ---------------------------------------------------------------------------------------------
--- 2. The schedule
--- ---------------------------------------------------------------------------------------------
 -- Daily, and separate from the archive-retention job: that honours a per-row date the user
 -- chose, this is a fixed platform policy. 03:15, between `prune_cron_history` (03:00) and
 -- `purge_expired_archives` (03:30): `platform_alerts` is REPLICA IDENTITY FULL and published,
@@ -7518,6 +8010,35 @@ END $$;
 
 SELECT cron.schedule('sweep-gateway-credential-revocations', '*/15 * * * *',
                      'SELECT public.sweep_gateway_credential_revocations()');
+
+-- Three months of headroom, so the system survives the job being broken for a quarter. Also
+-- called by 0001 at migration time, so a fresh database has its partitions before the first
+-- write rather than on the first night.
+SELECT public.ensure_cron_job(
+  'digital_thread_partitions',
+  '20 3 * * *',
+  $job$SELECT public.ensure_digital_thread_partitions(3)$job$
+);
+
+SELECT public.ensure_cron_job(
+  'expire_open_proposals',
+  '45 3 * * *',
+  $job$SELECT public.expire_open_proposals()$job$
+);
+
+SELECT public.ensure_cron_job(
+  'prune_closed_proposals',
+  '50 3 * * *',
+  $job$SELECT public.prune_closed_proposals()$job$
+);
+
+-- Fifteen minutes, like the credential-revocation sweep: membership at the door is immediate,
+-- and this is the backstop for the person who does not come back.
+SELECT public.ensure_cron_job(
+  'sweep_forge',
+  '*/15 * * * *',
+  $job$SELECT public.sweep_forge()$job$
+);
 
 -- -------------------------------------------------------------------------------------------
 -- Secrets, and the clients that authenticate with them
