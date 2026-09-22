@@ -5,7 +5,7 @@
 # Order matters once: `appliance` needs Docker, and `converge` installs the timer that will run
 # this again, so a first run that fails before it leaves no timer behind to retry with. The
 # installer retries the first run itself.
-- name: ACS-Cymru gateway appliance
+- name: Aber gateway appliance
   hosts: localhost
   connection: local
   become: true

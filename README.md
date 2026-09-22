@@ -1,16 +1,18 @@
-# AMRC Connectivity Stack - Cymru
+# Aber - the shopfloor data platform
 
 [![CI Pipeline](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml)
 
-An industrial, asset-centric manufacturing management platform aligned with the
-**AMRC Connectivity Stack (ACS / Factory+)** framework.
+Aber is Welsh for a river mouth, where many streams converge and leave as one. That is the
+ingestion topology: telemetry from every gateway on the shopfloor converges on one broker and one
+historian, and leaves through one API, one Unified Namespace and one digital thread.
 
-Real-time telemetry streaming, shopfloor cell mapping, zero-touch edge device onboarding,
-row-level security, continuous Digital Thread audit logging, AAS V3 export, and edge flow
-management.
+An industrial, asset-centric platform: real-time telemetry streaming, shopfloor cell mapping,
+zero-touch edge device onboarding, row-level security, continuous Digital Thread audit logging,
+AAS V3 export, and edge flow management. It speaks Factory+ Sparkplug B on the wire and began as
+a fork of the **AMRC Connectivity Stack (ACS)**.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
-> Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
+> Where ACS ships bespoke microservices, Aber uses Supabase, TimescaleDB, Grafana and
 > Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
 > the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
 > cold archival — sixteen edge functions, an i3X server and a React dashboard.
@@ -273,7 +275,7 @@ for — plus demo accounts (`supabase/seed.sql`).
 
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
-prompt rather than a login form. In Node-RED, click **Sign in with ACS-Cymru**; Administrator can
+prompt rather than a login form. In Node-RED, click **Sign in with Aber**; Administrator can
 deploy, every other role gets a read-only editor. Deploying a flow is `gitops:manage`, which
 `0069` made Administrator-only. The editor used to be the *second* door onto that permission; since
 the Directory page's Sync button and the `deploy-nodered` function were retired with the

@@ -24,7 +24,7 @@ apiVersion: 1
 providers:
   - name: 'acs-cymru-platform'
     orgId: 1
-    folder: 'ACS-Cymru - Platform Infrastructure'
+    folder: 'Aber - Platform Infrastructure'
     type: file
     disableDeletion: false
     # 30s. Provisioned dashboards are reconciled from disk, so an edit made in the UI is

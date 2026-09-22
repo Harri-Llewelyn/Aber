@@ -55,7 +55,7 @@ describe('arriving from a password-reset link', () => {
     await arriveFromResetLink()
     expect(await screen.findByText('Choose a new password')).toBeInTheDocument()
     expect(screen.getByText('for someone@example.com')).toBeInTheDocument()
-    expect(screen.queryByText('AMRC Connectivity Stack - Cymru')).toBeNull()
+    expect(screen.queryByText('Aber')).toBeNull()
   })
 
   it('refuses two passwords that differ, without calling the server', async () => {
@@ -76,7 +76,7 @@ describe('arriving from a password-reset link', () => {
     fireEvent.click(screen.getByText('Set password and continue'))
 
     await waitFor(() => expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: 'correct-horse' }))
-    expect(await screen.findByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument()
+    expect(await screen.findByText('Aber')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/site-map')
   })
 

@@ -40,7 +40,7 @@ export interface GatewayEnvInput {
 /** The .env text, as a real .env so `docker compose up` works with no editing. */
 export function renderGatewayEnv(input: GatewayEnvInput): string {
   return `# =============================================================================
-# ACS-Cymru Remote gateway -- ${input.gatewayName}
+# Aber Remote gateway -- ${input.gatewayName}
 #
 # GENERATED ${new Date().toISOString()} FOR ONE GATEWAY, by the ${input.via}. Not reusable: the
 # token below is single-use and bound to ${input.sparkplugId}.

@@ -1,6 +1,6 @@
 apiVersion: v2
 name: acs-cymru
-description: ACS-Cymru Asset Tracking Platform — Supabase BaaS, TimescaleDB historian, Sparkplug B ingestion, Node-RED edge automation and Grafana.
+description: Aber, the shopfloor data platform — Supabase BaaS, TimescaleDB historian, Sparkplug B ingestion, Node-RED edge automation and Grafana.
 type: application
 
 # The chart's own version. Bump on any template change.

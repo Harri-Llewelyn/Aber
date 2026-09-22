@@ -149,7 +149,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
     <AuthShell
       theme={theme}
       onToggleTheme={toggleTheme}
-      title="ACS-Cymru Supabase Portal"
+      title="Aber Supabase Portal"
       subtitle={mode === 'forgot'
         ? 'Enter your email address and a link to choose a new password will be sent to it'
         : 'Sign in with your platform account'}
@@ -505,20 +505,15 @@ function Dashboard({ session, onSignOut }) {
         <button
           className="topbar-brand"
           onClick={() => handleNavClick('site-map')}
-          title="ACS Cymru — go to the Site Map page"
-          aria-label="ACS Cymru, go to the Site Map page"
+          title="Aber — go to the Site Map page"
+          aria-label="Aber, go to the Site Map page"
         >
           <div className="brand-icon"><IconFactory size={18} /></div>
           <div className="brand-text">
             {/* Titled because .brand-name truncates: it is the region that yields space to the
-                search box and the session controls. The short form is hidden from assistive
-                technology and `title` carries the full name, so the accessible name never changes
-                with the viewport. */}
-            <div className="brand-name" title="AMRC Connectivity Stack - Cymru">
-              <span className="brand-name-full">AMRC Connectivity Stack - Cymru</span>
-              <span className="brand-name-short" aria-hidden="true">ACS Cymru</span>
-            </div>
-            <div className="brand-sub">Shopfloor to Digital Twin Pipeline</div>
+                search box and the session controls. */}
+            <div className="brand-name" title="Aber">Aber</div>
+            <div className="brand-sub">The shopfloor data platform</div>
           </div>
         </button>
 

@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Migration: 0001_baseline_schema.sql
--- ACS-Cymru Asset Tracking Platform -- consolidated schema baseline (public beta)
+-- Aber -- consolidated schema baseline (public beta)
 -- =============================================================================================
 --
 -- The squashed structural baseline: pure DDL, generated from a pg_dump of a database the

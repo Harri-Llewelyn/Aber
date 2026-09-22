@@ -118,9 +118,9 @@ spec:
             - name: GOTRUE_SMTP_ADMIN_EMAIL
               value: {{ .Values.supabaseAuth.smtp.from | default "" | quote }}
             - name: GOTRUE_SMTP_SENDER_NAME
-              value: {{ .Values.supabaseAuth.smtp.senderName | default "ACS Cymru" | quote }}
+              value: {{ .Values.supabaseAuth.smtp.senderName | default "Aber" | quote }}
             - name: GOTRUE_MAILER_SUBJECTS_RECOVERY
-              value: "Reset your ACS Cymru password"
+              value: "Reset your Aber password"
             - name: GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED
               value: "true"
             - name: GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI

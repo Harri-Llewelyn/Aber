@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: ACS-Cymru i3X 1.0 Server
+  title: Aber i3X 1.0 Server
   version: "0.1.0"
   description: |
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
@@ -95,7 +95,7 @@ info:
     > server. This document is a reference, not a live console.
 
   contact:
-    name: ACS-Cymru Asset Tracking Platform
+    name: Aber
     url: https://github.com/Harri-Llewelyn/ACS-Cymru
 
 servers:

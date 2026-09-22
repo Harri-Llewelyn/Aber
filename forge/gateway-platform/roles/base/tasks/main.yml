@@ -48,7 +48,7 @@
     dest: /etc/chrony/sources.d/acs-gateway.sources
     mode: "0644"
     content: |
-      # Managed by the ACS-Cymru platform playbook. Per-gateway sources come from platform.yml.
+      # Managed by the Aber platform playbook. Per-gateway sources come from platform.yml.
       {% for line in chrony_servers %}
       {{ line }}
       {% endfor %}

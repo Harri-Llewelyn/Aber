@@ -427,7 +427,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     // A per-gateway note at the top of the folder, so an unpacked bundle is self-identifying. The
     // bundle for the wrong gateway is otherwise indistinguishable from the right one until booted.
-    files[`${folder}/GATEWAY.txt`] = strToU8(`ACS-Cymru Remote gateway bundle
+    files[`${folder}/GATEWAY.txt`] = strToU8(`Aber Remote gateway bundle
 =================================
 
   Gateway          : ${gateway.name}

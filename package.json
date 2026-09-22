@@ -1,7 +1,7 @@
 {
   "name": "acs-cymru-asset-tracking",
   "version": "1.0.0",
-  "description": "ACS-Cymru Asset Tracking Platform (Supabase BaaS + Standalone TimescaleDB)",
+  "description": "Aber, the shopfloor data platform (Supabase BaaS + standalone TimescaleDB)",
   "private": true,
   "type": "module",
   "scripts": {

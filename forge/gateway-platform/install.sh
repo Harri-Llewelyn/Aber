@@ -1,5 +1,5 @@
 #!/bin/bash
-# ACS-Cymru gateway appliance installer.
+# Aber gateway appliance installer.
 #
 # Served by the platform's gateway-install function to the command the dashboard shows, which has
 # already fetched the platform's root over plain HTTP, checked it against the pin the dashboard

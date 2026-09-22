@@ -36,7 +36,7 @@
     dest: "{{ acs_compose_dir }}/docker-compose.override.yml"
     mode: "0644"
     content: |
-      # Managed by the ACS-Cymru platform playbook (roles/appliance).
+      # Managed by the Aber platform playbook (roles/appliance).
       volumes:
         nodered_data:
           driver: local
