@@ -423,7 +423,7 @@ i3X `sourceTypeId`.
 **One inconsistency this surfaced and deliberately did not fix.** `0002`'s rows mint semantic ids
 *path-shaped* (`…/mtconnect/v2.0/Axes/C/ANGLE`) where `mtconnect_vocabulary` mints them
 *type-shaped* (`…/mtconnect/v2.0/DataItemType/ANGLE`). Both are under the locally-minted
-`acs-cymru.local` namespace, so neither asserts a false interoperability and neither is wrong —
+`aber.local` namespace, so neither asserts a false interoperability and neither is wrong —
 they are two conventions for the same thing, and `0002`'s predates the vocabulary tables.
 Reconciling them is deprecate-and-supersede with its own reasoning to write.
 `test_metric_catalog_seed.py` scopes its provenance assertions to the rows `0018` owns for exactly

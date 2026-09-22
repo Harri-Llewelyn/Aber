@@ -62,6 +62,8 @@ install and restore, and the restored database is what the rows below meet.
 | Request header `X-ACS-Cymru-Actor` | `X-Aber-Actor` | Nothing for the stack's own callers; they ship together. A script of your own that declared itself with the header sends the new name, or its writes are attributed as `service`. |
 | Response headers `X-ACS-Bundle-Version`, `X-ACS-Sparkplug-Id`, `X-ACS-Token-Expires-At` | `X-Aber-…` | Nothing; only the dashboard reads them. |
 | JWT issuer `acs-cymru-supabase` (the quarantine webhook token) and the Node-RED break-glass user `acs-cymru-break-glass` | `aber-supabase`, `aber-break-glass` | Nothing. The token is minted per call and verified by the Node-RED the same release ships. |
+| Semantic-id authority `https://acs-cymru.local/semantics/…` (every locally-minted id in `metric_catalog`, `mtconnect_vocabulary` and `iso22400_vocabulary`; the i3X namespaces) | `https://aber.local/semantics/…` | Nothing in the database: `0004` rewrites every id under the old authority on the first boot, keeping the path after it byte for byte, and leaves an id under any other namespace alone. **A consumer that keyed on a semantic id** (an AAS importer, an i3X client caching type ids) sees new ids for the same concepts. History is not rewritten. |
+| AAS identifier base `https://acs-cymru.local/ids/asset/` (`supabaseFunctions.aas.baseIri`, the `AAS_BASE_IRI` default) | `https://aber.local/ids/asset/` | Identifiers are derived at request time, so every exported shell and submodel id changes with the release. A site that had set `aas.baseIri` to its own authority is unaffected. |
 
 Everything below is what that one command does and does not disturb.
 

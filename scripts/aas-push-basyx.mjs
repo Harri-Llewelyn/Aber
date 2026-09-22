@@ -15,7 +15,7 @@
  *
  * ---------------------------------------------------------------------------------------------
  * IDENTIFIERS ARE BASE64URL-ENCODED IN THE PATH, and this is the single most common way a hand-
- * rolled BaSyx client fails. AAS identifiers are IRIs -- `https://acs-cymru.local/ids/asset/...` --
+ * rolled BaSyx client fails. AAS identifiers are IRIs -- `https://aber.local/ids/asset/...` --
  * and AAS Part 2 specifies that an identifier appearing in a URL path is base64url-encoded.
  * Sending the raw IRI produces a 404 whose message names a resource that plainly exists, or, worse,
  * a 400 from a proxy that split the path on the IRI's own slashes.

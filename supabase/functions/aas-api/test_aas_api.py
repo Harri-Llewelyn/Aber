@@ -275,14 +275,14 @@ class TestBase64UrlContract(unittest.TestCase):
     """
 
     def test_a_shell_identifier_encodes_without_path_separators(self):
-        identifier = "https://acs-cymru.local/ids/asset/dev220000000000400080000/shell"
+        identifier = "https://aber.local/ids/asset/dev220000000000400080000/shell"
         encoded = b64url(identifier)
         self.assertNotIn("/", encoded)
         self.assertNotIn("+", encoded)
         self.assertNotIn("=", encoded)
 
     def test_round_trips(self):
-        identifier = "https://acs-cymru.local/ids/asset/dev220000000000400080000/submodel/Nameplate"
+        identifier = "https://aber.local/ids/asset/dev220000000000400080000/submodel/Nameplate"
         padded = b64url(identifier) + "=" * (-len(b64url(identifier)) % 4)
         self.assertEqual(base64.urlsafe_b64decode(padded).decode(), identifier)
 

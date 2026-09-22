@@ -31,12 +31,12 @@ const ISO_VOCABULARY = [
   {
     name: 'AVAILABILITY', kpi_id: 'A', category: 'OEE', unit: 'PERCENT',
     formula: 'A = APT / PBT', description: 'Availability ratio',
-    semantic_id: 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY'
+    semantic_id: 'https://aber.local/semantics/iso22400/AVAILABILITY'
   },
   {
     name: 'MTBF', kpi_id: 'MTBF', category: 'Maintenance', unit: 'HOUR',
     formula: 'MTBF = APT / number of failures', description: 'Mean operating time between failures',
-    semantic_id: 'https://acs-cymru.local/semantics/iso22400/MTBF'
+    semantic_id: 'https://aber.local/semantics/iso22400/MTBF'
   }
 ]
 
