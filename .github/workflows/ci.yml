@@ -447,8 +447,10 @@ jobs:
 
           # The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by
           # jwtSecret, and publishableKey and secretKey are what the gateway translates to them,
-          # so a partial set yields a stack that 401s at the gateway while looking fine.
-          expect_failure "no credentials at all" "required credentials are not set"
+          # so a partial set yields a stack that 401s at the gateway while looking fine. The primary
+          # host id is set because its own refusal fires first and would mask this one.
+          expect_failure "no credentials at all" "required credentials are not set" \
+            --set ingestion.primaryHostId=ci-render-check
           expect_failure "jwtSecret set but anonKey empty" "secrets.anonKey" \
             -f "$DEV" --set secrets.anonKey=
           expect_failure "publishableKey empty" "secrets.publishableKey" \
@@ -540,6 +542,13 @@ jobs:
           fi
           echo "  ok: the four deployed components render an HPA each"
 
+          # Every gateway on site watches spBv1.0/STATE/<id>, so the id has no default, and one that is
+          # not a single topic level publishes where the broker grants nothing.
+          expect_failure "no primary host id" "ingestion.primaryHostId is not set" \
+            -f "$DEV" --set ingestion.primaryHostId=
+          expect_failure "primary host id spanning topic levels" "which is not one topic level" \
+            -f "$DEV" --set ingestion.primaryHostId=site/a
+
           # A nightly backup that writes nowhere is worse than none, because it looks like one.
           expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
             -f "$DEV" --set backup.enabled=true --set backup.destination=s3
@@ -566,7 +575,8 @@ jobs:
       # place several settings appear, so a rename applied to values.yaml misses it. It carries no
       # credentials by design, so `existingSecret` is set rather than underlaying values-dev.yaml:
       # the example pins the credential keys to empty strings, and an explicit empty string overrides
-      # an underlaid value.
+      # an underlaid value. The primary host id is left empty for the operator to fill, so it is set
+      # here too.
       - name: Render The Production Values Example
         run: |
           set -euo pipefail
@@ -575,7 +585,8 @@ jobs:
           # Rendered to a file; every check below reads the file. `printf | grep -q` under pipefail
           # fails exactly when the string is present (grep closes the pipe, printf gets SIGPIPE).
           helm template aber deploy/helm/aber \
-            -f "$PROD" --set secrets.existingSecret=ci-render-check > /tmp/prod-render.yaml
+            -f "$PROD" --set secrets.existingSecret=ci-render-check \
+            --set ingestion.primaryHostId=ci-render-check > /tmp/prod-render.yaml
 
           # A render that succeeds and emits nothing would satisfy a bare exit-code check.
           COUNT=$(grep -c '^kind:' /tmp/prod-render.yaml || true)
@@ -797,12 +808,13 @@ jobs:
 
       # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
       # client to 8883 and must move their edges too. A second render because the port is a
-      # render-time choice.
+      # render-time choice. e2e is on because e2e-validate is one of the clients asserted, and its
+      # edges render only with the Job.
       - name: Verify NetworkPolicies Follow The Broker Onto TLS
         run: |
           helm template aber deploy/helm/aber \
             -f deploy/helm/aber/values-dev.yaml \
-            --set networkPolicy.enabled=true \
+            --set networkPolicy.enabled=true --set e2e.enabled=true \
             --set mosquitto.tls.enabled=true --set mosquitto.tls.internalClients=true \
             --set 'mosquitto.tls.extraIpSans={10.0.0.9}' \
             > /tmp/netpol-tls.yaml
