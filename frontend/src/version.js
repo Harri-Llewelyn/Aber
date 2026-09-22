@@ -21,7 +21,7 @@ export const VERSION_IS_KNOWN = APP_VERSION !== 'unknown';
  */
 export const versionTitle = () =>
   VERSION_IS_KNOWN
-    ? `Running ACS-Cymru ${APP_VERSION} — the release tag this build came from, `
+    ? `Running Aber ${APP_VERSION} — the release tag this build came from, `
       + 'plus the commits since it and the commit id, as reported by git describe'
     : 'This build was not given a version at build time, so it cannot name itself. Rebuild with '
       + 'APP_VERSION=$(git describe --tags --always --dirty) to label it.';

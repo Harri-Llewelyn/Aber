@@ -1,10 +1,10 @@
 openapi: 3.0.3
 
 info:
-  title: ACS-Cymru Asset Tracking Platform API
+  title: Aber API
   version: "2.0.0"
   description: |
-    The HTTP surface of the ACS-Cymru Asset Tracking Platform. Every request goes through
+    The HTTP surface of Aber, the shopfloor data platform. Every request goes through
     the **Envoy API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
 
     | Prefix | Upstream | `apikey` required? |
@@ -102,7 +102,7 @@ info:
     back under A. Read `device_locations` and merge by `device_id`.
 
   contact:
-    name: ACS-Cymru Asset Tracking Platform
+    name: Aber
     url: https://github.com/Harri-Llewelyn/ACS-Cymru
 
 servers:
@@ -2721,7 +2721,7 @@ paths:
             text/x-shellscript:
               schema:
                 type: string
-              example: "#!/bin/bash\n# ACS-Cymru gateway appliance installer.\n..."
+              example: "#!/bin/bash\n# Aber gateway appliance installer.\n..."
             text/plain:
               schema:
                 type: string
@@ -3372,7 +3372,7 @@ paths:
       tags: [Edge Functions]
       summary: Receive a Grafana alert notification
       description: |
-        The delivery target of Grafana's `ACS-Cymru Webhook` contact point. Accepts an
+        The delivery target of Grafana's `Aber Webhook` contact point. Accepts an
         Alertmanager-shaped payload and records each instance as an occurrence in
         `public.platform_alerts`, which the dashboard then receives over Realtime.
 

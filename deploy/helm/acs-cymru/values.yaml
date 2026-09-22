@@ -460,7 +460,7 @@ supabaseAuth:
     port: 587
     user: ""
     from: ""
-    senderName: ACS Cymru
+    senderName: Aber
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
@@ -612,8 +612,8 @@ supabaseStudio:
     tag: 2026.07.07-sha-a6a04f2
     pullPolicy: IfNotPresent
   replicas: 1
-  organizationName: ACS-Cymru
-  projectName: ACS-Cymru Asset Tracking
+  organizationName: Aber
+  projectName: Aber
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }

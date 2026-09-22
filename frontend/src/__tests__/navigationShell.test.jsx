@@ -60,7 +60,7 @@ const navTabs = () => [...document.querySelectorAll('.sidebar-item')]
 
 const renderShell = async () => {
   render(<App />)
-  await waitFor(() => expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText('Aber')).toBeInTheDocument())
 }
 
 describe('Merged navigation shell', () => {
@@ -393,8 +393,8 @@ describe('Merged navigation shell', () => {
 
   /**
    * The bands that are left, as a set. Navigation is in neither: the rail's collapse is a mode
-   * rather than a width band, so no viewport can take a page away. The brand subtitle goes before
-   * the wordmark shortens, and the wordmark shortens rather than disappearing.
+   * rather than a width band, so no viewport can take a page away. The brand subtitle goes first;
+   * the wordmark is four letters and stays until the whole brand text goes.
    */
   it('sheds only recoverable text now that navigation is not in the bar', () => {
     const band = (px) => APP_CSS.match(new RegExp(`@media \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
@@ -404,10 +404,10 @@ describe('Merged navigation shell', () => {
     expect(narrow, 'the <1400px band is missing').toBeTruthy()
     expect(narrowest, 'the <1100px band is missing').toBeTruthy()
 
-    // <1400: the strapline goes and the wordmark shortens. The bar's remaining controls are
+    // <1400: the strapline goes and the wordmark stays. The bar's remaining controls are
     // icons already, so there is no button label left to shed.
     expect(narrow).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
-    expect(narrow).toMatch(/\.brand-name-short\s*\{\s*display:\s*inline/)
+    expect(narrow).not.toMatch(/\.brand-name/)
 
     // <1100: the brand text entirely, leaving the mark.
     expect(narrowest).toMatch(/\.brand-text\s*\{\s*display:\s*none/)

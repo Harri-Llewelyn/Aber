@@ -1,5 +1,5 @@
 """
-i3X 1.0 server for the ACS-Cymru Asset Tracking Platform.
+i3X 1.0 server for Aber, the shopfloor data platform.
 
 A read-side adapter owning no data: metadata comes from PostgREST, current values from the MQTT
 broker. It is a long-lived service rather than an edge function because i3X requires the server to

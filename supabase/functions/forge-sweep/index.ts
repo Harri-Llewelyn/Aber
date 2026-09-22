@@ -502,7 +502,7 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
   const specs: PublishSpec[] = [
     {
       name: PLATFORM_REPOSITORY,
-      description: "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by ACS-Cymru.",
+      description: "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by Aber.",
       files: GATEWAY_PLATFORM_FILES,
       digest: GATEWAY_PLATFORM_DIGEST,
       version,
@@ -510,7 +510,7 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
     },
     {
       name: CUSTOM_EXAMPLE_REPOSITORY,
-      description: "An example custom gateway repository: what a gateway that needs code of its own looks like. Copy it with 'Use this template'. Published by ACS-Cymru.",
+      description: "An example custom gateway repository: what a gateway that needs code of its own looks like. Copy it with 'Use this template'. Published by Aber.",
       files: GATEWAY_CUSTOM_EXAMPLE_FILES,
       digest: GATEWAY_CUSTOM_EXAMPLE_DIGEST,
       version: null,

@@ -257,10 +257,6 @@ html, body, #root {
 
 /* Truncates rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be
    clipped mid-glyph. The element carries a `title` in App.jsx, so the full name stays reachable. */
-/* Two spellings of the wordmark, one shown. See the density ladder below for why the SHORT one
-   is the lever rather than the strapline. */
-.brand-name-short { display: none; }
-
 .brand-name {
   font-size: 14px;
   font-weight: 700;
@@ -732,14 +728,11 @@ html, body, #root {
   color: var(--text-dim);
 }
 
-/* Top bar responsive collapse. Below 1400px the strapline goes and the wordmark shortens, and
-   button labels go; below 1100px the brand text goes entirely. The wordmark shortens rather than
-   disappearing because `.brand-text` is a stacked block as wide as its wider line, and the
-   strapline is wider than the full wordmark, so hiding the strapline alone reclaims almost nothing. */
+/* Top bar responsive collapse. Below 1400px the strapline goes and button labels go; below
+   1100px the brand text goes entirely. `.brand-text` is a stacked block as wide as its wider
+   line, and the strapline is far wider than the wordmark, so hiding it reclaims the space. */
 @media (max-width: 1399px) {
   .brand-sub { display: none; }
-  .brand-name-full { display: none; }
-  .brand-name-short { display: inline; }
   /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
      leaves a shape and a figure -- whereas dropping the pill would hide the only changing thing in
      the bar at exactly the widths a kiosk display uses. */

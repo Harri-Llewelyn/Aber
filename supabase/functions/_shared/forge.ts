@@ -241,7 +241,7 @@ export async function ensureOrganisation(
     const created = await forgeApi(cfg, "POST", "/orgs", {
       username: FORGE_ORGANISATION,
       full_name: "Gateways",
-      description: "One repository per gateway. Managed by ACS-Cymru.",
+      description: "One repository per gateway. Managed by Aber.",
       visibility: "private",
       repo_admin_change_team_access: false,
     });
@@ -270,7 +270,7 @@ export async function ensureOrganisation(
     }
     const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/teams`, {
       name,
-      description: `${role.replace("_", " ")}s of the ACS-Cymru dashboard, placed here by forge-membership.`,
+      description: `${role.replace("_", " ")}s of the Aber dashboard, placed here by forge-membership.`,
       permission: "write",
       includes_all_repositories: true,
       can_create_org_repo: true,
@@ -321,7 +321,7 @@ async function ensureRepository(
 
   const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/repos`, {
     name,
-    description: `Node-RED flow for gateway '${gatewayName}'. Managed by ACS-Cymru.`,
+    description: `Node-RED flow for gateway '${gatewayName}'. Managed by Aber.`,
     // Belt and braces: the forge sets FORCE_PRIVATE, but the intent is stated in the request too.
     private: true,
     auto_init: true,
@@ -687,7 +687,7 @@ export async function ensurePlatformOrganisation(cfg: ForgeConfig): Promise<numb
     const created = await forgeApi(cfg, "POST", "/orgs", {
       username: PLATFORM_ORGANISATION,
       full_name: "Platform",
-      description: "The playbook every appliance converges to. Published by ACS-Cymru; changed in its repository, never here.",
+      description: "The playbook every appliance converges to. Published by Aber; changed in its repository, never here.",
       visibility: "private",
       repo_admin_change_team_access: false,
     });
@@ -785,7 +785,7 @@ export async function ensurePlatformRepository(cfg: ForgeConfig): Promise<ForgeR
   return await ensurePublishedRepository(
     cfg,
     PLATFORM_REPOSITORY,
-    "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by ACS-Cymru.",
+    "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by Aber.",
   );
 }
 

@@ -27,7 +27,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Platform Conditions
-    folder: ACS-Cymru - Platform Infrastructure
+    folder: Aber - Platform Infrastructure
     # One minute: none of these conditions moves faster (the staleness threshold is 90s, an enrolment
     # is measured in hours, a quarantine queue changes when a person approves something).
     interval: 1m
@@ -409,7 +409,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Ingestion Pipeline
-    folder: ACS-Cymru - Platform Infrastructure
+    folder: Aber - Platform Infrastructure
     # 1m. These are rates over 5-15 minute windows; evaluating faster re-reads a number that cannot
     # have moved, and the machine group's 10s exists only because someone is standing in front of a
     # fault-injection button.
@@ -1094,7 +1094,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Log Pipeline
-    folder: ACS-Cymru - Platform Infrastructure
+    folder: Aber - Platform Infrastructure
     interval: 1m
     rules:
 
@@ -1282,7 +1282,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Host
-    folder: ACS-Cymru - Platform Infrastructure
+    folder: Aber - Platform Infrastructure
     interval: 1m
     rules:
 
@@ -1358,7 +1358,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Cluster
-    folder: ACS-Cymru - Platform Infrastructure
+    folder: Aber - Platform Infrastructure
     interval: 1m
     rules:
 
@@ -1675,7 +1675,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Databases
-    folder: ACS-Cymru - Platform Infrastructure
+    folder: Aber - Platform Infrastructure
     # 1m, like the other Prometheus groups. Nothing here moves faster: the slowest is transaction-ID
     # age, which takes days, and the fastest is a connection count already smoothed by `for: 5m`.
     interval: 1m

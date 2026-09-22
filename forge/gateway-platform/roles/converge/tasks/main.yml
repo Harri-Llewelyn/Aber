@@ -18,7 +18,7 @@
     mode: "0644"
     content: |
       [Unit]
-      Description=ACS-Cymru gateway: converge to the platform tag this gateway names
+      Description=Aber gateway: converge to the platform tag this gateway names
       After=network-online.target docker.service
       Wants=network-online.target
 
@@ -35,7 +35,7 @@
     mode: "0644"
     content: |
       [Unit]
-      Description=ACS-Cymru gateway: converge hourly
+      Description=Aber gateway: converge hourly
 
       [Timer]
       OnBootSec=5min

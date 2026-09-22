@@ -21,7 +21,7 @@ supabase
 #
 # THE FORMAT IS THE POINT, not the library. Item 3 asks for "vendor-neutral Apache Parquet"
 # precisely so a decade of plant history is not readable only by the stack that wrote it -- DuckDB,
-# Spark, pandas and Power BI all open these files with no ACS-Cymru component involved. pyarrow is
+# Spark, pandas and Power BI all open these files with no Aber component involved. pyarrow is
 # the reference implementation and the one DuckDB interoperates with most predictably.
 #
 # It is a large wheel (~40 MB) and it is imported LAZILY, inside the two functions that write and
@@ -37,7 +37,7 @@ pyarrow==23.0.1
 #
 # It also keeps the archive honest about being VENDOR-NEUTRAL. The same query an operator runs here
 # runs unchanged in the DuckDB CLI, in pandas, or in Power BI, against the same objects, with no
-# ACS-Cymru component involved. That is the property Parquet was chosen for and this is what
+# Aber component involved. That is the property Parquet was chosen for and this is what
 # exercises it.
 duckdb==1.1.3
 # DuckDB needs this to hand TIMESTAMP WITH TIME ZONE values back to Python, and fails at fetch time

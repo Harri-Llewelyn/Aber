@@ -2,14 +2,14 @@
   {
     "id": "acs-tab",
     "type": "tab",
-    "label": "ACS-Cymru Gateway",
+    "label": "Aber Gateway",
     "disabled": false,
     "info": "# __GATEWAY_NAME__\n\nThis flow is a STARTING POINT, not a finished integration. It does three things:\n\n1. publishes a gateway heartbeat every 30s, which is what makes this gateway show ONLINE\n2. reports this appliance's own health on that heartbeat -- uptime, load, free memory, free disk,\n   the bundle version, the hash of the flow it last deployed, and when the broker CA expires\n3. publishes one device DBIRTH on demand, to demonstrate zero-touch onboarding\n\n## What this appliance reports about itself\n\n`node_exporter` runs beside Node-RED (see `docker-compose.yml`) and is **not** published: the\nplatform does not scrape it, because this appliance's connection is outbound only and an inbound\npath per gateway is exactly what that design avoids. The **poll host metrics** branch reads it over\nthe local network every 60s and caches three series; the heartbeat publishes whatever is cached.\n\n**A collector that is down costs three metrics and never the heartbeat.** The poll is on its own\ntimer for that reason -- a gateway that stopped beating because a disk-usage collector was slow\nwould be reported STALE and then OFFLINE, which is a far worse failure than the one it reports on.\nReadings older than five minutes are dropped rather than republished, so the figure on the\ndashboard is always one this appliance actually took.\n\nThe **flow hash** is read from `/data/gitops/deployed.json`, which `flow-sync` writes after every\ndeploy and `bootstrap` writes at enrolment. The platform holds the hash of `flows.json` at the head\nof `main`, so the dashboard can say whether this appliance has deployed what was approved. An edit\nmade in this editor is not reflected in it; the next approved deploy overwrites such an edit.\n\n`Cert_Expires_At` is the one worth understanding. The broker's CA is copied by hand into every\nappliance's trust store, so re-minting it takes a whole fleet offline at once with no signal but\nabsence. Reporting the date THIS appliance holds turns that into a month's warning. It is read once\nat enrolment, from the CA that was installed -- replace that file by hand and the reported date\nwill not follow it.\n\n## Adding your own device\n\nEdit the **ADD YOUR OWN DEVICE** function node, change `DEVICE_ID` to whatever your machine\nshould be called, and inject it. The device will appear in the dashboard's **quarantine queue** --\nunregistered devices are held there and their data is dropped until an operator approves them.\nThat is the intended path: you do not pre-register anything.\n\nOnce approved, publish DDATA on\n`spBv1.0/__SPARKPLUG_GROUP__/DDATA/__SPARKPLUG_ID__/<your-device-id>` and it will land in the\nhistorian.\n\n## What you may NOT publish\n\nThe broker confines this gateway to `spBv1.0/+/+/__SPARKPLUG_ID__/#`. A message published under\nany other edge node is dropped by the broker, silently, by design -- it is what stops one gateway\nforging another's telemetry."
   },
   {
     "id": "acs-tls",
     "type": "tls-config",
-    "name": "ACS-Cymru broker CA",
+    "name": "Aber broker CA",
     "certType": "files",
     "cert": "",
     "key": "",
@@ -24,7 +24,7 @@
   {
     "id": "acs-broker",
     "type": "mqtt-broker",
-    "name": "ACS-Cymru (MQTTS)",
+    "name": "Aber (MQTTS)",
     "broker": "__MQTT_HOST__",
     "port": "__MQTT_TLS_PORT__",
     "tls": "acs-tls",
@@ -179,7 +179,7 @@
     "id": "acs-mqtt-out",
     "type": "mqtt out",
     "z": "acs-tab",
-    "name": "ACS-Cymru broker",
+    "name": "Aber broker",
     "topic": "",
     "qos": "0",
     "retain": "false",

@@ -106,7 +106,7 @@ export function OAuthConsent() {
       <>
         <h2 style={{ marginTop: 0 }}>Sign in required</h2>
         <p>
-          Sign in to the ACS-Cymru dashboard first, then retry the application you were
+          Sign in to the Aber dashboard first, then retry the application you were
           connecting.
         </p>
         <a className="btn btn-primary" href="/">Go to sign in</a>
@@ -134,7 +134,7 @@ export function OAuthConsent() {
       <h2 style={{ marginTop: 0 }}>Authorize {client?.name || 'application'}</h2>
       <p>
         <strong>{client?.name || 'An application'}</strong> is requesting access to your
-        ACS-Cymru identity as <strong>{user?.email}</strong>.
+        Aber identity as <strong>{user?.email}</strong>.
       </p>
       <p style={{ fontSize: 13, opacity: 0.8 }}>
         Requested scope: <span className="mono">{scope || 'openid'}</span>

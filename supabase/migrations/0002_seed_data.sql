@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Migration: 0002_seed_data.sql
--- ACS-Cymru Asset Tracking Platform -- consolidated baseline data (public beta)
+-- Aber -- consolidated baseline data (public beta)
 -- =============================================================================================
 --
 -- Every row the platform needs to come up usable: pure DML, the counterpart of
@@ -2746,7 +2746,7 @@ BEGIN
     'manual',                                        -- seeded, not self-registered
     v_base || '/login/generic_oauth',                -- Grafana's fixed generic_oauth callback
     'authorization_code,refresh_token',
-    'ACS-Cymru Grafana',
+    'Aber Grafana',
     v_base,
     'confidential',
     'client_secret_basic'
@@ -8113,7 +8113,7 @@ BEGIN
     'manual',                                        -- seeded, not self-registered
     v_redirect,
     'authorization_code,refresh_token',
-    'ACS-Cymru Node-RED',
+    'Aber Node-RED',
     'http://localhost:1880',
     'confidential',
     'client_secret_post'

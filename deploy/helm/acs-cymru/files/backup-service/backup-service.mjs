@@ -2,7 +2,7 @@
 /**
  * The backup service: a queued backup_jobs row becomes a tier 1 backup on the backup volume.
  *
- * WHY IT EXISTS. request_backup() (migration 0101) is a row, and nothing else in the stack can
+ * WHY IT EXISTS. request_backup() (archived migration 0101) is a row, and nothing else in the stack can
  * turn a row into a backup: pg_dump against both databases, a tar of the storage objects and a
  * consistent copy of the forge's volume need a process beside the volumes holding a superuser
  * credential, which is neither an edge function nor a browser. This service is that process and

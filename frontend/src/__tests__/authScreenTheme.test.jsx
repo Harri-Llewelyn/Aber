@@ -79,7 +79,7 @@ describe('AuthScreen theming', () => {
     const { default: App } = await import('../App')
     render(<App />)
 
-    const heading = await screen.findByText('ACS-Cymru Supabase Portal')
+    const heading = await screen.findByText('Aber Supabase Portal')
     expect(heading).toBeTruthy()
     // Reads the real variable rather than a literal, so the theme controls it.
     expect(heading.getAttribute('style')).toContain('var(--text-primary)')

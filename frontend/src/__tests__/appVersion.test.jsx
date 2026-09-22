@@ -52,7 +52,7 @@ const RELEASE_WF = fs.readFileSync(path.resolve(__dirname, '../../../.github/wor
 
 const openMenu = async () => {
   render(<App />)
-  await waitFor(() => expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText('Aber')).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: /open account menu/i }))
   return within(document.querySelector('.user-popover'))
 }

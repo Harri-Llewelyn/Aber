@@ -44,7 +44,7 @@ const outPath = path.resolve(rootDir, outArg ? outArg.slice('--out='.length) : '
  *  escaping in any of them. */
 const hex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
-console.log('🚀 ACS-Cymru setup: a values file with credentials of its own');
+console.log('🚀 Aber setup: a values file with credentials of its own');
 
 if (fs.existsSync(outPath)) {
   console.log(`ℹ️  ${path.relative(rootDir, outPath)} already exists — left untouched. Delete it first for fresh credentials.`);

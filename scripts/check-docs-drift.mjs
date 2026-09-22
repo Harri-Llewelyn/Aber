@@ -1668,12 +1668,12 @@ function edgeFunctionNames() {
   // the consent screen puts in its heading. DO UPDATE on client_name means the literal here IS the
   // live value on every boot, so checking the literal checks what a user sees.
   const seed = read('supabase/seed.sql') + read('supabase/migrations/0002_seed_data.sql');
-  const clientNames = [...seed.matchAll(/'((?:Factory\+|ACS-Cymru)[^']*)'/g)].map((m) => m[1]);
+  const clientNames = [...seed.matchAll(/'((?:Factory\+|Aber)[^']*)'/g)].map((m) => m[1]);
   const misnamed = clientNames.filter((n) => n.startsWith('Factory+'));
   if (misnamed.length) {
     branded.push(
       `an OAuth client is registered as ${misnamed.map((n) => `"${n}"`).join(', ')} -- that string ` +
-        'is the heading on the consent screen. Node-RED\'s client is already "ACS-Cymru Node-RED".'
+        'is the heading on the consent screen. Node-RED\'s client is already "Aber Node-RED".'
     );
   }
 
@@ -1688,7 +1688,7 @@ function edgeFunctionNames() {
   } else {
     pass(
       `all ${Object.keys(BRANDED_SURFACES).length} user-facing branded surfaces name the product ` +
-        'ACS-Cymru, with framework references left intact'
+        'Aber, with framework references left intact'
     );
   }
 }
