@@ -6,7 +6,7 @@
 # scrapes. Re-enabling that collector to obtain ONE number is the wrong trade, and without the
 # number `pg_stat_activity_count` is a count with no denominator: 96 connections is either fine or
 # four short of refusing the next one, and nothing on the dashboard could say which.
-acs_postgres_max:
+aber_postgres_max:
   query: "SELECT current_setting('max_connections')::bigint AS connections"
   metrics:
     - connections:

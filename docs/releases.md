@@ -61,7 +61,7 @@ Anything a running site would notice as a break. Concretely, any of:
 - **A change to an identifier a site already holds.** These are the expensive ones because they
   reach outside this repository: the `sparkplug_id` derivation, the site's Sparkplug group, the
   `aber.local` semantic namespace that AAS exports and i3X type ids are minted into, a
-  `metric_catalog` name, or the `acs_ingestion_*` Prometheus metric prefix that every dashboard and
+  `metric_catalog` name, or the `aber_ingestion_*` Prometheus metric prefix that every dashboard and
   alert rule queries.
 - **A change to the shape of a topic** the platform publishes or consumes.
 - **Dropping support for a Kubernetes version** the previous release supported.

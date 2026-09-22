@@ -1624,9 +1624,9 @@ jobs:
           # The ingestion endpoint must be serving REAL counters, not just answering 200. validate.py
           # has just published a run's worth of Sparkplug traffic through the daemon.
           VALUE=$(curl -sf --get "$PROM/api/v1/query" \
-                    --data-urlencode 'query=sum(acs_ingestion_messages_total)' \
+                    --data-urlencode 'query=sum(aber_ingestion_messages_total)' \
                   | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "0")')
-          echo "  acs_ingestion_messages_total = $VALUE"
+          echo "  aber_ingestion_messages_total = $VALUE"
           python3 -c "import sys; sys.exit(0 if float('$VALUE') > 0 else 1)" || {
             echo "::error::Prometheus scraped the ingestion daemon but recorded no messages."
             echo "::error::The target is up and the counters are empty, which means the endpoint"

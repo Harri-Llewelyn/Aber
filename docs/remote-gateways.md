@@ -510,7 +510,7 @@ heartbeat against the time it arrived:
   ahead**, which is the direction that corrupts;
 * the **Gateway Clock Skew** alert, at a minute of drift sustained for fifteen;
 * and past **+5 minutes** the telemetry stops being written at all — refused rather than clamped,
-  and counted per gateway by `acs_ingestion_timestamps_rejected_total{edge_node}`. The backward
+  and counted per gateway by `aber_ingestion_timestamps_rejected_total{edge_node}`. The backward
   tolerance is a full day, because an appliance flushing a buffered outage is legitimate late data.
 
 **Nothing on the platform corrects it, deliberately.** Rewriting a device's timestamps centrally

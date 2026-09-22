@@ -1,5 +1,5 @@
 {
-  "uid": "acs-cymru-databases",
+  "uid": "aber-databases",
   "title": "Databases",
   "description": "Server-side condition of both databases, from the postgres_exporter sidecar in each database pod. Pick one with the Database selector; the historian row is always timescaledb, because its series exist nowhere else.",
   "tags": [
@@ -78,7 +78,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(pg_stat_activity_count{job=\"$database\"}) / max(acs_postgres_max_connections{job=\"$database\"})",
+          "expr": "sum(pg_stat_activity_count{job=\"$database\"}) / max(aber_postgres_max_connections{job=\"$database\"})",
           "instant": true
         }
       ],
@@ -351,7 +351,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Block I/O Time",
-      "description": "Seconds per second spent waiting on block reads and writes. THIS is what separates a slow disk from lock contention -- the distinction `acs_ingestion_write_seconds` cannot make from the client side, and the one the single-writer ceiling is argued on.",
+      "description": "Seconds per second spent waiting on block reads and writes. THIS is what separates a slow disk from lock contention -- the distinction `aber_ingestion_write_seconds` cannot make from the client side, and the one the single-writer ceiling is argued on.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -788,7 +788,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "acs_historian_chunks_count{job=\"timescaledb\"}",
+          "expr": "aber_historian_chunks_count{job=\"timescaledb\"}",
           "legendFormat": "{{hypertable}} total"
         },
         {
@@ -797,7 +797,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "acs_historian_chunks_compressed{job=\"timescaledb\"}",
+          "expr": "aber_historian_chunks_compressed{job=\"timescaledb\"}",
           "legendFormat": "{{hypertable}} compressed"
         }
       ],
@@ -849,7 +849,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "acs_historian_storage_total_bytes{job=\"timescaledb\"}",
+          "expr": "aber_historian_storage_total_bytes{job=\"timescaledb\"}",
           "legendFormat": "{{relation}} ({{tier}})"
         }
       ],
@@ -901,7 +901,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(acs_historian_compression_uncompressed_bytes{job=\"timescaledb\"}) / clamp_min(sum(acs_historian_compression_compressed_bytes{job=\"timescaledb\"}), 1)",
+          "expr": "sum(aber_historian_compression_uncompressed_bytes{job=\"timescaledb\"}) / clamp_min(sum(aber_historian_compression_compressed_bytes{job=\"timescaledb\"}), 1)",
           "instant": true
         }
       ],
@@ -968,7 +968,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "count(acs_historian_job_last_run_succeeded{job=\"timescaledb\"} == 0 and acs_historian_job_runs_total{job=\"timescaledb\"} > 0) or vector(0)",
+          "expr": "count(aber_historian_job_last_run_succeeded{job=\"timescaledb\"} == 0 and aber_historian_job_runs_total{job=\"timescaledb\"} > 0) or vector(0)",
           "instant": true
         }
       ],
@@ -1032,7 +1032,7 @@
           },
           "format": "table",
           "instant": true,
-          "expr": "acs_historian_job_last_run_succeeded{job=\"timescaledb\"}"
+          "expr": "aber_historian_job_last_run_succeeded{job=\"timescaledb\"}"
         },
         {
           "refId": "B",
@@ -1042,7 +1042,7 @@
           },
           "format": "table",
           "instant": true,
-          "expr": "acs_historian_job_runs_total{job=\"timescaledb\"}"
+          "expr": "aber_historian_job_runs_total{job=\"timescaledb\"}"
         },
         {
           "refId": "C",
@@ -1052,7 +1052,7 @@
           },
           "format": "table",
           "instant": true,
-          "expr": "acs_historian_job_failures_total{job=\"timescaledb\"}"
+          "expr": "aber_historian_job_failures_total{job=\"timescaledb\"}"
         }
       ],
       "transformations": [

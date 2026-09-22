@@ -162,11 +162,11 @@ class TestCoalescing(WriterTestCase):
 
     def test_one_histogram_observation_per_transaction(self):
         """rate(_sum) is the writer's occupancy only if a batch is observed once, not per message."""
-        before = registry.histogram_snapshot()["acs_ingestion_write_seconds"]["count"]
+        before = registry.histogram_snapshot()["aber_ingestion_write_seconds"]["count"]
         for i in range(3):
             self.writer.submit(pending(DEV_A, [("M%d" % i, float(i))]))
         self.writer.flush()
-        after = registry.histogram_snapshot()["acs_ingestion_write_seconds"]["count"]
+        after = registry.histogram_snapshot()["aber_ingestion_write_seconds"]["count"]
         self.assertEqual(after - before, 1)
 
     def test_messages_and_metrics_are_counted_after_the_commit(self):
@@ -350,7 +350,7 @@ class TestExposition(unittest.TestCase):
     """
     `count()` reads every `messages_<x>` flat name as a message TYPE and never consults the table
     for it, so a writer counter spelled that way would surface as
-    acs_ingestion_messages_total{msg_type="written"}. It did, on the live endpoint, before this
+    aber_ingestion_messages_total{msg_type="written"}. It did, on the live endpoint, before this
     test existed.
     """
 
@@ -360,7 +360,7 @@ class TestExposition(unittest.TestCase):
     def test_the_commit_counter_is_exported_under_its_own_name(self):
         registry.count("written_messages", 2)
         out = registry.render()
-        self.assertIn("acs_ingestion_messages_written_total 2.0", out)
+        self.assertIn("aber_ingestion_messages_written_total 2.0", out)
         self.assertNotIn('msg_type="written"', out)
 
     def test_no_mapped_counter_is_shadowed_by_the_message_type_convention(self):
@@ -370,7 +370,7 @@ class TestExposition(unittest.TestCase):
     def test_the_writer_counters_are_mapped(self):
         for name in ("written_messages", "write_batch_failures", "dropped_write_queue_full"):
             self.assertIn(name, metrics.COUNTER_MAP)
-        self.assertEqual(metrics.TYPES.get("acs_ingestion_write_queue_depth"), "gauge")
+        self.assertEqual(metrics.TYPES.get("aber_ingestion_write_queue_depth"), "gauge")
 
 
 if __name__ == "__main__":

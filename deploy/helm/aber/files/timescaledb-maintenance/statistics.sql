@@ -6,7 +6,7 @@
 -- `pg_stat_statements` already; the timescale image preloads `timescaledb` alone. So this is the
 -- half that had no server-side view of how long a write actually took.
 --
--- WHAT IT ANSWERS. `acs_ingestion_write_seconds` measures a telemetry write from the CLIENT and
+-- WHAT IT ANSWERS. `aber_ingestion_write_seconds` measures a telemetry write from the CLIENT and
 -- was the instrument that retired horizontal ingestion scaling as an item. It cannot distinguish a
 -- slow disk from lock contention from a saturated connection pool, and the single-writer ceiling
 -- is argued on exactly that distinction. These are the server-side series that can.

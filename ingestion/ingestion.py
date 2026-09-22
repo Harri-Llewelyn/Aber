@@ -765,9 +765,9 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
     # The message is still processed; only the counters are added. Both counters, because one gap
     # of 200 and 200 gaps of 1 are different faults. The 255 -> 0 wrap and the first message after
     # a restart never reach here (asserted in test_sequence_gap_metrics.py).
-    count_labelled("acs_ingestion_sequence_gaps_total", {"edge_node": edge_node_id})
+    count_labelled("aber_ingestion_sequence_gaps_total", {"edge_node": edge_node_id})
     count_labelled(
-        "acs_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
+        "aber_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
     )
 
     # Expected once after a start: the first message seen carries a seq far ahead of the 0
@@ -1787,13 +1787,13 @@ def extract_gateway_health(group_id, edge_node_id, payload):
 # Four of the seven: `agent_version`, `flow_hash` and `cert_expires_at` stay in the database
 # because the metrics endpoint is unauthenticated (see metrics.py).
 GATEWAY_HEALTH_GAUGES = {
-    "uptime_seconds":      "acs_ingestion_gateway_uptime_seconds",
-    "load_1m":             "acs_ingestion_gateway_load1",
-    "mem_available_bytes": "acs_ingestion_gateway_mem_available_bytes",
-    "disk_free_bytes":     "acs_ingestion_gateway_disk_free_bytes",
+    "uptime_seconds":      "aber_ingestion_gateway_uptime_seconds",
+    "load_1m":             "aber_ingestion_gateway_load1",
+    "mem_available_bytes": "aber_ingestion_gateway_mem_available_bytes",
+    "disk_free_bytes":     "aber_ingestion_gateway_disk_free_bytes",
 }
 
-HEALTH_REPORTED_GAUGE = "acs_ingestion_gateway_health_reported_timestamp_seconds"
+HEALTH_REPORTED_GAUGE = "aber_ingestion_gateway_health_reported_timestamp_seconds"
 
 # Last-seen values per edge node. Written only after resolve_gateway() matched a registered
 # gateway, so a forged edge node id cannot add an entry. An archived gateway's series lingers
@@ -1830,8 +1830,8 @@ def gateway_health_gauge_snapshot() -> dict:
 # counts it. Positive means the appliance is ahead of this server, the direction that corrupts
 # soonest. Nothing is rejected as implausible: an appliance reporting 1970 is a board with no
 # RTC after a power cut, the most likely instance of this fault.
-GATEWAY_CLOCK_OFFSET_GAUGE = "acs_ingestion_gateway_clock_offset_seconds"
-GATEWAY_CLOCK_MEASURED_GAUGE = "acs_ingestion_gateway_clock_measured_timestamp_seconds"
+GATEWAY_CLOCK_OFFSET_GAUGE = "aber_ingestion_gateway_clock_offset_seconds"
+GATEWAY_CLOCK_MEASURED_GAUGE = "aber_ingestion_gateway_clock_measured_timestamp_seconds"
 
 # Below TELEMETRY_MAX_FUTURE_SECONDS, so the warning arrives while telemetry is still accepted.
 GATEWAY_CLOCK_OFFSET_WARN_SECONDS = 60
@@ -2238,7 +2238,7 @@ class TelemetryWriter:
             drop(
                 "write_queue_full",
                 "Historian writer queue has held %d messages for %.0fs; dropping DDATA for '%s'. "
-                "The writer is slower than the fleet: read acs_ingestion_write_seconds.",
+                "The writer is slower than the fleet: read aber_ingestion_write_seconds.",
                 TELEMETRY_QUEUE_MAX_MESSAGES, TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS, pending.wire_id,
                 device=pending.wire_id,
             )
@@ -2601,7 +2601,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # that flat name in the STATS line, summed from this series rather than exported twice
     # (metrics.py, EXPORTED_LABELLED_INSTEAD).
     count_labelled(
-        "acs_ingestion_timestamps_rejected_total",
+        "aber_ingestion_timestamps_rejected_total",
         {"edge_node": gateway_wire_id}, rejected_timestamps
     )
     count("metrics_unresolved_alias", unresolved_aliases)
@@ -2643,7 +2643,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         group_id=group_id or DEFAULT_SPARKPLUG_GROUP, client=client,
     ))
 
-# Whether the daemon is subscribed. `acs_ingestion_db_connected` answers the same question for
+# Whether the daemon is subscribed. `aber_ingestion_db_connected` answers the same question for
 # PostgreSQL; "the process is running" and "the daemon is receiving messages" are different
 # states, and CI waits on this one. Set after `subscribe()` returns, not after `connect()`.
 # See docs/incidents.md -> "CI waited for a message count on a stack with no publisher".
@@ -3132,7 +3132,7 @@ def _heal_pass(state, supabase=None):
                 count("db_heals")
                 logger.info(
                     "Historian connection recovered by the startup recovery loop; "
-                    "acs_ingestion_db_connected now reads 1."
+                    "aber_ingestion_db_connected now reads 1."
                 )
         if redundant is not None:
             redundant.close()
@@ -3168,7 +3168,7 @@ def start_startup_healer(supabase=None, check_privileges=False, reconcile_captur
 
     A node coming back brings pods up in the kubelet's order, not the dependency graph's. Two
     startup steps depend on a database being up, with different
-    dependencies: the historian connection (which `acs_ingestion_db_connected` reads) and
+    dependencies: the historian connection (which `aber_ingestion_db_connected` reads) and
     capture_worker.reconcile() (Supabase). Each is retried until it succeeds.
 
     The thread stays resident afterwards so the gauge answers "can this daemon reach the
@@ -3195,22 +3195,22 @@ def scrape_time_series():
     STATES, NOT EVENTS, which is the whole reason they are read here rather than incremented at a
     site. `db_connected` is the clearest case: `_ts_conn.closed` cannot see a server-side drop, so
     this answers "did the daemon believe it had a connection", and
-    `acs_ingestion_db_connect_failures_total` rising while it reads 1 is exactly that drop.
+    `aber_ingestion_db_connect_failures_total` rising while it reads 1 is exactly that drop.
     """
     series = {
-        ("acs_ingestion_up", ()): 1,
-        ("acs_ingestion_db_connected", ()):
+        ("aber_ingestion_up", ()): 1,
+        ("aber_ingestion_db_connected", ()):
             1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
         # The subscription, not the connection. See the note above on_connect().
-        ("acs_ingestion_mqtt_connected", ()): 1 if _mqtt_subscribed else 0,
-        ("acs_ingestion_write_queue_depth", ()): _writer.depth(),
+        ("aber_ingestion_mqtt_connected", ()): 1 if _mqtt_subscribed else 0,
+        ("aber_ingestion_write_queue_depth", ()): _writer.depth(),
     }
 
     # Cache occupancy. The evictions counter is the one worth an alert: non-zero means
     # MAX_ENTITIES_PER_CACHE is being reached.
     for cache in (_device_cache, _gateway_cache, _schema_cache):
-        series[("acs_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
-        series[("acs_ingestion_cache_evictions_total", (("cache", cache.name),))] = cache.evictions
+        series[("aber_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
+        series[("aber_ingestion_cache_evictions_total", (("cache", cache.name),))] = cache.evictions
 
     # Appliance health. The reported-at timestamp says how old the readings are; a gauge holds its
     # last value indefinitely.
@@ -3265,7 +3265,7 @@ def main():
 
     if _startup_conn is not None:
         _assert_historian_is_least_privilege(_startup_conn)
-        # Kept, not closed: `acs_ingestion_db_connected` reads `_ts_conn`, and on a quiet stack
+        # Kept, not closed: `aber_ingestion_db_connected` reads `_ts_conn`, and on a quiet stack
         # nothing else opens it, so a discarded startup connection left the gauge at 0 and fired
         # `Historian Unreachable From Ingestion` against a reachable historian. Same single writer,
         # opened earlier. This covers only the boot where the connect succeeds; start_startup_healer()
@@ -3326,7 +3326,7 @@ def main():
     # directory refresher likewise, so the first messages resolve against a warm cache.
     _writer.start()
     start_directory_refresher()
-    # A daemon stuck retrying the broker must still be scrapeable: `acs_ingestion_up` at 1 with
+    # A daemon stuck retrying the broker must still be scrapeable: `aber_ingestion_up` at 1 with
     # flat counters is what "connected to nothing" looks like, and is distinguishable from a dead
     # target.
     start_metrics_endpoint()

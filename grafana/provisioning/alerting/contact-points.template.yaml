@@ -52,7 +52,7 @@ contactPoints:
   - orgId: 1
     name: Aber Webhook
     receivers:
-      - uid: acs-cymru-webhook
+      - uid: aber-webhook
         type: webhook
         settings:
           # The gateway's Service name and port.

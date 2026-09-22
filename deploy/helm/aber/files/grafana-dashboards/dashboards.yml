@@ -22,7 +22,7 @@
 apiVersion: 1
 
 providers:
-  - name: 'acs-cymru-platform'
+  - name: 'aber-platform'
     orgId: 1
     folder: 'Aber - Platform Infrastructure'
     type: file

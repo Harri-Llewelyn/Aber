@@ -55,7 +55,7 @@ class ExpositionTestCase(unittest.TestCase):
         return self.lines()
 
     def test_a_flat_counter_becomes_its_mapped_name(self):
-        self.assertIn("acs_ingestion_metrics_written_total 42.0",
+        self.assertIn("aber_ingestion_metrics_written_total 42.0",
                       self.counted(metrics_written=42))
 
     def test_every_declared_counter_starts_at_zero_rather_than_at_its_first_event(self):
@@ -67,8 +67,8 @@ class ExpositionTestCase(unittest.TestCase):
         initialises only the unlabelled half on its own.
         """
         exported = self.lines()
-        self.assertIn('acs_ingestion_messages_dropped_total{reason="db_unavailable"} 0.0', exported)
-        self.assertIn("acs_ingestion_write_failures_total 0.0", exported)
+        self.assertIn('aber_ingestion_messages_dropped_total{reason="db_unavailable"} 0.0', exported)
+        self.assertIn("aber_ingestion_write_failures_total 0.0", exported)
 
     def test_every_drop_reason_lands_on_one_metric_with_a_reason_label(self):
         """
@@ -87,7 +87,7 @@ class ExpositionTestCase(unittest.TestCase):
             ("directory_unavailable", 3), ("db_unavailable", 4),
         ]:
             self.assertIn(
-                f'acs_ingestion_messages_dropped_total{{reason="{reason}"}} {value}.0', exported)
+                f'aber_ingestion_messages_dropped_total{{reason="{reason}"}} {value}.0', exported)
 
     def test_every_drop_counter_in_ingestion_is_mapped(self):
         """
@@ -191,36 +191,36 @@ class ExpositionTestCase(unittest.TestCase):
             ("ddeath_directory_unavailable", 3), ("node_message_directory_unavailable", 4),
         ]:
             self.assertIn(
-                f'acs_ingestion_messages_dropped_total{{reason="{reason}"}} {value}.0', exported)
+                f'aber_ingestion_messages_dropped_total{{reason="{reason}"}} {value}.0', exported)
         # Still ONE metric family, so `sum by (reason)` -- which the drop alert uses -- picks the
         # three new reasons up with no change to the rule.
         self.assertEqual(
-            1, registry.render().count("# TYPE acs_ingestion_messages_dropped_total"))
+            1, registry.render().count("# TYPE aber_ingestion_messages_dropped_total"))
 
     def test_an_unmapped_counter_is_surfaced_rather_than_dropped(self):
         """
         A counter with no mapping still appears, under a name that says the mapping is missing.
         Silently discarding it would make a monitoring gap invisible to monitoring.
         """
-        self.assertIn('acs_ingestion_unmapped_counter_total{counter="something_new"} 7.0',
+        self.assertIn('aber_ingestion_unmapped_counter_total{counter="something_new"} 7.0',
                       self.counted(something_new=7))
 
     def test_msg_type_is_derived_from_the_existing_per_type_counters(self):
         # ingestion.py already writes `messages_<type>`; the dimension costs nothing at the site.
         exported = self.counted(messages_ddata=10, messages_nbirth=2)
-        self.assertIn('acs_ingestion_messages_total{msg_type="ddata"} 10.0', exported)
-        self.assertIn('acs_ingestion_messages_total{msg_type="nbirth"} 2.0', exported)
+        self.assertIn('aber_ingestion_messages_total{msg_type="ddata"} 10.0', exported)
+        self.assertIn('aber_ingestion_messages_total{msg_type="nbirth"} 2.0', exported)
 
     def test_the_flat_total_is_not_exported_beside_the_labelled_series(self):
         """
         `messages_total` is the SUM of the per-type counters. Exporting both would give a scraper
-        two ways to count the same message, and `sum(acs_ingestion_messages_total)` -- the obvious
+        two ways to count the same message, and `sum(aber_ingestion_messages_total)` -- the obvious
         query -- would silently double.
         """
         exported = self.counted(messages_total=12, messages_ddata=12)
-        self.assertNotIn("acs_ingestion_messages_total 12.0", exported)
+        self.assertNotIn("aber_ingestion_messages_total 12.0", exported)
         self.assertEqual(
-            1, len([l for l in exported if l.startswith("acs_ingestion_messages_total")]))
+            1, len([l for l in exported if l.startswith("aber_ingestion_messages_total")]))
         # And it still reads back under its flat name, which is what the STATS log line reports.
         self.assertEqual(12, registry.counter_snapshot()["messages_total"])
 
@@ -230,9 +230,9 @@ class ExpositionTestCase(unittest.TestCase):
         return registry.render()
 
     def test_gauges_are_typed_as_gauges(self):
-        body = self.scraped({("acs_ingestion_db_connected", ()): 0})
-        self.assertIn("# TYPE acs_ingestion_db_connected gauge", body)
-        self.assertIn("acs_ingestion_db_connected 0.0", self.lines(body))
+        body = self.scraped({("aber_ingestion_db_connected", ()): 0})
+        self.assertIn("# TYPE aber_ingestion_db_connected gauge", body)
+        self.assertIn("aber_ingestion_db_connected 0.0", self.lines(body))
 
     def test_a_label_value_cannot_break_the_line(self):
         """
@@ -240,8 +240,8 @@ class ExpositionTestCase(unittest.TestCase):
         the wire, and a quote or backslash in one that reached the body unescaped would take the
         whole scrape with it rather than just that series.
         """
-        registry.count_labelled("acs_ingestion_sequence_gaps_total", {"edge_node": 'a"b\\c'}, 1)
-        self.assertIn('acs_ingestion_sequence_gaps_total{edge_node="a\\"b\\\\c"} 1.0',
+        registry.count_labelled("aber_ingestion_sequence_gaps_total", {"edge_node": 'a"b\\c'}, 1)
+        self.assertIn('aber_ingestion_sequence_gaps_total{edge_node="a\\"b\\\\c"} 1.0',
                       self.lines())
 
     def test_a_labelled_gauge_is_typed_as_a_gauge(self):
@@ -251,14 +251,14 @@ class ExpositionTestCase(unittest.TestCase):
         arrived -- it asks TYPES. A counter that goes down is a scraper reporting a reset, so the
         wrong type here would turn an ordinary eviction into a fabricated spike on every rate().
         """
-        body = self.scraped({("acs_ingestion_cache_entries", (("cache", "device"),)): 17})
-        self.assertIn("# TYPE acs_ingestion_cache_entries gauge", body)
-        self.assertIn('acs_ingestion_cache_entries{cache="device"} 17.0', self.lines(body))
+        body = self.scraped({("aber_ingestion_cache_entries", (("cache", "device"),)): 17})
+        self.assertIn("# TYPE aber_ingestion_cache_entries gauge", body)
+        self.assertIn('aber_ingestion_cache_entries{cache="device"} 17.0', self.lines(body))
 
     def test_the_eviction_counter_stays_a_counter(self):
         # It only ever rises, and "the cap was hit N times" is exactly a rate() question.
-        body = self.scraped({("acs_ingestion_cache_evictions_total", (("cache", "device"),)): 3})
-        self.assertIn("# TYPE acs_ingestion_cache_evictions_total counter", body)
+        body = self.scraped({("aber_ingestion_cache_evictions_total", (("cache", "device"),)): 3})
+        self.assertIn("# TYPE aber_ingestion_cache_evictions_total counter", body)
 
     def test_every_exported_metric_carries_help(self):
         """
@@ -305,7 +305,7 @@ class EndpointTestCase(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn("text/plain", ctype)
         self.assertIn("version=0.0.4", ctype)
-        self.assertIn("acs_ingestion_metrics_written_total 5.0", body)
+        self.assertIn("aber_ingestion_metrics_written_total 5.0", body)
 
     def test_it_needs_no_credential(self):
         # Asserted rather than assumed, because it decides what may ever appear on this endpoint.
@@ -425,11 +425,11 @@ class SequenceGapTestCase(unittest.TestCase):
         self.node = "TestNode"
 
     def gaps(self, node=None):
-        key = ("acs_ingestion_sequence_gaps_total", (("edge_node", node or self.node),))
+        key = ("aber_ingestion_sequence_gaps_total", (("edge_node", node or self.node),))
         return registry.labelled_snapshot().get(key, 0)
 
     def missed(self, node=None):
-        key = ("acs_ingestion_sequence_messages_missed_total", (("edge_node", node or self.node),))
+        key = ("aber_ingestion_sequence_messages_missed_total", (("edge_node", node or self.node),))
         return registry.labelled_snapshot().get(key, 0)
 
     def send(self, seq, msg_type="DDATA"):
@@ -508,9 +508,9 @@ class SequenceGapTestCase(unittest.TestCase):
         self.send(1)
         self.send(5)
         out = registry.render()
-        self.assertIn(f'acs_ingestion_sequence_gaps_total{{edge_node="{self.node}"}} 1.0', out)
+        self.assertIn(f'aber_ingestion_sequence_gaps_total{{edge_node="{self.node}"}} 1.0', out)
         self.assertIn(
-            f'acs_ingestion_sequence_messages_missed_total{{edge_node="{self.node}"}} 3.0', out
+            f'aber_ingestion_sequence_messages_missed_total{{edge_node="{self.node}"}} 3.0', out
         )
 
 
@@ -538,7 +538,7 @@ class WriteLatencyRegistryTestCase(unittest.TestCase):
         so each count includes every bucket below it. The lowest boundary whose count first
         reaches n is the bucket an observation landed in.
         """
-        return registry.histogram_snapshot()["acs_ingestion_write_seconds"]
+        return registry.histogram_snapshot()["aber_ingestion_write_seconds"]
 
     def landed_in(self, nth=1):
         """The boundary at which the cumulative count first reaches `nth`."""
@@ -593,9 +593,9 @@ class WriteLatencyRegistryTestCase(unittest.TestCase):
         self.ing.observe_write_seconds(0.004)
         body = registry.render()
         for boundary in self.ing.WRITE_SECONDS_BUCKETS:
-            self.assertIn(f'acs_ingestion_write_seconds_bucket{{le="{float(boundary)}"}} ', body)
-        self.assertIn('acs_ingestion_write_seconds_bucket{le="0.005"} 1.0', body)
-        self.assertIn("acs_ingestion_write_seconds_count 1.0", body)
+            self.assertIn(f'aber_ingestion_write_seconds_bucket{{le="{float(boundary)}"}} ', body)
+        self.assertIn('aber_ingestion_write_seconds_bucket{le="0.005"} 1.0', body)
+        self.assertIn("aber_ingestion_write_seconds_count 1.0", body)
 
 
 # =================================================================================================
@@ -681,7 +681,7 @@ class DirectoryUnavailableDropTestCase(unittest.TestCase):
         self.ing.process_dbirth("dev-1", "node-a", _Payload(None))
         out = registry.render()
         self.assertIn(
-            'acs_ingestion_messages_dropped_total{reason="dbirth_directory_unavailable"} 1.0',
+            'aber_ingestion_messages_dropped_total{reason="dbirth_directory_unavailable"} 1.0',
             [l for l in out.splitlines() if l and not l.startswith("#")],
         )
 

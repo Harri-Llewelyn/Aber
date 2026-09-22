@@ -840,7 +840,7 @@ export const SUITES = {
     why:
       'THE ONLY CHECK THAT A DROP IS COUNTABLE AND READABLE AT THE SAME TIME. It publishes a ' +
       'DDATA for a randomly generated unregistered device, then asserts BOTH that ' +
-      'acs_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"} increased AND ' +
+      'aber_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"} increased AND ' +
       'that a line carrying that same reason and THAT device id arrived in Loki. Prometheus ' +
       'cannot name the device -- its endpoint is unauthenticated and carries no device data by ' +
       'design -- so this is the assertion that the other half of the instrument exists at all. ' +

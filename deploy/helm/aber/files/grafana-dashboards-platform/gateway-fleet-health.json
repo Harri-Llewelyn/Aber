@@ -1,5 +1,5 @@
 {
-  "uid": "acs-cymru-gateway-health",
+  "uid": "aber-gateway-health",
   "title": "Gateway Fleet Health",
   "description": "Every gateway's condition, and one appliance's in detail. Pick a gateway with the variable above.\n\nTWO DATASOURCES, AND THE SPLIT IS NOT ARBITRARY. The table and the stat tiles read `public.gateway_health` (migration 0036) on the Supabase datasource: it is authoritative, survives a daemon restart, and is what the certificate-expiry alert rule evaluates. The trend panels read labelled gauges the ingestion daemon exports to Prometheus, because the database columns hold a CURRENT VALUE AND NO HISTORY -- migration 0035 says so in its own header -- and \"is the disk filling\" is not answerable from a current value.\n\n`agent_version`, `flow_hash` and the CA expiry deliberately have no Prometheus series: that endpoint needs no credential and is published to the host, so a configuration fingerprint and the date the fleet's trust anchor dies stay in the database. ingestion/metrics.py's header carries the argument.",
   "tags": [
@@ -707,7 +707,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "acs_ingestion_gateway_disk_free_bytes{edge_node=\"$gateway\"}",
+          "expr": "aber_ingestion_gateway_disk_free_bytes{edge_node=\"$gateway\"}",
           "legendFormat": "{{edge_node}}"
         }
       ],
@@ -775,7 +775,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "acs_ingestion_gateway_mem_available_bytes{edge_node=\"$gateway\"}",
+          "expr": "aber_ingestion_gateway_mem_available_bytes{edge_node=\"$gateway\"}",
           "legendFormat": "{{edge_node}}"
         }
       ],
@@ -826,7 +826,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "acs_ingestion_gateway_load1{edge_node=\"$gateway\"}",
+          "expr": "aber_ingestion_gateway_load1{edge_node=\"$gateway\"}",
           "legendFormat": "{{edge_node}}"
         }
       ],
@@ -877,7 +877,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "time() - acs_ingestion_gateway_health_reported_timestamp_seconds{edge_node=\"$gateway\"}",
+          "expr": "time() - aber_ingestion_gateway_health_reported_timestamp_seconds{edge_node=\"$gateway\"}",
           "legendFormat": "{{edge_node}}"
         }
       ],
@@ -945,7 +945,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "acs_ingestion_gateway_clock_offset_seconds{edge_node=\"$gateway\"}",
+          "expr": "aber_ingestion_gateway_clock_offset_seconds{edge_node=\"$gateway\"}",
           "legendFormat": "{{edge_node}}"
         }
       ],

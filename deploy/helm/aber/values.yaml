@@ -370,7 +370,7 @@ databaseMetrics:
   extraArgs: []
   # Per-statement timing from `pg_stat_statements`: calls, total time, rows and block I/O for the
   # busiest statements, which is the ONLY server-side view of how long a write actually took.
-  # `acs_ingestion_write_seconds` measures the same write from the client and cannot tell a slow
+  # `aber_ingestion_write_seconds` measures the same write from the client and cannot tell a slow
   # disk from lock contention from a saturated pool; these series can.
   #
   # ON THE HISTORIAN THIS COSTS ONE POD RESTART, once. `shared_preload_libraries` is a postmaster

@@ -442,7 +442,7 @@ groups:
           summary: >-
             The ingestion daemon has recorded no Sparkplug messages for 10 minutes while devices are
             registered and expected to publish. Telemetry is not reaching the historian. Check the
-            broker connection and acs_ingestion_messages_dropped_total.
+            broker connection and aber_ingestion_messages_dropped_total.
         data:
           - refId: A
             relativeTimeRange:
@@ -460,7 +460,7 @@ groups:
               # an empty result, Grafana reads NoData, and `noDataState: Alerting` would fire before the gate
               # in F ran. A daemon that has gone away also yields vector(0), and with devices registered the
               # rule still fires.
-              expr: sum(rate(acs_ingestion_messages_total[5m])) or vector(0)
+              expr: sum(rate(aber_ingestion_messages_total[5m])) or vector(0)
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -545,7 +545,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: sum by (reason) (rate(acs_ingestion_messages_dropped_total[5m]))
+              expr: sum by (reason) (rate(aber_ingestion_messages_dropped_total[5m]))
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -601,7 +601,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: rate(acs_ingestion_messages_dropped_total{reason="gateway_binding"}[15m])
+              expr: rate(aber_ingestion_messages_dropped_total{reason="gateway_binding"}[15m])
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -662,7 +662,7 @@ groups:
                 type: prometheus
                 uid: prometheus
               expr: >-
-                sum by (reason) (rate(acs_ingestion_messages_dropped_total{reason=~"dbirth_directory_unavailable|node_message_directory_unavailable"}[5m]))
+                sum by (reason) (rate(aber_ingestion_messages_dropped_total{reason=~"dbirth_directory_unavailable|node_message_directory_unavailable"}[5m]))
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -789,7 +789,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: acs_ingestion_db_connected
+              expr: aber_ingestion_db_connected
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -813,7 +813,7 @@ groups:
                 uid: prometheus
               # sum() ACROSS msg_type, as rule 1 does: a daemon receiving only NDATA is still being
               # published to, and this half of the condition asks only whether anything is.
-              expr: sum(rate(acs_ingestion_messages_total[5m])) or vector(0)
+              expr: sum(rate(aber_ingestion_messages_total[5m])) or vector(0)
               instant: true
           - refId: E
             datasourceUid: __expr__
@@ -838,7 +838,7 @@ groups:
       # -------------------------------------------------------------------------------------------
       # 4b. HISTORIAN UNREACHABLE, AND NOTHING PUBLISHING. Not critical: nothing is being lost, but
       # the moment a gateway publishes it becomes rule 4. Read from the recovery loop's own counter
-      # (`acs_ingestion_db_heal_failures_total`), which rises only when the daemon tried to reach the
+      # (`aber_ingestion_db_heal_failures_total`), which rises only when the daemon tried to reach the
       # historian off the message path and could not; a stack that has not written yet cannot produce
       # it. `for: 10m` against a 30s loop: twenty consecutive failures.
       # -------------------------------------------------------------------------------------------
@@ -868,7 +868,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: rate(acs_ingestion_db_heal_failures_total[10m])
+              expr: rate(aber_ingestion_db_heal_failures_total[10m])
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -924,7 +924,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: rate(acs_ingestion_sequence_gaps_total[15m])
+              expr: rate(aber_ingestion_sequence_gaps_total[15m])
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -991,9 +991,9 @@ groups:
                 type: prometheus
                 uid: prometheus
               expr: >-
-                abs(acs_ingestion_gateway_clock_offset_seconds)
+                abs(aber_ingestion_gateway_clock_offset_seconds)
                 and on(edge_node)
-                (time() - acs_ingestion_gateway_clock_measured_timestamp_seconds < 300)
+                (time() - aber_ingestion_gateway_clock_measured_timestamp_seconds < 300)
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -1020,7 +1020,7 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 7. HISTORIAN WRITER SATURATING. rate(acs_ingestion_write_seconds_sum) is the fraction of the
+      # 7. HISTORIAN WRITER SATURATING. rate(aber_ingestion_write_seconds_sum) is the fraction of the
       # writer thread's time spent inside transactions -- its occupancy. Half is the warning: the
       # daemon keeps up, and a burst (a gateway flushing an outage's backlog) or a slower historian
       # is what takes it the rest of the way. Queue depth is deliberately not the trigger: it grows
@@ -1040,7 +1040,7 @@ groups:
           summary: >-
             The ingestion daemon's historian writer has been busy more than half the time for ten
             minutes. Telemetry is still being written; a burst or a slower historian would start it
-            queueing. Read acs_ingestion_write_queue_depth and acs_ingestion_write_seconds beside it.
+            queueing. Read aber_ingestion_write_queue_depth and aber_ingestion_write_seconds beside it.
         data:
           - refId: A
             relativeTimeRange:
@@ -1052,7 +1052,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: sum(rate(acs_ingestion_write_seconds_sum[5m]))
+              expr: sum(rate(aber_ingestion_write_seconds_sum[5m]))
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -1688,7 +1688,7 @@ groups:
       # rather than at the wall.
       #
       # THE DENOMINATOR IS A CUSTOM QUERY, not the exporter's `settings` collector -- that one is
-      # off because it emits a series per GUC. `acs_postgres_max_connections` is the single number
+      # off because it emits a series per GUC. `aber_postgres_max_connections` is the single number
       # that collector was wanted for.
       #
       # `for: 5m` because a connection count is spiky by nature: a rollout opens a pool, a backup
@@ -1724,7 +1724,7 @@ groups:
               expr: >-
                 sum by (job) (pg_stat_activity_count)
                 / on (job)
-                max by (job) (acs_postgres_max_connections)
+                max by (job) (aber_postgres_max_connections)
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -1900,7 +1900,7 @@ groups:
       # AND the procedure, because the id is what `timescaledb_information.jobs` is queried by and
       # the procedure is what tells an operator which policy stopped.
       #
-      # `and on (job_id) acs_historian_job_runs_total` RESTRICTS THIS TO JOBS THAT STILL EXIST, and
+      # `and on (job_id) aber_historian_job_runs_total` RESTRICTS THIS TO JOBS THAT STILL EXIST, and
       # it is not tidiness. TimescaleDB re-creates its policy jobs with NEW IDS every time the
       # maintenance hook runs, which is every helm upgrade -- so the one-hour window accumulates the
       # ids from every upgrade in the last hour. Measured on the dev stack mid-build: 10 jobs
@@ -1940,8 +1940,8 @@ groups:
                 type: prometheus
                 uid: prometheus
               expr: >-
-                sum by (job_id, proc_name) (increase(acs_historian_job_failures_total[1h]))
-                and on (job_id) acs_historian_job_runs_total
+                sum by (job_id, proc_name) (increase(aber_historian_job_failures_total[1h]))
+                and on (job_id) aber_historian_job_runs_total
               instant: true
           - refId: B
             datasourceUid: __expr__

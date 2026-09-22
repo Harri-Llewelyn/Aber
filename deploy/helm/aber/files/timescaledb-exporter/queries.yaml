@@ -11,7 +11,7 @@
 # replacement inside the exporter; if a later version removes it, `sql_exporter` as a second
 # sidecar is the fallback, and these queries move across unchanged.
 #
-# THE TOP-LEVEL KEY IS THE METRIC PREFIX, which is why these are `acs_historian_*` rather than
+# THE TOP-LEVEL KEY IS THE METRIC PREFIX, which is why these are `aber_historian_*` rather than
 # `pg_*`: they are this platform's series, not PostgreSQL's, and the distinction matters when
 # reading a dashboard that draws both. The exporter also appends a `server` label of its own; over
 # loopback that is `127.0.0.1:5432` on both databases, so it identifies nothing and the `job` label
@@ -20,7 +20,7 @@
 # EVERY QUERY HERE READS UNDER pg_monitor ALONE, except the storage footprint, which is a view in
 # `public` and needs its own GRANT -- issued in timescaledb/roles.sql beside the role.
 
-acs_historian_chunks:
+aber_historian_chunks:
   # Per hypertable, because "19 chunks" says nothing without knowing which table they belong to:
   # the raw `telemetry` hypertable and the three rollups age on completely different policies.
   #
@@ -49,7 +49,7 @@ acs_historian_chunks:
         usage: "GAUGE"
         description: "Chunks converted to the columnstore. Compare with count: the gap is what the compression policy has not reached yet"
 
-acs_historian_job:
+aber_historian_job:
   # THE LEFT JOIN IS LOAD-BEARING. A job that has never run has no `job_stats` row at all --
   # `policy_telemetry` (job_id 1) is in exactly that state on a fresh stack -- and an inner join
   # would silently omit it. A policy that has never fired is precisely the one worth seeing.
@@ -81,7 +81,7 @@ acs_historian_job:
         usage: "GAUGE"
         description: "1 if the last run succeeded; 0 if it failed OR if the job has never run (runs_total tells them apart)"
 
-acs_historian_storage:
+aber_historian_storage:
   # `public.storage_footprint` is a point-in-time table read that Grafana already draws over
   # postgres_fdw (0027). Scraping it is what turns it into a GROWTH RATE -- the thing an operator
   # would actually alert on and the input `tier_after_days` should be chosen from, neither of which
@@ -110,7 +110,7 @@ acs_historian_storage:
         usage: "GAUGE"
         description: "Index bytes"
 
-acs_historian_compression:
+aber_historian_compression:
   # A SEPARATE QUERY BECAUSE OF THE NULLs. `uncompressed_bytes` and `compressed_bytes` are null for
   # every relation that is not a compressed hypertable, and coalescing them to 0 would assert a
   # compression ratio of zero for a rollup that simply has no columnstore. Filtering instead means

@@ -301,10 +301,10 @@ class GatewayHealthGaugeTests(unittest.TestCase):
             'uptime_seconds': 4210, 'load_1m': 0.42,
             'mem_available_bytes': 6423183360, 'disk_free_bytes': 52428288000,
         })
-        self.assertEqual(got['acs_ingestion_gateway_uptime_seconds'], 4210)
-        self.assertEqual(got['acs_ingestion_gateway_load1'], 0.42)
-        self.assertEqual(got['acs_ingestion_gateway_mem_available_bytes'], 6423183360)
-        self.assertEqual(got['acs_ingestion_gateway_disk_free_bytes'], 52428288000)
+        self.assertEqual(got['aber_ingestion_gateway_uptime_seconds'], 4210)
+        self.assertEqual(got['aber_ingestion_gateway_load1'], 0.42)
+        self.assertEqual(got['aber_ingestion_gateway_mem_available_bytes'], 6423183360)
+        self.assertEqual(got['aber_ingestion_gateway_disk_free_bytes'], 52428288000)
 
     def test_the_unauthenticated_endpoint_never_sees_the_other_three(self):
         got = self._record({
@@ -318,13 +318,13 @@ class GatewayHealthGaugeTests(unittest.TestCase):
             self.assertNotIn(forbidden, exported)
         self.assertNotIn('1.4.0', [str(v) for v in got.values()])
         # And the one that should be there still is, so this is not passing by exporting nothing.
-        self.assertEqual(got['acs_ingestion_gateway_disk_free_bytes'], 4096)
+        self.assertEqual(got['aber_ingestion_gateway_disk_free_bytes'], 4096)
 
     def test_a_partial_payload_merges_rather_than_zeroing_the_rest(self):
         self._record({'load_1m': 1.5, 'disk_free_bytes': 100})
         got = self._record({'disk_free_bytes': 90})
-        self.assertEqual(got['acs_ingestion_gateway_load1'], 1.5)
-        self.assertEqual(got['acs_ingestion_gateway_disk_free_bytes'], 90)
+        self.assertEqual(got['aber_ingestion_gateway_load1'], 1.5)
+        self.assertEqual(got['aber_ingestion_gateway_disk_free_bytes'], 90)
 
     def test_the_reported_timestamp_moves_with_every_recognised_payload(self):
         from datetime import datetime, timedelta, timezone
@@ -341,24 +341,24 @@ class GatewayHealthGaugeTests(unittest.TestCase):
         # not a shape restated in the test.
         registry.set_scrape_time_source(ingestion.scrape_time_series)
         text = registry.render()
-        self.assertIn('# TYPE acs_ingestion_gateway_disk_free_bytes gauge', text)
+        self.assertIn('# TYPE aber_ingestion_gateway_disk_free_bytes gauge', text)
         self.assertIn(
-            'acs_ingestion_gateway_disk_free_bytes{edge_node="%s"} 5.2428288e+10' % NODE, text)
+            'aber_ingestion_gateway_disk_free_bytes{edge_node="%s"} 5.2428288e+10' % NODE, text)
         # A metric with no TYPES entry renders as a counter, which for a disk figure would be
         # wrong in a way only a rate() query would reveal.
-        self.assertNotIn('# TYPE acs_ingestion_gateway_disk_free_bytes counter', text)
+        self.assertNotIn('# TYPE aber_ingestion_gateway_disk_free_bytes counter', text)
 
     def test_the_rejection_counter_is_mapped(self):
         # An unmapped counter still reaches a scraper, but as
-        # acs_ingestion_unmapped_counter_total{counter="..."} -- which no dashboard or alert would
+        # aber_ingestion_unmapped_counter_total{counter="..."} -- which no dashboard or alert would
         # be written against. This is the assertion that it was named properly.
         registry.reset()
         registry.count('gateway_health_metrics_rejected', 3)
         text = registry.render()
-        self.assertIn('acs_ingestion_gateway_health_rejected_total 3.0', text)
+        self.assertIn('aber_ingestion_gateway_health_rejected_total 3.0', text)
         for line in text.split('\n'):
             if line and not line.startswith('#'):
-                self.assertFalse(line.startswith('acs_ingestion_unmapped_counter_total'), line)
+                self.assertFalse(line.startswith('aber_ingestion_unmapped_counter_total'), line)
 
 
 if __name__ == "__main__":
