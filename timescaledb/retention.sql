@@ -18,8 +18,8 @@
 
 -- Hand the psql variables to PL/pgSQL through GUCs: psql interpolates `:'var'` while lexing and
 -- does not descend into dollar-quoted strings.
-SELECT set_config('acs_cymru.compress_after', :'compress_after', false);
-SELECT set_config('acs_cymru.retain_after',   :'retain_after',   false);
+SELECT set_config('aber.compress_after', :'compress_after', false);
+SELECT set_config('aber.retain_after',   :'retain_after',   false);
 
 DO $$
 DECLARE
@@ -28,8 +28,8 @@ DECLARE
   -- one would take the boot down over a synonym.
   disabled  CONSTANT text[] := ARRAY['never', 'off', 'disabled', 'none', 'false', '0'];
 
-  raw_compress text := btrim(coalesce(current_setting('acs_cymru.compress_after', true), ''));
-  raw_retain   text := btrim(coalesce(current_setting('acs_cymru.retain_after',   true), ''));
+  raw_compress text := btrim(coalesce(current_setting('aber.compress_after', true), ''));
+  raw_retain   text := btrim(coalesce(current_setting('aber.retain_after',   true), ''));
 
   v_compress interval;
   v_retain   interval;

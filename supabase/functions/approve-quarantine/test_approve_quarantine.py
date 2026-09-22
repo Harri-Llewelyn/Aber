@@ -270,7 +270,7 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         approval and merge is logged with changed_by = NULL.
         """
         self.assertIn("p_actor_id: user.id", self.source)
-        self.assertIn("acs_cymru.actor_id", self.rpc_sql)
+        self.assertIn("aber.actor_id", self.rpc_sql)
 
     def test_the_merge_is_a_single_atomic_call(self):
         """

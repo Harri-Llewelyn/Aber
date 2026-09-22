@@ -41,7 +41,7 @@ DEVICE_ROWS = [
         "status": "ONLINE",
         "is_quarantined": False,
         "gateway_id": "gggggggg-0000-4000-8000-000000000001",
-        "gateways": {"sparkplug_id": "gwygggggggg000040008000", "sparkplug_group": "ACS-Cymru"},
+        "gateways": {"sparkplug_id": "gwygggggggg000040008000", "sparkplug_group": "Aber"},
     },
     {
         # Unbound AND quarantined: the two shapes the projection has an opinion about.
@@ -208,7 +208,7 @@ class TheProjection(unittest.TestCase):
     def test_a_bound_device_reports_its_full_address(self):
         entry = documents()["device"]["devices"][0]
         self.assertEqual(entry["address"], {
-            "group_id": "ACS-Cymru",
+            "group_id": "Aber",
             "node_id": "gwygggggggg000040008000",
             "device_id": "devdddddddd000040008000",
         })

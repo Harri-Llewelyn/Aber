@@ -401,7 +401,7 @@ class TestTheCaps(ProposalCase):
     def test_a_decided_proposal_stops_blocking_the_next_one(self):
         proposal = self.propose({"name": "first"})
         as_owner(self.cur)
-        self.cur.execute("SELECT set_config('acs_cymru.proposal_transition','on',true);")
+        self.cur.execute("SELECT set_config('aber.proposal_transition','on',true);")
         self.cur.execute(
             "UPDATE public.change_proposals SET status='rejected', decided_by=%s, "
             "decided_at=now(), decision_reason='not this week' WHERE id=%s;", (MANAGER, proposal))
@@ -1138,7 +1138,7 @@ class TestTheTimer(ProposalCase):
     def test_an_old_open_proposal_expires(self):
         proposal = self.propose({"name": "forgotten"})
         as_owner(self.cur)
-        self.cur.execute("SELECT set_config('acs_cymru.proposal_transition','on',true);")
+        self.cur.execute("SELECT set_config('aber.proposal_transition','on',true);")
         self.cur.execute(
             "UPDATE public.change_proposals SET proposed_at = now() - interval '30 days' "
             " WHERE id = %s;", (proposal,))
@@ -1164,7 +1164,7 @@ class TestTheTimer(ProposalCase):
     def test_the_expiry_declares_service_and_names_no_user(self):
         proposal = self.propose({"name": "forgotten"})
         as_owner(self.cur)
-        self.cur.execute("SELECT set_config('acs_cymru.proposal_transition','on',true);")
+        self.cur.execute("SELECT set_config('aber.proposal_transition','on',true);")
         self.cur.execute(
             "UPDATE public.change_proposals SET proposed_at = now() - interval '30 days' "
             " WHERE id = %s;", (proposal,))
@@ -1189,7 +1189,7 @@ class TestTheQueueStopsGrowing(ProposalCase):
     def test_an_old_decided_proposal_is_pruned(self):
         proposal = self.propose({"name": "long ago"})
         as_owner(self.cur)
-        self.cur.execute("SELECT set_config('acs_cymru.proposal_transition','on',true);")
+        self.cur.execute("SELECT set_config('aber.proposal_transition','on',true);")
         self.cur.execute(
             "UPDATE public.change_proposals SET status='withdrawn', decided_by=%s, "
             " decided_at = now() - interval '400 days' WHERE id = %s;", (OPERATOR, proposal))
@@ -1202,7 +1202,7 @@ class TestTheQueueStopsGrowing(ProposalCase):
         # proposal nobody had answered, which is not the same event at all.
         proposal = self.propose({"name": "still waiting"})
         as_owner(self.cur)
-        self.cur.execute("SELECT set_config('acs_cymru.proposal_transition','on',true);")
+        self.cur.execute("SELECT set_config('aber.proposal_transition','on',true);")
         self.cur.execute(
             "UPDATE public.change_proposals SET proposed_at = now() - interval '400 days' "
             " WHERE id = %s;", (proposal,))

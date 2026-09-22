@@ -55,7 +55,7 @@ if _is_stub:
     sys.modules["sparkplug_b_pb2"] = _installed
 
 
-GROUP = "ACS-Cymru"
+GROUP = "Aber"
 GWY = "gwy120000000000400080000"
 DEV = "dev270000000000400080000"
 OTHER_DEV = "dev990000000000400080000"

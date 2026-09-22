@@ -213,7 +213,7 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
         self.assertIsNone(device["last_birth_metrics"])
 
 
-GROUP = "ACS-Cymru"
+GROUP = "Aber"
 NODE_A = "gwy" + "a" * 21
 NODE_B = "gwy" + "b" * 21
 

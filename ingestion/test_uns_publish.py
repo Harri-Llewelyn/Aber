@@ -101,7 +101,7 @@ class Counters:
         self.values[name] = self.values.get(name, 0) + n
 
 
-def publish(client, supabase, rows=None, enabled=True, counters=None, group="ACS-Cymru"):
+def publish(client, supabase, rows=None, enabled=True, counters=None, group="Aber"):
     uns_publish.reset_cache()
     rows = rows if rows is not None else [(AT, "devdddddddd000040008000", "Spindle/Speed", 1200.0, None, None)]
     return uns_publish.publish_ddata(
@@ -116,7 +116,7 @@ class TopicShape(unittest.TestCase):
         n = publish(client, supabase_with("inherited", cell="Bay 1", area="Building A"))
         self.assertEqual(n, 1)
         topic, body, qos, retain = client.published[0]
-        self.assertEqual(topic, "uns/ACS-Cymru/Cardiff/Building A/Bay 1/CNC_01/Spindle/Speed")
+        self.assertEqual(topic, "uns/Aber/Cardiff/Building A/Bay 1/CNC_01/Spindle/Speed")
         self.assertEqual(body["value"], 1200.0)
         self.assertEqual(body["units"], "rpm")
         self.assertEqual(body["name"], "Spindle/Speed")
@@ -127,12 +127,12 @@ class TopicShape(unittest.TestCase):
     def test_an_area_wide_device_skips_the_cell_level(self):
         client = FakeClient()
         publish(client, supabase_with("area_wide", area="Building A"))
-        self.assertEqual(client.published[0][0], "uns/ACS-Cymru/Cardiff/Building A/CNC_01/Spindle/Speed")
+        self.assertEqual(client.published[0][0], "uns/Aber/Cardiff/Building A/CNC_01/Spindle/Speed")
 
     def test_a_site_wide_device_sits_directly_under_the_site(self):
         client = FakeClient()
         publish(client, supabase_with("site_wide"))
-        self.assertEqual(client.published[0][0], "uns/ACS-Cymru/Cardiff/CNC_01/Spindle/Speed")
+        self.assertEqual(client.published[0][0], "uns/Aber/Cardiff/CNC_01/Spindle/Speed")
 
     def test_the_enterprise_is_the_sparkplug_group_of_the_message(self):
         client = FakeClient()
@@ -235,7 +235,7 @@ class Defaults(unittest.TestCase):
         client = FakeClient()
         publish(client, supabase)
         reads_after_first = len(supabase.reads)
-        uns_publish.publish_ddata(client, supabase, {"id": DEVICE_ID, "name": "CNC_01"}, "ACS-Cymru",
+        uns_publish.publish_ddata(client, supabase, {"id": DEVICE_ID, "name": "CNC_01"}, "Aber",
                                   [(AT, "dev", "Spindle/Speed", 2.0, None, None)], enabled=True)
         self.assertEqual(len(supabase.reads), reads_after_first)
         self.assertEqual(len(client.published), 2)

@@ -86,7 +86,7 @@ NOW = 1_800_000_000_000    # playback's
 
 
 def message(offset_ms, msg_type, device=CAPTURED_DEV, metrics=None, **payload):
-    topic = "spBv1.0/ACS-Cymru/%s/%s" % (msg_type, CAPTURED_GW)
+    topic = "spBv1.0/Aber/%s/%s" % (msg_type, CAPTURED_GW)
     if device:
         topic += "/" + device
     body = {"timestamp": EPOCH + offset_ms, "metrics": metrics or []}
@@ -192,23 +192,23 @@ class IdentityRewriteTests(unittest.TestCase):
     def test_the_edge_node_segment_becomes_the_playback_gateway(self):
         # FAILURE 1. Without this the broker discards every publish and says nothing.
         topic, _ = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             {"metrics": []}, GW, DEFAULT_MAP,
         )
-        self.assertEqual(topic, "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (GW, DEV_A))
+        self.assertEqual(topic, "spBv1.0/Aber/DDATA/%s/%s" % (GW, DEV_A))
 
     def test_a_node_topic_keeps_its_four_segments(self):
         # NBIRTH/NDATA/NDEATH carry no device. Appending one would make process_node_message()
         # unreachable for the capture's gateway heartbeats.
         topic, _ = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/NBIRTH/%s" % CAPTURED_GW, {"metrics": []}, GW, {},
+            "spBv1.0/Aber/NBIRTH/%s" % CAPTURED_GW, {"metrics": []}, GW, {},
         )
-        self.assertEqual(topic, "spBv1.0/ACS-Cymru/NBIRTH/%s" % GW)
+        self.assertEqual(topic, "spBv1.0/Aber/NBIRTH/%s" % GW)
 
     def test_the_asset_id_claim_is_rewritten_with_the_topic(self):
         # FAILURE 2. A topic and a claim that disagree is the definition of a faulty identity.
         _, payload = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             {"metrics": [{"name": "Asset_ID", "string_value": CAPTURED_DEV}]},
             GW, DEFAULT_MAP,
         )
@@ -218,7 +218,7 @@ class IdentityRewriteTests(unittest.TestCase):
         # An optimised gateway does not repeat identity on every message; the topic is the only
         # identity available. Adding one would make playback unrepresentative of real traffic.
         _, payload = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             {"metrics": [{"alias": 3, "double_value": 20.0}]}, GW, DEFAULT_MAP,
         )
         self.assertEqual(len(payload["metrics"]), 1)
@@ -229,7 +229,7 @@ class IdentityRewriteTests(unittest.TestCase):
         # by the broker, silently. Refusing names the device that needs a --map.
         with self.assertRaises(capture.CaptureError) as ctx:
             capture.rewrite_identity(
-                "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                "spBv1.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
                 {"metrics": []}, GW, {},
             )
         self.assertIn(CAPTURED_DEV, str(ctx.exception))
@@ -238,7 +238,7 @@ class IdentityRewriteTests(unittest.TestCase):
         # Replaying one capture at two speeds must not have the first run edit the second's source.
         source = {"metrics": [{"name": "Asset_ID", "string_value": CAPTURED_DEV}]}
         capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             source, GW, DEFAULT_MAP,
         )
         self.assertEqual(source["metrics"][0]["string_value"], CAPTURED_DEV)

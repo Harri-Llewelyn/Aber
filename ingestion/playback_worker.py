@@ -201,7 +201,7 @@ def _supabase():
     # ingestion.py records at length that setting the session header instead silently sends the
     # gateway key. The storage client is built separately below for exactly that reason.
     client.postgrest.auth(SUPABASE_PLAYBACK_KEY)
-    client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "playback"
+    client.postgrest.session.headers["X-Aber-Actor"] = "playback"
     return client
 
 

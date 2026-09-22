@@ -503,6 +503,14 @@ differs from the stored one **aborts db-init** rather than quietly re-pointing t
 Passing no `sparkplug_group` is not a mismatch: the migration falls back to the same default the
 chart ships, which is what leaves the throwaway database and the CI lanes unaffected.
 
+**The default moved with the platform's name at 1.0 (`0003`).** A stack installed before then holds
+`ACS-Cymru` in the setting and in every gateway row that took the default. That one pair — stored
+`ACS-Cymru`, chart `Aber` — is the rename rather than a disagreement, so `0002`'s check lets it
+through and `0003` moves the setting and those rows on the same boot, and only those: a site that
+pinned `ingestion.sparkplugGroup: ACS-Cymru` keeps it, and a gateway on some other group keeps that.
+The physical gateways are re-pointed by hand, as the last move (archived `0015`) required, and the
+order of operations is in [`docs/upgrades.md`](../docs/upgrades.md).
+
 #### Changing it deliberately
 
 There is no supported in-place change, and the procedure below is a fleet reconfiguration rather
@@ -1209,7 +1217,7 @@ guarantee and matches no rows on a settled database.
 carries no `sub` — so **every privileged write used to be logged anonymously** (58 of 65 rows on
 the audited database had `changed_by IS NULL`).
 
-`log_digital_thread_event()` now falls back to a session-local GUC, `acs_cymru.actor_id`, which
+`log_digital_thread_event()` now falls back to a session-local GUC, `aber.actor_id`, which
 `approve_quarantined_device()` sets with `SET LOCAL`. `auth.uid()` still wins when present — a
 direct PostgREST write by a signed-in user is already correctly attributed, and the GUC must not be
 able to override it.
@@ -1223,7 +1231,7 @@ action, silently, with no sign but a `changed_by` uuid belonging to nobody who w
 
 `is_machine_principal()` decides it, reusing `0042`'s predicate unchanged — no email, no password,
 no `auth.identities` row — because a second definition of "is this a service account" would be worse
-than the bug. A machine falls through to the `X-ACS-Cymru-Actor` header path and is recorded as what
+than the bug. A machine falls through to the `X-Aber-Actor` header path and is recorded as what
 it is, while `changed_by` still receives the principal. The row improved as well as being corrected:
 an ingestion write records `'ingestion'` **and** names the identity, where it used to record
 `'ingestion'` and `NULL`.
@@ -1587,8 +1595,8 @@ not have failed at write time but at `CREATE TRIGGER` time. That is the same sha
 `log_role_assignment()` a separate function for `user_roles`, whose key is `(user_id, role_id)`.
 
 **A third copy of the attribution ladder was the obvious move and the wrong one.** That ladder is
-eighty lines deciding who a caller is — `auth.uid()`, then `acs_cymru.actor_id`, then the
-`X-ACS-Cymru-Actor` header, then the effective role — and the copy that already exists carries a
+eighty lines deciding who a caller is — `auth.uid()`, then `aber.actor_id`, then the
+`X-Aber-Actor` header, then the effective role — and the copy that already exists carries a
 deliberately reduced version that has to be kept in step by hand. `0122` makes the key column a
 trigger argument instead, defaulting to `id`, so the seven triggers already attached are untouched
 and a table keyed differently needs a trigger rather than a function.
@@ -2985,7 +2993,7 @@ control".
 **`status` is not writable through PostgREST at all.** An UPDATE policy can say who may write a
 row; it cannot say which columns, and a proposer who could set `applied` would hold the asset write
 the design exists to withhold. So the transition functions declare themselves with a session flag —
-the same mechanism `acs_cymru.actor_id` uses — and a trigger refuses every other path. A proposer
+the same mechanism `aber.actor_id` uses — and a trigger refuses every other path. A proposer
 may edit the `patch` and `rationale` of their own open row, which the caps make necessary rather
 than convenient: told "you already have an open proposal on this device", they have to be able to
 open it and add to it.

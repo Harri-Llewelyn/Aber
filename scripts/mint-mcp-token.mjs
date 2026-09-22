@@ -169,7 +169,7 @@ try {
       // trigger accepts only ingestion/service/migration from this header -- never 'user' -- and
       // 0043 pins its own value regardless, so this is provenance for the request log rather than
       // something the row depends on.
-      'X-ACS-Cymru-Actor': 'service',
+      'X-Aber-Actor': 'service',
     },
     body: JSON.stringify({
       p_principal_id: SUBJECT,

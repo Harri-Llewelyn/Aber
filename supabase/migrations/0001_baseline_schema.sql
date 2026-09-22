@@ -166,7 +166,7 @@ CREATE USER MAPPING FOR PUBLIC
 
 -- Staged through a GUC: psql substitutes :variables while lexing and does NOT descend into
 -- dollar-quoted blocks, so a :'bi_reader_password' inside the DO below would never be replaced.
-SELECT set_config('acs_cymru.bi_reader_password', :'bi_reader_password', false);
+SELECT set_config('aber.bi_reader_password', :'bi_reader_password', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- 3a. Default privileges, narrowed BEFORE anything is created
@@ -183,7 +183,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON FUNCTI
 
 DO $roles$
 DECLARE
-    v_password text := btrim(coalesce(current_setting('acs_cymru.bi_reader_password', true), ''));
+    v_password text := btrim(coalesce(current_setting('aber.bi_reader_password', true), ''));
     v_role     CONSTANT text := 'grafana_reader';
 BEGIN
     IF v_password = '' THEN
@@ -370,7 +370,7 @@ BEGIN
 
     -- Attribute every trigger-written audit row in this transaction to the approver. SET LOCAL,
     -- so it is discarded at COMMIT.
-    PERFORM set_config('acs_cymru.actor_id', v_actor::text, true);
+    PERFORM set_config('aber.actor_id', v_actor::text, true);
 
     IF v_proposal.entity_type = 'devices' THEN
         SELECT * INTO v_device FROM public.devices
@@ -512,7 +512,7 @@ BEGIN
     )
     RETURNING id INTO v_thread;
 
-    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+    PERFORM set_config('aber.proposal_transition', 'on', true);
 
     UPDATE public.change_proposals
        SET status = 'applied', decided_by = v_actor, decided_at = now(),
@@ -563,7 +563,7 @@ BEGIN
 
   -- Attribute every trigger-written audit row in this transaction to the operator. SET LOCAL, so
   -- it is discarded at COMMIT and cannot bleed into the connection's next user.
-  PERFORM set_config('acs_cymru.actor_id', p_actor_id::text, true);
+  PERFORM set_config('aber.actor_id', p_actor_id::text, true);
 
   SELECT * INTO v_quarantined FROM public.devices WHERE id = p_device_id FOR UPDATE;
   IF NOT FOUND THEN
@@ -2105,7 +2105,7 @@ BEGIN
 
     -- Attributes the audit row this DELETE fires to the person who asked for it. SET LOCAL, so it
     -- is discarded at COMMIT and cannot bleed into the connection's next user.
-    PERFORM set_config('acs_cymru.actor_id', v_actor::text, true);
+    PERFORM set_config('aber.actor_id', v_actor::text, true);
 
     DELETE FROM public.schemas WHERE id = p_schema_id;
 
@@ -2165,7 +2165,7 @@ BEGIN
           'Authorization',
           'Bearer ' || extensions.sign(
             json_build_object(
-              'iss',   'acs-cymru-supabase',
+              'iss',   'aber-supabase',
               'aud',   'node-red-hooks',
               'sub',   'webhook:device.quarantined',
               'scope', 'hooks:quarantine',
@@ -2697,7 +2697,7 @@ BEGIN
     -- expiry would stop silently, which is the failure mode the floor exists to prevent.
     v_days := COALESCE(v_days, 7);
 
-    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+    PERFORM set_config('aber.proposal_transition', 'on', true);
 
     FOR v_row IN
         UPDATE public.change_proposals
@@ -2836,7 +2836,7 @@ CREATE OR REPLACE FUNCTION public.sparkplug_group_default() RETURNS text
     AS $$
     SELECT coalesce(
         (SELECT value #>> '{}' FROM public.system_settings WHERE key = 'sparkplug.group_id'),
-        'ACS-Cymru'
+        'Aber'
     );
 $$;
 
@@ -3454,7 +3454,7 @@ CREATE OR REPLACE FUNCTION public.guard_change_proposal_transition() RETURNS tri
     SET search_path TO 'public'
     AS $$
 BEGIN
-    IF COALESCE(current_setting('acs_cymru.proposal_transition', true), '') = 'on' THEN
+    IF COALESCE(current_setting('aber.proposal_transition', true), '') = 'on' THEN
         RETURN NEW;
     END IF;
 
@@ -4689,7 +4689,7 @@ BEGIN
         -- approve-quarantine path, where the request arrives on the service-role key but a
         -- specific operator authorised it. See 0003.
         BEGIN
-            v_actor := NULLIF(current_setting('acs_cymru.actor_id', true), '')::UUID;
+            v_actor := NULLIF(current_setting('aber.actor_id', true), '')::UUID;
         EXCEPTION WHEN others THEN
             v_actor := NULL;
         END;
@@ -4704,12 +4704,12 @@ BEGIN
     IF v_actor IS NOT NULL AND NOT public.is_machine_principal(v_actor) THEN
         v_source := 'user';
     ELSE
-        -- A caller may declare itself with an `X-ACS-Cymru-Actor` request header, which PostgREST
+        -- A caller may declare itself with an `X-Aber-Actor` request header, which PostgREST
         -- exposes as request.headers. That is how the ingestion daemon is told apart from an edge
         -- function; the branch above declines to read a machine's `sub` as evidence of a person.
         BEGIN
             v_declared := NULLIF(
-                current_setting('request.headers', true)::json ->> 'x-acs-cymru-actor', ''
+                current_setting('request.headers', true)::json ->> 'x-aber-actor', ''
             );
         EXCEPTION WHEN others THEN
             v_declared := NULL;
@@ -4756,7 +4756,7 @@ ALTER FUNCTION public.log_digital_thread_event() OWNER TO postgres;
 --
 
 -- FUNCTION log_digital_thread_event() :: COMMENT
-COMMENT ON FUNCTION public.log_digital_thread_event() IS 'AFTER trigger that appends to digital_thread. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names (0100). The entity id is read from the column named in the trigger argument, defaulting to `id` -- 0122, for device_nameplate, which is keyed by device_id. Attribution is auth.uid(), then acs_cymru.actor_id, then the X-ACS-Cymru-Actor header, then the effective role.';
+COMMENT ON FUNCTION public.log_digital_thread_event() IS 'AFTER trigger that appends to digital_thread. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names (0100). The entity id is read from the column named in the trigger argument, defaulting to `id` -- 0122, for device_nameplate, which is keyed by device_id. Attribution is auth.uid(), then aber.actor_id, then the X-Aber-Actor header, then the effective role.';
 
 --
 
@@ -6013,7 +6013,7 @@ BEGIN
     v_actor := auth.uid();
     IF v_actor IS NULL THEN
         BEGIN
-            v_actor := NULLIF(current_setting('acs_cymru.actor_id', true), '')::uuid;
+            v_actor := NULLIF(current_setting('aber.actor_id', true), '')::uuid;
         EXCEPTION WHEN others THEN
             v_actor := NULL;
         END;
@@ -6687,7 +6687,7 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+    PERFORM set_config('aber.proposal_transition', 'on', true);
 
     UPDATE public.change_proposals
        SET status = 'rejected', decided_by = v_actor, decided_at = now(),
@@ -8498,7 +8498,7 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+    PERFORM set_config('aber.proposal_transition', 'on', true);
 
     UPDATE public.change_proposals
        SET status = 'withdrawn', decided_by = auth.uid(), decided_at = now()

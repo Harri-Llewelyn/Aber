@@ -473,11 +473,11 @@ See README.md for the rest, including what to do if the token has expired.
         "Content-Disposition": `attachment; filename="${filename}"`,
         // A binary body has nowhere to carry these. Separate headers rather than one JSON blob so a
         // caller can read the expiry without parsing anything -- the UI shows it as a countdown.
-        "X-ACS-Token-Expires-At": record.expires_at,
-        "X-ACS-Bundle-Version": BUNDLE_VERSION,
-        "X-ACS-Sparkplug-Id": gateway.sparkplug_id,
+        "X-Aber-Token-Expires-At": record.expires_at,
+        "X-Aber-Bundle-Version": BUNDLE_VERSION,
+        "X-Aber-Sparkplug-Id": gateway.sparkplug_id,
         "Access-Control-Expose-Headers":
-          "X-ACS-Token-Expires-At, X-ACS-Bundle-Version, X-ACS-Sparkplug-Id, Content-Disposition",
+          "X-Aber-Token-Expires-At, X-Aber-Bundle-Version, X-Aber-Sparkplug-Id, Content-Disposition",
         // Never cached anywhere: the body carries a single-use claim.
         "Cache-Control": "no-store",
       },

@@ -46,6 +46,23 @@ Four things about that command:
   the old release (the claims survive by policy), install `aber` into a fresh namespace, and restore
   from the backup. The same wall stood between `factoryplus` and `acs-cymru` (issue #367).
 
+### What 1.0 renames, and what each rename asks of a site
+
+1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/335)).
+Tiers 1 and 2 were prose and the chart; this is the third tier, the identifiers that exist outside
+the repository. Each row is a value a site already holds somewhere, and the right-hand column is
+what the site does about it. Nothing here is undone by `helm upgrade`, because there is no upgrade
+path from `acs-cymru` to `aber` in the first place: a 0.1.0 stack reaches 1.0 by backup, uninstall,
+install and restore, and the restored database is what the rows below meet.
+
+| Was | Is | What a site does |
+| :--- | :--- | :--- |
+| Sparkplug group `ACS-Cymru` (the chart default, the seeded `sparkplug.group_id` setting, every gateway row that took the default) | `Aber` | Nothing in the database: `0003` moves the setting and those rows on the first boot, and only where the old default still stands. A site that pinned `ingestion.sparkplugGroup: ACS-Cymru` keeps it. **Each physical gateway must be re-pointed**, because the group is chosen by whatever publishes: its messages quarantine (never discard) until it publishes on the new group. Re-point first, or approve afterwards, as the archived `0015` says of the last move. |
+| Custom-settings prefix `acs_cymru.*` (`acs_cymru.actor_id`, `.proposal_transition`, the psql-fed secrets) | `aber.*` | Nothing. It is session state inside the migrations and the maintenance scripts; nothing persists it. A direct SQL caller that set `acs_cymru.actor_id` itself sets `aber.actor_id`. |
+| Request header `X-ACS-Cymru-Actor` | `X-Aber-Actor` | Nothing for the stack's own callers; they ship together. A script of your own that declared itself with the header sends the new name, or its writes are attributed as `service`. |
+| Response headers `X-ACS-Bundle-Version`, `X-ACS-Sparkplug-Id`, `X-ACS-Token-Expires-At` | `X-Aber-…` | Nothing; only the dashboard reads them. |
+| JWT issuer `acs-cymru-supabase` (the quarantine webhook token) and the Node-RED break-glass user `acs-cymru-break-glass` | `aber-supabase`, `aber-break-glass` | Nothing. The token is minted per call and verified by the Node-RED the same release ships. |
+
 Everything below is what that one command does and does not disturb.
 
 ---

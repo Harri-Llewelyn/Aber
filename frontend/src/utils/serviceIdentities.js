@@ -19,7 +19,7 @@ export const BROKER_PRINCIPALS = [
     role: 'ingestion',
     purpose: 'The ingestion daemon. Reads every Sparkplug topic, is the only principal that may '
       + 'publish a command, and is the only writer of the Directory and the Unified Namespace.',
-    // Every write is narrow: NCMD is how a rebirth is requested, `ACS-Cymru/Directory/#` is the
+    // Every write is narrow: NCMD is how a rebirth is requested, `Aber/Directory/#` is the
     // Directory's MQTT half (off unless DIRECTORY_MQTT_ENABLED) and `uns/#` is the Unified
     // Namespace (off unless UNS_MQTT_ENABLED). Neither tree is readable by any gateway: the
     // Directory would enumerate the site, and the UNS would hand one credential every machine's

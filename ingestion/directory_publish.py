@@ -114,7 +114,7 @@ DIRECTORY_MQTT_ENABLED = os.getenv("DIRECTORY_MQTT_ENABLED", "").strip().lower()
 # rendered string.
 DIRECTORY_MQTT_TOPIC_PREFIX = os.getenv(
     "DIRECTORY_MQTT_TOPIC_PREFIX",
-    "%s/Directory/v1" % os.getenv("SPARKPLUG_GROUP", "ACS-Cymru"),
+    "%s/Directory/v1" % os.getenv("SPARKPLUG_GROUP", "Aber"),
 ).strip().rstrip("/")
 
 DIRECTORY_MQTT_INTERVAL_SECONDS = int(os.getenv("DIRECTORY_MQTT_INTERVAL_SECONDS", "60"))

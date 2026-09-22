@@ -161,7 +161,7 @@ try:
             # token on every request, so a header set by hand is silently replaced by the gateway key.
             # The apikey stays the gateway key; the bearer is what resolves auth.uid() to Service_Ingestor.
             supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)
-            supabase_client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "ingestion"
+            supabase_client.postgrest.session.headers["X-Aber-Actor"] = "ingestion"
         except Exception as header_err:
             # Losing the label is not worth losing ingestion over: without it the trigger falls
             # back to 'service', which is still attributed, just less specific.
@@ -366,7 +366,7 @@ FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 # is also what gateways.sparkplug_group defaults to. Used only to describe the fallback in a log
 # line; resolution never assumes it -- a gateway is resolved on the (group, node) pair its own row
 # carries.
-DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "ACS-Cymru")
+DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
 
 class DirectoryUnavailable(Exception):
     """

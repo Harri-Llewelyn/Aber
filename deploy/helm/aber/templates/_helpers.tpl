@@ -140,13 +140,14 @@ segment of its Unified Namespace. Fixed at install -- `0131` seeds it into the `
 setting on the first boot and refuses a later value that differs, because changing it re-addresses
 every gateway rather than changing a preference.
 
-UNLIKE primaryHostId, THIS HAS A DEFAULT. An install that predates the key has published under
-`ACS-Cymru` since its first message, and rendering must go on producing that for it.
+UNLIKE primaryHostId, THIS HAS A DEFAULT, `Aber`. A stack installed before 1.0 holds `ACS-Cymru`,
+the platform's former name; 0003 moves it to `Aber` on the first boot under this chart, so
+rendering the default for it is the rename, not a disagreement.
 */}}
 {{- define "aber.sparkplugGroup" -}}
 {{- $g := .Values.ingestion.sparkplugGroup | default "" -}}
 {{- if not $g -}}
-{{- fail "\n\naber: ingestion.sparkplugGroup is empty.\n\nIt is the Sparkplug group id -- the second segment of every topic this site publishes. Leave the\nkey out to take the default (ACS-Cymru), or name the site's own group:\n\n  --set ingestion.sparkplugGroup=<the group this plant publishes under>\n\nOne topic level: no '/', '+', '#' or whitespace.\n" -}}
+{{- fail "\n\naber: ingestion.sparkplugGroup is empty.\n\nIt is the Sparkplug group id -- the second segment of every topic this site publishes. Leave the\nkey out to take the default (Aber), or name the site's own group:\n\n  --set ingestion.sparkplugGroup=<the group this plant publishes under>\n\nOne topic level: no '/', '+', '#' or whitespace.\n" -}}
 {{- end -}}
 {{- if regexMatch "[/+#[:space:]]" $g -}}
 {{- fail (printf "\n\naber: ingestion.sparkplugGroup is %q, which is not one topic level.\n\nThe group is one segment of `spBv1.0/<group>/<TYPE>/<node>`, and the broker's Directory grant is\nderived from it. A value containing '/', '+', '#' or whitespace addresses a subtree nothing grants,\nand the broker drops the publish silently at QoS 0.\n" $g) -}}

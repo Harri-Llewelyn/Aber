@@ -54,7 +54,7 @@ def rest(path, method="GET", body=None, bearer=None, prefer=None):
             "apikey": PUBLISHABLE_KEY,
             "Authorization": f"Bearer {bearer or SERVICE_ROLE_KEY}",
             "Content-Type": "application/json",
-            "X-ACS-Cymru-Actor": "service",
+            "X-Aber-Actor": "service",
             **({"Prefer": prefer} if prefer else {}),
         },
     )
@@ -303,8 +303,8 @@ class TestArchiveIntegrity(BundleBase):
         # A bundle carries a live claim; nothing may keep a copy.
         self.assertIn("no-store", self.headers["cache-control"])
         # The expiry rides in a header because a binary body has nowhere to carry it.
-        self.assertIn("x-acs-token-expires-at", self.headers)
-        self.assertIn("x-acs-bundle-version", self.headers)
+        self.assertIn("x-aber-token-expires-at", self.headers)
+        self.assertIn("x-aber-bundle-version", self.headers)
 
     def test_is_a_valid_zip(self):
         # The literal PK signature, then a real structural check. A text-decoded archive is the

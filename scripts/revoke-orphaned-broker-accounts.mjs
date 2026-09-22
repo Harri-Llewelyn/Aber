@@ -60,7 +60,7 @@ const headers = {
   apikey: PUBLISHABLE_KEY,
   Authorization: `Bearer ${SERVICE_KEY}`,
   'Content-Type': 'application/json',
-  'X-ACS-Cymru-Actor': 'service',
+  'X-Aber-Actor': 'service',
 };
 
 async function rest(pathname, init = {}) {

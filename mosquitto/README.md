@@ -36,7 +36,7 @@ request and not another node's.
 **There is no wildcard-write principal.** The ingestion daemon reads `spBv1.0/#` and writes two
 things inside Sparkplug — the rebirth request `spBv1.0/+/NCMD/+`, and its own primary-host STATE
 on one literal topic (below); it is the only writer of the
-Directory (`ACS-Cymru/Directory/#`) and the Unified Namespace (`uns/#`). The i3X server reads
+Directory (`Aber/Directory/#`) and the Unified Namespace (`uns/#`). The i3X server reads
 `spBv1.0/#` and publishes nothing; it reads the Directory from the database, not from here. The
 monitoring account reads `$SYS/#` and publishes nothing. No gateway reads the Directory or the
 UNS: either is the whole plant behind one credential, and reading is silent.

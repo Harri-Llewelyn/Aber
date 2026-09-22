@@ -68,7 +68,7 @@ import ingestion  # noqa: E402  (must follow the stubs above)
 import metrics  # noqa: E402
 import registry  # noqa: E402
 
-GROUP = "ACS-Cymru"
+GROUP = "Aber"
 NODE = "gwy110000000000400080000"
 
 # The receipt time every measurement below is taken against. Fixed rather than `now`, so an
