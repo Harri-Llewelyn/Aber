@@ -254,6 +254,23 @@ function dumpSchema(name) {
 // rows live in the partitions, which is what `seedRows` resolves before matching here.
 const VOLATILE = ['digital_thread', 'directory_liveness_probe', 'playback_worker_status'];
 
+// ONE TABLE IS NOT COMPARED AT ALL, and the reason is different from the one above. Its rows are
+// not a declaration a chain makes, they are a record of what that chain DID: `one_shot_migrations`
+// is the ledger of migrations that must run exactly once, claimed by the migration itself inside
+// the transaction it guards. A one-shot folded into the baseline has no claim left to make, and
+// having the seed insert a row on its behalf would forge a claim for a file that is not in the
+// chain -- which is the one thing this ledger exists to prevent. So the short chain legitimately
+// holds fewer rows here than the long one, and will for every squash from now on.
+//
+// `digital_thread` is deliberately NOT in this list even though the same argument would fit it.
+// The audit trail records every seed a chain writes, so a declaration left behind by a fold shows
+// up here as a missing row -- which is exactly how the last four were found. Counting it is worth
+// more than the one difference it would excuse.
+//
+// Reported, never silent: the counts are printed under their own heading so a change in them is
+// visible and can be reasoned about, but it is not a failure.
+const HISTORICAL = ['one_shot_migrations'];
+
 function seedRows(container) {
   // Built as one query per table through a DO block would need a temp table to return from, so
   // the list is assembled client-side instead: one round trip per table, on a local container.
@@ -388,7 +405,19 @@ try {
   const sa = seedRows(A);
   const sb = seedRows(B);
   const tables = [...new Set([...sa.keys(), ...sb.keys()])].sort();
-  const differing = tables.filter((t) => (sa.get(t) || '') !== (sb.get(t) || ''));
+  // HISTORICAL names partition roots, as VOLATILE does, but the report keys each PARTITION under
+  // its own name -- so the match has to take `digital_thread_2026_09` and `digital_thread_default`
+  // with `digital_thread`, or the rows would be counted under a name nothing lists.
+  const isHistory = (t) => HISTORICAL.some((h) => t === h || t.startsWith(`${h}_`));
+  const history = tables.filter(isHistory);
+  const differing = tables.filter((t) => !history.includes(t) && (sa.get(t) || '') !== (sb.get(t) || ''));
+
+  const fmt = (v) => {
+    if (v === undefined) return '(absent)';
+    const [n, d] = v.split('|');
+    return d === '-' ? `${n} rows (volatile)` : `${n} rows ${(d || '').slice(0, 8)}`;
+  };
+  const row = (t) => note(`${t.padEnd(30)} ${fmt(sa.get(t)).padEnd(22)} ${fmt(sb.get(t))}`);
 
   if (differing.length === 0) {
     const seeded = tables.filter((t) => !/^\(/.test(t) && !(sa.get(t) || '').startsWith('0|'));
@@ -396,15 +425,17 @@ try {
   } else {
     fail(`the two chains seed DIFFERENT rows in ${differing.length} table(s).`);
     note(`${'table'.padEnd(30)} ${dirA === dirB ? 'a' : 'chain A'.padEnd(22)} chain B`);
-    for (const t of differing) {
-      const fmt = (v) => {
-        if (v === undefined) return '(absent)';
-        const [n, d] = v.split('|');
-        return d === '-' ? `${n} rows (volatile)` : `${n} rows ${(d || '').slice(0, 8)}`;
-      };
-      note(`${t.padEnd(30)} ${fmt(sa.get(t)).padEnd(22)} ${fmt(sb.get(t))}`);
-    }
+    for (const t of differing) row(t);
     note(``);
+  }
+
+  // Printed either way, and under its own heading so it is never mistaken for a pass. These are
+  // the tables that record what each chain DID rather than what it declares; see HISTORICAL.
+  const movedHistory = history.filter((t) => (sa.get(t) || '') !== (sb.get(t) || ''));
+  if (movedHistory.length) {
+    console.log('\n  History, not compared -- these record what each chain did, not what it declares\n');
+    for (const t of movedHistory) row(t);
+    console.log('');
   }
 } catch (err) {
   fail(err.message);

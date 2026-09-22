@@ -1,5 +1,5 @@
 """
-The Administrator / Shopfloor_Manager split (migration 0069).
+The Administrator / Shopfloor_Manager split (archived migration 0069).
 
 WHAT THIS SUITE IS DEFENDING, because "the manager lost three permissions" is the easy half and
 only the first class below is about it:

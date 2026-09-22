@@ -2089,7 +2089,7 @@ const apiMethods = {
     // Site Map, which only needs current state -- not the full history the
     // export dialog pages through.
     // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side
-    // (migration 0111) -- the retention SETTINGS cannot answer this, because a young stack holds
+    // (archived migration 0111) -- the retention SETTINGS cannot answer this, because a young stack holds
     // less than its policy allows and a widened policy does not restore dropped chunks.
     if (path.startsWith('/api/v1/telemetry/horizons')) {
       return queryTelemetryHorizons();

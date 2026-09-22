@@ -209,11 +209,12 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         # The write itself moved into an atomic RPC, so half of what this class guards now lives
         # in SQL. Both halves are still checked -- the invariant did not change, only its home.
         #
-        # Read from the LAST file that declares it, which is what the database runs: 0097 dropped
-        # the baseline's form and redeclared it with the area parameters. Reading the baseline
-        # would assert against SQL the database has stopped running, which is the drift this
-        # class exists to catch.
-        migration = os.path.join(here, "..", "..", "migrations", "0097_the_plant_gains_areas.sql")
+        # Read from the LAST file that declares it, which is what the database runs. That used to
+        # be archived migration 0097, which dropped the baseline's form and redeclared it with the
+        # area parameters; since the third squash folded 0097 in, the baseline is the only
+        # declaration and `0000` sweeps any older one off an upgrading database. The rule has not
+        # changed -- assert against the SQL the database actually runs -- only where that is.
+        migration = os.path.join(here, "..", "..", "migrations", "0001_baseline_schema.sql")
         with open(migration, "r", encoding="utf-8") as handle:
             self.rpc_sql = handle.read()
 

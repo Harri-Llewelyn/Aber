@@ -802,7 +802,7 @@ coldArchive:
   s3:
     # This site's identity in every object key: site=<siteKey>/dataset=telemetry/v=1/...
     #
-    # FROZEN AT THE FIRST BOOT THAT SETS IT (migration 0132) and refused afterwards: objects
+    # FROZEN AT THE FIRST BOOT THAT SETS IT (archived migration 0132) and refused afterwards: objects
     # already written live under the old prefix and renaming does not move them. It is also the
     # prefix the bucket policy is scoped on, which is why it is set here rather than derived at
     # the first export -- the policy has to exist before the first object does.

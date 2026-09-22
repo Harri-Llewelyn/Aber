@@ -223,17 +223,33 @@ $roles$;
 -- Every object below is taken from a dump of a database the whole chain built, so each one is
 -- its final form and appears exactly once. Comments inside function bodies survive the dump;
 -- the narrative between objects lives in the archived migrations.
+--
+-- `digital_thread`'s monthly partitions are NOT here. They are created at run time by the
+-- function 0079 installs, so the months present on the day of the dump are not schema; the
+-- partitioned parent and the DEFAULT partition are, and both are below.
 
--- SCHEMA public :: COMMENT
+-- public :: SCHEMA
+CREATE SCHEMA IF NOT EXISTS public;
+
+
+ALTER SCHEMA public OWNER TO pg_database_owner;
+
 --
 
+-- SCHEMA public :: COMMENT
 COMMENT ON SCHEMA public IS 'standard public schema';
 
 --
 
--- active_schema_version(uuid) :: FUNCTION
+-- timescale :: SCHEMA
+CREATE SCHEMA IF NOT EXISTS timescale;
+
+
+ALTER SCHEMA timescale OWNER TO postgres;
+
 --
 
+-- active_schema_version(uuid) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.active_schema_version(schema_id uuid) RETURNS uuid
     LANGUAGE plpgsql STABLE
     SET search_path TO 'public'
@@ -278,19 +294,249 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.active_schema_version(schema_id uuid) OWNER TO postgres;
+
 --
 
 -- FUNCTION active_schema_version(schema_id uuid) :: COMMENT
---
-
 COMMENT ON FUNCTION public.active_schema_version(schema_id uuid) IS 'Follows a lineage forward from any version to the one currently in force. Returns the input unchanged when it is already active, is a draft, or has no published successor.';
 
 --
 
--- approve_quarantined_device(uuid, uuid, uuid, uuid, text, uuid, text, boolean, boolean) :: FUNCTION
+-- approve_proposal(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.approve_proposal(p_proposal_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_proposal  public.change_proposals%ROWTYPE;
+    v_device    public.devices%ROWTYPE;
+    v_merged    public.devices%ROWTYPE;
+    v_plate     public.device_nameplate%ROWTYPE;
+    v_plate_new public.device_nameplate%ROWTYPE;
+    v_area      public.areas%ROWTYPE;
+    v_area_new  public.areas%ROWTYPE;
+    v_cell      public.cells%ROWTYPE;
+    v_cell_new  public.cells%ROWTYPE;
+    v_gateway   public.gateways%ROWTYPE;
+    v_gw_new    public.gateways%ROWTYPE;
+    v_actor     uuid := auth.uid();
+    v_allowed   text[];
+    v_key       text;
+    v_thread    bigint;
+BEGIN
+    -- The outer gate is the union of everybody who may decide anything; the lane's own gate below
+    -- is the one that decides.
+    IF NOT (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+            OR public.has_authority(ARRAY['cell:manage', 'gateway:manage'])) THEN
+        RAISE EXCEPTION 'not permitted to decide change proposals'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    SELECT * INTO v_proposal FROM public.change_proposals
+     WHERE id = p_proposal_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'proposal % not found', p_proposal_id USING ERRCODE = 'no_data_found';
+    END IF;
+
+    IF NOT public.may_decide_proposal(v_proposal.entity_type) THEN
+        RAISE EXCEPTION 'not permitted to decide proposals on %', v_proposal.entity_type
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF v_proposal.status <> 'open' THEN
+        RAISE EXCEPTION 'proposal % is already %', p_proposal_id, v_proposal.status
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Re-validated, not trusted: the patch may have been edited since the insert trigger checked
+    -- it, and the allowlist may have narrowed.
+    v_allowed := public.proposable_columns(v_proposal.entity_type);
+    FOREACH v_key IN ARRAY ARRAY(SELECT jsonb_object_keys(v_proposal.patch)) LOOP
+        IF NOT (v_key = ANY (v_allowed)) THEN
+            RAISE EXCEPTION 'proposal % names % , which is not proposable on %',
+                p_proposal_id, v_key, v_proposal.entity_type
+                USING ERRCODE = 'invalid_parameter_value';
+        END IF;
+    END LOOP;
+
+    -- Already true is not approvable: the repair is a rejection naming what happened.
+    IF public.proposal_is_already_true(p_proposal_id) THEN
+        RAISE EXCEPTION
+            'this change is already in place -- somebody made it while the proposal was open; reject it with that as the reason rather than recording an approval that changes nothing'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Attribute every trigger-written audit row in this transaction to the approver. SET LOCAL,
+    -- so it is discarded at COMMIT.
+    PERFORM set_config('acs_cymru.actor_id', v_actor::text, true);
+
+    IF v_proposal.entity_type = 'devices' THEN
+        SELECT * INTO v_device FROM public.devices
+         WHERE id = v_proposal.entity_id FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'device % no longer exists', v_proposal.entity_id
+                USING ERRCODE = 'no_data_found';
+        END IF;
+
+        SELECT * INTO v_merged FROM jsonb_populate_record(v_device, v_proposal.patch);
+
+        UPDATE public.devices
+           SET name              = v_merged.name,
+               description       = v_merged.description,
+               asset_type        = v_merged.asset_type,
+               connection_method = v_merged.connection_method,
+               cell_id           = v_merged.cell_id,
+               area_id           = v_merged.area_id,
+               location_scope    = v_merged.location_scope,
+               model_3d_path     = v_merged.model_3d_path
+         WHERE id = v_device.id;
+
+    ELSIF v_proposal.entity_type = 'device_nameplate' THEN
+        -- A device with no nameplate row yet is the normal case: the row is created by whoever
+        -- first asserts something about the asset.
+        INSERT INTO public.device_nameplate (device_id) VALUES (v_proposal.entity_id)
+        ON CONFLICT (device_id) DO NOTHING;
+
+        SELECT * INTO v_plate FROM public.device_nameplate
+         WHERE device_id = v_proposal.entity_id FOR UPDATE;
+
+        SELECT * INTO v_plate_new FROM jsonb_populate_record(v_plate, v_proposal.patch);
+
+        UPDATE public.device_nameplate
+           SET manufacturer_name                = v_plate_new.manufacturer_name,
+               manufacturer_product_designation = v_plate_new.manufacturer_product_designation,
+               manufacturer_product_type        = v_plate_new.manufacturer_product_type,
+               serial_number                    = v_plate_new.serial_number,
+               year_of_construction             = v_plate_new.year_of_construction,
+               date_of_manufacture              = v_plate_new.date_of_manufacture,
+               hardware_version                 = v_plate_new.hardware_version,
+               firmware_version                 = v_plate_new.firmware_version,
+               software_version                 = v_plate_new.software_version,
+               country_of_origin                = v_plate_new.country_of_origin,
+               uri_of_the_product               = v_plate_new.uri_of_the_product,
+               updated_at                       = now(),
+               -- The proposer; see 0086.
+               updated_by                       = v_proposal.proposed_by
+         WHERE device_id = v_proposal.entity_id;
+
+    ELSIF v_proposal.entity_type = 'areas' THEN
+        SELECT * INTO v_area FROM public.areas
+         WHERE id = v_proposal.entity_id FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'area % no longer exists', v_proposal.entity_id
+                USING ERRCODE = 'no_data_found';
+        END IF;
+
+        SELECT * INTO v_area_new FROM jsonb_populate_record(v_area, v_proposal.patch);
+
+        -- `areas_name_topic_safe`, `areas_name_key` and `areas_icon_valid` run on this UPDATE, so a
+        -- patch naming an area another area is already called, a name carrying a topic separator,
+        -- or an icon nobody drew aborts the approval rather than being stored. The refusal is the
+        -- database's own sentence and the proposal stays open.
+        UPDATE public.areas
+           SET name        = v_area_new.name,
+               description = v_area_new.description,
+               icon        = v_area_new.icon
+         WHERE id = v_area.id;
+
+    ELSIF v_proposal.entity_type = 'cells' THEN
+        SELECT * INTO v_cell FROM public.cells
+         WHERE id = v_proposal.entity_id FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'cell % no longer exists', v_proposal.entity_id
+                USING ERRCODE = 'no_data_found';
+        END IF;
+
+        SELECT * INTO v_cell_new FROM jsonb_populate_record(v_cell, v_proposal.patch);
+
+        -- The table's CHECKs, the area foreign key and place_cell_in_its_area() run on this
+        -- UPDATE, so a patch naming an icon nobody drew, a deleted area or a place too close to a
+        -- neighbour aborts the approval rather than being stored.
+        UPDATE public.cells
+           SET name        = v_cell_new.name,
+               grafana_url = v_cell_new.grafana_url,
+               icon        = v_cell_new.icon,
+               area_id     = v_cell_new.area_id,
+               plan_x      = v_cell_new.plan_x,
+               plan_y      = v_cell_new.plan_y,
+               description = v_cell_new.description
+         WHERE id = v_cell.id;
+
+    ELSIF v_proposal.entity_type = 'gateways' THEN
+        SELECT * INTO v_gateway FROM public.gateways
+         WHERE id = v_proposal.entity_id FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'gateway % no longer exists', v_proposal.entity_id
+                USING ERRCODE = 'no_data_found';
+        END IF;
+
+        SELECT * INTO v_gw_new FROM jsonb_populate_record(v_gateway, v_proposal.patch);
+
+        -- The location CHECKs guard this statement; a relocation that breaks one fails here, inside
+        -- the approver's transaction, and the proposal stays open with the database's own sentence.
+        UPDATE public.gateways
+           SET name           = v_gw_new.name,
+               description    = v_gw_new.description,
+               cell_id        = v_gw_new.cell_id,
+               area_id        = v_gw_new.area_id,
+               location_scope = v_gw_new.location_scope,
+               access_url     = v_gw_new.access_url
+         WHERE id = v_gateway.id;
+
+    END IF;
+    -- No `schemas` branch: 0090 withdrew the lane and may_decide_proposal() refuses it above. No
+    -- link branch either: 0108 withdrew those three the same way, and a link has only ever been
+    -- attached by the direct edit that `link:manage` gates.
+
+    -- The row that names both parties; the target's own audit trigger records only the approver.
+    INSERT INTO public.digital_thread
+        (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source, audit_domain)
+    VALUES (
+        v_proposal.entity_type,
+        v_proposal.entity_id,
+        'PROPOSAL_APPLIED',
+        NULL,
+        jsonb_build_object(
+            'proposal_id',       v_proposal.id,
+            'proposed_by',       v_proposal.proposed_by,
+            'proposed_by_email', v_proposal.proposed_by_email,
+            'approved_by',       v_actor,
+            'patch',             v_proposal.patch,
+            'rationale',         v_proposal.rationale
+        ),
+        v_actor,
+        'user',
+        public.audit_domain_for(v_proposal.entity_type, 'PROPOSAL_APPLIED')
+    )
+    RETURNING id INTO v_thread;
+
+    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+
+    UPDATE public.change_proposals
+       SET status = 'applied', decided_by = v_actor, decided_at = now(),
+           applied_thread_id = v_thread
+     WHERE id = p_proposal_id;
+
+    RETURN jsonb_build_object(
+        'id', p_proposal_id, 'status', 'applied', 'thread_id', v_thread
+    );
+END;
+$$;
+
+
+ALTER FUNCTION public.approve_proposal(p_proposal_id uuid) OWNER TO postgres;
+
 --
 
-CREATE OR REPLACE FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid DEFAULT NULL::uuid, p_merge_into_device_id uuid DEFAULT NULL::uuid, p_asset_name text DEFAULT NULL::text, p_cell_id uuid DEFAULT NULL::uuid, p_location_scope text DEFAULT NULL::text, p_set_cell boolean DEFAULT false, p_set_location_scope boolean DEFAULT false) RETURNS jsonb
+-- FUNCTION approve_proposal(p_proposal_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.approve_proposal(p_proposal_id uuid) IS 'Approving IS applying: the lane''s own gate is re-checked server-side, the patch re-validated against proposable_columns(), and the change written in this transaction so every CHECK and foreign key on the target runs now -- an invalid change aborts the approval instead of becoming an audit record of something that did not happen. A proposal whose values are already in place is refused for the same reason. The three *_links lanes INSERT a row rather than updating one.';
+
+--
+
+-- approve_quarantined_device(uuid, uuid, uuid, uuid, text, uuid, text, boolean, boolean, uuid, boolean) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid DEFAULT NULL::uuid, p_merge_into_device_id uuid DEFAULT NULL::uuid, p_asset_name text DEFAULT NULL::text, p_cell_id uuid DEFAULT NULL::uuid, p_location_scope text DEFAULT NULL::text, p_set_cell boolean DEFAULT false, p_set_location_scope boolean DEFAULT false, p_area_id uuid DEFAULT NULL::uuid, p_set_area boolean DEFAULT false) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -300,6 +546,7 @@ DECLARE
   v_result      public.devices%ROWTYPE;
   v_actor_role  text;
   v_cell        uuid := p_cell_id;
+  v_area        uuid := p_area_id;
 BEGIN
   -- Authorization is re-derived from the database rather than taken on trust. The edge function
   -- checks too; this is the check that still holds if the RPC is ever reached another way.
@@ -333,9 +580,8 @@ BEGIN
         USING ERRCODE = 'invalid_parameter_value';
     END IF;
 
-    -- Locked in a deterministic order relative to the row above would be ideal, but these are
-    -- two named ids and the transaction is short; the FOR UPDATE is what stops a concurrent
-    -- approval racing this one into two live rows.
+    -- Two named ids and a short transaction; the FOR UPDATE is what stops a concurrent approval
+    -- racing this one into two live rows.
     SELECT * INTO v_candidate FROM public.devices WHERE id = p_merge_into_device_id FOR UPDATE;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'target device % not found', p_merge_into_device_id
@@ -374,10 +620,20 @@ BEGIN
   -- ---------------------------------------------------------------------------------------
   -- Straight approval.
   -- ---------------------------------------------------------------------------------------
-  -- Mirrors devices_site_wide_has_no_cell: a site-wide asset cannot also name a cell, so it is
-  -- cleared here rather than left to a constraint violation.
+  -- Mirrors the scope CHECKs: a site-wide asset names neither cell nor area, an area-wide one
+  -- names its area and no cell, a cell-scoped one names no area. Cleared here rather than left
+  -- to a constraint violation the caller cannot interpret.
   IF p_set_location_scope AND p_location_scope = 'site_wide' THEN
     v_cell := NULL;
+    v_area := NULL;
+  ELSIF p_set_location_scope AND p_location_scope = 'area_wide' THEN
+    v_cell := NULL;
+    IF v_area IS NULL THEN
+      RAISE EXCEPTION 'an area_wide device must name its area'
+        USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+  ELSIF p_set_location_scope THEN
+    v_area := NULL;
   END IF;
 
   UPDATE public.devices
@@ -388,8 +644,11 @@ BEGIN
          -- NULL-means-inherit with no column default, so writing a value the operator did not
          -- choose would switch inheritance off permanently for every device approved this way.
          -- The p_set_* flags are what distinguish "not supplied" from "explicitly cleared" --
-         -- a plain NULL argument cannot express the difference.
-         cell_id           = CASE WHEN p_set_cell           THEN v_cell           ELSE cell_id END,
+         -- a plain NULL argument cannot express the difference. A wide scope clears the cell
+         -- whether or not one was supplied, since the CHECK would refuse the pair.
+         cell_id           = CASE WHEN p_set_cell OR (p_set_location_scope AND p_location_scope <> 'cell')
+                                  THEN v_cell ELSE cell_id END,
+         area_id           = CASE WHEN p_set_area OR p_set_location_scope THEN v_area ELSE area_id END,
          location_scope    = CASE WHEN p_set_location_scope THEN p_location_scope ELSE location_scope END,
          name              = COALESCE(NULLIF(btrim(COALESCE(p_asset_name, '')), ''), name)
    WHERE id = p_device_id
@@ -399,52 +658,249 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) OWNER TO postgres;
+
 --
 
--- FUNCTION approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) :: COMMENT
+-- FUNCTION approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) :: COMMENT
+COMMENT ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) IS 'Atomically approves or merges a quarantined device. Re-checks the actor role against public.user_roles and attributes the resulting digital_thread rows to that actor. Takes the three location scopes; location is written only when answered.';
+
 --
 
-COMMENT ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) IS 'Atomically approves or merges a quarantined device. Re-checks the actor role against public.user_roles and attributes the resulting digital_thread rows to that actor.';
+-- archive_credential_is_set() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.archive_credential_is_set() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+    SELECT public.has_role(ARRAY['Administrator'])
+       AND EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'archive_secret_access_key');
+$$;
+
+
+ALTER FUNCTION public.archive_credential_is_set() OWNER TO postgres;
+
+--
+
+-- FUNCTION archive_credential_is_set() :: COMMENT
+COMMENT ON FUNCTION public.archive_credential_is_set() IS 'True when a cold archive credential is in the vault AND the caller may be told. False for everyone else, which reads as "not configured" -- correct for a page they cannot configure.';
+
+--
+
+-- archive_destination_guard() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.archive_destination_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v_written bigint;
+BEGIN
+    IF NEW.key NOT IN ('archive.endpoint', 'archive.bucket')
+       OR NEW.value IS NOT DISTINCT FROM OLD.value
+       -- Setting one for the first time is not a change.
+       OR coalesce(OLD.value #>> '{}', '') = '' THEN
+        RETURN NEW;
+    END IF;
+
+    BEGIN
+        SELECT count(*) INTO v_written FROM timescale.telemetry_archive_manifest;
+    EXCEPTION WHEN OTHERS THEN
+        -- The historian is unreachable, so whether anything has been written cannot be known.
+        -- ALLOWED, with a warning, rather than refused: refusing would make an unrelated outage
+        -- block first-time configuration, and the destructive case this guards is a deliberate
+        -- act by somebody who can read the warning.
+        RAISE WARNING
+            'the cold archive manifest could not be read, so % is being changed without checking '
+            'whether objects have already been written under the old destination.', NEW.key;
+        RETURN NEW;
+    END;
+
+    IF v_written > 0 THEN
+        RAISE EXCEPTION
+            '% cannot be changed: % object(s) are already catalogued under the current '
+            'destination, and renaming it does not move them -- the manifest would point at a '
+            'bucket nothing is in, while cold_archive --drop kept deleting the only other copy. '
+            'Follow the destination change procedure in supabase/README.md.',
+            NEW.key, v_written;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.archive_destination_guard() OWNER TO postgres;
+
+--
+
+-- FUNCTION archive_destination_guard() :: COMMENT
+COMMENT ON FUNCTION public.archive_destination_guard() IS 'Refuses a change to the archive endpoint or bucket once anything has been written there. A trigger rather than a policy because RLS cannot see OLD and NEW at once, the same reason system_settings_read_only_guard() is one.';
+
+--
+
+-- assert_principal_not_revoked(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.assert_principal_not_revoked(p_principal_id uuid) RETURNS void
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.revoked_service_principals WHERE principal_id = p_principal_id) THEN
+    RAISE EXCEPTION
+      'principal % has been revoked, so a token for it would be refused on its first request. '
+      'Reinstate it before issuing one.', p_principal_id
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+END;
+$$;
+
+
+ALTER FUNCTION public.assert_principal_not_revoked(p_principal_id uuid) OWNER TO postgres;
 
 --
 
 -- audit_domain_for(text, text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action text) RETURNS text
     LANGUAGE sql IMMUTABLE
     AS $$
   SELECT CASE
-    -- Identity and authority. Every act on these is Administrator-only to perform, so it is
-    -- Administrator-and-Auditor to read.
+    -- Identity and authority. Every act on these is Administrator-only to perform AND the table
+    -- itself is Administrator-only to read, which is what makes the lane agree with its contents.
     WHEN p_entity_type IN ('service_principals', 'user_roles', 'system_settings')
       THEN 'security'
 
-    -- The asset trail: the shopfloor's own history, which is what a Shopfloor_Manager manages.
-    -- CREDENTIAL_ISSUED lands here on `gateways` deliberately -- see the header. A Manager may
-    -- mint a host-run gateway's broker credential, so a Manager may read that one was minted.
-    WHEN p_entity_type IN ('cells', 'devices', 'gateways', 'links')
+    -- The asset trail: the shopfloor's own history. CREDENTIAL_ISSUED lands here on `gateways`
+    -- deliberately: a Manager may mint a host-run gateway's broker credential. `schemas` joined in
+    -- 0120 -- see the header for why an Administrator-only write is still an asset-lane record.
+    WHEN p_entity_type IN ('areas', 'cells', 'devices', 'gateways', 'links',
+                           'schemas', 'device_nameplate', 'change_proposals',
+                           'cell_links', 'gateway_links', 'device_links')
       THEN 'asset'
 
-    -- FAIL-CLOSED. A new entity_type nobody classified is restricted rather than exposed. The
-    -- cost is a lane a Manager cannot see and will report; the alternative is a privileged act
-    -- they can, and will not.
+    -- Fail-closed: a new entity_type nobody classified is restricted rather than exposed.
     ELSE 'security'
   END
 $$;
 
+
+ALTER FUNCTION public.audit_domain_for(p_entity_type text, p_action text) OWNER TO postgres;
+
 --
 
 -- FUNCTION audit_domain_for(p_entity_type text, p_action text) :: COMMENT
+COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane a digital_thread row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070 -- with `schemas` the one exception 0120 makes, because its own table is readable by every authenticated user. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
+
 --
 
-COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane a digital_thread row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
+-- audit_telemetry_columns() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_telemetry_columns() RETURNS text[]
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    SET search_path TO 'public'
+    AS $$
+    SELECT ARRAY[
+        'last_heartbeat',
+        'health_reported_at',
+        'uptime_seconds',
+        'load_1m',
+        'mem_available_bytes',
+        'disk_free_bytes',
+        'flow_hash'
+    ]::text[];
+$$;
+
+
+ALTER FUNCTION public.audit_telemetry_columns() OWNER TO postgres;
+
+--
+
+-- FUNCTION audit_telemetry_columns() :: COMMENT
+COMMENT ON FUNCTION public.audit_telemetry_columns() IS 'The gateways columns a heartbeat rewrites: liveness and the health readings (0035), and flow_hash, whose change ingest_record_gateway_health() records as its own FLOW_DEPLOYED row. log_digital_thread_event() subtracts these before deciding whether an UPDATE is an event.';
+
+--
+
+-- auth_pre_request() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.auth_pre_request() RETURNS void
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_claims text;
+  v_jti    text;
+  v_sub    text;
+BEGIN
+  -- NO CLAIMS IS THE COMMON CASE, NOT AN ANOMALY. Every unauthenticated request arrives here with
+  -- this GUC unset -- the `true` argument is what makes that return NULL instead of raising.
+  v_claims := current_setting('request.jwt.claims', true);
+  IF v_claims IS NULL OR v_claims = '' THEN
+    RETURN;
+  END IF;
+
+  BEGIN
+    v_jti := (v_claims::jsonb) ->> 'jti';
+    v_sub := (v_claims::jsonb) ->> 'sub';
+  EXCEPTION WHEN others THEN
+    -- CLAIMS THAT WILL NOT PARSE ARE NOT THIS FUNCTION'S BUSINESS. PostgREST has already validated
+    -- the signature to get here, so malformed JSON in this GUC is a PostgREST-side surprise rather
+    -- than an attack this can meaningfully answer -- and raising would take the whole API down
+    -- over a condition that has nothing to do with revocation.
+    RETURN;
+  END;
+
+  -- ------------------------------------------------------------------------------------------
+  -- The principal denylist, checked first
+  -- ------------------------------------------------------------------------------------------
+  -- The order is about the message: after a principal revocation both arms match, and "this
+  -- identity has been revoked" is the fact that explains both. The cast is guarded because `sub`
+  -- is a claim, and a bare cast on a malformed one would abort every request through this hook.
+  IF v_sub IS NOT NULL AND v_sub <> '' THEN
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM public.revoked_service_principals WHERE principal_id = v_sub::uuid
+      ) THEN
+        RAISE EXCEPTION 'this identity has been revoked'
+          USING ERRCODE = 'insufficient_privilege',
+                DETAIL = 'principal ' || v_sub,
+                HINT   = 'The service principal this token names was withdrawn by an '
+                         'Administrator. Every token naming it is refused, including ones issued '
+                         'afterwards, until the principal is reinstated.';
+      END IF;
+    EXCEPTION
+      -- RE-RAISED, NOT SWALLOWED. Only the CAST is being guarded here; the refusal above must
+      -- travel. Catching everything would make the control silently fail open, which is the one
+      -- failure mode a denylist must not have.
+      WHEN insufficient_privilege THEN RAISE;
+      WHEN invalid_text_representation THEN NULL;
+    END;
+  END IF;
+
+  -- ------------------------------------------------------------------------------------------
+  -- The token denylist (0074)
+  -- ------------------------------------------------------------------------------------------
+  -- A token with no `jti` (every human session, the anon and service_role keys) is unrevokable by
+  -- this arm and must still be served. The subject arm above does not share that exemption.
+  IF v_jti IS NOT NULL AND v_jti <> '' AND EXISTS (
+    SELECT 1 FROM public.revoked_service_tokens
+     WHERE jti = v_jti AND expires_at > now()
+  ) THEN
+    RAISE EXCEPTION 'this token has been revoked'
+      USING ERRCODE = 'insufficient_privilege',
+            DETAIL = 'jti ' || v_jti,
+            HINT   = 'This credential was withdrawn by an Administrator. Minting a new token is '
+                     'the only way back; the revoked one cannot be reinstated.';
+  END IF;
+END;
+$$;
+
+
+ALTER FUNCTION public.auth_pre_request() OWNER TO postgres;
+
+--
+
+-- FUNCTION auth_pre_request() :: COMMENT
+COMMENT ON FUNCTION public.auth_pre_request() IS 'PostgREST db-pre-request hook: aborts the request when the caller''s JWT carries a revoked jti (0074) or names a revoked service principal (0076). Returns quietly for every other condition -- no claims, unparseable claims, a token with no jti, a sub that is not a uuid -- because those are the ordinary majority and refusing them would take the whole API down.';
 
 --
 
 -- authorize_host_gateway_credential(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) RETURNS TABLE(sparkplug_id text, gateway_name text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -489,18 +945,367 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) OWNER TO postgres;
+
 --
 
 -- FUNCTION authorize_host_gateway_credential(p_gateway_id uuid) :: COMMENT
---
-
 COMMENT ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) IS 'Gate for minting a HOST gateway''s broker credential: checks has_role(), refuses a Remote or archived gateway, and returns the generated sparkplug_id the account must be named after. The mirror of issue_gateway_enrollment_token(), which refuses exactly the gateways this accepts.';
 
 --
 
--- capped_capture_manifest(jsonb) :: FUNCTION
+-- backup_claim_job() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_claim_job() RETURNS jsonb
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_job public.backup_jobs;
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_claim_job');
+
+    SELECT * INTO v_job
+      FROM public.backup_jobs
+     WHERE status = 'PENDING'
+     ORDER BY created_at
+     FOR UPDATE SKIP LOCKED
+     LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+
+    UPDATE public.backup_jobs
+       SET status = 'RUNNING', started_at = now()
+     WHERE id = v_job.id;
+
+    RETURN to_jsonb(v_job) || jsonb_build_object('status', 'RUNNING', 'started_at', now());
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_claim_job() OWNER TO postgres;
+
 --
 
+-- FUNCTION backup_claim_job() :: COMMENT
+COMMENT ON FUNCTION public.backup_claim_job() IS 'Take the oldest PENDING job, mark it RUNNING and return it, or NULL. The backup service''s poll.';
+
+--
+
+-- backup_fail(uuid, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_fail(p_job_id uuid, p_error text) RETURNS void
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_job public.backup_jobs;
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_fail');
+
+    UPDATE public.backup_jobs
+       SET status = 'FAILED', finished_at = now(),
+           error = left(coalesce(nullif(btrim(p_error), ''), 'unspecified failure'), 2000)
+     WHERE id = p_job_id AND status IN ('PENDING', 'RUNNING')
+    RETURNING * INTO v_job;
+
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'backup_jobs', v_job.id, 'BACKUP_FAILED',
+        jsonb_build_object('origin', v_job.origin, 'note', v_job.note, 'started_at', v_job.started_at),
+        jsonb_build_object('status', 'FAILED', 'error', v_job.error),
+        NULL, 'service', txid_current(), now()
+    );
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_fail(p_job_id uuid, p_error text) OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_fail(p_job_id uuid, p_error text) :: COMMENT
+COMMENT ON FUNCTION public.backup_fail(p_job_id uuid, p_error text) IS 'Mark a job FAILED with what went wrong, and record BACKUP_FAILED. The service has already removed the partial files.';
+
+--
+
+-- backup_finalise(uuid, text, text, jsonb, bigint) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) RETURNS uuid
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_job       public.backup_jobs;
+    v_backup_id uuid;
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_finalise');
+
+    SELECT * INTO v_job FROM public.backup_jobs WHERE id = p_job_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'backup_finalise: no backup job %', p_job_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    IF v_job.status <> 'RUNNING' THEN
+        RAISE EXCEPTION 'backup_finalise: job % is %, not RUNNING', p_job_id, v_job.status
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    INSERT INTO public.backups (
+        stamp, origin, note, requested_by, job_id, location, components, size_bytes, pinned, taken_at
+    ) VALUES (
+        p_stamp, v_job.origin, v_job.note, v_job.requested_by, v_job.id, p_location,
+        coalesce(p_components, '[]'::jsonb), greatest(coalesce(p_size_bytes, 0), 0),
+        v_job.origin = 'requested', coalesce(v_job.started_at, now())
+    )
+    RETURNING id INTO v_backup_id;
+
+    UPDATE public.backup_jobs
+       SET status = 'COMPLETED', finished_at = now(), backup_id = v_backup_id
+     WHERE id = p_job_id;
+
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'backups', v_backup_id, 'BACKUP_TAKEN', NULL,
+        jsonb_build_object(
+            'stamp',      p_stamp,
+            'origin',     v_job.origin,
+            'note',       v_job.note,
+            'job_id',     v_job.id,
+            'size_bytes', greatest(coalesce(p_size_bytes, 0), 0),
+            'components', coalesce(p_components, '[]'::jsonb),
+            'pinned',     v_job.origin = 'requested'
+        ),
+        NULL, 'service', txid_current(), now()
+    );
+
+    RETURN v_backup_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) :: COMMENT
+COMMENT ON FUNCTION public.backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) IS 'Record a finished backup: the backups row, the job COMPLETED, and BACKUP_TAKEN in the thread, in one transaction. A requested backup is born pinned.';
+
+--
+
+-- backup_forget(uuid, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_forget(p_backup_id uuid, p_reason text) RETURNS boolean
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_backup public.backups;
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_forget');
+
+    DELETE FROM public.backups WHERE id = p_backup_id AND NOT pinned
+    RETURNING * INTO v_backup;
+
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'backups', v_backup.id, 'BACKUP_PRUNED',
+        jsonb_build_object(
+            'stamp', v_backup.stamp, 'origin', v_backup.origin, 'note', v_backup.note,
+            'taken_at', v_backup.taken_at, 'size_bytes', v_backup.size_bytes
+        ),
+        jsonb_build_object('reason', p_reason),
+        NULL, 'service', txid_current(), now()
+    );
+
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_forget(p_backup_id uuid, p_reason text) OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_forget(p_backup_id uuid, p_reason text) :: COMMENT
+COMMENT ON FUNCTION public.backup_forget(p_backup_id uuid, p_reason text) IS 'Delete the row for a backup whose files are gone, and record BACKUP_PRUNED. Refuses a pinned backup: the files of one should not have been removed.';
+
+--
+
+-- backup_prunable(integer) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_prunable(p_retention_days integer) RETURNS jsonb
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_prunable');
+
+    -- Zero or less disables pruning, as BACKUP_RETENTION_DAYS=0 does in backup-databases.sh.
+    IF coalesce(p_retention_days, 0) <= 0 THEN
+        RETURN '[]'::jsonb;
+    END IF;
+
+    RETURN coalesce((
+        SELECT jsonb_agg(jsonb_build_object('id', b.id, 'stamp', b.stamp, 'location', b.location) ORDER BY b.taken_at)
+          FROM public.backups b
+         WHERE NOT b.pinned
+           AND b.taken_at < now() - make_interval(days => p_retention_days)
+    ), '[]'::jsonb);
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_prunable(p_retention_days integer) OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_prunable(p_retention_days integer) :: COMMENT
+COMMENT ON FUNCTION public.backup_prunable(p_retention_days integer) IS 'The backups the retention window has expired and nobody has pinned, oldest first. The service deletes each one''s files and then calls backup_forget().';
+
+--
+
+-- backup_reconcile_jobs(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_reconcile_jobs(p_reason text) RETURNS integer
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_job  record;
+    v_rows integer := 0;
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_reconcile_jobs');
+
+    -- A RUNNING row at service start is a backup the previous process did not finish; its files
+    -- are partial and the service removes them. PENDING rows are left: the loop claims them.
+    FOR v_job IN
+        UPDATE public.backup_jobs
+           SET status = 'FAILED', finished_at = now(),
+               error  = left(coalesce(nullif(btrim(p_reason), ''), 'the backup service restarted'), 2000)
+         WHERE status = 'RUNNING'
+        RETURNING id, origin, started_at
+    LOOP
+        INSERT INTO public.digital_thread (
+            entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+            causation_id, recorded_at
+        ) VALUES (
+            'backup_jobs', v_job.id, 'BACKUP_FAILED',
+            jsonb_build_object('status', 'RUNNING', 'origin', v_job.origin, 'started_at', v_job.started_at),
+            jsonb_build_object('status', 'FAILED', 'error', p_reason),
+            NULL, 'service', txid_current(), now()
+        );
+        v_rows := v_rows + 1;
+    END LOOP;
+
+    RETURN v_rows;
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_reconcile_jobs(p_reason text) OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_reconcile_jobs(p_reason text) :: COMMENT
+COMMENT ON FUNCTION public.backup_reconcile_jobs(p_reason text) IS 'Fail every RUNNING job with the given reason. Called by the backup service at start and before each claim: a RUNNING job no service is running was interrupted, or came back in a restore from a backup taken while it ran; its files are partial or gone.';
+
+--
+
+-- backup_schedule(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_schedule(p_cron text) RETURNS boolean
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'cron'
+    AS $_$
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_schedule');
+
+    IF coalesce(btrim(p_cron), '') = '' THEN
+        IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'enqueue_scheduled_backup') THEN
+            PERFORM cron.unschedule('enqueue_scheduled_backup');
+        END IF;
+        RETURN false;
+    END IF;
+
+    PERFORM public.ensure_cron_job(
+        'enqueue_scheduled_backup',
+        p_cron,
+        $job$SELECT public.enqueue_scheduled_backup()$job$
+    );
+    RETURN true;
+END;
+$_$;
+
+
+ALTER FUNCTION public.backup_schedule(p_cron text) OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_schedule(p_cron text) :: COMMENT
+COMMENT ON FUNCTION public.backup_schedule(p_cron text) IS 'Register (or, given an empty schedule, remove) the pg_cron job that queues scheduled backups. Called by the backup service at start with BACKUP_SCHEDULE, so the schedule exists exactly where a service will take what it queues.';
+
+--
+
+-- cancel_backup_job(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.cancel_backup_job(p_job_id uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_job public.backup_jobs;
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator'::text]) THEN
+        RAISE EXCEPTION 'cancel_backup_job: only an Administrator may cancel a backup'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    -- PENDING only. A RUNNING job is the service's: pg_dump is under way, and a row flipped under
+    -- it would leave the job finishing into a state that says it did not.
+    UPDATE public.backup_jobs
+       SET status = 'CANCELLED', finished_at = now()
+     WHERE id = p_job_id AND status = 'PENDING'
+    RETURNING * INTO v_job;
+
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'backup_jobs', v_job.id, 'BACKUP_CANCELLED',
+        jsonb_build_object('status', 'PENDING', 'origin', v_job.origin, 'note', v_job.note),
+        jsonb_build_object('status', 'CANCELLED'),
+        auth.uid(), 'user', txid_current(), now()
+    );
+
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION public.cancel_backup_job(p_job_id uuid) OWNER TO postgres;
+
+--
+
+-- FUNCTION cancel_backup_job(p_job_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.cancel_backup_job(p_job_id uuid) IS 'Withdraw a queued backup before the service claims it. Administrator only. Returns false when the job was already claimed or finished, which is not an error.';
+
+--
+
+-- capped_capture_manifest(jsonb) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.capped_capture_manifest(p_manifest jsonb) RETURNS jsonb
     LANGUAGE plpgsql IMMUTABLE
     SET search_path TO 'public'
@@ -542,11 +1347,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.capped_capture_manifest(p_manifest jsonb) OWNER TO postgres;
+
 --
 
 -- clear_credential_revoked_on_enrolment() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.clear_credential_revoked_on_enrolment() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -558,11 +1364,121 @@ BEGIN
   RETURN NEW;
 END $$;
 
+
+ALTER FUNCTION public.clear_credential_revoked_on_enrolment() OWNER TO postgres;
+
+--
+
+-- cold_archive_backlog() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.cold_archive_backlog() RETURNS TABLE(enabled boolean, threshold_days integer, oldest_unexported timestamp with time zone, age_seconds numeric, overdue_seconds numeric)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+    SELECT b.enabled, b.threshold_days, b.oldest_unexported, b.age_seconds, b.overdue_seconds
+      FROM public.cold_archive_backlog_state() b
+     WHERE public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor']);
+$$;
+
+
+ALTER FUNCTION public.cold_archive_backlog() OWNER TO postgres;
+
+--
+
+-- FUNCTION cold_archive_backlog() :: COMMENT
+COMMENT ON FUNCTION public.cold_archive_backlog() IS 'The Cold Storage page''s header figure: when the unexported span begins, how old that is, and how far past archive.tier_after_days it has run. Up to one chunk interval overdue is normal.';
+
+--
+
+-- cold_archive_backlog_state() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.cold_archive_backlog_state() RETURNS TABLE(enabled boolean, threshold_days integer, oldest_unexported timestamp with time zone, age_seconds numeric, overdue_seconds numeric)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+    RETURN QUERY
+    WITH policy AS (
+        SELECT
+            coalesce(
+                (SELECT (value #>> '{}')::boolean
+                   FROM public.system_settings WHERE key = 'archive.enabled'), false) AS enabled,
+            coalesce(
+                (SELECT (value #>> '{}')::integer
+                   FROM public.system_settings WHERE key = 'archive.tier_after_days'), 90) AS threshold_days
+    ),
+    frontier AS (
+        SELECT coalesce(
+            -- The newest span known to be on the remote endpoint. `verified_at`, not `exported_at`:
+            -- an exported row is an object nothing has read back, which is the state this alert
+            -- exists to distinguish from success.
+            (SELECT max(m.range_end)
+               FROM timescale.telemetry_archive_manifest m
+              WHERE m.verified_at IS NOT NULL),
+            -- Nothing verified yet, so the unexported span begins at the oldest raw data.
+            (SELECT f.oldest_data
+               FROM timescale.storage_footprint f
+              WHERE f.relation = 'telemetry' AND f.tier = 'raw')
+        ) AS frontier_at
+    )
+    SELECT p.enabled,
+           p.threshold_days,
+           f.frontier_at,
+           EXTRACT(EPOCH FROM (now() - f.frontier_at))::numeric,
+           -- GREATEST returns the largest NON-NULL argument, so an empty historian -- no manifest
+           -- and no raw data -- reports 0 overdue rather than NULL, and the alert stays quiet on a
+           -- stack that has never ingested anything.
+           greatest(
+               0::numeric,
+               EXTRACT(EPOCH FROM (now() - f.frontier_at))::numeric
+                 - (p.threshold_days::numeric * 86400)
+           )
+      FROM policy p, frontier f;
+EXCEPTION
+    -- The historian is unreachable, or its manifest has not been created yet. Both mean "this
+    -- cannot be computed", which is not the same as zero and must not be reported as it.
+    WHEN OTHERS THEN
+        RETURN;
+END;
+$$;
+
+
+ALTER FUNCTION public.cold_archive_backlog_state() OWNER TO postgres;
+
+--
+
+-- FUNCTION cold_archive_backlog_state() :: COMMENT
+COMMENT ON FUNCTION public.cold_archive_backlog_state() IS 'How far the cold archive has fallen behind, measured from the newest verified range_end over the FDW. Internal: EXECUTE is revoked, and the two wrappers gate it for their own audience.';
+
+--
+
+-- cold_archive_destination() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.cold_archive_destination() RETURNS TABLE(endpoint text, region text, bucket text, access_key_id text, secret_key text, path_style boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+    SELECT
+        coalesce((SELECT value #>> '{}' FROM public.system_settings WHERE key = 'archive.endpoint'), ''),
+        coalesce((SELECT value #>> '{}' FROM public.system_settings WHERE key = 'archive.region'), ''),
+        coalesce((SELECT value #>> '{}' FROM public.system_settings WHERE key = 'archive.bucket'), ''),
+        coalesce((SELECT value #>> '{}' FROM public.system_settings WHERE key = 'archive.access_key_id'), ''),
+        coalesce((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'archive_secret_access_key'), ''),
+        coalesce((SELECT (value #>> '{}')::boolean FROM public.system_settings WHERE key = 'archive.path_style'), false)
+    -- `archive.site_key` is deliberately NOT here. It is not sensitive, the exporter already reads
+    -- it with the other archive.* settings, and a fact returned from two places is a fact that
+    -- will eventually differ between them.
+    WHERE public.is_ingestion_caller();
+$$;
+
+
+ALTER FUNCTION public.cold_archive_destination() OWNER TO postgres;
+
+--
+
+-- FUNCTION cold_archive_destination() :: COMMENT
+COMMENT ON FUNCTION public.cold_archive_destination() IS 'The cold archive''s destination including its secret, for the ingestion principal alone (0046). Returns no row to anybody else, so a caller without that identity learns nothing rather than being refused with a message that confirms the shape of what it holds.';
+
 --
 
 -- cold_storage_rows() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.cold_storage_rows() RETURNS TABLE(chunk_name text, range_start timestamp with time zone, range_end timestamp with time zone, row_count bigint, object_key text, object_bytes bigint, state text, on_cold_storage boolean, claimed_at timestamp with time zone, dropped_at timestamp with time zone, last_error text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
@@ -592,18 +1508,17 @@ CREATE OR REPLACE FUNCTION public.cold_storage_rows() RETURNS TABLE(chunk_name t
      ORDER BY m.range_start DESC;
 $$;
 
+
+ALTER FUNCTION public.cold_storage_rows() OWNER TO postgres;
+
 --
 
 -- FUNCTION cold_storage_rows() :: COMMENT
---
-
 COMMENT ON FUNCTION public.cold_storage_rows() IS 'The cold telemetry catalogue, read over the FDW from the historian''s manifest. `state` is derived here so no consumer re-implements the claimed->exported->verified->dropped ordering that timescaledb/cold_archive.sql enforces with CHECK constraints.';
 
 --
 
 -- consume_gateway_enrollment_token(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.consume_gateway_enrollment_token(p_token text) RETURNS TABLE(gateway_id uuid, sparkplug_id text, sparkplug_group text, gateway_name text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -646,105 +1561,153 @@ BEGIN
    WHERE g.id = v_gateway_id;
 END $_$;
 
+
+ALTER FUNCTION public.consume_gateway_enrollment_token(p_token text) OWNER TO postgres;
+
 --
 
 -- FUNCTION consume_gateway_enrollment_token(p_token text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.consume_gateway_enrollment_token(p_token text) IS 'Atomically claim a live enrolment token and return the gateway''s wire identity. Returns NO ROWS for an unknown, expired, already-consumed token or an ARCHIVED gateway (0037) -- the four are deliberately indistinguishable. Called by the enroll-gateway edge function with the service-role key; the token itself is the authorisation, so no role is checked.';
 
 --
 
--- create_service_principal(text, text) :: FUNCTION
---
-
-CREATE OR REPLACE FUNCTION public.create_service_principal(p_role_name text, p_note text DEFAULT NULL::text) RETURNS TABLE(principal_id uuid, roles text[])
+-- create_machine_principal(text, text[], text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text DEFAULT NULL::text) RETURNS TABLE(principal_id uuid, permissions text[])
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
-  -- Read-only roles only. See the header: a machine identity holding a privileged role becomes an
-  -- unrevocable write credential the moment a token is signed for it.
-  c_allowed  CONSTANT text[] := ARRAY['Operator', 'Auditor'];
-  v_role_id  integer;
-  v_id       uuid;
+    -- Read-only permissions only, as an allow-list so a permission added later is refused until
+    -- somebody decides otherwise: a machine identity holding a write permission becomes an
+    -- unrevocable write credential the moment a token is signed for it. check-docs-drift.mjs
+    -- asserts the Access Control page offers exactly this list.
+    c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'digital_thread:read'];
+    v_id      uuid;
+    v_name    text := btrim(p_name);
+    v_purpose text := nullif(btrim(coalesce(p_purpose, '')), '');
+    v_bad     text[];
+    v_ids     uuid[];
 BEGIN
-  -- ADMINISTRATOR ONLY, matching list_service_principals() (0042) and narrower than the credential
-  -- RPCs in 0041. Creating an identity that can reach the stack is an access-control act, and
-  -- `authz:manage` is granted to Administrator alone.
-  IF NOT public.has_role(ARRAY['Administrator']) THEN
-    RAISE EXCEPTION 'insufficient privileges to create a service principal'
-      USING ERRCODE = 'insufficient_privilege';
-  END IF;
+    -- ADMINISTRATOR ONLY. Creating an identity that can reach the stack is an access-control act,
+    -- and `authz:manage` is granted to Administrator alone.
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RAISE EXCEPTION 'insufficient privileges to create a machine principal'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
 
-  IF p_role_name IS NULL OR NOT (p_role_name = ANY(c_allowed)) THEN
-    RAISE EXCEPTION
-      'create_service_principal: role must be one of %, got %. A machine identity holding a '
-      'privileged role would be an unrevocable write credential once a token is signed for it.',
-      array_to_string(c_allowed, ', '), coalesce(p_role_name, 'null')
-      USING ERRCODE = 'invalid_parameter_value';
-  END IF;
+    IF v_name IS NULL OR length(v_name) = 0 THEN
+        RAISE EXCEPTION
+            'create_machine_principal: a name is required. An identity nobody can name on the '
+            'Access Control page is one nobody can decide to keep or remove.'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
 
-  -- BY NAME, not by a hardcoded id -- 0034's reasoning: `roles.id` is an integer assigned by 0001,
-  -- and a migration that hardcodes it is asserting a fact about a sequence.
-  SELECT id INTO v_role_id FROM public.roles WHERE name = p_role_name;
-  IF v_role_id IS NULL THEN
-    RAISE EXCEPTION 'create_service_principal: the % role does not exist', p_role_name
-      USING ERRCODE = 'foreign_key_violation';
-  END IF;
+    IF length(v_name) > 80 THEN
+        RAISE EXCEPTION 'create_machine_principal: p_name must be 80 characters or fewer'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
 
-  -- A NOTE IS BOUNDED. It reaches the audit row below, which is append-only and cannot be pruned.
-  IF p_note IS NOT NULL AND length(p_note) > 200 THEN
-    RAISE EXCEPTION 'create_service_principal: p_note must be 200 characters or fewer'
-      USING ERRCODE = 'invalid_parameter_value';
-  END IF;
+    IF v_purpose IS NOT NULL AND length(v_purpose) > 500 THEN
+        RAISE EXCEPTION 'create_machine_principal: p_purpose must be 500 characters or fewer'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
 
-  v_id := gen_random_uuid();
+    -- Checked before the identity exists, so the refusal names the name and not a constraint.
+    IF EXISTS (SELECT 1 FROM public.machine_principals mp WHERE lower(btrim(mp.name)) = lower(v_name)) THEN
+        RAISE EXCEPTION
+            'create_machine_principal: an identity named "%" already exists. Names are unique '
+            'ignoring case, so the page never lists two rows a reader cannot tell apart.', v_name
+            USING ERRCODE = 'unique_violation';
+    END IF;
 
-  -- ONLY `id`. See the header -- this is what makes the account unable to sign in, and it is a
-  -- property of the INSERT rather than of anybody's intent.
-  INSERT INTO auth.users (id) VALUES (v_id);
-  INSERT INTO public.user_roles (user_id, role_id) VALUES (v_id::text, v_role_id);
+    IF p_permissions IS NULL OR cardinality(p_permissions) = 0 THEN
+        RAISE EXCEPTION
+            'create_machine_principal: at least one permission is required. A principal with no '
+            'authority can still be named by a token, which makes it a credential that looks '
+            'harmless and is not accounted for anywhere.'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
 
-  -- RECORDED HERE, AND ATTRIBUTED TO A PERSON, which is the one way this differs from 0043. That
-  -- function is called by a host script holding a machine credential and cannot name anybody; this
-  -- one is called by an Administrator with a session, so `auth.uid()` is the attribution rather
-  -- than a claim -- the same reasoning as 0041's record_gateway_credential_issued().
-  INSERT INTO public.digital_thread (
-    entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
-    causation_id, recorded_at
-  ) VALUES (
-    'service_principals',
-    v_id,
-    'INSERT',
-    NULL,
-    jsonb_build_object(
-      'roles',       to_jsonb(ARRAY[p_role_name]),
-      'note',        p_note,
-      'can_sign_in', false
-    ),
-    auth.uid(),
-    'user',
-    txid_current(),
-    now()
-  );
+    SELECT array_agg(x) INTO v_bad
+      FROM unnest(p_permissions) AS x
+     WHERE x <> ALL (c_allowed);
 
-  RETURN QUERY SELECT v_id, ARRAY[p_role_name];
+    IF v_bad IS NOT NULL THEN
+        RAISE EXCEPTION
+            'create_machine_principal: % is not grantable to a machine identity. Allowed: %. Once a '
+            'token is signed for a principal it cannot be revoked, so a write permission here would '
+            'be an unrevocable write credential.',
+            array_to_string(v_bad, ', '), array_to_string(c_allowed, ', ')
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    -- BY NAME, not by a hardcoded id.
+    SELECT array_agg(p.id) INTO v_ids
+      FROM public.permissions p
+     WHERE p.name = ANY (p_permissions);
+
+    IF v_ids IS NULL OR cardinality(v_ids) <> cardinality(ARRAY(SELECT DISTINCT unnest(p_permissions))) THEN
+        RAISE EXCEPTION 'create_machine_principal: one of % does not exist in public.permissions',
+            array_to_string(p_permissions, ', ')
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    v_id := gen_random_uuid();
+
+    -- ONLY `id`. This is what makes the account unable to sign in, and it is a property of the
+    -- INSERT rather than of anybody's intent -- which is also what makes is_machine_principal()
+    -- true for it, and therefore what routes it through principal_permissions from here on.
+    INSERT INTO auth.users (id) VALUES (v_id);
+
+    -- BY CONSTRAINT NAME, not by column list: `principal_id` is also this function's first output
+    -- column, and PL/pgSQL refuses the column list as ambiguous. 0080 spelled it the other way and
+    -- nothing found out, because no page called the function until this file.
+    INSERT INTO public.principal_permissions (principal_id, permission_id)
+    SELECT v_id, unnest(v_ids)
+    ON CONFLICT ON CONSTRAINT principal_permissions_pkey DO NOTHING;
+
+    -- The name, in the same transaction: an identity and its name either both exist or neither
+    -- does.
+    INSERT INTO public.machine_principals (principal_id, name, purpose, created_by)
+    VALUES (v_id, v_name, v_purpose, auth.uid());
+
+    -- ATTRIBUTED TO A PERSON: this is called by an Administrator with a session, so `auth.uid()` is
+    -- the attribution rather than a claim.
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'service_principals',
+        v_id,
+        'INSERT',
+        NULL,
+        jsonb_build_object(
+            'name',        v_name,
+            'purpose',     v_purpose,
+            'permissions', to_jsonb(p_permissions),
+            'can_sign_in', false
+        ),
+        auth.uid(),
+        'user',
+        txid_current(),
+        now()
+    );
+
+    RETURN QUERY SELECT v_id, p_permissions;
 END;
 $$;
 
+
+ALTER FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) OWNER TO postgres;
+
 --
 
--- FUNCTION create_service_principal(p_role_name text, p_note text) :: COMMENT
---
-
-COMMENT ON FUNCTION public.create_service_principal(p_role_name text, p_note text) IS 'Create a machine identity that cannot sign in, holding one read-only role. Administrator only. Writes to auth.users the way 0034 does -- id alone, so the account has no email, no password and no identity provider. Refuses a privileged role: once a token is signed for a principal it cannot be revoked.';
+-- FUNCTION create_machine_principal(p_name text, p_permissions text[], p_purpose text) :: COMMENT
+COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding its own read-only permissions and a name the Access Control page lists it by. Administrator only. Refuses anything but telemetry:read, quarantine:view and digital_thread:read: once a token is signed for a principal it cannot be revoked. The name is unique ignoring case. Replaces the two-argument form of 0080, dropped because an overload whose extra arguments default makes every RPC call ambiguous.';
 
 --
 
 -- custom_access_token_hook(jsonb) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.custom_access_token_hook(event jsonb) RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -774,84 +1737,399 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.custom_access_token_hook(event jsonb) OWNER TO postgres;
+
 --
 
--- digital_thread_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone) :: FUNCTION
---
-
-CREATE OR REPLACE FUNCTION public.digital_thread_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS jsonb
-    LANGUAGE sql STABLE
+-- describe_machine_principal(uuid, text, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
-WITH matching AS (
+DECLARE
+    v_actor   uuid;
+    v_name    text := btrim(p_name);
+    v_purpose text := nullif(btrim(coalesce(p_purpose, '')), '');
+    v_old     public.machine_principals%ROWTYPE;
+    v_id      bigint;
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RAISE EXCEPTION 'insufficient privileges to describe a machine principal'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    v_actor := auth.uid();
+    IF v_actor IS NULL THEN
+        RAISE EXCEPTION 'describe_machine_principal: no session, so this could not be attributed'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF p_principal_id IS NULL THEN
+        RAISE EXCEPTION 'describe_machine_principal: p_principal_id is required'
+            USING ERRCODE = 'null_value_not_allowed';
+    END IF;
+
+    IF v_name IS NULL OR length(v_name) = 0 THEN
+        RAISE EXCEPTION 'describe_machine_principal: a name is required'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    IF length(v_name) > 80 THEN
+        RAISE EXCEPTION 'describe_machine_principal: p_name must be 80 characters or fewer'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    IF v_purpose IS NOT NULL AND length(v_purpose) > 500 THEN
+        RAISE EXCEPTION 'describe_machine_principal: p_purpose must be 500 characters or fewer'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    -- A ROW THAT EXISTS. A pinned identity has none, and the message says where its name lives
+    -- rather than "not found", which would send a reader looking for a row that was never meant
+    -- to be there. FOR UPDATE, so two edits of one row serialise.
+    SELECT * INTO v_old
+      FROM public.machine_principals mp
+     WHERE mp.principal_id = p_principal_id
+       FOR UPDATE;
+
+    IF NOT FOUND THEN
+        IF public.is_machine_principal(p_principal_id) THEN
+            RAISE EXCEPTION
+                'describe_machine_principal: % has no name row. It was pinned by a migration or '
+                'seeded by a suite, and the dashboard names it from its own registry '
+                '(frontend/src/utils/serviceIdentities.js).', p_principal_id
+                USING ERRCODE = 'invalid_parameter_value';
+        END IF;
+        RAISE EXCEPTION
+            'describe_machine_principal: % is not a machine principal. It either does not exist or '
+            'it can sign in.', p_principal_id
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    -- Unique ignoring case, excluding the row being renamed: keeping one's own name is not a
+    -- collision.
+    IF EXISTS (
+        SELECT 1 FROM public.machine_principals mp
+         WHERE lower(btrim(mp.name)) = lower(v_name)
+           AND mp.principal_id <> p_principal_id
+    ) THEN
+        RAISE EXCEPTION
+            'describe_machine_principal: an identity named "%" already exists. Names are unique '
+            'ignoring case, so the page never lists two rows a reader cannot tell apart.', v_name
+            USING ERRCODE = 'unique_violation';
+    END IF;
+
+    -- NOTHING TO SAY IS NOT AN EVENT. An unchanged save writes no row and returns NULL, so the
+    -- thread records decisions rather than clicks.
+    IF v_old.name = v_name AND v_old.purpose IS NOT DISTINCT FROM v_purpose THEN
+        RETURN NULL;
+    END IF;
+
+    UPDATE public.machine_principals
+       SET name = v_name, purpose = v_purpose
+     WHERE principal_id = p_principal_id;
+
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'service_principals',
+        p_principal_id,
+        'PRINCIPAL_DESCRIBED',
+        jsonb_build_object('name', v_old.name, 'purpose', v_old.purpose),
+        jsonb_build_object('name', v_name,     'purpose', v_purpose),
+        v_actor,
+        'user',
+        txid_current(),
+        now()
+    )
+    RETURNING id INTO v_id;
+
+    RETURN v_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) OWNER TO postgres;
+
+--
+
+-- FUNCTION describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) :: COMMENT
+COMMENT ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) IS 'Rename a machine principal created from the Access Control page, or change its purpose. Administrator only; the only write path to machine_principals after creation. Refuses an identity with no name row (the pinned ones, named by the dashboard''s registry) and a name another row holds. Records PRINCIPAL_DESCRIBED with the old and new values, and returns that row''s id, or NULL when nothing changed. Permissions are not editable: a wider grant is a new principal.';
+
+--
+
+-- digital_thread_backup_job_ids_matching(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) RETURNS uuid[]
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  SELECT coalesce(array_agg(j.id), '{}'::uuid[])
+    FROM public.backup_jobs j
+    LEFT JOIN public.backups b ON b.id = j.backup_id
+   WHERE p_pattern IS NOT NULL
+     AND public.has_role(ARRAY['Administrator', 'Auditor'])
+     AND (j.note ILIKE p_pattern OR b.stamp ILIKE p_pattern)
+$$;
+
+
+ALTER FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) OWNER TO postgres;
+
+--
+
+-- FUNCTION digital_thread_backup_job_ids_matching(p_pattern text) :: COMMENT
+COMMENT ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) IS 'The ids of backup jobs whose note, or the stamp of the backup they produced, matches a LIKE pattern -- the two things the Backups page identifies a job by and neither of which is in its audit payload. For digital_thread_page()''s search. Administrator and Auditor only, matching the roles digital_thread_select_security admits, and an empty array rather than an error for anybody else because this is part of a query rather than a request of its own.';
+
+--
+
+-- digital_thread_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.digital_thread_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text) RETURNS jsonb
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $_$
+WITH term AS (
+    SELECT CASE WHEN p_search IS NULL OR btrim(p_search) = '' THEN NULL ELSE btrim(p_search) END AS raw
+),
+pattern AS (
+    -- The search as a LIKE pattern, built once. THE METACHARACTERS ARE ESCAPED: the box promises
+    -- a substring of a name or an id, and an unescaped '%' would silently return the whole thread
+    -- to somebody who typed a percentage into it. Backslash is the default LIKE escape, so the
+    -- backslashes have to be doubled first or an escape would be introduced by the escaping.
+    SELECT CASE
+             WHEN t.raw IS NULL THEN NULL
+             ELSE '%' || replace(replace(replace(t.raw, '\', '\\'), '%', '\%'), '_', '\_') || '%'
+           END AS pattern,
+           -- THE SAME TERM AS A ROW ID, when it is nothing but digits. 18 at most: bigint tops out
+           -- at 19, and a cast that overflows raises rather than missing.
+           CASE
+             WHEN t.raw ~ '^[0-9]{1,18}$' THEN t.raw::bigint
+             ELSE NULL
+           END AS id_term
+      FROM term t
+),
+-- MATERIALIZED, AND MEASURED. Without it Postgres inlines this CTE and the helper lands in the
+-- per-row Filter of every partition scan -- a STABLE function is allowed to be called once and is
+-- not promised to be. On 4,065 rows that took a search from 53ms to 583ms, which is the shape of
+-- cost that looks like "the thread got big" rather than like a query doing the wrong thing.
+q AS MATERIALIZED (
+    SELECT p.pattern,
+           p.id_term,
+           public.digital_thread_user_ids_matching(p.pattern)        AS user_ids,
+           public.digital_thread_backup_job_ids_matching(p.pattern)  AS job_ids
+      FROM pattern p
+),
+matching AS (
     SELECT t.*,
-           -- Scoped to the three asset types: only entity types that name one of those tables can be
-           -- purged from it. `service_principals` is an auth.users row with no public table to probe and
-           -- would otherwise answer "absent from all three" and be hidden as deleted.
-           t.entity_type IN ('cells', 'gateways', 'devices')
+           -- SIX TYPES, FIVE PROBES, and the mismatch is `device_nameplate`: it is keyed by its
+           -- device's id, so `devices` answers for it. A type is listed here only if one of the
+           -- probes below can be asked about its rows -- `user_roles` and `service_principals`
+           -- are auth.users rows with no public table to read, and would otherwise answer "absent
+           -- from all five" about a person who is perfectly present. An entity type whose table
+           -- has been RETIRED is a third case this still does not answer: "the table is gone" is
+           -- not "the row is gone", so `area_floors` remains drawn and cannot be hidden.
+           t.entity_type IN ('areas', 'cells', 'gateways', 'devices', 'schemas', 'device_nameplate')
+       AND NOT EXISTS (SELECT 1 FROM public.areas    a WHERE a.id = t.entity_id)
        AND NOT EXISTS (SELECT 1 FROM public.cells    c WHERE c.id = t.entity_id)
        AND NOT EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = t.entity_id)
        AND NOT EXISTS (SELECT 1 FROM public.devices  d WHERE d.id = t.entity_id)
+       AND NOT EXISTS (SELECT 1 FROM public.schemas  s WHERE s.id = t.entity_id)
                AS is_purged
       FROM public.digital_thread t
+     CROSS JOIN q
      WHERE (p_entity_type IS NULL OR t.entity_type = p_entity_type)
        AND (p_action      IS NULL OR t.action      = p_action)
        AND (p_entity_ids  IS NULL OR t.entity_id   = ANY (p_entity_ids))
        AND (p_since       IS NULL OR t.recorded_at >= p_since)
        AND (p_until       IS NULL OR t.recorded_at <= p_until)
+       -- THE ID AND THE NAME THE TIMELINE DRAWS. Both snapshots are read because an INSERT has
+       -- only `new_data` and a DELETE only `old_data`, and an UPDATE that renames something is
+       -- findable under either name, which is what somebody searching for the old one wants.
+       AND (q.pattern IS NULL
+            OR t.entity_id::text ILIKE q.pattern
+            -- THE OTHER TWO IDS THE DRAWER SHOWS: this audit row, and the transaction that wrote
+            -- it. Only when the term is nothing but digits, so this adds rows to a numeric search
+            -- and changes no other one.
+            OR (q.id_term IS NOT NULL
+                AND (t.id = q.id_term OR t.causation_id = q.id_term))
+            -- The person a role assignment is about, who is not in the payload. Empty for a caller
+            -- who may not ask, which matches no row.
+            OR t.entity_id = ANY (q.user_ids)
+            -- The note and the produced backup's stamp, which are on two tables and in no payload.
+            -- Empty on the same terms, and for the same reason.
+            OR t.entity_id = ANY (q.job_ids)
+            OR EXISTS (
+                 SELECT 1
+                   FROM unnest(ARRAY['name', 'sparkplug_id', 'schema_name',
+                                     'label', 'key', 'role', 'stamp', 'origin']) AS f(field)
+                  WHERE (t.new_data ->> f.field) ILIKE q.pattern
+                     OR (t.old_data ->> f.field) ILIKE q.pattern
+               ))
 ),
 visible AS (
     SELECT * FROM matching
-     WHERE p_include_purged OR NOT is_purged
-     ORDER BY recorded_at DESC
+     WHERE (p_include_purged OR NOT is_purged)
+       -- The cursor is applied here and not in `matching`: `purged_assets` and `total_matching` are
+       -- counted over `matching` and are facts about everything the filters select, not about what
+       -- is left after paging.
+       AND (p_before_id IS NULL
+            OR p_before_recorded_at IS NULL
+            OR (recorded_at, id) < (p_before_recorded_at, p_before_id))
+     ORDER BY recorded_at DESC, id DESC
      LIMIT greatest(1, least(coalesce(p_limit, 200), 1000))
 )
 SELECT jsonb_build_object(
     'events', coalesce(
-        (SELECT jsonb_agg(to_jsonb(v) - 'is_purged' ORDER BY v.recorded_at DESC) FROM visible v),
+        (SELECT jsonb_agg(to_jsonb(v) - 'is_purged' ORDER BY v.recorded_at DESC, v.id DESC)
+           FROM visible v),
         '[]'::jsonb),
     'purged_assets', (SELECT count(DISTINCT entity_id) FROM matching WHERE is_purged),
-    'truncated', (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000))
+    -- HOW LONG THE THREAD IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
+    -- of it that is. Counted under the SAME predicate `visible` opens with, minus the cursor and
+    -- the limit -- so it does not move as the reader pages, and a page can never report more rows
+    -- than the total it is a fraction of.
+    'total_matching', (SELECT count(*) FROM matching WHERE p_include_purged OR NOT is_purged),
+    -- KEPT, AND IT MEANS "THERE IS A NEXT PAGE". It used to mean "your view is cut off", which was
+    -- the same thing when there was no way to ask for more. Callers that only ever showed a banner
+    -- keep working unchanged.
+    'truncated', (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000)),
+    -- WHERE THE READER GOT TO, or null at the end of the thread. Null is the ONLY end-of-data
+    -- signal a caller should trust: an empty `events` array with a non-null cursor cannot happen,
+    -- but a full page that happens to be the last one is ordinary, so "fewer rows than I asked
+    -- for" is not a reliable test and callers must not invent one.
+    'next_cursor', CASE
+        WHEN (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000))
+        THEN (SELECT jsonb_build_object('recorded_at', v.recorded_at, 'id', v.id)
+                FROM visible v ORDER BY v.recorded_at ASC, v.id ASC LIMIT 1)
+        ELSE NULL
+    END
 );
+$_$;
+
+
+ALTER FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) OWNER TO postgres;
+
+--
+
+-- FUNCTION digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: COMMENT
+COMMENT ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) IS 'One page of the Digital Thread, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the thread they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
+
+--
+
+-- digital_thread_user_ids_matching(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.digital_thread_user_ids_matching(p_pattern text) RETURNS uuid[]
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  SELECT coalesce(array_agg(u.id), '{}'::uuid[])
+    FROM auth.users u
+   WHERE p_pattern IS NOT NULL
+     AND public.has_role(ARRAY['Administrator', 'Auditor'])
+     AND u.email ILIKE p_pattern
 $$;
 
+
+ALTER FUNCTION public.digital_thread_user_ids_matching(p_pattern text) OWNER TO postgres;
+
 --
 
--- FUNCTION digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) :: COMMENT
---
-
-COMMENT ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) IS 'One page of the Digital Thread, with deleted assets filtered server-side and counted over the whole match rather than the page. `is_purged` applies only to cells, gateways and devices -- an entity type with no table behind it cannot have been deleted from one.';
+-- FUNCTION digital_thread_user_ids_matching(p_pattern text) :: COMMENT
+COMMENT ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) IS 'The ids of people whose email matches a LIKE pattern, for the one disjunct of digital_thread_page()''s search that cannot read its answer out of an audit payload: a role-assignment row names the role, and the dashboard labels that lane with the person (0116). Administrator and Auditor only, and an empty array rather than an error for anybody else, because this is part of a query rather than a request of its own.';
 
 --
 
 -- directory_liveness_job_map() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.directory_liveness_job_map() RETURNS TABLE(prometheus_job text, service_name text)
     LANGUAGE sql IMMUTABLE
     AS $$
     SELECT * FROM (VALUES
-        ('prometheus',    'Prometheus Metrics Store'),
-        ('grafana',       'Grafana Dashboards'),
-        ('ingestion',     'Ingestion Metrics Endpoint'),
-        ('node',          'Host Metrics Exporter (node_exporter)'),
-        ('envoy',         'Supabase API Gateway (Envoy)'),
-        ('supabase-rest', 'Supabase PostgREST API')
+        ('prometheus',     'Prometheus Metrics Store'),
+        ('grafana',        'Grafana Dashboards'),
+        ('ingestion',      'Ingestion Metrics Endpoint'),
+        ('node',           'Host Metrics Exporter (node_exporter)'),
+        ('supabase-envoy', 'Supabase API Gateway (Envoy)'),
+        ('supabase-rest',  'Supabase PostgREST API'),
+        ('supabase-db',    'Supabase PostgreSQL'),
+        ('timescaledb',    'TimescaleDB Telemetry Store')
     ) AS t(prometheus_job, service_name);
 $$;
+
+
+ALTER FUNCTION public.directory_liveness_job_map() OWNER TO postgres;
 
 --
 
 -- FUNCTION directory_liveness_job_map() :: COMMENT
+COMMENT ON FUNCTION public.directory_liveness_job_map() IS 'Prometheus scrape job -> directory_services.service_name, for the eight services whose liveness is genuinely observed. The job is the pod''s component name, as the chart''s Alloy labels it. Everything not named here is written UNKNOWN.';
+
 --
 
-COMMENT ON FUNCTION public.directory_liveness_job_map() IS 'Prometheus scrape job -> directory_services.service_name, for the six services whose liveness is genuinely observed. Everything not named here is written UNKNOWN.';
+-- discard_schema_draft(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.discard_schema_draft(p_schema_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_draft      public.schemas%ROWTYPE;
+    v_detached   integer := 0;
+    v_actor      uuid := auth.uid();
+BEGIN
+    -- THE SAME GATE `fork_schema()` AND `publish_schema_version()` CARRY SINCE 0087, and for the
+    -- same reason: a SECURITY DEFINER function bypasses RLS entirely, so its own check is the only
+    -- one there is. `schema:manage` rather than a role pair, so it cannot drift from the policy.
+    IF NOT public.has_authority(ARRAY['schema:manage']) THEN
+        RAISE EXCEPTION 'insufficient privileges to discard a schema draft'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    SELECT * INTO v_draft FROM public.schemas WHERE id = p_schema_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'schema % not found', p_schema_id USING ERRCODE = 'no_data_found';
+    END IF;
+
+    -- THE WHOLE REASON THIS FUNCTION EXISTS. An active or archived schema is part of the record of
+    -- what devices were judged against, and deleting one would detach every device bound to it
+    -- through two different foreign keys, silently.
+    IF v_draft.status <> 'draft' THEN
+        RAISE EXCEPTION
+            'schema "%" is %, not a draft; only a draft can be discarded',
+            v_draft.schema_name, v_draft.status
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Counted BEFORE the delete, because the CASCADE is what removes them and it reports nothing.
+    -- A draft can be attached to a machine to try it out -- publish_schema_version() relies on
+    -- that being possible -- so this is a real number rather than always zero.
+    SELECT count(*) INTO v_detached
+      FROM public.device_submodels WHERE schema_id = p_schema_id;
+
+    -- Attributes the audit row this DELETE fires to the person who asked for it. SET LOCAL, so it
+    -- is discarded at COMMIT and cannot bleed into the connection's next user.
+    PERFORM set_config('acs_cymru.actor_id', v_actor::text, true);
+
+    DELETE FROM public.schemas WHERE id = p_schema_id;
+
+    RETURN jsonb_build_object(
+        'discarded_schema_id',   p_schema_id,
+        'discarded_schema_name', v_draft.schema_name,
+        'version',               v_draft.version,
+        'parent_schema_id',      v_draft.parent_schema_id,
+        'devices_detached',      v_detached
+    );
+END;
+$$;
+
+
+ALTER FUNCTION public.discard_schema_draft(p_schema_id uuid) OWNER TO postgres;
+
+--
+
+-- FUNCTION discard_schema_draft(p_schema_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.discard_schema_draft(p_schema_id uuid) IS 'Delete a draft schema version, returning it to the state before the fork. Refuses anything that is not a draft: devices.schema_id is ON DELETE SET NULL and device_submodels.schema_id is ON DELETE CASCADE, so deleting an active schema would silently detach every device bound to it. Returns the count of draft attachments the cascade removed.';
 
 --
 
 -- dispatch_device_quarantine_webhook() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.dispatch_device_quarantine_webhook() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'extensions', 'vault'
@@ -923,11 +2201,12 @@ BEGIN
   RETURN NULL;  -- AFTER trigger; return value is ignored
 END $$;
 
+
+ALTER FUNCTION public.dispatch_device_quarantine_webhook() OWNER TO postgres;
+
 --
 
 -- enforce_digital_thread_append_only() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.enforce_digital_thread_append_only() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -949,18 +2228,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.enforce_digital_thread_append_only() OWNER TO postgres;
+
 --
 
 -- FUNCTION enforce_digital_thread_append_only() :: COMMENT
---
-
 COMMENT ON FUNCTION public.enforce_digital_thread_append_only() IS 'Rejects UPDATE and DELETE on public.digital_thread for every application role, including service_role. Owner roles are exempt because they can drop the trigger anyway.';
 
 --
 
 -- enforce_metric_catalog_immutability() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.enforce_metric_catalog_immutability() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -972,11 +2250,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.enforce_metric_catalog_immutability() OWNER TO postgres;
+
 --
 
 -- enforce_metric_group_spelling() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.enforce_metric_group_spelling() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -986,7 +2265,7 @@ DECLARE
 BEGIN
   -- Derived from NEW.name rather than read from NEW.metric_group: generated columns are computed
   -- *after* BEFORE triggers run, so NEW.metric_group is still NULL at this point. Keep this
-  -- expression identical to the generated column in migration 0016.
+  -- expression identical to the generated column in archived migration 0016.
   incoming_group := CASE WHEN strpos(NEW.name, '/') > 0
                          THEN NULLIF(split_part(NEW.name, '/', 1), '') END;
 
@@ -1018,11 +2297,56 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.enforce_metric_group_spelling() OWNER TO postgres;
+
+--
+
+-- enforce_open_proposal_cap() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.enforce_open_proposal_cap() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_cap  integer;
+    v_open integer;
+BEGIN
+    SELECT (value #>> '{}')::integer INTO v_cap
+      FROM public.system_settings
+     WHERE key = 'proposals.max_open_per_person';
+
+    -- The setting is seeded by this migration and bounded at 1, so a NULL here means somebody
+    -- deleted the row. Ten is the seeded default and the honest fallback: refusing every proposal
+    -- because a setting is missing would take the feature away without saying so.
+    v_cap := COALESCE(v_cap, 10);
+
+    SELECT count(*) INTO v_open
+      FROM public.change_proposals
+     WHERE proposed_by = NEW.proposed_by
+       AND status = 'open';
+
+    IF v_open >= v_cap THEN
+        RAISE EXCEPTION
+            'you already have % open proposal(s), which is the limit; decide or withdraw one first',
+            v_open
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.enforce_open_proposal_cap() OWNER TO postgres;
+
+--
+
+-- FUNCTION enforce_open_proposal_cap() :: COMMENT
+COMMENT ON FUNCTION public.enforce_open_proposal_cap() IS 'The per-person ceiling on OPEN proposals, read from system_settings. A trigger rather than a line in an RPC because the INSERT policy admits a direct PostgREST write, and a cap with a documented way around it is not a cap.';
+
 --
 
 -- enforce_schema_version_provenance() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.enforce_schema_version_provenance() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -1048,11 +2372,37 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.enforce_schema_version_provenance() OWNER TO postgres;
+
+--
+
+-- enqueue_scheduled_backup() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.enqueue_scheduled_backup() RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM public.backup_jobs WHERE status IN ('PENDING', 'RUNNING')) THEN
+        RETURN false;
+    END IF;
+
+    INSERT INTO public.backup_jobs (origin, status) VALUES ('scheduled', 'PENDING');
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION public.enqueue_scheduled_backup() OWNER TO postgres;
+
+--
+
+-- FUNCTION enqueue_scheduled_backup() :: COMMENT
+COMMENT ON FUNCTION public.enqueue_scheduled_backup() IS 'Queue a scheduled backup, unless one is already queued or running. Called by pg_cron on the schedule the backup service registers; not a user''s function.';
+
 --
 
 -- ensure_cron_job(text, text, text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'cron'
@@ -1064,18 +2414,94 @@ BEGIN
   PERFORM cron.schedule(p_name, p_schedule, p_command);
 END $$;
 
+
+ALTER FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) OWNER TO postgres;
+
 --
 
 -- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) IS 'Unschedule-then-schedule, so replaying this migration does not accumulate duplicate jobs.';
 
 --
 
--- ensure_gateway_status_view() :: FUNCTION
+-- ensure_digital_thread_partition(timestamp with time zone) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+  -- BOUNDS ARE COMPUTED IN UTC, NOT IN THE SESSION'S ZONE. date_trunc('month', ...) on a timestamptz
+  -- truncates in TimeZone, so a session in Europe/London would put the boundary an hour out for half
+  -- the year -- and which partition a row lands in would depend on who happened to be connected when
+  -- the partition was made. The round trip through AT TIME ZONE 'UTC' pins it.
+  v_from timestamp with time zone := (date_trunc('month', p_month AT TIME ZONE 'UTC')) AT TIME ZONE 'UTC';
+  v_to   timestamp with time zone;
+  v_name text;
+BEGIN
+  v_to   := v_from + interval '1 month';
+  v_name := 'digital_thread_' || to_char(v_from AT TIME ZONE 'UTC', 'YYYY_MM');
+
+  IF to_regclass('public.' || quote_ident(v_name)) IS NOT NULL THEN
+    RETURN false;
+  END IF;
+
+  EXECUTE format(
+    'CREATE TABLE public.%I PARTITION OF public.digital_thread FOR VALUES FROM (%L) TO (%L)',
+    v_name, v_from, v_to
+  );
+  -- Before it can hold a row. The window is inside this transaction either way, but the ordering
+  -- is what makes "a partition is never reachable directly" true by construction rather than by
+  -- the maintenance job finishing.
+  PERFORM public.secure_digital_thread_partition(format('public.%I', v_name)::regclass);
+  RETURN true;
+END $$;
+
+
+ALTER FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) OWNER TO postgres;
+
 --
 
+-- FUNCTION ensure_digital_thread_partition(p_month timestamp with time zone) :: COMMENT
+COMMENT ON FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) IS 'Create the monthly digital_thread partition containing the given instant, if absent. Returns true if one was created. Bounds are computed in UTC so which partition a row lands in does not depend on the session TimeZone.';
+
+--
+
+-- ensure_digital_thread_partitions(integer) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer DEFAULT 3) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+  v_created integer := 0;
+  v_i integer;
+BEGIN
+  IF p_months_ahead IS NULL OR p_months_ahead < 0 THEN
+    RAISE EXCEPTION 'ensure_digital_thread_partitions: months ahead must not be negative (got %)', p_months_ahead;
+  END IF;
+
+  -- THE CURRENT MONTH IS INCLUDED RATHER THAN ASSUMED. A stack restored from a dump taken months ago
+  -- comes up with every partition ending in the past, and the first asset write would meet the
+  -- default partition instead of a fresh one.
+  FOR v_i IN 0..p_months_ahead LOOP
+    IF public.ensure_digital_thread_partition(now() + (v_i || ' months')::interval) THEN
+      v_created := v_created + 1;
+    END IF;
+  END LOOP;
+
+  RETURN v_created;
+END $$;
+
+
+ALTER FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) OWNER TO postgres;
+
+--
+
+-- FUNCTION ensure_digital_thread_partitions(p_months_ahead integer) :: COMMENT
+COMMENT ON FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) IS 'Create this month''s digital_thread partition and the next p_months_ahead of them. Idempotent; returns how many were actually created. Called by the digital_thread_partitions cron job and by 0079 itself.';
+
+--
+
+-- ensure_gateway_status_view() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.ensure_gateway_status_view() RETURNS void
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -1122,18 +2548,17 @@ BEGIN
   GRANT SELECT ON public.gateway_status TO authenticated;
 END $$;
 
+
+ALTER FUNCTION public.ensure_gateway_status_view() OWNER TO postgres;
+
 --
 
 -- FUNCTION ensure_gateway_status_view() :: COMMENT
---
-
 COMMENT ON FUNCTION public.ensure_gateway_status_view() IS 'Drop-and-recreate public.gateway_status. Called here and by any later migration that adds a column to public.gateways -- the view selects g.*, which CREATE OR REPLACE VIEW cannot widen in place once a new column lands ahead of the derived ones.';
 
 --
 
 -- ensure_shadow_devices(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ensure_shadow_devices(p_capture_id uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1243,28 +2668,86 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ensure_shadow_devices(p_capture_id uuid) OWNER TO postgres;
+
 --
 
 -- FUNCTION ensure_shadow_devices(p_capture_id uuid) :: COMMENT
---
-
 COMMENT ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) IS 'Find or create one shadow device per device named in a capture''s manifest, bound to the playback gateway, and return the device map start_playback_job() takes. Reuses an existing lane rather than minting per playback, so a comparison chart holds still between runs. Copies the metric contract (schema_id and device_submodels) and nothing else -- notably not the nameplate, whose serial number identifies one physical object. See 0060''s header.';
 
 --
 
--- fork_schema(uuid, text) :: FUNCTION
+-- expire_open_proposals() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.expire_open_proposals() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_days    numeric;
+    v_expired integer := 0;
+    v_row     record;
+BEGIN
+    SELECT (value #>> '{}')::numeric INTO v_days
+      FROM public.system_settings
+     WHERE key = 'proposals.open_expiry_days';
+
+    -- Seven days, matching the seeded default. The setting is bounded at 1 so it cannot be zero,
+    -- but a deleted row would otherwise make this interval NULL and the comparison never true --
+    -- expiry would stop silently, which is the failure mode the floor exists to prevent.
+    v_days := COALESCE(v_days, 7);
+
+    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+
+    FOR v_row IN
+        UPDATE public.change_proposals
+           SET status = 'expired', decided_at = now()
+         WHERE status = 'open'
+           AND proposed_at < now() - make_interval(secs => v_days::double precision * 86400.0)
+        RETURNING id, entity_type, entity_id, proposed_by
+    LOOP
+        INSERT INTO public.digital_thread
+            (entity_type, entity_id, action, new_data, changed_by, actor_source, audit_domain)
+        VALUES (
+            'change_proposals',
+            v_row.id,
+            'PROPOSAL_EXPIRED',
+            jsonb_build_object(
+                'proposed_by', v_row.proposed_by,
+                'target_type', v_row.entity_type,
+                'target_id',   v_row.entity_id,
+                'after_days',  v_days
+            ),
+            -- NULL, and deliberately. `changed_by` names WHICH user, and no user did this.
+            NULL,
+            'service',
+            public.audit_domain_for('change_proposals', 'PROPOSAL_EXPIRED')
+        );
+        v_expired := v_expired + 1;
+    END LOOP;
+
+    RETURN v_expired;
+END;
+$$;
+
+
+ALTER FUNCTION public.expire_open_proposals() OWNER TO postgres;
+
 --
 
+-- FUNCTION expire_open_proposals() :: COMMENT
+COMMENT ON FUNCTION public.expire_open_proposals() IS 'Closes open proposals older than proposals.open_expiry_days, freeing the slots they hold under both caps. Records actor_source ''service'' with changed_by NULL: the timer has no session and is not a person, and an expiry is not a rejection.';
+
+--
+
+-- fork_schema(uuid, text) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.fork_schema(parent_schema_id uuid, change_description text DEFAULT NULL::text) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
-  -- Copied out of the parameters immediately, and the parameters never referenced again. Both are
-  -- named after columns of `schemas` -- which is what the brief specifies and what the RPC's JSON
-  -- body must use -- and plpgsql would raise "column reference is ambiguous" on the first
-  -- `WHERE id = parent_schema_id`. A DECLARE initialiser has no table in scope, so the copy is
-  -- unambiguous.
+  -- Copied out of the parameters immediately: both are named after columns of `schemas`, and
+  -- plpgsql would raise "column reference is ambiguous" on the first `WHERE id = parent_schema_id`.
   v_parent_id  UUID := parent_schema_id;
   v_change     TEXT := NULLIF(btrim(COALESCE(change_description, '')), '');
   parent       public.schemas%ROWTYPE;
@@ -1274,10 +2757,9 @@ DECLARE
   v_name       TEXT;
   v_suffix     INTEGER := 1;
 BEGIN
-  -- Fail closed, and check authority before anything else observable happens. Same allow-list as
-  -- the RLS write policies on `schemas` and as approve-quarantine: forking is a schema-management
-  -- act, so it carries schema-management authority.
-  IF NOT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) THEN
+  -- Fail closed, before anything else observable happens. `has_authority` rather than a role name,
+  -- so the gate is the permission 0069 withdrew.
+  IF NOT public.has_authority(ARRAY['schema:manage']) THEN
     RAISE EXCEPTION 'insufficient privileges to version a schema'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
@@ -1320,11 +2802,8 @@ BEGIN
     v_name := v_base || '_v' || v_next || '_' || v_suffix;
   END LOOP;
 
-  -- THE METRIC LINKS ARE THE DEFINITION. There is no `schema_metrics` table in this database --
-  -- a schema's membership of the catalog lives in `schema_definition.properties` / `.required`,
-  -- which is what `modelledMetrics()` in deviceTags.js and its Python mirror in validate.py both
-  -- read. Copying the JSONB document IS duplicating the parent's metric links; a join table would
-  -- have to be copied row by row here instead.
+  -- The metric links are the definition: a schema's membership of the catalog lives in
+  -- `schema_definition.properties` / `.required`, which deviceTags.js and validate.py both read.
   INSERT INTO public.schemas (
     schema_name, description, schema_definition,
     semantic_id, semantic_id_type,
@@ -1340,12 +2819,35 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) OWNER TO postgres;
+
 --
 
 -- FUNCTION fork_schema(parent_schema_id uuid, change_description text) :: COMMENT
+COMMENT ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) IS 'Derives the next draft version of an active schema, copying its definition. The version number is computed, never supplied.';
+
 --
 
-COMMENT ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) IS 'Derives the next draft version of an active schema, copying its definition. The version number is computed, never supplied.';
+-- sparkplug_group_default() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.sparkplug_group_default() RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+    SELECT coalesce(
+        (SELECT value #>> '{}' FROM public.system_settings WHERE key = 'sparkplug.group_id'),
+        'ACS-Cymru'
+    );
+$$;
+
+
+ALTER FUNCTION public.sparkplug_group_default() OWNER TO postgres;
+
+--
+
+-- FUNCTION sparkplug_group_default() :: COMMENT
+COMMENT ON FUNCTION public.sparkplug_group_default() IS 'The site''s Sparkplug group, for gateways.sparkplug_group''s DEFAULT. Falls back to the historical literal so a row can still be inserted if the setting is ever absent -- an INSERT that failed on a missing settings row would be a worse failure than a gateway in the old group.';
+
 
 SET default_tablespace = '';
 
@@ -1354,8 +2856,6 @@ SET default_table_access_method = heap;
 --
 
 -- gateways :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.gateways (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
@@ -1367,10 +2867,9 @@ CREATE TABLE IF NOT EXISTS public.gateways (
     archived_at timestamp with time zone,
     auto_delete_at timestamp with time zone,
     last_heartbeat timestamp with time zone,
-    is_virtual boolean DEFAULT false NOT NULL,
     sparkplug_id text GENERATED ALWAYS AS (('gwy'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
     location_scope text DEFAULT 'cell'::text NOT NULL,
-    sparkplug_group text DEFAULT 'ACS-Cymru'::text NOT NULL,
+    sparkplug_group text DEFAULT public.sparkplug_group_default() NOT NULL,
     description text,
     enrolled_at timestamp with time zone,
     agent_version text,
@@ -1384,9 +2883,27 @@ CREATE TABLE IF NOT EXISTS public.gateways (
     credential_revoked_at timestamp with time zone,
     is_simulated boolean DEFAULT false NOT NULL,
     is_shadow boolean DEFAULT false NOT NULL,
-    deployment text NOT NULL,
+    deployment text DEFAULT 'remote'::text NOT NULL,
+    forge_head_sha text,
+    forge_head_message text,
+    forge_head_by text,
+    forge_head_at timestamp with time zone,
+    forge_head_flow_sha256 text,
+    area_id uuid,
+    forge_appliance_sha text,
+    forge_appliance_at timestamp with time zone,
+    forge_appliance_flow_sha256 text,
+    forge_appliance_platform_tag text,
+    forge_appliance_platform_outcome text,
+    forge_appliance_converged_at timestamp with time zone,
+    forge_appliance_custom_outcome text,
+    forge_appliance_custom_revision text,
+    forge_repository_at timestamp with time zone,
+    forge_archived_at timestamp with time zone,
+    CONSTRAINT gateways_area_wide_has_no_cell CHECK (((location_scope <> 'area_wide'::text) OR (cell_id IS NULL))),
+    CONSTRAINT gateways_area_wide_names_its_area CHECK (((location_scope = 'area_wide'::text) = (area_id IS NOT NULL))),
     CONSTRAINT gateways_deployment_valid CHECK ((deployment = ANY (ARRAY['host'::text, 'remote'::text]))),
-    CONSTRAINT gateways_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text]))),
+    CONSTRAINT gateways_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text]))),
     CONSTRAINT gateways_shadow_is_simulated CHECK (((NOT is_shadow) OR is_simulated)),
     CONSTRAINT gateways_simulated_is_host CHECK (((NOT is_simulated) OR (deployment = 'host'::text))),
     CONSTRAINT gateways_site_wide_has_no_cell CHECK (((location_scope <> 'site_wide'::text) OR (cell_id IS NULL))),
@@ -1396,151 +2913,425 @@ CREATE TABLE IF NOT EXISTS public.gateways (
 
 ALTER TABLE ONLY public.gateways REPLICA IDENTITY FULL;
 
+
+ALTER TABLE public.gateways OWNER TO postgres;
+
+ALTER TABLE public.gateways
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS cell_id uuid,
+    ADD COLUMN IF NOT EXISTS access_url text,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'OFFLINE'::text,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS last_heartbeat timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS sparkplug_id text GENERATED ALWAYS AS (('gwy'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
+    ADD COLUMN IF NOT EXISTS location_scope text DEFAULT 'cell'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS sparkplug_group text DEFAULT public.sparkplug_group_default() NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS enrolled_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS agent_version text,
+    ADD COLUMN IF NOT EXISTS health_reported_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS uptime_seconds bigint,
+    ADD COLUMN IF NOT EXISTS load_1m real,
+    ADD COLUMN IF NOT EXISTS mem_available_bytes bigint,
+    ADD COLUMN IF NOT EXISTS disk_free_bytes bigint,
+    ADD COLUMN IF NOT EXISTS cert_expires_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS flow_hash text,
+    ADD COLUMN IF NOT EXISTS credential_revoked_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS is_simulated boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS is_shadow boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS deployment text DEFAULT 'remote'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS forge_head_sha text,
+    ADD COLUMN IF NOT EXISTS forge_head_message text,
+    ADD COLUMN IF NOT EXISTS forge_head_by text,
+    ADD COLUMN IF NOT EXISTS forge_head_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS forge_head_flow_sha256 text,
+    ADD COLUMN IF NOT EXISTS area_id uuid,
+    ADD COLUMN IF NOT EXISTS forge_appliance_sha text,
+    ADD COLUMN IF NOT EXISTS forge_appliance_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS forge_appliance_flow_sha256 text,
+    ADD COLUMN IF NOT EXISTS forge_appliance_platform_tag text,
+    ADD COLUMN IF NOT EXISTS forge_appliance_platform_outcome text,
+    ADD COLUMN IF NOT EXISTS forge_appliance_converged_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS forge_appliance_custom_outcome text,
+    ADD COLUMN IF NOT EXISTS forge_appliance_custom_revision text,
+    ADD COLUMN IF NOT EXISTS forge_repository_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS forge_archived_at timestamp with time zone;
+
+ALTER TABLE public.gateways
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN cell_id DROP DEFAULT,
+    ALTER COLUMN access_url DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'OFFLINE'::text,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN is_archived SET DEFAULT false,
+    ALTER COLUMN archived_at DROP DEFAULT,
+    ALTER COLUMN auto_delete_at DROP DEFAULT,
+    ALTER COLUMN last_heartbeat DROP DEFAULT,
+    ALTER COLUMN location_scope SET DEFAULT 'cell'::text,
+    ALTER COLUMN sparkplug_group SET DEFAULT public.sparkplug_group_default(),
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN enrolled_at DROP DEFAULT,
+    ALTER COLUMN agent_version DROP DEFAULT,
+    ALTER COLUMN health_reported_at DROP DEFAULT,
+    ALTER COLUMN uptime_seconds DROP DEFAULT,
+    ALTER COLUMN load_1m DROP DEFAULT,
+    ALTER COLUMN mem_available_bytes DROP DEFAULT,
+    ALTER COLUMN disk_free_bytes DROP DEFAULT,
+    ALTER COLUMN cert_expires_at DROP DEFAULT,
+    ALTER COLUMN flow_hash DROP DEFAULT,
+    ALTER COLUMN credential_revoked_at DROP DEFAULT,
+    ALTER COLUMN is_simulated SET DEFAULT false,
+    ALTER COLUMN is_shadow SET DEFAULT false,
+    ALTER COLUMN deployment SET DEFAULT 'remote'::text,
+    ALTER COLUMN forge_head_sha DROP DEFAULT,
+    ALTER COLUMN forge_head_message DROP DEFAULT,
+    ALTER COLUMN forge_head_by DROP DEFAULT,
+    ALTER COLUMN forge_head_at DROP DEFAULT,
+    ALTER COLUMN forge_head_flow_sha256 DROP DEFAULT,
+    ALTER COLUMN area_id DROP DEFAULT,
+    ALTER COLUMN forge_appliance_sha DROP DEFAULT,
+    ALTER COLUMN forge_appliance_at DROP DEFAULT,
+    ALTER COLUMN forge_appliance_flow_sha256 DROP DEFAULT,
+    ALTER COLUMN forge_appliance_platform_tag DROP DEFAULT,
+    ALTER COLUMN forge_appliance_platform_outcome DROP DEFAULT,
+    ALTER COLUMN forge_appliance_converged_at DROP DEFAULT,
+    ALTER COLUMN forge_appliance_custom_outcome DROP DEFAULT,
+    ALTER COLUMN forge_appliance_custom_revision DROP DEFAULT,
+    ALTER COLUMN forge_repository_at DROP DEFAULT,
+    ALTER COLUMN forge_archived_at DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_area_wide_has_no_cell'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''area_wide''::text) OR (cell_id IS NULL)))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_area_wide_has_no_cell;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_area_wide_has_no_cell'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_area_wide_has_no_cell CHECK (((location_scope <> 'area_wide'::text) OR (cell_id IS NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_area_wide_names_its_area'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope = ''area_wide''::text) = (area_id IS NOT NULL)))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_area_wide_names_its_area;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_area_wide_names_its_area'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_area_wide_names_its_area CHECK (((location_scope = 'area_wide'::text) = (area_id IS NOT NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_deployment_valid'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((deployment = ANY (ARRAY[''host''::text, ''remote''::text])))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_deployment_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_deployment_valid'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_deployment_valid CHECK ((deployment = ANY (ARRAY['host'::text, 'remote'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_location_scope_valid'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text])))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_location_scope_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_location_scope_valid'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_shadow_is_simulated'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((NOT is_shadow) OR is_simulated))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_shadow_is_simulated;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_shadow_is_simulated'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_shadow_is_simulated CHECK (((NOT is_shadow) OR is_simulated));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_simulated_is_host'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((NOT is_simulated) OR (deployment = ''host''::text)))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_simulated_is_host;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_simulated_is_host'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_simulated_is_host CHECK (((NOT is_simulated) OR (deployment = 'host'::text)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_site_wide_has_no_cell'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''site_wide''::text) OR (cell_id IS NULL)))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_site_wide_has_no_cell;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_site_wide_has_no_cell'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_site_wide_has_no_cell CHECK (((location_scope <> 'site_wide'::text) OR (cell_id IS NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_sparkplug_group_format'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((sparkplug_group <> ''''::text) AND (sparkplug_group !~ ''[/+#]''::text)))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_sparkplug_group_format;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_sparkplug_group_format'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_sparkplug_group_format CHECK (((sparkplug_group <> ''::text) AND (sparkplug_group !~ '[/+#]'::text)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_synthetic_has_no_cell'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((((NOT is_simulated) AND (NOT is_shadow)) OR (cell_id IS NULL)))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_synthetic_has_no_cell;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_synthetic_has_no_cell'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_synthetic_has_no_cell CHECK ((((NOT is_simulated) AND (NOT is_shadow)) OR (cell_id IS NULL)));
+  END IF;
+END $c$;
+
+--
+
+-- COLUMN gateways.cell_id :: COMMENT
+COMMENT ON COLUMN public.gateways.cell_id IS 'The cell this gateway is filed into, or NULL for the Unassigned lane -- which is also where it lands when that cell is deleted (0112: SET NULL, not CASCADE). NULL by assertion for a site-wide, area-wide, simulated or shadow gateway; see the CHECK constraints on this table.';
+
 --
 
 -- COLUMN gateways.status :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.status IS 'Free text, deliberately unconstrained -- a Gateway_Status metric in an NBIRTH payload overrides whatever the message type implies, so the domain is not closed. The values this platform writes are: PENDING_ENROLLMENT (a Remote gateway awaiting its bundle redemption), AWAITING_BIRTH (enrolled, holds a credential, has not yet published), ONLINE and OFFLINE (written by the ingestion daemon from node-level Sparkplug messages). STALE is DERIVED at read time by public.gateway_status and is never stored.';
 
 --
 
 -- COLUMN gateways.last_heartbeat :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.last_heartbeat IS 'When the ingestion daemon last received a Sparkplug B node-level message (NBIRTH/NDATA/NDEATH) from this edge node -- receipt time, not the payload timestamp, so it stays comparable with server time regardless of edge clock drift. NULL means no heartbeat has ever arrived.';
 
 --
 
--- COLUMN gateways.is_virtual :: COMMENT
---
-
-COMMENT ON COLUMN public.gateways.is_virtual IS 'RETIRED. Nothing reads this column: `deployment` (0064) carries the question it was being asked -- where the connector runs -- with one meaning instead of three. It is still written, by sync_gateway_deployment(), so it cannot drift into being wrong; it is not dropped because 0036 names it in a function signature and calls that function in its own self-check, and every migration replays on every boot. Remove it at the next baseline squash, with 0066.';
-
---
-
 -- COLUMN gateways.sparkplug_id :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.sparkplug_id IS 'Immutable Sparkplug B edge node id, derived from the primary key. This is what appears in the MQTT topic (spBv1.0/<group>/<TYPE>/<sparkplug_id>). Never editable; rename the gateway freely without affecting ingestion.';
 
 --
 
 -- COLUMN gateways.location_scope :: COMMENT
---
-
-COMMENT ON COLUMN public.gateways.location_scope IS '''cell'' or ''site_wide''. A site-wide gateway -- typically is_virtual -- is a host-level proxy with no physical cell. Scope is not inherited by its devices; they resolve to Unassigned until an operator files them.';
+COMMENT ON COLUMN public.gateways.location_scope IS '''cell'', ''area_wide'' or ''site_wide''. An area- or site-wide gateway -- typically one with no appliance of its own -- is a host-level proxy with no physical cell. Scope is not inherited by its devices; they resolve to Unassigned until an operator files them.';
 
 --
 
 -- COLUMN gateways.sparkplug_group :: COMMENT
---
-
-COMMENT ON COLUMN public.gateways.sparkplug_group IS 'Sparkplug B Group ID -- the second topic segment. With sparkplug_id it forms the edge node address Factory+ resolves as (group, node). Editable: unlike sparkplug_id it is a configuration choice, not an issued identity.';
+COMMENT ON COLUMN public.gateways.sparkplug_group IS 'Sparkplug B Group ID -- the second topic segment. With sparkplug_id it forms the edge node address Factory+ resolves as (group, node). Defaults to the site''s group (0131) and is editable per row: a gateway can be moved to another group, unlike sparkplug_id which is issued identity.';
 
 --
 
 -- COLUMN gateways.description :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.description IS 'Optional operator note. Free text, carries no semantics, and is read by nothing.';
 
 --
 
 -- COLUMN gateways.enrolled_at :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.enrolled_at IS 'When this gateway last redeemed an enrolment token and received a broker credential. NULL for a host-run gateway and for a Remote one that has never enrolled. Re-enrolment overwrites it.';
 
 --
 
 -- COLUMN gateways.agent_version :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.agent_version IS 'Version stamp of the bundle the appliance is running. Written at enrolment and REFRESHED from the Agent_Version metric on every node-level message that carries one, so an appliance upgraded in place is visible without re-enrolment. Lets the fleet''s vintage be seen without reaching into every appliance. NULL for a host-run gateway and for one that has never enrolled.';
 
 --
 
 -- COLUMN gateways.health_reported_at :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.health_reported_at IS 'When a node-level message last carried at least one recognised health metric. Distinct from last_heartbeat, which moves on every node-level message including those carrying none: NULL here alongside a recent last_heartbeat means the appliance is alive on a bundle that does not report health, which is a different situation from one that has stopped reporting it.';
 
 --
 
 -- COLUMN gateways.uptime_seconds :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.uptime_seconds IS 'Seconds since the appliance''s Node-RED runtime started, from the Uptime_s metric. Process uptime, not host uptime -- a restarted container resets it while the machine stays up.';
 
 --
 
 -- COLUMN gateways.load_1m :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.load_1m IS 'Host 1-minute load average, from node_exporter''s node_load1 via the Load_1m metric. Not normalised by core count, so compare a gateway against itself over time rather than against another gateway.';
 
 --
 
 -- COLUMN gateways.mem_available_bytes :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.mem_available_bytes IS 'Host MemAvailable in bytes, from node_exporter''s node_memory_MemAvailable_bytes. Available, not free: it counts reclaimable cache, which is the number that predicts whether an allocation will succeed.';
 
 --
 
 -- COLUMN gateways.disk_free_bytes :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.disk_free_bytes IS 'Free bytes on the appliance''s root filesystem, from node_exporter''s node_filesystem_avail_bytes. The metric that earns the collector: an appliance that fills its disk stops publishing and reports nothing about why.';
 
 --
 
 -- COLUMN gateways.cert_expires_at :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.cert_expires_at IS 'notAfter of the CA this appliance trusts for the broker, reported by the appliance itself. The CA is hand-distributed into every appliance''s trust store, so re-minting it takes the whole fleet offline at once with no other signal -- this is what makes that a dated warning instead of an outage. Reported, not observed: it is what the appliance HAS, which is the question.';
 
 --
 
 -- COLUMN gateways.flow_hash :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.flow_hash IS 'SHA-256 of the flow this appliance was provisioned with, computed by its bootstrap at enrolment. Answers "which bundle''s flow is on that gateway" without a shell on it. It does NOT detect local edits: an operator who changes the flow in the Node-RED editor keeps reporting the hash of what was installed, because the appliance has no way to hash its own running flow without the admin API and a credential to call it with.';
 
 --
 
 -- COLUMN gateways.credential_revoked_at :: COMMENT
---
-
-COMMENT ON COLUMN public.gateways.credential_revoked_at IS 'When this gateway''s broker credential was last rotated to a password nobody recorded, which is how this platform revokes. NULL on a gateway that is not archived, and on an archived one whose revocation has not yet succeeded -- the sweep in 0038 retries those. Set back to NULL by re-enrolment, because that issues a fresh working credential.';
+COMMENT ON COLUMN public.gateways.credential_revoked_at IS 'When this gateway''s broker account was last disabled at the broker, which is how this platform revokes. NULL on a gateway that is not archived, and on an archived one whose revocation has not yet succeeded -- the sweep in 0038 retries those. Set back to NULL by re-enrolment, because that issues a fresh working credential; a later issue from the dashboard outranks it in gateway_status.';
 
 --
 
 -- COLUMN gateways.is_simulated :: COMMENT
---
-
-COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s telemetry is generated rather than observed -- a broker playback target, or a simulator. Devices INHERIT this through their gateway_id and carry no flag of their own (see 0052''s header): the containment rules a stored device-level copy would need two triggers to maintain are given for nothing by the join. Distinct from is_virtual, which is about whether an edge appliance exists, not about whether the readings are real -- a physical appliance replaying a capture is virtual=false, simulated=true.';
+COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s telemetry is generated rather than observed -- a broker playback target, or a simulator. Devices INHERIT this through their gateway_id and carry no flag of their own (see 0052''s header): the containment rules a stored device-level copy would need two triggers to maintain are given for nothing by the join. Distinct from `deployment`, which is about where the connector runs rather than whether the readings are real -- a remote appliance replaying a capture is deployment=''remote'', simulated=true.';
 
 --
 
 -- COLUMN gateways.is_shadow :: COMMENT
---
-
 COMMENT ON COLUMN public.gateways.is_shadow IS 'True when this gateway exists only to publish recorded captures -- its devices are replay lanes for real machines rather than machines. Implies is_simulated (a CHECK enforces it), and takes precedence over it in device_locations: the readings are genuine, so "replayed" is more informative than "synthetic". Devices INHERIT this through gateway_id and carry no flag of their own (see 0052).';
 
 --
 
 -- COLUMN gateways.deployment :: COMMENT
+COMMENT ON COLUMN public.gateways.deployment IS 'Where this gateway''s connector runs: ''host'' (inside this stack) or ''remote'' (an edge appliance on the plant network). This is the axis every behaviour that used to branch on the retired `is_virtual` flag was actually about -- bundles, enrolment -- and since that column went it is the only one stating it.';
+
 --
 
-COMMENT ON COLUMN public.gateways.deployment IS 'Where this gateway''s connector runs: ''host'' (inside this stack) or ''remote'' (an edge appliance on the plant network). This is the axis every behaviour branching on is_virtual was actually about -- bundles, enrolment. Kept in step with is_virtual by sync_gateway_deployment() until that column is retired.';
+-- COLUMN gateways.forge_head_sha :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_head_sha IS 'The commit at the head of main in this gateway''s repository, as the forge last reported it (forge-events, on every push). Null until the first push after the webhook existed.';
+
+--
+
+-- COLUMN gateways.forge_head_message :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_head_message IS 'First line of that commit''s message.';
+
+--
+
+-- COLUMN gateways.forge_head_by :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_head_by IS 'Who pushed it, as the forge names them: the email of the login that merged, or the committer of a push.';
+
+--
+
+-- COLUMN gateways.forge_head_at :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_head_at IS 'When that commit was made. The appliance deploys it on its next tick after this.';
+
+--
+
+-- COLUMN gateways.forge_head_flow_sha256 :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_head_flow_sha256 IS 'SHA-256 of flows.json at that head, or null if main carries none. flow_hash is the same digest for the flow the appliance last deployed, reported on its heartbeat; equal means the appliance has deployed what main holds.';
+
+--
+
+-- COLUMN gateways.area_id :: COMMENT
+COMMENT ON COLUMN public.gateways.area_id IS 'Populated exactly when location_scope = ''area_wide''. Not inherited by its devices, as location_scope is not: they resolve to Unassigned until an operator files them.';
+
+--
+
+-- COLUMN gateways.forge_appliance_sha :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_sha IS 'The commit at the head of the appliance branch in this gateway''s repository, as the forge last reported it (forge-events, on every push). Written only by the appliance. Null until it has pushed once.';
+
+--
+
+-- COLUMN gateways.forge_appliance_at :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_at IS 'When that commit was made: the last time the appliance reported what it is running.';
+
+--
+
+-- COLUMN gateways.forge_appliance_flow_sha256 :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_flow_sha256 IS 'SHA-256 of flows.json at that head: the flow Node-RED is running on the appliance. Differs from flow_hash when the flow was edited in the appliance''s editor after the last deploy.';
+
+--
+
+-- COLUMN gateways.forge_appliance_platform_tag :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_platform_tag IS 'The platform playbook tag this appliance last converged to, from converged.json on the appliance branch. Compare with the platform''s own version to see a fleet mid-rollout. Null until the appliance has converged once.';
+
+--
+
+-- COLUMN gateways.forge_appliance_platform_outcome :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_platform_outcome IS 'How that convergence ended: converged, failed, or refused (the appliance is not enrolled, or no file names a tag).';
+
+--
+
+-- COLUMN gateways.forge_appliance_converged_at :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_converged_at IS 'When the appliance recorded that convergence, by its own clock. The clock offset gauge says how far that is from the platform''s.';
+
+--
+
+-- COLUMN gateways.forge_appliance_custom_outcome :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_custom_outcome IS 'How this gateway''s own custom.yml ended: converged or failed. Null when its repository carries no playbook of its own, and when the platform run failed before one could be attempted.';
+
+--
+
+-- COLUMN gateways.forge_appliance_custom_revision :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_appliance_custom_revision IS 'The commit of the gateway''s own repository that custom.yml was run from. Null for the same reasons as the outcome beside it.';
+
+--
+
+-- COLUMN gateways.forge_repository_at :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_repository_at IS 'When this gateway''s repository was created in the forge (enroll-gateway step 4), or when forge-sweep first saw it. Null means there is no repository to link to: no forge on this deployment, no SSH key sent at enrolment, or provisioning failed -- all of which leave enrolled_at set.';
+
+--
+
+-- COLUMN gateways.forge_archived_at :: COMMENT
+COMMENT ON COLUMN public.gateways.forge_archived_at IS 'When forge-sweep last saw this gateway''s repository in the forge''s archive -- read-only, every branch and wiki page kept. Written and cleared by the sweep, never by the trigger that asks for it: null means the repository is live, or that nothing has spoken to a forge about it. Set from is_archived, so restoring the gateway clears it on the next pass.';
 
 --
 
 -- gateway_has_broker_credential(public.gateways) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.gateway_has_broker_credential(g public.gateways) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -1556,19 +3347,18 @@ CREATE OR REPLACE FUNCTION public.gateway_has_broker_credential(g public.gateway
         ));
 $$;
 
+
+ALTER FUNCTION public.gateway_has_broker_credential(g public.gateways) OWNER TO postgres;
+
 --
 
 -- FUNCTION gateway_has_broker_credential(g public.gateways) :: COMMENT
---
-
 COMMENT ON FUNCTION public.gateway_has_broker_credential(g public.gateways) IS 'Does an account exist at the broker for this gateway, by either route it can arrive -- a remote appliance completing enrolment, or the CREDENTIAL_ISSUED row a host-run mint leaves -- minus revocation. Cannot admit a gateway that never held one, which is what lets revocation use it without creating accounts through the add-only credential service (0063).';
 
 --
 
 -- gateway_health_rows() :: FUNCTION
---
-
-CREATE OR REPLACE FUNCTION public.gateway_health_rows() RETURNS TABLE(sparkplug_id text, gateway_name text, live_status text, is_stale boolean, is_virtual boolean, heartbeat_age_seconds bigint, health_reported_at timestamp with time zone, health_age_seconds bigint, uptime_seconds bigint, load_1m real, mem_available_bytes bigint, disk_free_bytes bigint, cert_expires_at timestamp with time zone, cert_expires_in_days numeric, agent_version text, flow_hash text)
+CREATE OR REPLACE FUNCTION public.gateway_health_rows() RETURNS TABLE(sparkplug_id text, gateway_name text, live_status text, is_stale boolean, heartbeat_age_seconds bigint, health_reported_at timestamp with time zone, health_age_seconds bigint, uptime_seconds bigint, load_1m real, mem_available_bytes bigint, disk_free_bytes bigint, cert_expires_at timestamp with time zone, cert_expires_in_days numeric, agent_version text, flow_hash text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
@@ -1577,7 +3367,6 @@ CREATE OR REPLACE FUNCTION public.gateway_health_rows() RETURNS TABLE(sparkplug_
         g.name,
         g.live_status,
         g.is_stale,
-        g.is_virtual,
         g.heartbeat_age_seconds,
         g.health_reported_at,
         EXTRACT(EPOCH FROM (now() - g.health_reported_at))::bigint,
@@ -1600,34 +3389,113 @@ CREATE OR REPLACE FUNCTION public.gateway_health_rows() RETURNS TABLE(sparkplug_
      WHERE NOT g.is_archived
 $$;
 
+
+ALTER FUNCTION public.gateway_health_rows() OWNER TO postgres;
+
 --
 
 -- FUNCTION gateway_health_rows() :: COMMENT
---
-
 COMMENT ON FUNCTION public.gateway_health_rows() IS 'One row per live gateway: its identity, its heartbeat freshness, and the appliance health it reports (0035). SECURITY DEFINER so the Grafana reader needs no privilege on `gateways`. Carries NOTHING about devices, cells or quarantine -- that inventory is the boundary 0029 drew and this does not cross it.';
 
 --
 
 -- gateway_holds_a_credential(public.gateways) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.gateway_holds_a_credential(g public.gateways) RETURNS boolean
     LANGUAGE sql IMMUTABLE
     AS $$ SELECT g.deployment = 'remote' AND g.enrolled_at IS NOT NULL $$;
 
+
+ALTER FUNCTION public.gateway_holds_a_credential(g public.gateways) OWNER TO postgres;
+
 --
 
 -- FUNCTION gateway_holds_a_credential(g public.gateways) :: COMMENT
---
-
 COMMENT ON FUNCTION public.gateway_holds_a_credential(g public.gateways) IS 'True for a REMOTE appliance that completed enrolment, and false for everything else -- which includes every host-run gateway, whose credential leaves no enrolment behind. Ask gateway_has_broker_credential() instead when the question is "does an account exist at the broker": this one is about enrolment, and mistaking the two is what 0056, 0062 and 0063 each had to correct.';
 
 --
 
--- handle_new_user() :: FUNCTION
+-- gateway_is_playback_delivery_target(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_simulated boolean;
+BEGIN
+  -- The same allow-list as the authorisation gate, re-checked here: authorisation must not rest on
+  -- a check made only by the component that also acts on the answer.
+  IF NOT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) THEN
+    RAISE EXCEPTION 'insufficient privileges to resolve a playback delivery target'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  SELECT is_simulated INTO v_simulated FROM public.gateways WHERE id = p_gateway_id;
+
+  -- False for a gateway that does not exist, rather than an exception: "do not deliver" is the safe
+  -- answer to a row deleted between the two calls. Coalesced though is_simulated is NOT NULL today,
+  -- so relaxing the constraint later cannot silently change what is delivered.
+  RETURN coalesce(v_simulated, false);
+END;
+$$;
+
+
+ALTER FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) OWNER TO postgres;
+
 --
 
+-- FUNCTION gateway_is_playback_delivery_target(p_gateway_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) IS 'Whether a freshly-issued broker credential for this gateway may be DELIVERED to the playback worker. is_simulated -- the same predicate start_playback_job() gates on, so the set of passwords the worker can hold is exactly the set of gateways it may publish as. Deliberately NOT a column on authorize_host_gateway_credential(): 0001 redeclares that function on every boot and CREATE OR REPLACE cannot change a return type, which aborts the whole chain at file one.';
+
+--
+
+-- guard_change_proposal_transition() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.guard_change_proposal_transition() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    IF COALESCE(current_setting('acs_cymru.proposal_transition', true), '') = 'on' THEN
+        RETURN NEW;
+    END IF;
+
+    IF OLD.status <> 'open' THEN
+        RAISE EXCEPTION 'proposal % is %, and a decided proposal is a record rather than a draft',
+            OLD.id, OLD.status
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NEW.status IS DISTINCT FROM OLD.status
+       OR NEW.entity_type IS DISTINCT FROM OLD.entity_type
+       OR NEW.entity_id IS DISTINCT FROM OLD.entity_id
+       OR NEW.proposed_by IS DISTINCT FROM OLD.proposed_by
+       OR NEW.proposed_by_email IS DISTINCT FROM OLD.proposed_by_email
+       OR NEW.proposed_at IS DISTINCT FROM OLD.proposed_at
+       OR NEW.decided_by IS DISTINCT FROM OLD.decided_by
+       OR NEW.decided_at IS DISTINCT FROM OLD.decided_at
+       OR NEW.decision_reason IS DISTINCT FROM OLD.decision_reason
+       OR NEW.applied_thread_id IS DISTINCT FROM OLD.applied_thread_id
+    THEN
+        RAISE EXCEPTION
+            'only the patch and the rationale may be edited; approve_proposal(), reject_proposal() '
+            'and withdraw_proposal() are how a proposal changes status'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.guard_change_proposal_transition() OWNER TO postgres;
+
+--
+
+-- FUNCTION guard_change_proposal_transition() :: COMMENT
+COMMENT ON FUNCTION public.guard_change_proposal_transition() IS 'Outside the transition functions, only patch and rationale may be edited and only while open. An RLS policy can say who may UPDATE a row; it cannot say which columns, and status is the column that must not move -- a proposer who could set ''applied'' would hold the asset write this design exists to withhold. The author stamp is equally immutable: rewriting it would re-attribute a proposal an approver is already reading.';
+
+--
+
+-- handle_new_user() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.handle_new_user() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1680,11 +3548,48 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.handle_new_user() OWNER TO postgres;
+
+--
+
+-- has_authority(text[]) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.has_authority(allowed_permissions text[]) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+    -- One arm or the other, never both: the trigger on user_roles guarantees an identity cannot be
+    -- in both sets. An anonymous caller takes the person arm, matches nothing, and returns false.
+    SELECT CASE
+        WHEN public.is_machine_principal(auth.uid()) THEN EXISTS (
+            SELECT 1
+              FROM public.principal_permissions pp
+              JOIN public.permissions p ON p.id = pp.permission_id
+             WHERE pp.principal_id = auth.uid()
+               AND p.name = ANY (allowed_permissions)
+        )
+        ELSE EXISTS (
+            SELECT 1
+              FROM public.user_roles ur
+              JOIN public.role_permissions rp ON rp.role_id = ur.role_id
+              JOIN public.permissions p ON p.id = rp.permission_id
+             WHERE ur.user_id = auth.uid()::text
+               AND p.name = ANY (allowed_permissions)
+        )
+    END;
+$$;
+
+
+ALTER FUNCTION public.has_authority(allowed_permissions text[]) OWNER TO postgres;
+
+--
+
+-- FUNCTION has_authority(allowed_permissions text[]) :: COMMENT
+COMMENT ON FUNCTION public.has_authority(allowed_permissions text[]) IS 'True when the caller holds any of these PERMISSIONS. A machine principal resolves through principal_permissions, a person through user_roles -> role_permissions, and nothing resolves through both. Use it where a policy would otherwise name a role that machine principals happen to share; has_role() remains the predicate for the 58 sites that name Administrator or Shopfloor_Manager, which no machine has ever satisfied.';
+
 --
 
 -- has_role(text[]) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.has_role(allowed_roles text[]) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -1698,11 +3603,12 @@ CREATE OR REPLACE FUNCTION public.has_role(allowed_roles text[]) RETURNS boolean
   );
 $$;
 
+
+ALTER FUNCTION public.has_role(allowed_roles text[]) OWNER TO postgres;
+
 --
 
 -- ingest_capture_progress(uuid, bigint, bigint, integer, boolean) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean DEFAULT false) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1732,11 +3638,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) OWNER TO postgres;
+
 --
 
 -- ingest_claim_capture_job() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_claim_capture_job() RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1768,11 +3675,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_claim_capture_job() OWNER TO postgres;
+
 --
 
 -- ingest_claim_rebirth_requests() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_claim_rebirth_requests() RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1802,11 +3710,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_claim_rebirth_requests() OWNER TO postgres;
+
 --
 
 -- ingest_fail_capture(uuid, text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1823,11 +3732,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) OWNER TO postgres;
+
 --
 
 -- ingest_finalise_capture(uuid, bigint, integer, jsonb) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb DEFAULT '{}'::jsonb) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1879,11 +3789,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) OWNER TO postgres;
+
 --
 
 -- ingest_mark_device_offline(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_mark_device_offline(p_device_id uuid) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1908,11 +3819,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_mark_device_offline(p_device_id uuid) OWNER TO postgres;
+
 --
 
 -- ingest_reconcile_capture_jobs() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_reconcile_capture_jobs() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1939,11 +3851,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_reconcile_capture_jobs() OWNER TO postgres;
+
 --
 
 -- ingest_record_declared_metrics(uuid, text[], timestamp with time zone) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone DEFAULT now()) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -1969,18 +3882,21 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone) OWNER TO postgres;
+
 --
 
 -- ingest_record_gateway_health(uuid, text, timestamp with time zone, jsonb) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb DEFAULT NULL::jsonb) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
-    v_rows integer;
+    v_rows       integer;
     v_has_health boolean;
+    v_before     record;
+    v_flow_hash  text;
 BEGIN
     PERFORM public.require_ingestion_caller('ingest_record_gateway_health');
 
@@ -2013,6 +3929,14 @@ BEGIN
     v_has_health := p_health IS NOT NULL AND jsonb_typeof(p_health) = 'object'
                     AND p_health <> '{}'::jsonb;
 
+    -- What the row said before this heartbeat, for the one reading that is an event: the flow
+    -- the appliance last deployed. Read before the UPDATE, with the forge's head beside it, so
+    -- the row below can say what main held at the moment the appliance reported.
+    SELECT g.flow_hash, g.name, g.sparkplug_id, g.forge_head_sha, g.forge_head_flow_sha256
+      INTO v_before
+      FROM public.gateways g
+     WHERE g.id = p_gateway_id;
+
     UPDATE public.gateways g
        SET status         = p_status,
            last_heartbeat = COALESCE(p_heartbeat_at, now()),
@@ -2041,15 +3965,49 @@ BEGIN
             USING ERRCODE = 'foreign_key_violation';
     END IF;
 
+    -- A DEPLOYED FLOW IS AN EVENT. The audit trigger no longer sees this column (it is in
+    -- audit_telemetry_columns(), with the readings), so the change is recorded here, once per
+    -- change, as a FLOW_DEPLOYED row pinned to 'ingestion': the daemon is the witness to what the
+    -- appliance reported, the way record_ingestion_rejection() is the witness to what it refused.
+    -- No fourth actor kind: the puller on the appliance never touches this database, and the
+    -- heartbeat is its only channel. `matches_main` is what the forge held at that moment.
+    v_flow_hash := p_health->>'flow_hash';
+    IF v_has_health AND v_flow_hash IS NOT NULL AND v_flow_hash IS DISTINCT FROM v_before.flow_hash THEN
+        INSERT INTO public.digital_thread (
+            entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+            causation_id, recorded_at
+        ) VALUES (
+            'gateways',
+            p_gateway_id,
+            'FLOW_DEPLOYED',
+            jsonb_build_object('flow_hash', v_before.flow_hash),
+            jsonb_build_object(
+                'flow_hash',              v_flow_hash,
+                -- The identity as it was AT THE TIME, as the rejection row keeps it.
+                'name',                   v_before.name,
+                'sparkplug_id',           v_before.sparkplug_id,
+                'reported_at',            COALESCE(p_heartbeat_at, now()),
+                'forge_head_sha',         v_before.forge_head_sha,
+                'forge_head_flow_sha256', v_before.forge_head_flow_sha256,
+                'matches_main',           v_flow_hash = v_before.forge_head_flow_sha256
+            ),
+            NULL,
+            'ingestion',
+            txid_current(),
+            now()
+        );
+    END IF;
+
     RETURN true;
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) OWNER TO postgres;
+
 --
 
 -- ingest_record_rebirth_outcome(uuid, boolean, text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean DEFAULT false, p_error text DEFAULT NULL::text) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2065,11 +4023,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean, p_error text) OWNER TO postgres;
+
 --
 
 -- ingest_register_quarantined_device(text, uuid, text, text, text, text[], timestamp with time zone) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[] DEFAULT NULL::text[], p_observed_at timestamp with time zone DEFAULT now()) RETURNS TABLE(id uuid, name text, sparkplug_id text, reported_identity text, gateway_id uuid, is_quarantined boolean, first_dbirth_at timestamp with time zone, last_birth_metrics text[], status text, identity_source text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2141,11 +4100,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) OWNER TO postgres;
+
 --
 
 -- ingest_requarantine_device(uuid, text, text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2182,11 +4142,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) OWNER TO postgres;
+
 --
 
 -- ingest_set_device_state(uuid, text, text, timestamp with time zone) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text DEFAULT NULL::text, p_identity_source text DEFAULT NULL::text, p_first_dbirth_at timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2227,11 +4188,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) OWNER TO postgres;
+
 --
 
 -- ingest_store_birth_parameters(text, jsonb, timestamp with time zone) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone DEFAULT now()) RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2289,11 +4251,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone) OWNER TO postgres;
+
 --
 
 -- is_active_capture_object(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.is_active_capture_object(p_name text) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -2304,18 +4267,17 @@ CREATE OR REPLACE FUNCTION public.is_active_capture_object(p_name text) RETURNS 
     );
 $$;
 
+
+ALTER FUNCTION public.is_active_capture_object(p_name text) OWNER TO postgres;
+
 --
 
 -- FUNCTION is_active_capture_object(p_name text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.is_active_capture_object(p_name text) IS 'True when a storage object path is the destination of a capture job that is RECORDING right now. Confines the ingestion daemon''s authority over broker-captures to the single file it is producing: with no capture in flight the daemon can reach nothing in the bucket at all.';
 
 --
 
 -- is_active_playback_capture(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.is_active_playback_capture(p_name text) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -2326,18 +4288,17 @@ CREATE OR REPLACE FUNCTION public.is_active_playback_capture(p_name text) RETURN
     );
 $$;
 
+
+ALTER FUNCTION public.is_active_playback_capture(p_name text) OWNER TO postgres;
+
 --
 
 -- FUNCTION is_active_playback_capture(p_name text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.is_active_playback_capture(p_name text) IS 'True when a storage object is the capture of a playback job that is RUNNING right now. Confines the playback worker''s read of broker-captures to the single file it is publishing: with no playback in flight the worker can reach nothing in the bucket at all.';
 
 --
 
 -- is_capture_subject_prefix(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.is_capture_subject_prefix(p_folder text) RETURNS boolean
     LANGUAGE sql STABLE
     SET search_path TO 'public'
@@ -2346,18 +4307,35 @@ CREATE OR REPLACE FUNCTION public.is_capture_subject_prefix(p_folder text) RETUR
         OR EXISTS (SELECT 1 FROM public.devices  d WHERE d.sparkplug_id = p_folder);
 $$;
 
+
+ALTER FUNCTION public.is_capture_subject_prefix(p_folder text) OWNER TO postgres;
+
 --
 
 -- FUNCTION is_capture_subject_prefix(p_folder text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.is_capture_subject_prefix(p_folder text) IS 'True when a storage folder names a real gateway or device. The prefix rule for broker-captures, which files by the SUBJECT RECORDED rather than by the gateway a capture plays back as.';
 
 --
 
--- is_ingestion_caller() :: FUNCTION
+-- is_floor_plan_path(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.is_floor_plan_path(p_name text) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $_$
+  SELECT split_part(p_name, '/', 3) = ''
+     AND split_part(p_name, '/', 2) ~* '^[^/]+\.svg$'
+     AND EXISTS (
+       SELECT 1 FROM public.areas a
+        WHERE a.id::text = split_part(p_name, '/', 1)
+     )
+$_$;
+
+
+ALTER FUNCTION public.is_floor_plan_path(p_name text) OWNER TO postgres;
+
 --
 
+-- is_ingestion_caller() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.is_ingestion_caller() RETURNS boolean
     LANGUAGE sql STABLE
     SET search_path TO 'public'
@@ -2368,18 +4346,17 @@ CREATE OR REPLACE FUNCTION public.is_ingestion_caller() RETURNS boolean
     SELECT COALESCE(auth.uid()::text = 'b0000000-0000-4000-8000-000000000002', false);
 $$;
 
+
+ALTER FUNCTION public.is_ingestion_caller() OWNER TO postgres;
+
 --
 
 -- FUNCTION is_ingestion_caller() :: COMMENT
---
-
 COMMENT ON FUNCTION public.is_ingestion_caller() IS 'True only for the Service_Ingestor principal (0046). Guards every ingest_* write gate. The transitional service_role arm was removed by 0048 -- see Machine Identities in supabase/README.md.';
 
 --
 
 -- is_machine_principal(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.is_machine_principal(p_user_id uuid) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -2397,18 +4374,17 @@ CREATE OR REPLACE FUNCTION public.is_machine_principal(p_user_id uuid) RETURNS b
     );
 $$;
 
+
+ALTER FUNCTION public.is_machine_principal(p_user_id uuid) OWNER TO postgres;
+
 --
 
 -- FUNCTION is_machine_principal(p_user_id uuid) :: COMMENT
---
-
 COMMENT ON FUNCTION public.is_machine_principal(p_user_id uuid) IS 'True for a seeded or minted machine identity -- no email, no password, no identity provider, and therefore unable to sign in. The predicate is 0042''s, deliberately unchanged: a second definition of "is this a service account" would be worse than none. Used by log_digital_thread_event() to keep a machine''s writes from being recorded as a human''s.';
 
 --
 
 -- is_playback_caller() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.is_playback_caller() RETURNS boolean
     LANGUAGE sql STABLE
     SET search_path TO 'public'
@@ -2419,18 +4395,17 @@ CREATE OR REPLACE FUNCTION public.is_playback_caller() RETURNS boolean
     SELECT COALESCE(auth.uid()::text = 'b0000000-0000-4000-8000-000000000003', false);
 $$;
 
+
+ALTER FUNCTION public.is_playback_caller() OWNER TO postgres;
+
 --
 
 -- FUNCTION is_playback_caller() :: COMMENT
---
-
 COMMENT ON FUNCTION public.is_playback_caller() IS 'True only for the Service_Playback principal (0056). Guards every playback_* worker gate. Deliberately distinct from is_ingestion_caller(): the two processes hold different broker rights -- the daemon may publish only NCMD rebirth requests, the worker may publish asset data as one gateway -- and a shared predicate would let either use the other''s gates.';
 
 --
 
 -- is_valid_quarantine_reason(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.is_valid_quarantine_reason(p_reason text) RETURNS boolean
     LANGUAGE sql IMMUTABLE
     AS $$
@@ -2442,18 +4417,17 @@ CREATE OR REPLACE FUNCTION public.is_valid_quarantine_reason(p_reason text) RETU
     );
 $$;
 
+
+ALTER FUNCTION public.is_valid_quarantine_reason(p_reason text) OWNER TO postgres;
+
 --
 
 -- FUNCTION is_valid_quarantine_reason(p_reason text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.is_valid_quarantine_reason(p_reason text) IS 'True when the reason is one of the four quarantine codes, bare or followed by ": <detail>". Both shapes are produced by ingestion.py -- see 0047''s header for why this is a prefix check rather than an equality check.';
 
 --
 
 -- issue_gateway_enrollment_token(uuid, integer) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer DEFAULT 30) RETURNS TABLE(token text, expires_at timestamp with time zone)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2530,63 +4504,119 @@ BEGIN
   RETURN QUERY SELECT v_token, v_expires;
 END $$;
 
+
+ALTER FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) OWNER TO postgres;
+
 --
 
 -- FUNCTION issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) :: COMMENT
---
-
 COMMENT ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) IS 'Mint a single-use enrolment token for a Remote gateway and move it to PENDING_ENROLLMENT. Returns the raw token ONCE -- only its SHA-256 is stored. Requires Administrator or Shopfloor_Manager. Re-issuing consumes any previous live token, so a regenerated bundle invalidates the one already downloaded.';
 
 --
 
--- list_service_principals() :: FUNCTION
---
-
-CREATE OR REPLACE FUNCTION public.list_service_principals() RETURNS TABLE(principal_id uuid, roles text[], created_at timestamp with time zone, can_sign_in boolean)
+-- list_machine_principals() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.list_machine_principals() RETURNS TABLE(principal_id uuid, permissions text[], created_at timestamp with time zone, can_sign_in boolean)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 BEGIN
-  -- ADMINISTRATOR ONLY, and narrower than the page's other reads on purpose. A gateway's
-  -- credential state is operational -- a Shopfloor_Manager acts on it. The list of machine
-  -- identities that can reach the stack is an access-control question, and `authz:manage` is
-  -- granted to Administrator alone.
-  IF NOT public.has_role(ARRAY['Administrator']) THEN
-    RAISE EXCEPTION 'insufficient privileges to list service principals'
-      USING ERRCODE = 'insufficient_privilege';
-  END IF;
+    -- ADMINISTRATOR ONLY, and narrower than the page's other reads on purpose. A gateway's
+    -- credential state is operational -- a Shopfloor_Manager acts on it. The list of machine
+    -- identities that can reach the stack is an access-control question.
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RAISE EXCEPTION 'insufficient privileges to list machine principals'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
 
-  RETURN QUERY
-  SELECT u.id,
-         coalesce(array_agg(r.name ORDER BY r.name) FILTER (WHERE r.name IS NOT NULL), '{}'::text[]),
-         u.created_at,
-         -- RETURNED RATHER THAN ASSUMED, even though the WHERE clause makes it false for every row.
-         -- It is the property that makes listing these safe, and a page that states it is a page
-         -- whose claim can be checked. If this ever comes back true, the predicate below has
-         -- stopped meaning what its name says.
-         false
-    FROM auth.users u
-    LEFT JOIN public.user_roles ur ON ur.user_id = u.id::text
-    LEFT JOIN public.roles r ON r.id = ur.role_id
-   WHERE u.email IS NULL
-     AND (u.encrypted_password IS NULL OR u.encrypted_password = '')
-   GROUP BY u.id, u.created_at
-   ORDER BY u.created_at;
+    RETURN QUERY
+    SELECT u.id,
+           coalesce(array_agg(p.name ORDER BY p.name) FILTER (WHERE p.name IS NOT NULL), '{}'::text[]),
+           u.created_at,
+           -- RETURNED RATHER THAN ASSUMED, even though the WHERE clause makes it false for every
+           -- row. It is the property that makes listing these safe, and a page that states it is a
+           -- page whose claim can be checked.
+           false
+      FROM auth.users u
+      LEFT JOIN public.principal_permissions pp ON pp.principal_id = u.id
+      LEFT JOIN public.permissions p ON p.id = pp.permission_id
+     WHERE u.email IS NULL
+       AND (u.encrypted_password IS NULL OR u.encrypted_password = '')
+     GROUP BY u.id, u.created_at
+     ORDER BY u.created_at;
 END;
 $$;
 
+
+ALTER FUNCTION public.list_machine_principals() OWNER TO postgres;
+
 --
 
--- FUNCTION list_service_principals() :: COMMENT
+-- FUNCTION list_machine_principals() :: COMMENT
+COMMENT ON FUNCTION public.list_machine_principals() IS 'Machine identities that can reach this stack, with the permissions each holds in its own right. Administrator only. Replaces list_service_principals(), whose second column was the role a machine borrowed; the name changed because the return type did. Returns no email, no token and nothing derived from one.';
+
 --
 
-COMMENT ON FUNCTION public.list_service_principals() IS 'Machine identities that can reach this stack: auth.users rows with no email and no password, which cannot sign in through GoTrue and are presented only by a JWT signed outside it. Administrator only. Returns no email, no token and nothing derived from one.';
+-- list_user_accounts() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.list_user_accounts() RETURNS TABLE(user_id uuid, email text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    -- Administrator and Auditor: the two roles `digital_thread_select_security` admits. See the
+    -- header for why this is not narrower.
+    IF NOT public.has_role(ARRAY['Administrator', 'Auditor']) THEN
+        RAISE EXCEPTION 'insufficient privileges to list user accounts'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    RETURN QUERY
+    SELECT u.id, u.email::text
+      FROM auth.users u
+     -- ONE DEFINITION OF "IS THIS A SERVICE ACCOUNT", which is 0048's rule. Spelling the test out
+     -- again here would be a second one, and the two would agree until the day they did not.
+     WHERE NOT public.is_machine_principal(u.id)
+     ORDER BY u.email NULLS LAST, u.id;
+END;
+$$;
+
+
+ALTER FUNCTION public.list_user_accounts() OWNER TO postgres;
+
+--
+
+-- FUNCTION list_user_accounts() :: COMMENT
+COMMENT ON FUNCTION public.list_user_accounts() IS 'The people who can reach this stack, as id and email, for naming the person a digital_thread role-assignment row is about. Membership is NOT is_machine_principal() (0048), the same predicate the rest of the stack tells a person from a service identity with. Administrator and Auditor only -- the roles digital_thread_select_security admits, because an Auditor reading uuids beside an Administrator reading names would be the same record told two ways. The email may be NULL; the caller falls back to the id.';
+
+--
+
+-- log_asset_export() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.log_asset_export() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    INSERT INTO public.digital_thread
+        (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+         causation_id, recorded_at)
+    VALUES
+        (NEW.entity_type, NEW.entity_id, 'EXPORTED', NULL, to_jsonb(NEW), NEW.taken_by,
+         CASE WHEN NEW.taken_by IS NULL THEN 'service' ELSE 'user' END,
+         txid_current(), NEW.taken_at);
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.log_asset_export() OWNER TO postgres;
+
+--
+
+-- FUNCTION log_asset_export() :: COMMENT
+COMMENT ON FUNCTION public.log_asset_export() IS 'Records an asset_exports row in digital_thread as EXPORTED, attributed to the person the function verified. The one thread row that survives the entity in a form the tombstone can link to.';
 
 --
 
 -- log_digital_thread_event() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.log_digital_thread_event() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2599,29 +4629,54 @@ DECLARE
     v_source    TEXT;
     v_declared  TEXT;
     v_role      TEXT;
+    v_key       TEXT;
 BEGIN
     -- -----------------------------------------------------------------------------------------
     -- Suppression. UPDATE only: an INSERT or DELETE is always an event.
     -- -----------------------------------------------------------------------------------------
-    -- One comparison covers both cases, because subtracting an absent key is a no-op: identical
-    -- rows are a no-op write, and rows differing only in last_heartbeat are liveness telemetry.
+    -- One comparison covers every case, because subtracting an absent key is a no-op: identical
+    -- rows are a no-op write, and rows differing only in the columns audit_telemetry_columns()
+    -- names are a heartbeat's readings, which arrive every thirty seconds and are not events.
     -- `IS NOT DISTINCT FROM` so a NULL on either side compares as equal.
     IF TG_OP = 'UPDATE'
-       AND (to_jsonb(NEW) - 'last_heartbeat') IS NOT DISTINCT FROM (to_jsonb(OLD) - 'last_heartbeat')
+       AND (to_jsonb(NEW) - public.audit_telemetry_columns())
+           IS NOT DISTINCT FROM (to_jsonb(OLD) - public.audit_telemetry_columns())
     THEN
         RETURN NEW;
     END IF;
 
+    -- -----------------------------------------------------------------------------------------
+    -- Which column names the entity
+    -- -----------------------------------------------------------------------------------------
+    -- `id` unless the trigger says otherwise. `device_nameplate` is keyed by `device_id` and has
+    -- no `id` column at all, so the `NEW.id` this read before could never have been attached to
+    -- it. Taking the name as a trigger argument keeps ONE attribution ladder for every table that
+    -- has one: the alternative is a THIRD copy of everything below, after log_role_assignment(),
+    -- which carries a deliberately reduced ladder and has to be kept in step with this one by
+    -- hand.
+    v_key := COALESCE(TG_ARGV[0], 'id');
+
     IF (TG_OP = 'DELETE') THEN
         v_old_data := to_jsonb(OLD);
-        v_entity_id := OLD.id;
+        v_entity_id := (v_old_data ->> v_key)::UUID;
     ELSIF (TG_OP = 'UPDATE') THEN
         v_old_data := to_jsonb(OLD);
         v_new_data := to_jsonb(NEW);
-        v_entity_id := NEW.id;
+        v_entity_id := (v_new_data ->> v_key)::UUID;
     ELSIF (TG_OP = 'INSERT') THEN
         v_new_data := to_jsonb(NEW);
-        v_entity_id := NEW.id;
+        v_entity_id := (v_new_data ->> v_key)::UUID;
+    END IF;
+
+    -- A column that is not there reads as NULL through `->>`, so a mistyped trigger argument
+    -- would otherwise file every row under no entity. entity_id is NOT NULL, so this would be
+    -- caught either way -- but by a constraint that names digital_thread rather than the trigger
+    -- that is wrong.
+    IF v_entity_id IS NULL THEN
+        RAISE EXCEPTION
+            'log_digital_thread_event: % has no % to name the entity by -- check the column named '
+            'in the trigger argument', TG_TABLE_NAME, v_key
+            USING ERRCODE = 'null_value_not_allowed';
     END IF;
 
     -- -----------------------------------------------------------------------------------------
@@ -2695,11 +4750,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.log_digital_thread_event() OWNER TO postgres;
+
+--
+
+-- FUNCTION log_digital_thread_event() :: COMMENT
+COMMENT ON FUNCTION public.log_digital_thread_event() IS 'AFTER trigger that appends to digital_thread. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names (0100). The entity id is read from the column named in the trigger argument, defaulting to `id` -- 0122, for device_nameplate, which is keyed by device_id. Attribution is auth.uid(), then acs_cymru.actor_id, then the X-ACS-Cymru-Actor header, then the effective role.';
+
 --
 
 -- log_role_assignment() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.log_role_assignment() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2763,18 +4824,56 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.log_role_assignment() OWNER TO postgres;
+
 --
 
 -- FUNCTION log_role_assignment() :: COMMENT
---
-
 COMMENT ON FUNCTION public.log_role_assignment() IS 'Audit trigger for public.user_roles. Separate from log_digital_thread_event() because that function reads NEW.id and user_roles has no id column -- its key is (user_id, role_id).';
 
 --
 
--- may_manage_captures() :: FUNCTION
+-- may_decide_proposal(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.may_decide_proposal(p_entity_type text) RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $$
+  SELECT CASE p_entity_type
+    -- The two original lanes, unchanged. `device:manage` is held by exactly the two roles named
+    -- here, so rewriting them as has_authority() would be a no-op with a migration's blast radius.
+    WHEN 'devices'          THEN public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    WHEN 'device_nameplate' THEN public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+
+    -- 0123. A ROLE PAIR, NOT A PERMISSION, WHICH IS THE RULE AND NOT AN EXCEPTION TO IT. The rule
+    -- every lane follows is: resolve whatever the target table's own policy resolves, so the lane
+    -- closes when that closes. `areas_update_privileged` resolves this role pair -- there is no
+    -- `area:manage` grant anywhere in the schema -- so mirroring it means has_role() here. A lane
+    -- gated on a permission the table does not consult would be a second, disagreeing answer.
+    WHEN 'areas'            THEN public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+
+    -- 0090. THE PERMISSION THE TABLE'S OWN POLICY RESOLVES, so the lane closes when the grant is
+    -- withdrawn rather than outliving it.
+    WHEN 'cells'            THEN public.has_authority(ARRAY['cell:manage'])
+    WHEN 'gateways'         THEN public.has_authority(ARRAY['gateway:manage'])
+
+    -- 'schemas' FALLS THROUGH TO false, which is 0090 withdrawing the lane rather than an omission,
+    -- and so do the three link lanes 0108 withdrew. Nothing can be filed in either (proposable_columns
+    -- is empty) and nothing left in them can be decided.
+    ELSE false
+  END
+$$;
+
+
+ALTER FUNCTION public.may_decide_proposal(p_entity_type text) OWNER TO postgres;
+
 --
 
+-- FUNCTION may_decide_proposal(p_entity_type text) :: COMMENT
+COMMENT ON FUNCTION public.may_decide_proposal(p_entity_type text) IS 'Who may approve or reject a proposal in this lane. Each lane resolves whatever its target table''s own policy resolves, so the lane closes when that closes: the two device lanes and areas (0123) resolve a role pair, cells and gateways the permission their policy names. An unknown or withdrawn lane -- schemas since 0090, the three link lanes since 0108 -- is decidable by nobody.';
+
+--
+
+-- may_manage_captures() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.may_manage_captures() RETURNS boolean
     LANGUAGE sql STABLE
     SET search_path TO 'public'
@@ -2782,20 +4881,122 @@ CREATE OR REPLACE FUNCTION public.may_manage_captures() RETURNS boolean
     SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']);
 $$;
 
+
+ALTER FUNCTION public.may_manage_captures() OWNER TO postgres;
+
+--
+
+-- peek_gateway_enrollment_token(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.peek_gateway_enrollment_token(p_token text) RETURNS TABLE(gateway_id uuid, sparkplug_id text, sparkplug_group text, gateway_name text, expires_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $_$
+DECLARE
+  v_hash text;
+BEGIN
+  IF p_token IS NULL OR p_token !~ '^[0-9a-f]{64}$' THEN
+    RETURN;
+  END IF;
+
+  v_hash := encode(extensions.digest(p_token, 'sha256'), 'hex');
+
+  RETURN QUERY
+  SELECT g.id, g.sparkplug_id, g.sparkplug_group, g.name, t.expires_at
+    FROM public.gateway_enrollment_tokens t
+    JOIN public.gateways g ON g.id = t.gateway_id
+   WHERE t.token_hash = v_hash
+     AND t.consumed_at IS NULL
+     AND t.expires_at > now()
+     AND NOT g.is_archived;
+END $_$;
+
+
+ALTER FUNCTION public.peek_gateway_enrollment_token(p_token text) OWNER TO postgres;
+
+--
+
+-- FUNCTION peek_gateway_enrollment_token(p_token text) :: COMMENT
+COMMENT ON FUNCTION public.peek_gateway_enrollment_token(p_token text) IS 'Whether an enrolment token is live now, and for which gateway, WITHOUT consuming it: the read-only twin of consume_gateway_enrollment_token(), answering the same four refusals with no rows. Called by the gateway-install edge function with the service-role key to authorise the installer, playbook and .env downloads; only enrolment spends the token.';
+
+--
+
+-- place_cell_in_its_area() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.place_cell_in_its_area() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_aspect numeric;
+    v_min    numeric;
+    v_near   text;
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND NEW.area_id IS DISTINCT FROM OLD.area_id
+       AND NEW.plan_x IS NOT DISTINCT FROM OLD.plan_x
+       AND NEW.plan_y IS NOT DISTINCT FROM OLD.plan_y THEN
+        NEW.plan_x := NULL;
+        NEW.plan_y := NULL;
+    END IF;
+
+    -- A place written with no area at all is left for cells_place_needs_an_area to refuse.
+    IF NEW.area_id IS NULL OR NEW.plan_x IS NULL OR COALESCE(NEW.is_archived, false) THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT plan_aspect INTO v_aspect FROM public.areas WHERE id = NEW.area_id;
+
+    SELECT (value #>> '{}')::numeric INTO v_min
+      FROM public.system_settings WHERE key = 'site_map.min_pin_spacing';
+    v_min := COALESCE(v_min, 0.08);
+
+    SELECT c.name INTO v_near
+      FROM public.cells c
+     WHERE c.area_id = NEW.area_id
+       AND c.id <> NEW.id
+       AND c.plan_x IS NOT NULL
+       AND NOT COALESCE(c.is_archived, false)
+       AND public.plan_distance(NEW.plan_x, NEW.plan_y, c.plan_x, c.plan_y, v_aspect) < v_min
+     ORDER BY public.plan_distance(NEW.plan_x, NEW.plan_y, c.plan_x, c.plan_y, v_aspect)
+     LIMIT 1;
+    IF v_near IS NOT NULL THEN
+        RAISE EXCEPTION 'that place is too close to "%" on the same area plan; the minimum spacing is % of the plan''s shorter side', v_near, v_min
+            USING ERRCODE = 'check_violation',
+                  HINT = 'Move the pin further away, or change site_map.min_pin_spacing on the Settings page.';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.place_cell_in_its_area() OWNER TO postgres;
+
+--
+
+-- plan_distance(numeric, numeric, numeric, numeric, numeric) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) RETURNS numeric
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE
+    WHEN COALESCE(p_aspect, 4.0/3.0) >= 1
+      THEN sqrt(power((p_x1 - p_x2) * COALESCE(p_aspect, 4.0/3.0), 2) + power(p_y1 - p_y2, 2))
+    ELSE   sqrt(power(p_x1 - p_x2, 2) + power((p_y1 - p_y2) / COALESCE(p_aspect, 4.0/3.0), 2))
+  END
+$$;
+
+
+ALTER FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) OWNER TO postgres;
+
 --
 
 -- platform_health_rows() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition text, sparkplug_id text, subject text, value numeric, detail text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
     -- ---------------------------------------------------------------------------------------
-    -- A gateway that has stopped heartbeating.
-    -- Reads `gateway_status.is_stale` rather than re-deriving it: that view owns the 90s
-    -- threshold (mirrored into the frontend, checked by check-mirror-drift.mjs). The alert rule
-    -- adds its own `for:` on top. Archived gateways are excluded.
+    -- A gateway that has stopped heartbeating. Reads `gateway_status.is_stale` rather than
+    -- re-deriving it: that view owns the 90s threshold. Archived gateways are excluded.
     -- ---------------------------------------------------------------------------------------
     SELECT 'gateway_stale'::text,
            g.sparkplug_id,
@@ -2809,9 +5010,8 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
     UNION ALL
 
     -- ---------------------------------------------------------------------------------------
-    -- An enrolment that never completed: a Remote gateway redeems its token, lands in
-    -- AWAITING_BIRTH, and leaves that state on its first NBIRTH. Age is measured from
-    -- `enrolled_at`.
+    -- An enrolment that never completed: redeemed its token, landed in AWAITING_BIRTH, and never
+    -- published. Age is measured from `enrolled_at`.
     -- ---------------------------------------------------------------------------------------
     SELECT 'enrolment_stuck'::text,
            g.sparkplug_id,
@@ -2827,8 +5027,8 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
 
     -- ---------------------------------------------------------------------------------------
     -- The quarantine queue: fleet-wide, so one row with no subject (`entity_type = 'platform'`).
-    -- Emitted even at zero, so a rule can tell "nothing is quarantined" from "the datasource is
-    -- down" without relying on NoData handling.
+    -- Emitted even at zero, so "nothing is quarantined" and "the datasource is down" are
+    -- distinguishable.
     -- ---------------------------------------------------------------------------------------
     SELECT 'quarantine_depth'::text,
            NULL::text,
@@ -2841,33 +5041,71 @@ CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition
     UNION ALL
 
     -- ---------------------------------------------------------------------------------------
-    -- Devices that SHOULD be publishing. See this migration's header for why each exclusion is
-    -- here and why zero is the answer that disables the alert rather than a gap in it.
+    -- Devices that SHOULD be publishing. See `0092`'s header for why each exclusion is here and
+    -- why zero is the answer that disables the alert rather than a gap in it.
     -- ---------------------------------------------------------------------------------------
     SELECT 'expected_publishers'::text,
            NULL::text,
            'fleet'::text,
            count(*)::numeric,
-           format('%s device(s) registered, unarchived, unquarantined and bound to a gateway',
-                  count(*))
+           format('%s device(s) registered, unarchived, unquarantined, and behind a gateway that '
+                  'has reported at least once', count(*))
       FROM public.devices d
      WHERE NOT d.is_archived
        AND NOT d.is_quarantined
        AND d.gateway_id IS NOT NULL
+       -- 0092. BEING BOUND TO A GATEWAY IS NOT EVIDENCE THAT A PATH HAS EVER EXISTED. See that
+       -- migration's header: a device behind an edge node nobody has deployed yet is not late.
+       AND (
+             -- The device has published. The strongest evidence available, and about the device
+             -- itself rather than about something it points at.
+             d.first_dbirth_at IS NOT NULL
+             -- Or its gateway has been heard from at least once, ever. 0001's own comment on the
+             -- column is the contract: "NULL means no heartbeat has ever arrived." Nothing clears
+             -- it, so a gateway that has since DIED still counts -- which is correct, because that
+             -- is precisely the case this alert exists for.
+             OR EXISTS (
+                  SELECT 1 FROM public.gateways g
+                   WHERE g.id = d.gateway_id
+                     AND g.last_heartbeat IS NOT NULL
+                )
+           )
+
+    UNION ALL
+
+    -- ---------------------------------------------------------------------------------------
+    -- 0133. How far the cold archive has fallen behind, in DAYS past the tiering threshold.
+    --
+    -- ONLY WHILE ARCHIVING IS ON, and that is the whole gate. On a stack that does not archive,
+    -- every chunk is unexported for ever and the frontier is the oldest data there is -- a row
+    -- that would be permanently and uselessly alarming. The rule's noDataState is OK, so an
+    -- absent row reads as "nothing to report" exactly as it does for a healthy fleet.
+    --
+    -- Days rather than seconds because the annotation is read by a person deciding whether to go
+    -- and look at a link, and because the tolerance is measured in chunk intervals.
+    -- ---------------------------------------------------------------------------------------
+    SELECT 'archive_backlog'::text,
+           NULL::text,
+           'fleet'::text,
+           round(b.overdue_seconds / 86400.0, 1),
+           format('cold telemetry from %s onwards is not yet verified on the remote endpoint: '
+                  '%s day(s) past the %s-day threshold',
+                  b.oldest_unexported, round(b.overdue_seconds / 86400.0, 1), b.threshold_days)
+      FROM public.cold_archive_backlog_state() b
+     WHERE b.enabled
 $$;
+
+
+ALTER FUNCTION public.platform_health_rows() OWNER TO postgres;
 
 --
 
 -- FUNCTION platform_health_rows() :: COMMENT
---
-
 COMMENT ON FUNCTION public.platform_health_rows() IS 'One row per platform condition worth alerting on: stale gateways, stuck enrolments, the quarantine queue depth, and how many devices are expected to be publishing. SECURITY DEFINER so the Grafana reader needs no privilege on gateways or devices -- it emits a count and, where the condition names an asset, that asset''s wire id, and nothing else about it.';
 
 --
 
 -- platform_storage_rows() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.platform_storage_rows() RETURNS TABLE(tier text, relation text, table_bytes bigint, index_bytes bigint, toast_bytes bigint, total_bytes bigint)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
@@ -2895,18 +5133,17 @@ CREATE OR REPLACE FUNCTION public.platform_storage_rows() RETURNS TABLE(tier tex
      ORDER BY pg_total_relation_size(c.oid) DESC;
 $$;
 
+
+ALTER FUNCTION public.platform_storage_rows() OWNER TO postgres;
+
 --
 
 -- FUNCTION platform_storage_rows() :: COMMENT
---
-
 COMMENT ON FUNCTION public.platform_storage_rows() IS 'Byte counts for every ordinary table in the Supabase public schema, tiered so an audit trail that is never pruned is distinguishable from reference data that never grows. SECURITY DEFINER so the dashboard reader needs no privilege on the tables it reports the size of.';
 
 --
 
 -- playback_claim_job() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.playback_claim_job() RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2938,17 +5175,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.playback_claim_job() OWNER TO postgres;
+
 --
 
 -- playback_finish(uuid, integer, text, integer) :: FUNCTION
---
--- p_messages_out_of_window IS DECLARED HERE AND IGNORED HERE. 0109 rewrites this function around
--- it; this file only has to agree about the SIGNATURE. It replays before 0109 on every boot, so a
--- three-argument declaration here would sit beside 0109's four-argument one for most of the run,
--- and a three-argument call -- a worker image older than 0109, which is the case its default
--- exists for -- would match both and raise "function is not unique".
---
-
 CREATE OR REPLACE FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text DEFAULT NULL::text, p_messages_out_of_window integer DEFAULT 0) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2956,23 +5188,31 @@ CREATE OR REPLACE FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent
 BEGIN
     PERFORM public.require_playback_caller('playback_finish');
 
-    -- ONE FUNCTION FOR BOTH OUTCOMES, unlike capture's pair, because a playback that stops early
-    -- has still published everything it published -- there is no artifact to write on success and
-    -- nothing to roll back on failure. The distinction is a status and a string.
     UPDATE public.playback_jobs
-       SET status = CASE WHEN p_error IS NULL THEN 'COMPLETED' ELSE 'FAILED' END,
+       SET status = CASE
+                      WHEN p_error IS NOT NULL THEN 'FAILED'
+                      WHEN stop_requested THEN 'CANCELLED'
+                      ELSE 'COMPLETED'
+                    END,
            finished_at = now(),
            messages_sent = greatest(coalesce(p_messages_sent, messages_sent), 0),
+           messages_out_of_window = greatest(coalesce(p_messages_out_of_window, 0), 0),
            error = left(nullif(btrim(coalesce(p_error, '')), ''), 2000)
      WHERE id = p_job_id AND status IN ('PENDING', 'RUNNING');
 END;
 $$;
 
+
+ALTER FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) OWNER TO postgres;
+
+--
+
+-- FUNCTION playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) :: COMMENT
+COMMENT ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) IS 'The playback worker recording the end of a job. Three outcomes, in this order: an error is FAILED; a job whose stop_requested flag was raised while it ran is CANCELLED; anything else is COMPLETED. The error outranks the flag because it is the half an operator can act on. Only a PENDING or RUNNING row is touched, so a job already cancelled before it was claimed keeps the status request_playback_stop() gave it. p_messages_out_of_window is recorded and not judged: the worker holds the plan and decides there, and a job whose every message would be discarded is reported here as an error.';
+
 --
 
 -- playback_progress(uuid, integer, integer, integer) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -2998,11 +5238,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) OWNER TO postgres;
+
 --
 
 -- playback_reconcile_jobs() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.playback_reconcile_jobs() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3025,45 +5266,113 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.playback_reconcile_jobs() OWNER TO postgres;
+
 --
 
--- playback_report_credentials(text[]) :: FUNCTION
---
-
-CREATE OR REPLACE FUNCTION public.playback_report_credentials(p_edge_nodes text[]) RETURNS void
+-- playback_report_credentials(text[], text[]) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.playback_report_credentials(p_edge_nodes text[], p_rotated text[] DEFAULT '{}'::text[]) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
+DECLARE
+    v_held     text[];
+    v_rotated  text[];
+    v_observed jsonb;
 BEGIN
     PERFORM public.require_playback_caller('playback_report_credentials');
 
     -- COERCED TO A SORTED, DE-DUPLICATED SET rather than stored as sent. The worker builds this
     -- from a JSON object whose key order is not defined, so storing it verbatim would rewrite the
     -- row -- and therefore wake every Realtime subscriber -- on a heartbeat that changed nothing.
+    v_held := COALESCE(
+      (SELECT array_agg(DISTINCT node ORDER BY node)
+         FROM unnest(coalesce(p_edge_nodes, '{}')) AS node
+        WHERE node IS NOT NULL AND btrim(node) <> ''),
+      '{}'
+    );
+
+    -- Only ids actually held: a rotation reported for something no longer in the map would stamp an
+    -- observation with nothing to describe.
+    v_rotated := COALESCE(
+      (SELECT array_agg(DISTINCT node)
+         FROM unnest(coalesce(p_rotated, '{}')) AS node
+        WHERE node = ANY(v_held)),
+      '{}'
+    );
+
+    SELECT credential_observed_at INTO v_observed FROM public.playback_worker_status WHERE id;
+
+    -- Keep what is still held and was not just rotated; stamp the rotations at `now()`. Narrowing
+    -- to what is held is what stops an observation outliving the credential it describes.
+    v_observed := COALESCE(
+      (SELECT jsonb_object_agg(key, value)
+         FROM jsonb_each(coalesce(v_observed, '{}'::jsonb))
+        WHERE key = ANY(v_held) AND NOT (key = ANY(v_rotated))),
+      '{}'::jsonb
+    ) || COALESCE(
+      (SELECT jsonb_object_agg(node, to_jsonb(now())) FROM unnest(v_rotated) AS node),
+      '{}'::jsonb
+    );
+
     UPDATE public.playback_worker_status
-       SET held_edge_nodes = COALESCE(
-             (SELECT array_agg(DISTINCT node ORDER BY node)
-                FROM unnest(coalesce(p_edge_nodes, '{}')) AS node
-               WHERE node IS NOT NULL AND btrim(node) <> ''),
-             '{}'
-           ),
-           reported_at = now()
+       SET held_edge_nodes        = v_held,
+           credential_observed_at = v_observed,
+           reported_at            = now()
      WHERE id;
 END;
 $$;
 
+
+ALTER FUNCTION public.playback_report_credentials(p_edge_nodes text[], p_rotated text[]) OWNER TO postgres;
+
 --
 
--- FUNCTION playback_report_credentials(p_edge_nodes text[]) :: COMMENT
+-- FUNCTION playback_report_credentials(p_edge_nodes text[], p_rotated text[]) :: COMMENT
+COMMENT ON FUNCTION public.playback_report_credentials(p_edge_nodes text[], p_rotated text[]) IS 'The playback worker reporting which gateways it can authenticate as, and which of those it has picked up a NEW password for since it last reported. The only writer of playback_worker_status. Called on startup and on a heartbeat, so a stale reported_at means the worker is down rather than credential-less. The worker sends no timestamp of its own: this function stamps the rotations with now(), the same clock the CREDENTIAL_ISSUED row it is compared against uses. p_rotated defaults so a worker from the previous release still reports during a rollout.';
+
 --
 
-COMMENT ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) IS 'The playback worker reporting which gateways it can authenticate as. The only writer of playback_worker_status. Called on startup and on a heartbeat, so a stale reported_at means the worker is down rather than credential-less.';
+-- playback_stale_credentials() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.playback_stale_credentials() RETURNS TABLE(sparkplug_id text, observed_at timestamp with time zone, issued_at timestamp with time zone)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+    SELECT g.sparkplug_id,
+           (w.credential_observed_at->>g.sparkplug_id)::timestamptz,
+           i.issued_at
+      FROM public.playback_worker_status w
+      CROSS JOIN LATERAL unnest(w.held_edge_nodes) AS held(node)
+      JOIN public.gateways g ON g.sparkplug_id = held.node
+      -- THE SAME THREE PREDICATES gateway_has_broker_credential() uses, entity_type included: the
+      -- thread is partitioned (0079) and carries no index on (entity_id, action), so the shape of
+      -- this lookup is the one already established for that question rather than a new one. It runs
+      -- over the held nodes alone -- a handful -- once per dialog open.
+      JOIN LATERAL (
+            SELECT max(dt.recorded_at) AS issued_at
+              FROM public.digital_thread dt
+             WHERE dt.entity_type = 'gateways'
+               AND dt.entity_id   = g.id
+               AND dt.action      = 'CREDENTIAL_ISSUED'
+           ) i ON true
+     WHERE i.issued_at IS NOT NULL
+       -- NOT `IS DISTINCT FROM`: a missing observation must read as unknown, and the comparison
+       -- below is false for NULL, which is the wanted answer.
+       AND (w.credential_observed_at->>g.sparkplug_id)::timestamptz < i.issued_at
+$$;
+
+
+ALTER FUNCTION public.playback_stale_credentials() OWNER TO postgres;
+
+--
+
+-- FUNCTION playback_stale_credentials() :: COMMENT
+COMMENT ON FUNCTION public.playback_stale_credentials() IS 'The gateways the playback worker reports holding a credential for whose credential has been re-issued since the worker last observed it (#217) -- so it is holding the previous password and a playback onto it would fail at CONNACK. SECURITY DEFINER so the dialog needs no privilege on digital_thread. A gateway with no observation is absent from this result, not stale: that is what a worker from the previous release reports.';
 
 --
 
 -- playback_target_must_be_shadow() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.playback_target_must_be_shadow() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -3087,11 +5396,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.playback_target_must_be_shadow() OWNER TO postgres;
+
 --
 
 -- prevent_active_schema_mutation() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.prevent_active_schema_mutation() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -3144,18 +5454,148 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.prevent_active_schema_mutation() OWNER TO postgres;
+
 --
 
 -- FUNCTION prevent_active_schema_mutation() :: COMMENT
---
-
 COMMENT ON FUNCTION public.prevent_active_schema_mutation() IS 'Freezes every column except `status` on an active or archived schema, and rejects illegal status transitions for all callers.';
 
 --
 
--- prune_platform_alerts(interval) :: FUNCTION
+-- proposable_columns(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS text[]
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE p_entity_type
+    -- `area_id` joins `cell_id` and `location_scope`: the three together say where an asset sits,
+    -- and the table's CHECKs decide whether the triple is sayable, so one proposal can relocate.
+    WHEN 'devices' THEN ARRAY[
+      'name', 'description', 'asset_type', 'connection_method',
+      'cell_id', 'area_id', 'location_scope', 'model_3d_path'
+    ]
+    WHEN 'device_nameplate' THEN ARRAY[
+      'manufacturer_name', 'manufacturer_product_designation', 'manufacturer_product_type',
+      'serial_number', 'year_of_construction', 'date_of_manufacture', 'hardware_version',
+      'firmware_version', 'software_version', 'country_of_origin', 'uri_of_the_product'
+    ]
+
+    -- Every column of an area a person chooses; the other two are the platform's. `name` reaches
+    -- MQTT as the <area> segment of every uns/ topic beneath it, which is why the table carries
+    -- `areas_name_topic_safe` and a UNIQUE -- both run on the approval's UPDATE. `icon` is one of
+    -- the eight names `areas_icon_valid` admits.
+    WHEN 'areas' THEN ARRAY['name', 'description', 'icon']
+
+    -- `grafana_url` is a dashboard address and `icon` is one of eight names the CHECK on the table
+    -- admits. `area_id` and the place are where the cell is; the cells trigger decides whether the
+    -- three agree.
+    WHEN 'cells' THEN ARRAY['name', 'grafana_url', 'icon', 'area_id', 'plan_x', 'plan_y', 'description']
+
+    WHEN 'gateways' THEN ARRAY['name', 'description', 'cell_id', 'area_id', 'location_scope', 'access_url']
+
+    -- 'schemas' is absent on purpose, and so are the three link lanes 0108 withdrew: the empty
+    -- array is how this function closes a lane.
+    ELSE ARRAY[]::text[]
+  END
+$$;
+
+
+ALTER FUNCTION public.proposable_columns(p_entity_type text) OWNER TO postgres;
+
 --
 
+-- FUNCTION proposable_columns(p_entity_type text) :: COMMENT
+COMMENT ON FUNCTION public.proposable_columns(p_entity_type text) IS 'Which columns a change proposal may name, per entity type. An unknown or withdrawn entity type yields the empty array, so a lane nobody has written an allowlist for can propose nothing at all rather than everything. Withdrawn: schemas (0090) and the three link lanes (0108). Areas joined in 0123.';
+
+--
+
+-- proposal_is_already_true(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.proposal_is_already_true(p_proposal_id uuid) RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_proposal public.change_proposals%ROWTYPE;
+    v_current  jsonb;
+BEGIN
+    SELECT * INTO v_proposal FROM public.change_proposals WHERE id = p_proposal_id;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+
+    SELECT CASE v_proposal.entity_type
+        WHEN 'devices' THEN
+            (SELECT to_jsonb(d) FROM public.devices d WHERE d.id = v_proposal.entity_id)
+        WHEN 'device_nameplate' THEN
+            (SELECT to_jsonb(n) FROM public.device_nameplate n
+              WHERE n.device_id = v_proposal.entity_id)
+        WHEN 'areas' THEN
+            (SELECT to_jsonb(a) FROM public.areas a WHERE a.id = v_proposal.entity_id)
+        WHEN 'cells' THEN
+            (SELECT to_jsonb(c) FROM public.cells c WHERE c.id = v_proposal.entity_id)
+        WHEN 'gateways' THEN
+            (SELECT to_jsonb(g) FROM public.gateways g WHERE g.id = v_proposal.entity_id)
+        ELSE NULL
+    END INTO v_current;
+
+    -- NO ROW IS NOT A NO-OP. A device_nameplate that does not exist yet is the normal case for that
+    -- lane -- the approval CREATES it -- so a missing row means the proposal has everything still
+    -- to do.
+    IF v_current IS NULL THEN
+        RETURN false;
+    END IF;
+
+    -- CONTAINMENT, NOT EQUALITY: does the row already hold every value the patch proposes? Columns
+    -- the patch says nothing about are ignored, which is what a patch means.
+    RETURN v_current @> v_proposal.patch;
+END;
+$$;
+
+
+ALTER FUNCTION public.proposal_is_already_true(p_proposal_id uuid) OWNER TO postgres;
+
+--
+
+-- FUNCTION proposal_is_already_true(p_proposal_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.proposal_is_already_true(p_proposal_id uuid) IS 'Whether every value this proposal asks for is already in place -- because somebody made the change by hand while it sat in the queue. approve_proposal() refuses such a proposal rather than writing an audit row for a change that did not happen; the queue reads it to warn an approver first.';
+
+--
+
+-- prune_closed_proposals() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.prune_closed_proposals() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_days    numeric;
+    v_deleted integer;
+BEGIN
+    SELECT (value #>> '{}')::numeric INTO v_days
+      FROM public.system_settings
+     WHERE key = 'proposals.retention_days';
+    v_days := COALESCE(v_days, 90);
+
+    DELETE FROM public.change_proposals
+     WHERE status <> 'open'
+       AND decided_at < now() - make_interval(secs => v_days::double precision * 86400.0);
+
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    RETURN v_deleted;
+END;
+$$;
+
+
+ALTER FUNCTION public.prune_closed_proposals() OWNER TO postgres;
+
+--
+
+-- FUNCTION prune_closed_proposals() :: COMMENT
+COMMENT ON FUNCTION public.prune_closed_proposals() IS 'Removes decided proposals older than proposals.retention_days. Only the queue entry: what an approval changed is in digital_thread under its own retention.';
+
+--
+
+-- prune_platform_alerts(interval) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.prune_platform_alerts(p_retain interval DEFAULT NULL::interval) RETURNS integer
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_catalog'
@@ -3202,18 +5642,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.prune_platform_alerts(p_retain interval) OWNER TO postgres;
+
 --
 
 -- FUNCTION prune_platform_alerts(p_retain interval) :: COMMENT
---
-
 COMMENT ON FUNCTION public.prune_platform_alerts(p_retain interval) IS 'Delete alert occurrences older than the retention window, EXCEPT the newest occurrence of any fingerprint -- so an alert that has been firing longer than the window is never removed while it is still the current state. Returns the number of rows deleted. Scheduled as prune_platform_alerts; see the migration header for why the obvious one-line predicate is wrong.';
 
 --
 
 -- publish_schema_version(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.publish_schema_version(draft_schema_id uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3227,7 +5666,10 @@ DECLARE
   v_legacy         INTEGER := 0;
   v_merged         INTEGER := 0;
 BEGIN
-  IF NOT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) THEN
+  -- NARROWED BY 0087. This admitted the pair while the RLS write policies it is the transactional
+  -- form of admitted Administrator alone, and being SECURITY DEFINER it did not consult them --
+  -- so it was the way around 0069 rather than an application of it.
+  IF NOT public.has_authority(ARRAY['schema:manage']) THEN
     RAISE EXCEPTION 'insufficient privileges to publish a schema version'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
@@ -3249,9 +5691,9 @@ BEGIN
   IF draft.parent_schema_id IS NOT NULL THEN
     SELECT * INTO parent FROM public.schemas WHERE id = draft.parent_schema_id FOR UPDATE;
 
-    -- Rebind before archiving, so no window exists in which a device points at an archived schema.
-    -- A device already carrying both versions as submodels would collide on `uq_device_submodels`
-    -- when repointed, so the redundant old-version rows are dropped first.
+    -- Rebind before archiving, so no window exists in which a device points at an archived schema. A
+    -- device already carrying both versions as submodels would collide on `uq_device_submodels` when
+    -- repointed, so the redundant old-version rows are dropped first.
     DELETE FROM public.device_submodels old_link
      WHERE old_link.schema_id = parent.id
        AND EXISTS (
@@ -3265,8 +5707,8 @@ BEGIN
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
 
     -- The legacy 1:1 pointer moves too: `devices.schema_id` is the fallback arm of the
-    -- `device_schemas` view. This UPDATE fires `log_digital_thread_event()`, so the rebinding lands
-    -- in the audit trail per device.
+    -- `device_schemas` view. This UPDATE fires `log_digital_thread_event()`, so the rebinding lands in
+    -- the audit trail per device.
     UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_legacy = ROW_COUNT;
 
@@ -3289,18 +5731,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.publish_schema_version(draft_schema_id uuid) OWNER TO postgres;
+
 --
 
 -- FUNCTION publish_schema_version(draft_schema_id uuid) :: COMMENT
---
-
 COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and legacy devices.schema_id from the parent to it.';
 
 --
 
 -- record_gateway_credential_issued(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3351,18 +5792,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) OWNER TO postgres;
+
 --
 
 -- FUNCTION record_gateway_credential_issued(p_gateway_id uuid) :: COMMENT
---
-
 COMMENT ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) IS 'Record that a broker credential was minted for a host-run gateway, as a CREDENTIAL_ISSUED row in digital_thread attributed to the calling operator. Carries the wire identity and never the password: the audit trail is append-only and the secret is reveal-once.';
 
 --
 
 -- record_gateway_credential_issued_by_service(uuid, jsonb) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb DEFAULT '{}'::jsonb) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3438,18 +5878,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) OWNER TO postgres;
+
 --
 
 -- FUNCTION record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) :: COMMENT
---
-
 COMMENT ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) IS 'Record that a host script issued a broker credential to a gateway, as a CREDENTIAL_ISSUED row in digital_thread. Reachable by service_role ALONE -- 0041''s pair is the operator path and gates on has_role(), which no host script can satisfy. actor_source is pinned to ''service'' and changed_by to NULL; the host and OS user are stored under `claimed` because the database cannot verify either. Carries the wire identity and never the password.';
 
 --
 
 -- record_ingestion_rejection(uuid, jsonb, timestamp with time zone) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone DEFAULT now()) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3541,37 +5980,112 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) OWNER TO postgres;
+
 --
 
 -- FUNCTION record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) :: COMMENT
---
-
 COMMENT ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) IS 'Record a Sparkplug payload the ingestion daemon refused, as a SCHEMA_REJECTION row in digital_thread. The violation list is capped at 50 entries with the true count kept alongside. actor_source is pinned to ''ingestion'' and changed_by to NULL: this is the narrow gate that replaces service_role''s direct INSERT on the audit table. Callable only by the Service_Ingestor principal (0051), which is what makes the grant to `authenticated` safe.';
 
 --
 
--- record_service_token_issued(uuid, text, timestamp with time zone, jsonb) :: FUNCTION
---
-
-CREATE OR REPLACE FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb DEFAULT '{}'::jsonb) RETURNS bigint
+-- record_retired_entity() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.record_retired_entity() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
-  v_roles    text[];
+    v_row    jsonb := to_jsonb(OLD);
+    v_actor  uuid;
+    v_email  text;
+    v_thread bigint;
+BEGIN
+    -- ONLY A ROW THAT WENT THROUGH THE LIFECYCLE. A device rejected from quarantine, a fixture a
+    -- suite removes, a row a cleanup migration deletes: none was in service, and a tombstone for
+    -- it would be noise beside the ones that matter.
+    IF NOT COALESCE((v_row ->> 'is_archived')::boolean, false) THEN
+        RETURN OLD;
+    END IF;
+
+    -- Who, the way log_digital_thread_event() answers it: the session's user, else the actor a
+    -- SECURITY DEFINER RPC declared with SET LOCAL.
+    v_actor := auth.uid();
+    IF v_actor IS NULL THEN
+        BEGIN
+            v_actor := NULLIF(current_setting('acs_cymru.actor_id', true), '')::uuid;
+        EXCEPTION WHEN others THEN
+            v_actor := NULL;
+        END;
+    END IF;
+    v_email := NULLIF(auth.jwt() ->> 'email', '');
+
+    -- The DELETE audit row this same event wrote. AFTER triggers on one event fire in name order
+    -- and trg_<table>_retired sorts after trg_<table>_digital_thread, so it is there to find;
+    -- looked up by the transaction rather than assumed, so a renamed trigger leaves this NULL
+    -- rather than pointing at the wrong row.
+    SELECT t.id INTO v_thread
+      FROM public.digital_thread t
+     WHERE t.entity_type = TG_TABLE_NAME
+       AND t.entity_id = OLD.id
+       AND t.action = 'DELETE'
+       AND t.causation_id = txid_current()
+     ORDER BY t.id DESC
+     LIMIT 1;
+
+    -- An upsert: a pinned-id fixture can be archived and deleted more than once, and the latest
+    -- retirement is the one that describes the row.
+    INSERT INTO public.retired_entities
+        (entity_type, entity_id, name, sparkplug_id, archived_at, retired_at,
+         retired_by, retired_by_email, thread_id, old_data)
+    VALUES
+        (TG_TABLE_NAME, OLD.id, v_row ->> 'name', v_row ->> 'sparkplug_id',
+         (v_row ->> 'archived_at')::timestamp with time zone, now(),
+         v_actor, v_email, v_thread, v_row)
+    ON CONFLICT (entity_type, entity_id) DO UPDATE
+       SET name             = EXCLUDED.name,
+           sparkplug_id     = EXCLUDED.sparkplug_id,
+           archived_at      = EXCLUDED.archived_at,
+           retired_at       = EXCLUDED.retired_at,
+           retired_by       = EXCLUDED.retired_by,
+           retired_by_email = EXCLUDED.retired_by_email,
+           thread_id        = EXCLUDED.thread_id,
+           old_data         = EXCLUDED.old_data;
+
+    RETURN OLD;
+END;
+$$;
+
+
+ALTER FUNCTION public.record_retired_entity() OWNER TO postgres;
+
+--
+
+-- FUNCTION record_retired_entity() :: COMMENT
+COMMENT ON FUNCTION public.record_retired_entity() IS 'Writes the retired_entities tombstone for an archived row on its DELETE. SECURITY DEFINER because the operator deleting the row holds no grant on the tombstone table, and it must not: a tombstone is evidence of a delete, not something a client writes.';
+
+--
+
+-- record_service_token_issued(uuid, text, timestamp with time zone, jsonb, uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb DEFAULT '{}'::jsonb, p_actor_id uuid DEFAULT NULL::uuid) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_roles      text[];
   v_is_service boolean;
-  v_ttl_days numeric;
-  v_id       bigint;
+  v_ttl_days   numeric;
+  v_actor      uuid := p_actor_id;
+  v_source     text;
+  v_id         bigint;
 BEGIN
   IF p_principal_id IS NULL THEN
     RAISE EXCEPTION 'record_service_token_issued: p_principal_id is required'
       USING ERRCODE = 'null_value_not_allowed';
   END IF;
 
-  -- A `jti` DOES NOT ENABLE REVOCATION and nothing here pretends otherwise. It exists so two
-  -- tokens for one principal can be told apart -- so an operator holding a token can check whether
-  -- it is the one this row describes, and so a re-mint is visibly a second credential rather than
-  -- a replacement. Bounded because it lands in an append-only table that cannot be pruned.
+  -- A `jti` is the key of the denylist `auth_pre_request()` reads, so it is what a revocation is
+  -- performed against. Bounded because it lands in an append-only table.
   IF p_jti IS NULL OR length(p_jti) = 0 OR length(p_jti) > 64 THEN
     RAISE EXCEPTION 'record_service_token_issued: p_jti must be 1-64 characters (got %)',
       coalesce(length(p_jti)::text, 'null')
@@ -3584,21 +6098,21 @@ BEGIN
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- THE CEILING. See the header: the script refuses this too, and because it records before it
-  -- prints, a refusal here means the token never reaches anybody.
+  -- THE CEILING. The callers refuse this too, and because they record before they print, a
+  -- refusal here means the token never reaches anybody.
   v_ttl_days := extract(epoch FROM (p_expires_at - now())) / 86400.0;
   IF v_ttl_days > public.service_token_max_days() THEN
     RAISE EXCEPTION
-      'record_service_token_issued: a token may not outlive % days (asked for %). These tokens '
-      'cannot be revoked -- rotating SUPABASE_JWT_SECRET is the only way to invalidate one, and '
-      'that invalidates every token in the stack.',
+      'record_service_token_issued: a token may not outlive % days (asked for %). A token can be '
+      'revoked against the API (0074), but storage, realtime and the edge functions verify the '
+      'signature only -- so the expiry is still the only bound that reaches every service.',
       public.service_token_max_days(), round(v_ttl_days, 1)
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
   -- The subject must be a service principal: no email and no password means nothing can present
-  -- this identity except a JWT signed outside GoTrue. A token minted against a human login would
-  -- be a permanent, unrevocable escalation of that person's session.
+  -- this identity except a JWT signed outside GoTrue. A long-lived token minted against an
+  -- Administrator's login would be a permanent escalation of that person's session.
   SELECT (u.email IS NULL AND (u.encrypted_password IS NULL OR u.encrypted_password = ''))
     INTO v_is_service
     FROM auth.users u WHERE u.id = p_principal_id;
@@ -3611,14 +6125,47 @@ BEGIN
   IF NOT v_is_service THEN
     RAISE EXCEPTION
       'record_service_token_issued: % can sign in, so it is a person''s account and not a service '
-      'principal. A long-lived token for it could not be revoked.', p_principal_id
+      'principal. A long-lived token for it would escalate that person''s session.', p_principal_id
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- WHAT THE TOKEN COULD DO AT THE MOMENT IT WAS SIGNED, captured rather than left to a join. 0026
-  -- gives the reason: an audit row readable only by joining to a live row loses its meaning in
-  -- exactly the cases it matters most -- and a role removed later does not shorten a token that
-  -- was signed while it was held.
+  -- A revoked principal cannot be issued a new token; without this the page would sign a
+  -- credential that is refused on its first request. A forward reference to 0076, safe because
+  -- PL/pgSQL resolves a call at execution time and the whole chain replays before anything calls
+  -- this.
+  PERFORM public.assert_principal_not_revoked(p_principal_id);
+
+  -- ---------------------------------------------------------------------------------------------
+  -- The actor is re-checked here, not trusted: `mint-service-token` verifies the session before
+  -- it signs, and this is the second of two checks, so authorisation does not rest solely on a
+  -- function that also holds the signing key. Refused rather than downgraded to NULL.
+  -- ---------------------------------------------------------------------------------------------
+  IF v_actor IS NULL THEN
+    -- 0043's original attribution, unchanged: the caller holds a machine credential and there is
+    -- no person to name.
+    v_source := 'service';
+  ELSE
+    IF NOT EXISTS (
+      SELECT 1
+        FROM public.user_roles ur
+        JOIN public.roles r ON r.id = ur.role_id
+       WHERE ur.user_id = v_actor::text
+         AND r.name = 'Administrator'
+    ) THEN
+      RAISE EXCEPTION
+        'record_service_token_issued: % is not an Administrator, so it cannot be recorded as '
+        'having issued a service token.', v_actor
+        USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    -- 'user', which log_digital_thread_event() refuses from a REQUEST HEADER for good reason --
+    -- claiming a human author is the assertion a client must not make about itself. It is written
+    -- here only after the claim has been checked against user_roles above.
+    v_source := 'user';
+  END IF;
+
+  -- WHAT THE TOKEN COULD DO AT THE MOMENT IT WAS SIGNED, captured rather than left to a join. An
+  -- audit row readable only by joining to a live row loses its meaning in exactly the cases it
+  -- matters most -- and a role removed later does not shorten a token signed while it was held.
   SELECT coalesce(array_agg(r.name ORDER BY r.name), '{}'::text[])
     INTO v_roles
     FROM public.user_roles ur
@@ -3629,9 +6176,6 @@ BEGIN
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
-    -- NOT A TABLE NAME, which every other entity_type is. There is no public table of service
-    -- principals -- they are auth.users rows, and auth is GoTrue's schema. DigitalThreadTab
-    -- renders this type explicitly for that reason; see the note there.
     'service_principals',
     p_principal_id,
     'TOKEN_MINTED',
@@ -3642,20 +6186,16 @@ BEGIN
       'expires_at',   p_expires_at,
       'ttl_days',     round(v_ttl_days, 1),
       'roles',        to_jsonb(v_roles),
-      -- ASSERTED BY THE CALLER AND LABELLED AS SUCH. The database cannot verify either value, and
-      -- a key called `issued_by` would have read as an attribution. Only these two are lifted out
-      -- of p_context: storing it wholesale would let a caller add fields that look authoritative.
+      -- Asserted by the caller and labelled as such; the database cannot verify either value. Only
+      -- these two are lifted out of p_context, so a caller cannot add fields that look authoritative.
+      -- Empty for a mint from the page; the attribution is in `changed_by`.
       'claimed',      jsonb_build_object(
                         'os_user', p_context ->> 'os_user',
                         'host',    p_context ->> 'host'
                       )
     ),
-    -- NULL, like 0026's. There is no person here to name: the caller holds a machine credential.
-    NULL,
-    -- PINNED, not taken from a header. 'user' is refused from a header by
-    -- log_digital_thread_event() precisely because claiming a human author is the assertion a
-    -- client must not be able to make about itself; the same reasoning applies to a function.
-    'service',
+    v_actor,
+    v_source,
     txid_current(),
     now()
   )
@@ -3665,18 +6205,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) OWNER TO postgres;
+
 --
 
--- FUNCTION record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) :: COMMENT
---
-
-COMMENT ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) IS 'Record that a long-lived JWT was signed for a service principal, as a TOKEN_MINTED row in digital_thread. Refuses a human account and any expiry beyond service_token_max_days(). actor_source is pinned to ''service'' and changed_by to NULL: the caller holds a machine credential, so the row cannot name a person and does not pretend to.';
+-- FUNCTION record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) IS 'Record that a long-lived JWT was signed for a service principal, as a TOKEN_MINTED row in digital_thread. Refuses a human account and any expiry beyond service_token_max_days(). With p_actor_id NULL the row is attributed to ''service'' with no changed_by, which is how the host scripts record. With an actor it is re-checked against user_roles for Administrator and the row names that person -- the shape mint-service-token uses.';
 
 --
 
 -- refresh_directory_liveness() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.refresh_directory_liveness() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'net'
@@ -3744,18 +6283,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.refresh_directory_liveness() OWNER TO postgres;
+
 --
 
 -- FUNCTION refresh_directory_liveness() :: COMMENT
---
-
 COMMENT ON FUNCTION public.refresh_directory_liveness() IS 'Collects the previous Prometheus `up` probe, writes ACTIVE/DOWN for the six observed services and UNKNOWN for the rest, then queues the next probe. Returns how many rows were written from a real observation. Run every minute by cron; safe to call by hand.';
 
 --
 
 -- refuse_archiving_the_last_shadow_gateway() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.refuse_archiving_the_last_shadow_gateway() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -3787,18 +6325,102 @@ BEGIN
     USING ERRCODE = 'restrict_violation';
 END $$;
 
+
+ALTER FUNCTION public.refuse_archiving_the_last_shadow_gateway() OWNER TO postgres;
+
 --
 
 -- FUNCTION refuse_archiving_the_last_shadow_gateway() :: COMMENT
---
-
 COMMENT ON FUNCTION public.refuse_archiving_the_last_shadow_gateway() IS 'Refuses the archive that would leave a stack with no un-archived shadow gateway. Not a ban on archiving one: swapping in a replacement first is legitimate and is what 0060''s own error text tells an operator to do.';
 
 --
 
--- register_uploaded_capture(text, uuid, text, bigint, integer, jsonb, text, boolean) :: FUNCTION
+-- refuse_hand_assigning_a_replay_lane() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.refuse_hand_assigning_a_replay_lane() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_gateway public.gateways;
+BEGIN
+    -- NOT AN ARRIVAL. `BEFORE UPDATE OF gateway_id` fires when the column is MENTIONED, not when
+    -- it changes -- and PostgREST sends the whole row on a PATCH, so an operator renaming a lane
+    -- mentions gateway_id every time. Without this the rename would be refused.
+    IF TG_OP = 'UPDATE' AND NEW.gateway_id IS NOT DISTINCT FROM OLD.gateway_id THEN
+        RETURN NEW;
+    END IF;
+
+    -- Unassigned is not a lane, and a device that HAS provenance is exactly what a lane is.
+    IF NEW.gateway_id IS NULL OR NEW.shadow_of IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT * INTO v_gateway FROM public.gateways WHERE id = NEW.gateway_id;
+
+    -- NOT FOUND IS LET THROUGH ON PURPOSE. `devices_gateway_id_fkey` is about to refuse this row
+    -- and will name the missing gateway; raising here first would replace a precise foreign-key
+    -- error with a confusing one about playback.
+    IF NOT FOUND OR NOT v_gateway.is_shadow THEN
+        RETURN NEW;
+    END IF;
+
+    RAISE EXCEPTION
+      'devices: % is a playback gateway, and a device cannot be assigned to one. Its devices are '
+      'REPLAY LANES -- each stands in for a real machine, and which machine is recorded in '
+      'shadow_of. A device placed here by hand would stand in for nothing: an asset with no '
+      'provenance, exporting an Asset Administration Shell for a machine that does not exist. '
+      'Lanes are minted by ensure_shadow_devices() when a capture is played, one per recorded '
+      'device and reused across runs. To replay onto this gateway, start a playback from the '
+      'capture instead.',
+      v_gateway.name
+        USING ERRCODE = 'check_violation';
+END;
+$$;
+
+
+ALTER FUNCTION public.refuse_hand_assigning_a_replay_lane() OWNER TO postgres;
+
 --
 
+-- FUNCTION refuse_hand_assigning_a_replay_lane() :: COMMENT
+COMMENT ON FUNCTION public.refuse_hand_assigning_a_replay_lane() IS 'Refuses a device ARRIVING on a shadow gateway without shadow_of -- an INSERT, or an UPDATE that changes gateway_id. Deliberately silent about a device already there whose shadow_of has become NULL: devices_shadow_of_fkey is ON DELETE SET NULL, so that is the legal state of a lane whose original was deleted, and checking it would make that deletion fail. See 0083''s header.';
+
+--
+
+-- refuse_role_for_machine_principal() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.refuse_role_for_machine_principal() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $_$
+BEGIN
+    -- `user_roles.user_id` is TEXT and carries no FK, so it is not guaranteed to be a uuid. A cast
+    -- that raises here would refuse a row for the wrong reason and name the wrong problem, so the
+    -- shape is checked before the predicate is asked.
+    IF NEW.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       AND public.is_machine_principal(NEW.user_id::uuid) THEN
+        RAISE EXCEPTION
+            'user_roles: % is a machine principal and may not hold a role. Grant it permissions '
+            'with create_machine_principal() or principal_permissions instead -- 0080 separated the '
+            'two so that widening a person''s role stops widening the stack''s own processes.',
+            NEW.user_id
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    RETURN NEW;
+END;
+$_$;
+
+
+ALTER FUNCTION public.refuse_role_for_machine_principal() OWNER TO postgres;
+
+--
+
+-- FUNCTION refuse_role_for_machine_principal() :: COMMENT
+COMMENT ON FUNCTION public.refuse_role_for_machine_principal() IS 'BEFORE INSERT/UPDATE guard on user_roles. Refuses a role assignment to an identity that cannot sign in, which is what makes "a machine resolves through its own grants" a property of the database rather than a convention every future author has to remember.';
+
+--
+
+-- register_uploaded_capture(text, uuid, text, bigint, integer, jsonb, text, boolean) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb DEFAULT '{}'::jsonb, p_note text DEFAULT NULL::text, p_replace boolean DEFAULT false) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3874,11 +6496,265 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) OWNER TO postgres;
+
+--
+
+-- reinstate_service_principal(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.reinstate_service_principal(p_principal_id uuid) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_actor uuid;
+  v_id    bigint;
+BEGIN
+  IF NOT public.has_role(ARRAY['Administrator']) THEN
+    RAISE EXCEPTION 'insufficient privileges to reinstate a service principal'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'reinstate_service_principal: no session, so this could not be attributed'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  DELETE FROM public.revoked_service_principals WHERE principal_id = p_principal_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'reinstate_service_principal: % is not revoked', p_principal_id
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  INSERT INTO public.digital_thread (
+    entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+    causation_id, recorded_at
+  ) VALUES (
+    'service_principals',
+    p_principal_id,
+    'PRINCIPAL_REINSTATED',
+    NULL,
+    -- SAID ON THE ROW, because it is the thing most likely to be assumed wrong. Reinstating
+    -- restores the IDENTITY, not its credentials: every token withdrawn when it was revoked stays
+    -- withdrawn, because revoke_service_token() has no inverse. A new token must be minted.
+    jsonb_build_object(
+      'reinstated_at',  now(),
+      'tokens_restored', 0,
+      'note', 'Tokens revoked with this principal remain revoked; mint a new one.'
+    ),
+    v_actor,
+    'user',
+    txid_current(),
+    now()
+  )
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.reinstate_service_principal(p_principal_id uuid) OWNER TO postgres;
+
+--
+
+-- FUNCTION reinstate_service_principal(p_principal_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.reinstate_service_principal(p_principal_id uuid) IS 'Administrator-only. Lifts the flag revoke_service_principal() set, so the identity can hold tokens again. Does NOT restore the tokens revoked alongside it -- those stay withdrawn and a new one must be minted.';
+
+--
+
+-- reject_archived_schema_assignment() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.reject_archived_schema_assignment() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v_device_id  uuid;
+    v_is_shadow  boolean := false;
+    v_status     text;
+    v_name       text;
+    v_version    integer;
+    v_successor  text;
+BEGIN
+    -- One function, two tables: `devices.schema_id` and `device_submodels.schema_id` are the two
+    -- arms of the `device_schemas` view, and a guard on one of them is not a guard.
+    IF TG_TABLE_NAME = 'devices' THEN
+        v_device_id := NEW.id;
+        -- READ OFF `NEW`, NOT OUT OF THE TABLE. On INSERT the row is not visible to a query yet,
+        -- so a lookup would report "not a shadow" for every shadow device at the moment it is
+        -- created -- which is the only moment ensure_shadow_devices() writes this column.
+        v_is_shadow := NEW.shadow_of IS NOT NULL;
+    ELSE
+        v_device_id := NEW.device_id;
+        -- The submodel rows are written AFTER the shadow device exists, so here the lookup is both
+        -- possible and necessary -- the join row carries no shadow marker of its own.
+        SELECT d.shadow_of IS NOT NULL INTO v_is_shadow
+          FROM public.devices d WHERE d.id = v_device_id;
+    END IF;
+
+    -- Detaching is always allowed. So is leaving the pointer exactly where it was: see the header
+    -- for why the unchanged-value case is the one that keeps an unfinished migration editable.
+    IF NEW.schema_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+    IF TG_OP = 'UPDATE' AND NEW.schema_id IS NOT DISTINCT FROM OLD.schema_id THEN
+        RETURN NEW;
+    END IF;
+
+    IF coalesce(v_is_shadow, false) THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT s.status::text, s.schema_name, s.version
+      INTO v_status, v_name, v_version
+      FROM public.schemas s
+     WHERE s.id = NEW.schema_id;
+
+    -- A schema_id naming nothing is left to the foreign key, which states that better than this
+    -- trigger could. `IS DISTINCT FROM` rather than `<>` so a NULL status falls through here too.
+    IF v_status IS DISTINCT FROM 'archived' THEN
+        RETURN NEW;
+    END IF;
+
+    -- THE ERROR NAMES THE WAY OUT, because the operator reaching this is not doing something
+    -- absurd -- they are looking at a version history and picked the wrong row. The successor is
+    -- resolved here rather than left for them to find: it is one query, and "use v2 instead" is
+    -- the entire remedy in most cases.
+    SELECT s.schema_name INTO v_successor
+      FROM public.schemas s
+     WHERE s.parent_schema_id = NEW.schema_id
+       AND s.status::text = 'active'
+     ORDER BY s.version DESC
+     LIMIT 1;
+
+    RAISE EXCEPTION
+        'schema "%" (v%) is archived and cannot be assigned to a device',
+        v_name, v_version
+        USING ERRCODE = 'check_violation',
+              HINT = coalesce(
+                  'Assign ' || v_successor || ', which replaced it.',
+                  'This lineage has no active version. Publish one from the Schemas page, or leave '
+                  'the device without a schema.'
+              );
+END;
+$$;
+
+
+ALTER FUNCTION public.reject_archived_schema_assignment() OWNER TO postgres;
+
+--
+
+-- FUNCTION reject_archived_schema_assignment() :: COMMENT
+COMMENT ON FUNCTION public.reject_archived_schema_assignment() IS 'Refuses a NEW binding of a device to an archived schema, on either arm of the device_schemas view. Leaving an existing binding in place is allowed -- an archived schema with devices still attached is an unfinished migration, not a fault -- and shadow devices are exempt because they copy the contract of the device they replay. Issue #167.';
+
+--
+
+-- reject_proposal(uuid, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.reject_proposal(p_proposal_id uuid, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_proposal public.change_proposals%ROWTYPE;
+    v_actor    uuid := auth.uid();
+BEGIN
+    IF NOT (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+            OR public.has_authority(ARRAY['cell:manage', 'gateway:manage'])) THEN
+        RAISE EXCEPTION 'not permitted to decide change proposals'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF COALESCE(TRIM(p_reason), '') = '' THEN
+        -- A REASON IS THE WHOLE POINT OF A REJECTION. Without one the proposer learns only that
+        -- somebody said no, which leaves them to propose the same thing again.
+        RAISE EXCEPTION 'a rejection needs a reason' USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    SELECT * INTO v_proposal FROM public.change_proposals
+     WHERE id = p_proposal_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'proposal % not found', p_proposal_id USING ERRCODE = 'no_data_found';
+    END IF;
+
+    IF NOT public.may_decide_proposal(v_proposal.entity_type) THEN
+        RAISE EXCEPTION 'not permitted to decide proposals on %', v_proposal.entity_type
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF v_proposal.status <> 'open' THEN
+        RAISE EXCEPTION 'proposal % is already %', p_proposal_id, v_proposal.status
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+
+    UPDATE public.change_proposals
+       SET status = 'rejected', decided_by = v_actor, decided_at = now(),
+           decision_reason = p_reason
+     WHERE id = p_proposal_id;
+
+    RETURN jsonb_build_object('id', p_proposal_id, 'status', 'rejected');
+END;
+$$;
+
+
+ALTER FUNCTION public.reject_proposal(p_proposal_id uuid, p_reason text) OWNER TO postgres;
+
+--
+
+-- FUNCTION reject_proposal(p_proposal_id uuid, p_reason text) :: COMMENT
+COMMENT ON FUNCTION public.reject_proposal(p_proposal_id uuid, p_reason text) IS 'An approver refuses a proposal in a lane may_decide_proposal() admits them to, with a reason the constraint also requires. The slot is freed immediately and the same change may be proposed again at once -- the reason, not a cooldown, is what makes the second attempt different from the first.';
+
+--
+
+-- release_backup(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.release_backup(p_backup_id uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_backup public.backups;
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator'::text]) THEN
+        RAISE EXCEPTION 'release_backup: only an Administrator may release a backup'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    UPDATE public.backups
+       SET pinned = false, released_at = now(), released_by = auth.uid()
+     WHERE id = p_backup_id AND pinned
+    RETURNING * INTO v_backup;
+
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'backups', v_backup.id, 'BACKUP_RELEASED',
+        jsonb_build_object('pinned', true),
+        jsonb_build_object('pinned', false, 'stamp', v_backup.stamp, 'taken_at', v_backup.taken_at),
+        auth.uid(), 'user', txid_current(), now()
+    );
+
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION public.release_backup(p_backup_id uuid) OWNER TO postgres;
+
+--
+
+-- FUNCTION release_backup(p_backup_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.release_backup(p_backup_id uuid) IS 'Let the retention window apply to a requested backup. Administrator only. Nothing is deleted here: the service prunes on its next pass, and only if the backup is older than the window. Returns false when the backup was not pinned.';
+
 --
 
 -- release_gateway_enrollment_token(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.release_gateway_enrollment_token(p_token text) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3908,18 +6784,17 @@ BEGIN
   RETURN v_released = 1;
 END $_$;
 
+
+ALTER FUNCTION public.release_gateway_enrollment_token(p_token text) OWNER TO postgres;
+
 --
 
 -- FUNCTION release_gateway_enrollment_token(p_token text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.release_gateway_enrollment_token(p_token text) IS 'Undo a claim made by consume_gateway_enrollment_token() when the credential could not be issued, so the appliance can retry with the same bundle. Refuses to release an expired token or one that has since been superseded by a re-issue -- both would restore a row the partial unique index counts, blocking the operator from issuing a replacement. Returns whether it released.';
 
 --
 
 -- relocate_devices(jsonb) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.relocate_devices(p_moves jsonb) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -3930,6 +6805,8 @@ DECLARE
   v_scope     text;
   v_cell      uuid;
   v_raw_cell  text;
+  v_area      uuid;
+  v_raw_area  text;
   v_len       integer;
   v_applied   integer := 0;
   v_unchanged integer := 0;
@@ -3953,28 +6830,20 @@ BEGIN
 
   v_len := jsonb_array_length(p_moves);
 
-  -- An empty batch is a CALLER BUG, not a no-op, and it is raised rather than absorbed. The page
-  -- disables Apply at zero staged moves; a request arriving here with none means that guard is
-  -- gone, and answering "success, nothing done" would make the regression invisible.
+  -- An empty batch is a caller bug: the page disables Apply at zero staged moves.
   IF v_len = 0 THEN
     RAISE EXCEPTION 'p_moves is empty; nothing to relocate'
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- A ceiling, because there is not one anywhere else. Every row below takes a FOR UPDATE lock
-  -- held until commit, so an unbounded array is an unbounded lock hold on `devices` by an
-  -- ordinary authenticated user. 200 is far above any plausible rearrange gesture -- the page
-  -- renders one draggable chip per device -- and far below anything that would matter.
+  -- Every row below takes a FOR UPDATE lock held until commit, so the batch is bounded.
   IF v_len > 200 THEN
     RAISE EXCEPTION 'a relocation batch is limited to 200 moves; got %', v_len
       USING ERRCODE = 'program_limit_exceeded',
             HINT = 'Apply the rearrangement in smaller batches.';
   END IF;
 
-  -- ONE DEVICE MAY APPEAR ONCE. Dragging a chip twice before applying is a legitimate gesture and
-  -- the page collapses it to a single staged entry keyed by device -- but if two entries ever do
-  -- arrive, "last one wins" would silently discard an instruction the operator gave. The whole
-  -- point of a batch is that its outcome is stated, so an ambiguous batch is refused instead.
+  -- One device may appear once: "last one wins" would silently discard an instruction.
   IF EXISTS (
     SELECT 1 FROM jsonb_array_elements(p_moves) m
      GROUP BY m ->> 'device_id'
@@ -3984,10 +6853,7 @@ BEGIN
       USING ERRCODE = 'cardinality_violation';
   END IF;
 
-  -- ORDERED BY device_id, AND THAT ORDER IS LOAD-BEARING. Each iteration takes a row lock held
-  -- until commit, so two operators applying overlapping batches in opposite orders would deadlock
-  -- and one of them would lose a rearrangement to a message about a lock. A total order over the
-  -- locked rows makes that impossible, and the primary key is the cheapest one available.
+  -- Ordered by device_id so two overlapping batches cannot deadlock on their row locks.
   FOR v_move IN
     SELECT m FROM jsonb_array_elements(p_moves) m ORDER BY m ->> 'device_id'
   LOOP
@@ -4007,24 +6873,20 @@ BEGIN
         USING ERRCODE = 'invalid_parameter_value';
     END;
 
-    -- REQUIRED, NOT DEFAULTED TO 'cell'. Defaulting would mean a caller that simply forgot the
-    -- key silently clears `site_wide` off an asset deliberately marked as having no cell -- an
-    -- assertion an operator made, undone by an omission. Absent is not the same as 'cell' here,
-    -- so absent is an error.
+    -- Required, not defaulted to 'cell': a caller that forgot the key would silently clear a
+    -- wide scope an operator asserted.
     v_scope := v_move ->> 'location_scope';
     IF v_scope IS NULL THEN
-      RAISE EXCEPTION 'move for device % must state location_scope (cell or site_wide)', v_device_id
+      RAISE EXCEPTION 'move for device % must state location_scope (cell, area_wide or site_wide)', v_device_id
         USING ERRCODE = 'null_value_not_allowed';
     END IF;
-    IF v_scope NOT IN ('cell', 'site_wide') THEN
-      RAISE EXCEPTION 'location_scope % is not valid for device %; expected cell or site_wide',
+    IF v_scope NOT IN ('cell', 'area_wide', 'site_wide') THEN
+      RAISE EXCEPTION 'location_scope % is not valid for device %; expected cell, area_wide or site_wide',
                       v_scope, v_device_id
         USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Empty string reads as absent, the same normalisation `emptyToNull()` performs on the
-    -- single-device path in frontend/src/api.js. Two spellings of "no cell" is how a
-    -- `WHERE cell_id IS NULL` starts missing rows.
+    -- Empty string reads as absent, as emptyToNull() does in frontend/src/api.js.
     v_raw_cell := NULLIF(btrim(COALESCE(v_move ->> 'cell_id', '')), '');
     IF v_raw_cell IS NULL THEN
       v_cell := NULL;
@@ -4037,21 +6899,37 @@ BEGIN
       END;
     END IF;
 
-    -- Mirrors devices_site_wide_has_no_cell, and mirrors locationFieldsFrom() in
-    -- frontend/src/api.js which normalises the same way on the single-device path. FORCED rather
-    -- than rejected: "site-wide, in cell 3" is not a refusal case, it is an incompletely cleared
-    -- form, and the CHECK constraint would refuse it with a message naming a constraint.
-    IF v_scope = 'site_wide' THEN
-      v_cell := NULL;
+    v_raw_area := NULLIF(btrim(COALESCE(v_move ->> 'area_id', '')), '');
+    IF v_raw_area IS NULL THEN
+      v_area := NULL;
+    ELSE
+      BEGIN
+        v_area := v_raw_area::uuid;
+      EXCEPTION WHEN invalid_text_representation THEN
+        RAISE EXCEPTION 'area_id % is not a uuid', v_raw_area
+          USING ERRCODE = 'invalid_parameter_value';
+      END;
     END IF;
 
-    -- FOR UPDATE, for the ordering reason above and because the no-op comparison below has to be
-    -- read against a row nobody else can move underneath it.
+    -- Mirrors the CHECKs and locationFieldsFrom() in frontend/src/api.js. Forced rather than
+    -- rejected: "site-wide, in cell 3" is an incompletely cleared form, not a refusal case. The
+    -- one thing that cannot be forced is an area-wide move with no area, which is refused.
+    IF v_scope = 'site_wide' THEN
+      v_cell := NULL;
+      v_area := NULL;
+    ELSIF v_scope = 'area_wide' THEN
+      v_cell := NULL;
+      IF v_area IS NULL THEN
+        RAISE EXCEPTION 'an area_wide move for device % must name area_id', v_device_id
+          USING ERRCODE = 'null_value_not_allowed';
+      END IF;
+    ELSE
+      v_area := NULL;
+    END IF;
+
     SELECT * INTO v_before FROM public.devices WHERE id = v_device_id FOR UPDATE;
     IF NOT FOUND THEN
-      -- THE WHOLE BATCH FAILS, and that is the behaviour this item asks for. A half-applied
-      -- rearrangement is the failure mode deferring the commit exists to remove, so one unknown
-      -- device rolls back the other five moves rather than leaving them applied and unrecorded.
+      -- The whole batch fails: a half-applied rearrangement is what the batch exists to remove.
       RAISE EXCEPTION 'device % not found; no part of this batch was applied', v_device_id
         USING ERRCODE = 'no_data_found';
     END IF;
@@ -4061,23 +6939,24 @@ BEGIN
         USING ERRCODE = 'foreign_key_violation';
     END IF;
 
-    -- THE GATEWAY IS DELIBERATELY LEFT ALONE, exactly as the single-device drop path leaves it.
-    -- A drop says where the machine IS; it says nothing about which connector reaches it, and
-    -- rewiring the data path to express a location is the coupling archived migration 0036
-    -- removed. Only these two columns move.
+    IF v_area IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.areas a WHERE a.id = v_area) THEN
+      RAISE EXCEPTION 'area % not found; no part of this batch was applied', v_area
+        USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    -- The gateway is left alone: a drop says where the machine is, not which connector reaches it.
     UPDATE public.devices
        SET cell_id        = v_cell,
+           area_id        = v_area,
            location_scope = v_scope
      WHERE id = v_device_id
     RETURNING * INTO v_after;
 
     v_changed := v_before.cell_id IS DISTINCT FROM v_after.cell_id
+              OR v_before.area_id IS DISTINCT FROM v_after.area_id
               OR v_before.location_scope IS DISTINCT FROM v_after.location_scope;
 
-    -- A move that changes nothing is COUNTED, but not called applied. The audit trigger already
-    -- suppresses the no-op row -- `to_jsonb(NEW) - 'last_heartbeat' IS NOT DISTINCT FROM OLD` in
-    -- 0005 -- so reporting it as applied would promise a thread row that deliberately does not
-    -- exist. Dragging a device back where it started is the ordinary way this arises.
+    -- A no-op move is counted but not called applied: the audit trigger writes no row for it.
     IF v_changed THEN
       v_applied := v_applied + 1;
     ELSE
@@ -4087,17 +6966,15 @@ BEGIN
     v_results := v_results || jsonb_build_object(
       'device_id',      v_after.id,
       'cell_id',        v_after.cell_id,
+      'area_id',        v_after.area_id,
       'location_scope', v_after.location_scope,
       'changed',        v_changed
     );
   END LOOP;
 
   RETURN jsonb_build_object(
-    -- REPORTED, NOT GENERATED. This is the transaction the UPDATEs above ran in, which is the
-    -- same number `log_digital_thread_event()` stamped on every row it wrote -- so a caller can
-    -- follow it straight into the Digital Thread's "Same transaction" view. NULL when nothing
-    -- changed, because the trigger then wrote no row at all: handing back a transaction id with
-    -- no rows under it would be a link to an empty result.
+    -- The transaction the UPDATEs ran in, which log_digital_thread_event() stamped on every row it
+    -- wrote; NULL when nothing changed, since the trigger then wrote no row.
     'causation_id', CASE WHEN v_applied > 0 THEN txid_current() ELSE NULL END,
     'requested',    v_len,
     'applied',      v_applied,
@@ -4107,18 +6984,79 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.relocate_devices(p_moves jsonb) OWNER TO postgres;
+
 --
 
 -- FUNCTION relocate_devices(p_moves jsonb) :: COMMENT
+COMMENT ON FUNCTION public.relocate_devices(p_moves jsonb) IS 'Apply a batch of device relocations in ONE transaction, so the whole rearrangement shares a single digital_thread causation_id. A move states location_scope (cell, area_wide or site_wide) and, for area_wide, area_id. Refuses the batch outright on an unknown device, cell or area, a duplicate device, a missing location_scope or an area_wide move with no area -- a half-applied batch is the failure mode this exists to remove. Authority: Administrator or Shopfloor_Manager.';
+
 --
 
-COMMENT ON FUNCTION public.relocate_devices(p_moves jsonb) IS 'Apply a batch of device relocations in ONE transaction, so the whole rearrangement shares a single digital_thread causation_id. Refuses the batch outright on an unknown device, an unknown cell, a duplicate device or a missing location_scope -- a half-applied batch is the failure mode this exists to remove. Authority: Administrator or Shopfloor_Manager.';
+-- request_backup(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.request_backup(p_note text DEFAULT NULL::text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_running record;
+    v_job_id  uuid;
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator'::text]) THEN
+        RAISE EXCEPTION 'request_backup: only an Administrator may take a backup'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    -- Reported rather than left to the index, so the refusal says what is in the way. A PENDING
+    -- row nobody has claimed is the sign the service is not running, and the message says so.
+    SELECT j.id, j.status, j.origin, j.created_at INTO v_running
+      FROM public.backup_jobs j
+     WHERE j.status IN ('PENDING', 'RUNNING')
+     LIMIT 1;
+    IF FOUND THEN
+        IF v_running.status = 'PENDING' THEN
+            RAISE EXCEPTION
+              'request_backup: a % backup queued at % has not been claimed. One backup runs at a '
+              'time; if the backup service is not running, nothing will take it -- cancel it or '
+              'start the service.',
+              v_running.origin, to_char(v_running.created_at, 'DD Mon YYYY HH24:MI')
+                USING ERRCODE = 'unique_violation';
+        END IF;
+        RAISE EXCEPTION
+          'request_backup: a % backup is running. One backup runs at a time; wait for it to finish.',
+          v_running.origin
+            USING ERRCODE = 'unique_violation';
+    END IF;
+
+    INSERT INTO public.backup_jobs (origin, status, note, requested_by)
+    VALUES ('requested', 'PENDING', nullif(btrim(coalesce(p_note, '')), ''), auth.uid())
+    RETURNING id INTO v_job_id;
+
+    INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+    ) VALUES (
+        'backup_jobs', v_job_id, 'BACKUP_REQUESTED', NULL,
+        jsonb_build_object('note', nullif(btrim(coalesce(p_note, '')), ''), 'origin', 'requested'),
+        auth.uid(), 'user', txid_current(), now()
+    );
+
+    RETURN v_job_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.request_backup(p_note text) OWNER TO postgres;
+
+--
+
+-- FUNCTION request_backup(p_note text) :: COMMENT
+COMMENT ON FUNCTION public.request_backup(p_note text) IS 'Queue a backup of the whole stack: both databases, the storage objects and the forge, taken by the backup service and pinned until release_backup(). Administrator only. Refuses while another backup is queued or running, naming it.';
 
 --
 
 -- request_capture_stop(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.request_capture_stop(p_job_id uuid) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4161,11 +7099,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.request_capture_stop(p_job_id uuid) OWNER TO postgres;
+
 --
 
 -- request_gateway_rebirth(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4215,18 +7154,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) OWNER TO postgres;
+
 --
 
 -- FUNCTION request_gateway_rebirth(p_gateway_id uuid) :: COMMENT
---
-
 COMMENT ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) IS 'Ask an edge node to republish its birth certificate. The only way a rebirth_requests row is created. The daemon sends it; this only records that somebody asked.';
 
 --
 
 -- request_playback_stop(uuid) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.request_playback_stop(p_job_id uuid) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4264,11 +7202,31 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.request_playback_stop(p_job_id uuid) OWNER TO postgres;
+
+--
+
+-- require_backup_service_caller(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.require_backup_service_caller(p_fn text) RETURNS void
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    IF coalesce(nullif(current_setting('role', true), 'none'), '') <> ''
+       OR session_user NOT IN ('supabase_admin', 'postgres') THEN
+        RAISE EXCEPTION '%: only the backup service may call this', p_fn
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION public.require_backup_service_caller(p_fn text) OWNER TO postgres;
+
 --
 
 -- require_ingestion_caller(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.require_ingestion_caller(p_fn text) RETURNS void
     LANGUAGE plpgsql STABLE
     SET search_path TO 'public'
@@ -4283,11 +7241,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.require_ingestion_caller(p_fn text) OWNER TO postgres;
+
 --
 
 -- require_playback_caller(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.require_playback_caller(p_fn text) RETURNS void
     LANGUAGE plpgsql STABLE
     SET search_path TO 'public'
@@ -4302,11 +7261,12 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.require_playback_caller(p_fn text) OWNER TO postgres;
+
 --
 
 -- revoke_anon_function_privileges() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.revoke_anon_function_privileges() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4364,18 +7324,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.revoke_anon_function_privileges() OWNER TO postgres;
+
 --
 
 -- FUNCTION revoke_anon_function_privileges() :: COMMENT
---
-
 COMMENT ON FUNCTION public.revoke_anon_function_privileges() IS 'Revoke EXECUTE from PUBLIC and anon on every function in public, restoring what authenticated and service_role held. MUST BE CALLED BY THE LAST MIGRATION THAT CREATES A FUNCTION -- see 0071. PostgreSQL grants EXECUTE to PUBLIC on creation, so a function added after the sweep is anon-executable until the next call.';
 
 --
 
 -- revoke_credential_on_decommission() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.revoke_credential_on_decommission() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4404,18 +7363,17 @@ BEGIN
   RETURN NEW;
 END $$;
 
+
+ALTER FUNCTION public.revoke_credential_on_decommission() OWNER TO postgres;
+
 --
 
 -- FUNCTION revoke_credential_on_decommission() :: COMMENT
---
-
 COMMENT ON FUNCTION public.revoke_credential_on_decommission() IS 'Rotates a decommissioned gateway''s broker credential to a password nobody records. Gated on gateway_has_broker_credential() (0056), NOT gateway_holds_a_credential() (0038): the latter asks about Remote enrolment and therefore refused every host-run gateway, which is every gateway a provisioned stack has. The gate still cannot admit a gateway that never held an account, so 0040''s guarantee -- revocation never CREATES one -- is preserved.';
 
 --
 
 -- revoke_gateway_credential(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4456,36 +7414,305 @@ BEGIN
   RETURN true;
 END $_$;
 
+
+ALTER FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) OWNER TO postgres;
+
 --
 
 -- FUNCTION revoke_gateway_credential(p_sparkplug_id text) :: COMMENT
+COMMENT ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) IS 'Ask the credential service to disable this gateway''s broker account, which is how this platform revokes: the broker drops any live session at once and refuses the next CONNECT. The account is not deleted; a later issue re-enables it. Returns false when the service is not configured. ASYNCHRONOUS: net.http_post queues the request, so a true return means "asked", not "revoked". The sweep is what makes archive eventually correct.';
+
 --
 
-COMMENT ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) IS 'Rotate a gateway''s broker account to a password nobody records, which is how this platform revokes -- the credential service is add-only by design and must not gain a delete verb. Returns false when the service is not configured. ASYNCHRONOUS: net.http_post queues the request, so a true return means "asked", not "revoked". The sweep is what makes archive eventually correct.';
+-- revoke_service_principal(uuid, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.revoke_service_principal(p_principal_id uuid, p_reason text DEFAULT NULL::text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_actor  uuid;
+  v_tokens int := 0;
+  v_id     bigint;
+  v_row    record;
+BEGIN
+  IF NOT public.has_role(ARRAY['Administrator']) THEN
+    RAISE EXCEPTION 'insufficient privileges to revoke a service principal'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'revoke_service_principal: no session, so this could not be attributed'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF p_principal_id IS NULL THEN
+    RAISE EXCEPTION 'revoke_service_principal: p_principal_id is required'
+      USING ERRCODE = 'null_value_not_allowed';
+  END IF;
+
+  -- A PERSON'S ACCOUNT IS REFUSED. `sub` is on every JWT, so a row here naming a human would lock
+  -- them out of PostgREST through a control built for machines -- and out of the request that
+  -- would undo it. Revoking a person's access is a different act with different tools: remove
+  -- their role, or disable the account in GoTrue.
+  IF NOT public.is_machine_principal(p_principal_id) THEN
+    RAISE EXCEPTION
+      'revoke_service_principal: % is not a service principal. It either does not exist or it can '
+      'sign in, and locking a person out through the machine denylist would also refuse the '
+      'request that reinstated them.', p_principal_id
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  -- SELF-REVOCATION IS IMPOSSIBLE BY CONSTRUCTION rather than by a check: has_role() above needs
+  -- an Administrator, and is_machine_principal() refuses anything that can sign in, so the actor
+  -- and the target can never be the same row. Said here because its absence looks like an omission.
+
+  IF EXISTS (SELECT 1 FROM public.revoked_service_principals WHERE principal_id = p_principal_id) THEN
+    RAISE EXCEPTION 'revoke_service_principal: % is already revoked', p_principal_id
+      USING ERRCODE = 'unique_violation',
+            HINT = 'Reinstate it first if the intent is to change the recorded reason.';
+  END IF;
+
+  INSERT INTO public.revoked_service_principals (principal_id, revoked_by, reason)
+  VALUES (p_principal_id, v_actor, nullif(btrim(coalesce(p_reason, '')), ''));
+
+  -- ------------------------------------------------------------------------------------------
+  -- Every outstanding token as well, which is what makes reinstatement safe
+  -- ------------------------------------------------------------------------------------------
+  -- Redundant for PostgREST and not for the audit trail or for reinstatement; see the header.
+  FOR v_row IN
+    SELECT DISTINCT ON (dt.new_data ->> 'jti')
+           dt.new_data ->> 'jti'                     AS jti,
+           (dt.new_data ->> 'expires_at')::timestamptz AS expires_at
+      FROM public.digital_thread dt
+     WHERE dt.entity_type = 'service_principals'
+       AND dt.action = 'TOKEN_MINTED'
+       AND dt.entity_id = p_principal_id
+       AND dt.new_data ->> 'jti' IS NOT NULL
+       AND (dt.new_data ->> 'expires_at')::timestamptz > now()
+     ORDER BY dt.new_data ->> 'jti', dt.id DESC
+  LOOP
+    INSERT INTO public.revoked_service_tokens (jti, principal_id, expires_at, revoked_by)
+    VALUES (v_row.jti, p_principal_id, v_row.expires_at, v_actor)
+    ON CONFLICT (jti) DO NOTHING;
+
+    IF FOUND THEN
+      v_tokens := v_tokens + 1;
+      INSERT INTO public.digital_thread (
+        entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+        causation_id, recorded_at
+      ) VALUES (
+        'service_principals', p_principal_id, 'TOKEN_REVOKED', NULL,
+        jsonb_build_object('jti', v_row.jti, 'revoked_at', now(),
+                           'expires_at', v_row.expires_at, 'scope', 'postgrest',
+                           -- WHY THIS ONE WAS WITHDRAWN, so a reader of a lone TOKEN_REVOKED row
+                           -- is not left to correlate timestamps to discover it was collateral.
+                           'cascaded_from', 'PRINCIPAL_REVOKED'),
+        v_actor, 'user', txid_current(), now()
+      );
+    END IF;
+  END LOOP;
+
+  INSERT INTO public.digital_thread (
+    entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+    causation_id, recorded_at
+  ) VALUES (
+    'service_principals',
+    p_principal_id,
+    'PRINCIPAL_REVOKED',
+    NULL,
+    jsonb_build_object(
+      'revoked_at',      now(),
+      'reason',          nullif(btrim(coalesce(p_reason, '')), ''),
+      'tokens_revoked',  v_tokens,
+      -- THE SUBJECT ARM REACHES FURTHER THAN THE TOKEN COUNT SUGGESTS, and the row should not
+      -- imply otherwise: tokens this stack never recorded are refused too, and so is anything
+      -- minted afterwards.
+      'scope',           'postgrest'
+    ),
+    v_actor,
+    'user',
+    txid_current(),
+    now()
+  )
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.revoke_service_principal(p_principal_id uuid, p_reason text) OWNER TO postgres;
+
+--
+
+-- FUNCTION revoke_service_principal(p_principal_id uuid, p_reason text) :: COMMENT
+COMMENT ON FUNCTION public.revoke_service_principal(p_principal_id uuid, p_reason text) IS 'Administrator-only. Flags a service principal so auth_pre_request() refuses every token naming it, and denylists its outstanding tokens individually so reinstating the principal does not restore them. Refuses a human account. Reaches PostgREST only.';
+
+--
+
+-- revoke_service_token(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.revoke_service_token(p_jti text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_actor     uuid;
+  v_mint      jsonb;
+  v_principal uuid;
+  v_expires   timestamptz;
+  v_id        bigint;
+BEGIN
+  -- Administrator alone: withdrawing a credential is an access-control act, not an operational one.
+  IF NOT public.has_role(ARRAY['Administrator']) THEN
+    RAISE EXCEPTION 'insufficient privileges to revoke a service token'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN
+    -- THE AUDIT ROW MUST NAME SOMEBODY. has_role() above cannot pass without a session, so this
+    -- is unreachable in practice and is here so that it stays unreachable: a future caller that
+    -- found a way past the role check would still not be able to revoke anonymously.
+    RAISE EXCEPTION 'revoke_service_token: no session, so this revocation could not be attributed'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF p_jti IS NULL OR length(p_jti) = 0 OR length(p_jti) > 64 THEN
+    RAISE EXCEPTION 'revoke_service_token: p_jti must be 1-64 characters (got %)',
+      coalesce(length(p_jti)::text, 'null')
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  -- The mint row is the source of the principal and the expiry; requiring it stops this table
+  -- filling with jtis nobody issued. Newest first, so the choice is defined.
+  SELECT dt.new_data INTO v_mint
+    FROM public.digital_thread dt
+   WHERE dt.entity_type = 'service_principals'
+     AND dt.action = 'TOKEN_MINTED'
+     AND dt.new_data ->> 'jti' = p_jti
+   ORDER BY dt.id DESC
+   LIMIT 1;
+
+  IF v_mint IS NULL THEN
+    RAISE EXCEPTION
+      'revoke_service_token: no TOKEN_MINTED record for jti %. Only a token this stack recorded '
+      'issuing can be revoked here.', p_jti
+      USING ERRCODE = 'foreign_key_violation';
+  END IF;
+
+  SELECT dt.entity_id INTO v_principal
+    FROM public.digital_thread dt
+   WHERE dt.entity_type = 'service_principals'
+     AND dt.action = 'TOKEN_MINTED'
+     AND dt.new_data ->> 'jti' = p_jti
+   ORDER BY dt.id DESC
+   LIMIT 1;
+
+  v_expires := (v_mint ->> 'expires_at')::timestamptz;
+
+  IF v_expires <= now() THEN
+    -- REFUSED AS A NO-OP RATHER THAN ACCEPTED QUIETLY. The signature check already refuses this
+    -- token, so a row would be pruned on its way in and the operator would be told a credential
+    -- was withdrawn when nothing changed. Saying so is the honest answer and costs them nothing.
+    RAISE EXCEPTION
+      'revoke_service_token: the token % expired on % and is already refused by the signature '
+      'check. There is nothing to revoke.', p_jti, v_expires
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  -- SELF-PRUNING, DONE HERE BECAUSE THIS IS THE ONLY WRITE PATH. A background job would be a
+  -- second moving part for a table that is only touched when somebody revokes something, and the
+  -- work is bounded by how many tokens were revoked in the last 90 days.
+  DELETE FROM public.revoked_service_tokens WHERE expires_at <= now();
+
+  -- IDEMPOTENT. Revoking twice is something an operator will do -- the button is in a page that
+  -- refreshes -- and the second press should confirm rather than fail. The audit row below is
+  -- still written, because "somebody pressed revoke" is true both times.
+  INSERT INTO public.revoked_service_tokens (jti, principal_id, expires_at, revoked_by)
+  VALUES (p_jti, v_principal, v_expires, v_actor)
+  ON CONFLICT (jti) DO NOTHING;
+
+  INSERT INTO public.digital_thread (
+    entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+    causation_id, recorded_at
+  ) VALUES (
+    'service_principals',
+    v_principal,
+    'TOKEN_REVOKED',
+    -- THE MINT ROW GOES IN `old_data`, which is what makes this row readable on its own. 0026's
+    -- argument: an audit row that needs a join to a live row loses its meaning in exactly the
+    -- cases it matters most, and the denylist entry this describes is pruned the moment the token
+    -- expires.
+    v_mint,
+    jsonb_build_object(
+      'jti',        p_jti,
+      'revoked_at', now(),
+      'expires_at', v_expires,
+      -- WHAT THE REVOCATION ACTUALLY REACHES, recorded on the row rather than left to the reader.
+      -- Four services verify the secret for themselves and never consult this denylist, so a row
+      -- claiming a token was revoked without saying where would overstate what happened.
+      'scope',      'postgrest'
+    ),
+    v_actor,
+    'user',
+    txid_current(),
+    now()
+  )
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.revoke_service_token(p_jti text) OWNER TO postgres;
+
+--
+
+-- FUNCTION revoke_service_token(p_jti text) :: COMMENT
+COMMENT ON FUNCTION public.revoke_service_token(p_jti text) IS 'Administrator-only. Adds a minted token''s jti to the denylist auth_pre_request() consults, and records a TOKEN_REVOKED row. Refuses a jti with no TOKEN_MINTED record and one that has already expired. Reaches PostgREST only -- storage, realtime, the edge runtime and Studio verify the JWT secret independently.';
 
 --
 
 -- schema_version_base_name(text) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.schema_version_base_name(schema_name text) RETURNS text
     LANGUAGE sql IMMUTABLE
     AS $_$
   SELECT regexp_replace(COALESCE(schema_name, ''), '_v[0-9]+$', '');
 $_$;
 
+
+ALTER FUNCTION public.schema_version_base_name(schema_name text) OWNER TO postgres;
+
 --
 
 -- FUNCTION schema_version_base_name(schema_name text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.schema_version_base_name(schema_name text) IS 'The lineage stem of a versioned schema name. Mirrored by baseSchemaName() in frontend/src/utils/schemaVersion.js -- keep the two in step.';
 
 --
 
--- seed_setting(text, jsonb, text, text, text, text, text) :: FUNCTION
+-- secure_digital_thread_partition(regclass) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.secure_digital_thread_partition(p_partition regclass) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+  EXECUTE format('REVOKE ALL ON TABLE %s FROM PUBLIC', p_partition::text);
+  EXECUTE format('REVOKE ALL ON TABLE %s FROM anon, authenticated, service_role', p_partition::text);
+END $$;
+
+
+ALTER FUNCTION public.secure_digital_thread_partition(p_partition regclass) OWNER TO postgres;
+
 --
 
+-- FUNCTION secure_digital_thread_partition(p_partition regclass) :: COMMENT
+COMMENT ON FUNCTION public.secure_digital_thread_partition(p_partition regclass) IS 'Strip every application-role privilege from one digital_thread partition. Partitions do not inherit the parent ACL and the image default grants service_role ALL -- including TRUNCATE, which no row trigger can refuse. Readers use the parent; a partition needs no grants.';
+
+--
+
+-- seed_setting(text, jsonb, text, text, text, text, text) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text DEFAULT NULL::text, p_fallback_source text DEFAULT NULL::text) RETURNS void
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_catalog'
@@ -4510,34 +7737,109 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) OWNER TO postgres;
+
 --
 
 -- FUNCTION seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) :: COMMENT
---
-
 COMMENT ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) IS 'Declare a setting from a migration. Inserts on first boot and afterwards refreshes only the metadata, and only where it differs, so an operator''s value survives every replay and an unchanged declaration writes no row. Not reachable through PostgREST.';
 
 --
 
 -- service_token_max_days() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.service_token_max_days() RETURNS integer
     LANGUAGE sql IMMUTABLE
     AS $$ SELECT 90 $$;
 
+
+ALTER FUNCTION public.service_token_max_days() OWNER TO postgres;
+
 --
 
 -- FUNCTION service_token_max_days() :: COMMENT
---
-
 COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-mcp-token.mjs; these tokens cannot be revoked, so the expiry is the only bound that exists.';
 
 --
 
--- stamp_audit_domain() :: FUNCTION
+-- set_archive_credential(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.set_archive_credential(p_secret text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v_id uuid;
+BEGIN
+    -- ADMINISTRATOR ONLY, with the errcode `create_machine_principal()` uses: PostgREST maps it to
+    -- 403, so the page can tell "you may not" from "that did not work".
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RAISE EXCEPTION 'insufficient privileges to set the cold archive credential'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF p_secret IS NULL OR length(trim(p_secret)) = 0 THEN
+        RAISE EXCEPTION 'the cold archive credential cannot be empty; clear the destination instead';
+    END IF;
+
+    SELECT id INTO v_id FROM vault.secrets WHERE name = 'archive_secret_access_key';
+
+    IF v_id IS NULL THEN
+        PERFORM vault.create_secret(trim(p_secret), 'archive_secret_access_key',
+                                    'The secret half of the cold archive''s S3 credential.');
+    ELSE
+        PERFORM vault.update_secret(v_id, trim(p_secret));
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION public.set_archive_credential(p_secret text) OWNER TO postgres;
+
 --
 
+-- FUNCTION set_archive_credential(p_secret text) :: COMMENT
+COMMENT ON FUNCTION public.set_archive_credential(p_secret text) IS 'Write the cold archive''s S3 secret key into the vault. Administrator only. WRITE-ONLY BY CONSTRUCTION: nothing reads it back to a browser, so the page can report that a credential is set and never what it is.';
+
+--
+
+-- shadow_follows_its_original() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.shadow_follows_its_original() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    -- BEFORE the row goes, so the lanes are deleted as themselves -- each with its own audit row
+    -- and tombstone in this transaction -- rather than being SET NULL into a lane for nothing.
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM public.devices WHERE shadow_of = OLD.id;
+        RETURN OLD;
+    END IF;
+
+    -- ON THE TRANSITION, IN EITHER DIRECTION. `UPDATE OF is_archived` fires whenever the column
+    -- appears in a SET list, and PostgREST sends the whole row on a PATCH.
+    IF NEW.is_archived IS DISTINCT FROM COALESCE(OLD.is_archived, false) THEN
+        UPDATE public.devices
+           SET is_archived    = NEW.is_archived,
+               archived_at    = NEW.archived_at,
+               auto_delete_at = NEW.auto_delete_at
+         WHERE shadow_of = NEW.id
+           AND COALESCE(is_archived, false) IS DISTINCT FROM NEW.is_archived;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.shadow_follows_its_original() OWNER TO postgres;
+
+--
+
+-- FUNCTION shadow_follows_its_original() :: COMMENT
+COMMENT ON FUNCTION public.shadow_follows_its_original() IS 'Archiving, restoring or deleting a device does the same to every replay lane whose shadow_of names it: the lane carries the original''s archived_at and auto_delete_at, and goes before it on a delete. A lane is a recording of an asset, not a second asset, so it has no lifecycle of its own.';
+
+--
+
+-- stamp_audit_domain() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.stamp_audit_domain() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
@@ -4548,11 +7850,37 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.stamp_audit_domain() OWNER TO postgres;
+
+--
+
+-- stamp_proposal_author() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.stamp_proposal_author() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    -- The primitive, not `auth.email()`: the base image the database suites run against ships a
+    -- legacy definition reading the singular `request.jwt.claim.email` GUC and returns NULL for a
+    -- modern session (the same trap test-harness/auth-bootstrap.sql records for `auth.uid()`).
+    -- NULL under service_role and during a migration, which is correct.
+    NEW.proposed_by_email := NULLIF(auth.jwt() ->> 'email', '');
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.stamp_proposal_author() OWNER TO postgres;
+
+--
+
+-- FUNCTION stamp_proposal_author() :: COMMENT
+COMMENT ON FUNCTION public.stamp_proposal_author() IS 'Stamps change_proposals.proposed_by_email from the access token on INSERT, discarding anything the client supplied. A DEFAULT would only apply when the column was omitted, and this table takes a direct PostgREST INSERT from any Operator.';
+
 --
 
 -- start_capture_job(text, uuid, text, integer, boolean) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text DEFAULT NULL::text, p_max_seconds integer DEFAULT 300, p_replace boolean DEFAULT false) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4696,18 +8024,17 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) OWNER TO postgres;
+
 --
 
 -- FUNCTION start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) :: COMMENT
---
-
 COMMENT ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) IS 'Queue a broker capture of one gateway or one device. The only way a capture_jobs row is created. Refuses without Administrator or Shopfloor_Manager, refuses a second concurrent capture, and refuses to overwrite a stored capture unless p_replace is true -- which is what makes the replace confirmation a property of the schema rather than of the frontend.';
 
 --
 
 -- start_playback_job(uuid, uuid, jsonb, numeric) :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb DEFAULT '{}'::jsonb, p_speed numeric DEFAULT 1.0) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4772,6 +8099,29 @@ BEGIN
     END IF;
 
     -- ------------------------------------------------------------------------------------
+    -- TIER TWO AND A HALF: the worker must hold the CURRENT credential (#217)
+    -- ------------------------------------------------------------------------------------
+    -- The check above proves an account EXISTS. It cannot prove the worker holds the password
+    -- that account now has, and the broker keeps one password per gateway -- so every mint after
+    -- the first REPLACES one, and for the length of the delivery window the worker is still
+    -- holding the previous password. Accepting here and failing at CONNACK a second later is
+    -- exactly what this refuses.
+    --
+    -- ABSENT IS NOT STALE. playback_stale_credentials() returns a gateway only when the worker
+    -- reported an observation OLDER than the last issue; a worker that has reported no
+    -- observation at all -- one from the release before 0129 -- is not listed and is not refused.
+    IF EXISTS (
+        SELECT 1 FROM public.playback_stale_credentials() s
+         WHERE s.sparkplug_id = v_gateway.sparkplug_id
+    ) THEN
+        RAISE EXCEPTION
+          'start_playback_job: gateway % had its broker credential re-issued after the playback '
+          'worker last picked one up, so the worker still holds the previous password and the '
+          'broker would refuse it. Delivery takes about a minute; try again shortly.', v_gateway.name
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- ------------------------------------------------------------------------------------
     -- The device map
     -- ------------------------------------------------------------------------------------
     -- Every target must be a device of this gateway: publishing another gateway's device segment
@@ -4819,18 +8169,97 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) OWNER TO postgres;
+
 --
 
 -- FUNCTION start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) :: COMMENT
---
-
 COMMENT ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) IS 'Queue a capture for publication onto a simulated gateway. The only way a playback_jobs row is created. Refuses a target that is not is_simulated, one holding no broker credential, a device map naming devices of another gateway, and a second concurrent playback onto the same edge node. See 0056''s header for the three tiers this is the first of.';
 
 --
 
--- sweep_gateway_credential_revocations() :: FUNCTION
+-- sweep_forge() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.sweep_forge() RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_url    text;
+  v_anon   text;
+  v_secret text;
+BEGIN
+  SELECT decrypted_secret INTO v_url    FROM vault.decrypted_secrets WHERE name = 'supabase_functions_url';
+  SELECT decrypted_secret INTO v_anon   FROM vault.decrypted_secrets WHERE name = 'supabase_anon_key';
+  SELECT decrypted_secret INTO v_secret FROM vault.decrypted_secrets WHERE name = 'forge_sweep_secret';
+
+  -- Nothing configured does nothing, rather than sending a bare "Bearer ": the call would answer
+  -- 401 or 503 either way, and not making it keeps "not configured" legible as such.
+  IF coalesce(v_url, '') = '' OR coalesce(v_anon, '') = '' OR coalesce(v_secret, '') = '' THEN
+    RETURN false;
+  END IF;
+
+  -- A minute rather than pg_net's default: one pass is a request per team member and two per
+  -- repository, and a worker whose caller hung up still finishes the pass.
+  PERFORM net.http_post(
+    url     := rtrim(v_url, '/') || '/forge-sweep',
+    headers := jsonb_build_object(
+                 'Content-Type',   'application/json',
+                 'apikey',         v_anon,
+                 'Authorization',  'Bearer ' || v_anon,
+                 'x-sweep-secret', v_secret),
+    body    := '{}'::jsonb,
+    timeout_milliseconds := 60000
+  );
+
+  RETURN true;
+END $$;
+
+
+ALTER FUNCTION public.sweep_forge() OWNER TO postgres;
+
 --
 
+-- FUNCTION sweep_forge() :: COMMENT
+COMMENT ON FUNCTION public.sweep_forge() IS 'Ask the forge-sweep edge function for one reconciliation of the forge against user_roles: team members whose role has gone are removed, admitted logins are placed, gateway repositories get their push webhook and branch protection back, an archived gateway''s repository is put into the forge''s archive and a restored one taken out (0114), and hand-made repositories get main protected. Returns false when the stack holds no sweep secret. ASYNCHRONOUS: net.http_post queues the request, so true means "asked", not "swept". Scheduled every fifteen minutes by pg_cron, and asked for by trg_gateways_forge_follows_archive as an archive lands.';
+
+--
+
+-- sweep_forge_on_archive_change() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.sweep_forge_on_archive_change() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+  -- SECURITY DEFINER because sweep_forge() is service_role's and an operator archiving a gateway
+  -- is `authenticated`. It reaches no further than the sweep the schedule already runs.
+
+  -- ON THE TRANSITION, IN EITHER DIRECTION. `UPDATE OF is_archived` fires whenever the column
+  -- appears in a SET list, including when it is set to the value it already held, and an archived
+  -- gateway is written to by ordinary edits -- so without this guard every such write would walk
+  -- the whole forge. Both directions matter: restoring is what takes the repository back out.
+  IF NEW.is_archived IS DISTINCT FROM COALESCE(OLD.is_archived, false)
+     -- A gateway with no repository has nothing in the forge to follow. A host-run, simulated or
+     -- shadow gateway never gets one, and neither does one enrolled on a deployment with no forge.
+     -- A fleet enrolled before 0110 has repositories this column does not name yet; those converge
+     -- on the timer, which is what the timer is for.
+     AND NEW.forge_repository_at IS NOT NULL THEN
+    PERFORM public.sweep_forge();
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+ALTER FUNCTION public.sweep_forge_on_archive_change() OWNER TO postgres;
+
+--
+
+-- FUNCTION sweep_forge_on_archive_change() :: COMMENT
+COMMENT ON FUNCTION public.sweep_forge_on_archive_change() IS 'Ask forge-sweep for one pass when a gateway is archived or restored, so its repository follows within seconds rather than at the next quarter hour. Gated on the transition and on the gateway having a repository. ASYNCHRONOUS, like everything sweep_forge() does: the pass is queued, and the fifteen-minute schedule is what makes it eventually correct.';
+
+--
+
+-- sweep_gateway_credential_revocations() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.sweep_gateway_credential_revocations() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4871,62 +8300,45 @@ BEGIN
   RETURN v_asked;
 END $$;
 
+
+ALTER FUNCTION public.sweep_gateway_credential_revocations() OWNER TO postgres;
+
 --
 
 -- FUNCTION sweep_gateway_credential_revocations() :: COMMENT
---
-
 COMMENT ON FUNCTION public.sweep_gateway_credential_revocations() IS 'Retries broker-credential revocation for archived gateways whose trigger call did not land, and clears stamps that pg_net shows were never answered. Run by pg_cron every 15 minutes. Gated on gateway_has_broker_credential() since 0063. Does nothing for DELETED gateways -- their row is gone; scripts/revoke-orphaned-broker-accounts.mjs is the sweep for those.';
 
 --
 
--- sync_gateway_deployment() :: FUNCTION
---
-
-CREATE OR REPLACE FUNCTION public.sync_gateway_deployment() RETURNS trigger
+-- system_settings_read_only_guard() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.system_settings_read_only_guard() RETURNS trigger
     LANGUAGE plpgsql
-    SET search_path TO 'public'
+    SET search_path TO 'public', 'pg_catalog'
     AS $$
-DECLARE
-  v_implied text;
 BEGIN
-  v_implied := CASE WHEN NEW.is_virtual THEN 'host' ELSE 'remote' END;
-
-  IF TG_OP = 'INSERT' THEN
-    -- Unspecified is NULL, because the column has no default. See the note on the ALTER above.
-    IF NEW.deployment IS NULL THEN
-      NEW.deployment := v_implied;
-    ELSE
-      NEW.is_virtual := (NEW.deployment = 'host');
+    -- The VALUE alone. Metadata (label, description, bounds) is refreshed by seed_setting() on
+    -- every boot, and refusing that would make the row impossible to correct.
+    IF OLD.read_only AND NEW.value IS DISTINCT FROM OLD.value THEN
+        RAISE EXCEPTION
+            'system_settings.% is fixed at install and cannot be changed here. It is named by the '
+            'deployment, and changing it in the database alone would leave the stack disagreeing '
+            'with the chart. See supabase/README.md.', OLD.key;
     END IF;
     RETURN NEW;
-  END IF;
+END;
+$$;
 
-  -- On UPDATE, whichever column moved wins. Both columns are two-valued and the row starts in
-  -- agreement, so an update that changes both flips both and agrees again; there is no
-  -- disagreement case to refuse. The INSERT arm above needs its rule because `is_virtual` has a
-  -- column default.
-  IF NEW.deployment IS DISTINCT FROM OLD.deployment THEN
-    NEW.is_virtual := (NEW.deployment = 'host');
-  ELSIF NEW.is_virtual IS DISTINCT FROM OLD.is_virtual THEN
-    NEW.deployment := v_implied;
-  END IF;
 
-  RETURN NEW;
-END $$;
+ALTER FUNCTION public.system_settings_read_only_guard() OWNER TO postgres;
 
 --
 
--- FUNCTION sync_gateway_deployment() :: COMMENT
---
-
-COMMENT ON FUNCTION public.sync_gateway_deployment() IS 'Keeps gateways.deployment and gateways.is_virtual in agreement while both exist. Transitional: it goes when is_virtual does. deployment wins when a caller names it; a caller naming both and disagreeing is refused.';
+-- FUNCTION system_settings_read_only_guard() :: COMMENT
+COMMENT ON FUNCTION public.system_settings_read_only_guard() IS 'Refuses a value change to a read-only setting. A trigger rather than a policy because RLS cannot see OLD and NEW at once in a USING clause that must also permit ordinary edits -- the same reason system_settings_stamp() holds the key and value_type immutability.';
 
 --
 
 -- system_settings_stamp() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.system_settings_stamp() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_catalog'
@@ -4955,11 +8367,83 @@ BEGIN
 END;
 $$;
 
+
+ALTER FUNCTION public.system_settings_stamp() OWNER TO postgres;
+
+--
+
+-- validate_change_proposal() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.validate_change_proposal() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_allowed text[] := public.proposable_columns(NEW.entity_type);
+    v_key     text;
+    v_exists  boolean;
+BEGIN
+    -- Fail closed, naming the real problem: the CHECK constraint admits the known lanes and this
+    -- trigger runs before it. This is also how the schema lane's withdrawal is enforced: the string
+    -- is admitted by the constraint and has no allowlist.
+    IF array_length(v_allowed, 1) IS NULL THEN
+        RAISE EXCEPTION
+            'nothing is proposable on %; proposable_columns() has no allowlist for it',
+            NEW.entity_type
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    FOREACH v_key IN ARRAY ARRAY(SELECT jsonb_object_keys(NEW.patch)) LOOP
+        IF NOT (v_key = ANY (v_allowed)) THEN
+            -- NAMED, not merely refused. The proposer chose this field in a form; "invalid patch"
+            -- would send them to an administrator to find out which one.
+            RAISE EXCEPTION
+                'column % is not proposable on %; proposable columns are: %',
+                v_key, NEW.entity_type, array_to_string(v_allowed, ', ')
+                USING ERRCODE = 'invalid_parameter_value';
+        END IF;
+    END LOOP;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- The target has to exist and be in service, and no foreign key can say so: `entity_id`
+    -- addresses a different table depending on `entity_type`.
+    -- ---------------------------------------------------------------------------------------------
+    v_exists := CASE
+        WHEN NEW.entity_type IN ('devices', 'device_nameplate') THEN
+            EXISTS (SELECT 1 FROM public.devices d
+                     WHERE d.id = NEW.entity_id AND d.is_archived = false)
+        WHEN NEW.entity_type = 'areas' THEN
+            EXISTS (SELECT 1 FROM public.areas a
+                     WHERE a.id = NEW.entity_id AND a.is_archived = false)
+        WHEN NEW.entity_type = 'cells' THEN
+            EXISTS (SELECT 1 FROM public.cells c
+                     WHERE c.id = NEW.entity_id AND COALESCE(c.is_archived, false) = false)
+        WHEN NEW.entity_type = 'gateways' THEN
+            EXISTS (SELECT 1 FROM public.gateways g
+                     WHERE g.id = NEW.entity_id AND COALESCE(g.is_archived, false) = false)
+        ELSE false
+    END;
+
+    IF NOT v_exists THEN
+        RAISE EXCEPTION 'no live target % to propose a % change against',
+            NEW.entity_id, NEW.entity_type
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.validate_change_proposal() OWNER TO postgres;
+
+--
+
+-- FUNCTION validate_change_proposal() :: COMMENT
+COMMENT ON FUNCTION public.validate_change_proposal() IS 'Refuses a patch naming a key proposable_columns() does not admit, and a proposal aimed at a target that is absent, archived or -- for the schema lane -- not a draft. Runs on INSERT and on any UPDATE that touches the patch, because editing an open proposal is a path INSERT-only validation would miss.';
+
 --
 
 -- withdraw_gateway_enrollment_tokens() :: FUNCTION
---
-
 CREATE OR REPLACE FUNCTION public.withdraw_gateway_enrollment_tokens() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -4978,18 +8462,216 @@ BEGIN
   RETURN NEW;
 END $$;
 
+
+ALTER FUNCTION public.withdraw_gateway_enrollment_tokens() OWNER TO postgres;
+
 --
 
 -- FUNCTION withdraw_gateway_enrollment_tokens() :: COMMENT
---
-
 COMMENT ON FUNCTION public.withdraw_gateway_enrollment_tokens() IS 'Burns any unredeemed enrolment token when a gateway is archived. SECURITY DEFINER because the operator archiving the gateway has no grant on gateway_enrollment_tokens -- RLS is on with no policy, deliberately, so the table is reachable only by service_role and by definers like this.';
 
 --
 
--- ashrae223_vocabulary :: TABLE
+-- withdraw_proposal(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.withdraw_proposal(p_proposal_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_proposal public.change_proposals%ROWTYPE;
+BEGIN
+    SELECT * INTO v_proposal FROM public.change_proposals
+     WHERE id = p_proposal_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'proposal % not found', p_proposal_id USING ERRCODE = 'no_data_found';
+    END IF;
+
+    -- The proposer's own, and nobody else's. An approver who wants an open proposal gone rejects
+    -- it with a reason -- withdrawal on somebody's behalf would erase the refusal.
+    IF v_proposal.proposed_by IS DISTINCT FROM auth.uid() THEN
+        RAISE EXCEPTION 'only the proposer may withdraw proposal %', p_proposal_id
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF v_proposal.status <> 'open' THEN
+        RAISE EXCEPTION 'proposal % is already %', p_proposal_id, v_proposal.status
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    PERFORM set_config('acs_cymru.proposal_transition', 'on', true);
+
+    UPDATE public.change_proposals
+       SET status = 'withdrawn', decided_by = auth.uid(), decided_at = now()
+     WHERE id = p_proposal_id;
+
+    RETURN jsonb_build_object('id', p_proposal_id, 'status', 'withdrawn');
+END;
+$$;
+
+
+ALTER FUNCTION public.withdraw_proposal(p_proposal_id uuid) OWNER TO postgres;
+
 --
 
+-- FUNCTION withdraw_proposal(p_proposal_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.withdraw_proposal(p_proposal_id uuid) IS 'The proposer closes their own open proposal, freeing the slot it holds under both caps. Not available to an approver: making somebody else''s proposal disappear without a reason is what rejection exists to prevent.';
+
+--
+
+-- areas :: TABLE
+CREATE TABLE IF NOT EXISTS public.areas (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    description text,
+    icon text DEFAULT 'Building2'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    plan_path text,
+    plan_aspect numeric(8,4),
+    is_archived boolean DEFAULT false NOT NULL,
+    archived_at timestamp with time zone,
+    auto_delete_at timestamp with time zone,
+    CONSTRAINT areas_icon_valid CHECK ((icon = ANY (ARRAY['Building2'::text, 'Factory'::text, 'Warehouse'::text, 'FlaskConical'::text, 'Truck'::text, 'Parking'::text, 'Trees'::text, 'Zap'::text]))),
+    CONSTRAINT areas_name_topic_safe CHECK (((name <> ''::text) AND (name !~ '[/+#]'::text))),
+    CONSTRAINT areas_plan_aspect_positive CHECK (((plan_aspect IS NULL) OR (plan_aspect > (0)::numeric))),
+    CONSTRAINT areas_plan_has_aspect CHECK (((plan_path IS NULL) = (plan_aspect IS NULL)))
+);
+
+ALTER TABLE ONLY public.areas REPLICA IDENTITY FULL;
+
+
+ALTER TABLE public.areas OWNER TO postgres;
+
+ALTER TABLE public.areas
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS icon text DEFAULT 'Building2'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS plan_path text,
+    ADD COLUMN IF NOT EXISTS plan_aspect numeric(8,4),
+    ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone;
+
+ALTER TABLE public.areas
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN icon SET DEFAULT 'Building2'::text,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN plan_path DROP DEFAULT,
+    ALTER COLUMN plan_aspect DROP DEFAULT,
+    ALTER COLUMN is_archived SET DEFAULT false,
+    ALTER COLUMN archived_at DROP DEFAULT,
+    ALTER COLUMN auto_delete_at DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'areas_icon_valid'
+                AND conrelid = 'public.areas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((icon = ANY (ARRAY[''Building2''::text, ''Factory''::text, ''Warehouse''::text, ''FlaskConical''::text, ''Truck''::text, ''Parking''::text, ''Trees''::text, ''Zap''::text])))') THEN
+    ALTER TABLE public.areas DROP CONSTRAINT areas_icon_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'areas_icon_valid'
+                    AND conrelid = 'public.areas'::regclass) THEN
+    ALTER TABLE public.areas
+        ADD CONSTRAINT areas_icon_valid CHECK ((icon = ANY (ARRAY['Building2'::text, 'Factory'::text, 'Warehouse'::text, 'FlaskConical'::text, 'Truck'::text, 'Parking'::text, 'Trees'::text, 'Zap'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'areas_name_topic_safe'
+                AND conrelid = 'public.areas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((name <> ''''::text) AND (name !~ ''[/+#]''::text)))') THEN
+    ALTER TABLE public.areas DROP CONSTRAINT areas_name_topic_safe;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'areas_name_topic_safe'
+                    AND conrelid = 'public.areas'::regclass) THEN
+    ALTER TABLE public.areas
+        ADD CONSTRAINT areas_name_topic_safe CHECK (((name <> ''::text) AND (name !~ '[/+#]'::text)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'areas_plan_aspect_positive'
+                AND conrelid = 'public.areas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_aspect IS NULL) OR (plan_aspect > (0)::numeric)))') THEN
+    ALTER TABLE public.areas DROP CONSTRAINT areas_plan_aspect_positive;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'areas_plan_aspect_positive'
+                    AND conrelid = 'public.areas'::regclass) THEN
+    ALTER TABLE public.areas
+        ADD CONSTRAINT areas_plan_aspect_positive CHECK (((plan_aspect IS NULL) OR (plan_aspect > (0)::numeric)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'areas_plan_has_aspect'
+                AND conrelid = 'public.areas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_path IS NULL) = (plan_aspect IS NULL)))') THEN
+    ALTER TABLE public.areas DROP CONSTRAINT areas_plan_has_aspect;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'areas_plan_has_aspect'
+                    AND conrelid = 'public.areas'::regclass) THEN
+    ALTER TABLE public.areas
+        ADD CONSTRAINT areas_plan_has_aspect CHECK (((plan_path IS NULL) = (plan_aspect IS NULL)));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE areas :: COMMENT
+COMMENT ON TABLE public.areas IS 'ISA-95 areas -- the buildings of the one site. A cell files into at most one area (cells.area_id); an area-wide asset names one directly. The name is a segment of every uns/ topic beneath it, so it cannot contain the MQTT separator or wildcards.';
+
+--
+
+-- COLUMN areas.name :: COMMENT
+COMMENT ON COLUMN public.areas.name IS 'Display name and the <area> segment of uns/<enterprise>/<site>/<area>/... Unique, non-empty, no / + #.';
+
+--
+
+-- COLUMN areas.icon :: COMMENT
+COMMENT ON COLUMN public.areas.icon IS 'Icon key for this area, rendered by the dashboard from a bundled SVG set (frontend/src/utils/areaIcon.jsx). A closed set (see areas_icon_valid), as cells.icon is: a lookup key, never markup or a URL.';
+
+--
+
+-- COLUMN areas.plan_path :: COMMENT
+COMMENT ON COLUMN public.areas.plan_path IS 'Object path of the area''s plan in the floor-plans bucket, <area_id>/<file>.svg, or NULL for the default outline. A path, never markup.';
+
+--
+
+-- COLUMN areas.plan_aspect :: COMMENT
+COMMENT ON COLUMN public.areas.plan_aspect IS 'Width over height of the plan''s viewBox, read at upload. Cell places are fractions of the plan, so the aspect is what turns them back into a distance; NULL with no plan, when the default 4:3 outline applies.';
+
+--
+
+-- COLUMN areas.is_archived :: COMMENT
+COMMENT ON COLUMN public.areas.is_archived IS 'Out of commission but not gone: listed on the Archived Entities page, restorable, and still the <area> segment of every uns/ topic beneath it. Its cells stay filed in it. Never proposable.';
+
+--
+
+-- COLUMN areas.archived_at :: COMMENT
+COMMENT ON COLUMN public.areas.archived_at IS 'When the area was archived; NULL while it is in service.';
+
+--
+
+-- COLUMN areas.auto_delete_at :: COMMENT
+COMMENT ON COLUMN public.areas.auto_delete_at IS 'When purge_expired_archives (0002) may delete the row; NULL is permanent retention. The delete is skipped, not attempted, while an Area-Wide asset still names the area.';
+
+--
+
+-- ashrae223_vocabulary :: TABLE
 CREATE TABLE IF NOT EXISTS public.ashrae223_vocabulary (
     name text NOT NULL,
     concept_kind text NOT NULL,
@@ -5001,25 +8683,70 @@ CREATE TABLE IF NOT EXISTS public.ashrae223_vocabulary (
     CONSTRAINT ashrae223_vocabulary_semantic_id_namespace CHECK ((semantic_id ~~ 'http://data.ashrae.org/standard223#%'::text))
 );
 
+
+ALTER TABLE public.ashrae223_vocabulary OWNER TO postgres;
+
+ALTER TABLE public.ashrae223_vocabulary
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS concept_kind text NOT NULL,
+    ADD COLUMN IF NOT EXISTS label text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS subclass_of text,
+    ADD COLUMN IF NOT EXISTS semantic_id text NOT NULL;
+
+ALTER TABLE public.ashrae223_vocabulary
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN concept_kind DROP DEFAULT,
+    ALTER COLUMN label DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN subclass_of DROP DEFAULT,
+    ALTER COLUMN semantic_id DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'ashrae223_vocabulary_kind_valid'
+                AND conrelid = 'public.ashrae223_vocabulary'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((concept_kind = ANY (ARRAY[''Class''::text, ''AbstractClass''::text, ''Concept''::text, ''Relation''::text, ''EnumerationKind''::text])))') THEN
+    ALTER TABLE public.ashrae223_vocabulary DROP CONSTRAINT ashrae223_vocabulary_kind_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'ashrae223_vocabulary_kind_valid'
+                    AND conrelid = 'public.ashrae223_vocabulary'::regclass) THEN
+    ALTER TABLE public.ashrae223_vocabulary
+        ADD CONSTRAINT ashrae223_vocabulary_kind_valid CHECK ((concept_kind = ANY (ARRAY['Class'::text, 'AbstractClass'::text, 'Concept'::text, 'Relation'::text, 'EnumerationKind'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'ashrae223_vocabulary_semantic_id_namespace'
+                AND conrelid = 'public.ashrae223_vocabulary'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((semantic_id ~~ ''http://data.ashrae.org/standard223#%''::text))') THEN
+    ALTER TABLE public.ashrae223_vocabulary DROP CONSTRAINT ashrae223_vocabulary_semantic_id_namespace;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'ashrae223_vocabulary_semantic_id_namespace'
+                    AND conrelid = 'public.ashrae223_vocabulary'::regclass) THEN
+    ALTER TABLE public.ashrae223_vocabulary
+        ADD CONSTRAINT ashrae223_vocabulary_semantic_id_namespace CHECK ((semantic_id ~~ 'http://data.ashrae.org/standard223#%'::text));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE ashrae223_vocabulary :: COMMENT
---
-
 COMMENT ON TABLE public.ashrae223_vocabulary IS 'ASHRAE 223P semantic concepts, generated from the open223 ontology (Apache-2.0). Reference data, not deployment state -- a row is a concept the standard defines. ⚠ The standard is still in public review; concepts may move before publication.';
 
 --
 
 -- COLUMN ashrae223_vocabulary.subclass_of :: COMMENT
---
-
 COMMENT ON COLUMN public.ashrae223_vocabulary.subclass_of IS 'Immediate s223 superclass, or NULL at the top of the hierarchy. Used to give the vocabulary panel browsable sections.';
 
 --
 
 -- asset_config :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.asset_config (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     asset_id text NOT NULL,
@@ -5031,11 +8758,368 @@ CREATE TABLE IF NOT EXISTS public.asset_config (
     updated_at timestamp with time zone DEFAULT now()
 );
 
+
+ALTER TABLE public.asset_config OWNER TO postgres;
+
+ALTER TABLE public.asset_config
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS asset_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS metric_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS val_double double precision,
+    ADD COLUMN IF NOT EXISTS val_string text,
+    ADD COLUMN IF NOT EXISTS val_bool boolean,
+    ADD COLUMN IF NOT EXISTS datatype integer,
+    ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now();
+
+ALTER TABLE public.asset_config
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN asset_id DROP DEFAULT,
+    ALTER COLUMN metric_name DROP DEFAULT,
+    ALTER COLUMN val_double DROP DEFAULT,
+    ALTER COLUMN val_string DROP DEFAULT,
+    ALTER COLUMN val_bool DROP DEFAULT,
+    ALTER COLUMN datatype DROP DEFAULT,
+    ALTER COLUMN updated_at SET DEFAULT now();
+
+--
+
+-- asset_exports :: TABLE
+CREATE TABLE IF NOT EXISTS public.asset_exports (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_type text DEFAULT 'devices'::text NOT NULL,
+    entity_id uuid NOT NULL,
+    name text,
+    sparkplug_id text,
+    format text DEFAULT 'aasx'::text NOT NULL,
+    object_bucket text NOT NULL,
+    object_key text NOT NULL,
+    object_bytes bigint,
+    sha256 text,
+    stats jsonb DEFAULT '{}'::jsonb NOT NULL,
+    taken_at timestamp with time zone DEFAULT now() NOT NULL,
+    taken_by uuid,
+    taken_by_email text,
+    CONSTRAINT asset_exports_format_valid CHECK ((format = 'aasx'::text)),
+    CONSTRAINT asset_exports_type_known CHECK ((entity_type = 'devices'::text))
+);
+
+
+ALTER TABLE public.asset_exports OWNER TO postgres;
+
+ALTER TABLE public.asset_exports
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'devices'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text,
+    ADD COLUMN IF NOT EXISTS sparkplug_id text,
+    ADD COLUMN IF NOT EXISTS format text DEFAULT 'aasx'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS object_bucket text NOT NULL,
+    ADD COLUMN IF NOT EXISTS object_key text NOT NULL,
+    ADD COLUMN IF NOT EXISTS object_bytes bigint,
+    ADD COLUMN IF NOT EXISTS sha256 text,
+    ADD COLUMN IF NOT EXISTS stats jsonb DEFAULT '{}'::jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS taken_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS taken_by uuid,
+    ADD COLUMN IF NOT EXISTS taken_by_email text;
+
+ALTER TABLE public.asset_exports
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN entity_type SET DEFAULT 'devices'::text,
+    ALTER COLUMN entity_id DROP DEFAULT,
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN sparkplug_id DROP DEFAULT,
+    ALTER COLUMN format SET DEFAULT 'aasx'::text,
+    ALTER COLUMN object_bucket DROP DEFAULT,
+    ALTER COLUMN object_key DROP DEFAULT,
+    ALTER COLUMN object_bytes DROP DEFAULT,
+    ALTER COLUMN sha256 DROP DEFAULT,
+    ALTER COLUMN stats SET DEFAULT '{}'::jsonb,
+    ALTER COLUMN taken_at SET DEFAULT now(),
+    ALTER COLUMN taken_by DROP DEFAULT,
+    ALTER COLUMN taken_by_email DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'asset_exports_format_valid'
+                AND conrelid = 'public.asset_exports'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((format = ''aasx''::text))') THEN
+    ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_format_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'asset_exports_format_valid'
+                    AND conrelid = 'public.asset_exports'::regclass) THEN
+    ALTER TABLE public.asset_exports
+        ADD CONSTRAINT asset_exports_format_valid CHECK ((format = 'aasx'::text));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'asset_exports_type_known'
+                AND conrelid = 'public.asset_exports'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ''devices''::text))') THEN
+    ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_type_known;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'asset_exports_type_known'
+                    AND conrelid = 'public.asset_exports'::regclass) THEN
+    ALTER TABLE public.asset_exports
+        ADD CONSTRAINT asset_exports_type_known CHECK ((entity_type = 'devices'::text));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE asset_exports :: COMMENT
+COMMENT ON TABLE public.asset_exports IS 'Each per-asset bundle aas-export stored: an AASX carrying the shell, the digital thread, the telemetry still in the live historian and a manifest naming the cold objects that hold the rest. A sibling of the cold tier that shares its bucket, and not a row in the historian''s manifest, which is keyed by chunk and exists to make dropping one safe. Readable by the three roles the bucket admits; written by the function alone.';
+
+--
+
+-- backup_jobs :: TABLE
+CREATE TABLE IF NOT EXISTS public.backup_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    origin text NOT NULL,
+    status text DEFAULT 'PENDING'::text NOT NULL,
+    note text,
+    requested_by uuid,
+    backup_id uuid,
+    error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    CONSTRAINT backup_jobs_origin_valid CHECK ((origin = ANY (ARRAY['requested'::text, 'scheduled'::text]))),
+    CONSTRAINT backup_jobs_status_valid CHECK ((status = ANY (ARRAY['PENDING'::text, 'RUNNING'::text, 'COMPLETED'::text, 'FAILED'::text, 'CANCELLED'::text])))
+);
+
+
+ALTER TABLE public.backup_jobs OWNER TO postgres;
+
+ALTER TABLE public.backup_jobs
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS origin text NOT NULL,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'PENDING'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS note text,
+    ADD COLUMN IF NOT EXISTS requested_by uuid,
+    ADD COLUMN IF NOT EXISTS backup_id uuid,
+    ADD COLUMN IF NOT EXISTS error text,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS started_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS finished_at timestamp with time zone;
+
+ALTER TABLE public.backup_jobs
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN origin DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'PENDING'::text,
+    ALTER COLUMN note DROP DEFAULT,
+    ALTER COLUMN requested_by DROP DEFAULT,
+    ALTER COLUMN backup_id DROP DEFAULT,
+    ALTER COLUMN error DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN started_at DROP DEFAULT,
+    ALTER COLUMN finished_at DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backup_jobs_origin_valid'
+                AND conrelid = 'public.backup_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((origin = ANY (ARRAY[''requested''::text, ''scheduled''::text])))') THEN
+    ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_origin_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backup_jobs_origin_valid'
+                    AND conrelid = 'public.backup_jobs'::regclass) THEN
+    ALTER TABLE public.backup_jobs
+        ADD CONSTRAINT backup_jobs_origin_valid CHECK ((origin = ANY (ARRAY['requested'::text, 'scheduled'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backup_jobs_status_valid'
+                AND conrelid = 'public.backup_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RUNNING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
+    ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backup_jobs_status_valid'
+                    AND conrelid = 'public.backup_jobs'::regclass) THEN
+    ALTER TABLE public.backup_jobs
+        ADD CONSTRAINT backup_jobs_status_valid CHECK ((status = ANY (ARRAY['PENDING'::text, 'RUNNING'::text, 'COMPLETED'::text, 'FAILED'::text, 'CANCELLED'::text])));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE backup_jobs :: COMMENT
+COMMENT ON TABLE public.backup_jobs IS 'One row per backup ATTEMPTED, including the ones that failed. At most one row is PENDING or RUNNING at a time (backup_jobs_single_flight). Written only through request_backup(), enqueue_scheduled_backup() and the backup service''s gates -- there is no direct-write RLS policy. Readable by Administrator only.';
+
+--
+
+-- COLUMN backup_jobs.origin :: COMMENT
+COMMENT ON COLUMN public.backup_jobs.origin IS 'requested: an Administrator asked, and requested_by names them. scheduled: the service''s timer asked, and requested_by is NULL.';
+
+--
+
+-- COLUMN backup_jobs.backup_id :: COMMENT
+COMMENT ON COLUMN public.backup_jobs.backup_id IS 'The backups row this job produced, set by backup_finalise(). Not a foreign key: a pruned backup keeps its job row, which is the history of the act.';
+
+--
+
+-- COLUMN backup_jobs.error :: COMMENT
+COMMENT ON COLUMN public.backup_jobs.error IS 'What the service said when it failed, capped at 2000 characters. The page shows this string.';
+
+--
+
+-- backups :: TABLE
+CREATE TABLE IF NOT EXISTS public.backups (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    stamp text NOT NULL,
+    origin text NOT NULL,
+    note text,
+    requested_by uuid,
+    job_id uuid,
+    location text NOT NULL,
+    components jsonb DEFAULT '[]'::jsonb NOT NULL,
+    size_bytes bigint DEFAULT 0 NOT NULL,
+    pinned boolean DEFAULT false NOT NULL,
+    released_at timestamp with time zone,
+    released_by uuid,
+    taken_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT backups_components_is_an_array CHECK ((jsonb_typeof(components) = 'array'::text)),
+    CONSTRAINT backups_origin_valid CHECK ((origin = ANY (ARRAY['requested'::text, 'scheduled'::text]))),
+    CONSTRAINT backups_size_is_not_negative CHECK ((size_bytes >= 0)),
+    CONSTRAINT backups_stamp_is_a_directory_name CHECK ((stamp ~ '^[0-9]{8}T[0-9]{6}Z$'::text))
+);
+
+
+ALTER TABLE public.backups OWNER TO postgres;
+
+ALTER TABLE public.backups
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS stamp text NOT NULL,
+    ADD COLUMN IF NOT EXISTS origin text NOT NULL,
+    ADD COLUMN IF NOT EXISTS note text,
+    ADD COLUMN IF NOT EXISTS requested_by uuid,
+    ADD COLUMN IF NOT EXISTS job_id uuid,
+    ADD COLUMN IF NOT EXISTS location text NOT NULL,
+    ADD COLUMN IF NOT EXISTS components jsonb DEFAULT '[]'::jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS size_bytes bigint DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS pinned boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS released_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS released_by uuid,
+    ADD COLUMN IF NOT EXISTS taken_at timestamp with time zone DEFAULT now() NOT NULL;
+
+ALTER TABLE public.backups
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN stamp DROP DEFAULT,
+    ALTER COLUMN origin DROP DEFAULT,
+    ALTER COLUMN note DROP DEFAULT,
+    ALTER COLUMN requested_by DROP DEFAULT,
+    ALTER COLUMN job_id DROP DEFAULT,
+    ALTER COLUMN location DROP DEFAULT,
+    ALTER COLUMN components SET DEFAULT '[]'::jsonb,
+    ALTER COLUMN size_bytes SET DEFAULT 0,
+    ALTER COLUMN pinned SET DEFAULT false,
+    ALTER COLUMN released_at DROP DEFAULT,
+    ALTER COLUMN released_by DROP DEFAULT,
+    ALTER COLUMN taken_at SET DEFAULT now();
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_components_is_an_array'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((jsonb_typeof(components) = ''array''::text))') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_components_is_an_array;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_components_is_an_array'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE public.backups
+        ADD CONSTRAINT backups_components_is_an_array CHECK ((jsonb_typeof(components) = 'array'::text));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_origin_valid'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((origin = ANY (ARRAY[''requested''::text, ''scheduled''::text])))') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_origin_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_origin_valid'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE public.backups
+        ADD CONSTRAINT backups_origin_valid CHECK ((origin = ANY (ARRAY['requested'::text, 'scheduled'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_size_is_not_negative'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((size_bytes >= 0))') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_size_is_not_negative;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_size_is_not_negative'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE public.backups
+        ADD CONSTRAINT backups_size_is_not_negative CHECK ((size_bytes >= 0));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_stamp_is_a_directory_name'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((stamp ~ ''^[0-9]{8}T[0-9]{6}Z$''::text))') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_stamp_is_a_directory_name;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_stamp_is_a_directory_name'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE public.backups
+        ADD CONSTRAINT backups_stamp_is_a_directory_name CHECK ((stamp ~ '^[0-9]{8}T[0-9]{6}Z$'::text));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE backups :: COMMENT
+COMMENT ON TABLE public.backups IS 'One row per backup that EXISTS on the backup volume; the row is deleted when the service prunes the files, and BACKUP_PRUNED in digital_thread is the record that it did. Written only by backup_finalise() and released only by release_backup(). Readable by Administrator only. The bytes never leave the volume: nothing serves them to a browser.';
+
+--
+
+-- COLUMN backups.stamp :: COMMENT
+COMMENT ON COLUMN public.backups.stamp IS 'The UTC stamp the files carry, YYYYMMDDTHHMMSSZ, and the name of the directory under the backup volume holding them. What BACKUP_STAMP takes in restore-databases.sh.';
+
+--
+
+-- COLUMN backups.location :: COMMENT
+COMMENT ON COLUMN public.backups.location IS 'The directory holding this backup''s files, as a path inside the backup service''s container. Informational: a restore is run from a shell against the volume, not from this row.';
+
+--
+
+-- COLUMN backups.components :: COMMENT
+COMMENT ON COLUMN public.backups.components IS 'What the backup holds: an array of {name, file, size_bytes, sha256}. Names are supabase-db, timescaledb, vault-key, storage-objects, forge, broker and ca; a component the service was not given a volume, a file or a Secret for is absent, not empty.';
+
+--
+
+-- COLUMN backups.pinned :: COMMENT
+COMMENT ON COLUMN public.backups.pinned IS 'True keeps the backup out of the retention prune. Set at creation for a requested backup, cleared by release_backup(). A scheduled backup is never pinned.';
+
 --
 
 -- capture_jobs :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.capture_jobs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     subject_kind text NOT NULL,
@@ -5062,11 +9146,7 @@ CREATE TABLE IF NOT EXISTS public.capture_jobs (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     started_at timestamp with time zone,
     finished_at timestamp with time zone,
-    CONSTRAINT capture_jobs_caps_are_bounded CHECK (
-        max_seconds  BETWEEN 5 AND 7200
-    AND max_messages BETWEEN 1 AND 100000
-    AND max_bytes    BETWEEN 1024 AND 52428800
-    ),
+    CONSTRAINT capture_jobs_caps_are_bounded CHECK (((max_seconds BETWEEN 5 AND 7200) AND (max_messages BETWEEN 1 AND 100000) AND (max_bytes BETWEEN 1024 AND 52428800))),
     CONSTRAINT capture_jobs_status_valid CHECK ((status = ANY (ARRAY['PENDING'::text, 'RECORDING'::text, 'COMPLETED'::text, 'FAILED'::text, 'CANCELLED'::text]))),
     CONSTRAINT capture_jobs_subject_is_coherent CHECK ((((subject_kind = 'gateway'::text) AND (gateway_id IS NOT NULL) AND (device_sparkplug_id IS NULL)) OR ((subject_kind = 'device'::text) AND (device_id IS NOT NULL) AND (device_sparkplug_id IS NOT NULL)))),
     CONSTRAINT capture_jobs_subject_kind_valid CHECK ((subject_kind = ANY (ARRAY['gateway'::text, 'device'::text])))
@@ -5074,25 +9154,140 @@ CREATE TABLE IF NOT EXISTS public.capture_jobs (
 
 ALTER TABLE ONLY public.capture_jobs REPLICA IDENTITY FULL;
 
+
+ALTER TABLE public.capture_jobs OWNER TO postgres;
+
+ALTER TABLE public.capture_jobs
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS subject_kind text NOT NULL,
+    ADD COLUMN IF NOT EXISTS gateway_id uuid,
+    ADD COLUMN IF NOT EXISTS device_id uuid,
+    ADD COLUMN IF NOT EXISTS sparkplug_group text NOT NULL,
+    ADD COLUMN IF NOT EXISTS edge_node_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS device_sparkplug_id text,
+    ADD COLUMN IF NOT EXISTS subject_sparkplug_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS storage_path text NOT NULL,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'PENDING'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS note text,
+    ADD COLUMN IF NOT EXISTS max_seconds integer DEFAULT 7200 NOT NULL,
+    ADD COLUMN IF NOT EXISTS max_messages integer DEFAULT 100000 NOT NULL,
+    ADD COLUMN IF NOT EXISTS max_bytes bigint DEFAULT 52428800 NOT NULL,
+    ADD COLUMN IF NOT EXISTS messages bigint DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS bytes bigint DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS elapsed_seconds integer DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS birth_captured boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS stop_requested boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS capture_id uuid,
+    ADD COLUMN IF NOT EXISTS error text,
+    ADD COLUMN IF NOT EXISTS requested_by uuid,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS started_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS finished_at timestamp with time zone;
+
+ALTER TABLE public.capture_jobs
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN subject_kind DROP DEFAULT,
+    ALTER COLUMN gateway_id DROP DEFAULT,
+    ALTER COLUMN device_id DROP DEFAULT,
+    ALTER COLUMN sparkplug_group DROP DEFAULT,
+    ALTER COLUMN edge_node_id DROP DEFAULT,
+    ALTER COLUMN device_sparkplug_id DROP DEFAULT,
+    ALTER COLUMN subject_sparkplug_id DROP DEFAULT,
+    ALTER COLUMN storage_path DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'PENDING'::text,
+    ALTER COLUMN note DROP DEFAULT,
+    ALTER COLUMN max_seconds SET DEFAULT 7200,
+    ALTER COLUMN max_messages SET DEFAULT 100000,
+    ALTER COLUMN max_bytes SET DEFAULT 52428800,
+    ALTER COLUMN messages SET DEFAULT 0,
+    ALTER COLUMN bytes SET DEFAULT 0,
+    ALTER COLUMN elapsed_seconds SET DEFAULT 0,
+    ALTER COLUMN birth_captured SET DEFAULT false,
+    ALTER COLUMN stop_requested SET DEFAULT false,
+    ALTER COLUMN capture_id DROP DEFAULT,
+    ALTER COLUMN error DROP DEFAULT,
+    ALTER COLUMN requested_by DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN started_at DROP DEFAULT,
+    ALTER COLUMN finished_at DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_caps_are_bounded'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((max_seconds BETWEEN 5 AND 7200) AND (max_messages BETWEEN 1 AND 100000) AND (max_bytes BETWEEN 1024 AND 52428800)))') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_caps_are_bounded;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'capture_jobs_caps_are_bounded'
+                    AND conrelid = 'public.capture_jobs'::regclass) THEN
+    ALTER TABLE public.capture_jobs
+        ADD CONSTRAINT capture_jobs_caps_are_bounded CHECK (((max_seconds BETWEEN 5 AND 7200) AND (max_messages BETWEEN 1 AND 100000) AND (max_bytes BETWEEN 1024 AND 52428800)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_status_valid'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RECORDING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'capture_jobs_status_valid'
+                    AND conrelid = 'public.capture_jobs'::regclass) THEN
+    ALTER TABLE public.capture_jobs
+        ADD CONSTRAINT capture_jobs_status_valid CHECK ((status = ANY (ARRAY['PENDING'::text, 'RECORDING'::text, 'COMPLETED'::text, 'FAILED'::text, 'CANCELLED'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_subject_is_coherent'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((((subject_kind = ''gateway''::text) AND (gateway_id IS NOT NULL) AND (device_sparkplug_id IS NULL)) OR ((subject_kind = ''device''::text) AND (device_id IS NOT NULL) AND (device_sparkplug_id IS NOT NULL))))') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_subject_is_coherent;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'capture_jobs_subject_is_coherent'
+                    AND conrelid = 'public.capture_jobs'::regclass) THEN
+    ALTER TABLE public.capture_jobs
+        ADD CONSTRAINT capture_jobs_subject_is_coherent CHECK ((((subject_kind = 'gateway'::text) AND (gateway_id IS NOT NULL) AND (device_sparkplug_id IS NULL)) OR ((subject_kind = 'device'::text) AND (device_id IS NOT NULL) AND (device_sparkplug_id IS NOT NULL))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_subject_kind_valid'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((subject_kind = ANY (ARRAY[''gateway''::text, ''device''::text])))') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_subject_kind_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'capture_jobs_subject_kind_valid'
+                    AND conrelid = 'public.capture_jobs'::regclass) THEN
+    ALTER TABLE public.capture_jobs
+        ADD CONSTRAINT capture_jobs_subject_kind_valid CHECK ((subject_kind = ANY (ARRAY['gateway'::text, 'device'::text])));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE capture_jobs :: COMMENT
---
-
 COMMENT ON TABLE public.capture_jobs IS 'One row per recording ATTEMPTED, including the ones that failed. At most one row is PENDING or RECORDING at a time across the whole stack (capture_jobs_single_flight). Written only through the gates in 0055 -- there is no direct-write RLS policy -- and pushed to the Capture page by Realtime as the daemon updates its progress columns.';
 
 --
 
 -- COLUMN capture_jobs.stop_requested :: COMMENT
---
-
 COMMENT ON COLUMN public.capture_jobs.stop_requested IS 'Set by request_capture_stop(); observed by the daemon on its next message, which then flushes and completes. A column rather than an endpoint because the daemon hosts no REST tier, and because a flag survives a page reload.';
 
 --
 
 -- captures :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.captures (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     subject_kind text NOT NULL,
@@ -5115,25 +9310,134 @@ CREATE TABLE IF NOT EXISTS public.captures (
     CONSTRAINT captures_subject_kind_valid CHECK ((subject_kind = ANY (ARRAY['gateway'::text, 'device'::text])))
 );
 
+
+ALTER TABLE public.captures OWNER TO postgres;
+
+ALTER TABLE public.captures
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS subject_kind text NOT NULL,
+    ADD COLUMN IF NOT EXISTS gateway_id uuid,
+    ADD COLUMN IF NOT EXISTS device_id uuid,
+    ADD COLUMN IF NOT EXISTS subject_sparkplug_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS storage_path text NOT NULL,
+    ADD COLUMN IF NOT EXISTS size_bytes bigint NOT NULL,
+    ADD COLUMN IF NOT EXISTS message_count integer NOT NULL,
+    ADD COLUMN IF NOT EXISTS note text,
+    ADD COLUMN IF NOT EXISTS manifest jsonb DEFAULT '{}'::jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS source text DEFAULT 'recorded'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS created_by uuid;
+
+ALTER TABLE public.captures
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN subject_kind DROP DEFAULT,
+    ALTER COLUMN gateway_id DROP DEFAULT,
+    ALTER COLUMN device_id DROP DEFAULT,
+    ALTER COLUMN subject_sparkplug_id DROP DEFAULT,
+    ALTER COLUMN storage_path DROP DEFAULT,
+    ALTER COLUMN size_bytes DROP DEFAULT,
+    ALTER COLUMN message_count DROP DEFAULT,
+    ALTER COLUMN note DROP DEFAULT,
+    ALTER COLUMN manifest SET DEFAULT '{}'::jsonb,
+    ALTER COLUMN source SET DEFAULT 'recorded'::text,
+    ALTER COLUMN recorded_at SET DEFAULT now(),
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN created_by DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_message_count_check'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((message_count >= 0))') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_message_count_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'captures_message_count_check'
+                    AND conrelid = 'public.captures'::regclass) THEN
+    ALTER TABLE public.captures
+        ADD CONSTRAINT captures_message_count_check CHECK ((message_count >= 0));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_size_bytes_check'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((size_bytes >= 0))') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_size_bytes_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'captures_size_bytes_check'
+                    AND conrelid = 'public.captures'::regclass) THEN
+    ALTER TABLE public.captures
+        ADD CONSTRAINT captures_size_bytes_check CHECK ((size_bytes >= 0));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_source_valid'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((source = ANY (ARRAY[''recorded''::text, ''uploaded''::text])))') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_source_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'captures_source_valid'
+                    AND conrelid = 'public.captures'::regclass) THEN
+    ALTER TABLE public.captures
+        ADD CONSTRAINT captures_source_valid CHECK ((source = ANY (ARRAY['recorded'::text, 'uploaded'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_subject_is_coherent'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((((subject_kind = ''gateway''::text) AND (gateway_id IS NOT NULL) AND (device_id IS NULL)) OR ((subject_kind = ''device''::text) AND (device_id IS NOT NULL))))') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_subject_is_coherent;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'captures_subject_is_coherent'
+                    AND conrelid = 'public.captures'::regclass) THEN
+    ALTER TABLE public.captures
+        ADD CONSTRAINT captures_subject_is_coherent CHECK ((((subject_kind = 'gateway'::text) AND (gateway_id IS NOT NULL) AND (device_id IS NULL)) OR ((subject_kind = 'device'::text) AND (device_id IS NOT NULL))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_subject_kind_valid'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((subject_kind = ANY (ARRAY[''gateway''::text, ''device''::text])))') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_subject_kind_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'captures_subject_kind_valid'
+                    AND conrelid = 'public.captures'::regclass) THEN
+    ALTER TABLE public.captures
+        ADD CONSTRAINT captures_subject_kind_valid CHECK ((subject_kind = ANY (ARRAY['gateway'::text, 'device'::text])));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE captures :: COMMENT
---
-
 COMMENT ON TABLE public.captures IS 'The capture that EXISTS for a subject -- at most one per gateway and one per device, enforced by two partial unique indexes. Written by ingest_finalise_capture() for a recorded capture and by register_uploaded_capture() for one uploaded through the browser; both paths land here so that playback has a single way to name a capture. Distinct from capture_jobs, which records the ACT of recording and has no row at all for an uploaded file. See 0055''s header.';
 
 --
 
 -- COLUMN captures.manifest :: COMMENT
---
-
 COMMENT ON COLUMN public.captures.manifest IS 'What is in the file, so the list can describe a capture nobody has downloaded: metric_names (capped at 50, with metric_name_count beside it), topic_count, observed_rate_hz, birth_captured, and the edge_node_ids / device_ids the recording publishes under. birth_captured=false means the recording contains no NBIRTH/DBIRTH, so an alias-optimised gateway will replay as unresolved_alias and drop every metric -- from a file that otherwise looks complete. Note it means the NODE''s birth: announcing a DEVICE takes a DBIRTH, and only that sets a device ONLINE. device_ids is what the playback dialog builds its device map from, which is why it is here rather than read out of a file that may be 100 MiB.';
 
 --
 
 -- cells :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.cells (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
@@ -5143,23 +9447,335 @@ CREATE TABLE IF NOT EXISTS public.cells (
     archived_at timestamp with time zone,
     auto_delete_at timestamp with time zone,
     icon text DEFAULT 'Factory'::text NOT NULL,
-    CONSTRAINT cells_icon_valid CHECK ((icon = ANY (ARRAY['Factory'::text, 'Bot'::text, 'Cog'::text, 'CircuitBoard'::text, 'Gauge'::text, 'Building2'::text, 'Truck'::text, 'Zap'::text])))
+    area_id uuid,
+    description text,
+    plan_x numeric(7,6),
+    plan_y numeric(7,6),
+    CONSTRAINT cells_icon_valid CHECK ((icon = ANY (ARRAY['Factory'::text, 'Bot'::text, 'Cog'::text, 'CircuitBoard'::text, 'Gauge'::text, 'Building2'::text, 'Truck'::text, 'Zap'::text]))),
+    CONSTRAINT cells_place_is_a_pair CHECK (((plan_x IS NULL) = (plan_y IS NULL))),
+    CONSTRAINT cells_place_needs_an_area CHECK (((plan_x IS NULL) OR (area_id IS NOT NULL))),
+    CONSTRAINT cells_place_within_plan CHECK ((((plan_x IS NULL) OR ((plan_x >= (0)::numeric) AND (plan_x <= (1)::numeric))) AND ((plan_y IS NULL) OR ((plan_y >= (0)::numeric) AND (plan_y <= (1)::numeric)))))
 );
 
 ALTER TABLE ONLY public.cells REPLICA IDENTITY FULL;
 
+
+ALTER TABLE public.cells OWNER TO postgres;
+
+ALTER TABLE public.cells
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS grafana_url text,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS icon text DEFAULT 'Factory'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS area_id uuid,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS plan_x numeric(7,6),
+    ADD COLUMN IF NOT EXISTS plan_y numeric(7,6);
+
+ALTER TABLE public.cells
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN grafana_url DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN is_archived SET DEFAULT false,
+    ALTER COLUMN archived_at DROP DEFAULT,
+    ALTER COLUMN auto_delete_at DROP DEFAULT,
+    ALTER COLUMN icon SET DEFAULT 'Factory'::text,
+    ALTER COLUMN area_id DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN plan_x DROP DEFAULT,
+    ALTER COLUMN plan_y DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_icon_valid'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((icon = ANY (ARRAY[''Factory''::text, ''Bot''::text, ''Cog''::text, ''CircuitBoard''::text, ''Gauge''::text, ''Building2''::text, ''Truck''::text, ''Zap''::text])))') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_icon_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'cells_icon_valid'
+                    AND conrelid = 'public.cells'::regclass) THEN
+    ALTER TABLE public.cells
+        ADD CONSTRAINT cells_icon_valid CHECK ((icon = ANY (ARRAY['Factory'::text, 'Bot'::text, 'Cog'::text, 'CircuitBoard'::text, 'Gauge'::text, 'Building2'::text, 'Truck'::text, 'Zap'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_place_is_a_pair'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_x IS NULL) = (plan_y IS NULL)))') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_place_is_a_pair;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'cells_place_is_a_pair'
+                    AND conrelid = 'public.cells'::regclass) THEN
+    ALTER TABLE public.cells
+        ADD CONSTRAINT cells_place_is_a_pair CHECK (((plan_x IS NULL) = (plan_y IS NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_place_needs_an_area'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_x IS NULL) OR (area_id IS NOT NULL)))') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_place_needs_an_area;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'cells_place_needs_an_area'
+                    AND conrelid = 'public.cells'::regclass) THEN
+    ALTER TABLE public.cells
+        ADD CONSTRAINT cells_place_needs_an_area CHECK (((plan_x IS NULL) OR (area_id IS NOT NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_place_within_plan'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((((plan_x IS NULL) OR ((plan_x >= (0)::numeric) AND (plan_x <= (1)::numeric))) AND ((plan_y IS NULL) OR ((plan_y >= (0)::numeric) AND (plan_y <= (1)::numeric)))))') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_place_within_plan;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'cells_place_within_plan'
+                    AND conrelid = 'public.cells'::regclass) THEN
+    ALTER TABLE public.cells
+        ADD CONSTRAINT cells_place_within_plan CHECK ((((plan_x IS NULL) OR ((plan_x >= (0)::numeric) AND (plan_x <= (1)::numeric))) AND ((plan_y IS NULL) OR ((plan_y >= (0)::numeric) AND (plan_y <= (1)::numeric)))));
+  END IF;
+END $c$;
+
 --
 
 -- COLUMN cells.icon :: COMMENT
---
-
 COMMENT ON COLUMN public.cells.icon IS 'Icon key for this cell, rendered by the dashboard from a bundled SVG set. A closed set (see cells_icon_valid) rather than free text: the column is a lookup key, never markup or a URL.';
 
 --
 
--- devices :: TABLE
+-- COLUMN cells.area_id :: COMMENT
+COMMENT ON COLUMN public.cells.area_id IS 'The ISA-95 area (building) this cell is in; NULL is unfiled, which the Areas page lists as a queue. Devices and gateways in the cell derive their area from it and store none.';
+
 --
 
+-- COLUMN cells.description :: COMMENT
+COMMENT ON COLUMN public.cells.description IS 'Free text about the cell, shown as a help tip beside its name on the Overview map when present. Not a topic segment.';
+
+--
+
+-- COLUMN cells.plan_x :: COMMENT
+COMMENT ON COLUMN public.cells.plan_x IS 'Where the cell sits on its area''s plan, as a fraction of the plan''s width, 0 at the left. NULL with plan_y is unplaced: the Site Map lists the cell beside the plan.';
+
+--
+
+-- COLUMN cells.plan_y :: COMMENT
+COMMENT ON COLUMN public.cells.plan_y IS 'Fraction of the plan''s height, 0 at the top. Always set together with plan_x.';
+
+--
+
+-- change_proposals :: TABLE
+CREATE TABLE IF NOT EXISTS public.change_proposals (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    entity_type text NOT NULL,
+    entity_id uuid NOT NULL,
+    patch jsonb NOT NULL,
+    rationale text,
+    status text DEFAULT 'open'::text NOT NULL,
+    proposed_by uuid DEFAULT auth.uid() NOT NULL,
+    proposed_at timestamp with time zone DEFAULT now() NOT NULL,
+    decided_by uuid,
+    decided_at timestamp with time zone,
+    decision_reason text,
+    applied_thread_id bigint,
+    proposed_by_email text,
+    CONSTRAINT change_proposals_closed_rows_are_decided CHECK (((status = 'open'::text) OR (decided_at IS NOT NULL))),
+    CONSTRAINT change_proposals_entity_type_known CHECK ((entity_type = ANY (ARRAY['devices'::text, 'device_nameplate'::text, 'areas'::text, 'cells'::text, 'gateways'::text, 'schemas'::text]))),
+    CONSTRAINT change_proposals_open_rows_are_undecided CHECK (((status <> 'open'::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_thread_id IS NULL)))),
+    CONSTRAINT change_proposals_patch_is_an_object CHECK (((jsonb_typeof(patch) = 'object'::text) AND (patch <> '{}'::jsonb))),
+    CONSTRAINT change_proposals_rejection_carries_a_reason CHECK (((status <> 'rejected'::text) OR ((decision_reason IS NOT NULL) AND (btrim(decision_reason) <> ''::text)))),
+    CONSTRAINT change_proposals_status_known CHECK ((status = ANY (ARRAY['open'::text, 'applied'::text, 'rejected'::text, 'withdrawn'::text, 'expired'::text])))
+);
+
+
+ALTER TABLE public.change_proposals OWNER TO postgres;
+
+ALTER TABLE public.change_proposals
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS patch jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS rationale text,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'open'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS proposed_by uuid DEFAULT auth.uid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS proposed_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS decided_by uuid,
+    ADD COLUMN IF NOT EXISTS decided_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS decision_reason text,
+    ADD COLUMN IF NOT EXISTS applied_thread_id bigint,
+    ADD COLUMN IF NOT EXISTS proposed_by_email text;
+
+ALTER TABLE public.change_proposals
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN entity_type DROP DEFAULT,
+    ALTER COLUMN entity_id DROP DEFAULT,
+    ALTER COLUMN patch DROP DEFAULT,
+    ALTER COLUMN rationale DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'open'::text,
+    ALTER COLUMN proposed_by SET DEFAULT auth.uid(),
+    ALTER COLUMN proposed_at SET DEFAULT now(),
+    ALTER COLUMN decided_by DROP DEFAULT,
+    ALTER COLUMN decided_at DROP DEFAULT,
+    ALTER COLUMN decision_reason DROP DEFAULT,
+    ALTER COLUMN applied_thread_id DROP DEFAULT,
+    ALTER COLUMN proposed_by_email DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'change_proposals_closed_rows_are_decided'
+                AND conrelid = 'public.change_proposals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((status = ''open''::text) OR (decided_at IS NOT NULL)))') THEN
+    ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_closed_rows_are_decided;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'change_proposals_closed_rows_are_decided'
+                    AND conrelid = 'public.change_proposals'::regclass) THEN
+    ALTER TABLE public.change_proposals
+        ADD CONSTRAINT change_proposals_closed_rows_are_decided CHECK (((status = 'open'::text) OR (decided_at IS NOT NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'change_proposals_entity_type_known'
+                AND conrelid = 'public.change_proposals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ANY (ARRAY[''devices''::text, ''device_nameplate''::text, ''areas''::text, ''cells''::text, ''gateways''::text, ''schemas''::text])))') THEN
+    ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_entity_type_known;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'change_proposals_entity_type_known'
+                    AND conrelid = 'public.change_proposals'::regclass) THEN
+    ALTER TABLE public.change_proposals
+        ADD CONSTRAINT change_proposals_entity_type_known CHECK ((entity_type = ANY (ARRAY['devices'::text, 'device_nameplate'::text, 'areas'::text, 'cells'::text, 'gateways'::text, 'schemas'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'change_proposals_open_rows_are_undecided'
+                AND conrelid = 'public.change_proposals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''open''::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_thread_id IS NULL))))') THEN
+    ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_open_rows_are_undecided;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'change_proposals_open_rows_are_undecided'
+                    AND conrelid = 'public.change_proposals'::regclass) THEN
+    ALTER TABLE public.change_proposals
+        ADD CONSTRAINT change_proposals_open_rows_are_undecided CHECK (((status <> 'open'::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_thread_id IS NULL))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'change_proposals_patch_is_an_object'
+                AND conrelid = 'public.change_proposals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((jsonb_typeof(patch) = ''object''::text) AND (patch <> ''{}''::jsonb)))') THEN
+    ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_patch_is_an_object;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'change_proposals_patch_is_an_object'
+                    AND conrelid = 'public.change_proposals'::regclass) THEN
+    ALTER TABLE public.change_proposals
+        ADD CONSTRAINT change_proposals_patch_is_an_object CHECK (((jsonb_typeof(patch) = 'object'::text) AND (patch <> '{}'::jsonb)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'change_proposals_rejection_carries_a_reason'
+                AND conrelid = 'public.change_proposals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''rejected''::text) OR ((decision_reason IS NOT NULL) AND (btrim(decision_reason) <> ''''::text))))') THEN
+    ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_rejection_carries_a_reason;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'change_proposals_rejection_carries_a_reason'
+                    AND conrelid = 'public.change_proposals'::regclass) THEN
+    ALTER TABLE public.change_proposals
+        ADD CONSTRAINT change_proposals_rejection_carries_a_reason CHECK (((status <> 'rejected'::text) OR ((decision_reason IS NOT NULL) AND (btrim(decision_reason) <> ''::text))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'change_proposals_status_known'
+                AND conrelid = 'public.change_proposals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''open''::text, ''applied''::text, ''rejected''::text, ''withdrawn''::text, ''expired''::text])))') THEN
+    ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_status_known;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'change_proposals_status_known'
+                    AND conrelid = 'public.change_proposals'::regclass) THEN
+    ALTER TABLE public.change_proposals
+        ADD CONSTRAINT change_proposals_status_known CHECK ((status = ANY (ARRAY['open'::text, 'applied'::text, 'rejected'::text, 'withdrawn'::text, 'expired'::text])));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE change_proposals :: COMMENT
+COMMENT ON TABLE public.change_proposals IS 'A change somebody proposed but may not apply. An Operator inserts; an Administrator or Shopfloor_Manager approves, and the approval is the write. The asset write policies are unchanged by this table existing.';
+
+--
+
+-- COLUMN change_proposals.entity_type :: COMMENT
+COMMENT ON COLUMN public.change_proposals.entity_type IS 'The TARGET TABLE, so this speaks the same vocabulary as digital_thread.entity_type and audit_domain_for().';
+
+--
+
+-- COLUMN change_proposals.patch :: COMMENT
+COMMENT ON COLUMN public.change_proposals.patch IS 'Column -> new value, for the columns proposable_columns() admits. A PATCH rather than a whole row: two proposals touching different fields of one asset both apply, where a row snapshot would silently revert whatever changed underneath it between proposal and approval.';
+
+--
+
+-- COLUMN change_proposals.rationale :: COMMENT
+COMMENT ON COLUMN public.change_proposals.rationale IS 'Why the proposer is asking. Operator-authored free text, pruned with the row under proposals.retention_days.';
+
+--
+
+-- COLUMN change_proposals.decided_by :: COMMENT
+COMMENT ON COLUMN public.change_proposals.decided_by IS 'Who approved or rejected. NULL on an expired row: the timer is not a person, and naming one would be a false attribution.';
+
+--
+
+-- COLUMN change_proposals.decision_reason :: COMMENT
+COMMENT ON COLUMN public.change_proposals.decision_reason IS 'Required to reject. The only thing an operator receives other than a refusal, and what stops the next attempt being identical.';
+
+--
+
+-- COLUMN change_proposals.applied_thread_id :: COMMENT
+COMMENT ON COLUMN public.change_proposals.applied_thread_id IS 'The digital_thread row the approval wrote, so the queue entry and the audit trail can be read from either end.';
+
+--
+
+-- COLUMN change_proposals.proposed_by_email :: COMMENT
+COMMENT ON COLUMN public.change_proposals.proposed_by_email IS 'The proposer''s email, taken from the signed access token at INSERT and never from the request body. A readable label beside proposed_by, which stays the key everything resolves through. NULL when the token carried no email.';
+
+--
+
+-- devices :: TABLE
 CREATE TABLE IF NOT EXISTS public.devices (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
@@ -5186,93 +9802,273 @@ CREATE TABLE IF NOT EXISTS public.devices (
     description text,
     conformance_policy text DEFAULT 'audit'::text NOT NULL,
     shadow_of uuid,
+    area_id uuid,
+    CONSTRAINT devices_area_wide_has_no_cell CHECK (((location_scope <> 'area_wide'::text) OR (cell_id IS NULL))),
+    CONSTRAINT devices_area_wide_names_its_area CHECK (((location_scope = 'area_wide'::text) = (area_id IS NOT NULL))),
     CONSTRAINT devices_conformance_policy_valid CHECK ((conformance_policy = ANY (ARRAY['audit'::text, 'enforce'::text]))),
-    CONSTRAINT devices_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text]))),
+    CONSTRAINT devices_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text]))),
     CONSTRAINT devices_model_3d_path_shape CHECK (((model_3d_path IS NULL) OR (model_3d_path ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]+\.(gltf|glb|obj|stl)$'::text))),
+    CONSTRAINT devices_online_implies_born CHECK (((status IS DISTINCT FROM 'ONLINE'::text) OR (first_dbirth_at IS NOT NULL))),
     CONSTRAINT devices_shadow_of_is_not_self CHECK (((shadow_of IS NULL) OR (shadow_of <> id))),
     CONSTRAINT devices_site_wide_has_no_cell CHECK (((location_scope <> 'site_wide'::text) OR (cell_id IS NULL)))
 );
 
 ALTER TABLE ONLY public.devices REPLICA IDENTITY FULL;
 
+
+ALTER TABLE public.devices OWNER TO postgres;
+
+ALTER TABLE public.devices
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS gateway_id uuid,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'OFFLINE'::text,
+    ADD COLUMN IF NOT EXISTS is_quarantined boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS asset_type text,
+    ADD COLUMN IF NOT EXISTS connection_method text,
+    ADD COLUMN IF NOT EXISTS first_dbirth_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS schema_id uuid,
+    ADD COLUMN IF NOT EXISTS sparkplug_id text GENERATED ALWAYS AS (('dev'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
+    ADD COLUMN IF NOT EXISTS reported_identity text,
+    ADD COLUMN IF NOT EXISTS quarantine_reason text,
+    ADD COLUMN IF NOT EXISTS identity_source text,
+    ADD COLUMN IF NOT EXISTS last_birth_metrics text[],
+    ADD COLUMN IF NOT EXISTS last_birth_metrics_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS model_3d_path text,
+    ADD COLUMN IF NOT EXISTS cell_id uuid,
+    ADD COLUMN IF NOT EXISTS location_scope text DEFAULT 'cell'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS conformance_policy text DEFAULT 'audit'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS shadow_of uuid,
+    ADD COLUMN IF NOT EXISTS area_id uuid;
+
+ALTER TABLE public.devices
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN gateway_id DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'OFFLINE'::text,
+    ALTER COLUMN is_quarantined SET DEFAULT false,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN is_archived SET DEFAULT false,
+    ALTER COLUMN archived_at DROP DEFAULT,
+    ALTER COLUMN auto_delete_at DROP DEFAULT,
+    ALTER COLUMN asset_type DROP DEFAULT,
+    ALTER COLUMN connection_method DROP DEFAULT,
+    ALTER COLUMN first_dbirth_at DROP DEFAULT,
+    ALTER COLUMN schema_id DROP DEFAULT,
+    ALTER COLUMN reported_identity DROP DEFAULT,
+    ALTER COLUMN quarantine_reason DROP DEFAULT,
+    ALTER COLUMN identity_source DROP DEFAULT,
+    ALTER COLUMN last_birth_metrics DROP DEFAULT,
+    ALTER COLUMN last_birth_metrics_at DROP DEFAULT,
+    ALTER COLUMN model_3d_path DROP DEFAULT,
+    ALTER COLUMN cell_id DROP DEFAULT,
+    ALTER COLUMN location_scope SET DEFAULT 'cell'::text,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN conformance_policy SET DEFAULT 'audit'::text,
+    ALTER COLUMN shadow_of DROP DEFAULT,
+    ALTER COLUMN area_id DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_area_wide_has_no_cell'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''area_wide''::text) OR (cell_id IS NULL)))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_area_wide_has_no_cell;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_area_wide_has_no_cell'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_area_wide_has_no_cell CHECK (((location_scope <> 'area_wide'::text) OR (cell_id IS NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_area_wide_names_its_area'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope = ''area_wide''::text) = (area_id IS NOT NULL)))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_area_wide_names_its_area;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_area_wide_names_its_area'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_area_wide_names_its_area CHECK (((location_scope = 'area_wide'::text) = (area_id IS NOT NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_conformance_policy_valid'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((conformance_policy = ANY (ARRAY[''audit''::text, ''enforce''::text])))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_conformance_policy_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_conformance_policy_valid'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_conformance_policy_valid CHECK ((conformance_policy = ANY (ARRAY['audit'::text, 'enforce'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_location_scope_valid'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text])))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_location_scope_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_location_scope_valid'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_model_3d_path_shape'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((model_3d_path IS NULL) OR (model_3d_path ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]+\.(gltf|glb|obj|stl)$''::text)))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_model_3d_path_shape;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_model_3d_path_shape'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_model_3d_path_shape CHECK (((model_3d_path IS NULL) OR (model_3d_path ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]+\.(gltf|glb|obj|stl)$'::text)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_online_implies_born'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((status IS DISTINCT FROM ''ONLINE''::text) OR (first_dbirth_at IS NOT NULL)))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_online_implies_born;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_online_implies_born'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_online_implies_born CHECK (((status IS DISTINCT FROM 'ONLINE'::text) OR (first_dbirth_at IS NOT NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_shadow_of_is_not_self'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((shadow_of IS NULL) OR (shadow_of <> id)))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_shadow_of_is_not_self;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_shadow_of_is_not_self'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_shadow_of_is_not_self CHECK (((shadow_of IS NULL) OR (shadow_of <> id)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_site_wide_has_no_cell'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''site_wide''::text) OR (cell_id IS NULL)))') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_site_wide_has_no_cell;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_site_wide_has_no_cell'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE public.devices
+        ADD CONSTRAINT devices_site_wide_has_no_cell CHECK (((location_scope <> 'site_wide'::text) OR (cell_id IS NULL)));
+  END IF;
+END $c$;
+
+--
+
+-- COLUMN devices.status :: COMMENT
+COMMENT ON COLUMN public.devices.status IS 'What the platform has OBSERVED of this device, never what an operator intends: ONLINE or OFFLINE. Written only by ingestion -- DBIRTH sets ONLINE, DDEATH and the liveness watchdog set OFFLINE -- and left at its OFFLINE default for a device registered but not yet connected. devices_online_implies_born refuses ONLINE without a first_dbirth_at. A device provisioned and never heard from is OFFLINE with a null first_dbirth_at, which the dashboard draws as awaiting its first birth rather than as a machine that went away.';
+
 --
 
 -- COLUMN devices.sparkplug_id :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.sparkplug_id IS 'Immutable Sparkplug B device id, derived from the primary key. This is what appears in the MQTT topic and keys telemetry in TimescaleDB and birth parameters in asset_config.';
 
 --
 
 -- COLUMN devices.reported_identity :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.reported_identity IS 'The Sparkplug B device id this device actually published under, when it differs from the platform-issued sparkplug_id. NULL means the device uses its issued id.';
 
 --
 
 -- COLUMN devices.quarantine_reason :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.quarantine_reason IS 'Why this device is in the quarantine queue, as "<CODE>" or "<CODE>: <detail>": UNKNOWN_DEVICE (well-formed id, never seen), MALFORMED_IDENTITY (id failed the 24-char gwy/dev format check), IDENTITY_MISMATCH (topic device id and Asset_ID payload metric disagreed), or GATEWAY_MISMATCH (announced by an edge node it is not bound to, or one that is unregistered or archived). Enforced by is_valid_quarantine_reason() (0047), not by a CHECK -- the detail suffix is free text and only the code is pinned.';
 
 --
 
 -- COLUMN devices.identity_source :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.identity_source IS 'How ingestion last resolved this device: ''sparkplug_id'' (current scheme) or ''legacy_name'' (matched by name during the migration window). Drives the deprecation badge in the UI.';
 
 --
 
 -- COLUMN devices.model_3d_path :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.model_3d_path IS 'Object key of this device''s 3D model within the asset-3d-models bucket (<device_uuid>/<filename>). Never a URL -- the public URL is composed at export time from a configurable base.';
 
 --
 
 -- COLUMN devices.cell_id :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.cell_id IS 'Explicit location override. NULL means inherit from gateways.cell_id -- deliberately no default, since an explicit value wins over inheritance and a default would make inheritance unreachable. Resolve through public.device_locations, never by reading this column alone.';
 
 --
 
 -- COLUMN devices.location_scope :: COMMENT
---
-
-COMMENT ON COLUMN public.devices.location_scope IS '''cell'' (located in, or awaiting, a cell) or ''site_wide'' (asserted to have no single cell -- BMS, AGV, ambient sensor). Distinct from cell_id IS NULL, which means undecided.';
+COMMENT ON COLUMN public.devices.location_scope IS '''cell'' (located in, or awaiting, a cell), ''area_wide'' (asserted to have no single cell within one area -- a building''s BMS) or ''site_wide'' (asserted to have no single area -- a campus-wide asset). Distinct from cell_id IS NULL, which means undecided.';
 
 --
 
 -- COLUMN devices.description :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.description IS 'Optional operator note. Free text, carries no semantics, and is read by nothing -- typed identification belongs in device_nameplate.';
 
 --
 
 -- COLUMN devices.conformance_policy :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.conformance_policy IS '''audit'' (default) evaluates every DDATA metric against the device''s attached schemas and records what fails, writing the sample regardless -- the behaviour since 0026. ''enforce'' additionally DROPS a metric whose value contradicts a constraint its bound schema states. Per device and not per daemon: enforcement is a judgement about one asset''s schema being trustworthy enough to reject against, and a fleet is not uniform. An unmodelled metric is dropped only when a schema closes the set with additionalProperties: false.';
 
 --
 
 -- COLUMN devices.shadow_of :: COMMENT
---
-
 COMMENT ON COLUMN public.devices.shadow_of IS 'For a shadow device: the real machine whose recordings this lane replays. NULL for every ordinary device. This is PROVENANCE, not a copy of a gateway flag -- whether a device is synthetic still derives from gateways.is_shadow / is_simulated (see 0052 and 0059), and this stores the one thing the gateway cannot know. Set only by ensure_shadow_devices().';
 
 --
 
--- device_locations :: VIEW
+-- COLUMN devices.area_id :: COMMENT
+COMMENT ON COLUMN public.devices.area_id IS 'Populated exactly when location_scope = ''area_wide''. A cell-scoped device derives its area through its effective cell (public.device_locations) and stores none; a site-wide device has none.';
+
 --
 
--- Dropped first: 0097 recreates this view with two more columns, and CREATE OR REPLACE cannot
--- take them away again on the next replay. The grants below are re-applied there too.
-DROP VIEW IF EXISTS public.device_locations;
+-- CONSTRAINT devices_online_implies_born ON devices :: COMMENT
+COMMENT ON CONSTRAINT devices_online_implies_born ON public.devices IS 'ONLINE is earned, never asserted: a device cannot currently be born without ever having been born. first_dbirth_at is write-once and set by ingestion at the first DBIRTH, so this refuses a row claiming to be running before the platform has heard from it -- the defect 0119 corrects, where the dashboard drew a green chip for a machine that had never connected.';
+
+--
+
+-- device_locations :: VIEW
 CREATE OR REPLACE VIEW public.device_locations WITH (security_invoker='true') AS
  SELECT d.id AS device_id,
     d.gateway_id,
@@ -5283,32 +10079,42 @@ CREATE OR REPLACE VIEW public.device_locations WITH (security_invoker='true') AS
             WHEN COALESCE(g.is_shadow, false) THEN NULL::uuid
             WHEN COALESCE(g.is_simulated, false) THEN NULL::uuid
             WHEN (d.location_scope = 'site_wide'::text) THEN NULL::uuid
+            WHEN (d.location_scope = 'area_wide'::text) THEN NULL::uuid
             ELSE COALESCE(d.cell_id, g.cell_id)
         END AS effective_cell_id,
         CASE
             WHEN COALESCE(g.is_shadow, false) THEN 'shadow'::text
             WHEN COALESCE(g.is_simulated, false) THEN 'simulated'::text
             WHEN (d.location_scope = 'site_wide'::text) THEN 'site_wide'::text
+            WHEN (d.location_scope = 'area_wide'::text) THEN 'area_wide'::text
             WHEN (d.cell_id IS NOT NULL) THEN 'explicit'::text
             WHEN (g.cell_id IS NOT NULL) THEN 'inherited'::text
             ELSE 'unassigned'::text
         END AS location_source,
-    ((d.location_scope = 'cell'::text) AND (d.cell_id IS NOT NULL) AND (g.cell_id IS NOT NULL) AND (d.cell_id <> g.cell_id)) AS cell_mismatch
-   FROM (public.devices d
-     LEFT JOIN public.gateways g ON ((g.id = d.gateway_id)));
+    ((d.location_scope = 'cell'::text) AND (d.cell_id IS NOT NULL) AND (g.cell_id IS NOT NULL) AND (d.cell_id <> g.cell_id)) AS cell_mismatch,
+    d.area_id AS explicit_area_id,
+        CASE
+            WHEN COALESCE(g.is_shadow, false) THEN NULL::uuid
+            WHEN COALESCE(g.is_simulated, false) THEN NULL::uuid
+            WHEN (d.location_scope = 'site_wide'::text) THEN NULL::uuid
+            WHEN (d.location_scope = 'area_wide'::text) THEN d.area_id
+            ELSE c.area_id
+        END AS effective_area_id
+   FROM ((public.devices d
+     LEFT JOIN public.gateways g ON ((g.id = d.gateway_id)))
+     LEFT JOIN public.cells c ON ((c.id = COALESCE(d.cell_id, g.cell_id))));
+
+
+ALTER VIEW public.device_locations OWNER TO postgres;
 
 --
 
 -- VIEW device_locations :: COMMENT
---
-
-COMMENT ON VIEW public.device_locations IS 'Effective cell per device, and which arm answered. Precedence: shadow (a replay lane behind a playback gateway) and simulated (synthetic telemetry) resolve to NO cell and take priority over everything else; then site-wide assets, which have none by assertion; then explicit devices.cell_id, then inherited gateways.cell_id, else unassigned. The first two are the gateway''s flags and are inherited -- devices store no copy. Mirrors frontend/src/utils/cellResolution.js -- keep the two in step. Derived at read time and never stored, so flipping a gateway''s flag or cell reclassifies its devices immediately.';
+COMMENT ON VIEW public.device_locations IS 'Effective cell and area per device, and which arm answered. Precedence: shadow (a replay lane behind a playback gateway) and simulated (synthetic telemetry) resolve to NO cell and NO area and take priority over everything else; then site-wide assets, which have neither by assertion; then area-wide assets, which have their own area and no cell; then explicit devices.cell_id, then inherited gateways.cell_id, else unassigned. A cell-scoped device''s area is its effective cell''s. The first two are the gateway''s flags and are inherited -- devices store no copy. Mirrors frontend/src/utils/cellResolution.js -- keep the two in step. Derived at read time and never stored, so flipping a gateway''s flag or cell reclassifies its devices immediately.';
 
 --
 
 -- device_nameplate :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.device_nameplate (
     device_id uuid NOT NULL,
     manufacturer_name text,
@@ -5328,25 +10134,86 @@ CREATE TABLE IF NOT EXISTS public.device_nameplate (
     CONSTRAINT device_nameplate_year_shape CHECK (((year_of_construction IS NULL) OR (year_of_construction ~ '^[0-9]{4}$'::text)))
 );
 
+
+ALTER TABLE public.device_nameplate OWNER TO postgres;
+
+ALTER TABLE public.device_nameplate
+    ADD COLUMN IF NOT EXISTS device_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS manufacturer_name text,
+    ADD COLUMN IF NOT EXISTS manufacturer_product_designation text,
+    ADD COLUMN IF NOT EXISTS manufacturer_product_type text,
+    ADD COLUMN IF NOT EXISTS serial_number text,
+    ADD COLUMN IF NOT EXISTS year_of_construction text,
+    ADD COLUMN IF NOT EXISTS date_of_manufacture date,
+    ADD COLUMN IF NOT EXISTS hardware_version text,
+    ADD COLUMN IF NOT EXISTS firmware_version text,
+    ADD COLUMN IF NOT EXISTS software_version text,
+    ADD COLUMN IF NOT EXISTS country_of_origin text,
+    ADD COLUMN IF NOT EXISTS uri_of_the_product text,
+    ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS updated_by uuid;
+
+ALTER TABLE public.device_nameplate
+    ALTER COLUMN device_id DROP DEFAULT,
+    ALTER COLUMN manufacturer_name DROP DEFAULT,
+    ALTER COLUMN manufacturer_product_designation DROP DEFAULT,
+    ALTER COLUMN manufacturer_product_type DROP DEFAULT,
+    ALTER COLUMN serial_number DROP DEFAULT,
+    ALTER COLUMN year_of_construction DROP DEFAULT,
+    ALTER COLUMN date_of_manufacture DROP DEFAULT,
+    ALTER COLUMN hardware_version DROP DEFAULT,
+    ALTER COLUMN firmware_version DROP DEFAULT,
+    ALTER COLUMN software_version DROP DEFAULT,
+    ALTER COLUMN country_of_origin DROP DEFAULT,
+    ALTER COLUMN uri_of_the_product DROP DEFAULT,
+    ALTER COLUMN updated_at SET DEFAULT now(),
+    ALTER COLUMN updated_by DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_nameplate_uri_shape'
+                AND conrelid = 'public.device_nameplate'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((uri_of_the_product IS NULL) OR (uri_of_the_product ~* ''^[a-z][a-z0-9+.-]*:''::text)))') THEN
+    ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_uri_shape;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'device_nameplate_uri_shape'
+                    AND conrelid = 'public.device_nameplate'::regclass) THEN
+    ALTER TABLE public.device_nameplate
+        ADD CONSTRAINT device_nameplate_uri_shape CHECK (((uri_of_the_product IS NULL) OR (uri_of_the_product ~* '^[a-z][a-z0-9+.-]*:'::text)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_nameplate_year_shape'
+                AND conrelid = 'public.device_nameplate'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((year_of_construction IS NULL) OR (year_of_construction ~ ''^[0-9]{4}$''::text)))') THEN
+    ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_year_shape;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'device_nameplate_year_shape'
+                    AND conrelid = 'public.device_nameplate'::regclass) THEN
+    ALTER TABLE public.device_nameplate
+        ADD CONSTRAINT device_nameplate_year_shape CHECK (((year_of_construction IS NULL) OR (year_of_construction ~ '^[0-9]{4}$'::text)));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE device_nameplate :: COMMENT
---
-
 COMMENT ON TABLE public.device_nameplate IS 'Operator-supplied IDTA 02006 Digital Nameplate data, one row per device. The FALLBACK source: where a device publishes its own identification as birth metrics (OPC 40001 Machinery Manufacturer, SerialNumber, YearOfConstruction), the exporter prefers what the device said. Deliberately not in asset_config, which ingestion overwrites from every DBIRTH.';
 
 --
 
 -- COLUMN device_nameplate.updated_by :: COMMENT
---
-
 COMMENT ON COLUMN public.device_nameplate.updated_by IS 'Who last edited this nameplate. A nameplate is an assertion about an asset, so who made it is part of the record -- the same reason digital_thread exists.';
 
 --
 
 -- device_submodels :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.device_submodels (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     device_id uuid NOT NULL,
@@ -5356,18 +10223,47 @@ CREATE TABLE IF NOT EXISTS public.device_submodels (
     CONSTRAINT device_submodels_key_is_id_short CHECK (((submodel_key IS NULL) OR (submodel_key ~ '^[A-Za-z_][A-Za-z0-9_]*$'::text)))
 );
 
+
+ALTER TABLE public.device_submodels OWNER TO postgres;
+
+ALTER TABLE public.device_submodels
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS device_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS schema_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS submodel_key text,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now();
+
+ALTER TABLE public.device_submodels
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN device_id DROP DEFAULT,
+    ALTER COLUMN schema_id DROP DEFAULT,
+    ALTER COLUMN submodel_key DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now();
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_submodels_key_is_id_short'
+                AND conrelid = 'public.device_submodels'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((submodel_key IS NULL) OR (submodel_key ~ ''^[A-Za-z_][A-Za-z0-9_]*$''::text)))') THEN
+    ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_key_is_id_short;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'device_submodels_key_is_id_short'
+                    AND conrelid = 'public.device_submodels'::regclass) THEN
+    ALTER TABLE public.device_submodels
+        ADD CONSTRAINT device_submodels_key_is_id_short CHECK (((submodel_key IS NULL) OR (submodel_key ~ '^[A-Za-z_][A-Za-z0-9_]*$'::text)));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE device_submodels :: COMMENT
---
-
 COMMENT ON TABLE public.device_submodels IS 'Schemas attached to a device, one AAS Submodel each. Supersedes the 1:1 devices.schema_id, which is retained as a fallback for devices with no rows here.';
 
 --
 
 -- device_schemas :: VIEW
---
-
 CREATE OR REPLACE VIEW public.device_schemas WITH (security_invoker='true') AS
  SELECT ds.device_id,
     ds.schema_id,
@@ -5384,18 +10280,17 @@ UNION
            FROM public.device_submodels ds
           WHERE (ds.device_id = d.id)))));
 
+
+ALTER VIEW public.device_schemas OWNER TO postgres;
+
 --
 
 -- VIEW device_schemas :: COMMENT
---
-
 COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: device_submodels rows, plus the legacy devices.schema_id for devices that have none.';
 
 --
 
 -- digital_thread :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.digital_thread (
     id bigint NOT NULL,
     entity_type text NOT NULL,
@@ -5404,40 +10299,99 @@ CREATE TABLE IF NOT EXISTS public.digital_thread (
     old_data jsonb,
     new_data jsonb,
     changed_by uuid,
-    recorded_at timestamp with time zone DEFAULT now(),
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
     actor_source text,
     causation_id bigint,
     audit_domain text NOT NULL,
     CONSTRAINT digital_thread_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text])))),
     CONSTRAINT digital_thread_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])))
-);
+)
+PARTITION BY RANGE (recorded_at);
+
+
+ALTER TABLE public.digital_thread OWNER TO postgres;
+
+ALTER TABLE public.digital_thread
+    ADD COLUMN IF NOT EXISTS id bigint NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS action text NOT NULL,
+    ADD COLUMN IF NOT EXISTS old_data jsonb,
+    ADD COLUMN IF NOT EXISTS new_data jsonb,
+    ADD COLUMN IF NOT EXISTS changed_by uuid,
+    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS actor_source text,
+    ADD COLUMN IF NOT EXISTS causation_id bigint,
+    ADD COLUMN IF NOT EXISTS audit_domain text NOT NULL;
+
+ALTER TABLE public.digital_thread
+    ALTER COLUMN id DROP DEFAULT,
+    ALTER COLUMN entity_type DROP DEFAULT,
+    ALTER COLUMN entity_id DROP DEFAULT,
+    ALTER COLUMN action DROP DEFAULT,
+    ALTER COLUMN old_data DROP DEFAULT,
+    ALTER COLUMN new_data DROP DEFAULT,
+    ALTER COLUMN changed_by DROP DEFAULT,
+    ALTER COLUMN recorded_at SET DEFAULT now(),
+    ALTER COLUMN actor_source DROP DEFAULT,
+    ALTER COLUMN causation_id DROP DEFAULT,
+    ALTER COLUMN audit_domain DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'digital_thread_actor_source_check'
+                AND conrelid = 'public.digital_thread'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY[''user''::text, ''ingestion''::text, ''migration''::text, ''service''::text]))))') THEN
+    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_actor_source_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'digital_thread_actor_source_check'
+                    AND conrelid = 'public.digital_thread'::regclass) THEN
+    ALTER TABLE public.digital_thread
+        ADD CONSTRAINT digital_thread_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text]))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'digital_thread_audit_domain_check'
+                AND conrelid = 'public.digital_thread'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((audit_domain = ANY (ARRAY[''asset''::text, ''security''::text])))') THEN
+    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_audit_domain_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'digital_thread_audit_domain_check'
+                    AND conrelid = 'public.digital_thread'::regclass) THEN
+    ALTER TABLE public.digital_thread
+        ADD CONSTRAINT digital_thread_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE digital_thread :: COMMENT
+COMMENT ON TABLE public.digital_thread IS 'Append-only audit of every attributed change to cells, gateways and devices, plus the security lane 0070 added. Range-partitioned by month on recorded_at (0079) so retention is DETACH rather than DELETE. Rows are written only by log_digital_thread_event() and its named siblings; UPDATE and DELETE are refused for every role that is not an owner.';
 
 --
 
 -- COLUMN digital_thread.actor_source :: COMMENT
---
-
 COMMENT ON COLUMN public.digital_thread.actor_source IS 'What kind of actor made the change: user | ingestion | migration | service. Complements changed_by, which names WHICH user and is NULL for every machine-originated write.';
 
 --
 
 -- COLUMN digital_thread.causation_id :: COMMENT
---
-
 COMMENT ON COLUMN public.digital_thread.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an operator approval that also rebound a schema, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
 
 --
 
 -- COLUMN digital_thread.audit_domain :: COMMENT
---
-
 COMMENT ON COLUMN public.digital_thread.audit_domain IS 'asset | security. Stamped by trg_digital_thread_stamp_domain from audit_domain_for(); callers do not supply it and cannot override it. Decides which SELECT policy admits the row.';
 
 --
 
 -- digital_thread_id_seq :: SEQUENCE
---
-
 CREATE SEQUENCE IF NOT EXISTS public.digital_thread_id_seq
     START WITH 1
     INCREMENT BY 1
@@ -5445,18 +10399,45 @@ CREATE SEQUENCE IF NOT EXISTS public.digital_thread_id_seq
     NO MAXVALUE
     CACHE 1;
 
+
+ALTER SEQUENCE public.digital_thread_id_seq OWNER TO postgres;
+
 --
 
 -- digital_thread_id_seq :: SEQUENCE OWNED BY
---
-
 ALTER SEQUENCE public.digital_thread_id_seq OWNED BY public.digital_thread.id;
 
 --
 
--- directory_liveness_probe :: TABLE
+-- digital_thread_default :: TABLE
+CREATE TABLE IF NOT EXISTS public.digital_thread_default PARTITION OF public.digital_thread DEFAULT;
+
 --
 
+-- digital_thread_partition_health :: VIEW
+CREATE OR REPLACE VIEW public.digital_thread_partition_health AS
+ SELECT ( SELECT count(*) AS count
+           FROM (pg_class c
+             JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
+          WHERE (i.inhparent = ('public.digital_thread'::regclass)::oid)) AS partition_count,
+    ( SELECT count(*) AS count
+           FROM public.digital_thread_default) AS default_rows,
+    ( SELECT max((regexp_replace(pg_get_expr(c.relpartbound, c.oid), '^FOR VALUES FROM \(''([^'']+)''\) TO \(''([^'']+)''\).*$'::text, '\2'::text))::timestamp with time zone) AS max
+           FROM (pg_class c
+             JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
+          WHERE ((i.inhparent = ('public.digital_thread'::regclass)::oid) AND (pg_get_expr(c.relpartbound, c.oid) !~~ 'DEFAULT%'::text))) AS covered_until;
+
+
+ALTER VIEW public.digital_thread_partition_health OWNER TO postgres;
+
+--
+
+-- VIEW digital_thread_partition_health :: COMMENT
+COMMENT ON VIEW public.digital_thread_partition_health IS 'Whether digital_thread partitioning is keeping up. default_rows > 0 means the maintenance job has stopped and retention by DETACH is no longer complete; covered_until is the instant beyond which new rows fall to the default partition. Read by the Grafana rule "Digital Thread Partitions Falling Behind".';
+
+--
+
+-- directory_liveness_probe :: TABLE
 CREATE TABLE IF NOT EXISTS public.directory_liveness_probe (
     id boolean DEFAULT true NOT NULL,
     request_id bigint,
@@ -5464,18 +10445,43 @@ CREATE TABLE IF NOT EXISTS public.directory_liveness_probe (
     CONSTRAINT directory_liveness_probe_id_check CHECK (id)
 );
 
+
+ALTER TABLE public.directory_liveness_probe OWNER TO postgres;
+
+ALTER TABLE public.directory_liveness_probe
+    ADD COLUMN IF NOT EXISTS id boolean DEFAULT true NOT NULL,
+    ADD COLUMN IF NOT EXISTS request_id bigint,
+    ADD COLUMN IF NOT EXISTS requested_at timestamp with time zone;
+
+ALTER TABLE public.directory_liveness_probe
+    ALTER COLUMN id SET DEFAULT true,
+    ALTER COLUMN request_id DROP DEFAULT,
+    ALTER COLUMN requested_at DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'directory_liveness_probe_id_check'
+                AND conrelid = 'public.directory_liveness_probe'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+    ALTER TABLE public.directory_liveness_probe DROP CONSTRAINT directory_liveness_probe_id_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'directory_liveness_probe_id_check'
+                    AND conrelid = 'public.directory_liveness_probe'::regclass) THEN
+    ALTER TABLE public.directory_liveness_probe
+        ADD CONSTRAINT directory_liveness_probe_id_check CHECK (id);
+  END IF;
+END $c$;
+
 --
 
 -- TABLE directory_liveness_probe :: COMMENT
---
-
 COMMENT ON TABLE public.directory_liveness_probe IS 'The single in-flight pg_net request id for the Prometheus liveness probe. One row by CHECK (id), because two concurrent probes would race to write the same directory rows from different observations.';
 
 --
 
 -- directory_services :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.directory_services (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     service_name text NOT NULL,
@@ -5484,28 +10490,84 @@ CREATE TABLE IF NOT EXISTS public.directory_services (
     status text DEFAULT 'UNKNOWN'::text NOT NULL,
     last_heartbeat timestamp with time zone DEFAULT now(),
     registered_schema_id uuid,
+    exposure text DEFAULT 'UNKNOWN'::text NOT NULL,
+    CONSTRAINT directory_services_exposure_valid CHECK ((exposure = ANY (ARRAY['NETWORK'::text, 'HOST'::text, 'INTERNAL'::text, 'UNKNOWN'::text]))),
     CONSTRAINT directory_services_status_valid CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'DOWN'::text, 'UNKNOWN'::text])))
 );
+
+
+ALTER TABLE public.directory_services OWNER TO postgres;
+
+ALTER TABLE public.directory_services
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS service_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS service_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS endpoint_url text NOT NULL,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'UNKNOWN'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS last_heartbeat timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS registered_schema_id uuid,
+    ADD COLUMN IF NOT EXISTS exposure text DEFAULT 'UNKNOWN'::text NOT NULL;
+
+ALTER TABLE public.directory_services
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN service_name DROP DEFAULT,
+    ALTER COLUMN service_type DROP DEFAULT,
+    ALTER COLUMN endpoint_url DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'UNKNOWN'::text,
+    ALTER COLUMN last_heartbeat SET DEFAULT now(),
+    ALTER COLUMN registered_schema_id DROP DEFAULT,
+    ALTER COLUMN exposure SET DEFAULT 'UNKNOWN'::text;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'directory_services_exposure_valid'
+                AND conrelid = 'public.directory_services'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((exposure = ANY (ARRAY[''NETWORK''::text, ''HOST''::text, ''INTERNAL''::text, ''UNKNOWN''::text])))') THEN
+    ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_exposure_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'directory_services_exposure_valid'
+                    AND conrelid = 'public.directory_services'::regclass) THEN
+    ALTER TABLE public.directory_services
+        ADD CONSTRAINT directory_services_exposure_valid CHECK ((exposure = ANY (ARRAY['NETWORK'::text, 'HOST'::text, 'INTERNAL'::text, 'UNKNOWN'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'directory_services_status_valid'
+                AND conrelid = 'public.directory_services'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''ACTIVE''::text, ''DOWN''::text, ''UNKNOWN''::text])))') THEN
+    ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'directory_services_status_valid'
+                    AND conrelid = 'public.directory_services'::regclass) THEN
+    ALTER TABLE public.directory_services
+        ADD CONSTRAINT directory_services_status_valid CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'DOWN'::text, 'UNKNOWN'::text])));
+  END IF;
+END $c$;
 
 --
 
 -- COLUMN directory_services.status :: COMMENT
---
-
 COMMENT ON COLUMN public.directory_services.status IS 'Observed liveness: ACTIVE (Prometheus reports up=1), DOWN (up=0), or UNKNOWN (nothing observes this service). Written only by refresh_directory_liveness(). UNKNOWN is not a failure -- nine of the fifteen registered services have no exporter, and saying so is the point.';
 
 --
 
 -- COLUMN directory_services.last_heartbeat :: COMMENT
---
-
 COMMENT ON COLUMN public.directory_services.last_heartbeat IS 'When this service was last OBSERVED up. NULL whenever status is not ACTIVE, including UNKNOWN: a timestamp on a row nothing probes would imply a freshness it does not have, which is the defect this column had before 0054 -- it held the moment the row was seeded.';
 
 --
 
--- gateway_enrollment_tokens :: TABLE
+-- COLUMN directory_services.exposure :: COMMENT
+COMMENT ON COLUMN public.directory_services.exposure IS 'Where this service can be reached FROM, as a property of its port binding rather than of its URL: NETWORK (published on every interface), HOST (bound to 127.0.0.1 -- the deployment host or an SSH tunnel), INTERNAL (no host port; container network only), UNKNOWN (not recorded). Describes the Compose deployment the seed describes; a deployment that publishes differently updates it. Consumed by the Directory page, which combines it with the URL''s own host -- a loopback ADDRESS cannot work from a remote browser however broadly the PORT is published.';
+
 --
 
+-- gateway_enrollment_tokens :: TABLE
 CREATE TABLE IF NOT EXISTS public.gateway_enrollment_tokens (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     gateway_id uuid NOT NULL,
@@ -5518,25 +10580,73 @@ CREATE TABLE IF NOT EXISTS public.gateway_enrollment_tokens (
     CONSTRAINT gateway_enrollment_tokens_hash_is_sha256 CHECK ((token_hash ~ '^[0-9a-f]{64}$'::text))
 );
 
+
+ALTER TABLE public.gateway_enrollment_tokens OWNER TO postgres;
+
+ALTER TABLE public.gateway_enrollment_tokens
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS gateway_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS token_hash text NOT NULL,
+    ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS consumed_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS created_by uuid;
+
+ALTER TABLE public.gateway_enrollment_tokens
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN gateway_id DROP DEFAULT,
+    ALTER COLUMN token_hash DROP DEFAULT,
+    ALTER COLUMN expires_at DROP DEFAULT,
+    ALTER COLUMN consumed_at DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN created_by DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateway_enrollment_tokens_expiry_after_creation'
+                AND conrelid = 'public.gateway_enrollment_tokens'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((expires_at > created_at))') THEN
+    ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_expiry_after_creation;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateway_enrollment_tokens_expiry_after_creation'
+                    AND conrelid = 'public.gateway_enrollment_tokens'::regclass) THEN
+    ALTER TABLE public.gateway_enrollment_tokens
+        ADD CONSTRAINT gateway_enrollment_tokens_expiry_after_creation CHECK ((expires_at > created_at));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateway_enrollment_tokens_hash_is_sha256'
+                AND conrelid = 'public.gateway_enrollment_tokens'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((token_hash ~ ''^[0-9a-f]{64}$''::text))') THEN
+    ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_hash_is_sha256;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateway_enrollment_tokens_hash_is_sha256'
+                    AND conrelid = 'public.gateway_enrollment_tokens'::regclass) THEN
+    ALTER TABLE public.gateway_enrollment_tokens
+        ADD CONSTRAINT gateway_enrollment_tokens_hash_is_sha256 CHECK ((token_hash ~ '^[0-9a-f]{64}$'::text));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE gateway_enrollment_tokens :: COMMENT
---
-
 COMMENT ON TABLE public.gateway_enrollment_tokens IS 'Single-use, short-lived claims that let a Remote gateway appliance exchange its downloaded bundle for a broker credential exactly once. NOT READABLE BY ANY BROWSER-FACING ROLE -- RLS is enabled with no policy for anon or authenticated, so only service_role (which bypasses RLS) can see it, and only the enroll-gateway edge function holds that key. Deliberately a separate table rather than columns on public.gateways: that table is world-readable to authenticated users, its full row is copied into digital_thread on every write, and public.gateway_status selects g.*.';
 
 --
 
 -- gateway_health :: VIEW
---
-
 CREATE OR REPLACE VIEW public.gateway_health AS
  SELECT now() AS collected_at,
     sparkplug_id,
     gateway_name,
     live_status,
     is_stale,
-    is_virtual,
     heartbeat_age_seconds,
     health_reported_at,
     health_age_seconds,
@@ -5548,42 +10658,85 @@ CREATE OR REPLACE VIEW public.gateway_health AS
     cert_expires_in_days,
     agent_version,
     flow_hash
-   FROM public.gateway_health_rows() r(sparkplug_id, gateway_name, live_status, is_stale, is_virtual, heartbeat_age_seconds, health_reported_at, health_age_seconds, uptime_seconds, load_1m, mem_available_bytes, disk_free_bytes, cert_expires_at, cert_expires_in_days, agent_version, flow_hash);
+   FROM public.gateway_health_rows() r(sparkplug_id, gateway_name, live_status, is_stale, heartbeat_age_seconds, health_reported_at, health_age_seconds, uptime_seconds, load_1m, mem_available_bytes, disk_free_bytes, cert_expires_at, cert_expires_in_days, agent_version, flow_hash);
+
+
+ALTER VIEW public.gateway_health OWNER TO postgres;
 
 --
 
 -- VIEW gateway_health :: COMMENT
---
-
 COMMENT ON VIEW public.gateway_health IS 'The fleet''s current condition, one row per non-archived gateway. Read by the `supabase` datasource: backs the gateway variable and the panels in the "Gateway Fleet Health" dashboard, and the certificate-expiry alert rule. Current values only -- the trends are Prometheus gauges exported by the ingestion daemon.';
 
 --
 
 -- gateway_status :: VIEW
---
+CREATE OR REPLACE VIEW public.gateway_status WITH (security_invoker='true') AS
+ SELECT id,
+    name,
+    cell_id,
+    access_url,
+    status,
+    created_at,
+    is_archived,
+    archived_at,
+    auto_delete_at,
+    last_heartbeat,
+    sparkplug_id,
+    location_scope,
+    sparkplug_group,
+    description,
+    enrolled_at,
+    agent_version,
+    health_reported_at,
+    uptime_seconds,
+    load_1m,
+    mem_available_bytes,
+    disk_free_bytes,
+    cert_expires_at,
+    flow_hash,
+    credential_revoked_at,
+    is_simulated,
+    is_shadow,
+    deployment,
+    forge_head_sha,
+    forge_head_message,
+    forge_head_by,
+    forge_head_at,
+    forge_head_flow_sha256,
+    area_id,
+    forge_appliance_sha,
+    forge_appliance_at,
+    forge_appliance_flow_sha256,
+    forge_appliance_platform_tag,
+    forge_appliance_platform_outcome,
+    forge_appliance_converged_at,
+    forge_appliance_custom_outcome,
+    forge_appliance_custom_revision,
+    forge_repository_at,
+    forge_archived_at,
+        CASE
+            WHEN (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text])) THEN status
+            WHEN (status = 'OFFLINE'::text) THEN 'OFFLINE'::text
+            WHEN (last_heartbeat IS NULL) THEN status
+            WHEN ((now() - last_heartbeat) > '00:01:30'::interval) THEN 'STALE'::text
+            ELSE status
+        END AS live_status,
+    ((last_heartbeat IS NOT NULL) AND ((now() - last_heartbeat) > '00:01:30'::interval)) AS is_stale,
+    (EXTRACT(epoch FROM (now() - last_heartbeat)))::bigint AS heartbeat_age_seconds
+   FROM public.gateways g;
 
--- THE VIEW IS BUILT BY ITS FUNCTION, NOT BY THE DUMPED STATEMENT THAT USED TO STAND HERE. pg_dump
--- writes a view's column list out explicitly, and CREATE OR REPLACE VIEW cannot narrow a view: once
--- a later migration adds a gateways column and rebuilds this view through
--- ensure_gateway_status_view() (g.* now five columns wider), the explicit list here has FEWER
--- columns than the live view and every subsequent boot fails in this file with
--- "cannot drop columns from view". Found by 0095, the first migration since the squash to add a
--- gateways column. The function drops and recreates, which is the only shape that survives both a
--- fresh database and a replay.
-SELECT public.ensure_gateway_status_view();
+
+ALTER VIEW public.gateway_status OWNER TO postgres;
 
 --
 
 -- VIEW gateway_status :: COMMENT
---
-
 COMMENT ON VIEW public.gateway_status IS 'public.gateways with heartbeat staleness derived at read time. Mirrors frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing status would append to the immutable digital_thread audit table on every sweep and would be stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a gateways column.';
 
 --
 
 -- idta_submodel_templates :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.idta_submodel_templates (
     template_id text NOT NULL,
     template_name text NOT NULL,
@@ -5598,32 +10751,81 @@ CREATE TABLE IF NOT EXISTS public.idta_submodel_templates (
     CONSTRAINT idta_submodel_templates_semantic_id_type_valid CHECK ((semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text])))
 );
 
+
+ALTER TABLE public.idta_submodel_templates OWNER TO postgres;
+
+ALTER TABLE public.idta_submodel_templates
+    ADD COLUMN IF NOT EXISTS template_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS template_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS template_version text NOT NULL,
+    ADD COLUMN IF NOT EXISTS id_short text NOT NULL,
+    ADD COLUMN IF NOT EXISTS semantic_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS semantic_id_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS is_mandatory boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS ordinal integer NOT NULL;
+
+ALTER TABLE public.idta_submodel_templates
+    ALTER COLUMN template_id DROP DEFAULT,
+    ALTER COLUMN template_name DROP DEFAULT,
+    ALTER COLUMN template_version DROP DEFAULT,
+    ALTER COLUMN id_short DROP DEFAULT,
+    ALTER COLUMN semantic_id DROP DEFAULT,
+    ALTER COLUMN semantic_id_type DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN is_mandatory SET DEFAULT false,
+    ALTER COLUMN ordinal DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'idta_submodel_templates_id_short_shape'
+                AND conrelid = 'public.idta_submodel_templates'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((id_short ~ ''^[A-Za-z][A-Za-z0-9_]*$''::text))') THEN
+    ALTER TABLE public.idta_submodel_templates DROP CONSTRAINT idta_submodel_templates_id_short_shape;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'idta_submodel_templates_id_short_shape'
+                    AND conrelid = 'public.idta_submodel_templates'::regclass) THEN
+    ALTER TABLE public.idta_submodel_templates
+        ADD CONSTRAINT idta_submodel_templates_id_short_shape CHECK ((id_short ~ '^[A-Za-z][A-Za-z0-9_]*$'::text));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'idta_submodel_templates_semantic_id_type_valid'
+                AND conrelid = 'public.idta_submodel_templates'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text])))') THEN
+    ALTER TABLE public.idta_submodel_templates DROP CONSTRAINT idta_submodel_templates_semantic_id_type_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'idta_submodel_templates_semantic_id_type_valid'
+                    AND conrelid = 'public.idta_submodel_templates'::regclass) THEN
+    ALTER TABLE public.idta_submodel_templates
+        ADD CONSTRAINT idta_submodel_templates_semantic_id_type_valid CHECK ((semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text])));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE idta_submodel_templates :: COMMENT
---
-
 COMMENT ON TABLE public.idta_submodel_templates IS 'IDTA Asset Administration Shell submodel-template elements. Reference data, not deployment state -- a row here is an element the template defines, not a value a device holds. semantic_id is issued by IDTA/IEC CDD/ECLASS and must never be minted locally.';
 
 --
 
 -- COLUMN idta_submodel_templates.is_mandatory :: COMMENT
---
-
 COMMENT ON COLUMN public.idta_submodel_templates.is_mandatory IS 'Whether the template marks this element as mandatory. Recorded so the exporter can report what a shell would need to claim conformance -- it does NOT claim it; see the exporter.';
 
 --
 
 -- COLUMN idta_submodel_templates.ordinal :: COMMENT
---
-
 COMMENT ON COLUMN public.idta_submodel_templates.ordinal IS 'Order the element appears in the published template, so the exported submodel reads like the specification rather than like a hash map.';
 
 --
 
 -- iso22400_vocabulary :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.iso22400_vocabulary (
     name text NOT NULL,
     kpi_id text NOT NULL,
@@ -5634,18 +10836,35 @@ CREATE TABLE IF NOT EXISTS public.iso22400_vocabulary (
     semantic_id text
 );
 
+
+ALTER TABLE public.iso22400_vocabulary OWNER TO postgres;
+
+ALTER TABLE public.iso22400_vocabulary
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS kpi_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS category text,
+    ADD COLUMN IF NOT EXISTS unit text,
+    ADD COLUMN IF NOT EXISTS formula text,
+    ADD COLUMN IF NOT EXISTS semantic_id text;
+
+ALTER TABLE public.iso22400_vocabulary
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN kpi_id DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN category DROP DEFAULT,
+    ALTER COLUMN unit DROP DEFAULT,
+    ALTER COLUMN formula DROP DEFAULT,
+    ALTER COLUMN semantic_id DROP DEFAULT;
+
 --
 
 -- TABLE iso22400_vocabulary :: COMMENT
---
-
 COMMENT ON TABLE public.iso22400_vocabulary IS 'ISO 22400-2 key performance indicator definitions. Reference data, not deployment state -- a row here is a KPI the standard defines, not a metric a device publishes.';
 
 --
 
 -- links :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.links (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     entity_type text NOT NULL,
@@ -5657,11 +10876,114 @@ CREATE TABLE IF NOT EXISTS public.links (
     updated_at timestamp with time zone DEFAULT now()
 );
 
+
+ALTER TABLE public.links OWNER TO postgres;
+
+ALTER TABLE public.links
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS display_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS url text NOT NULL,
+    ADD COLUMN IF NOT EXISTS link_tag text DEFAULT 'other'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now();
+
+ALTER TABLE public.links
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN entity_type DROP DEFAULT,
+    ALTER COLUMN entity_id DROP DEFAULT,
+    ALTER COLUMN display_name DROP DEFAULT,
+    ALTER COLUMN url DROP DEFAULT,
+    ALTER COLUMN link_tag SET DEFAULT 'other'::text,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN updated_at SET DEFAULT now();
+
+--
+
+-- machine_principals :: TABLE
+CREATE TABLE IF NOT EXISTS public.machine_principals (
+    principal_id uuid NOT NULL,
+    name text NOT NULL,
+    purpose text,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT machine_principals_name_bounded CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80))),
+    CONSTRAINT machine_principals_purpose_bounded CHECK (((purpose IS NULL) OR (length(purpose) <= 500)))
+);
+
+
+ALTER TABLE public.machine_principals OWNER TO postgres;
+
+ALTER TABLE public.machine_principals
+    ADD COLUMN IF NOT EXISTS principal_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS purpose text,
+    ADD COLUMN IF NOT EXISTS created_by uuid,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL;
+
+ALTER TABLE public.machine_principals
+    ALTER COLUMN principal_id DROP DEFAULT,
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN purpose DROP DEFAULT,
+    ALTER COLUMN created_by DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now();
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'machine_principals_name_bounded'
+                AND conrelid = 'public.machine_principals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80)))') THEN
+    ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_name_bounded;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'machine_principals_name_bounded'
+                    AND conrelid = 'public.machine_principals'::regclass) THEN
+    ALTER TABLE public.machine_principals
+        ADD CONSTRAINT machine_principals_name_bounded CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'machine_principals_purpose_bounded'
+                AND conrelid = 'public.machine_principals'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((purpose IS NULL) OR (length(purpose) <= 500)))') THEN
+    ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_purpose_bounded;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'machine_principals_purpose_bounded'
+                    AND conrelid = 'public.machine_principals'::regclass) THEN
+    ALTER TABLE public.machine_principals
+        ADD CONSTRAINT machine_principals_purpose_bounded CHECK (((purpose IS NULL) OR (length(purpose) <= 500)));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE machine_principals :: COMMENT
+COMMENT ON TABLE public.machine_principals IS 'The name and purpose an Administrator gave a machine identity when creating it from the Access Control page. One row per runtime-created principal; the three identities a migration pinned have no row and are named by the dashboard''s own registry. Written only by create_machine_principal(), in the same transaction as the auth.users row it describes.';
+
+--
+
+-- COLUMN machine_principals.name :: COMMENT
+COMMENT ON COLUMN public.machine_principals.name IS 'What the page lists the identity as. Unique ignoring case and surrounding whitespace, 1 to 80 characters.';
+
+--
+
+-- COLUMN machine_principals.purpose :: COMMENT
+COMMENT ON COLUMN public.machine_principals.purpose IS 'Why the identity exists, in the Administrator''s words, up to 500 characters. Shown beside the name so an unfamiliar principal is safe to leave alone or safe to remove.';
+
+--
+
+-- COLUMN machine_principals.created_by :: COMMENT
+COMMENT ON COLUMN public.machine_principals.created_by IS 'The Administrator whose session created the identity. NULL once that account is deleted; the digital thread row keeps the attribution.';
+
 --
 
 -- metric_catalog :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.metric_catalog (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
@@ -5688,32 +11010,128 @@ END) STORED,
     CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text]))))
 );
 
+
+ALTER TABLE public.metric_catalog OWNER TO postgres;
+
+ALTER TABLE public.metric_catalog
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS datatype integer NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS deprecated boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS superseded_by uuid,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS metric_group text GENERATED ALWAYS AS (
+CASE
+    WHEN (strpos(name, '/'::text) > 0) THEN NULLIF(split_part(name, '/'::text, 1), ''::text)
+    ELSE NULL::text
+END) STORED,
+    ADD COLUMN IF NOT EXISTS category text,
+    ADD COLUMN IF NOT EXISTS units text,
+    ADD COLUMN IF NOT EXISTS sub_type text,
+    ADD COLUMN IF NOT EXISTS standard text,
+    ADD COLUMN IF NOT EXISTS semantic_id text,
+    ADD COLUMN IF NOT EXISTS semantic_id_type text,
+    ADD COLUMN IF NOT EXISTS permitted_values text[];
+
+ALTER TABLE public.metric_catalog
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN datatype DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN deprecated SET DEFAULT false,
+    ALTER COLUMN superseded_by DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN category DROP DEFAULT,
+    ALTER COLUMN units DROP DEFAULT,
+    ALTER COLUMN sub_type DROP DEFAULT,
+    ALTER COLUMN standard DROP DEFAULT,
+    ALTER COLUMN semantic_id DROP DEFAULT,
+    ALTER COLUMN semantic_id_type DROP DEFAULT,
+    ALTER COLUMN permitted_values DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_catalog_category_valid'
+                AND conrelid = 'public.metric_catalog'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((category IS NULL) OR (category = ANY (ARRAY[''SAMPLE''::text, ''EVENT''::text, ''CONDITION''::text]))))') THEN
+    ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_category_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'metric_catalog_category_valid'
+                    AND conrelid = 'public.metric_catalog'::regclass) THEN
+    ALTER TABLE public.metric_catalog
+        ADD CONSTRAINT metric_catalog_category_valid CHECK (((category IS NULL) OR (category = ANY (ARRAY['SAMPLE'::text, 'EVENT'::text, 'CONDITION'::text]))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_catalog_name_format'
+                AND conrelid = 'public.metric_catalog'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((name ~ ''^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$''::text))') THEN
+    ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_name_format;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'metric_catalog_name_format'
+                    AND conrelid = 'public.metric_catalog'::regclass) THEN
+    ALTER TABLE public.metric_catalog
+        ADD CONSTRAINT metric_catalog_name_format CHECK ((name ~ '^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$'::text));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_catalog_permitted_values_shape'
+                AND conrelid = 'public.metric_catalog'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((permitted_values IS NULL) OR ((cardinality(permitted_values) > 0) AND (array_position(permitted_values, NULL::text) IS NULL) AND (''''::text <> ALL (permitted_values)))))') THEN
+    ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_permitted_values_shape;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'metric_catalog_permitted_values_shape'
+                    AND conrelid = 'public.metric_catalog'::regclass) THEN
+    ALTER TABLE public.metric_catalog
+        ADD CONSTRAINT metric_catalog_permitted_values_shape CHECK (((permitted_values IS NULL) OR ((cardinality(permitted_values) > 0) AND (array_position(permitted_values, NULL::text) IS NULL) AND (''::text <> ALL (permitted_values)))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_catalog_semantic_id_type_valid'
+                AND conrelid = 'public.metric_catalog'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ModelReference''::text]))))') THEN
+    ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_semantic_id_type_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'metric_catalog_semantic_id_type_valid'
+                    AND conrelid = 'public.metric_catalog'::regclass) THEN
+    ALTER TABLE public.metric_catalog
+        ADD CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text]))));
+  END IF;
+END $c$;
+
 --
 
 -- COLUMN metric_catalog.semantic_id :: COMMENT
---
-
 COMMENT ON COLUMN public.metric_catalog.semantic_id IS 'AAS (IEC 63278) semanticId for this metric -- the globally-resolvable identity of the concept it measures. NULL means unmapped, which is a legitimate state for a local extension.';
 
 --
 
 -- COLUMN metric_catalog.semantic_id_type :: COMMENT
---
-
 COMMENT ON COLUMN public.metric_catalog.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI, IRDI, or ModelReference.';
 
 --
 
 -- COLUMN metric_catalog.permitted_values :: COMMENT
---
-
 COMMENT ON COLUMN public.metric_catalog.permitted_values IS 'The values a discrete metric is allowed to report, from its standard vocabulary. NULL means unconstrained -- most metrics are, and a continuous SAMPLE always is. Deliberately NOT frozen by enforce_metric_catalog_immutability: it is a transcribed assertion about a standard, not a wire contract a device is configured against. See this migration''s header.';
 
 --
 
 -- metric_groups :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.metric_groups (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
@@ -5723,11 +11141,42 @@ CREATE TABLE IF NOT EXISTS public.metric_groups (
     CONSTRAINT metric_groups_name_is_one_segment CHECK (((name <> ''::text) AND (strpos(name, '/'::text) = 0)))
 );
 
+
+ALTER TABLE public.metric_groups OWNER TO postgres;
+
+ALTER TABLE public.metric_groups
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS standard text;
+
+ALTER TABLE public.metric_groups
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN standard DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_groups_name_is_one_segment'
+                AND conrelid = 'public.metric_groups'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((name <> ''''::text) AND (strpos(name, ''/''::text) = 0)))') THEN
+    ALTER TABLE public.metric_groups DROP CONSTRAINT metric_groups_name_is_one_segment;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'metric_groups_name_is_one_segment'
+                    AND conrelid = 'public.metric_groups'::regclass) THEN
+    ALTER TABLE public.metric_groups
+        ADD CONSTRAINT metric_groups_name_is_one_segment CHECK (((name <> ''::text) AND (strpos(name, '/'::text) = 0)));
+  END IF;
+END $c$;
+
 --
 
 -- mtconnect_vocabulary :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.mtconnect_vocabulary (
     kind text NOT NULL,
     name text NOT NULL,
@@ -5735,43 +11184,61 @@ CREATE TABLE IF NOT EXISTS public.mtconnect_vocabulary (
     semantic_id text
 );
 
+
+ALTER TABLE public.mtconnect_vocabulary OWNER TO postgres;
+
+ALTER TABLE public.mtconnect_vocabulary
+    ADD COLUMN IF NOT EXISTS kind text NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS category text,
+    ADD COLUMN IF NOT EXISTS semantic_id text;
+
+ALTER TABLE public.mtconnect_vocabulary
+    ALTER COLUMN kind DROP DEFAULT,
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN category DROP DEFAULT,
+    ALTER COLUMN semantic_id DROP DEFAULT;
+
 --
 
 -- TABLE mtconnect_vocabulary :: COMMENT
---
-
 COMMENT ON TABLE public.mtconnect_vocabulary IS 'MTConnect controlled vocabularies, generated from the Apache-2.0 mtconnect/schema repository. Reference data, not deployment state.';
 
 --
 
 -- COLUMN mtconnect_vocabulary.semantic_id :: COMMENT
---
-
 COMMENT ON COLUMN public.mtconnect_vocabulary.semantic_id IS 'Local-namespace IRI for this vocabulary concept. Minted by this deployment, not issued by MTConnect -- see archived migration 0032.';
 
 --
 
 -- one_shot_migrations :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.one_shot_migrations (
     key text NOT NULL,
     applied_at timestamp with time zone DEFAULT now() NOT NULL,
     note text
 );
 
+
+ALTER TABLE public.one_shot_migrations OWNER TO postgres;
+
+ALTER TABLE public.one_shot_migrations
+    ADD COLUMN IF NOT EXISTS key text NOT NULL,
+    ADD COLUMN IF NOT EXISTS applied_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS note text;
+
+ALTER TABLE public.one_shot_migrations
+    ALTER COLUMN key DROP DEFAULT,
+    ALTER COLUMN applied_at SET DEFAULT now(),
+    ALTER COLUMN note DROP DEFAULT;
+
 --
 
 -- TABLE one_shot_migrations :: COMMENT
---
-
 COMMENT ON TABLE public.one_shot_migrations IS 'Ledger for migrations that must run exactly once, rather than on every boot like the rest of the chain. Claimed by INSERT ... ON CONFLICT DO NOTHING inside the same transaction as the work it guards. Written only by the migration owner (postgres): service_role holds SELECT and no write since 0053, because deleting a claim re-arms a destructive one-shot and the next boot reports success exactly as the first did.';
 
 --
 
 -- opcua_vocabulary :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.opcua_vocabulary (
     name text NOT NULL,
     companion_spec text NOT NULL,
@@ -5782,29 +11249,57 @@ CREATE TABLE IF NOT EXISTS public.opcua_vocabulary (
     semantic_id text
 );
 
+
+ALTER TABLE public.opcua_vocabulary OWNER TO postgres;
+
+ALTER TABLE public.opcua_vocabulary
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS companion_spec text NOT NULL,
+    ADD COLUMN IF NOT EXISTS node_id text,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS datatype text,
+    ADD COLUMN IF NOT EXISTS unit text,
+    ADD COLUMN IF NOT EXISTS semantic_id text;
+
+ALTER TABLE public.opcua_vocabulary
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN companion_spec DROP DEFAULT,
+    ALTER COLUMN node_id DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN datatype DROP DEFAULT,
+    ALTER COLUMN unit DROP DEFAULT,
+    ALTER COLUMN semantic_id DROP DEFAULT;
+
 --
 
 -- TABLE opcua_vocabulary :: COMMENT
---
-
 COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data points (OPC 40001 Machinery, OPC 40010 Robotics). Reference data, not deployment state. node_id holds a browse path, not a resolvable numeric NodeId -- see the migration header.';
 
 --
 
 -- permissions :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.permissions (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
     description text
 );
 
+
+ALTER TABLE public.permissions OWNER TO postgres;
+
+ALTER TABLE public.permissions
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text;
+
+ALTER TABLE public.permissions
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT;
+
 --
 
 -- platform_alerts :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.platform_alerts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     fingerprint text NOT NULL,
@@ -5827,39 +11322,140 @@ CREATE TABLE IF NOT EXISTS public.platform_alerts (
 
 ALTER TABLE ONLY public.platform_alerts REPLICA IDENTITY FULL;
 
+
+ALTER TABLE public.platform_alerts OWNER TO postgres;
+
+ALTER TABLE public.platform_alerts
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS fingerprint text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_type text DEFAULT 'device'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_id uuid,
+    ADD COLUMN IF NOT EXISTS sparkplug_id text,
+    ADD COLUMN IF NOT EXISTS alert_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS severity text DEFAULT 'warning'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS status text NOT NULL,
+    ADD COLUMN IF NOT EXISTS summary text,
+    ADD COLUMN IF NOT EXISTS starts_at timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS ends_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL;
+
+ALTER TABLE public.platform_alerts
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN fingerprint DROP DEFAULT,
+    ALTER COLUMN entity_type SET DEFAULT 'device'::text,
+    ALTER COLUMN entity_id DROP DEFAULT,
+    ALTER COLUMN sparkplug_id DROP DEFAULT,
+    ALTER COLUMN alert_name DROP DEFAULT,
+    ALTER COLUMN severity SET DEFAULT 'warning'::text,
+    ALTER COLUMN status DROP DEFAULT,
+    ALTER COLUMN summary DROP DEFAULT,
+    ALTER COLUMN starts_at DROP DEFAULT,
+    ALTER COLUMN ends_at DROP DEFAULT,
+    ALTER COLUMN recorded_at SET DEFAULT now();
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'platform_alerts_asset_has_wire_id'
+                AND conrelid = 'public.platform_alerts'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((entity_type = ''platform''::text) OR (sparkplug_id IS NOT NULL)))') THEN
+    ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_asset_has_wire_id;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'platform_alerts_asset_has_wire_id'
+                    AND conrelid = 'public.platform_alerts'::regclass) THEN
+    ALTER TABLE public.platform_alerts
+        ADD CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = 'platform'::text) OR (sparkplug_id IS NOT NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'platform_alerts_entity_type_valid'
+                AND conrelid = 'public.platform_alerts'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ANY (ARRAY[''device''::text, ''gateway''::text, ''platform''::text])))') THEN
+    ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_entity_type_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'platform_alerts_entity_type_valid'
+                    AND conrelid = 'public.platform_alerts'::regclass) THEN
+    ALTER TABLE public.platform_alerts
+        ADD CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'platform_alerts_resolved_has_end'
+                AND conrelid = 'public.platform_alerts'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''resolved''::text) OR (ends_at IS NOT NULL)))') THEN
+    ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_resolved_has_end;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'platform_alerts_resolved_has_end'
+                    AND conrelid = 'public.platform_alerts'::regclass) THEN
+    ALTER TABLE public.platform_alerts
+        ADD CONSTRAINT platform_alerts_resolved_has_end CHECK (((status <> 'resolved'::text) OR (ends_at IS NOT NULL)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'platform_alerts_severity_valid'
+                AND conrelid = 'public.platform_alerts'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((severity = ANY (ARRAY[''critical''::text, ''warning''::text, ''info''::text])))') THEN
+    ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_severity_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'platform_alerts_severity_valid'
+                    AND conrelid = 'public.platform_alerts'::regclass) THEN
+    ALTER TABLE public.platform_alerts
+        ADD CONSTRAINT platform_alerts_severity_valid CHECK ((severity = ANY (ARRAY['critical'::text, 'warning'::text, 'info'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'platform_alerts_status_valid'
+                AND conrelid = 'public.platform_alerts'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''firing''::text, ''resolved''::text])))') THEN
+    ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'platform_alerts_status_valid'
+                    AND conrelid = 'public.platform_alerts'::regclass) THEN
+    ALTER TABLE public.platform_alerts
+        ADD CONSTRAINT platform_alerts_status_valid CHECK ((status = ANY (ARRAY['firing'::text, 'resolved'::text])));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE platform_alerts :: COMMENT
---
-
 COMMENT ON TABLE public.platform_alerts IS 'One row per Grafana alert OCCURRENCE -- machine conditions and platform conditions alike -- delivered by the grafana-alert-webhook edge function. Append-only on (fingerprint, starts_at); an occurrence transitions firing -> resolved in place.';
 
 --
 
 -- COLUMN platform_alerts.entity_type :: COMMENT
---
-
 COMMENT ON COLUMN public.platform_alerts.entity_type IS 'What the alert is about: device | gateway | platform. The dashboard reddens an asset only for its own kind, so this is read before entity_id anywhere a colour or a link is derived.';
 
 --
 
 -- COLUMN platform_alerts.entity_id :: COMMENT
---
-
 COMMENT ON COLUMN public.platform_alerts.entity_id IS 'The subject row id, or NULL for a platform-scoped alert or an id that matched nothing. Carries no foreign key on purpose -- see the column definition.';
 
 --
 
 -- COLUMN platform_alerts.sparkplug_id :: COMMENT
---
-
 COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS 'The immutable Sparkplug id of the asset the alert was raised for, taken from the Grafana label. Never a display name. NULL only for entity_type = platform, which has no single subject.';
 
 --
 
 -- platform_alerts_active :: VIEW
---
-
 CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='true') AS
  SELECT id,
     fingerprint,
@@ -5889,18 +11485,17 @@ CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='tru
           ORDER BY a.fingerprint, a.starts_at DESC, a.recorded_at DESC) newest
   WHERE (status = 'firing'::text);
 
+
+ALTER VIEW public.platform_alerts_active OWNER TO postgres;
+
 --
 
 -- VIEW platform_alerts_active :: COMMENT
---
-
 COMMENT ON VIEW public.platform_alerts_active IS 'Currently firing alerts, one row per Grafana fingerprint (the newest occurrence). A later resolved occurrence supersedes an earlier firing one, so a missed resolve cannot pin a stale alert.';
 
 --
 
 -- platform_health :: VIEW
---
-
 CREATE OR REPLACE VIEW public.platform_health AS
  SELECT now() AS collected_at,
     condition,
@@ -5910,18 +11505,17 @@ CREATE OR REPLACE VIEW public.platform_health AS
     detail
    FROM public.platform_health_rows() r(condition, sparkplug_id, subject, value, detail);
 
+
+ALTER VIEW public.platform_health OWNER TO postgres;
+
 --
 
 -- VIEW platform_health :: COMMENT
---
-
 COMMENT ON VIEW public.platform_health IS 'The platform''s own condition, long-form so a Grafana rule over one `condition` value produces one alert instance per subject. Read by the `supabase` datasource; see grafana/provisioning/alerting/alert-rules.yaml.';
 
 --
 
 -- playback_jobs :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.playback_jobs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     capture_id uuid,
@@ -5941,51 +11535,226 @@ CREATE TABLE IF NOT EXISTS public.playback_jobs (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     started_at timestamp with time zone,
     finished_at timestamp with time zone,
+    messages_out_of_window integer DEFAULT 0 NOT NULL,
     CONSTRAINT playback_jobs_device_map_is_object CHECK ((jsonb_typeof(device_map) = 'object'::text)),
+    CONSTRAINT playback_jobs_out_of_window_is_sane CHECK ((messages_out_of_window >= 0)),
     CONSTRAINT playback_jobs_speed_is_sane CHECK (((speed > (0)::numeric) AND (speed <= (60)::numeric))),
     CONSTRAINT playback_jobs_status_valid CHECK ((status = ANY (ARRAY['PENDING'::text, 'RUNNING'::text, 'COMPLETED'::text, 'FAILED'::text, 'CANCELLED'::text])))
 );
 
 ALTER TABLE ONLY public.playback_jobs REPLICA IDENTITY FULL;
 
+
+ALTER TABLE public.playback_jobs OWNER TO postgres;
+
+ALTER TABLE public.playback_jobs
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS capture_id uuid,
+    ADD COLUMN IF NOT EXISTS capture_storage_path text NOT NULL,
+    ADD COLUMN IF NOT EXISTS target_gateway_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS target_edge_node_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS sparkplug_group text NOT NULL,
+    ADD COLUMN IF NOT EXISTS device_map jsonb DEFAULT '{}'::jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS speed numeric DEFAULT 1.0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'PENDING'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS messages_total integer DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS messages_sent integer DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS elapsed_seconds integer DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS stop_requested boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS error text,
+    ADD COLUMN IF NOT EXISTS requested_by uuid,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS started_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS finished_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS messages_out_of_window integer DEFAULT 0 NOT NULL;
+
+ALTER TABLE public.playback_jobs
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN capture_id DROP DEFAULT,
+    ALTER COLUMN capture_storage_path DROP DEFAULT,
+    ALTER COLUMN target_gateway_id DROP DEFAULT,
+    ALTER COLUMN target_edge_node_id DROP DEFAULT,
+    ALTER COLUMN sparkplug_group DROP DEFAULT,
+    ALTER COLUMN device_map SET DEFAULT '{}'::jsonb,
+    ALTER COLUMN speed SET DEFAULT 1.0,
+    ALTER COLUMN status SET DEFAULT 'PENDING'::text,
+    ALTER COLUMN messages_total SET DEFAULT 0,
+    ALTER COLUMN messages_sent SET DEFAULT 0,
+    ALTER COLUMN elapsed_seconds SET DEFAULT 0,
+    ALTER COLUMN stop_requested SET DEFAULT false,
+    ALTER COLUMN error DROP DEFAULT,
+    ALTER COLUMN requested_by DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN started_at DROP DEFAULT,
+    ALTER COLUMN finished_at DROP DEFAULT,
+    ALTER COLUMN messages_out_of_window SET DEFAULT 0;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_jobs_device_map_is_object'
+                AND conrelid = 'public.playback_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((jsonb_typeof(device_map) = ''object''::text))') THEN
+    ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_device_map_is_object;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'playback_jobs_device_map_is_object'
+                    AND conrelid = 'public.playback_jobs'::regclass) THEN
+    ALTER TABLE public.playback_jobs
+        ADD CONSTRAINT playback_jobs_device_map_is_object CHECK ((jsonb_typeof(device_map) = 'object'::text));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_jobs_out_of_window_is_sane'
+                AND conrelid = 'public.playback_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((messages_out_of_window >= 0))') THEN
+    ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_out_of_window_is_sane;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'playback_jobs_out_of_window_is_sane'
+                    AND conrelid = 'public.playback_jobs'::regclass) THEN
+    ALTER TABLE public.playback_jobs
+        ADD CONSTRAINT playback_jobs_out_of_window_is_sane CHECK ((messages_out_of_window >= 0));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_jobs_speed_is_sane'
+                AND conrelid = 'public.playback_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((speed > (0)::numeric) AND (speed <= (60)::numeric)))') THEN
+    ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_speed_is_sane;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'playback_jobs_speed_is_sane'
+                    AND conrelid = 'public.playback_jobs'::regclass) THEN
+    ALTER TABLE public.playback_jobs
+        ADD CONSTRAINT playback_jobs_speed_is_sane CHECK (((speed > (0)::numeric) AND (speed <= (60)::numeric)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_jobs_status_valid'
+                AND conrelid = 'public.playback_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RUNNING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
+    ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'playback_jobs_status_valid'
+                    AND conrelid = 'public.playback_jobs'::regclass) THEN
+    ALTER TABLE public.playback_jobs
+        ADD CONSTRAINT playback_jobs_status_valid CHECK ((status = ANY (ARRAY['PENDING'::text, 'RUNNING'::text, 'COMPLETED'::text, 'FAILED'::text, 'CANCELLED'::text])));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE playback_jobs :: COMMENT
---
-
 COMMENT ON TABLE public.playback_jobs IS 'One row per playback attempted. At most one is PENDING or RUNNING per TARGET GATEWAY -- two publishers on one edge node interleave sequence numbers. Written only through the gates in 0056; there is no direct-write policy. Progress is pushed to the page by Realtime.';
 
 --
 
--- playback_worker_status :: TABLE
+-- COLUMN playback_jobs.messages_out_of_window :: COMMENT
+COMMENT ON COLUMN public.playback_jobs.messages_out_of_window IS 'How many of this job''s planned messages carried timestamps the ingestion daemon will discard as outside its sanity window -- computed by the worker from the plan before publishing, never reported back by the daemon, whose answer to an out-of-window metric is a counter and not an error. COUNTED PER MESSAGE WHILE THE REFUSAL IS DECIDED PER METRIC: process_ddata() judges each metric on its own timestamp and falls back to the payload''s only when it has none, so a job carrying a count on every one of its messages may still have written a reading from each. The worker refuses, as FAILED, only a playback the window would discard entirely. Zero on every job written before 0109.';
+
 --
 
+-- playback_worker_status :: TABLE
 CREATE TABLE IF NOT EXISTS public.playback_worker_status (
     id boolean DEFAULT true NOT NULL,
     held_edge_nodes text[] DEFAULT '{}'::text[] NOT NULL,
     reported_at timestamp with time zone DEFAULT now() NOT NULL,
+    credential_observed_at jsonb DEFAULT '{}'::jsonb NOT NULL,
     CONSTRAINT playback_worker_status_id_check CHECK (id)
 );
+
+
+ALTER TABLE public.playback_worker_status OWNER TO postgres;
+
+ALTER TABLE public.playback_worker_status
+    ADD COLUMN IF NOT EXISTS id boolean DEFAULT true NOT NULL,
+    ADD COLUMN IF NOT EXISTS held_edge_nodes text[] DEFAULT '{}'::text[] NOT NULL,
+    ADD COLUMN IF NOT EXISTS reported_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS credential_observed_at jsonb DEFAULT '{}'::jsonb NOT NULL;
+
+ALTER TABLE public.playback_worker_status
+    ALTER COLUMN id SET DEFAULT true,
+    ALTER COLUMN held_edge_nodes SET DEFAULT '{}'::text[],
+    ALTER COLUMN reported_at SET DEFAULT now(),
+    ALTER COLUMN credential_observed_at SET DEFAULT '{}'::jsonb;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_worker_status_id_check'
+                AND conrelid = 'public.playback_worker_status'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+    ALTER TABLE public.playback_worker_status DROP CONSTRAINT playback_worker_status_id_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'playback_worker_status_id_check'
+                    AND conrelid = 'public.playback_worker_status'::regclass) THEN
+    ALTER TABLE public.playback_worker_status
+        ADD CONSTRAINT playback_worker_status_id_check CHECK (id);
+  END IF;
+END $c$;
 
 --
 
 -- TABLE playback_worker_status :: COMMENT
---
-
 COMMENT ON TABLE public.playback_worker_status IS 'What the playback worker can actually publish as: the gateway sparkplug_ids it holds broker passwords for, and when it last said so. One row by CHECK (id). Written only by playback_report_credentials(), read by the playback dialog so a target the worker cannot authenticate as is refused before a job is queued rather than after. Holds no secret -- a sparkplug_id is a public identifier and the passwords are deliberately not here.';
 
 --
 
 -- COLUMN playback_worker_status.reported_at :: COMMENT
---
-
 COMMENT ON COLUMN public.playback_worker_status.reported_at IS 'Heartbeat. An empty held_edge_nodes with a RECENT timestamp means the worker is running and holds no credentials; a stale timestamp means the worker is not running. Those are different problems and the page says which.';
 
 --
 
--- rebirth_requests :: TABLE
+-- COLUMN playback_worker_status.credential_observed_at :: COMMENT
+COMMENT ON COLUMN public.playback_worker_status.credential_observed_at IS 'sparkplug_id -> when this database last stamped an observation of a NEW password the worker reported picking up for it. Compared with that gateway''s last CREDENTIAL_ISSUED row to tell "holds a credential for X" from "holds the CURRENT credential for X" (#217). A jsonb map rather than a side table because the whole of it is one process''s memory, written as a unit by the same single writer as the rest of the row. Holds no secret: a timestamp is derived from nothing, which a truncated hash of the password would not be.';
+
 --
 
+-- principal_permissions :: TABLE
+CREATE TABLE IF NOT EXISTS public.principal_permissions (
+    principal_id uuid NOT NULL,
+    permission_id uuid NOT NULL,
+    granted_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.principal_permissions OWNER TO postgres;
+
+ALTER TABLE public.principal_permissions
+    ADD COLUMN IF NOT EXISTS principal_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS permission_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS granted_at timestamp with time zone DEFAULT now() NOT NULL;
+
+ALTER TABLE public.principal_permissions
+    ALTER COLUMN principal_id DROP DEFAULT,
+    ALTER COLUMN permission_id DROP DEFAULT,
+    ALTER COLUMN granted_at SET DEFAULT now();
+
+--
+
+-- TABLE principal_permissions :: COMMENT
+COMMENT ON TABLE public.principal_permissions IS 'Permissions granted to ONE machine identity, resolved by has_authority(). The machine-side twin of role_permissions: a principal holds grants of its own instead of borrowing a person''s role, so widening Operator no longer widens the ingestion daemon. A machine principal may hold no role at all -- refuse_role_for_machine_principal() enforces that on user_roles.';
+
+--
+
+-- COLUMN principal_permissions.granted_at :: COMMENT
+COMMENT ON COLUMN public.principal_permissions.granted_at IS 'When the grant was made. role_permissions carries no equivalent because its rows are seeded by migration and never by a person; these are minted at runtime by create_machine_principal().';
+
+--
+
+-- rebirth_requests :: TABLE
 CREATE TABLE IF NOT EXISTS public.rebirth_requests (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     gateway_id uuid NOT NULL,
@@ -6002,39 +11771,231 @@ CREATE TABLE IF NOT EXISTS public.rebirth_requests (
 
 ALTER TABLE ONLY public.rebirth_requests REPLICA IDENTITY FULL;
 
+
+ALTER TABLE public.rebirth_requests OWNER TO postgres;
+
+ALTER TABLE public.rebirth_requests
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS gateway_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS edge_node_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS sparkplug_group text NOT NULL,
+    ADD COLUMN IF NOT EXISTS status text DEFAULT 'PENDING'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS throttled boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS error text,
+    ADD COLUMN IF NOT EXISTS requested_by uuid,
+    ADD COLUMN IF NOT EXISTS requested_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS sent_at timestamp with time zone;
+
+ALTER TABLE public.rebirth_requests
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN gateway_id DROP DEFAULT,
+    ALTER COLUMN edge_node_id DROP DEFAULT,
+    ALTER COLUMN sparkplug_group DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'PENDING'::text,
+    ALTER COLUMN throttled SET DEFAULT false,
+    ALTER COLUMN error DROP DEFAULT,
+    ALTER COLUMN requested_by DROP DEFAULT,
+    ALTER COLUMN requested_at SET DEFAULT now(),
+    ALTER COLUMN sent_at DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'rebirth_requests_status_valid'
+                AND conrelid = 'public.rebirth_requests'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''SENT''::text, ''FAILED''::text])))') THEN
+    ALTER TABLE public.rebirth_requests DROP CONSTRAINT rebirth_requests_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'rebirth_requests_status_valid'
+                    AND conrelid = 'public.rebirth_requests'::regclass) THEN
+    ALTER TABLE public.rebirth_requests
+        ADD CONSTRAINT rebirth_requests_status_valid CHECK ((status = ANY (ARRAY['PENDING'::text, 'SENT'::text, 'FAILED'::text])));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE rebirth_requests :: COMMENT
+COMMENT ON TABLE public.rebirth_requests IS 'A person asking an edge node to republish its birth certificate. The daemon claims PENDING rows and publishes Node Control/Rebirth, which is the only NCMD this stack sends and the only one the ingestion role at the broker permits it (mosquitto/dynsec-roles.json). Not a general command channel: writing a metric VALUE is actuation and is deliberately not reachable from here. See 0058''s header.';
+
 --
 
-COMMENT ON TABLE public.rebirth_requests IS 'A person asking an edge node to republish its birth certificate. The daemon claims PENDING rows and publishes Node Control/Rebirth, which is the only NCMD this stack sends and the only one mosquitto.acl permits it. Not a general command channel: writing a metric VALUE is actuation and is deliberately not reachable from here. See 0058''s header.';
+-- retired_entities :: TABLE
+CREATE TABLE IF NOT EXISTS public.retired_entities (
+    entity_type text NOT NULL,
+    entity_id uuid NOT NULL,
+    name text,
+    sparkplug_id text,
+    archived_at timestamp with time zone,
+    retired_at timestamp with time zone DEFAULT now() NOT NULL,
+    retired_by uuid,
+    retired_by_email text,
+    thread_id bigint,
+    old_data jsonb NOT NULL,
+    CONSTRAINT retired_entities_type_known CHECK ((entity_type = ANY (ARRAY['areas'::text, 'cells'::text, 'gateways'::text, 'devices'::text])))
+);
+
+
+ALTER TABLE public.retired_entities OWNER TO postgres;
+
+ALTER TABLE public.retired_entities
+    ADD COLUMN IF NOT EXISTS entity_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text,
+    ADD COLUMN IF NOT EXISTS sparkplug_id text,
+    ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS retired_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS retired_by uuid,
+    ADD COLUMN IF NOT EXISTS retired_by_email text,
+    ADD COLUMN IF NOT EXISTS thread_id bigint,
+    ADD COLUMN IF NOT EXISTS old_data jsonb NOT NULL;
+
+ALTER TABLE public.retired_entities
+    ALTER COLUMN entity_type DROP DEFAULT,
+    ALTER COLUMN entity_id DROP DEFAULT,
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN sparkplug_id DROP DEFAULT,
+    ALTER COLUMN archived_at DROP DEFAULT,
+    ALTER COLUMN retired_at SET DEFAULT now(),
+    ALTER COLUMN retired_by DROP DEFAULT,
+    ALTER COLUMN retired_by_email DROP DEFAULT,
+    ALTER COLUMN thread_id DROP DEFAULT,
+    ALTER COLUMN old_data DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'retired_entities_type_known'
+                AND conrelid = 'public.retired_entities'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ANY (ARRAY[''areas''::text, ''cells''::text, ''gateways''::text, ''devices''::text])))') THEN
+    ALTER TABLE public.retired_entities DROP CONSTRAINT retired_entities_type_known;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'retired_entities_type_known'
+                    AND conrelid = 'public.retired_entities'::regclass) THEN
+    ALTER TABLE public.retired_entities
+        ADD CONSTRAINT retired_entities_type_known CHECK ((entity_type = ANY (ARRAY['areas'::text, 'cells'::text, 'gateways'::text, 'devices'::text])));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE retired_entities :: COMMENT
+COMMENT ON TABLE public.retired_entities IS 'One row per asset that was archived and then deleted, written by record_retired_entity() on the DELETE. Not derived from digital_thread, which is partitioned for an eventual DETACH: a tombstone outlives the month that recorded the delete. Readable by whoever may read the Archived Entities page or the thread''s asset lane; written by nothing but the trigger.';
+
+--
+
+-- COLUMN retired_entities.old_data :: COMMENT
+COMMENT ON COLUMN public.retired_entities.old_data IS 'The deleted row, as the DELETE audit row carries it. A gateway''s forge repository is derived from it (gateway-<sparkplug_id>) as it is everywhere else.';
+
+--
+
+-- revoked_service_principals :: TABLE
+CREATE TABLE IF NOT EXISTS public.revoked_service_principals (
+    principal_id uuid NOT NULL,
+    revoked_at timestamp with time zone DEFAULT now() NOT NULL,
+    revoked_by uuid,
+    reason text
+);
+
+
+ALTER TABLE public.revoked_service_principals OWNER TO postgres;
+
+ALTER TABLE public.revoked_service_principals
+    ADD COLUMN IF NOT EXISTS principal_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS revoked_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS revoked_by uuid,
+    ADD COLUMN IF NOT EXISTS reason text;
+
+ALTER TABLE public.revoked_service_principals
+    ALTER COLUMN principal_id DROP DEFAULT,
+    ALTER COLUMN revoked_at SET DEFAULT now(),
+    ALTER COLUMN revoked_by DROP DEFAULT,
+    ALTER COLUMN reason DROP DEFAULT;
+
+--
+
+-- TABLE revoked_service_principals :: COMMENT
+COMMENT ON TABLE public.revoked_service_principals IS 'Service principals that public.auth_pre_request() refuses by subject. Not self-pruning: a principal has no expiry, so a row stays until reinstate_service_principal() removes it. The permanent record is the PRINCIPAL_REVOKED / PRINCIPAL_REINSTATED rows in digital_thread.';
+
+--
+
+-- revoked_service_tokens :: TABLE
+CREATE TABLE IF NOT EXISTS public.revoked_service_tokens (
+    jti text NOT NULL,
+    principal_id uuid NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone DEFAULT now() NOT NULL,
+    revoked_by uuid
+);
+
+
+ALTER TABLE public.revoked_service_tokens OWNER TO postgres;
+
+ALTER TABLE public.revoked_service_tokens
+    ADD COLUMN IF NOT EXISTS jti text NOT NULL,
+    ADD COLUMN IF NOT EXISTS principal_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS revoked_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS revoked_by uuid;
+
+ALTER TABLE public.revoked_service_tokens
+    ALTER COLUMN jti DROP DEFAULT,
+    ALTER COLUMN principal_id DROP DEFAULT,
+    ALTER COLUMN expires_at DROP DEFAULT,
+    ALTER COLUMN revoked_at SET DEFAULT now(),
+    ALTER COLUMN revoked_by DROP DEFAULT;
+
+--
+
+-- TABLE revoked_service_tokens :: COMMENT
+COMMENT ON TABLE public.revoked_service_tokens IS 'Unexpired service-token jtis that public.auth_pre_request() refuses. Operational, not audit: rows are pruned once the token they name has expired, because the signature check refuses it from then on. The permanent record is the TOKEN_REVOKED row in digital_thread.';
 
 --
 
 -- role_permissions :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.role_permissions (
     role_id integer NOT NULL,
     permission_id uuid NOT NULL
 );
 
+
+ALTER TABLE public.role_permissions OWNER TO postgres;
+
+ALTER TABLE public.role_permissions
+    ADD COLUMN IF NOT EXISTS role_id integer NOT NULL,
+    ADD COLUMN IF NOT EXISTS permission_id uuid NOT NULL;
+
+ALTER TABLE public.role_permissions
+    ALTER COLUMN role_id DROP DEFAULT,
+    ALTER COLUMN permission_id DROP DEFAULT;
+
 --
 
 -- roles :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.roles (
     id integer NOT NULL,
     name text NOT NULL,
     description text
 );
 
+
+ALTER TABLE public.roles OWNER TO postgres;
+
+ALTER TABLE public.roles
+    ADD COLUMN IF NOT EXISTS id integer NOT NULL,
+    ADD COLUMN IF NOT EXISTS name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text;
+
+ALTER TABLE public.roles
+    ALTER COLUMN id DROP DEFAULT,
+    ALTER COLUMN name DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT;
+
 --
 
 -- roles_id_seq :: SEQUENCE
---
-
 CREATE SEQUENCE IF NOT EXISTS public.roles_id_seq
     AS integer
     START WITH 1
@@ -6043,18 +12004,17 @@ CREATE SEQUENCE IF NOT EXISTS public.roles_id_seq
     NO MAXVALUE
     CACHE 1;
 
+
+ALTER SEQUENCE public.roles_id_seq OWNER TO postgres;
+
 --
 
 -- roles_id_seq :: SEQUENCE OWNED BY
---
-
 ALTER SEQUENCE public.roles_id_seq OWNED BY public.roles.id;
 
 --
 
 -- schema_bootstrap :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.schema_bootstrap (
     id boolean DEFAULT true NOT NULL,
     started_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -6062,25 +12022,48 @@ CREATE TABLE IF NOT EXISTS public.schema_bootstrap (
     CONSTRAINT schema_bootstrap_id_check CHECK (id)
 );
 
+
+ALTER TABLE public.schema_bootstrap OWNER TO postgres;
+
+ALTER TABLE public.schema_bootstrap
+    ADD COLUMN IF NOT EXISTS id boolean DEFAULT true NOT NULL,
+    ADD COLUMN IF NOT EXISTS started_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS completed_at timestamp with time zone;
+
+ALTER TABLE public.schema_bootstrap
+    ALTER COLUMN id SET DEFAULT true,
+    ALTER COLUMN started_at SET DEFAULT now(),
+    ALTER COLUMN completed_at DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schema_bootstrap_id_check'
+                AND conrelid = 'public.schema_bootstrap'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+    ALTER TABLE public.schema_bootstrap DROP CONSTRAINT schema_bootstrap_id_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'schema_bootstrap_id_check'
+                    AND conrelid = 'public.schema_bootstrap'::regclass) THEN
+    ALTER TABLE public.schema_bootstrap
+        ADD CONSTRAINT schema_bootstrap_id_check CHECK (id);
+  END IF;
+END $c$;
+
 --
 
 -- TABLE schema_bootstrap :: COMMENT
---
-
 COMMENT ON TABLE public.schema_bootstrap IS 'One row. completed_at IS NULL means db-init is part-way through the migration chain; a non-null completed_at means it reached the end of seed.sql on this boot. Written by db-init, not by a migration -- a migration cannot know whether the files after it succeeded.';
 
 --
 
 -- COLUMN schema_bootstrap.completed_at :: COMMENT
---
-
 COMMENT ON COLUMN public.schema_bootstrap.completed_at IS 'Cleared at the start of every boot and stamped after seed.sql. The e2e-validate Job gates on it.';
 
 --
 
 -- schemas :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.schemas (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     schema_name text NOT NULL,
@@ -6100,46 +12083,143 @@ CREATE TABLE IF NOT EXISTS public.schemas (
     CONSTRAINT schemas_version_positive CHECK ((version >= 1))
 );
 
+
+ALTER TABLE public.schemas OWNER TO postgres;
+
+ALTER TABLE public.schemas
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS schema_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS schema_definition jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS semantic_id text,
+    ADD COLUMN IF NOT EXISTS semantic_id_type text,
+    ADD COLUMN IF NOT EXISTS version integer DEFAULT 1 NOT NULL,
+    ADD COLUMN IF NOT EXISTS parent_schema_id uuid,
+    ADD COLUMN IF NOT EXISTS status character varying(20) DEFAULT 'active'::character varying NOT NULL,
+    ADD COLUMN IF NOT EXISTS change_description text;
+
+ALTER TABLE public.schemas
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN schema_name DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN schema_definition DROP DEFAULT,
+    ALTER COLUMN created_at SET DEFAULT now(),
+    ALTER COLUMN semantic_id DROP DEFAULT,
+    ALTER COLUMN semantic_id_type DROP DEFAULT,
+    ALTER COLUMN version SET DEFAULT 1,
+    ALTER COLUMN parent_schema_id DROP DEFAULT,
+    ALTER COLUMN status SET DEFAULT 'active'::character varying,
+    ALTER COLUMN change_description DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_parent_not_self'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((parent_schema_id IS NULL) OR (parent_schema_id <> id)))') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_parent_not_self;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'schemas_parent_not_self'
+                    AND conrelid = 'public.schemas'::regclass) THEN
+    ALTER TABLE public.schemas
+        ADD CONSTRAINT schemas_parent_not_self CHECK (((parent_schema_id IS NULL) OR (parent_schema_id <> id)));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_semantic_id_type_valid'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ModelReference''::text]))))') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_semantic_id_type_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'schemas_semantic_id_type_valid'
+                    AND conrelid = 'public.schemas'::regclass) THEN
+    ALTER TABLE public.schemas
+        ADD CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text]))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_status_valid'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((status)::text = ANY (ARRAY[(''draft''::character varying)::text, (''active''::character varying)::text, (''archived''::character varying)::text])))') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'schemas_status_valid'
+                    AND conrelid = 'public.schemas'::regclass) THEN
+    ALTER TABLE public.schemas
+        ADD CONSTRAINT schemas_status_valid CHECK (((status)::text = ANY (ARRAY[('draft'::character varying)::text, ('active'::character varying)::text, ('archived'::character varying)::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_version_lineage_coherent'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((((version = 1) AND (parent_schema_id IS NULL)) OR ((version > 1) AND (parent_schema_id IS NOT NULL))))') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_version_lineage_coherent;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'schemas_version_lineage_coherent'
+                    AND conrelid = 'public.schemas'::regclass) THEN
+    ALTER TABLE public.schemas
+        ADD CONSTRAINT schemas_version_lineage_coherent CHECK ((((version = 1) AND (parent_schema_id IS NULL)) OR ((version > 1) AND (parent_schema_id IS NOT NULL))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_version_positive'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((version >= 1))') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_version_positive;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'schemas_version_positive'
+                    AND conrelid = 'public.schemas'::regclass) THEN
+    ALTER TABLE public.schemas
+        ADD CONSTRAINT schemas_version_positive CHECK ((version >= 1));
+  END IF;
+END $c$;
+
 --
 
 -- COLUMN schemas.semantic_id :: COMMENT
---
-
 COMMENT ON COLUMN public.schemas.semantic_id IS 'AAS semanticId for the Submodel this schema corresponds to, e.g. an IDTA submodel template id.';
 
 --
 
 -- COLUMN schemas.version :: COMMENT
---
-
 COMMENT ON COLUMN public.schemas.version IS 'Auto-incremented lineage position. Never supplied by a caller -- fork_schema() derives it from the parent.';
 
 --
 
 -- COLUMN schemas.parent_schema_id :: COMMENT
---
-
 COMMENT ON COLUMN public.schemas.parent_schema_id IS 'The version this one was forked from. NULL only for a v1 root.';
 
 --
 
 -- COLUMN schemas.status :: COMMENT
---
-
 COMMENT ON COLUMN public.schemas.status IS 'draft (editable) | active (in force, immutable) | archived (superseded, immutable).';
 
 --
 
 -- COLUMN schemas.change_description :: COMMENT
---
-
 COMMENT ON COLUMN public.schemas.change_description IS 'Why this version exists. Captured at fork time; immutable once the version is published.';
 
 --
 
 -- storage_footprint :: FOREIGN TABLE
---
-
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.storage_footprint (
     collected_at timestamp with time zone,
     source text,
@@ -6161,11 +12241,42 @@ OPTIONS (
     table_name 'storage_footprint'
 );
 
+
+ALTER FOREIGN TABLE timescale.storage_footprint OWNER TO postgres;
+
+ALTER TABLE timescale.storage_footprint
+    ADD COLUMN IF NOT EXISTS collected_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS source text,
+    ADD COLUMN IF NOT EXISTS tier text,
+    ADD COLUMN IF NOT EXISTS relation text,
+    ADD COLUMN IF NOT EXISTS chunks bigint,
+    ADD COLUMN IF NOT EXISTS table_bytes bigint,
+    ADD COLUMN IF NOT EXISTS index_bytes bigint,
+    ADD COLUMN IF NOT EXISTS toast_bytes bigint,
+    ADD COLUMN IF NOT EXISTS total_bytes bigint,
+    ADD COLUMN IF NOT EXISTS uncompressed_bytes bigint,
+    ADD COLUMN IF NOT EXISTS compressed_bytes bigint,
+    ADD COLUMN IF NOT EXISTS oldest_data timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS newest_data timestamp with time zone;
+
+ALTER TABLE timescale.storage_footprint
+    ALTER COLUMN collected_at DROP DEFAULT,
+    ALTER COLUMN source DROP DEFAULT,
+    ALTER COLUMN tier DROP DEFAULT,
+    ALTER COLUMN relation DROP DEFAULT,
+    ALTER COLUMN chunks DROP DEFAULT,
+    ALTER COLUMN table_bytes DROP DEFAULT,
+    ALTER COLUMN index_bytes DROP DEFAULT,
+    ALTER COLUMN toast_bytes DROP DEFAULT,
+    ALTER COLUMN total_bytes DROP DEFAULT,
+    ALTER COLUMN uncompressed_bytes DROP DEFAULT,
+    ALTER COLUMN compressed_bytes DROP DEFAULT,
+    ALTER COLUMN oldest_data DROP DEFAULT,
+    ALTER COLUMN newest_data DROP DEFAULT;
+
 --
 
 -- storage_footprint :: VIEW
---
-
 CREATE OR REPLACE VIEW public.storage_footprint AS
  SELECT f.collected_at,
     f.source,
@@ -6197,18 +12308,17 @@ UNION ALL
     NULL::timestamp with time zone AS newest_data
    FROM public.platform_storage_rows() p(tier, relation, table_bytes, index_bytes, toast_bytes, total_bytes);
 
+
+ALTER VIEW public.storage_footprint OWNER TO postgres;
+
 --
 
 -- VIEW storage_footprint :: COMMENT
---
-
 COMMENT ON VIEW public.storage_footprint IS 'Every relation this platform stores, from both databases: the historian over postgres_fdw and the Supabase public schema locally. Bytes by kind, chunk count and compression for hypertables, and the time span the chunks cover. Read by Grafana as the `supabase` datasource.';
 
 --
 
 -- system_settings :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.system_settings (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     key text NOT NULL,
@@ -6222,6 +12332,8 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     updated_by uuid,
     min_value numeric,
     max_value numeric,
+    read_only boolean DEFAULT false NOT NULL,
+    sensitive boolean DEFAULT false NOT NULL,
     CONSTRAINT system_settings_key_format CHECK ((key ~ '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'::text)),
     CONSTRAINT system_settings_value_matches_type CHECK (
 CASE value_type
@@ -6235,32 +12347,140 @@ END),
     CONSTRAINT system_settings_value_within_bounds CHECK (((value_type <> 'number'::text) OR (((min_value IS NULL) OR (((value #>> '{}'::text[]))::numeric >= min_value)) AND ((max_value IS NULL) OR (((value #>> '{}'::text[]))::numeric <= max_value)))))
 );
 
+
+ALTER TABLE public.system_settings OWNER TO postgres;
+
+ALTER TABLE public.system_settings
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS key text NOT NULL,
+    ADD COLUMN IF NOT EXISTS value jsonb NOT NULL,
+    ADD COLUMN IF NOT EXISTS value_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS category text NOT NULL,
+    ADD COLUMN IF NOT EXISTS label text NOT NULL,
+    ADD COLUMN IF NOT EXISTS description text,
+    ADD COLUMN IF NOT EXISTS fallback_source text,
+    ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS updated_by uuid,
+    ADD COLUMN IF NOT EXISTS min_value numeric,
+    ADD COLUMN IF NOT EXISTS max_value numeric,
+    ADD COLUMN IF NOT EXISTS read_only boolean DEFAULT false NOT NULL,
+    ADD COLUMN IF NOT EXISTS sensitive boolean DEFAULT false NOT NULL;
+
+ALTER TABLE public.system_settings
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN key DROP DEFAULT,
+    ALTER COLUMN value DROP DEFAULT,
+    ALTER COLUMN value_type DROP DEFAULT,
+    ALTER COLUMN category DROP DEFAULT,
+    ALTER COLUMN label DROP DEFAULT,
+    ALTER COLUMN description DROP DEFAULT,
+    ALTER COLUMN fallback_source DROP DEFAULT,
+    ALTER COLUMN updated_at SET DEFAULT now(),
+    ALTER COLUMN updated_by DROP DEFAULT,
+    ALTER COLUMN min_value DROP DEFAULT,
+    ALTER COLUMN max_value DROP DEFAULT,
+    ALTER COLUMN read_only SET DEFAULT false,
+    ALTER COLUMN sensitive SET DEFAULT false;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'system_settings_key_format'
+                AND conrelid = 'public.system_settings'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((key ~ ''^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$''::text))') THEN
+    ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_key_format;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'system_settings_key_format'
+                    AND conrelid = 'public.system_settings'::regclass) THEN
+    ALTER TABLE public.system_settings
+        ADD CONSTRAINT system_settings_key_format CHECK ((key ~ '^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$'::text));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'system_settings_value_matches_type'
+                AND conrelid = 'public.system_settings'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ( CASE value_type WHEN ''string''::text THEN (jsonb_typeof(value) = ''string''::text) WHEN ''number''::text THEN (jsonb_typeof(value) = ''number''::text) WHEN ''boolean''::text THEN (jsonb_typeof(value) = ''boolean''::text) WHEN ''json''::text THEN (jsonb_typeof(value) = ANY (ARRAY[''object''::text, ''array''::text])) ELSE NULL::boolean END)') THEN
+    ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_value_matches_type;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'system_settings_value_matches_type'
+                    AND conrelid = 'public.system_settings'::regclass) THEN
+    ALTER TABLE public.system_settings
+        ADD CONSTRAINT system_settings_value_matches_type CHECK (
+    CASE value_type
+        WHEN 'string'::text THEN (jsonb_typeof(value) = 'string'::text)
+        WHEN 'number'::text THEN (jsonb_typeof(value) = 'number'::text)
+        WHEN 'boolean'::text THEN (jsonb_typeof(value) = 'boolean'::text)
+        WHEN 'json'::text THEN (jsonb_typeof(value) = ANY (ARRAY['object'::text, 'array'::text]))
+        ELSE NULL::boolean
+    END);
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'system_settings_value_type_known'
+                AND conrelid = 'public.system_settings'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((value_type = ANY (ARRAY[''string''::text, ''number''::text, ''boolean''::text, ''json''::text])))') THEN
+    ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_value_type_known;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'system_settings_value_type_known'
+                    AND conrelid = 'public.system_settings'::regclass) THEN
+    ALTER TABLE public.system_settings
+        ADD CONSTRAINT system_settings_value_type_known CHECK ((value_type = ANY (ARRAY['string'::text, 'number'::text, 'boolean'::text, 'json'::text])));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'system_settings_value_within_bounds'
+                AND conrelid = 'public.system_settings'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((value_type <> ''number''::text) OR (((min_value IS NULL) OR (((value #>> ''{}''::text[]))::numeric >= min_value)) AND ((max_value IS NULL) OR (((value #>> ''{}''::text[]))::numeric <= max_value)))))') THEN
+    ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_value_within_bounds;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'system_settings_value_within_bounds'
+                    AND conrelid = 'public.system_settings'::regclass) THEN
+    ALTER TABLE public.system_settings
+        ADD CONSTRAINT system_settings_value_within_bounds CHECK (((value_type <> 'number'::text) OR (((min_value IS NULL) OR (((value #>> '{}'::text[]))::numeric >= min_value)) AND ((max_value IS NULL) OR (((value #>> '{}'::text[]))::numeric <= max_value)))));
+  END IF;
+END $c$;
+
 --
 
 -- TABLE system_settings :: COMMENT
---
-
 COMMENT ON TABLE public.system_settings IS 'Runtime configuration an Administrator may change without a container restart. The key set is closed: RLS grants UPDATE only, and new keys arrive by migration beside the code that reads them. Nothing secret belongs here -- every authenticated user can read this table.';
 
 --
 
 -- COLUMN system_settings.min_value :: COMMENT
---
-
 COMMENT ON COLUMN public.system_settings.min_value IS 'Inclusive lower bound for a number setting. NULL means unbounded. Enforced by CHECK, not by the reader: a value the table accepts and the consumer then ignores is a setting that lies.';
 
 --
 
 -- COLUMN system_settings.max_value :: COMMENT
---
-
 COMMENT ON COLUMN public.system_settings.max_value IS 'Inclusive upper bound for a number setting. NULL means unbounded.';
 
 --
 
--- telemetry :: FOREIGN TABLE
+-- COLUMN system_settings.read_only :: COMMENT
+COMMENT ON COLUMN public.system_settings.read_only IS 'The value is fixed at install and shown for reference, not edited. The Settings page renders it without a control and system_settings_read_only_guard() refuses a write, so neither half depends on the other being present.';
+
 --
 
+-- COLUMN system_settings.sensitive :: COMMENT
+COMMENT ON COLUMN public.system_settings.sensitive IS 'The row is readable by Administrators alone. For configuration that is not a secret but is not everyone''s business either -- where a site''s history is written, and under which identity. The secret itself is never here: it is in the vault.';
+
+--
+
+-- telemetry :: FOREIGN TABLE
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry (
     "time" timestamp with time zone NOT NULL,
     asset_id text NOT NULL,
@@ -6275,11 +12495,28 @@ OPTIONS (
     table_name 'telemetry'
 );
 
+
+ALTER FOREIGN TABLE timescale.telemetry OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry
+    ADD COLUMN IF NOT EXISTS "time" timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS asset_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS metric_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS val_double double precision,
+    ADD COLUMN IF NOT EXISTS val_string text,
+    ADD COLUMN IF NOT EXISTS val_bool boolean;
+
+ALTER TABLE timescale.telemetry
+    ALTER COLUMN "time" DROP DEFAULT,
+    ALTER COLUMN asset_id DROP DEFAULT,
+    ALTER COLUMN metric_name DROP DEFAULT,
+    ALTER COLUMN val_double DROP DEFAULT,
+    ALTER COLUMN val_string DROP DEFAULT,
+    ALTER COLUMN val_bool DROP DEFAULT;
+
 --
 
 -- telemetry :: VIEW
---
-
 CREATE OR REPLACE VIEW public.telemetry WITH (security_invoker='true') AS
  SELECT "time",
     asset_id,
@@ -6289,18 +12526,17 @@ CREATE OR REPLACE VIEW public.telemetry WITH (security_invoker='true') AS
     val_bool
    FROM timescale.telemetry;
 
+
+ALTER VIEW public.telemetry OWNER TO postgres;
+
 --
 
 -- VIEW telemetry :: COMMENT
---
-
 COMMENT ON VIEW public.telemetry IS 'Read-only PostgREST projection of the standalone TimescaleDB telemetry hypertable, reached over postgres_fdw. Filter with asset_id / metric_name / time and always pass a limit -- postgres_fdw pushes WHERE clauses to the remote but not LIMIT, so an unbounded query materialises the whole matching range locally.';
 
 --
 
 -- telemetry_1h :: FOREIGN TABLE
---
-
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_1h (
     bucket timestamp with time zone NOT NULL,
     asset_id text NOT NULL,
@@ -6320,11 +12556,38 @@ OPTIONS (
     table_name 'telemetry_1h'
 );
 
+
+ALTER FOREIGN TABLE timescale.telemetry_1h OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry_1h
+    ADD COLUMN IF NOT EXISTS bucket timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS asset_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS metric_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS sum_double double precision,
+    ADD COLUMN IF NOT EXISTS n_double bigint,
+    ADD COLUMN IF NOT EXISTS min_double double precision,
+    ADD COLUMN IF NOT EXISTS max_double double precision,
+    ADD COLUMN IF NOT EXISTS last_double double precision,
+    ADD COLUMN IF NOT EXISTS last_string text,
+    ADD COLUMN IF NOT EXISTS last_bool boolean,
+    ADD COLUMN IF NOT EXISTS n_rows bigint;
+
+ALTER TABLE timescale.telemetry_1h
+    ALTER COLUMN bucket DROP DEFAULT,
+    ALTER COLUMN asset_id DROP DEFAULT,
+    ALTER COLUMN metric_name DROP DEFAULT,
+    ALTER COLUMN sum_double DROP DEFAULT,
+    ALTER COLUMN n_double DROP DEFAULT,
+    ALTER COLUMN min_double DROP DEFAULT,
+    ALTER COLUMN max_double DROP DEFAULT,
+    ALTER COLUMN last_double DROP DEFAULT,
+    ALTER COLUMN last_string DROP DEFAULT,
+    ALTER COLUMN last_bool DROP DEFAULT,
+    ALTER COLUMN n_rows DROP DEFAULT;
+
 --
 
 -- telemetry_1h :: VIEW
---
-
 CREATE OR REPLACE VIEW public.telemetry_1h WITH (security_invoker='true') AS
  SELECT bucket,
     asset_id,
@@ -6339,18 +12602,17 @@ CREATE OR REPLACE VIEW public.telemetry_1h WITH (security_invoker='true') AS
     n_rows
    FROM timescale.telemetry_1h t;
 
+
+ALTER VIEW public.telemetry_1h OWNER TO postgres;
+
 --
 
 -- VIEW telemetry_1h :: COMMENT
---
-
 COMMENT ON VIEW public.telemetry_1h IS 'Hourly rollup, aggregated from telemetry_5m. Retained far longer than the raw hypertable, so it answers questions about periods the raw retention window has already dropped.';
 
 --
 
 -- telemetry_1m :: FOREIGN TABLE
---
-
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_1m (
     bucket timestamp with time zone NOT NULL,
     asset_id text NOT NULL,
@@ -6370,11 +12632,38 @@ OPTIONS (
     table_name 'telemetry_1m'
 );
 
+
+ALTER FOREIGN TABLE timescale.telemetry_1m OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry_1m
+    ADD COLUMN IF NOT EXISTS bucket timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS asset_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS metric_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS sum_double double precision,
+    ADD COLUMN IF NOT EXISTS n_double bigint,
+    ADD COLUMN IF NOT EXISTS min_double double precision,
+    ADD COLUMN IF NOT EXISTS max_double double precision,
+    ADD COLUMN IF NOT EXISTS last_double double precision,
+    ADD COLUMN IF NOT EXISTS last_string text,
+    ADD COLUMN IF NOT EXISTS last_bool boolean,
+    ADD COLUMN IF NOT EXISTS n_rows bigint;
+
+ALTER TABLE timescale.telemetry_1m
+    ALTER COLUMN bucket DROP DEFAULT,
+    ALTER COLUMN asset_id DROP DEFAULT,
+    ALTER COLUMN metric_name DROP DEFAULT,
+    ALTER COLUMN sum_double DROP DEFAULT,
+    ALTER COLUMN n_double DROP DEFAULT,
+    ALTER COLUMN min_double DROP DEFAULT,
+    ALTER COLUMN max_double DROP DEFAULT,
+    ALTER COLUMN last_double DROP DEFAULT,
+    ALTER COLUMN last_string DROP DEFAULT,
+    ALTER COLUMN last_bool DROP DEFAULT,
+    ALTER COLUMN n_rows DROP DEFAULT;
+
 --
 
 -- telemetry_1m :: VIEW
---
-
 CREATE OR REPLACE VIEW public.telemetry_1m WITH (security_invoker='true') AS
  SELECT bucket,
     asset_id,
@@ -6389,18 +12678,17 @@ CREATE OR REPLACE VIEW public.telemetry_1m WITH (security_invoker='true') AS
     n_rows
    FROM timescale.telemetry_1m t;
 
+
+ALTER VIEW public.telemetry_1m OWNER TO postgres;
+
 --
 
 -- VIEW telemetry_1m :: COMMENT
---
-
 COMMENT ON VIEW public.telemetry_1m IS 'One-minute rollup of the telemetry hypertable. avg_double is derived from the stored sum and count; min/max are preserved because an average hides the excursion. last_string/last_bool carry state metrics, which cannot be averaged. Filter with bucket / asset_id / metric_name.';
 
 --
 
 -- telemetry_5m :: FOREIGN TABLE
---
-
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_5m (
     bucket timestamp with time zone NOT NULL,
     asset_id text NOT NULL,
@@ -6420,11 +12708,38 @@ OPTIONS (
     table_name 'telemetry_5m'
 );
 
+
+ALTER FOREIGN TABLE timescale.telemetry_5m OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry_5m
+    ADD COLUMN IF NOT EXISTS bucket timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS asset_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS metric_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS sum_double double precision,
+    ADD COLUMN IF NOT EXISTS n_double bigint,
+    ADD COLUMN IF NOT EXISTS min_double double precision,
+    ADD COLUMN IF NOT EXISTS max_double double precision,
+    ADD COLUMN IF NOT EXISTS last_double double precision,
+    ADD COLUMN IF NOT EXISTS last_string text,
+    ADD COLUMN IF NOT EXISTS last_bool boolean,
+    ADD COLUMN IF NOT EXISTS n_rows bigint;
+
+ALTER TABLE timescale.telemetry_5m
+    ALTER COLUMN bucket DROP DEFAULT,
+    ALTER COLUMN asset_id DROP DEFAULT,
+    ALTER COLUMN metric_name DROP DEFAULT,
+    ALTER COLUMN sum_double DROP DEFAULT,
+    ALTER COLUMN n_double DROP DEFAULT,
+    ALTER COLUMN min_double DROP DEFAULT,
+    ALTER COLUMN max_double DROP DEFAULT,
+    ALTER COLUMN last_double DROP DEFAULT,
+    ALTER COLUMN last_string DROP DEFAULT,
+    ALTER COLUMN last_bool DROP DEFAULT,
+    ALTER COLUMN n_rows DROP DEFAULT;
+
 --
 
 -- telemetry_5m :: VIEW
---
-
 CREATE OR REPLACE VIEW public.telemetry_5m WITH (security_invoker='true') AS
  SELECT bucket,
     asset_id,
@@ -6439,18 +12754,57 @@ CREATE OR REPLACE VIEW public.telemetry_5m WITH (security_invoker='true') AS
     n_rows
    FROM timescale.telemetry_5m t;
 
+
+ALTER VIEW public.telemetry_5m OWNER TO postgres;
+
 --
 
 -- VIEW telemetry_5m :: COMMENT
---
-
 COMMENT ON VIEW public.telemetry_5m IS 'Five-minute rollup, aggregated from telemetry_1m. See telemetry_1m.';
 
 --
 
--- telemetry_latest :: FOREIGN TABLE
+-- telemetry_horizons :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_horizons (
+    relation text NOT NULL,
+    oldest timestamp with time zone
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_horizons'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_horizons OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry_horizons
+    ADD COLUMN IF NOT EXISTS relation text NOT NULL,
+    ADD COLUMN IF NOT EXISTS oldest timestamp with time zone;
+
+ALTER TABLE timescale.telemetry_horizons
+    ALTER COLUMN relation DROP DEFAULT,
+    ALTER COLUMN oldest DROP DEFAULT;
+
 --
 
+-- telemetry_horizons :: VIEW
+CREATE OR REPLACE VIEW public.telemetry_horizons WITH (security_invoker='true') AS
+ SELECT relation,
+    oldest
+   FROM timescale.telemetry_horizons t;
+
+
+ALTER VIEW public.telemetry_horizons OWNER TO postgres;
+
+--
+
+-- VIEW telemetry_horizons :: COMMENT
+COMMENT ON VIEW public.telemetry_horizons IS 'Oldest timestamp held by each telemetry resolution: `telemetry` (raw) and the `telemetry_1m`, `telemetry_5m` and `telemetry_1h` rollups. Four rows, evaluated on the TimescaleDB side. What is HELD, not what the retention policy promises -- a young stack holds less than its policy allows, and a widened policy does not restore dropped chunks. A null `oldest` means that relation is empty. Read by the telemetry export dialog to say which resolutions still cover a chosen range.';
+
+--
+
+-- telemetry_latest :: FOREIGN TABLE
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_latest (
     "time" timestamp with time zone NOT NULL,
     asset_id text NOT NULL,
@@ -6465,11 +12819,28 @@ OPTIONS (
     table_name 'telemetry_latest'
 );
 
+
+ALTER FOREIGN TABLE timescale.telemetry_latest OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry_latest
+    ADD COLUMN IF NOT EXISTS "time" timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS asset_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS metric_name text NOT NULL,
+    ADD COLUMN IF NOT EXISTS val_double double precision,
+    ADD COLUMN IF NOT EXISTS val_string text,
+    ADD COLUMN IF NOT EXISTS val_bool boolean;
+
+ALTER TABLE timescale.telemetry_latest
+    ALTER COLUMN "time" DROP DEFAULT,
+    ALTER COLUMN asset_id DROP DEFAULT,
+    ALTER COLUMN metric_name DROP DEFAULT,
+    ALTER COLUMN val_double DROP DEFAULT,
+    ALTER COLUMN val_string DROP DEFAULT,
+    ALTER COLUMN val_bool DROP DEFAULT;
+
 --
 
 -- telemetry_latest :: VIEW
---
-
 CREATE OR REPLACE VIEW public.telemetry_latest WITH (security_invoker='true') AS
  SELECT "time",
     asset_id,
@@ -6479,35 +12850,41 @@ CREATE OR REPLACE VIEW public.telemetry_latest WITH (security_invoker='true') AS
     val_bool
    FROM timescale.telemetry_latest t;
 
+
+ALTER VIEW public.telemetry_latest OWNER TO postgres;
+
 --
 
 -- VIEW telemetry_latest :: COMMENT
---
-
 COMMENT ON VIEW public.telemetry_latest IS 'Newest sample per (asset_id, metric_name), evaluated on the TimescaleDB side so postgres_fdw ships one row per series instead of a time window. Filter with asset_id. This is what the dashboard''s latest-value routes read; public.telemetry remains the raw record for exports.';
 
 --
 
 -- user_roles :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.user_roles (
     user_id text NOT NULL,
     role_id integer NOT NULL
 );
 
+
+ALTER TABLE public.user_roles OWNER TO postgres;
+
+ALTER TABLE public.user_roles
+    ADD COLUMN IF NOT EXISTS user_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS role_id integer NOT NULL;
+
+ALTER TABLE public.user_roles
+    ALTER COLUMN user_id DROP DEFAULT,
+    ALTER COLUMN role_id DROP DEFAULT;
+
 --
 
 -- TABLE user_roles :: COMMENT
---
-
 COMMENT ON TABLE public.user_roles IS 'Role assignment per auth user. Includes three seeded machine principals that cannot sign in: b0000000-0000-4000-8000-000000000001, the read-only principal the MCP client authenticates as (0034); b0000000-0000-4000-8000-000000000002, Service_Ingestor, the identity the ingestion daemon authenticates as (0046); and b0000000-0000-4000-8000-000000000003, Service_Playback, the identity the playback worker authenticates as (0056). All three hold Operator and write nothing directly -- every write goes through a SECURITY DEFINER gate that checks which of them is calling.';
 
 --
 
 -- webhook_endpoints :: TABLE
---
-
 CREATE TABLE IF NOT EXISTS public.webhook_endpoints (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     event_key text NOT NULL,
@@ -6517,18 +12894,33 @@ CREATE TABLE IF NOT EXISTS public.webhook_endpoints (
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
+
+ALTER TABLE public.webhook_endpoints OWNER TO postgres;
+
+ALTER TABLE public.webhook_endpoints
+    ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
+    ADD COLUMN IF NOT EXISTS event_key text NOT NULL,
+    ADD COLUMN IF NOT EXISTS url text NOT NULL,
+    ADD COLUMN IF NOT EXISTS secret_name text,
+    ADD COLUMN IF NOT EXISTS is_enabled boolean DEFAULT true NOT NULL,
+    ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now() NOT NULL;
+
+ALTER TABLE public.webhook_endpoints
+    ALTER COLUMN id SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN event_key DROP DEFAULT,
+    ALTER COLUMN url DROP DEFAULT,
+    ALTER COLUMN secret_name DROP DEFAULT,
+    ALTER COLUMN is_enabled SET DEFAULT true,
+    ALTER COLUMN created_at SET DEFAULT now();
+
 --
 
 -- TABLE webhook_endpoints :: COMMENT
---
-
 COMMENT ON TABLE public.webhook_endpoints IS 'Outbound webhook targets. Managed by migration only -- there is deliberately no INSERT/UPDATE/DELETE RLS policy, so no API caller can point the database at a host of their choosing.';
 
 --
 
 -- telemetry_archive_manifest :: FOREIGN TABLE
---
-
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_archive_manifest (
     chunk_schema text,
     chunk_name text,
@@ -6551,2152 +12943,3014 @@ OPTIONS (
     table_name 'telemetry_archive_manifest'
 );
 
+
+ALTER FOREIGN TABLE timescale.telemetry_archive_manifest OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry_archive_manifest
+    ADD COLUMN IF NOT EXISTS chunk_schema text,
+    ADD COLUMN IF NOT EXISTS chunk_name text,
+    ADD COLUMN IF NOT EXISTS range_start timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS range_end timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS row_count bigint,
+    ADD COLUMN IF NOT EXISTS object_key text,
+    ADD COLUMN IF NOT EXISTS object_bytes bigint,
+    ADD COLUMN IF NOT EXISTS object_etag text,
+    ADD COLUMN IF NOT EXISTS format text,
+    ADD COLUMN IF NOT EXISTS claimed_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS exported_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS verified_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS dropped_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS last_error text;
+
+ALTER TABLE timescale.telemetry_archive_manifest
+    ALTER COLUMN chunk_schema DROP DEFAULT,
+    ALTER COLUMN chunk_name DROP DEFAULT,
+    ALTER COLUMN range_start DROP DEFAULT,
+    ALTER COLUMN range_end DROP DEFAULT,
+    ALTER COLUMN row_count DROP DEFAULT,
+    ALTER COLUMN object_key DROP DEFAULT,
+    ALTER COLUMN object_bytes DROP DEFAULT,
+    ALTER COLUMN object_etag DROP DEFAULT,
+    ALTER COLUMN format DROP DEFAULT,
+    ALTER COLUMN claimed_at DROP DEFAULT,
+    ALTER COLUMN exported_at DROP DEFAULT,
+    ALTER COLUMN verified_at DROP DEFAULT,
+    ALTER COLUMN dropped_at DROP DEFAULT,
+    ALTER COLUMN last_error DROP DEFAULT;
+
 --
 
 -- digital_thread id :: DEFAULT
---
-
-ALTER TABLE ONLY public.digital_thread ALTER COLUMN id SET DEFAULT nextval('public.digital_thread_id_seq'::regclass);
+ALTER TABLE public.digital_thread ALTER COLUMN id SET DEFAULT nextval('public.digital_thread_id_seq'::regclass);
 
 --
 
 -- roles id :: DEFAULT
+ALTER TABLE ONLY public.roles ALTER COLUMN id SET DEFAULT nextval('public.roles_id_seq'::regclass);
+
 --
 
-ALTER TABLE ONLY public.roles ALTER COLUMN id SET DEFAULT nextval('public.roles_id_seq'::regclass);
+-- areas areas_name_key :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'areas_name_key'
+                AND conrelid = 'public.areas'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+    ALTER TABLE public.areas DROP CONSTRAINT areas_name_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'areas_name_key'
+                    AND conrelid = 'public.areas'::regclass) THEN
+    ALTER TABLE ONLY public.areas
+        ADD CONSTRAINT areas_name_key UNIQUE (name);
+  END IF;
+END $c$;
+
+--
+
+-- areas areas_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'areas_pkey'
+                AND conrelid = 'public.areas'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.areas DROP CONSTRAINT areas_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'areas_pkey'
+                    AND conrelid = 'public.areas'::regclass) THEN
+    ALTER TABLE ONLY public.areas
+        ADD CONSTRAINT areas_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
 
 --
 
 -- ashrae223_vocabulary ashrae223_vocabulary_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'ashrae223_vocabulary_pkey'
+                AND conrelid = 'public.ashrae223_vocabulary'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (name)') THEN
+    ALTER TABLE public.ashrae223_vocabulary DROP CONSTRAINT ashrae223_vocabulary_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'ashrae223_vocabulary_pkey'
                     AND conrelid = 'public.ashrae223_vocabulary'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.ashrae223_vocabulary
         ADD CONSTRAINT ashrae223_vocabulary_pkey PRIMARY KEY (name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- asset_config asset_config_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'asset_config_pkey'
+                AND conrelid = 'public.asset_config'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.asset_config DROP CONSTRAINT asset_config_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'asset_config_pkey'
                     AND conrelid = 'public.asset_config'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.asset_config
         ADD CONSTRAINT asset_config_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- asset_exports asset_exports_object_unique :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'asset_exports_object_unique'
+                AND conrelid = 'public.asset_exports'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (object_bucket, object_key)') THEN
+    ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_object_unique;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'asset_exports_object_unique'
+                    AND conrelid = 'public.asset_exports'::regclass) THEN
+    ALTER TABLE ONLY public.asset_exports
+        ADD CONSTRAINT asset_exports_object_unique UNIQUE (object_bucket, object_key);
+  END IF;
+END $c$;
+
+--
+
+-- asset_exports asset_exports_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'asset_exports_pkey'
+                AND conrelid = 'public.asset_exports'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'asset_exports_pkey'
+                    AND conrelid = 'public.asset_exports'::regclass) THEN
+    ALTER TABLE ONLY public.asset_exports
+        ADD CONSTRAINT asset_exports_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
+
+--
+
+-- backup_jobs backup_jobs_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backup_jobs_pkey'
+                AND conrelid = 'public.backup_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backup_jobs_pkey'
+                    AND conrelid = 'public.backup_jobs'::regclass) THEN
+    ALTER TABLE ONLY public.backup_jobs
+        ADD CONSTRAINT backup_jobs_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
+
+--
+
+-- backups backups_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_pkey'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_pkey'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE ONLY public.backups
+        ADD CONSTRAINT backups_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
+
+--
+
+-- backups backups_stamp_key :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_stamp_key'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (stamp)') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_stamp_key;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_stamp_key'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE ONLY public.backups
+        ADD CONSTRAINT backups_stamp_key UNIQUE (stamp);
+  END IF;
+END $c$;
+
+--
 
 -- capture_jobs capture_jobs_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_pkey'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'capture_jobs_pkey'
                     AND conrelid = 'public.capture_jobs'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- captures captures_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_pkey'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'captures_pkey'
                     AND conrelid = 'public.captures'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- captures captures_storage_path_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_storage_path_key'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (storage_path)') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_storage_path_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'captures_storage_path_key'
                     AND conrelid = 'public.captures'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_storage_path_key UNIQUE (storage_path);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- cells cells_name_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_name_key'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_name_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'cells_name_key'
                     AND conrelid = 'public.cells'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.cells
         ADD CONSTRAINT cells_name_key UNIQUE (name);
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- cells cells_name_topic_safe :: CHECK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_name_topic_safe'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((name <> ''''::text) AND (name !~ ''[/+#]''::text))) NOT VALID') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_name_topic_safe;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'cells_name_topic_safe'
+                    AND conrelid = 'public.cells'::regclass) THEN
+    ALTER TABLE public.cells
+        ADD CONSTRAINT cells_name_topic_safe CHECK (((name <> ''::text) AND (name !~ '[/+#]'::text))) NOT VALID;
+  END IF;
+END $c$;
+
+--
 
 -- cells cells_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_pkey'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'cells_pkey'
                     AND conrelid = 'public.cells'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.cells
         ADD CONSTRAINT cells_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- change_proposals change_proposals_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'change_proposals_pkey'
+                AND conrelid = 'public.change_proposals'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'change_proposals_pkey'
+                    AND conrelid = 'public.change_proposals'::regclass) THEN
+    ALTER TABLE ONLY public.change_proposals
+        ADD CONSTRAINT change_proposals_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
+
+--
 
 -- device_nameplate device_nameplate_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_nameplate_pkey'
+                AND conrelid = 'public.device_nameplate'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (device_id)') THEN
+    ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'device_nameplate_pkey'
                     AND conrelid = 'public.device_nameplate'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.device_nameplate
         ADD CONSTRAINT device_nameplate_pkey PRIMARY KEY (device_id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- device_submodels device_submodels_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_submodels_pkey'
+                AND conrelid = 'public.device_submodels'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'device_submodels_pkey'
                     AND conrelid = 'public.device_submodels'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT device_submodels_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- devices devices_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_pkey'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'devices_pkey'
                     AND conrelid = 'public.devices'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- digital_thread digital_thread_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'digital_thread_pkey'
+                AND conrelid = 'public.digital_thread'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id, recorded_at)') THEN
+    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'digital_thread_pkey'
                     AND conrelid = 'public.digital_thread'::regclass) THEN
-    --
-    
-    ALTER TABLE ONLY public.digital_thread
-        ADD CONSTRAINT digital_thread_pkey PRIMARY KEY (id);
-    
-    --
+    ALTER TABLE public.digital_thread
+        ADD CONSTRAINT digital_thread_pkey PRIMARY KEY (id, recorded_at);
   END IF;
 END $c$;
+
+--
 
 -- directory_liveness_probe directory_liveness_probe_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'directory_liveness_probe_pkey'
+                AND conrelid = 'public.directory_liveness_probe'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.directory_liveness_probe DROP CONSTRAINT directory_liveness_probe_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'directory_liveness_probe_pkey'
                     AND conrelid = 'public.directory_liveness_probe'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.directory_liveness_probe
         ADD CONSTRAINT directory_liveness_probe_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- directory_services directory_services_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'directory_services_pkey'
+                AND conrelid = 'public.directory_services'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'directory_services_pkey'
                     AND conrelid = 'public.directory_services'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.directory_services
         ADD CONSTRAINT directory_services_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- directory_services directory_services_service_name_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'directory_services_service_name_key'
+                AND conrelid = 'public.directory_services'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (service_name)') THEN
+    ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_service_name_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'directory_services_service_name_key'
                     AND conrelid = 'public.directory_services'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.directory_services
         ADD CONSTRAINT directory_services_service_name_key UNIQUE (service_name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- gateway_enrollment_tokens gateway_enrollment_tokens_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateway_enrollment_tokens_pkey'
+                AND conrelid = 'public.gateway_enrollment_tokens'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'gateway_enrollment_tokens_pkey'
                     AND conrelid = 'public.gateway_enrollment_tokens'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.gateway_enrollment_tokens
         ADD CONSTRAINT gateway_enrollment_tokens_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- gateways gateways_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_pkey'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'gateways_pkey'
                     AND conrelid = 'public.gateways'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.gateways
         ADD CONSTRAINT gateways_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- idta_submodel_templates idta_submodel_templates_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'idta_submodel_templates_pkey'
+                AND conrelid = 'public.idta_submodel_templates'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (template_id, id_short)') THEN
+    ALTER TABLE public.idta_submodel_templates DROP CONSTRAINT idta_submodel_templates_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'idta_submodel_templates_pkey'
                     AND conrelid = 'public.idta_submodel_templates'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.idta_submodel_templates
         ADD CONSTRAINT idta_submodel_templates_pkey PRIMARY KEY (template_id, id_short);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- iso22400_vocabulary iso22400_vocabulary_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'iso22400_vocabulary_pkey'
+                AND conrelid = 'public.iso22400_vocabulary'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (name)') THEN
+    ALTER TABLE public.iso22400_vocabulary DROP CONSTRAINT iso22400_vocabulary_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'iso22400_vocabulary_pkey'
                     AND conrelid = 'public.iso22400_vocabulary'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.iso22400_vocabulary
         ADD CONSTRAINT iso22400_vocabulary_pkey PRIMARY KEY (name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- links links_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'links_pkey'
+                AND conrelid = 'public.links'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.links DROP CONSTRAINT links_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'links_pkey'
                     AND conrelid = 'public.links'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.links
         ADD CONSTRAINT links_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- machine_principals machine_principals_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'machine_principals_pkey'
+                AND conrelid = 'public.machine_principals'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (principal_id)') THEN
+    ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'machine_principals_pkey'
+                    AND conrelid = 'public.machine_principals'::regclass) THEN
+    ALTER TABLE ONLY public.machine_principals
+        ADD CONSTRAINT machine_principals_pkey PRIMARY KEY (principal_id);
+  END IF;
+END $c$;
+
+--
 
 -- metric_catalog metric_catalog_name_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_catalog_name_key'
+                AND conrelid = 'public.metric_catalog'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+    ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_name_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'metric_catalog_name_key'
                     AND conrelid = 'public.metric_catalog'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.metric_catalog
         ADD CONSTRAINT metric_catalog_name_key UNIQUE (name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- metric_catalog metric_catalog_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_catalog_pkey'
+                AND conrelid = 'public.metric_catalog'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'metric_catalog_pkey'
                     AND conrelid = 'public.metric_catalog'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.metric_catalog
         ADD CONSTRAINT metric_catalog_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- metric_groups metric_groups_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_groups_pkey'
+                AND conrelid = 'public.metric_groups'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.metric_groups DROP CONSTRAINT metric_groups_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'metric_groups_pkey'
                     AND conrelid = 'public.metric_groups'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.metric_groups
         ADD CONSTRAINT metric_groups_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- mtconnect_vocabulary mtconnect_vocabulary_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'mtconnect_vocabulary_pkey'
+                AND conrelid = 'public.mtconnect_vocabulary'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (kind, name)') THEN
+    ALTER TABLE public.mtconnect_vocabulary DROP CONSTRAINT mtconnect_vocabulary_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'mtconnect_vocabulary_pkey'
                     AND conrelid = 'public.mtconnect_vocabulary'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.mtconnect_vocabulary
         ADD CONSTRAINT mtconnect_vocabulary_pkey PRIMARY KEY (kind, name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- one_shot_migrations one_shot_migrations_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'one_shot_migrations_pkey'
+                AND conrelid = 'public.one_shot_migrations'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (key)') THEN
+    ALTER TABLE public.one_shot_migrations DROP CONSTRAINT one_shot_migrations_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'one_shot_migrations_pkey'
                     AND conrelid = 'public.one_shot_migrations'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.one_shot_migrations
         ADD CONSTRAINT one_shot_migrations_pkey PRIMARY KEY (key);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- opcua_vocabulary opcua_vocabulary_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'opcua_vocabulary_pkey'
+                AND conrelid = 'public.opcua_vocabulary'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (companion_spec, name)') THEN
+    ALTER TABLE public.opcua_vocabulary DROP CONSTRAINT opcua_vocabulary_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'opcua_vocabulary_pkey'
                     AND conrelid = 'public.opcua_vocabulary'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.opcua_vocabulary
         ADD CONSTRAINT opcua_vocabulary_pkey PRIMARY KEY (companion_spec, name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- permissions permissions_name_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'permissions_name_key'
+                AND conrelid = 'public.permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+    ALTER TABLE public.permissions DROP CONSTRAINT permissions_name_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'permissions_name_key'
                     AND conrelid = 'public.permissions'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.permissions
         ADD CONSTRAINT permissions_name_key UNIQUE (name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- permissions permissions_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'permissions_pkey'
+                AND conrelid = 'public.permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.permissions DROP CONSTRAINT permissions_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'permissions_pkey'
                     AND conrelid = 'public.permissions'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.permissions
         ADD CONSTRAINT permissions_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- platform_alerts platform_alerts_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'platform_alerts_pkey'
+                AND conrelid = 'public.platform_alerts'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'platform_alerts_pkey'
                     AND conrelid = 'public.platform_alerts'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.platform_alerts
         ADD CONSTRAINT platform_alerts_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- playback_jobs playback_jobs_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_jobs_pkey'
+                AND conrelid = 'public.playback_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'playback_jobs_pkey'
                     AND conrelid = 'public.playback_jobs'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.playback_jobs
         ADD CONSTRAINT playback_jobs_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- playback_worker_status playback_worker_status_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_worker_status_pkey'
+                AND conrelid = 'public.playback_worker_status'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.playback_worker_status DROP CONSTRAINT playback_worker_status_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'playback_worker_status_pkey'
                     AND conrelid = 'public.playback_worker_status'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.playback_worker_status
         ADD CONSTRAINT playback_worker_status_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- principal_permissions principal_permissions_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'principal_permissions_pkey'
+                AND conrelid = 'public.principal_permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (principal_id, permission_id)') THEN
+    ALTER TABLE public.principal_permissions DROP CONSTRAINT principal_permissions_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'principal_permissions_pkey'
+                    AND conrelid = 'public.principal_permissions'::regclass) THEN
+    ALTER TABLE ONLY public.principal_permissions
+        ADD CONSTRAINT principal_permissions_pkey PRIMARY KEY (principal_id, permission_id);
+  END IF;
+END $c$;
+
+--
 
 -- rebirth_requests rebirth_requests_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'rebirth_requests_pkey'
+                AND conrelid = 'public.rebirth_requests'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.rebirth_requests DROP CONSTRAINT rebirth_requests_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'rebirth_requests_pkey'
                     AND conrelid = 'public.rebirth_requests'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.rebirth_requests
         ADD CONSTRAINT rebirth_requests_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- retired_entities retired_entities_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'retired_entities_pkey'
+                AND conrelid = 'public.retired_entities'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (entity_type, entity_id)') THEN
+    ALTER TABLE public.retired_entities DROP CONSTRAINT retired_entities_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'retired_entities_pkey'
+                    AND conrelid = 'public.retired_entities'::regclass) THEN
+    ALTER TABLE ONLY public.retired_entities
+        ADD CONSTRAINT retired_entities_pkey PRIMARY KEY (entity_type, entity_id);
+  END IF;
+END $c$;
+
+--
+
+-- revoked_service_principals revoked_service_principals_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'revoked_service_principals_pkey'
+                AND conrelid = 'public.revoked_service_principals'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (principal_id)') THEN
+    ALTER TABLE public.revoked_service_principals DROP CONSTRAINT revoked_service_principals_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'revoked_service_principals_pkey'
+                    AND conrelid = 'public.revoked_service_principals'::regclass) THEN
+    ALTER TABLE ONLY public.revoked_service_principals
+        ADD CONSTRAINT revoked_service_principals_pkey PRIMARY KEY (principal_id);
+  END IF;
+END $c$;
+
+--
+
+-- revoked_service_tokens revoked_service_tokens_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'revoked_service_tokens_pkey'
+                AND conrelid = 'public.revoked_service_tokens'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (jti)') THEN
+    ALTER TABLE public.revoked_service_tokens DROP CONSTRAINT revoked_service_tokens_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'revoked_service_tokens_pkey'
+                    AND conrelid = 'public.revoked_service_tokens'::regclass) THEN
+    ALTER TABLE ONLY public.revoked_service_tokens
+        ADD CONSTRAINT revoked_service_tokens_pkey PRIMARY KEY (jti);
+  END IF;
+END $c$;
+
+--
 
 -- role_permissions role_permissions_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'role_permissions_pkey'
+                AND conrelid = 'public.role_permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (role_id, permission_id)') THEN
+    ALTER TABLE public.role_permissions DROP CONSTRAINT role_permissions_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'role_permissions_pkey'
                     AND conrelid = 'public.role_permissions'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.role_permissions
         ADD CONSTRAINT role_permissions_pkey PRIMARY KEY (role_id, permission_id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- roles roles_name_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'roles_name_key'
+                AND conrelid = 'public.roles'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+    ALTER TABLE public.roles DROP CONSTRAINT roles_name_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'roles_name_key'
                     AND conrelid = 'public.roles'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.roles
         ADD CONSTRAINT roles_name_key UNIQUE (name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- roles roles_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'roles_pkey'
+                AND conrelid = 'public.roles'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.roles DROP CONSTRAINT roles_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'roles_pkey'
                     AND conrelid = 'public.roles'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.roles
         ADD CONSTRAINT roles_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- schema_bootstrap schema_bootstrap_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schema_bootstrap_pkey'
+                AND conrelid = 'public.schema_bootstrap'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.schema_bootstrap DROP CONSTRAINT schema_bootstrap_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'schema_bootstrap_pkey'
                     AND conrelid = 'public.schema_bootstrap'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.schema_bootstrap
         ADD CONSTRAINT schema_bootstrap_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- schemas schemas_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_pkey'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'schemas_pkey'
                     AND conrelid = 'public.schemas'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.schemas
         ADD CONSTRAINT schemas_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- schemas schemas_schema_name_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_schema_name_key'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (schema_name)') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_schema_name_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'schemas_schema_name_key'
                     AND conrelid = 'public.schemas'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.schemas
         ADD CONSTRAINT schemas_schema_name_key UNIQUE (schema_name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- system_settings system_settings_key_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'system_settings_key_key'
+                AND conrelid = 'public.system_settings'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (key)') THEN
+    ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_key_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'system_settings_key_key'
                     AND conrelid = 'public.system_settings'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.system_settings
         ADD CONSTRAINT system_settings_key_key UNIQUE (key);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- system_settings system_settings_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'system_settings_pkey'
+                AND conrelid = 'public.system_settings'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'system_settings_pkey'
                     AND conrelid = 'public.system_settings'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.system_settings
         ADD CONSTRAINT system_settings_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- asset_config uq_asset_config_metric :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'uq_asset_config_metric'
+                AND conrelid = 'public.asset_config'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (asset_id, metric_name)') THEN
+    ALTER TABLE public.asset_config DROP CONSTRAINT uq_asset_config_metric;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'uq_asset_config_metric'
                     AND conrelid = 'public.asset_config'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.asset_config
         ADD CONSTRAINT uq_asset_config_metric UNIQUE (asset_id, metric_name);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- device_submodels uq_device_submodels :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'uq_device_submodels'
+                AND conrelid = 'public.device_submodels'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (device_id, schema_id)') THEN
+    ALTER TABLE public.device_submodels DROP CONSTRAINT uq_device_submodels;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'uq_device_submodels'
                     AND conrelid = 'public.device_submodels'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT uq_device_submodels UNIQUE (device_id, schema_id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- platform_alerts uq_platform_alerts_event :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'uq_platform_alerts_event'
+                AND conrelid = 'public.platform_alerts'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (fingerprint, starts_at)') THEN
+    ALTER TABLE public.platform_alerts DROP CONSTRAINT uq_platform_alerts_event;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'uq_platform_alerts_event'
                     AND conrelid = 'public.platform_alerts'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.platform_alerts
         ADD CONSTRAINT uq_platform_alerts_event UNIQUE (fingerprint, starts_at);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- user_roles user_roles_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'user_roles_pkey'
+                AND conrelid = 'public.user_roles'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (user_id, role_id)') THEN
+    ALTER TABLE public.user_roles DROP CONSTRAINT user_roles_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'user_roles_pkey'
                     AND conrelid = 'public.user_roles'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.user_roles
         ADD CONSTRAINT user_roles_pkey PRIMARY KEY (user_id, role_id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- webhook_endpoints webhook_endpoints_event_key_url_key :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'webhook_endpoints_event_key_url_key'
+                AND conrelid = 'public.webhook_endpoints'::regclass
+                AND pg_get_constraintdef(oid) <> 'UNIQUE (event_key, url)') THEN
+    ALTER TABLE public.webhook_endpoints DROP CONSTRAINT webhook_endpoints_event_key_url_key;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'webhook_endpoints_event_key_url_key'
                     AND conrelid = 'public.webhook_endpoints'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.webhook_endpoints
         ADD CONSTRAINT webhook_endpoints_event_key_url_key UNIQUE (event_key, url);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- webhook_endpoints webhook_endpoints_pkey :: CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'webhook_endpoints_pkey'
+                AND conrelid = 'public.webhook_endpoints'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.webhook_endpoints DROP CONSTRAINT webhook_endpoints_pkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'webhook_endpoints_pkey'
                     AND conrelid = 'public.webhook_endpoints'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.webhook_endpoints
         ADD CONSTRAINT webhook_endpoints_pkey PRIMARY KEY (id);
-    
-    --
   END IF;
 END $c$;
 
--- capture_jobs_single_flight :: INDEX
 --
 
+-- asset_exports_entity_idx :: INDEX
+CREATE INDEX IF NOT EXISTS asset_exports_entity_idx ON public.asset_exports USING btree (entity_id, taken_at DESC);
+
+--
+
+-- backup_jobs_finished_at_idx :: INDEX
+CREATE INDEX IF NOT EXISTS backup_jobs_finished_at_idx ON public.backup_jobs USING btree (finished_at DESC);
+
+--
+
+-- backup_jobs_single_flight :: INDEX
+CREATE UNIQUE INDEX IF NOT EXISTS backup_jobs_single_flight ON public.backup_jobs USING btree ((true)) WHERE (status = ANY (ARRAY['PENDING'::text, 'RUNNING'::text]));
+
+--
+
+-- backups_taken_at_idx :: INDEX
+CREATE INDEX IF NOT EXISTS backups_taken_at_idx ON public.backups USING btree (taken_at DESC);
+
+--
+
+-- capture_jobs_single_flight :: INDEX
 CREATE UNIQUE INDEX IF NOT EXISTS capture_jobs_single_flight ON public.capture_jobs USING btree ((true)) WHERE (status = ANY (ARRAY['PENDING'::text, 'RECORDING'::text]));
 
 --
 
 -- captures_one_per_device :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS captures_one_per_device ON public.captures USING btree (device_id) WHERE (subject_kind = 'device'::text);
 
 --
 
 -- captures_one_per_gateway :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS captures_one_per_gateway ON public.captures USING btree (gateway_id) WHERE (subject_kind = 'gateway'::text);
 
 --
 
--- gateway_enrollment_tokens_hash_key :: INDEX
+-- cells_area_id_idx :: INDEX
+CREATE INDEX IF NOT EXISTS cells_area_id_idx ON public.cells USING btree (area_id);
+
 --
 
+-- change_proposals_by_entity :: INDEX
+CREATE INDEX IF NOT EXISTS change_proposals_by_entity ON public.change_proposals USING btree (entity_type, entity_id);
+
+--
+
+-- change_proposals_one_open_per_asset_per_person :: INDEX
+CREATE UNIQUE INDEX IF NOT EXISTS change_proposals_one_open_per_asset_per_person ON public.change_proposals USING btree (entity_type, entity_id, proposed_by) WHERE (status = 'open'::text);
+
+--
+
+-- change_proposals_open_by_age :: INDEX
+CREATE INDEX IF NOT EXISTS change_proposals_open_by_age ON public.change_proposals USING btree (proposed_at) WHERE (status = 'open'::text);
+
+--
+
+-- idx_digital_thread_domain :: INDEX
+CREATE INDEX IF NOT EXISTS idx_digital_thread_domain ON public.digital_thread USING btree (audit_domain, recorded_at DESC);
+
+--
+
+-- idx_digital_thread_causation :: INDEX
+CREATE INDEX IF NOT EXISTS idx_digital_thread_causation ON public.digital_thread USING btree (causation_id) WHERE (causation_id IS NOT NULL);
+
+--
+
+-- idx_digital_thread_recorded_id :: INDEX
+CREATE INDEX IF NOT EXISTS idx_digital_thread_recorded_id ON public.digital_thread USING btree (recorded_at DESC, id DESC);
+
+--
+
+-- INDEX idx_digital_thread_recorded_id :: COMMENT
+COMMENT ON INDEX public.idx_digital_thread_recorded_id IS 'Serves digital_thread_page()''s keyset order. MUST match its ORDER BY (recorded_at DESC, id DESC) exactly -- a cursor walking one order against an index in another degrades to a full sort per page, which is invisible until the table is large.';
+
+--
+
+-- gateway_enrollment_tokens_hash_key :: INDEX
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_enrollment_tokens_hash_key ON public.gateway_enrollment_tokens USING btree (token_hash);
 
 --
 
 -- gateway_enrollment_tokens_one_live_per_gateway :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_enrollment_tokens_one_live_per_gateway ON public.gateway_enrollment_tokens USING btree (gateway_id) WHERE (consumed_at IS NULL);
 
 --
 
 -- idx_capture_jobs_created_at :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_capture_jobs_created_at ON public.capture_jobs USING btree (created_at DESC);
 
 --
 
 -- idx_device_submodels_device :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_device_submodels_device ON public.device_submodels USING btree (device_id);
 
 --
 
 -- idx_device_submodels_schema :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_device_submodels_schema ON public.device_submodels USING btree (schema_id);
 
 --
 
 -- idx_devices_cell_id :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_devices_cell_id ON public.devices USING btree (cell_id) WHERE (cell_id IS NOT NULL);
 
 --
 
 -- idx_devices_name :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_devices_name ON public.devices USING btree (name);
 
 --
 
 -- idx_devices_reported_identity :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_devices_reported_identity ON public.devices USING btree (reported_identity) WHERE (reported_identity IS NOT NULL);
 
 --
 
 -- idx_devices_sparkplug_id :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_sparkplug_id ON public.devices USING btree (sparkplug_id);
 
 --
 
--- idx_digital_thread_causation :: INDEX
---
-
-CREATE INDEX IF NOT EXISTS idx_digital_thread_causation ON public.digital_thread USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
---
-
--- idx_digital_thread_domain :: INDEX
---
-
-CREATE INDEX IF NOT EXISTS idx_digital_thread_domain ON public.digital_thread USING btree (audit_domain, recorded_at DESC);
-
---
-
 -- idx_gateways_group_sparkplug_id :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_gateways_group_sparkplug_id ON public.gateways USING btree (sparkplug_group, sparkplug_id);
 
 --
 
 -- idx_gateways_name :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_gateways_name ON public.gateways USING btree (name);
 
 --
 
 -- idx_gateways_sparkplug_id :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gateways_sparkplug_id ON public.gateways USING btree (sparkplug_id);
 
 --
 
 -- idx_links_entity :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_links_entity ON public.links USING btree (entity_type, entity_id);
 
 --
 
 -- idx_metric_catalog_group :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_metric_catalog_group ON public.metric_catalog USING btree (metric_group);
 
 --
 
 -- idx_metric_catalog_semantic_id :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_metric_catalog_semantic_id ON public.metric_catalog USING btree (semantic_id) WHERE (semantic_id IS NOT NULL);
 
 --
 
 -- idx_platform_alerts_entity :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_platform_alerts_entity ON public.platform_alerts USING btree (entity_type, entity_id);
 
 --
 
 -- idx_platform_alerts_sparkplug_started :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_platform_alerts_sparkplug_started ON public.platform_alerts USING btree (sparkplug_id, starts_at DESC);
 
 --
 
 -- idx_platform_alerts_status_started :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_platform_alerts_status_started ON public.platform_alerts USING btree (status, starts_at DESC);
 
 --
 
 -- idx_playback_jobs_created_at :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_playback_jobs_created_at ON public.playback_jobs USING btree (created_at DESC);
 
 --
 
 -- idx_rebirth_requests_requested_at :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_rebirth_requests_requested_at ON public.rebirth_requests USING btree (requested_at DESC);
 
 --
 
 -- idx_schemas_parent :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_schemas_parent ON public.schemas USING btree (parent_schema_id);
 
 --
 
 -- idx_schemas_status :: INDEX
---
-
 CREATE INDEX IF NOT EXISTS idx_schemas_status ON public.schemas USING btree (status);
 
 --
 
--- playback_jobs_one_per_target :: INDEX
+-- machine_principals_name_key :: INDEX
+CREATE UNIQUE INDEX IF NOT EXISTS machine_principals_name_key ON public.machine_principals USING btree (lower(btrim(name)));
+
 --
 
+-- playback_jobs_one_per_target :: INDEX
 CREATE UNIQUE INDEX IF NOT EXISTS playback_jobs_one_per_target ON public.playback_jobs USING btree (target_gateway_id) WHERE (status = ANY (ARRAY['PENDING'::text, 'RUNNING'::text]));
 
 --
 
 -- rebirth_requests_one_pending_per_gateway :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS rebirth_requests_one_pending_per_gateway ON public.rebirth_requests USING btree (gateway_id) WHERE (status = 'PENDING'::text);
 
 --
 
 -- uq_devices_shadow_per_gateway :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_shadow_per_gateway ON public.devices USING btree (gateway_id, shadow_of) WHERE (shadow_of IS NOT NULL);
 
 --
 
 -- uq_metric_groups_name_ci :: INDEX
---
-
 CREATE UNIQUE INDEX IF NOT EXISTS uq_metric_groups_name_ci ON public.metric_groups USING btree (lower(name));
 
 --
 
 -- uq_schemas_one_draft_per_parent :: INDEX
+CREATE UNIQUE INDEX IF NOT EXISTS uq_schemas_one_draft_per_parent ON public.schemas USING btree (parent_schema_id) WHERE (((status)::text = 'draft'::text) AND (parent_schema_id IS NOT NULL));
+
 --
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_schemas_one_draft_per_parent ON public.schemas USING btree (parent_schema_id) WHERE (((status)::text = 'draft'::text) AND (parent_schema_id IS NOT NULL));
+-- system_settings archive_destination_guard_trg :: TRIGGER
+DROP TRIGGER IF EXISTS archive_destination_guard_trg ON public.system_settings;
+CREATE TRIGGER archive_destination_guard_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.archive_destination_guard();
+
+--
+
+-- system_settings system_settings_read_only_trg :: TRIGGER
+DROP TRIGGER IF EXISTS system_settings_read_only_trg ON public.system_settings;
+CREATE TRIGGER system_settings_read_only_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_read_only_guard();
 
 --
 
 -- system_settings system_settings_stamp_trg :: TRIGGER
 DROP TRIGGER IF EXISTS system_settings_stamp_trg ON public.system_settings;
+CREATE TRIGGER system_settings_stamp_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_stamp();
+
 --
 
-CREATE TRIGGER system_settings_stamp_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_stamp();
+-- areas trg_areas_digital_thread :: TRIGGER
+DROP TRIGGER IF EXISTS trg_areas_digital_thread ON public.areas;
+CREATE TRIGGER trg_areas_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+
+--
+
+-- areas trg_areas_retired :: TRIGGER
+DROP TRIGGER IF EXISTS trg_areas_retired ON public.areas;
+CREATE TRIGGER trg_areas_retired AFTER DELETE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+
+--
+
+-- asset_exports trg_asset_exports_digital_thread :: TRIGGER
+DROP TRIGGER IF EXISTS trg_asset_exports_digital_thread ON public.asset_exports;
+CREATE TRIGGER trg_asset_exports_digital_thread AFTER INSERT ON public.asset_exports FOR EACH ROW EXECUTE FUNCTION public.log_asset_export();
 
 --
 
 -- cells trg_cells_digital_thread :: TRIGGER
 DROP TRIGGER IF EXISTS trg_cells_digital_thread ON public.cells;
+CREATE TRIGGER trg_cells_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+
 --
 
-CREATE TRIGGER trg_cells_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- cells trg_cells_place_in_area :: TRIGGER
+DROP TRIGGER IF EXISTS trg_cells_place_in_area ON public.cells;
+CREATE TRIGGER trg_cells_place_in_area BEFORE INSERT OR UPDATE OF area_id, plan_x, plan_y, is_archived ON public.cells FOR EACH ROW EXECUTE FUNCTION public.place_cell_in_its_area();
+
+--
+
+-- cells trg_cells_retired :: TRIGGER
+DROP TRIGGER IF EXISTS trg_cells_retired ON public.cells;
+CREATE TRIGGER trg_cells_retired AFTER DELETE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+
+--
+
+-- change_proposals trg_change_proposals_author :: TRIGGER
+DROP TRIGGER IF EXISTS trg_change_proposals_author ON public.change_proposals;
+CREATE TRIGGER trg_change_proposals_author BEFORE INSERT ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.stamp_proposal_author();
+
+--
+
+-- change_proposals trg_change_proposals_cap :: TRIGGER
+DROP TRIGGER IF EXISTS trg_change_proposals_cap ON public.change_proposals;
+CREATE TRIGGER trg_change_proposals_cap BEFORE INSERT ON public.change_proposals FOR EACH ROW WHEN ((new.status = 'open'::text)) EXECUTE FUNCTION public.enforce_open_proposal_cap();
+
+--
+
+-- change_proposals trg_change_proposals_transition :: TRIGGER
+DROP TRIGGER IF EXISTS trg_change_proposals_transition ON public.change_proposals;
+CREATE TRIGGER trg_change_proposals_transition BEFORE UPDATE ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.guard_change_proposal_transition();
+
+--
+
+-- change_proposals trg_change_proposals_validate :: TRIGGER
+DROP TRIGGER IF EXISTS trg_change_proposals_validate ON public.change_proposals;
+CREATE TRIGGER trg_change_proposals_validate BEFORE INSERT OR UPDATE OF patch, entity_type, entity_id ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.validate_change_proposal();
+
+--
+
+-- device_nameplate trg_device_nameplate_digital_thread :: TRIGGER
+DROP TRIGGER IF EXISTS trg_device_nameplate_digital_thread ON public.device_nameplate;
+CREATE TRIGGER trg_device_nameplate_digital_thread AFTER INSERT OR DELETE ON public.device_nameplate FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event('device_id');
+
+--
+
+-- device_nameplate trg_device_nameplate_digital_thread_update :: TRIGGER
+DROP TRIGGER IF EXISTS trg_device_nameplate_digital_thread_update ON public.device_nameplate;
+CREATE TRIGGER trg_device_nameplate_digital_thread_update AFTER UPDATE ON public.device_nameplate FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_digital_thread_event('device_id');
 
 --
 
 -- devices trg_device_quarantine_webhook_insert :: TRIGGER
 DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_insert ON public.devices;
---
-
 CREATE TRIGGER trg_device_quarantine_webhook_insert AFTER INSERT ON public.devices FOR EACH ROW WHEN ((new.is_quarantined IS TRUE)) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
 
 --
 
 -- devices trg_device_quarantine_webhook_update :: TRIGGER
 DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_update ON public.devices;
+CREATE TRIGGER trg_device_quarantine_webhook_update AFTER UPDATE OF is_quarantined ON public.devices FOR EACH ROW WHEN (((new.is_quarantined IS TRUE) AND (old.is_quarantined IS DISTINCT FROM true))) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
+
 --
 
-CREATE TRIGGER trg_device_quarantine_webhook_update AFTER UPDATE OF is_quarantined ON public.devices FOR EACH ROW WHEN (((new.is_quarantined IS TRUE) AND (old.is_quarantined IS DISTINCT FROM true))) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
+-- device_submodels trg_device_submodels_reject_archived_schema :: TRIGGER
+DROP TRIGGER IF EXISTS trg_device_submodels_reject_archived_schema ON public.device_submodels;
+CREATE TRIGGER trg_device_submodels_reject_archived_schema BEFORE INSERT OR UPDATE OF schema_id ON public.device_submodels FOR EACH ROW EXECUTE FUNCTION public.reject_archived_schema_assignment();
 
 --
 
 -- devices trg_devices_digital_thread :: TRIGGER
 DROP TRIGGER IF EXISTS trg_devices_digital_thread ON public.devices;
+CREATE TRIGGER trg_devices_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+
 --
 
-CREATE TRIGGER trg_devices_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- devices trg_devices_reject_archived_schema :: TRIGGER
+DROP TRIGGER IF EXISTS trg_devices_reject_archived_schema ON public.devices;
+CREATE TRIGGER trg_devices_reject_archived_schema BEFORE INSERT OR UPDATE OF schema_id ON public.devices FOR EACH ROW EXECUTE FUNCTION public.reject_archived_schema_assignment();
+
+--
+
+-- devices trg_devices_replay_lane_is_minted :: TRIGGER
+DROP TRIGGER IF EXISTS trg_devices_replay_lane_is_minted ON public.devices;
+CREATE TRIGGER trg_devices_replay_lane_is_minted BEFORE INSERT OR UPDATE OF gateway_id ON public.devices FOR EACH ROW EXECUTE FUNCTION public.refuse_hand_assigning_a_replay_lane();
+
+--
+
+-- devices trg_devices_retired :: TRIGGER
+DROP TRIGGER IF EXISTS trg_devices_retired ON public.devices;
+CREATE TRIGGER trg_devices_retired AFTER DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+
+--
+
+-- devices trg_devices_shadow_follows_archive :: TRIGGER
+DROP TRIGGER IF EXISTS trg_devices_shadow_follows_archive ON public.devices;
+CREATE TRIGGER trg_devices_shadow_follows_archive AFTER UPDATE OF is_archived ON public.devices FOR EACH ROW EXECUTE FUNCTION public.shadow_follows_its_original();
+
+--
+
+-- devices trg_devices_shadow_follows_delete :: TRIGGER
+DROP TRIGGER IF EXISTS trg_devices_shadow_follows_delete ON public.devices;
+CREATE TRIGGER trg_devices_shadow_follows_delete BEFORE DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.shadow_follows_its_original();
 
 --
 
 -- digital_thread trg_digital_thread_append_only :: TRIGGER
 DROP TRIGGER IF EXISTS trg_digital_thread_append_only ON public.digital_thread;
---
-
 CREATE TRIGGER trg_digital_thread_append_only BEFORE DELETE OR UPDATE ON public.digital_thread FOR EACH ROW EXECUTE FUNCTION public.enforce_digital_thread_append_only();
 
 --
 
 -- digital_thread trg_digital_thread_stamp_domain :: TRIGGER
 DROP TRIGGER IF EXISTS trg_digital_thread_stamp_domain ON public.digital_thread;
---
-
 CREATE TRIGGER trg_digital_thread_stamp_domain BEFORE INSERT ON public.digital_thread FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
 
 --
 
 -- schemas trg_enforce_schema_version_provenance :: TRIGGER
 DROP TRIGGER IF EXISTS trg_enforce_schema_version_provenance ON public.schemas;
---
-
 CREATE TRIGGER trg_enforce_schema_version_provenance BEFORE INSERT ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.enforce_schema_version_provenance();
 
 --
 
 -- gateways trg_gateways_clear_credential_revoked :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_clear_credential_revoked ON public.gateways;
---
-
 CREATE TRIGGER trg_gateways_clear_credential_revoked BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.clear_credential_revoked_on_enrolment();
 
 --
 
 -- gateways trg_gateways_digital_thread :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_digital_thread ON public.gateways;
+CREATE TRIGGER trg_gateways_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+
 --
 
-CREATE TRIGGER trg_gateways_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- gateways trg_gateways_forge_follows_archive :: TRIGGER
+DROP TRIGGER IF EXISTS trg_gateways_forge_follows_archive ON public.gateways;
+CREATE TRIGGER trg_gateways_forge_follows_archive AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.sweep_forge_on_archive_change();
 
 --
 
 -- gateways trg_gateways_keep_a_playback_target :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_keep_a_playback_target ON public.gateways;
+CREATE TRIGGER trg_gateways_keep_a_playback_target BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.refuse_archiving_the_last_shadow_gateway();
+
 --
 
-CREATE TRIGGER trg_gateways_keep_a_playback_target BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.refuse_archiving_the_last_shadow_gateway();
+-- gateways trg_gateways_retired :: TRIGGER
+DROP TRIGGER IF EXISTS trg_gateways_retired ON public.gateways;
+CREATE TRIGGER trg_gateways_retired AFTER DELETE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
 
 --
 
 -- gateways trg_gateways_revoke_credential_delete :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_revoke_credential_delete ON public.gateways;
---
-
 CREATE TRIGGER trg_gateways_revoke_credential_delete BEFORE DELETE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.revoke_credential_on_decommission();
 
 --
 
 -- gateways trg_gateways_revoke_credential_update :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_revoke_credential_update ON public.gateways;
---
-
 CREATE TRIGGER trg_gateways_revoke_credential_update AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.revoke_credential_on_decommission();
-
---
-
--- gateways trg_gateways_sync_deployment :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_sync_deployment ON public.gateways;
---
-
-CREATE TRIGGER trg_gateways_sync_deployment BEFORE INSERT OR UPDATE OF deployment, is_virtual ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.sync_gateway_deployment();
 
 --
 
 -- gateways trg_gateways_withdraw_enrolment :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_withdraw_enrolment ON public.gateways;
---
-
 CREATE TRIGGER trg_gateways_withdraw_enrolment AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.withdraw_gateway_enrollment_tokens();
 
 --
 
 -- metric_catalog trg_metric_catalog_immutability :: TRIGGER
 DROP TRIGGER IF EXISTS trg_metric_catalog_immutability ON public.metric_catalog;
---
-
 CREATE TRIGGER trg_metric_catalog_immutability BEFORE UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_metric_catalog_immutability();
 
 --
 
 -- metric_catalog trg_metric_group_spelling :: TRIGGER
 DROP TRIGGER IF EXISTS trg_metric_group_spelling ON public.metric_catalog;
---
-
 CREATE TRIGGER trg_metric_group_spelling BEFORE INSERT ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_metric_group_spelling();
 
 --
 
 -- playback_jobs trg_playback_target_must_be_shadow :: TRIGGER
 DROP TRIGGER IF EXISTS trg_playback_target_must_be_shadow ON public.playback_jobs;
---
-
 CREATE TRIGGER trg_playback_target_must_be_shadow BEFORE INSERT ON public.playback_jobs FOR EACH ROW EXECUTE FUNCTION public.playback_target_must_be_shadow();
 
 --
 
 -- schemas trg_prevent_active_schema_mutation :: TRIGGER
 DROP TRIGGER IF EXISTS trg_prevent_active_schema_mutation ON public.schemas;
---
-
 CREATE TRIGGER trg_prevent_active_schema_mutation BEFORE UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.prevent_active_schema_mutation();
 
 --
 
 -- schemas trg_schemas_digital_thread :: TRIGGER
 DROP TRIGGER IF EXISTS trg_schemas_digital_thread ON public.schemas;
---
-
 CREATE TRIGGER trg_schemas_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
 
 --
 
 -- system_settings trg_system_settings_digital_thread :: TRIGGER
 DROP TRIGGER IF EXISTS trg_system_settings_digital_thread ON public.system_settings;
---
-
 CREATE TRIGGER trg_system_settings_digital_thread AFTER INSERT OR DELETE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
 
 --
 
 -- system_settings trg_system_settings_digital_thread_update :: TRIGGER
 DROP TRIGGER IF EXISTS trg_system_settings_digital_thread_update ON public.system_settings;
---
-
 CREATE TRIGGER trg_system_settings_digital_thread_update AFTER UPDATE ON public.system_settings FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_digital_thread_event();
 
 --
 
 -- user_roles trg_user_roles_digital_thread :: TRIGGER
 DROP TRIGGER IF EXISTS trg_user_roles_digital_thread ON public.user_roles;
+CREATE TRIGGER trg_user_roles_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.log_role_assignment();
+
 --
 
-CREATE TRIGGER trg_user_roles_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.log_role_assignment();
+-- user_roles trg_user_roles_refuse_machine_principal :: TRIGGER
+DROP TRIGGER IF EXISTS trg_user_roles_refuse_machine_principal ON public.user_roles;
+CREATE TRIGGER trg_user_roles_refuse_machine_principal BEFORE INSERT OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.refuse_role_for_machine_principal();
+
+--
+
+-- backup_jobs backup_jobs_requested_by_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backup_jobs_requested_by_fkey'
+                AND conrelid = 'public.backup_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_requested_by_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backup_jobs_requested_by_fkey'
+                    AND conrelid = 'public.backup_jobs'::regclass) THEN
+    ALTER TABLE ONLY public.backup_jobs
+        ADD CONSTRAINT backup_jobs_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+END $c$;
+
+--
+
+-- backups backups_job_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_job_id_fkey'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (job_id) REFERENCES public.backup_jobs(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_job_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_job_id_fkey'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE ONLY public.backups
+        ADD CONSTRAINT backups_job_id_fkey FOREIGN KEY (job_id) REFERENCES public.backup_jobs(id) ON DELETE SET NULL;
+  END IF;
+END $c$;
+
+--
+
+-- backups backups_released_by_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_released_by_fkey'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (released_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_released_by_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_released_by_fkey'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE ONLY public.backups
+        ADD CONSTRAINT backups_released_by_fkey FOREIGN KEY (released_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+END $c$;
+
+--
+
+-- backups backups_requested_by_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_requested_by_fkey'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_requested_by_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_requested_by_fkey'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE ONLY public.backups
+        ADD CONSTRAINT backups_requested_by_fkey FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+END $c$;
 
 --
 
 -- capture_jobs capture_jobs_capture_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_capture_id_fkey'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_capture_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'capture_jobs_capture_id_fkey'
                     AND conrelid = 'public.capture_jobs'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_capture_id_fkey FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- capture_jobs capture_jobs_device_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_device_id_fkey'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_device_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'capture_jobs_device_id_fkey'
                     AND conrelid = 'public.capture_jobs'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- capture_jobs capture_jobs_gateway_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'capture_jobs_gateway_id_fkey'
+                AND conrelid = 'public.capture_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_gateway_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'capture_jobs_gateway_id_fkey'
                     AND conrelid = 'public.capture_jobs'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.capture_jobs
         ADD CONSTRAINT capture_jobs_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- captures captures_device_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_device_id_fkey'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_device_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'captures_device_id_fkey'
                     AND conrelid = 'public.captures'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- captures captures_gateway_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'captures_gateway_id_fkey'
+                AND conrelid = 'public.captures'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.captures DROP CONSTRAINT captures_gateway_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'captures_gateway_id_fkey'
                     AND conrelid = 'public.captures'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.captures
         ADD CONSTRAINT captures_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- cells cells_area_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'cells_area_id_fkey'
+                AND conrelid = 'public.cells'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.cells DROP CONSTRAINT cells_area_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'cells_area_id_fkey'
+                    AND conrelid = 'public.cells'::regclass) THEN
+    ALTER TABLE ONLY public.cells
+        ADD CONSTRAINT cells_area_id_fkey FOREIGN KEY (area_id) REFERENCES public.areas(id) ON DELETE SET NULL;
+  END IF;
+END $c$;
+
+--
 
 -- device_nameplate device_nameplate_device_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_nameplate_device_id_fkey'
+                AND conrelid = 'public.device_nameplate'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_device_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'device_nameplate_device_id_fkey'
                     AND conrelid = 'public.device_nameplate'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.device_nameplate
         ADD CONSTRAINT device_nameplate_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- device_submodels device_submodels_device_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_submodels_device_id_fkey'
+                AND conrelid = 'public.device_submodels'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_device_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'device_submodels_device_id_fkey'
                     AND conrelid = 'public.device_submodels'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT device_submodels_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- device_submodels device_submodels_schema_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'device_submodels_schema_id_fkey'
+                AND conrelid = 'public.device_submodels'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_schema_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'device_submodels_schema_id_fkey'
                     AND conrelid = 'public.device_submodels'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.device_submodels
         ADD CONSTRAINT device_submodels_schema_id_fkey FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- devices devices_area_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_area_id_fkey'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id)') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_area_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'devices_area_id_fkey'
+                    AND conrelid = 'public.devices'::regclass) THEN
+    ALTER TABLE ONLY public.devices
+        ADD CONSTRAINT devices_area_id_fkey FOREIGN KEY (area_id) REFERENCES public.areas(id);
+  END IF;
+END $c$;
+
+--
 
 -- devices devices_cell_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_cell_id_fkey'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_cell_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'devices_cell_id_fkey'
                     AND conrelid = 'public.devices'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- devices devices_gateway_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_gateway_id_fkey'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_gateway_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'devices_gateway_id_fkey'
                     AND conrelid = 'public.devices'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- devices devices_schema_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_schema_id_fkey'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_schema_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'devices_schema_id_fkey'
                     AND conrelid = 'public.devices'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_schema_id_fkey FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- devices devices_shadow_of_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'devices_shadow_of_fkey'
+                AND conrelid = 'public.devices'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (shadow_of) REFERENCES public.devices(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.devices DROP CONSTRAINT devices_shadow_of_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'devices_shadow_of_fkey'
                     AND conrelid = 'public.devices'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_shadow_of_fkey FOREIGN KEY (shadow_of) REFERENCES public.devices(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- digital_thread digital_thread_changed_by_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'digital_thread_changed_by_fkey'
+                AND conrelid = 'public.digital_thread'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (changed_by) REFERENCES auth.users(id)') THEN
+    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_changed_by_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'digital_thread_changed_by_fkey'
                     AND conrelid = 'public.digital_thread'::regclass) THEN
-    --
-    
-    ALTER TABLE ONLY public.digital_thread
+    ALTER TABLE public.digital_thread
         ADD CONSTRAINT digital_thread_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES auth.users(id);
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- directory_services directory_services_registered_schema_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'directory_services_registered_schema_id_fkey'
+                AND conrelid = 'public.directory_services'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (registered_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_registered_schema_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'directory_services_registered_schema_id_fkey'
                     AND conrelid = 'public.directory_services'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.directory_services
         ADD CONSTRAINT directory_services_registered_schema_id_fkey FOREIGN KEY (registered_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- gateway_enrollment_tokens gateway_enrollment_tokens_gateway_fk :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateway_enrollment_tokens_gateway_fk'
+                AND conrelid = 'public.gateway_enrollment_tokens'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_gateway_fk;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'gateway_enrollment_tokens_gateway_fk'
                     AND conrelid = 'public.gateway_enrollment_tokens'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.gateway_enrollment_tokens
         ADD CONSTRAINT gateway_enrollment_tokens_gateway_fk FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- gateways gateways_area_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_area_id_fkey'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id)') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_area_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_area_id_fkey'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE ONLY public.gateways
+        ADD CONSTRAINT gateways_area_id_fkey FOREIGN KEY (area_id) REFERENCES public.areas(id);
+  END IF;
+END $c$;
+
+--
 
 -- gateways gateways_cell_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_cell_id_fkey'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_cell_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'gateways_cell_id_fkey'
                     AND conrelid = 'public.gateways'::regclass) THEN
-    --
-    
-    -- SET NULL, as every other child of `cells` is: deleting a cell un-files what was in it.
-    -- 0112 carries the same change to a database that already holds the CASCADE this shipped with.
     ALTER TABLE ONLY public.gateways
         ADD CONSTRAINT gateways_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- machine_principals machine_principals_created_by_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'machine_principals_created_by_fkey'
+                AND conrelid = 'public.machine_principals'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_created_by_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'machine_principals_created_by_fkey'
+                    AND conrelid = 'public.machine_principals'::regclass) THEN
+    ALTER TABLE ONLY public.machine_principals
+        ADD CONSTRAINT machine_principals_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
+END $c$;
+
+--
+
+-- machine_principals machine_principals_principal_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'machine_principals_principal_id_fkey'
+                AND conrelid = 'public.machine_principals'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_principal_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'machine_principals_principal_id_fkey'
+                    AND conrelid = 'public.machine_principals'::regclass) THEN
+    ALTER TABLE ONLY public.machine_principals
+        ADD CONSTRAINT machine_principals_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+END $c$;
+
+--
 
 -- metric_catalog metric_catalog_superseded_by_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'metric_catalog_superseded_by_fkey'
+                AND conrelid = 'public.metric_catalog'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (superseded_by) REFERENCES public.metric_catalog(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_superseded_by_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'metric_catalog_superseded_by_fkey'
                     AND conrelid = 'public.metric_catalog'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.metric_catalog
         ADD CONSTRAINT metric_catalog_superseded_by_fkey FOREIGN KEY (superseded_by) REFERENCES public.metric_catalog(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- playback_jobs playback_jobs_capture_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_jobs_capture_id_fkey'
+                AND conrelid = 'public.playback_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_capture_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'playback_jobs_capture_id_fkey'
                     AND conrelid = 'public.playback_jobs'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.playback_jobs
         ADD CONSTRAINT playback_jobs_capture_id_fkey FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- playback_jobs playback_jobs_target_gateway_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'playback_jobs_target_gateway_id_fkey'
+                AND conrelid = 'public.playback_jobs'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (target_gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_target_gateway_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'playback_jobs_target_gateway_id_fkey'
                     AND conrelid = 'public.playback_jobs'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.playback_jobs
         ADD CONSTRAINT playback_jobs_target_gateway_id_fkey FOREIGN KEY (target_gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
+
+-- principal_permissions principal_permissions_permission_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'principal_permissions_permission_id_fkey'
+                AND conrelid = 'public.principal_permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE RESTRICT') THEN
+    ALTER TABLE public.principal_permissions DROP CONSTRAINT principal_permissions_permission_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'principal_permissions_permission_id_fkey'
+                    AND conrelid = 'public.principal_permissions'::regclass) THEN
+    ALTER TABLE ONLY public.principal_permissions
+        ADD CONSTRAINT principal_permissions_permission_id_fkey FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE RESTRICT;
+  END IF;
+END $c$;
+
+--
+
+-- principal_permissions principal_permissions_principal_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'principal_permissions_principal_id_fkey'
+                AND conrelid = 'public.principal_permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.principal_permissions DROP CONSTRAINT principal_permissions_principal_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'principal_permissions_principal_id_fkey'
+                    AND conrelid = 'public.principal_permissions'::regclass) THEN
+    ALTER TABLE ONLY public.principal_permissions
+        ADD CONSTRAINT principal_permissions_principal_id_fkey FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+END $c$;
+
+--
 
 -- rebirth_requests rebirth_requests_gateway_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'rebirth_requests_gateway_id_fkey'
+                AND conrelid = 'public.rebirth_requests'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.rebirth_requests DROP CONSTRAINT rebirth_requests_gateway_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'rebirth_requests_gateway_id_fkey'
                     AND conrelid = 'public.rebirth_requests'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.rebirth_requests
         ADD CONSTRAINT rebirth_requests_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- role_permissions role_permissions_permission_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'role_permissions_permission_id_fkey'
+                AND conrelid = 'public.role_permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.role_permissions DROP CONSTRAINT role_permissions_permission_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'role_permissions_permission_id_fkey'
                     AND conrelid = 'public.role_permissions'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.role_permissions
         ADD CONSTRAINT role_permissions_permission_id_fkey FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- role_permissions role_permissions_role_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'role_permissions_role_id_fkey'
+                AND conrelid = 'public.role_permissions'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.role_permissions DROP CONSTRAINT role_permissions_role_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'role_permissions_role_id_fkey'
                     AND conrelid = 'public.role_permissions'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.role_permissions
         ADD CONSTRAINT role_permissions_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- schemas schemas_parent_schema_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'schemas_parent_schema_id_fkey'
+                AND conrelid = 'public.schemas'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (parent_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
+    ALTER TABLE public.schemas DROP CONSTRAINT schemas_parent_schema_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'schemas_parent_schema_id_fkey'
                     AND conrelid = 'public.schemas'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.schemas
         ADD CONSTRAINT schemas_parent_schema_id_fkey FOREIGN KEY (parent_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL;
-    
-    --
   END IF;
 END $c$;
+
+--
 
 -- user_roles user_roles_role_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'user_roles_role_id_fkey'
+                AND conrelid = 'public.user_roles'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.user_roles DROP CONSTRAINT user_roles_role_id_fkey;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'user_roles_role_id_fkey'
                     AND conrelid = 'public.user_roles'::regclass) THEN
-    --
-    
     ALTER TABLE ONLY public.user_roles
         ADD CONSTRAINT user_roles_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
-    
-    --
   END IF;
 END $c$;
 
--- ashrae223_vocabulary :: ROW SECURITY
 --
 
+-- areas :: ROW SECURITY
+ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- areas areas_delete_privileged :: POLICY
+DROP POLICY IF EXISTS areas_delete_privileged ON public.areas;
+CREATE POLICY areas_delete_privileged ON public.areas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+
+--
+
+-- areas areas_insert_privileged :: POLICY
+DROP POLICY IF EXISTS areas_insert_privileged ON public.areas;
+CREATE POLICY areas_insert_privileged ON public.areas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+
+--
+
+-- areas areas_select_authenticated :: POLICY
+DROP POLICY IF EXISTS areas_select_authenticated ON public.areas;
+CREATE POLICY areas_select_authenticated ON public.areas FOR SELECT TO authenticated USING (true);
+
+--
+
+-- areas areas_update_privileged :: POLICY
+DROP POLICY IF EXISTS areas_update_privileged ON public.areas;
+CREATE POLICY areas_update_privileged ON public.areas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+
+--
+
+-- ashrae223_vocabulary :: ROW SECURITY
 ALTER TABLE public.ashrae223_vocabulary ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- ashrae223_vocabulary ashrae223_vocabulary_select_authenticated :: POLICY
 DROP POLICY IF EXISTS ashrae223_vocabulary_select_authenticated ON public.ashrae223_vocabulary;
---
-
 CREATE POLICY ashrae223_vocabulary_select_authenticated ON public.ashrae223_vocabulary FOR SELECT TO authenticated USING (true);
 
 --
 
 -- asset_config :: ROW SECURITY
---
-
 ALTER TABLE public.asset_config ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- asset_config asset_config_delete_privileged :: POLICY
 DROP POLICY IF EXISTS asset_config_delete_privileged ON public.asset_config;
---
-
 CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- asset_config asset_config_insert_privileged :: POLICY
 DROP POLICY IF EXISTS asset_config_insert_privileged ON public.asset_config;
---
-
 CREATE POLICY asset_config_insert_privileged ON public.asset_config FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- asset_config asset_config_select_authenticated :: POLICY
 DROP POLICY IF EXISTS asset_config_select_authenticated ON public.asset_config;
---
-
 CREATE POLICY asset_config_select_authenticated ON public.asset_config FOR SELECT TO authenticated USING (true);
 
 --
 
 -- asset_config asset_config_update_privileged :: POLICY
 DROP POLICY IF EXISTS asset_config_update_privileged ON public.asset_config;
---
-
 CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
--- capture_jobs :: ROW SECURITY
+-- asset_exports :: ROW SECURITY
+ALTER TABLE public.asset_exports ENABLE ROW LEVEL SECURITY;
+
 --
 
+-- asset_exports asset_exports_select_privileged :: POLICY
+DROP POLICY IF EXISTS asset_exports_select_privileged ON public.asset_exports;
+CREATE POLICY asset_exports_select_privileged ON public.asset_exports FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+
+--
+
+-- backup_jobs :: ROW SECURITY
+ALTER TABLE public.backup_jobs ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- backup_jobs backup_jobs_select_administrator :: POLICY
+DROP POLICY IF EXISTS backup_jobs_select_administrator ON public.backup_jobs;
+CREATE POLICY backup_jobs_select_administrator ON public.backup_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+
+--
+
+-- backups :: ROW SECURITY
+ALTER TABLE public.backups ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- backups backups_select_administrator :: POLICY
+DROP POLICY IF EXISTS backups_select_administrator ON public.backups;
+CREATE POLICY backups_select_administrator ON public.backups FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+
+--
+
+-- capture_jobs :: ROW SECURITY
 ALTER TABLE public.capture_jobs ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- capture_jobs capture_jobs_select_privileged :: POLICY
 DROP POLICY IF EXISTS capture_jobs_select_privileged ON public.capture_jobs;
---
-
 CREATE POLICY capture_jobs_select_privileged ON public.capture_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
 --
 
 -- captures :: ROW SECURITY
---
-
 ALTER TABLE public.captures ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- captures captures_delete_privileged :: POLICY
 DROP POLICY IF EXISTS captures_delete_privileged ON public.captures;
---
-
 CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- captures captures_select_privileged :: POLICY
 DROP POLICY IF EXISTS captures_select_privileged ON public.captures;
---
-
 CREATE POLICY captures_select_privileged ON public.captures FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
 --
 
 -- cells :: ROW SECURITY
---
-
 ALTER TABLE public.cells ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- cells cells_delete_privileged :: POLICY
 DROP POLICY IF EXISTS cells_delete_privileged ON public.cells;
---
-
 CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- cells cells_insert_privileged :: POLICY
 DROP POLICY IF EXISTS cells_insert_privileged ON public.cells;
---
-
 CREATE POLICY cells_insert_privileged ON public.cells FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- cells cells_select_authenticated :: POLICY
 DROP POLICY IF EXISTS cells_select_authenticated ON public.cells;
---
-
 CREATE POLICY cells_select_authenticated ON public.cells FOR SELECT TO authenticated USING (true);
 
 --
 
 -- cells cells_update_privileged :: POLICY
 DROP POLICY IF EXISTS cells_update_privileged ON public.cells;
---
-
 CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
--- device_nameplate :: ROW SECURITY
+-- change_proposals :: ROW SECURITY
+ALTER TABLE public.change_proposals ENABLE ROW LEVEL SECURITY;
+
 --
 
+-- change_proposals change_proposals_insert_proposer :: POLICY
+DROP POLICY IF EXISTS change_proposals_insert_proposer ON public.change_proposals;
+CREATE POLICY change_proposals_insert_proposer ON public.change_proposals FOR INSERT TO authenticated WITH CHECK ((public.has_authority(ARRAY['proposal:create'::text]) AND (proposed_by = auth.uid()) AND (status = 'open'::text)));
+
+--
+
+-- change_proposals change_proposals_select_own_or_approver :: POLICY
+DROP POLICY IF EXISTS change_proposals_select_own_or_approver ON public.change_proposals;
+CREATE POLICY change_proposals_select_own_or_approver ON public.change_proposals FOR SELECT TO authenticated USING (((proposed_by = auth.uid()) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
+
+--
+
+-- change_proposals change_proposals_update_own_open :: POLICY
+DROP POLICY IF EXISTS change_proposals_update_own_open ON public.change_proposals;
+CREATE POLICY change_proposals_update_own_open ON public.change_proposals FOR UPDATE TO authenticated USING (((proposed_by = auth.uid()) AND (status = 'open'::text))) WITH CHECK ((proposed_by = auth.uid()));
+
+--
+
+-- device_nameplate :: ROW SECURITY
 ALTER TABLE public.device_nameplate ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- device_nameplate device_nameplate_delete_privileged :: POLICY
 DROP POLICY IF EXISTS device_nameplate_delete_privileged ON public.device_nameplate;
---
-
 CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- device_nameplate device_nameplate_insert_privileged :: POLICY
 DROP POLICY IF EXISTS device_nameplate_insert_privileged ON public.device_nameplate;
---
-
 CREATE POLICY device_nameplate_insert_privileged ON public.device_nameplate FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- device_nameplate device_nameplate_select_authenticated :: POLICY
 DROP POLICY IF EXISTS device_nameplate_select_authenticated ON public.device_nameplate;
---
-
 CREATE POLICY device_nameplate_select_authenticated ON public.device_nameplate FOR SELECT TO authenticated USING (true);
 
 --
 
 -- device_nameplate device_nameplate_update_privileged :: POLICY
 DROP POLICY IF EXISTS device_nameplate_update_privileged ON public.device_nameplate;
---
-
 CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- device_submodels :: ROW SECURITY
---
-
 ALTER TABLE public.device_submodels ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- device_submodels device_submodels_delete_privileged :: POLICY
 DROP POLICY IF EXISTS device_submodels_delete_privileged ON public.device_submodels;
---
-
 CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- device_submodels device_submodels_insert_privileged :: POLICY
 DROP POLICY IF EXISTS device_submodels_insert_privileged ON public.device_submodels;
---
-
 CREATE POLICY device_submodels_insert_privileged ON public.device_submodels FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- device_submodels device_submodels_select_authenticated :: POLICY
 DROP POLICY IF EXISTS device_submodels_select_authenticated ON public.device_submodels;
---
-
 CREATE POLICY device_submodels_select_authenticated ON public.device_submodels FOR SELECT TO authenticated USING (true);
 
 --
 
 -- device_submodels device_submodels_update_privileged :: POLICY
 DROP POLICY IF EXISTS device_submodels_update_privileged ON public.device_submodels;
---
-
 CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- devices :: ROW SECURITY
---
-
 ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- devices devices_delete_privileged :: POLICY
 DROP POLICY IF EXISTS devices_delete_privileged ON public.devices;
---
-
 CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- devices devices_insert_privileged :: POLICY
 DROP POLICY IF EXISTS devices_insert_privileged ON public.devices;
---
-
 CREATE POLICY devices_insert_privileged ON public.devices FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- devices devices_select_authenticated :: POLICY
 DROP POLICY IF EXISTS devices_select_authenticated ON public.devices;
---
-
 CREATE POLICY devices_select_authenticated ON public.devices FOR SELECT TO authenticated USING (true);
 
 --
 
 -- devices devices_update_privileged :: POLICY
 DROP POLICY IF EXISTS devices_update_privileged ON public.devices;
---
-
 CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- digital_thread :: ROW SECURITY
---
-
 ALTER TABLE public.digital_thread ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- digital_thread digital_thread_select_asset :: POLICY
 DROP POLICY IF EXISTS digital_thread_select_asset ON public.digital_thread;
---
-
 CREATE POLICY digital_thread_select_asset ON public.digital_thread FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text])));
 
 --
 
 -- digital_thread digital_thread_select_security :: POLICY
 DROP POLICY IF EXISTS digital_thread_select_security ON public.digital_thread;
---
-
 CREATE POLICY digital_thread_select_security ON public.digital_thread FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
 
 --
 
 -- directory_liveness_probe :: ROW SECURITY
---
-
 ALTER TABLE public.directory_liveness_probe ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- directory_services :: ROW SECURITY
---
-
 ALTER TABLE public.directory_services ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- directory_services directory_services_delete_privileged :: POLICY
 DROP POLICY IF EXISTS directory_services_delete_privileged ON public.directory_services;
---
-
 CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- directory_services directory_services_insert_privileged :: POLICY
 DROP POLICY IF EXISTS directory_services_insert_privileged ON public.directory_services;
---
-
 CREATE POLICY directory_services_insert_privileged ON public.directory_services FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- directory_services directory_services_select_authenticated :: POLICY
 DROP POLICY IF EXISTS directory_services_select_authenticated ON public.directory_services;
---
-
 CREATE POLICY directory_services_select_authenticated ON public.directory_services FOR SELECT TO authenticated USING (true);
 
 --
 
 -- directory_services directory_services_update_privileged :: POLICY
 DROP POLICY IF EXISTS directory_services_update_privileged ON public.directory_services;
---
-
 CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- gateway_enrollment_tokens :: ROW SECURITY
---
-
 ALTER TABLE public.gateway_enrollment_tokens ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- gateways :: ROW SECURITY
---
-
 ALTER TABLE public.gateways ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- gateways gateways_delete_privileged :: POLICY
 DROP POLICY IF EXISTS gateways_delete_privileged ON public.gateways;
---
-
 CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- gateways gateways_insert_privileged :: POLICY
 DROP POLICY IF EXISTS gateways_insert_privileged ON public.gateways;
---
-
 CREATE POLICY gateways_insert_privileged ON public.gateways FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- gateways gateways_select_authenticated :: POLICY
 DROP POLICY IF EXISTS gateways_select_authenticated ON public.gateways;
---
-
 CREATE POLICY gateways_select_authenticated ON public.gateways FOR SELECT TO authenticated USING (true);
 
 --
 
 -- gateways gateways_update_privileged :: POLICY
 DROP POLICY IF EXISTS gateways_update_privileged ON public.gateways;
---
-
 CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- idta_submodel_templates :: ROW SECURITY
---
-
 ALTER TABLE public.idta_submodel_templates ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- idta_submodel_templates idta_submodel_templates_select_authenticated :: POLICY
 DROP POLICY IF EXISTS idta_submodel_templates_select_authenticated ON public.idta_submodel_templates;
---
-
 CREATE POLICY idta_submodel_templates_select_authenticated ON public.idta_submodel_templates FOR SELECT TO authenticated USING (true);
 
 --
 
 -- iso22400_vocabulary :: ROW SECURITY
---
-
 ALTER TABLE public.iso22400_vocabulary ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- iso22400_vocabulary iso22400_vocabulary_select_authenticated :: POLICY
 DROP POLICY IF EXISTS iso22400_vocabulary_select_authenticated ON public.iso22400_vocabulary;
---
-
 CREATE POLICY iso22400_vocabulary_select_authenticated ON public.iso22400_vocabulary FOR SELECT TO authenticated USING (true);
 
 --
 
 -- links :: ROW SECURITY
---
-
 ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- links links_delete_privileged :: POLICY
 DROP POLICY IF EXISTS links_delete_privileged ON public.links;
---
-
 CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- links links_insert_privileged :: POLICY
 DROP POLICY IF EXISTS links_insert_privileged ON public.links;
---
-
 CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
 -- links links_select_authenticated :: POLICY
 DROP POLICY IF EXISTS links_select_authenticated ON public.links;
---
-
 CREATE POLICY links_select_authenticated ON public.links FOR SELECT TO authenticated USING (true);
 
 --
 
 -- links links_update_privileged :: POLICY
 DROP POLICY IF EXISTS links_update_privileged ON public.links;
---
-
 CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 --
 
--- metric_catalog :: ROW SECURITY
+-- machine_principals :: ROW SECURITY
+ALTER TABLE public.machine_principals ENABLE ROW LEVEL SECURITY;
+
 --
 
+-- machine_principals machine_principals_select_admin_or_auditor :: POLICY
+DROP POLICY IF EXISTS machine_principals_select_admin_or_auditor ON public.machine_principals;
+CREATE POLICY machine_principals_select_admin_or_auditor ON public.machine_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+
+--
+
+-- metric_catalog :: ROW SECURITY
 ALTER TABLE public.metric_catalog ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- metric_catalog metric_catalog_insert_privileged :: POLICY
 DROP POLICY IF EXISTS metric_catalog_insert_privileged ON public.metric_catalog;
---
-
 CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- metric_catalog metric_catalog_select_authenticated :: POLICY
 DROP POLICY IF EXISTS metric_catalog_select_authenticated ON public.metric_catalog;
---
-
 CREATE POLICY metric_catalog_select_authenticated ON public.metric_catalog FOR SELECT TO authenticated USING (true);
 
 --
 
 -- metric_catalog metric_catalog_update_privileged :: POLICY
 DROP POLICY IF EXISTS metric_catalog_update_privileged ON public.metric_catalog;
---
-
 CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- metric_groups :: ROW SECURITY
---
-
 ALTER TABLE public.metric_groups ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- metric_groups metric_groups_insert_privileged :: POLICY
 DROP POLICY IF EXISTS metric_groups_insert_privileged ON public.metric_groups;
---
-
 CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- metric_groups metric_groups_select_authenticated :: POLICY
 DROP POLICY IF EXISTS metric_groups_select_authenticated ON public.metric_groups;
---
-
 CREATE POLICY metric_groups_select_authenticated ON public.metric_groups FOR SELECT TO authenticated USING (true);
 
 --
 
 -- metric_groups metric_groups_update_privileged :: POLICY
 DROP POLICY IF EXISTS metric_groups_update_privileged ON public.metric_groups;
---
-
 CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- mtconnect_vocabulary :: ROW SECURITY
---
-
 ALTER TABLE public.mtconnect_vocabulary ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- mtconnect_vocabulary mtconnect_vocabulary_select_authenticated :: POLICY
 DROP POLICY IF EXISTS mtconnect_vocabulary_select_authenticated ON public.mtconnect_vocabulary;
---
-
 CREATE POLICY mtconnect_vocabulary_select_authenticated ON public.mtconnect_vocabulary FOR SELECT TO authenticated USING (true);
 
 --
 
 -- one_shot_migrations :: ROW SECURITY
---
-
 ALTER TABLE public.one_shot_migrations ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- opcua_vocabulary :: ROW SECURITY
---
-
 ALTER TABLE public.opcua_vocabulary ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- opcua_vocabulary opcua_vocabulary_select_authenticated :: POLICY
 DROP POLICY IF EXISTS opcua_vocabulary_select_authenticated ON public.opcua_vocabulary;
---
-
 CREATE POLICY opcua_vocabulary_select_authenticated ON public.opcua_vocabulary FOR SELECT TO authenticated USING (true);
 
 --
 
 -- permissions :: ROW SECURITY
---
-
 ALTER TABLE public.permissions ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- permissions permissions_select_authenticated :: POLICY
 DROP POLICY IF EXISTS permissions_select_authenticated ON public.permissions;
---
-
 CREATE POLICY permissions_select_authenticated ON public.permissions FOR SELECT TO authenticated USING (true);
 
 --
 
 -- platform_alerts :: ROW SECURITY
---
-
 ALTER TABLE public.platform_alerts ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- platform_alerts platform_alerts_all_service_role :: POLICY
 DROP POLICY IF EXISTS platform_alerts_all_service_role ON public.platform_alerts;
---
-
 CREATE POLICY platform_alerts_all_service_role ON public.platform_alerts TO service_role USING (true) WITH CHECK (true);
 
 --
 
 -- platform_alerts platform_alerts_select_authenticated :: POLICY
 DROP POLICY IF EXISTS platform_alerts_select_authenticated ON public.platform_alerts;
---
-
 CREATE POLICY platform_alerts_select_authenticated ON public.platform_alerts FOR SELECT TO authenticated USING (true);
 
 --
 
 -- playback_jobs :: ROW SECURITY
---
-
 ALTER TABLE public.playback_jobs ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- playback_jobs playback_jobs_select_privileged :: POLICY
 DROP POLICY IF EXISTS playback_jobs_select_privileged ON public.playback_jobs;
---
-
 CREATE POLICY playback_jobs_select_privileged ON public.playback_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
 --
 
 -- playback_worker_status :: ROW SECURITY
---
-
 ALTER TABLE public.playback_worker_status ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- playback_worker_status playback_worker_status_select_privileged :: POLICY
 DROP POLICY IF EXISTS playback_worker_status_select_privileged ON public.playback_worker_status;
---
-
 CREATE POLICY playback_worker_status_select_privileged ON public.playback_worker_status FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
 --
 
--- rebirth_requests :: ROW SECURITY
+-- principal_permissions :: ROW SECURITY
+ALTER TABLE public.principal_permissions ENABLE ROW LEVEL SECURITY;
+
 --
 
+-- principal_permissions principal_permissions_select_own_or_admin :: POLICY
+DROP POLICY IF EXISTS principal_permissions_select_own_or_admin ON public.principal_permissions;
+CREATE POLICY principal_permissions_select_own_or_admin ON public.principal_permissions FOR SELECT TO authenticated USING (((principal_id = auth.uid()) OR public.has_role(ARRAY['Administrator'::text])));
+
+--
+
+-- rebirth_requests :: ROW SECURITY
 ALTER TABLE public.rebirth_requests ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- rebirth_requests rebirth_requests_select_privileged :: POLICY
 DROP POLICY IF EXISTS rebirth_requests_select_privileged ON public.rebirth_requests;
---
-
 CREATE POLICY rebirth_requests_select_privileged ON public.rebirth_requests FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
 
 --
 
--- role_permissions :: ROW SECURITY
+-- retired_entities :: ROW SECURITY
+ALTER TABLE public.retired_entities ENABLE ROW LEVEL SECURITY;
+
 --
 
+-- retired_entities retired_entities_select_privileged :: POLICY
+DROP POLICY IF EXISTS retired_entities_select_privileged ON public.retired_entities;
+CREATE POLICY retired_entities_select_privileged ON public.retired_entities FOR SELECT TO authenticated USING (public.has_authority(ARRAY['archive:manage'::text, 'digital_thread:read'::text]));
+
+--
+
+-- revoked_service_principals :: ROW SECURITY
+ALTER TABLE public.revoked_service_principals ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- revoked_service_principals revoked_service_principals_select_privileged :: POLICY
+DROP POLICY IF EXISTS revoked_service_principals_select_privileged ON public.revoked_service_principals;
+CREATE POLICY revoked_service_principals_select_privileged ON public.revoked_service_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+
+--
+
+-- revoked_service_tokens :: ROW SECURITY
+ALTER TABLE public.revoked_service_tokens ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- revoked_service_tokens revoked_service_tokens_select_privileged :: POLICY
+DROP POLICY IF EXISTS revoked_service_tokens_select_privileged ON public.revoked_service_tokens;
+CREATE POLICY revoked_service_tokens_select_privileged ON public.revoked_service_tokens FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+
+--
+
+-- role_permissions :: ROW SECURITY
 ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- role_permissions role_permissions_select_authenticated :: POLICY
 DROP POLICY IF EXISTS role_permissions_select_authenticated ON public.role_permissions;
---
-
 CREATE POLICY role_permissions_select_authenticated ON public.role_permissions FOR SELECT TO authenticated USING (true);
 
 --
 
 -- roles :: ROW SECURITY
---
-
 ALTER TABLE public.roles ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- roles roles_select_authenticated :: POLICY
 DROP POLICY IF EXISTS roles_select_authenticated ON public.roles;
---
-
 CREATE POLICY roles_select_authenticated ON public.roles FOR SELECT TO authenticated USING (true);
 
 --
 
 -- schema_bootstrap :: ROW SECURITY
---
-
 ALTER TABLE public.schema_bootstrap ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- schemas :: ROW SECURITY
---
-
 ALTER TABLE public.schemas ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- schemas schemas_delete_privileged :: POLICY
 DROP POLICY IF EXISTS schemas_delete_privileged ON public.schemas;
---
-
 CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- schemas schemas_insert_privileged :: POLICY
 DROP POLICY IF EXISTS schemas_insert_privileged ON public.schemas;
---
-
 CREATE POLICY schemas_insert_privileged ON public.schemas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- schemas schemas_select_authenticated :: POLICY
 DROP POLICY IF EXISTS schemas_select_authenticated ON public.schemas;
---
-
 CREATE POLICY schemas_select_authenticated ON public.schemas FOR SELECT TO authenticated USING (true);
 
 --
 
 -- schemas schemas_update_privileged :: POLICY
 DROP POLICY IF EXISTS schemas_update_privileged ON public.schemas;
---
-
 CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- system_settings :: ROW SECURITY
---
-
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- system_settings system_settings_all_service_role :: POLICY
 DROP POLICY IF EXISTS system_settings_all_service_role ON public.system_settings;
---
-
 CREATE POLICY system_settings_all_service_role ON public.system_settings TO service_role USING (true) WITH CHECK (true);
 
 --
 
 -- system_settings system_settings_select_authenticated :: POLICY
 DROP POLICY IF EXISTS system_settings_select_authenticated ON public.system_settings;
---
-
-CREATE POLICY system_settings_select_authenticated ON public.system_settings FOR SELECT TO authenticated USING (true);
+CREATE POLICY system_settings_select_authenticated ON public.system_settings FOR SELECT TO authenticated USING (((NOT sensitive) OR public.has_role(ARRAY['Administrator'::text])));
 
 --
 
 -- system_settings system_settings_update_admin :: POLICY
 DROP POLICY IF EXISTS system_settings_update_admin ON public.system_settings;
---
-
 CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- user_roles :: ROW SECURITY
---
-
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- user_roles user_roles_select_own_or_privileged :: POLICY
 DROP POLICY IF EXISTS user_roles_select_own_or_privileged ON public.user_roles;
---
-
 CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = (auth.uid())::text) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
 
 --
 
 -- webhook_endpoints :: ROW SECURITY
---
-
 ALTER TABLE public.webhook_endpoints ENABLE ROW LEVEL SECURITY;
 
 --
 
 -- webhook_endpoints webhook_endpoints_select_privileged :: POLICY
 DROP POLICY IF EXISTS webhook_endpoints_select_privileged ON public.webhook_endpoints;
---
-
 CREATE POLICY webhook_endpoints_select_privileged ON public.webhook_endpoints FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
 
 --
 
 -- SCHEMA public :: ACL
---
-
 GRANT USAGE ON SCHEMA public TO postgres;
 GRANT USAGE ON SCHEMA public TO anon;
 GRANT USAGE ON SCHEMA public TO authenticated;
@@ -8706,53 +15960,126 @@ DO $g$ BEGIN
     EXECUTE 'GRANT USAGE ON SCHEMA public TO grafana_reader';
   END IF;
 END $g$;
+
 --
 
 -- SCHEMA timescale :: ACL
---
-
 GRANT USAGE ON SCHEMA timescale TO authenticated;
 GRANT USAGE ON SCHEMA timescale TO service_role;
 
 --
 
 -- FUNCTION active_schema_version(schema_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.active_schema_version(schema_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.active_schema_version(schema_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.active_schema_version(schema_id uuid) TO authenticated;
 
 --
 
--- FUNCTION approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) :: ACL
+-- FUNCTION approve_proposal(p_proposal_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.approve_proposal(p_proposal_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.approve_proposal(p_proposal_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.approve_proposal(p_proposal_id uuid) TO authenticated;
+
 --
 
-REVOKE ALL ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean) TO service_role;
+-- FUNCTION approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) :: ACL
+REVOKE ALL ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) TO service_role;
+
+--
+
+-- FUNCTION archive_credential_is_set() :: ACL
+REVOKE ALL ON FUNCTION public.archive_credential_is_set() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.archive_credential_is_set() TO service_role;
+GRANT ALL ON FUNCTION public.archive_credential_is_set() TO authenticated;
+
+--
+
+-- FUNCTION archive_destination_guard() :: ACL
+REVOKE ALL ON FUNCTION public.archive_destination_guard() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.archive_destination_guard() TO service_role;
+
+--
+
+-- FUNCTION assert_principal_not_revoked(p_principal_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.assert_principal_not_revoked(p_principal_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.assert_principal_not_revoked(p_principal_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.assert_principal_not_revoked(p_principal_id uuid) TO authenticated;
 
 --
 
 -- FUNCTION audit_domain_for(p_entity_type text, p_action text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) TO service_role;
 
 --
 
--- FUNCTION authorize_host_gateway_credential(p_gateway_id uuid) :: ACL
+-- FUNCTION audit_telemetry_columns() :: ACL
+REVOKE ALL ON FUNCTION public.audit_telemetry_columns() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_telemetry_columns() TO service_role;
+GRANT ALL ON FUNCTION public.audit_telemetry_columns() TO authenticated;
+
 --
 
+-- FUNCTION auth_pre_request() :: ACL
+REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.auth_pre_request() TO anon;
+GRANT ALL ON FUNCTION public.auth_pre_request() TO authenticated;
+GRANT ALL ON FUNCTION public.auth_pre_request() TO service_role;
+
+--
+
+-- FUNCTION authorize_host_gateway_credential(p_gateway_id uuid) :: ACL
 REVOKE ALL ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.authorize_host_gateway_credential(p_gateway_id uuid) TO authenticated;
 
 --
 
--- FUNCTION capped_capture_manifest(p_manifest jsonb) :: ACL
+-- FUNCTION backup_claim_job() :: ACL
+REVOKE ALL ON FUNCTION public.backup_claim_job() FROM PUBLIC;
+
 --
 
+-- FUNCTION backup_fail(p_job_id uuid, p_error text) :: ACL
+REVOKE ALL ON FUNCTION public.backup_fail(p_job_id uuid, p_error text) FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) :: ACL
+REVOKE ALL ON FUNCTION public.backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_forget(p_backup_id uuid, p_reason text) :: ACL
+REVOKE ALL ON FUNCTION public.backup_forget(p_backup_id uuid, p_reason text) FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_prunable(p_retention_days integer) :: ACL
+REVOKE ALL ON FUNCTION public.backup_prunable(p_retention_days integer) FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_reconcile_jobs(p_reason text) :: ACL
+REVOKE ALL ON FUNCTION public.backup_reconcile_jobs(p_reason text) FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_schedule(p_cron text) :: ACL
+REVOKE ALL ON FUNCTION public.backup_schedule(p_cron text) FROM PUBLIC;
+
+--
+
+-- FUNCTION cancel_backup_job(p_job_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.cancel_backup_job(p_job_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.cancel_backup_job(p_job_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.cancel_backup_job(p_job_id uuid) TO authenticated;
+
+--
+
+-- FUNCTION capped_capture_manifest(p_manifest jsonb) :: ACL
 REVOKE ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO authenticated;
@@ -8760,16 +16087,32 @@ GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO authen
 --
 
 -- FUNCTION clear_credential_revoked_on_enrolment() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.clear_credential_revoked_on_enrolment() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.clear_credential_revoked_on_enrolment() TO service_role;
 
 --
 
--- FUNCTION cold_storage_rows() :: ACL
+-- FUNCTION cold_archive_backlog() :: ACL
+REVOKE ALL ON FUNCTION public.cold_archive_backlog() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.cold_archive_backlog() TO service_role;
+GRANT ALL ON FUNCTION public.cold_archive_backlog() TO authenticated;
+
 --
 
+-- FUNCTION cold_archive_backlog_state() :: ACL
+REVOKE ALL ON FUNCTION public.cold_archive_backlog_state() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.cold_archive_backlog_state() TO service_role;
+
+--
+
+-- FUNCTION cold_archive_destination() :: ACL
+REVOKE ALL ON FUNCTION public.cold_archive_destination() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.cold_archive_destination() TO service_role;
+GRANT ALL ON FUNCTION public.cold_archive_destination() TO authenticated;
+
+--
+
+-- FUNCTION cold_storage_rows() :: ACL
 REVOKE ALL ON FUNCTION public.cold_storage_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.cold_storage_rows() TO service_role;
 GRANT ALL ON FUNCTION public.cold_storage_rows() TO authenticated;
@@ -8777,51 +16120,67 @@ GRANT ALL ON FUNCTION public.cold_storage_rows() TO authenticated;
 --
 
 -- FUNCTION consume_gateway_enrollment_token(p_token text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.consume_gateway_enrollment_token(p_token text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.consume_gateway_enrollment_token(p_token text) TO service_role;
 
 --
 
--- FUNCTION create_service_principal(p_role_name text, p_note text) :: ACL
---
-
-REVOKE ALL ON FUNCTION public.create_service_principal(p_role_name text, p_note text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.create_service_principal(p_role_name text, p_note text) TO service_role;
-GRANT ALL ON FUNCTION public.create_service_principal(p_role_name text, p_note text) TO authenticated;
+-- FUNCTION create_machine_principal(p_name text, p_permissions text[], p_purpose text) :: ACL
+REVOKE ALL ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) TO service_role;
+GRANT ALL ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) TO authenticated;
 
 --
 
 -- FUNCTION custom_access_token_hook(event jsonb) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.custom_access_token_hook(event jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.custom_access_token_hook(event jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.custom_access_token_hook(event jsonb) TO supabase_auth_admin;
 
 --
 
--- FUNCTION digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) :: ACL
+-- FUNCTION describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) :: ACL
+REVOKE ALL ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) TO service_role;
+GRANT ALL ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) TO authenticated;
+
 --
 
-REVOKE ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) TO service_role;
-GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone) TO authenticated;
+-- FUNCTION digital_thread_backup_job_ids_matching(p_pattern text) :: ACL
+REVOKE ALL ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) TO service_role;
+GRANT ALL ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) TO authenticated;
+
+--
+
+-- FUNCTION digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: ACL
+REVOKE ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO service_role;
+GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO authenticated;
+
+--
+
+-- FUNCTION digital_thread_user_ids_matching(p_pattern text) :: ACL
+REVOKE ALL ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) TO service_role;
+GRANT ALL ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) TO authenticated;
 
 --
 
 -- FUNCTION directory_liveness_job_map() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.directory_liveness_job_map() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.directory_liveness_job_map() TO service_role;
 
 --
 
--- FUNCTION dispatch_device_quarantine_webhook() :: ACL
+-- FUNCTION discard_schema_draft(p_schema_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.discard_schema_draft(p_schema_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.discard_schema_draft(p_schema_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.discard_schema_draft(p_schema_id uuid) TO authenticated;
+
 --
 
+-- FUNCTION dispatch_device_quarantine_webhook() :: ACL
 REVOKE ALL ON FUNCTION public.dispatch_device_quarantine_webhook() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.dispatch_device_quarantine_webhook() TO service_role;
 GRANT ALL ON FUNCTION public.dispatch_device_quarantine_webhook() TO authenticated;
@@ -8829,16 +16188,12 @@ GRANT ALL ON FUNCTION public.dispatch_device_quarantine_webhook() TO authenticat
 --
 
 -- FUNCTION enforce_digital_thread_append_only() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.enforce_digital_thread_append_only() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_digital_thread_append_only() TO service_role;
 
 --
 
 -- FUNCTION enforce_metric_catalog_immutability() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.enforce_metric_catalog_immutability() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_metric_catalog_immutability() TO service_role;
 GRANT ALL ON FUNCTION public.enforce_metric_catalog_immutability() TO authenticated;
@@ -8846,67 +16201,88 @@ GRANT ALL ON FUNCTION public.enforce_metric_catalog_immutability() TO authentica
 --
 
 -- FUNCTION enforce_metric_group_spelling() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.enforce_metric_group_spelling() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_metric_group_spelling() TO service_role;
 GRANT ALL ON FUNCTION public.enforce_metric_group_spelling() TO authenticated;
 
 --
 
--- FUNCTION enforce_schema_version_provenance() :: ACL
+-- FUNCTION enforce_open_proposal_cap() :: ACL
+REVOKE ALL ON FUNCTION public.enforce_open_proposal_cap() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.enforce_open_proposal_cap() TO service_role;
+
 --
 
+-- FUNCTION enforce_schema_version_provenance() :: ACL
 REVOKE ALL ON FUNCTION public.enforce_schema_version_provenance() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.enforce_schema_version_provenance() TO service_role;
 GRANT ALL ON FUNCTION public.enforce_schema_version_provenance() TO authenticated;
 
 --
 
--- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: ACL
+-- FUNCTION enqueue_scheduled_backup() :: ACL
+REVOKE ALL ON FUNCTION public.enqueue_scheduled_backup() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.enqueue_scheduled_backup() TO service_role;
+
 --
 
+-- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: ACL
 REVOKE ALL ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) FROM PUBLIC;
 
 --
 
--- FUNCTION ensure_gateway_status_view() :: ACL
+-- FUNCTION ensure_digital_thread_partition(p_month timestamp with time zone) :: ACL
+REVOKE ALL ON FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) TO service_role;
+
 --
 
+-- FUNCTION ensure_digital_thread_partitions(p_months_ahead integer) :: ACL
+REVOKE ALL ON FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) TO service_role;
+
+--
+
+-- FUNCTION ensure_gateway_status_view() :: ACL
 REVOKE ALL ON FUNCTION public.ensure_gateway_status_view() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ensure_gateway_status_view() TO service_role;
 
 --
 
 -- FUNCTION ensure_shadow_devices(p_capture_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) TO authenticated;
 
 --
 
--- FUNCTION fork_schema(parent_schema_id uuid, change_description text) :: ACL
+-- FUNCTION expire_open_proposals() :: ACL
+REVOKE ALL ON FUNCTION public.expire_open_proposals() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.expire_open_proposals() TO service_role;
+
 --
 
+-- FUNCTION fork_schema(parent_schema_id uuid, change_description text) :: ACL
 REVOKE ALL ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) TO service_role;
 GRANT ALL ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description text) TO authenticated;
 
 --
 
--- TABLE gateways :: ACL
+-- FUNCTION sparkplug_group_default() :: ACL
+REVOKE ALL ON FUNCTION public.sparkplug_group_default() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.sparkplug_group_default() TO service_role;
+GRANT ALL ON FUNCTION public.sparkplug_group_default() TO authenticated;
+
 --
 
+-- TABLE gateways :: ACL
 GRANT ALL ON TABLE public.gateways TO service_role;
 GRANT ALL ON TABLE public.gateways TO authenticated;
 
 --
 
 -- FUNCTION gateway_has_broker_credential(g public.gateways) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) TO service_role;
 GRANT ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) TO authenticated;
@@ -8914,8 +16290,6 @@ GRANT ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) TO
 --
 
 -- FUNCTION gateway_health_rows() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.gateway_health_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.gateway_health_rows() TO service_role;
 DO $g$ BEGIN
@@ -8923,27 +16297,42 @@ DO $g$ BEGIN
     EXECUTE 'GRANT ALL ON FUNCTION public.gateway_health_rows() TO grafana_reader';
   END IF;
 END $g$;
+
 --
 
 -- FUNCTION gateway_holds_a_credential(g public.gateways) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.gateway_holds_a_credential(g public.gateways) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.gateway_holds_a_credential(g public.gateways) TO service_role;
 
 --
 
--- FUNCTION handle_new_user() :: ACL
+-- FUNCTION gateway_is_playback_delivery_target(p_gateway_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.gateway_is_playback_delivery_target(p_gateway_id uuid) TO authenticated;
+
 --
 
+-- FUNCTION guard_change_proposal_transition() :: ACL
+REVOKE ALL ON FUNCTION public.guard_change_proposal_transition() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.guard_change_proposal_transition() TO service_role;
+
+--
+
+-- FUNCTION handle_new_user() :: ACL
 REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.handle_new_user() TO service_role;
 
 --
 
--- FUNCTION has_role(allowed_roles text[]) :: ACL
+-- FUNCTION has_authority(allowed_permissions text[]) :: ACL
+REVOKE ALL ON FUNCTION public.has_authority(allowed_permissions text[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.has_authority(allowed_permissions text[]) TO service_role;
+GRANT ALL ON FUNCTION public.has_authority(allowed_permissions text[]) TO authenticated;
+
 --
 
+-- FUNCTION has_role(allowed_roles text[]) :: ACL
 REVOKE ALL ON FUNCTION public.has_role(allowed_roles text[]) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.has_role(allowed_roles text[]) TO service_role;
 GRANT ALL ON FUNCTION public.has_role(allowed_roles text[]) TO authenticated;
@@ -8951,8 +16340,6 @@ GRANT ALL ON FUNCTION public.has_role(allowed_roles text[]) TO authenticated;
 --
 
 -- FUNCTION ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) TO authenticated;
@@ -8960,8 +16347,6 @@ GRANT ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages b
 --
 
 -- FUNCTION ingest_claim_capture_job() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_claim_capture_job() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_claim_capture_job() TO service_role;
 GRANT ALL ON FUNCTION public.ingest_claim_capture_job() TO authenticated;
@@ -8969,8 +16354,6 @@ GRANT ALL ON FUNCTION public.ingest_claim_capture_job() TO authenticated;
 --
 
 -- FUNCTION ingest_claim_rebirth_requests() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_claim_rebirth_requests() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_claim_rebirth_requests() TO service_role;
 GRANT ALL ON FUNCTION public.ingest_claim_rebirth_requests() TO authenticated;
@@ -8978,8 +16361,6 @@ GRANT ALL ON FUNCTION public.ingest_claim_rebirth_requests() TO authenticated;
 --
 
 -- FUNCTION ingest_fail_capture(p_job_id uuid, p_error text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) TO authenticated;
@@ -8987,8 +16368,6 @@ GRANT ALL ON FUNCTION public.ingest_fail_capture(p_job_id uuid, p_error text) TO
 --
 
 -- FUNCTION ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes bigint, p_message_count integer, p_manifest jsonb) TO authenticated;
@@ -8996,8 +16375,6 @@ GRANT ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes
 --
 
 -- FUNCTION ingest_mark_device_offline(p_device_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO authenticated;
@@ -9005,8 +16382,6 @@ GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO aut
 --
 
 -- FUNCTION ingest_reconcile_capture_jobs() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_reconcile_capture_jobs() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_reconcile_capture_jobs() TO service_role;
 GRANT ALL ON FUNCTION public.ingest_reconcile_capture_jobs() TO authenticated;
@@ -9014,8 +16389,6 @@ GRANT ALL ON FUNCTION public.ingest_reconcile_capture_jobs() TO authenticated;
 --
 
 -- FUNCTION ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_metrics text[], p_observed_at timestamp with time zone) TO authenticated;
@@ -9023,8 +16396,6 @@ GRANT ALL ON FUNCTION public.ingest_record_declared_metrics(p_device_id uuid, p_
 --
 
 -- FUNCTION ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_status text, p_heartbeat_at timestamp with time zone, p_health jsonb) TO authenticated;
@@ -9032,8 +16403,6 @@ GRANT ALL ON FUNCTION public.ingest_record_gateway_health(p_gateway_id uuid, p_s
 --
 
 -- FUNCTION ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean, p_error text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean, p_error text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean, p_error text) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttled boolean, p_error text) TO authenticated;
@@ -9041,8 +16410,6 @@ GRANT ALL ON FUNCTION public.ingest_record_rebirth_outcome(p_id uuid, p_throttle
 --
 
 -- FUNCTION ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_register_quarantined_device(p_name text, p_gateway_id uuid, p_reported_identity text, p_quarantine_reason text, p_identity_source text, p_declared_metrics text[], p_observed_at timestamp with time zone) TO authenticated;
@@ -9050,8 +16417,6 @@ GRANT ALL ON FUNCTION public.ingest_register_quarantined_device(p_name text, p_g
 --
 
 -- FUNCTION ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quarantine_reason text, p_reported_identity text) TO authenticated;
@@ -9059,8 +16424,6 @@ GRANT ALL ON FUNCTION public.ingest_requarantine_device(p_device_id uuid, p_quar
 --
 
 -- FUNCTION ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status text, p_identity_source text, p_first_dbirth_at timestamp with time zone) TO authenticated;
@@ -9068,8 +16431,6 @@ GRANT ALL ON FUNCTION public.ingest_set_device_state(p_device_id uuid, p_status 
 --
 
 -- FUNCTION ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_rows jsonb, p_observed_at timestamp with time zone) TO authenticated;
@@ -9077,8 +16438,6 @@ GRANT ALL ON FUNCTION public.ingest_store_birth_parameters(p_asset_id text, p_ro
 --
 
 -- FUNCTION is_active_capture_object(p_name text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.is_active_capture_object(p_name text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_active_capture_object(p_name text) TO service_role;
 GRANT ALL ON FUNCTION public.is_active_capture_object(p_name text) TO authenticated;
@@ -9086,8 +16445,6 @@ GRANT ALL ON FUNCTION public.is_active_capture_object(p_name text) TO authentica
 --
 
 -- FUNCTION is_active_playback_capture(p_name text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.is_active_playback_capture(p_name text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_active_playback_capture(p_name text) TO service_role;
 GRANT ALL ON FUNCTION public.is_active_playback_capture(p_name text) TO authenticated;
@@ -9095,17 +16452,20 @@ GRANT ALL ON FUNCTION public.is_active_playback_capture(p_name text) TO authenti
 --
 
 -- FUNCTION is_capture_subject_prefix(p_folder text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) TO service_role;
 GRANT ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) TO authenticated;
 
 --
 
--- FUNCTION is_ingestion_caller() :: ACL
+-- FUNCTION is_floor_plan_path(p_name text) :: ACL
+REVOKE ALL ON FUNCTION public.is_floor_plan_path(p_name text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.is_floor_plan_path(p_name text) TO service_role;
+GRANT ALL ON FUNCTION public.is_floor_plan_path(p_name text) TO authenticated;
+
 --
 
+-- FUNCTION is_ingestion_caller() :: ACL
 REVOKE ALL ON FUNCTION public.is_ingestion_caller() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_ingestion_caller() TO service_role;
 GRANT ALL ON FUNCTION public.is_ingestion_caller() TO authenticated;
@@ -9113,8 +16473,6 @@ GRANT ALL ON FUNCTION public.is_ingestion_caller() TO authenticated;
 --
 
 -- FUNCTION is_machine_principal(p_user_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.is_machine_principal(p_user_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_machine_principal(p_user_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.is_machine_principal(p_user_id uuid) TO authenticated;
@@ -9122,8 +16480,6 @@ GRANT ALL ON FUNCTION public.is_machine_principal(p_user_id uuid) TO authenticat
 --
 
 -- FUNCTION is_playback_caller() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.is_playback_caller() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_playback_caller() TO service_role;
 GRANT ALL ON FUNCTION public.is_playback_caller() TO authenticated;
@@ -9131,8 +16487,6 @@ GRANT ALL ON FUNCTION public.is_playback_caller() TO authenticated;
 --
 
 -- FUNCTION is_valid_quarantine_reason(p_reason text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.is_valid_quarantine_reason(p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_valid_quarantine_reason(p_reason text) TO service_role;
 GRANT ALL ON FUNCTION public.is_valid_quarantine_reason(p_reason text) TO authenticated;
@@ -9140,51 +16494,78 @@ GRANT ALL ON FUNCTION public.is_valid_quarantine_reason(p_reason text) TO authen
 --
 
 -- FUNCTION issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) TO service_role;
 GRANT ALL ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p_ttl_minutes integer) TO authenticated;
 
 --
 
--- FUNCTION list_service_principals() :: ACL
+-- FUNCTION list_machine_principals() :: ACL
+REVOKE ALL ON FUNCTION public.list_machine_principals() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.list_machine_principals() TO service_role;
+GRANT ALL ON FUNCTION public.list_machine_principals() TO authenticated;
+
 --
 
-REVOKE ALL ON FUNCTION public.list_service_principals() FROM PUBLIC;
-GRANT ALL ON FUNCTION public.list_service_principals() TO service_role;
-GRANT ALL ON FUNCTION public.list_service_principals() TO authenticated;
+-- FUNCTION list_user_accounts() :: ACL
+REVOKE ALL ON FUNCTION public.list_user_accounts() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.list_user_accounts() TO service_role;
+GRANT ALL ON FUNCTION public.list_user_accounts() TO authenticated;
+
+--
+
+-- FUNCTION log_asset_export() :: ACL
+REVOKE ALL ON FUNCTION public.log_asset_export() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.log_asset_export() TO service_role;
 
 --
 
 -- FUNCTION log_digital_thread_event() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.log_digital_thread_event() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.log_digital_thread_event() TO service_role;
 
 --
 
 -- FUNCTION log_role_assignment() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.log_role_assignment() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.log_role_assignment() TO service_role;
 
 --
 
--- FUNCTION may_manage_captures() :: ACL
+-- FUNCTION may_decide_proposal(p_entity_type text) :: ACL
+REVOKE ALL ON FUNCTION public.may_decide_proposal(p_entity_type text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.may_decide_proposal(p_entity_type text) TO service_role;
+GRANT ALL ON FUNCTION public.may_decide_proposal(p_entity_type text) TO authenticated;
+
 --
 
+-- FUNCTION may_manage_captures() :: ACL
 REVOKE ALL ON FUNCTION public.may_manage_captures() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.may_manage_captures() TO service_role;
 GRANT ALL ON FUNCTION public.may_manage_captures() TO authenticated;
 
 --
 
--- FUNCTION platform_health_rows() :: ACL
+-- FUNCTION peek_gateway_enrollment_token(p_token text) :: ACL
+REVOKE ALL ON FUNCTION public.peek_gateway_enrollment_token(p_token text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.peek_gateway_enrollment_token(p_token text) TO service_role;
+
 --
 
+-- FUNCTION place_cell_in_its_area() :: ACL
+REVOKE ALL ON FUNCTION public.place_cell_in_its_area() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.place_cell_in_its_area() TO service_role;
+
+--
+
+-- FUNCTION plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) :: ACL
+REVOKE ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) TO service_role;
+GRANT ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) TO authenticated;
+
+--
+
+-- FUNCTION platform_health_rows() :: ACL
 REVOKE ALL ON FUNCTION public.platform_health_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.platform_health_rows() TO service_role;
 DO $g$ BEGIN
@@ -9192,11 +16573,10 @@ DO $g$ BEGIN
     EXECUTE 'GRANT ALL ON FUNCTION public.platform_health_rows() TO grafana_reader';
   END IF;
 END $g$;
+
 --
 
 -- FUNCTION platform_storage_rows() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.platform_storage_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.platform_storage_rows() TO service_role;
 DO $g$ BEGIN
@@ -9204,11 +16584,10 @@ DO $g$ BEGIN
     EXECUTE 'GRANT ALL ON FUNCTION public.platform_storage_rows() TO grafana_reader';
   END IF;
 END $g$;
+
 --
 
 -- FUNCTION playback_claim_job() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.playback_claim_job() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_claim_job() TO service_role;
 GRANT ALL ON FUNCTION public.playback_claim_job() TO authenticated;
@@ -9216,8 +16595,6 @@ GRANT ALL ON FUNCTION public.playback_claim_job() TO authenticated;
 --
 
 -- FUNCTION playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) TO service_role;
 GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) TO authenticated;
@@ -9225,8 +16602,6 @@ GRANT ALL ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent inte
 --
 
 -- FUNCTION playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) TO service_role;
 GRANT ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent integer, p_messages_total integer, p_elapsed_seconds integer) TO authenticated;
@@ -9234,50 +16609,65 @@ GRANT ALL ON FUNCTION public.playback_progress(p_job_id uuid, p_messages_sent in
 --
 
 -- FUNCTION playback_reconcile_jobs() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.playback_reconcile_jobs() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_reconcile_jobs() TO service_role;
 GRANT ALL ON FUNCTION public.playback_reconcile_jobs() TO authenticated;
 
 --
 
--- FUNCTION playback_report_credentials(p_edge_nodes text[]) :: ACL
+-- FUNCTION playback_report_credentials(p_edge_nodes text[], p_rotated text[]) :: ACL
+REVOKE ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[], p_rotated text[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[], p_rotated text[]) TO service_role;
+GRANT ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[], p_rotated text[]) TO authenticated;
+
 --
 
-REVOKE ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) TO service_role;
-GRANT ALL ON FUNCTION public.playback_report_credentials(p_edge_nodes text[]) TO authenticated;
+-- FUNCTION playback_stale_credentials() :: ACL
+REVOKE ALL ON FUNCTION public.playback_stale_credentials() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.playback_stale_credentials() TO service_role;
+GRANT ALL ON FUNCTION public.playback_stale_credentials() TO authenticated;
 
 --
 
 -- FUNCTION playback_target_must_be_shadow() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.playback_target_must_be_shadow() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.playback_target_must_be_shadow() TO service_role;
 
 --
 
 -- FUNCTION prevent_active_schema_mutation() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.prevent_active_schema_mutation() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.prevent_active_schema_mutation() TO service_role;
 GRANT ALL ON FUNCTION public.prevent_active_schema_mutation() TO authenticated;
 
 --
 
--- FUNCTION prune_platform_alerts(p_retain interval) :: ACL
+-- FUNCTION proposable_columns(p_entity_type text) :: ACL
+REVOKE ALL ON FUNCTION public.proposable_columns(p_entity_type text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.proposable_columns(p_entity_type text) TO service_role;
+GRANT ALL ON FUNCTION public.proposable_columns(p_entity_type text) TO authenticated;
+
 --
 
+-- FUNCTION proposal_is_already_true(p_proposal_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.proposal_is_already_true(p_proposal_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.proposal_is_already_true(p_proposal_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.proposal_is_already_true(p_proposal_id uuid) TO authenticated;
+
+--
+
+-- FUNCTION prune_closed_proposals() :: ACL
+REVOKE ALL ON FUNCTION public.prune_closed_proposals() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.prune_closed_proposals() TO service_role;
+
+--
+
+-- FUNCTION prune_platform_alerts(p_retain interval) :: ACL
 REVOKE ALL ON FUNCTION public.prune_platform_alerts(p_retain interval) FROM PUBLIC;
 
 --
 
 -- FUNCTION publish_schema_version(draft_schema_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) TO authenticated;
@@ -9285,8 +16675,6 @@ GRANT ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) TO aut
 --
 
 -- FUNCTION record_gateway_credential_issued(p_gateway_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) TO authenticated;
@@ -9294,75 +16682,110 @@ GRANT ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid)
 --
 
 -- FUNCTION record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) TO service_role;
 
 --
 
 -- FUNCTION record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) TO service_role;
 GRANT ALL ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) TO authenticated;
 
 --
 
--- FUNCTION record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) :: ACL
+-- FUNCTION record_retired_entity() :: ACL
+REVOKE ALL ON FUNCTION public.record_retired_entity() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.record_retired_entity() TO service_role;
+
 --
 
-REVOKE ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb) TO service_role;
+-- FUNCTION record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) TO authenticated;
 
 --
 
 -- FUNCTION refresh_directory_liveness() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.refresh_directory_liveness() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.refresh_directory_liveness() TO service_role;
 
 --
 
 -- FUNCTION refuse_archiving_the_last_shadow_gateway() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.refuse_archiving_the_last_shadow_gateway() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.refuse_archiving_the_last_shadow_gateway() TO service_role;
 
 --
 
--- FUNCTION register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) :: ACL
+-- FUNCTION refuse_hand_assigning_a_replay_lane() :: ACL
+REVOKE ALL ON FUNCTION public.refuse_hand_assigning_a_replay_lane() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.refuse_hand_assigning_a_replay_lane() TO service_role;
+
 --
 
+-- FUNCTION refuse_role_for_machine_principal() :: ACL
+REVOKE ALL ON FUNCTION public.refuse_role_for_machine_principal() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.refuse_role_for_machine_principal() TO service_role;
+
+--
+
+-- FUNCTION register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) :: ACL
 REVOKE ALL ON FUNCTION public.register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) TO service_role;
 GRANT ALL ON FUNCTION public.register_uploaded_capture(p_subject_kind text, p_subject_id uuid, p_storage_path text, p_size_bytes bigint, p_message_count integer, p_manifest jsonb, p_note text, p_replace boolean) TO authenticated;
 
 --
 
--- FUNCTION release_gateway_enrollment_token(p_token text) :: ACL
+-- FUNCTION reinstate_service_principal(p_principal_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.reinstate_service_principal(p_principal_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.reinstate_service_principal(p_principal_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.reinstate_service_principal(p_principal_id uuid) TO authenticated;
+
 --
 
+-- FUNCTION reject_archived_schema_assignment() :: ACL
+REVOKE ALL ON FUNCTION public.reject_archived_schema_assignment() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.reject_archived_schema_assignment() TO service_role;
+
+--
+
+-- FUNCTION reject_proposal(p_proposal_id uuid, p_reason text) :: ACL
+REVOKE ALL ON FUNCTION public.reject_proposal(p_proposal_id uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.reject_proposal(p_proposal_id uuid, p_reason text) TO service_role;
+GRANT ALL ON FUNCTION public.reject_proposal(p_proposal_id uuid, p_reason text) TO authenticated;
+
+--
+
+-- FUNCTION release_backup(p_backup_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.release_backup(p_backup_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.release_backup(p_backup_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.release_backup(p_backup_id uuid) TO authenticated;
+
+--
+
+-- FUNCTION release_gateway_enrollment_token(p_token text) :: ACL
 REVOKE ALL ON FUNCTION public.release_gateway_enrollment_token(p_token text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.release_gateway_enrollment_token(p_token text) TO service_role;
 
 --
 
 -- FUNCTION relocate_devices(p_moves jsonb) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.relocate_devices(p_moves jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.relocate_devices(p_moves jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.relocate_devices(p_moves jsonb) TO authenticated;
 
 --
 
--- FUNCTION request_capture_stop(p_job_id uuid) :: ACL
+-- FUNCTION request_backup(p_note text) :: ACL
+REVOKE ALL ON FUNCTION public.request_backup(p_note text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.request_backup(p_note text) TO service_role;
+GRANT ALL ON FUNCTION public.request_backup(p_note text) TO authenticated;
+
 --
 
+-- FUNCTION request_capture_stop(p_job_id uuid) :: ACL
 REVOKE ALL ON FUNCTION public.request_capture_stop(p_job_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.request_capture_stop(p_job_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.request_capture_stop(p_job_id uuid) TO authenticated;
@@ -9370,8 +16793,6 @@ GRANT ALL ON FUNCTION public.request_capture_stop(p_job_id uuid) TO authenticate
 --
 
 -- FUNCTION request_gateway_rebirth(p_gateway_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) TO authenticated;
@@ -9379,17 +16800,18 @@ GRANT ALL ON FUNCTION public.request_gateway_rebirth(p_gateway_id uuid) TO authe
 --
 
 -- FUNCTION request_playback_stop(p_job_id uuid) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.request_playback_stop(p_job_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.request_playback_stop(p_job_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.request_playback_stop(p_job_id uuid) TO authenticated;
 
 --
 
--- FUNCTION require_ingestion_caller(p_fn text) :: ACL
+-- FUNCTION require_backup_service_caller(p_fn text) :: ACL
+REVOKE ALL ON FUNCTION public.require_backup_service_caller(p_fn text) FROM PUBLIC;
+
 --
 
+-- FUNCTION require_ingestion_caller(p_fn text) :: ACL
 REVOKE ALL ON FUNCTION public.require_ingestion_caller(p_fn text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO service_role;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO authenticated;
@@ -9397,8 +16819,6 @@ GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO authenticate
 --
 
 -- FUNCTION require_playback_caller(p_fn text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.require_playback_caller(p_fn text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.require_playback_caller(p_fn text) TO service_role;
 GRANT ALL ON FUNCTION public.require_playback_caller(p_fn text) TO authenticated;
@@ -9406,65 +16826,88 @@ GRANT ALL ON FUNCTION public.require_playback_caller(p_fn text) TO authenticated
 --
 
 -- FUNCTION revoke_anon_function_privileges() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.revoke_anon_function_privileges() FROM PUBLIC;
 
 --
 
 -- FUNCTION revoke_credential_on_decommission() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.revoke_credential_on_decommission() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.revoke_credential_on_decommission() TO service_role;
 
 --
 
 -- FUNCTION revoke_gateway_credential(p_sparkplug_id text) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) TO service_role;
 
 --
 
--- FUNCTION schema_version_base_name(schema_name text) :: ACL
+-- FUNCTION revoke_service_principal(p_principal_id uuid, p_reason text) :: ACL
+REVOKE ALL ON FUNCTION public.revoke_service_principal(p_principal_id uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.revoke_service_principal(p_principal_id uuid, p_reason text) TO service_role;
+GRANT ALL ON FUNCTION public.revoke_service_principal(p_principal_id uuid, p_reason text) TO authenticated;
+
 --
 
+-- FUNCTION revoke_service_token(p_jti text) :: ACL
+REVOKE ALL ON FUNCTION public.revoke_service_token(p_jti text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.revoke_service_token(p_jti text) TO service_role;
+GRANT ALL ON FUNCTION public.revoke_service_token(p_jti text) TO authenticated;
+
+--
+
+-- FUNCTION schema_version_base_name(schema_name text) :: ACL
 REVOKE ALL ON FUNCTION public.schema_version_base_name(schema_name text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.schema_version_base_name(schema_name text) TO service_role;
 GRANT ALL ON FUNCTION public.schema_version_base_name(schema_name text) TO authenticated;
 
 --
 
--- FUNCTION seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) :: ACL
+-- FUNCTION secure_digital_thread_partition(p_partition regclass) :: ACL
+REVOKE ALL ON FUNCTION public.secure_digital_thread_partition(p_partition regclass) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.secure_digital_thread_partition(p_partition regclass) TO service_role;
+
 --
 
+-- FUNCTION seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) :: ACL
 REVOKE ALL ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.seed_setting(p_key text, p_value jsonb, p_value_type text, p_category text, p_label text, p_description text, p_fallback_source text) TO service_role;
 
 --
 
 -- FUNCTION service_token_max_days() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.service_token_max_days() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.service_token_max_days() TO service_role;
 GRANT ALL ON FUNCTION public.service_token_max_days() TO authenticated;
 
 --
 
--- FUNCTION stamp_audit_domain() :: ACL
+-- FUNCTION set_archive_credential(p_secret text) :: ACL
+REVOKE ALL ON FUNCTION public.set_archive_credential(p_secret text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.set_archive_credential(p_secret text) TO service_role;
+GRANT ALL ON FUNCTION public.set_archive_credential(p_secret text) TO authenticated;
+
 --
 
+-- FUNCTION shadow_follows_its_original() :: ACL
+REVOKE ALL ON FUNCTION public.shadow_follows_its_original() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.shadow_follows_its_original() TO service_role;
+
+--
+
+-- FUNCTION stamp_audit_domain() :: ACL
 REVOKE ALL ON FUNCTION public.stamp_audit_domain() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.stamp_audit_domain() TO service_role;
 
 --
 
--- FUNCTION start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) :: ACL
+-- FUNCTION stamp_proposal_author() :: ACL
+REVOKE ALL ON FUNCTION public.stamp_proposal_author() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.stamp_proposal_author() TO service_role;
+
 --
 
+-- FUNCTION start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) :: ACL
 REVOKE ALL ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) TO service_role;
 GRANT ALL ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean) TO authenticated;
@@ -9472,316 +16915,335 @@ GRANT ALL ON FUNCTION public.start_capture_job(p_subject_kind text, p_subject_id
 --
 
 -- FUNCTION start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) :: ACL
---
-
 REVOKE ALL ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) TO service_role;
 GRANT ALL ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) TO authenticated;
 
 --
 
--- FUNCTION sweep_gateway_credential_revocations() :: ACL
+-- FUNCTION sweep_forge() :: ACL
+REVOKE ALL ON FUNCTION public.sweep_forge() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.sweep_forge() TO service_role;
+
 --
 
+-- FUNCTION sweep_forge_on_archive_change() :: ACL
+REVOKE ALL ON FUNCTION public.sweep_forge_on_archive_change() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.sweep_forge_on_archive_change() TO service_role;
+
+--
+
+-- FUNCTION sweep_gateway_credential_revocations() :: ACL
 REVOKE ALL ON FUNCTION public.sweep_gateway_credential_revocations() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.sweep_gateway_credential_revocations() TO service_role;
 
 --
 
--- FUNCTION sync_gateway_deployment() :: ACL
---
-
-REVOKE ALL ON FUNCTION public.sync_gateway_deployment() FROM PUBLIC;
-GRANT ALL ON FUNCTION public.sync_gateway_deployment() TO service_role;
+-- FUNCTION system_settings_read_only_guard() :: ACL
+REVOKE ALL ON FUNCTION public.system_settings_read_only_guard() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.system_settings_read_only_guard() TO service_role;
 
 --
 
 -- FUNCTION system_settings_stamp() :: ACL
---
-
 REVOKE ALL ON FUNCTION public.system_settings_stamp() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.system_settings_stamp() TO service_role;
 
 --
 
--- FUNCTION withdraw_gateway_enrollment_tokens() :: ACL
+-- FUNCTION validate_change_proposal() :: ACL
+REVOKE ALL ON FUNCTION public.validate_change_proposal() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.validate_change_proposal() TO service_role;
+
 --
 
+-- FUNCTION withdraw_gateway_enrollment_tokens() :: ACL
 REVOKE ALL ON FUNCTION public.withdraw_gateway_enrollment_tokens() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.withdraw_gateway_enrollment_tokens() TO service_role;
 
 --
 
--- TABLE ashrae223_vocabulary :: ACL
+-- FUNCTION withdraw_proposal(p_proposal_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.withdraw_proposal(p_proposal_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.withdraw_proposal(p_proposal_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.withdraw_proposal(p_proposal_id uuid) TO authenticated;
+
 --
 
+-- TABLE areas :: ACL
+GRANT ALL ON TABLE public.areas TO service_role;
+GRANT ALL ON TABLE public.areas TO authenticated;
+
+--
+
+-- TABLE ashrae223_vocabulary :: ACL
 GRANT ALL ON TABLE public.ashrae223_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.ashrae223_vocabulary TO authenticated;
 
 --
 
 -- TABLE asset_config :: ACL
---
-
 GRANT ALL ON TABLE public.asset_config TO service_role;
 GRANT ALL ON TABLE public.asset_config TO authenticated;
 
 --
 
--- TABLE capture_jobs :: ACL
+-- TABLE asset_exports :: ACL
+GRANT ALL ON TABLE public.asset_exports TO service_role;
+GRANT SELECT ON TABLE public.asset_exports TO authenticated;
+
 --
 
+-- TABLE backup_jobs :: ACL
+GRANT ALL ON TABLE public.backup_jobs TO service_role;
+GRANT SELECT ON TABLE public.backup_jobs TO authenticated;
+
+--
+
+-- TABLE backups :: ACL
+GRANT ALL ON TABLE public.backups TO service_role;
+GRANT SELECT ON TABLE public.backups TO authenticated;
+
+--
+
+-- TABLE capture_jobs :: ACL
 GRANT ALL ON TABLE public.capture_jobs TO service_role;
 GRANT SELECT ON TABLE public.capture_jobs TO authenticated;
 
 --
 
 -- TABLE captures :: ACL
---
-
 GRANT ALL ON TABLE public.captures TO service_role;
 GRANT SELECT,DELETE ON TABLE public.captures TO authenticated;
 
 --
 
 -- TABLE cells :: ACL
---
-
 GRANT ALL ON TABLE public.cells TO service_role;
 GRANT ALL ON TABLE public.cells TO authenticated;
 
 --
 
--- TABLE devices :: ACL
+-- TABLE change_proposals :: ACL
+GRANT ALL ON TABLE public.change_proposals TO service_role;
+GRANT SELECT,INSERT,UPDATE ON TABLE public.change_proposals TO authenticated;
+
 --
 
+-- TABLE devices :: ACL
 GRANT ALL ON TABLE public.devices TO service_role;
 GRANT ALL ON TABLE public.devices TO authenticated;
 
 --
 
 -- TABLE device_locations :: ACL
---
-
 GRANT ALL ON TABLE public.device_locations TO service_role;
 GRANT SELECT ON TABLE public.device_locations TO authenticated;
 
 --
 
 -- TABLE device_nameplate :: ACL
---
-
 GRANT ALL ON TABLE public.device_nameplate TO service_role;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.device_nameplate TO authenticated;
 
 --
 
 -- TABLE device_submodels :: ACL
---
-
 GRANT ALL ON TABLE public.device_submodels TO service_role;
 GRANT ALL ON TABLE public.device_submodels TO authenticated;
 
 --
 
 -- TABLE device_schemas :: ACL
---
-
 GRANT ALL ON TABLE public.device_schemas TO service_role;
 GRANT ALL ON TABLE public.device_schemas TO authenticated;
 
 --
 
 -- TABLE digital_thread :: ACL
---
-
 GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.digital_thread TO service_role;
 GRANT SELECT ON TABLE public.digital_thread TO authenticated;
 
 --
 
--- TABLE directory_liveness_probe :: ACL
+-- TABLE digital_thread_partition_health :: ACL
+GRANT ALL ON TABLE public.digital_thread_partition_health TO service_role;
+DO $g$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    EXECUTE 'GRANT SELECT ON TABLE public.digital_thread_partition_health TO grafana_reader';
+  END IF;
+END $g$;
+
 --
 
+-- TABLE directory_liveness_probe :: ACL
 GRANT ALL ON TABLE public.directory_liveness_probe TO service_role;
 
 --
 
 -- TABLE directory_services :: ACL
---
-
 GRANT ALL ON TABLE public.directory_services TO service_role;
 GRANT ALL ON TABLE public.directory_services TO authenticated;
 
 --
 
 -- TABLE gateway_enrollment_tokens :: ACL
---
-
 GRANT ALL ON TABLE public.gateway_enrollment_tokens TO service_role;
 
 --
 
 -- TABLE gateway_health :: ACL
---
-
 GRANT ALL ON TABLE public.gateway_health TO service_role;
 DO $g$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
     EXECUTE 'GRANT SELECT ON TABLE public.gateway_health TO grafana_reader';
   END IF;
 END $g$;
+
 --
 
 -- TABLE gateway_status :: ACL
---
-
 GRANT ALL ON TABLE public.gateway_status TO service_role;
 GRANT SELECT ON TABLE public.gateway_status TO authenticated;
 
 --
 
 -- TABLE idta_submodel_templates :: ACL
---
-
 GRANT ALL ON TABLE public.idta_submodel_templates TO service_role;
 GRANT SELECT ON TABLE public.idta_submodel_templates TO authenticated;
 
 --
 
 -- TABLE iso22400_vocabulary :: ACL
---
-
 GRANT ALL ON TABLE public.iso22400_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.iso22400_vocabulary TO authenticated;
 
 --
 
 -- TABLE links :: ACL
---
-
 GRANT ALL ON TABLE public.links TO service_role;
 GRANT ALL ON TABLE public.links TO authenticated;
 
 --
 
--- TABLE metric_catalog :: ACL
+-- TABLE machine_principals :: ACL
+GRANT ALL ON TABLE public.machine_principals TO service_role;
+GRANT SELECT ON TABLE public.machine_principals TO authenticated;
+
 --
 
+-- TABLE metric_catalog :: ACL
 GRANT ALL ON TABLE public.metric_catalog TO service_role;
 GRANT ALL ON TABLE public.metric_catalog TO authenticated;
 
 --
 
 -- TABLE metric_groups :: ACL
---
-
 GRANT ALL ON TABLE public.metric_groups TO service_role;
 GRANT ALL ON TABLE public.metric_groups TO authenticated;
 
 --
 
 -- TABLE mtconnect_vocabulary :: ACL
---
-
 GRANT ALL ON TABLE public.mtconnect_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.mtconnect_vocabulary TO authenticated;
 
 --
 
 -- TABLE one_shot_migrations :: ACL
---
-
 GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.one_shot_migrations TO service_role;
 
 --
 
 -- TABLE opcua_vocabulary :: ACL
---
-
 GRANT ALL ON TABLE public.opcua_vocabulary TO service_role;
 GRANT SELECT ON TABLE public.opcua_vocabulary TO authenticated;
 
 --
 
 -- TABLE permissions :: ACL
---
-
 GRANT ALL ON TABLE public.permissions TO service_role;
 GRANT ALL ON TABLE public.permissions TO authenticated;
 
 --
 
 -- TABLE platform_alerts :: ACL
---
-
 GRANT ALL ON TABLE public.platform_alerts TO service_role;
 GRANT SELECT ON TABLE public.platform_alerts TO authenticated;
 
 --
 
 -- TABLE platform_alerts_active :: ACL
---
-
 GRANT ALL ON TABLE public.platform_alerts_active TO service_role;
 GRANT SELECT ON TABLE public.platform_alerts_active TO authenticated;
 
 --
 
 -- TABLE platform_health :: ACL
---
-
 GRANT ALL ON TABLE public.platform_health TO service_role;
 DO $g$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
     EXECUTE 'GRANT SELECT ON TABLE public.platform_health TO grafana_reader';
   END IF;
 END $g$;
+
 --
 
 -- TABLE playback_jobs :: ACL
---
-
 GRANT ALL ON TABLE public.playback_jobs TO service_role;
 GRANT SELECT ON TABLE public.playback_jobs TO authenticated;
 
 --
 
 -- TABLE playback_worker_status :: ACL
---
-
 GRANT ALL ON TABLE public.playback_worker_status TO service_role;
 GRANT SELECT ON TABLE public.playback_worker_status TO authenticated;
 
 --
 
--- TABLE rebirth_requests :: ACL
+-- TABLE principal_permissions :: ACL
+GRANT ALL ON TABLE public.principal_permissions TO service_role;
+GRANT SELECT ON TABLE public.principal_permissions TO authenticated;
+
 --
 
+-- TABLE rebirth_requests :: ACL
 GRANT ALL ON TABLE public.rebirth_requests TO service_role;
 GRANT SELECT ON TABLE public.rebirth_requests TO authenticated;
 
 --
 
--- TABLE role_permissions :: ACL
+-- TABLE retired_entities :: ACL
+GRANT ALL ON TABLE public.retired_entities TO service_role;
+GRANT SELECT ON TABLE public.retired_entities TO authenticated;
+
 --
 
+-- TABLE revoked_service_principals :: ACL
+GRANT ALL ON TABLE public.revoked_service_principals TO service_role;
+GRANT SELECT ON TABLE public.revoked_service_principals TO authenticated;
+
+--
+
+-- TABLE revoked_service_tokens :: ACL
+GRANT ALL ON TABLE public.revoked_service_tokens TO service_role;
+GRANT SELECT ON TABLE public.revoked_service_tokens TO authenticated;
+
+--
+
+-- TABLE role_permissions :: ACL
 GRANT ALL ON TABLE public.role_permissions TO service_role;
 GRANT ALL ON TABLE public.role_permissions TO authenticated;
 
 --
 
 -- TABLE roles :: ACL
---
-
 GRANT ALL ON TABLE public.roles TO service_role;
 GRANT ALL ON TABLE public.roles TO authenticated;
 
 --
 
 -- SEQUENCE roles_id_seq :: ACL
---
-
 GRANT ALL ON SEQUENCE public.roles_id_seq TO service_role;
 GRANT ALL ON SEQUENCE public.roles_id_seq TO anon;
 GRANT ALL ON SEQUENCE public.roles_id_seq TO authenticated;
@@ -9789,184 +17251,486 @@ GRANT ALL ON SEQUENCE public.roles_id_seq TO authenticated;
 --
 
 -- TABLE schema_bootstrap :: ACL
---
-
 GRANT ALL ON TABLE public.schema_bootstrap TO service_role;
 
 --
 
 -- TABLE schemas :: ACL
---
-
 GRANT ALL ON TABLE public.schemas TO service_role;
 GRANT ALL ON TABLE public.schemas TO authenticated;
 
 --
 
 -- TABLE storage_footprint :: ACL
---
-
 GRANT ALL ON TABLE public.storage_footprint TO service_role;
 DO $g$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
     EXECUTE 'GRANT SELECT ON TABLE public.storage_footprint TO grafana_reader';
   END IF;
 END $g$;
+
 --
 
 -- TABLE system_settings :: ACL
---
-
 GRANT ALL ON TABLE public.system_settings TO service_role;
 GRANT SELECT ON TABLE public.system_settings TO authenticated;
 
 --
 
 -- COLUMN system_settings.value :: ACL
---
-
 GRANT UPDATE(value) ON TABLE public.system_settings TO authenticated;
 
 --
 
 -- TABLE telemetry :: ACL
---
-
 GRANT SELECT ON TABLE timescale.telemetry TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry TO service_role;
 
 --
 
 -- TABLE telemetry :: ACL
---
-
 GRANT ALL ON TABLE public.telemetry TO service_role;
 GRANT ALL ON TABLE public.telemetry TO authenticated;
 
 --
 
 -- TABLE telemetry_1h :: ACL
---
-
 GRANT SELECT ON TABLE timescale.telemetry_1h TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_1h TO service_role;
 
 --
 
 -- TABLE telemetry_1h :: ACL
---
-
 GRANT ALL ON TABLE public.telemetry_1h TO service_role;
 GRANT SELECT ON TABLE public.telemetry_1h TO authenticated;
 
 --
 
 -- TABLE telemetry_1m :: ACL
---
-
 GRANT SELECT ON TABLE timescale.telemetry_1m TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_1m TO service_role;
 
 --
 
 -- TABLE telemetry_1m :: ACL
---
-
 GRANT ALL ON TABLE public.telemetry_1m TO service_role;
 GRANT SELECT ON TABLE public.telemetry_1m TO authenticated;
 
 --
 
 -- TABLE telemetry_5m :: ACL
---
-
 GRANT SELECT ON TABLE timescale.telemetry_5m TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_5m TO service_role;
 
 --
 
 -- TABLE telemetry_5m :: ACL
---
-
 GRANT ALL ON TABLE public.telemetry_5m TO service_role;
 GRANT SELECT ON TABLE public.telemetry_5m TO authenticated;
 
 --
 
--- TABLE telemetry_latest :: ACL
+-- TABLE telemetry_horizons :: ACL
+GRANT SELECT ON TABLE timescale.telemetry_horizons TO authenticated;
+GRANT SELECT ON TABLE timescale.telemetry_horizons TO service_role;
+
 --
 
+-- TABLE telemetry_horizons :: ACL
+GRANT ALL ON TABLE public.telemetry_horizons TO service_role;
+GRANT SELECT ON TABLE public.telemetry_horizons TO authenticated;
+
+--
+
+-- TABLE telemetry_latest :: ACL
 GRANT SELECT ON TABLE timescale.telemetry_latest TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_latest TO service_role;
 
 --
 
 -- TABLE telemetry_latest :: ACL
---
-
 GRANT ALL ON TABLE public.telemetry_latest TO service_role;
 GRANT SELECT ON TABLE public.telemetry_latest TO authenticated;
 
 --
 
 -- TABLE user_roles :: ACL
---
-
 GRANT ALL ON TABLE public.user_roles TO service_role;
 GRANT ALL ON TABLE public.user_roles TO authenticated;
 
 --
 
 -- TABLE webhook_endpoints :: ACL
---
-
 GRANT ALL ON TABLE public.webhook_endpoints TO service_role;
 GRANT ALL ON TABLE public.webhook_endpoints TO authenticated;
 
 --
 
--- DEFAULT PRIVILEGES FOR SEQUENCES :: DEFAULT ACL
---
+-- stale overloads :: SWEEP
+DO $overloads$
+DECLARE
+    r record;
+BEGIN
+    -- SAME search_path pg_dump WROTE THE LIST UNDER, which is none. `format_type` qualifies
+    -- a type only when it is not visible, so with `public` on the path a composite argument
+    -- renders as `gateways` where the dump says `public.gateways` -- and every function
+    -- taking one fails to match its own entry and is dropped. Reverts with the block.
+    SET LOCAL search_path TO '';
 
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO service_role;
+    FOR r IN
+        SELECT p.oid::regprocedure AS sig,
+               p.proname || '(' || coalesce((SELECT string_agg(format_type(t, NULL), ', ' ORDER BY ord)
+                                               FROM unnest(p.proargtypes) WITH ORDINALITY AS a(t, ord)), '')
+                          || ')' AS ident
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.proname = ANY (ARRAY[
+               'active_schema_version',
+               'approve_proposal',
+               'approve_quarantined_device',
+               'archive_credential_is_set',
+               'archive_destination_guard',
+               'assert_principal_not_revoked',
+               'audit_domain_for',
+               'audit_telemetry_columns',
+               'auth_pre_request',
+               'authorize_host_gateway_credential',
+               'backup_claim_job',
+               'backup_fail',
+               'backup_finalise',
+               'backup_forget',
+               'backup_prunable',
+               'backup_reconcile_jobs',
+               'backup_schedule',
+               'cancel_backup_job',
+               'capped_capture_manifest',
+               'clear_credential_revoked_on_enrolment',
+               'cold_archive_backlog',
+               'cold_archive_backlog_state',
+               'cold_archive_destination',
+               'cold_storage_rows',
+               'consume_gateway_enrollment_token',
+               'create_machine_principal',
+               'custom_access_token_hook',
+               'describe_machine_principal',
+               'digital_thread_backup_job_ids_matching',
+               'digital_thread_page',
+               'digital_thread_user_ids_matching',
+               'directory_liveness_job_map',
+               'discard_schema_draft',
+               'dispatch_device_quarantine_webhook',
+               'enforce_digital_thread_append_only',
+               'enforce_metric_catalog_immutability',
+               'enforce_metric_group_spelling',
+               'enforce_open_proposal_cap',
+               'enforce_schema_version_provenance',
+               'enqueue_scheduled_backup',
+               'ensure_cron_job',
+               'ensure_digital_thread_partition',
+               'ensure_digital_thread_partitions',
+               'ensure_gateway_status_view',
+               'ensure_shadow_devices',
+               'expire_open_proposals',
+               'fork_schema',
+               'gateway_has_broker_credential',
+               'gateway_health_rows',
+               'gateway_holds_a_credential',
+               'gateway_is_playback_delivery_target',
+               'guard_change_proposal_transition',
+               'handle_new_user',
+               'has_authority',
+               'has_role',
+               'ingest_capture_progress',
+               'ingest_claim_capture_job',
+               'ingest_claim_rebirth_requests',
+               'ingest_fail_capture',
+               'ingest_finalise_capture',
+               'ingest_mark_device_offline',
+               'ingest_reconcile_capture_jobs',
+               'ingest_record_declared_metrics',
+               'ingest_record_gateway_health',
+               'ingest_record_rebirth_outcome',
+               'ingest_register_quarantined_device',
+               'ingest_requarantine_device',
+               'ingest_set_device_state',
+               'ingest_store_birth_parameters',
+               'is_active_capture_object',
+               'is_active_playback_capture',
+               'is_capture_subject_prefix',
+               'is_floor_plan_path',
+               'is_ingestion_caller',
+               'is_machine_principal',
+               'is_playback_caller',
+               'is_valid_quarantine_reason',
+               'issue_gateway_enrollment_token',
+               'list_machine_principals',
+               'list_user_accounts',
+               'log_asset_export',
+               'log_digital_thread_event',
+               'log_role_assignment',
+               'may_decide_proposal',
+               'may_manage_captures',
+               'peek_gateway_enrollment_token',
+               'place_cell_in_its_area',
+               'plan_distance',
+               'platform_health_rows',
+               'platform_storage_rows',
+               'playback_claim_job',
+               'playback_finish',
+               'playback_progress',
+               'playback_reconcile_jobs',
+               'playback_report_credentials',
+               'playback_stale_credentials',
+               'playback_target_must_be_shadow',
+               'prevent_active_schema_mutation',
+               'proposable_columns',
+               'proposal_is_already_true',
+               'prune_closed_proposals',
+               'prune_platform_alerts',
+               'publish_schema_version',
+               'record_gateway_credential_issued',
+               'record_gateway_credential_issued_by_service',
+               'record_ingestion_rejection',
+               'record_retired_entity',
+               'record_service_token_issued',
+               'refresh_directory_liveness',
+               'refuse_archiving_the_last_shadow_gateway',
+               'refuse_hand_assigning_a_replay_lane',
+               'refuse_role_for_machine_principal',
+               'register_uploaded_capture',
+               'reinstate_service_principal',
+               'reject_archived_schema_assignment',
+               'reject_proposal',
+               'release_backup',
+               'release_gateway_enrollment_token',
+               'relocate_devices',
+               'request_backup',
+               'request_capture_stop',
+               'request_gateway_rebirth',
+               'request_playback_stop',
+               'require_backup_service_caller',
+               'require_ingestion_caller',
+               'require_playback_caller',
+               'revoke_anon_function_privileges',
+               'revoke_credential_on_decommission',
+               'revoke_gateway_credential',
+               'revoke_service_principal',
+               'revoke_service_token',
+               'schema_version_base_name',
+               'secure_digital_thread_partition',
+               'seed_setting',
+               'service_token_max_days',
+               'set_archive_credential',
+               'shadow_follows_its_original',
+               'sparkplug_group_default',
+               'stamp_audit_domain',
+               'stamp_proposal_author',
+               'start_capture_job',
+               'start_playback_job',
+               'sweep_forge',
+               'sweep_forge_on_archive_change',
+               'sweep_gateway_credential_revocations',
+               'system_settings_read_only_guard',
+               'system_settings_stamp',
+               'validate_change_proposal',
+               'withdraw_gateway_enrollment_tokens',
+               'withdraw_proposal'
+           ])
+    LOOP
+        IF r.ident <> ALL (ARRAY[
+            'active_schema_version(uuid)',
+            'approve_proposal(uuid)',
+            'approve_quarantined_device(uuid, uuid, uuid, uuid, text, uuid, text, boolean, boolean, uuid, boolean)',
+            'archive_credential_is_set()',
+            'archive_destination_guard()',
+            'assert_principal_not_revoked(uuid)',
+            'audit_domain_for(text, text)',
+            'audit_telemetry_columns()',
+            'auth_pre_request()',
+            'authorize_host_gateway_credential(uuid)',
+            'backup_claim_job()',
+            'backup_fail(uuid, text)',
+            'backup_finalise(uuid, text, text, jsonb, bigint)',
+            'backup_forget(uuid, text)',
+            'backup_prunable(integer)',
+            'backup_reconcile_jobs(text)',
+            'backup_schedule(text)',
+            'cancel_backup_job(uuid)',
+            'capped_capture_manifest(jsonb)',
+            'clear_credential_revoked_on_enrolment()',
+            'cold_archive_backlog()',
+            'cold_archive_backlog_state()',
+            'cold_archive_destination()',
+            'cold_storage_rows()',
+            'consume_gateway_enrollment_token(text)',
+            'create_machine_principal(text, text[], text)',
+            'custom_access_token_hook(jsonb)',
+            'describe_machine_principal(uuid, text, text)',
+            'digital_thread_backup_job_ids_matching(text)',
+            'digital_thread_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text)',
+            'digital_thread_user_ids_matching(text)',
+            'directory_liveness_job_map()',
+            'discard_schema_draft(uuid)',
+            'dispatch_device_quarantine_webhook()',
+            'enforce_digital_thread_append_only()',
+            'enforce_metric_catalog_immutability()',
+            'enforce_metric_group_spelling()',
+            'enforce_open_proposal_cap()',
+            'enforce_schema_version_provenance()',
+            'enqueue_scheduled_backup()',
+            'ensure_cron_job(text, text, text)',
+            'ensure_digital_thread_partition(timestamp with time zone)',
+            'ensure_digital_thread_partitions(integer)',
+            'ensure_gateway_status_view()',
+            'ensure_shadow_devices(uuid)',
+            'expire_open_proposals()',
+            'fork_schema(uuid, text)',
+            'gateway_has_broker_credential(public.gateways)',
+            'gateway_health_rows()',
+            'gateway_holds_a_credential(public.gateways)',
+            'gateway_is_playback_delivery_target(uuid)',
+            'guard_change_proposal_transition()',
+            'handle_new_user()',
+            'has_authority(text[])',
+            'has_role(text[])',
+            'ingest_capture_progress(uuid, bigint, bigint, integer, boolean)',
+            'ingest_claim_capture_job()',
+            'ingest_claim_rebirth_requests()',
+            'ingest_fail_capture(uuid, text)',
+            'ingest_finalise_capture(uuid, bigint, integer, jsonb)',
+            'ingest_mark_device_offline(uuid)',
+            'ingest_reconcile_capture_jobs()',
+            'ingest_record_declared_metrics(uuid, text[], timestamp with time zone)',
+            'ingest_record_gateway_health(uuid, text, timestamp with time zone, jsonb)',
+            'ingest_record_rebirth_outcome(uuid, boolean, text)',
+            'ingest_register_quarantined_device(text, uuid, text, text, text, text[], timestamp with time zone)',
+            'ingest_requarantine_device(uuid, text, text)',
+            'ingest_set_device_state(uuid, text, text, timestamp with time zone)',
+            'ingest_store_birth_parameters(text, jsonb, timestamp with time zone)',
+            'is_active_capture_object(text)',
+            'is_active_playback_capture(text)',
+            'is_capture_subject_prefix(text)',
+            'is_floor_plan_path(text)',
+            'is_ingestion_caller()',
+            'is_machine_principal(uuid)',
+            'is_playback_caller()',
+            'is_valid_quarantine_reason(text)',
+            'issue_gateway_enrollment_token(uuid, integer)',
+            'list_machine_principals()',
+            'list_user_accounts()',
+            'log_asset_export()',
+            'log_digital_thread_event()',
+            'log_role_assignment()',
+            'may_decide_proposal(text)',
+            'may_manage_captures()',
+            'peek_gateway_enrollment_token(text)',
+            'place_cell_in_its_area()',
+            'plan_distance(numeric, numeric, numeric, numeric, numeric)',
+            'platform_health_rows()',
+            'platform_storage_rows()',
+            'playback_claim_job()',
+            'playback_finish(uuid, integer, text, integer)',
+            'playback_progress(uuid, integer, integer, integer)',
+            'playback_reconcile_jobs()',
+            'playback_report_credentials(text[], text[])',
+            'playback_stale_credentials()',
+            'playback_target_must_be_shadow()',
+            'prevent_active_schema_mutation()',
+            'proposable_columns(text)',
+            'proposal_is_already_true(uuid)',
+            'prune_closed_proposals()',
+            'prune_platform_alerts(interval)',
+            'publish_schema_version(uuid)',
+            'record_gateway_credential_issued(uuid)',
+            'record_gateway_credential_issued_by_service(uuid, jsonb)',
+            'record_ingestion_rejection(uuid, jsonb, timestamp with time zone)',
+            'record_retired_entity()',
+            'record_service_token_issued(uuid, text, timestamp with time zone, jsonb, uuid)',
+            'refresh_directory_liveness()',
+            'refuse_archiving_the_last_shadow_gateway()',
+            'refuse_hand_assigning_a_replay_lane()',
+            'refuse_role_for_machine_principal()',
+            'register_uploaded_capture(text, uuid, text, bigint, integer, jsonb, text, boolean)',
+            'reinstate_service_principal(uuid)',
+            'reject_archived_schema_assignment()',
+            'reject_proposal(uuid, text)',
+            'release_backup(uuid)',
+            'release_gateway_enrollment_token(text)',
+            'relocate_devices(jsonb)',
+            'request_backup(text)',
+            'request_capture_stop(uuid)',
+            'request_gateway_rebirth(uuid)',
+            'request_playback_stop(uuid)',
+            'require_backup_service_caller(text)',
+            'require_ingestion_caller(text)',
+            'require_playback_caller(text)',
+            'revoke_anon_function_privileges()',
+            'revoke_credential_on_decommission()',
+            'revoke_gateway_credential(text)',
+            'revoke_service_principal(uuid, text)',
+            'revoke_service_token(text)',
+            'schema_version_base_name(text)',
+            'secure_digital_thread_partition(regclass)',
+            'seed_setting(text, jsonb, text, text, text, text, text)',
+            'service_token_max_days()',
+            'set_archive_credential(text)',
+            'shadow_follows_its_original()',
+            'sparkplug_group_default()',
+            'stamp_audit_domain()',
+            'stamp_proposal_author()',
+            'start_capture_job(text, uuid, text, integer, boolean)',
+            'start_playback_job(uuid, uuid, jsonb, numeric)',
+            'sweep_forge()',
+            'sweep_forge_on_archive_change()',
+            'sweep_gateway_credential_revocations()',
+            'system_settings_read_only_guard()',
+            'system_settings_stamp()',
+            'validate_change_proposal()',
+            'withdraw_gateway_enrollment_tokens()',
+            'withdraw_proposal(uuid)'
+        ]) THEN
+            EXECUTE format('DROP FUNCTION %s', r.sig);
+            RAISE NOTICE 'dropped %, which this baseline does not declare.', r.sig;
+        END IF;
+    END LOOP;
+END
+$overloads$;
 
---
-
--- DEFAULT PRIVILEGES FOR SEQUENCES :: DEFAULT ACL
---
-
---
-
--- DEFAULT PRIVILEGES FOR FUNCTIONS :: DEFAULT ACL
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO service_role;
-
---
-
--- DEFAULT PRIVILEGES FOR FUNCTIONS :: DEFAULT ACL
---
-
---
-
--- DEFAULT PRIVILEGES FOR TABLES :: DEFAULT ACL
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO service_role;
-
---
-
--- DEFAULT PRIVILEGES FOR TABLES :: DEFAULT ACL
---
-
---
--- PostgreSQL database dump complete
---
 
 -- ---------------------------------------------------------------------------------------------
+-- 4b. The partitions digital_thread can accept, and their privileges
+-- ---------------------------------------------------------------------------------------------
+-- BEFORE 0002 SEEDS, and that ordering is the whole point of where this sits. Section 4 creates
+-- the partitioned parent and the DEFAULT partition only -- the monthly partitions are run-time
+-- objects, not schema. Leave the second line out and the seed's audit rows land in the DEFAULT
+-- partition, and the first boot of the partition maintainer then cannot attach the month they
+-- belong to: "updated partition constraint for default partition would be violated by some row".
+-- The old chain did not need it because 0002 seeded a table that was not yet partitioned and
+-- 0079 converted it afterwards, routing each row as it went.
+--
+-- THE FIRST LINE IS A PRIVILEGE FIX, NOT A TIDY-UP. A partition's privileges are checked when it
+-- is addressed directly, so they do not follow the parent's. 0079 created this partition through
+-- secure_digital_thread_partition(), which withdraws everything; section 4 creates it directly,
+-- where the image's default privileges hand `service_role` INSERT, UPDATE, DELETE and TRUNCATE on
+-- it -- on the default partition of the append-only audit table, which is exactly what the
+-- parent's own grants refuse. `ensure_digital_thread_partitions()` secures the months it creates;
+-- nothing secures this one but this line.
+SELECT public.secure_digital_thread_partition('public.digital_thread_default'::regclass);
+SELECT public.ensure_digital_thread_partitions(3);
+
+-- ---------------------------------------------------------------------------------------------
+-- 4c. gateway_status is rebuilt from the column set this database actually has
+-- ---------------------------------------------------------------------------------------------
+-- Section 4 declares the view with an explicit column list, because that is how a dump records
+-- `SELECT g.*`. That list is right for a fresh install and wrong for an UPGRADE: the widening
+-- above appends a missing column to the END of `gateways`, while the list puts it in declaration
+-- order, and `CREATE OR REPLACE VIEW` refuses a list whose existing columns have moved. Rebuilding
+-- from `g.*` takes whatever column set the table ended up with, and re-applies the grants that
+-- DROP VIEW discards. check-docs-drift.mjs requires this of any migration that adds a gateways
+-- column, which -- since the widening -- this file does.
+SELECT public.ensure_gateway_status_view();
+
 -- 5. Realtime publication
 -- ---------------------------------------------------------------------------------------------
 -- `telemetry` is absent: it is a postgres_fdw foreign table whose rows enter TimescaleDB's WAL,
@@ -10067,6 +17831,33 @@ END
 $sweep$;
 
 -- ---------------------------------------------------------------------------------------------
+-- THE BACKUP LANE IS CLOSED TO EVERY PostgREST ROLE, and section 4 cannot say so. These eight
+-- are SECURITY DEFINER gates the backup service reaches over its own connection; the only thing
+-- standing between `service_role` and them is the absence of a grant, and the image's default
+-- privileges hand `service_role` EXECUTE on every function created after them. 0101 withdrew it
+-- and a dump records only what was granted, so a generated baseline hands it back.
+REVOKE ALL ON FUNCTION public.require_backup_service_caller(text)               FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_schedule(text)                             FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_reconcile_jobs(text)                       FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_claim_job()                                FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_finalise(uuid, text, text, jsonb, bigint)  FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_fail(uuid, text)                           FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_prunable(integer)                          FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_forget(uuid, text)                         FROM PUBLIC, anon, authenticated, service_role;
+
+-- ONE GRANT THE SWEEP ABOVE MUST NOT TAKE, and it has to be re-stated after it rather than with
+-- the object. `auth_pre_request()` is PostgREST's db-pre-request hook: it runs for EVERY request
+-- before the role is considered, so `anon` executing it is what makes an unauthenticated request
+-- possible at all. In the chain this file replaces the grant landed in 0074 and 0076 -- after the
+-- baseline, and therefore after the sweep. Folded, the grant arrives with the function and the
+-- sweep then withdraws it, which takes the whole API down for anonymous callers on the next boot.
+--
+-- All three are withdrawn and re-granted together, in 0076's order, rather than adding `anon` back
+-- on its own. A grantee keeps its place in the ACL, so re-granting one role leaves it last instead
+-- of first -- the same three grants in a different order, which a dump records and a digest sees.
+REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.auth_pre_request() TO anon, authenticated, service_role;
+
 -- 7. Structural self-checks
 -- ---------------------------------------------------------------------------------------------
 -- The two invariants that fail silently if the structure is wrong.

@@ -388,7 +388,7 @@ BEGIN
   EXECUTE format('GRANT SELECT ON public.telemetry_1m TO %I', v_role);
   EXECUTE format('GRANT SELECT ON public.telemetry_5m TO %I', v_role);
   EXECUTE format('GRANT SELECT ON public.telemetry_1h TO %I', v_role);
-  -- How far back each resolution reaches (migration 0111). Guarded on the view existing because a
+  -- How far back each resolution reaches (archived migration 0111). Guarded on the view existing because a
   -- first boot applies aggregates.sql after this file, as the archive manifest is.
   --
   -- WITHOUT THIS GRANT THE FAILURE IS SILENT AT THE DASHBOARD. The Supabase-side view is

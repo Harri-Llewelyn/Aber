@@ -51,28 +51,31 @@ def get_connection():
     )
 
 
-# The numbered section headers 0132 is written in, used to cut one stanza out of it.
+# The numbered section headers the migration is written in, used to cut one stanza out of it.
 _SECTION = "-- ---------------------------------------------------------------------------------------------"
 
 
 def _retirement_stanza():
     """
-    0132's bucket-retirement section, read from the migration itself.
+    The bucket-retirement section, read from the migration itself.
 
     READ RATHER THAN COPIED so the tests below exercise the statement that actually runs. A copy
     would keep passing after somebody simplified the guard away in the migration, which is precisely
     the regression they exist to catch.
+
+    IT MOVED WITH THE THIRD SQUASH. It was archived migration 0132's section 2; the fold archived
+    0132 and the retirement is a subtraction, so it is `0000`'s now -- and `0000` runs BEFORE the
+    baseline, which is what keeps the guard's question ("has `sensitive` arrived yet?") answerable
+    at all. The stanza is the same statement either way, which is why these tests did not change.
     """
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "0132_the_archive_leaves_the_site.sql")
+                        "0000_a_database_from_before_the_fold.sql")
     with open(path, encoding="utf-8") as handle:
         text = handle.read()
 
-    marker = "2. The bucket setting goes with the bucket"
+    marker = "4. Two settings rows that are no longer controls"
     start = text.index(marker)
-    # Past the header's own closing rule, then up to the rule that opens the next section -- or
-    # to the end of the file, because this is the last section since `archive.enabled` was folded
-    # back into 0002 (#356) and nothing follows it.
+    # Past the header's own closing rule, then up to the rule that opens the next section.
     body = text[text.index(_SECTION, start) + len(_SECTION):]
     end = body.find(_SECTION)
     return body if end == -1 else body[:end]

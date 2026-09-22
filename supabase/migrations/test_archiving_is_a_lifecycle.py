@@ -98,9 +98,9 @@ class LifecycleBase(unittest.TestCase):
     def gateway(self, cell_id=None, **flags):
         gid = str(uuid.uuid4())
         self.cur.execute(
-            "INSERT INTO public.gateways (id, name, cell_id, location_scope, is_virtual, "
+            "INSERT INTO public.gateways (id, name, cell_id, location_scope, deployment, "
             "is_simulated, is_shadow) VALUES (%s, %s, %s, 'cell', %s, %s, %s);",
-            (gid, f"Lifecycle_GW_{gid[:8]}", cell_id, flags.get("is_virtual", False),
+            (gid, f"Lifecycle_GW_{gid[:8]}", cell_id, flags.get("deployment", "remote"),
              flags.get("is_simulated", False), flags.get("is_shadow", False)),
         )
         return gid
@@ -256,7 +256,7 @@ class AShadowFollowsItsOriginal(LifecycleBase):
     def setUp(self):
         super().setUp()
         self.real = self.gateway()
-        self.playback = self.gateway(is_virtual=True, is_simulated=True, is_shadow=True)
+        self.playback = self.gateway(deployment="host", is_simulated=True, is_shadow=True)
         self.origin = self.device(gateway_id=self.real)
         self.lane = self.device(gateway_id=self.playback, shadow_of=self.origin)
 
