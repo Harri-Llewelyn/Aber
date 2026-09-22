@@ -28,7 +28,7 @@ helm upgrade aber oci://ghcr.io/harri-llewelyn/acs-cymru/aber \
   --wait --timeout 15m
 ```
 
-Three things about that command:
+Four things about that command:
 
 - **`--version` is not optional in practice.** Without it Helm resolves the newest release, which
   makes the command mean something different next month.

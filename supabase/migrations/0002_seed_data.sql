@@ -2406,6 +2406,8 @@ ON CONFLICT (service_name) DO NOTHING;
 \if :{?studio_public_url}    \else \set studio_public_url    '' \endif
 \if :{?nodered_redirect_uri} \else \set nodered_redirect_uri '' \endif
 \if :{?gitea_public_url}     \else \set gitea_public_url     '' \endif
+\if :{?docs_public_url}      \else \set docs_public_url      '' \endif
+\if :{?supabase_public_url}  \else \set supabase_public_url  '' \endif
 
 SELECT set_config('acs_cymru.dir_gitea_public_url', :'gitea_public_url', false);
 
@@ -2480,9 +2482,13 @@ WHERE public.directory_services.id = v.id
 SELECT set_config('acs_cymru.dir_grafana_public_url', :'grafana_public_url',   false);
 SELECT set_config('acs_cymru.dir_studio_public_url',  :'studio_public_url',    false);
 SELECT set_config('acs_cymru.dir_nodered_redirect',   :'nodered_redirect_uri', false);
+SELECT set_config('acs_cymru.dir_docs_public_url',     :'docs_public_url',      false);
+SELECT set_config('acs_cymru.dir_supabase_public_url', :'supabase_public_url',  false);
 
 DO $$
 DECLARE
+  v_docs     TEXT := NULLIF(current_setting('acs_cymru.dir_docs_public_url',     true), '');
+  v_supabase TEXT := NULLIF(current_setting('acs_cymru.dir_supabase_public_url', true), '');
   v_grafana TEXT := NULLIF(current_setting('acs_cymru.dir_grafana_public_url', true), '');
   v_studio  TEXT := NULLIF(current_setting('acs_cymru.dir_studio_public_url',  true), '');
   v_nodered TEXT := NULLIF(current_setting('acs_cymru.dir_nodered_redirect',   true), '');
@@ -2535,12 +2541,45 @@ BEGIN
       RAISE NOTICE 'directory: Node-RED now advertised at %, from NODERED_PUBLIC_URL', v_nodered_origin;
     END IF;
   END IF;
+
+  -- Swagger UI, which the chart serves from its own image at the docs address. Seeded as the
+  -- Compose-era `localhost:8088`, which no Kubernetes install has ever listened on.
+  IF v_docs IS NOT NULL THEN
+    UPDATE public.directory_services
+       SET endpoint_url = rtrim(v_docs, '/')
+     WHERE id = 'f1111111-0000-0000-0000-00000000000d'::uuid
+       AND endpoint_url IS DISTINCT FROM rtrim(v_docs, '/');
+    GET DIAGNOSTICS v_moved = ROW_COUNT;
+    IF v_moved > 0 THEN
+      RAISE NOTICE 'directory: Swagger UI now advertised at %, from DOCS_PUBLIC_URL', rtrim(v_docs, '/');
+    END IF;
+  END IF;
+
+  -- The four Supabase rows share one origin (the gateway) and keep their own paths.
+  IF v_supabase IS NOT NULL THEN
+    UPDATE public.directory_services AS d
+       SET endpoint_url = rtrim(v_supabase, '/') || p.suffix
+      FROM (VALUES
+             ('f1111111-0000-0000-0000-000000000007'::uuid, ''),
+             ('f1111111-0000-0000-0000-000000000008'::uuid, '/auth/v1'),
+             ('f1111111-0000-0000-0000-000000000009'::uuid, '/rest/v1'),
+             ('f1111111-0000-0000-0000-00000000000a'::uuid, '/functions/v1')
+           ) AS p(id, suffix)
+     WHERE d.id = p.id
+       AND d.endpoint_url IS DISTINCT FROM rtrim(v_supabase, '/') || p.suffix;
+    GET DIAGNOSTICS v_moved = ROW_COUNT;
+    IF v_moved > 0 THEN
+      RAISE NOTICE 'directory: % Supabase row(s) now advertised under %, from SUPABASE_PUBLIC_URL', v_moved, rtrim(v_supabase, '/');
+    END IF;
+  END IF;
 END $$;
 
 SELECT set_config('acs_cymru.dir_grafana_public_url', '', false);
 SELECT set_config('acs_cymru.dir_studio_public_url',  '', false);
 SELECT set_config('acs_cymru.dir_nodered_redirect',   '', false);
 SELECT set_config('acs_cymru.dir_gitea_public_url',   '', false);
+SELECT set_config('acs_cymru.dir_docs_public_url',     '', false);
+SELECT set_config('acs_cymru.dir_supabase_public_url', '', false);
 
 -- -------------------------------------------------------------------------------------------
 -- Outbound webhook targets  (1 row)
@@ -2765,6 +2804,128 @@ BEGIN
 END $$;
 
 SELECT set_config('acs_cymru.grafana_oauth_client_secret', '', false);
+
+-- Studio's door: the client the gateway's studio listener authenticates as (`...0003`).
+-- Registered here since the fold of archived migration 0081, in the shape of the Grafana client
+-- above. An absent secret skips the registration with a WARNING; the gateway then answers with a
+-- login that cannot complete rather than with an error naming this row.
+\if :{?studio_oauth_client_secret} \else \set studio_oauth_client_secret '' \endif
+
+SELECT set_config('acs_cymru.studio_oauth_client_secret', :'studio_oauth_client_secret', false);
+SELECT set_config('acs_cymru.studio_public_url',          :'studio_public_url',          false);
+
+DO $$
+DECLARE
+  -- Pinned, not generated: supabase/envoy.yaml carries this as the listener's `client_id`, and a
+  -- fresh UUID on every stack rebuild would silently break the login.
+  v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000003';
+  v_secret    TEXT := current_setting('acs_cymru.studio_oauth_client_secret', true);
+  v_base      TEXT := rtrim(
+                        COALESCE(
+                          NULLIF(current_setting('acs_cymru.studio_public_url', true), ''),
+                          'http://127.0.0.1:54323'),
+                        '/');
+  v_hash      TEXT;
+BEGIN
+  IF v_secret IS NULL OR v_secret = '' THEN
+    RAISE WARNING 'studio_oauth_client_secret not supplied; skipping client registration. '
+                  'The listener will answer a login it cannot complete.';
+    RETURN;
+  END IF;
+
+  v_hash := rtrim(translate(encode(extensions.digest(v_secret, 'sha256'), 'base64'), '+/', '-_'), '=');
+
+  INSERT INTO auth.oauth_clients (
+    id, client_secret_hash, registration_type, redirect_uris, grant_types,
+    client_name, client_uri, client_type, token_endpoint_auth_method
+  ) VALUES (
+    v_client_id,
+    v_hash,
+    'manual',                                        -- seeded, not self-registered
+    v_base || '/oauth2/callback',                    -- the oauth2 filter's fixed callback path
+    'authorization_code,refresh_token',
+    'Aber Supabase Studio',
+    v_base,
+    'confidential',
+    -- MUST MATCH `auth_type: BASIC_AUTH` in the listener. GoTrue enforces the registered method
+    -- exactly and answers 400 invalid_credentials for the other one.
+    'client_secret_basic'
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    client_secret_hash         = EXCLUDED.client_secret_hash,
+    redirect_uris              = EXCLUDED.redirect_uris,
+    grant_types                = EXCLUDED.grant_types,
+    client_name                = EXCLUDED.client_name,
+    client_uri                 = EXCLUDED.client_uri,
+    token_endpoint_auth_method = EXCLUDED.token_endpoint_auth_method,
+    deleted_at                 = NULL,
+    updated_at                 = NOW();
+  -- DO UPDATE, not DO NOTHING: db-init replays every migration on every boot, so a rotated secret
+  -- or a changed address takes effect on the next one.
+END $$;
+
+SELECT set_config('acs_cymru.studio_oauth_client_secret', '', false);
+
+-- The forge's door: the client the gateway's forge listener authenticates as (`...0004`).
+-- Registered here since the fold of archived migration 0094, in the shape of the Grafana client
+-- above. An absent secret skips the registration with a WARNING; the gateway then answers with a
+-- login that cannot complete rather than with an error naming this row.
+\if :{?gitea_oauth_client_secret} \else \set gitea_oauth_client_secret '' \endif
+
+SELECT set_config('acs_cymru.gitea_oauth_client_secret', :'gitea_oauth_client_secret', false);
+SELECT set_config('acs_cymru.gitea_public_url',          :'gitea_public_url',          false);
+
+DO $$
+DECLARE
+  -- Pinned, not generated: supabase/envoy.yaml carries this as the listener's `client_id`, and a
+  -- fresh UUID on every stack rebuild would silently break the login.
+  v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000004';
+  v_secret    TEXT := current_setting('acs_cymru.gitea_oauth_client_secret', true);
+  v_base      TEXT := rtrim(
+                        COALESCE(
+                          NULLIF(current_setting('acs_cymru.gitea_public_url', true), ''),
+                          'http://localhost:3003'),
+                        '/');
+  v_hash      TEXT;
+BEGIN
+  IF v_secret IS NULL OR v_secret = '' THEN
+    RAISE WARNING 'gitea_oauth_client_secret not supplied; skipping client registration. '
+                  'The listener will answer a login it cannot complete.';
+    RETURN;
+  END IF;
+
+  v_hash := rtrim(translate(encode(extensions.digest(v_secret, 'sha256'), 'base64'), '+/', '-_'), '=');
+
+  INSERT INTO auth.oauth_clients (
+    id, client_secret_hash, registration_type, redirect_uris, grant_types,
+    client_name, client_uri, client_type, token_endpoint_auth_method
+  ) VALUES (
+    v_client_id,
+    v_hash,
+    'manual',                                        -- seeded, not self-registered
+    v_base || '/oauth2/callback',                    -- the oauth2 filter's fixed callback path
+    'authorization_code,refresh_token',
+    'Aber Forge',
+    v_base,
+    'confidential',
+    -- MUST MATCH `auth_type: BASIC_AUTH` in the listener. GoTrue enforces the registered method
+    -- exactly and answers 400 invalid_credentials for the other one.
+    'client_secret_basic'
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    client_secret_hash         = EXCLUDED.client_secret_hash,
+    redirect_uris              = EXCLUDED.redirect_uris,
+    grant_types                = EXCLUDED.grant_types,
+    client_name                = EXCLUDED.client_name,
+    client_uri                 = EXCLUDED.client_uri,
+    token_endpoint_auth_method = EXCLUDED.token_endpoint_auth_method,
+    deleted_at                 = NULL,
+    updated_at                 = NOW();
+  -- DO UPDATE, not DO NOTHING: db-init replays every migration on every boot, so a rotated secret
+  -- or a changed address takes effect on the next one.
+END $$;
+
+SELECT set_config('acs_cymru.gitea_oauth_client_secret', '', false);
 
 -- -------------------------------------------------------------------------------------------
 -- ASHRAE 223P building-system concepts  (640 rows, and the one metric group they file under)
