@@ -65,6 +65,10 @@ Anything a running site would notice as a break. Concretely, any of:
   alert rule queries.
 - **A change to the shape of a topic** the platform publishes or consumes.
 - **Dropping support for a Kubernetes version** the previous release supported.
+- **A change `helm upgrade` cannot carry**, which moves [the floor](upgrades.md#the-floor-100): a
+  renamed chart (its name is in every workload's immutable selector), a PostgreSQL major version,
+  or a schema older than the migration chain is verified to converge. The release says so under
+  *Action required before upgrading* and moves the floor in `upgrades.md` in the same change.
 
 Anything not on that list is not a major change, whatever it looks like in the diff.
 
@@ -78,6 +82,10 @@ made on top of it: `db-init` replays **every** migration in filename order on ev
 applied-migrations ledger, so arriving from `1.0.0` and arriving from `1.3.2` run exactly the same
 files. [`upgrades.md`](upgrades.md#2-the-database-upgrades-itself-forwards-on-every-boot) has the
 mechanism.
+
+**Nothing below 1.0.0 upgrades to it.** 0.1.0 and any install from a checkout before 1.0 reach it
+by reinstalling, with their data or without it; [`upgrades.md`](upgrades.md#the-floor-100) says
+which.
 
 **Skipping minors is supported. Rolling back is not.** The images can be rolled back and the schema
 cannot — there are no down-migrations. Take a backup before upgrading if a rollback is a real
@@ -131,7 +139,7 @@ document's — the latest minor — and the two are deliberately not invented se
 
 ## Related
 
-- [`upgrades.md`](upgrades.md) — what survives an upgrade, and the three places that is not the
+- [`upgrades.md`](upgrades.md) — what survives an upgrade, and the four places that is not the
   whole truth
 - [`testing.md`](testing.md#releases) — what the release workflow builds and checks
 - [`../deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release) — publishing one
