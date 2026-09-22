@@ -66,7 +66,7 @@ def pending(wire_id, metrics, asset_name="Sim_CNC_Mill_01"):
         dropped=[],
         modelled=None,
         payload_dt=NOW,
-        group_id="ACS-Cymru",
+        group_id="Aber",
         client=MagicMock(),
     )
 

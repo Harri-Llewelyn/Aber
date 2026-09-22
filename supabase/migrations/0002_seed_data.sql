@@ -2409,13 +2409,13 @@ ON CONFLICT (service_name) DO NOTHING;
 \if :{?docs_public_url}      \else \set docs_public_url      '' \endif
 \if :{?supabase_public_url}  \else \set supabase_public_url  '' \endif
 
-SELECT set_config('acs_cymru.dir_gitea_public_url', :'gitea_public_url', false);
+SELECT set_config('aber.dir_gitea_public_url', :'gitea_public_url', false);
 
 DO $$
 DECLARE
   v_forge TEXT := rtrim(
                     COALESCE(
-                      NULLIF(current_setting('acs_cymru.dir_gitea_public_url', true), ''),
+                      NULLIF(current_setting('aber.dir_gitea_public_url', true), ''),
                       'http://localhost:3003'),
                     '/');
   v_moved INT := 0;
@@ -2479,19 +2479,19 @@ WHERE public.directory_services.id = v.id
 --
 -- Staged through session GUCs because psql does not substitute `:variables` inside dollar-quoted
 -- blocks (archived migration 0026), which is the same staging this file uses for its OAuth rows.
-SELECT set_config('acs_cymru.dir_grafana_public_url', :'grafana_public_url',   false);
-SELECT set_config('acs_cymru.dir_studio_public_url',  :'studio_public_url',    false);
-SELECT set_config('acs_cymru.dir_nodered_redirect',   :'nodered_redirect_uri', false);
-SELECT set_config('acs_cymru.dir_docs_public_url',     :'docs_public_url',      false);
-SELECT set_config('acs_cymru.dir_supabase_public_url', :'supabase_public_url',  false);
+SELECT set_config('aber.dir_grafana_public_url', :'grafana_public_url',   false);
+SELECT set_config('aber.dir_studio_public_url',  :'studio_public_url',    false);
+SELECT set_config('aber.dir_nodered_redirect',   :'nodered_redirect_uri', false);
+SELECT set_config('aber.dir_docs_public_url',     :'docs_public_url',      false);
+SELECT set_config('aber.dir_supabase_public_url', :'supabase_public_url',  false);
 
 DO $$
 DECLARE
-  v_docs     TEXT := NULLIF(current_setting('acs_cymru.dir_docs_public_url',     true), '');
-  v_supabase TEXT := NULLIF(current_setting('acs_cymru.dir_supabase_public_url', true), '');
-  v_grafana TEXT := NULLIF(current_setting('acs_cymru.dir_grafana_public_url', true), '');
-  v_studio  TEXT := NULLIF(current_setting('acs_cymru.dir_studio_public_url',  true), '');
-  v_nodered TEXT := NULLIF(current_setting('acs_cymru.dir_nodered_redirect',   true), '');
+  v_docs     TEXT := NULLIF(current_setting('aber.dir_docs_public_url',     true), '');
+  v_supabase TEXT := NULLIF(current_setting('aber.dir_supabase_public_url', true), '');
+  v_grafana TEXT := NULLIF(current_setting('aber.dir_grafana_public_url', true), '');
+  v_studio  TEXT := NULLIF(current_setting('aber.dir_studio_public_url',  true), '');
+  v_nodered TEXT := NULLIF(current_setting('aber.dir_nodered_redirect',   true), '');
   v_moved   INT  := 0;
 
   -- The Node-RED value arrives as the callback (the chart builds
@@ -2574,12 +2574,12 @@ BEGIN
   END IF;
 END $$;
 
-SELECT set_config('acs_cymru.dir_grafana_public_url', '', false);
-SELECT set_config('acs_cymru.dir_studio_public_url',  '', false);
-SELECT set_config('acs_cymru.dir_nodered_redirect',   '', false);
-SELECT set_config('acs_cymru.dir_gitea_public_url',   '', false);
-SELECT set_config('acs_cymru.dir_docs_public_url',     '', false);
-SELECT set_config('acs_cymru.dir_supabase_public_url', '', false);
+SELECT set_config('aber.dir_grafana_public_url', '', false);
+SELECT set_config('aber.dir_studio_public_url',  '', false);
+SELECT set_config('aber.dir_nodered_redirect',   '', false);
+SELECT set_config('aber.dir_gitea_public_url',   '', false);
+SELECT set_config('aber.dir_docs_public_url',     '', false);
+SELECT set_config('aber.dir_supabase_public_url', '', false);
 
 -- -------------------------------------------------------------------------------------------
 -- Outbound webhook targets  (1 row)
@@ -2684,11 +2684,11 @@ SELECT public.ensure_cron_job(
 -- parse. archived migration 0010 gets away with :'ts_host' because those appear in plain SQL.
 -- Stash it in a session GUC out here, where substitution does happen, and read it back inside.
 -- Session-local (is_local = false but never committed to a role), so it does not persist.
-SELECT set_config('acs_cymru.nodered_admin_token', :'nodered_admin_token', false);
+SELECT set_config('aber.nodered_admin_token', :'nodered_admin_token', false);
 
 DO $$
 DECLARE
-  v_token TEXT := current_setting('acs_cymru.nodered_admin_token', true);
+  v_token TEXT := current_setting('aber.nodered_admin_token', true);
   v_id    UUID;
 BEGIN
   -- An absent token is the default stack's normal state: Node-RED runs without adminAuth, so
@@ -2722,7 +2722,7 @@ REVOKE ALL ON vault.decrypted_secrets FROM anon, authenticated;
 REVOKE ALL ON vault.secrets           FROM anon, authenticated;
 
 -- Do not leave the plaintext sitting in the session's settings after the migration.
-SELECT set_config('acs_cymru.nodered_admin_token', '', false);
+SELECT set_config('aber.nodered_admin_token', '', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- Grafana OAuth client registration
@@ -2747,8 +2747,8 @@ SELECT set_config('acs_cymru.nodered_admin_token', '', false);
 
 -- psql does not substitute :variables inside dollar-quoted blocks (see archived migration 0026), so
 -- both values are staged through session GUCs where substitution does happen.
-SELECT set_config('acs_cymru.grafana_oauth_client_secret', :'grafana_oauth_client_secret', false);
-SELECT set_config('acs_cymru.grafana_public_url',          :'grafana_public_url',          false);
+SELECT set_config('aber.grafana_oauth_client_secret', :'grafana_oauth_client_secret', false);
+SELECT set_config('aber.grafana_public_url',          :'grafana_public_url',          false);
 
 DO $$
 DECLARE
@@ -2756,14 +2756,14 @@ DECLARE
   -- stack rebuild would silently break the integration. Same reasoning as the pinned gateway
   -- UUID in archived migration 0009.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000001';
-  v_secret    TEXT := current_setting('acs_cymru.grafana_oauth_client_secret', true);
+  v_secret    TEXT := current_setting('aber.grafana_oauth_client_secret', true);
   -- The trailing slash is trimmed. GRAFANA_PUBLIC_URL is documented without one, but a value
   -- copied from a browser address bar carries it, and `http://host//login/generic_oauth` is not
   -- the string GoTrue compares against -- it fails as `invalid redirect_uri`, which reads as a
   -- Grafana fault rather than as a stray character in .env.
   v_base      TEXT := rtrim(
                         COALESCE(
-                          NULLIF(current_setting('acs_cymru.grafana_public_url', true), ''),
+                          NULLIF(current_setting('aber.grafana_public_url', true), ''),
                           'http://localhost:3002'),
                         '/');
   v_hash      TEXT;
@@ -2803,7 +2803,7 @@ BEGIN
   -- so a rotated GRAFANA_OAUTH_CLIENT_SECRET in .env has to take effect on the next boot.
 END $$;
 
-SELECT set_config('acs_cymru.grafana_oauth_client_secret', '', false);
+SELECT set_config('aber.grafana_oauth_client_secret', '', false);
 
 -- Studio's door: the client the gateway's studio listener authenticates as (`...0003`).
 -- Registered here since the fold of archived migration 0081, in the shape of the Grafana client
@@ -2811,18 +2811,18 @@ SELECT set_config('acs_cymru.grafana_oauth_client_secret', '', false);
 -- login that cannot complete rather than with an error naming this row.
 \if :{?studio_oauth_client_secret} \else \set studio_oauth_client_secret '' \endif
 
-SELECT set_config('acs_cymru.studio_oauth_client_secret', :'studio_oauth_client_secret', false);
-SELECT set_config('acs_cymru.studio_public_url',          :'studio_public_url',          false);
+SELECT set_config('aber.studio_oauth_client_secret', :'studio_oauth_client_secret', false);
+SELECT set_config('aber.studio_public_url',          :'studio_public_url',          false);
 
 DO $$
 DECLARE
   -- Pinned, not generated: supabase/envoy.yaml carries this as the listener's `client_id`, and a
   -- fresh UUID on every stack rebuild would silently break the login.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000003';
-  v_secret    TEXT := current_setting('acs_cymru.studio_oauth_client_secret', true);
+  v_secret    TEXT := current_setting('aber.studio_oauth_client_secret', true);
   v_base      TEXT := rtrim(
                         COALESCE(
-                          NULLIF(current_setting('acs_cymru.studio_public_url', true), ''),
+                          NULLIF(current_setting('aber.studio_public_url', true), ''),
                           'http://127.0.0.1:54323'),
                         '/');
   v_hash      TEXT;
@@ -2864,7 +2864,7 @@ BEGIN
   -- or a changed address takes effect on the next one.
 END $$;
 
-SELECT set_config('acs_cymru.studio_oauth_client_secret', '', false);
+SELECT set_config('aber.studio_oauth_client_secret', '', false);
 
 -- The forge's door: the client the gateway's forge listener authenticates as (`...0004`).
 -- Registered here since the fold of archived migration 0094, in the shape of the Grafana client
@@ -2872,18 +2872,18 @@ SELECT set_config('acs_cymru.studio_oauth_client_secret', '', false);
 -- login that cannot complete rather than with an error naming this row.
 \if :{?gitea_oauth_client_secret} \else \set gitea_oauth_client_secret '' \endif
 
-SELECT set_config('acs_cymru.gitea_oauth_client_secret', :'gitea_oauth_client_secret', false);
-SELECT set_config('acs_cymru.gitea_public_url',          :'gitea_public_url',          false);
+SELECT set_config('aber.gitea_oauth_client_secret', :'gitea_oauth_client_secret', false);
+SELECT set_config('aber.gitea_public_url',          :'gitea_public_url',          false);
 
 DO $$
 DECLARE
   -- Pinned, not generated: supabase/envoy.yaml carries this as the listener's `client_id`, and a
   -- fresh UUID on every stack rebuild would silently break the login.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000004';
-  v_secret    TEXT := current_setting('acs_cymru.gitea_oauth_client_secret', true);
+  v_secret    TEXT := current_setting('aber.gitea_oauth_client_secret', true);
   v_base      TEXT := rtrim(
                         COALESCE(
-                          NULLIF(current_setting('acs_cymru.gitea_public_url', true), ''),
+                          NULLIF(current_setting('aber.gitea_public_url', true), ''),
                           'http://localhost:3003'),
                         '/');
   v_hash      TEXT;
@@ -2925,7 +2925,7 @@ BEGIN
   -- or a changed address takes effect on the next one.
 END $$;
 
-SELECT set_config('acs_cymru.gitea_oauth_client_secret', '', false);
+SELECT set_config('aber.gitea_oauth_client_secret', '', false);
 
 -- -------------------------------------------------------------------------------------------
 -- ASHRAE 223P building-system concepts  (640 rows, and the one metric group they file under)
@@ -7611,7 +7611,7 @@ ON CONFLICT (name) DO NOTHING;
 -- rather than a literal -- psql does not substitute `:variables` inside dollar quotes. Each is
 -- seeded only into an empty value, so the chart names a destination once and the page owns it
 -- from then on.
-\if :{?sparkplug_group}           \else \set sparkplug_group 'ACS-Cymru'  \endif
+\if :{?sparkplug_group}           \else \set sparkplug_group 'Aber'  \endif
 \if :{?archive_site_key}          \else \set archive_site_key          '' \endif
 \if :{?archive_endpoint}          \else \set archive_endpoint          '' \endif
 \if :{?archive_region}            \else \set archive_region            '' \endif
@@ -7619,13 +7619,13 @@ ON CONFLICT (name) DO NOTHING;
 \if :{?archive_access_key_id}     \else \set archive_access_key_id     '' \endif
 \if :{?archive_path_style}        \else \set archive_path_style        '' \endif
 
-SELECT set_config('acs_cymru.sparkplug_group',       :'sparkplug_group',       false);
-SELECT set_config('acs_cymru.archive_site_key',      :'archive_site_key',      false);
-SELECT set_config('acs_cymru.archive_endpoint',      :'archive_endpoint',      false);
-SELECT set_config('acs_cymru.archive_region',        :'archive_region',        false);
-SELECT set_config('acs_cymru.archive_bucket',        :'archive_bucket',        false);
-SELECT set_config('acs_cymru.archive_access_key_id', :'archive_access_key_id', false);
-SELECT set_config('acs_cymru.archive_path_style',    :'archive_path_style',    false);
+SELECT set_config('aber.sparkplug_group',       :'sparkplug_group',       false);
+SELECT set_config('aber.archive_site_key',      :'archive_site_key',      false);
+SELECT set_config('aber.archive_endpoint',      :'archive_endpoint',      false);
+SELECT set_config('aber.archive_region',        :'archive_region',        false);
+SELECT set_config('aber.archive_bucket',        :'archive_bucket',        false);
+SELECT set_config('aber.archive_access_key_id', :'archive_access_key_id', false);
+SELECT set_config('aber.archive_path_style',    :'archive_path_style',    false);
 
 SELECT public.seed_setting(
     'ui.digital_thread_poll_seconds',
@@ -7726,7 +7726,8 @@ SELECT public.seed_setting(
 -- spBv1.0/<group>/<TYPE>/<node>, so a separator in it addresses a subtree nothing grants.
 DO $$
 DECLARE
-    v_group text := coalesce(nullif(current_setting('acs_cymru.sparkplug_group', true), ''), 'ACS-Cymru');
+    v_group  text := coalesce(nullif(current_setting('aber.sparkplug_group', true), ''), 'Aber');
+    v_stored text;
 BEGIN
     IF v_group ~ '[/+#[:space:]]' THEN
         RAISE EXCEPTION
@@ -7754,6 +7755,25 @@ BEGIN
        SET read_only = true
      WHERE key = 'sparkplug.group_id'
        AND NOT read_only;
+
+    SELECT value #>> '{}' INTO v_stored
+      FROM public.system_settings
+     WHERE key = 'sparkplug.group_id';
+
+    -- THE DISAGREEMENT IS LOUD. A chart value that no longer matches the database means either the
+    -- values file lost the key or somebody meant to re-address the site; both need a person, and
+    -- neither is served by db-init carrying on. One pair is not a disagreement: a stack installed
+    -- before 1.0 holds 'ACS-Cymru', the platform's former name, and 0003 moves it to 'Aber' later
+    -- in this same boot.
+    IF v_stored IS DISTINCT FROM v_group
+       AND NOT (v_stored = 'ACS-Cymru' AND v_group = 'Aber') THEN
+        RAISE EXCEPTION
+            '0002: the database was installed with sparkplug group %, and the chart now says %. '
+            'The group is fixed at install because it addresses every gateway, every appliance '
+            'bundle and all existing history. Restore ingestion.sparkplugGroup to %, or follow '
+            'the group change procedure in supabase/README.md.',
+            quote_literal(v_stored), quote_literal(v_group), quote_literal(v_stored);
+    END IF;
 END;
 $$;
 
@@ -7799,7 +7819,7 @@ SELECT public.seed_setting(
 -- an operator is already looking rather than in db-init.
 DO $$
 DECLARE
-    v_key    text := coalesce(nullif(current_setting('acs_cymru.archive_site_key', true), ''), '');
+    v_key    text := coalesce(nullif(current_setting('aber.archive_site_key', true), ''), '');
     v_stored text;
 BEGIN
     SELECT value #>> '{}' INTO v_stored FROM public.system_settings WHERE key = 'archive.site_key';
@@ -7875,22 +7895,22 @@ BEGIN
              'The full URL cold telemetry is written to, including the scheme -- AWS is '
              'https://s3.<region>.amazonaws.com, a MinIO is whatever it is reachable at. "S3" is '
              'a protocol here, not a vendor.',
-             nullif(current_setting('acs_cymru.archive_endpoint', true), '')),
+             nullif(current_setting('aber.archive_endpoint', true), '')),
             ('archive.region', 'string',
              'S3 region',
              'The region the bucket lives in. Required even where the endpoint implies it, '
              'because the request is signed with it.',
-             nullif(current_setting('acs_cymru.archive_region', true), '')),
+             nullif(current_setting('aber.archive_region', true), '')),
             ('archive.bucket', 'string',
              'S3 bucket',
              'The bucket objects are written into. Every object is addressed under '
              'site=<site key>/ within it, which is what lets several sites share one bucket.',
-             nullif(current_setting('acs_cymru.archive_bucket', true), '')),
+             nullif(current_setting('aber.archive_bucket', true), '')),
             ('archive.access_key_id', 'string',
              'S3 access key ID',
              'The identity the exporter writes as. An identifier rather than a secret -- the '
              'secret half is held in the vault and is never shown here.',
-             nullif(current_setting('acs_cymru.archive_access_key_id', true), ''))
+             nullif(current_setting('aber.archive_access_key_id', true), ''))
         ) AS t(key, value_type, label, description, seeded)
     LOOP
         PERFORM public.seed_setting(
@@ -7917,7 +7937,7 @@ BEGIN
 
     PERFORM public.seed_setting(
         'archive.path_style',
-        to_jsonb(lower(coalesce(nullif(current_setting('acs_cymru.archive_path_style', true), ''), 'false')) IN ('1', 'true', 'yes', 'on')),
+        to_jsonb(lower(coalesce(nullif(current_setting('aber.archive_path_style', true), ''), 'false')) IN ('1', 'true', 'yes', 'on')),
         'boolean',
         'Cold Storage',
         'Address the bucket by path',
@@ -7939,13 +7959,13 @@ BEGIN
 END;
 $$;
 
-SELECT set_config('acs_cymru.sparkplug_group',       '', false);
-SELECT set_config('acs_cymru.archive_site_key',      '', false);
-SELECT set_config('acs_cymru.archive_endpoint',      '', false);
-SELECT set_config('acs_cymru.archive_region',        '', false);
-SELECT set_config('acs_cymru.archive_bucket',        '', false);
-SELECT set_config('acs_cymru.archive_access_key_id', '', false);
-SELECT set_config('acs_cymru.archive_path_style',    '', false);
+SELECT set_config('aber.sparkplug_group',       '', false);
+SELECT set_config('aber.archive_site_key',      '', false);
+SELECT set_config('aber.archive_endpoint',      '', false);
+SELECT set_config('aber.archive_region',        '', false);
+SELECT set_config('aber.archive_bucket',        '', false);
+SELECT set_config('aber.archive_access_key_id', '', false);
+SELECT set_config('aber.archive_path_style',    '', false);
 
 -- -------------------------------------------------------------------------------------------
 -- Value domains, and the bounds on the two settings that have them
@@ -8230,9 +8250,9 @@ SELECT public.ensure_cron_job(
 -- referenced directly from the DO blocks below -- it would be read as literal text. Stash them
 -- in session GUCs out here, where substitution does happen, and read them back inside. Same
 -- arrangement 0002_seed_data.sql uses for the Vault token and the Grafana secret.
-SELECT set_config('acs_cymru.nodered_oauth_client_secret', :'nodered_oauth_client_secret', false);
-SELECT set_config('acs_cymru.nodered_webhook_jwt_secret',  :'nodered_webhook_jwt_secret',  false);
-SELECT set_config('acs_cymru.nodered_redirect_uri',        :'nodered_redirect_uri',        false);
+SELECT set_config('aber.nodered_oauth_client_secret', :'nodered_oauth_client_secret', false);
+SELECT set_config('aber.nodered_webhook_jwt_secret',  :'nodered_webhook_jwt_secret',  false);
+SELECT set_config('aber.nodered_redirect_uri',        :'nodered_redirect_uri',        false);
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. Node-RED OAuth client registration
@@ -8247,12 +8267,12 @@ DECLARE
   -- integration. Same reasoning as the Grafana client id and the pinned host-run gateway.
   -- Deliberately the next value after Grafana's ...0001.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000002';
-  v_secret    TEXT := current_setting('acs_cymru.nodered_oauth_client_secret', true);
+  v_secret    TEXT := current_setting('aber.nodered_oauth_client_secret', true);
   -- Derived from NODERED_PUBLIC_URL by the chart, so this row and the callbackURL settings.js
   -- hands passport-oauth2 come from one value; they must agree exactly or /oauth/authorize
   -- answers "invalid redirect_uri". /auth/strategy/callback is Node-RED's own fixed route.
   v_redirect  TEXT := COALESCE(
-                        NULLIF(current_setting('acs_cymru.nodered_redirect_uri', true), ''),
+                        NULLIF(current_setting('aber.nodered_redirect_uri', true), ''),
                         'http://localhost:1880/auth/strategy/callback');
   v_hash      TEXT;
 BEGIN
@@ -8292,7 +8312,7 @@ BEGIN
     updated_at                 = NOW();
 END $$;
 
-SELECT set_config('acs_cymru.nodered_oauth_client_secret', '', false);
+SELECT set_config('aber.nodered_oauth_client_secret', '', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. Vault: the quarantine webhook SIGNING KEY
@@ -8302,7 +8322,7 @@ SELECT set_config('acs_cymru.nodered_oauth_client_secret', '', false);
 -- implements only the HS family. See tutorial/README.md -> "Node-RED authentication".
 DO $$
 DECLARE
-  v_secret TEXT := current_setting('acs_cymru.nodered_webhook_jwt_secret', true);
+  v_secret TEXT := current_setting('aber.nodered_webhook_jwt_secret', true);
   v_id     UUID;
 BEGIN
   IF v_secret IS NULL OR v_secret = '' THEN
@@ -8348,7 +8368,7 @@ BEGIN
   END IF;
 END $$;
 
-SELECT set_config('acs_cymru.nodered_webhook_jwt_secret', '', false);
+SELECT set_config('aber.nodered_webhook_jwt_secret', '', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- 3. Repoint the webhook endpoint at the new secret
@@ -8378,10 +8398,10 @@ UPDATE public.webhook_endpoints
 \set forge_sweep_secret ''
 \endif
 
-SELECT set_config('acs_cymru.fn_url',      :'supabase_functions_url', false);
-SELECT set_config('acs_cymru.anon_key',    :'supabase_anon_key', false);
-SELECT set_config('acs_cymru.revoke_key',  :'gateway_revoke_secret', false);
-SELECT set_config('acs_cymru.sweep_key',   :'forge_sweep_secret', false);
+SELECT set_config('aber.fn_url',      :'supabase_functions_url', false);
+SELECT set_config('aber.anon_key',    :'supabase_anon_key', false);
+SELECT set_config('aber.revoke_key',  :'gateway_revoke_secret', false);
+SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. Where the address and the credentials live
@@ -8399,10 +8419,10 @@ SELECT set_config('acs_cymru.sweep_key',   :'forge_sweep_secret', false);
 --   forge_sweep_secret            what authorises the forge sweep (0099), checked by forge-sweep
 DO $vault$
 DECLARE
-  v_url    text := btrim(coalesce(current_setting('acs_cymru.fn_url', true), ''));
-  v_anon   text := btrim(coalesce(current_setting('acs_cymru.anon_key', true), ''));
-  v_secret text := btrim(coalesce(current_setting('acs_cymru.revoke_key', true), ''));
-  v_sweep  text := btrim(coalesce(current_setting('acs_cymru.sweep_key', true), ''));
+  v_url    text := btrim(coalesce(current_setting('aber.fn_url', true), ''));
+  v_anon   text := btrim(coalesce(current_setting('aber.anon_key', true), ''));
+  v_secret text := btrim(coalesce(current_setting('aber.revoke_key', true), ''));
+  v_sweep  text := btrim(coalesce(current_setting('aber.sweep_key', true), ''));
   v_id     uuid;
 BEGIN
   IF v_secret = '' OR v_anon = '' THEN

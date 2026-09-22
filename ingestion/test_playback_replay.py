@@ -265,13 +265,13 @@ def build_capture(recorded_gateway, recorded_device, metric, epoch_ms):
 
     messages = [
         {"offset_ms": 0, "encoding": "json",
-         "topic": f"spBv1.0/ACS-Cymru/DBIRTH/{recorded_gateway}/{recorded_device}",
+         "topic": f"spBv1.0/Aber/DBIRTH/{recorded_gateway}/{recorded_device}",
          "payload": payload(0, 1.0, True)},
         {"offset_ms": 200, "encoding": "json",
-         "topic": f"spBv1.0/ACS-Cymru/DDATA/{recorded_gateway}/{recorded_device}",
+         "topic": f"spBv1.0/Aber/DDATA/{recorded_gateway}/{recorded_device}",
          "payload": payload(200, 2.0, False)},
         {"offset_ms": 400, "encoding": "json",
-         "topic": f"spBv1.0/ACS-Cymru/DDATA/{recorded_gateway}/{recorded_device}",
+         "topic": f"spBv1.0/Aber/DDATA/{recorded_gateway}/{recorded_device}",
          "payload": payload(400, 3.0, False)},
     ]
     return {

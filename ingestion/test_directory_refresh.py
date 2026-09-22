@@ -48,7 +48,7 @@ _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402
 
-GROUP = "ACS-Cymru"
+GROUP = "Aber"
 
 
 def device(n, **extra):

@@ -1,5 +1,5 @@
 # =============================================================================================
-# ACS-Cymru — default values
+# Aber — default values
 #
 # These defaults are NOT a working configuration: the Supabase credentials in `secrets` are
 # empty and the chart refuses to render without them (`aber.validateSecrets`). Use
@@ -873,10 +873,12 @@ ingestion:
   # value differs -- because changing the group re-addresses every gateway, every appliance bundle
   # and every row of history keyed on the old pair. That is a migration, not a preference.
   #
-  # Unlike primaryHostId this has a default: an install predating the key has published under
-  # `ACS-Cymru` since its first message and must go on doing so. One topic level: no `/`, `+`, `#`
-  # or whitespace.
-  sparkplugGroup: ACS-Cymru
+  # Unlike primaryHostId this has a default, `Aber`, the platform's own name. A stack installed
+  # before 1.0 holds `ACS-Cymru`, the platform's former name; that one pair is not a mismatch, and
+  # 0003 moves the setting and every gateway still on it to `Aber` on the first boot under this
+  # chart -- each physical gateway is then re-pointed (docs/upgrades.md). One topic level: no `/`,
+  # `+`, `#` or whitespace.
+  sparkplugGroup: Aber
   # The Directory's MQTT half. Off by default: a topic has no caller, so publishing puts the
   # whole address space behind the broker's roles alone.
   #

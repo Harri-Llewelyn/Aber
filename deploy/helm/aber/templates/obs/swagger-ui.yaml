@@ -67,10 +67,10 @@ spec:
             # browser cannot reach :8090 cross-origin. The document says so in its description.
             - name: URLS
               value: >-
-                [{"url":"/openapi.yaml","name":"ACS-Cymru Platform API"},
+                [{"url":"/openapi.yaml","name":"Aber Platform API"},
                  {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"}]
             - name: URLS_PRIMARY_NAME
-              value: ACS-Cymru Platform API
+              value: Aber Platform API
             - name: DEEP_LINKING
               value: "true"
             - name: DISPLAY_REQUEST_DURATION

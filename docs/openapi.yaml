@@ -2263,18 +2263,18 @@ paths:
                   description: The Remote gateway to generate a bundle for.
       responses:
         '200':
-          description: The bundle. `X-ACS-Token-Expires-At` carries the enrolment deadline.
+          description: The bundle. `X-Aber-Token-Expires-At` carries the enrolment deadline.
           headers:
             Content-Disposition:
               schema: { type: string }
               description: 'attachment; filename="acs-gateway-<name>.zip"'
-            X-ACS-Token-Expires-At:
+            X-Aber-Token-Expires-At:
               schema: { type: string, format: date-time }
               description: When the embedded enrolment token stops working.
-            X-ACS-Bundle-Version:
+            X-Aber-Bundle-Version:
               schema: { type: string }
               description: Template version, recorded on the gateway when the appliance enrols.
-            X-ACS-Sparkplug-Id:
+            X-Aber-Sparkplug-Id:
               schema: { type: string, pattern: '^gwy[0-9a-f]{21}$' }
               description: >-
                 The edge node this bundle enrols. Also the MQTT username the appliance will be
@@ -2652,7 +2652,7 @@ paths:
                     type: string
                     pattern: '^gwy[0-9a-f]{21}$'
                     description: The immutable edge-node id. Also the MQTT username; it cannot be anything else.
-                  sparkplug_group: { type: string, example: ACS-Cymru }
+                  sparkplug_group: { type: string, example: Aber }
                   mqtt_host: { type: string, example: broker.plant.example }
                   mqtt_tls_port: { type: integer, example: 8883 }
                   mqtt_username: { type: string, description: Equal to `sparkplug_id`. }
@@ -3240,7 +3240,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - { name: group_id, in: path, required: true, schema: { type: string }, description: 'e.g. `ACS-Cymru`' }
+        - { name: group_id, in: path, required: true, schema: { type: string }, description: 'e.g. `Aber`' }
         - { name: node_id, in: path, required: true, schema: { type: string }, description: 'The gateway `sparkplug_id`.' }
       responses:
         '200':
@@ -3809,7 +3809,7 @@ components:
         cell_id: { type: string, format: uuid, nullable: true }
         sparkplug_group:
           type: string
-          default: ACS-Cymru
+          default: Aber
           description: >-
             Sparkplug B Group ID -- the second topic segment. With `sparkplug_id` it forms the edge
             node address Factory+ resolves as (group, node), which is what `/v1/address/…` reads.
@@ -4365,7 +4365,7 @@ components:
         subject_kind: { type: string, enum: [gateway, device] }
         gateway_id: { type: string, format: uuid, nullable: true }
         device_id: { type: string, format: uuid, nullable: true }
-        sparkplug_group: { type: string, example: ACS-Cymru }
+        sparkplug_group: { type: string, example: Aber }
         edge_node_id:
           type: string
           description: 'The gateway the daemon matches topics against — for a device capture too.'
@@ -4458,7 +4458,7 @@ components:
           type: string
           description: 'The gateway`s sparkplug_id — the NCMD is addressed to it.'
           example: gwy120000000000400080000
-        sparkplug_group: { type: string, example: ACS-Cymru }
+        sparkplug_group: { type: string, example: Aber }
         status: { type: string, enum: [PENDING, SENT, FAILED] }
         throttled:
           type: boolean
@@ -4515,7 +4515,7 @@ components:
             generates a role per gateway granting `spBv1.0/+/+/<that id>/#`, and a client holding
             it can publish nowhere else.
           example: gwy130000000000400080000
-        sparkplug_group: { type: string, example: ACS-Cymru }
+        sparkplug_group: { type: string, example: Aber }
         device_map:
           type: object
           additionalProperties: { type: string }
@@ -4604,7 +4604,7 @@ components:
       type: object
       description: A Sparkplug B address. `(group_id, node_id)` names the edge node; `device_id` is its device.
       properties:
-        group_id: { type: string, example: ACS-Cymru, description: 'Empty when the device is bound to no gateway.' }
+        group_id: { type: string, example: Aber, description: 'Empty when the device is bound to no gateway.' }
         node_id: { type: string, example: gwy120000000000400080000 }
         device_id: { type: string, example: dev220000000000400080000 }
 

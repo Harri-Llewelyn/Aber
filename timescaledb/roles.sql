@@ -16,7 +16,7 @@
 
 \set ON_ERROR_STOP on
 
-SELECT set_config('acs_cymru.bi_reader_password', :'bi_reader_password', false);
+SELECT set_config('aber.bi_reader_password', :'bi_reader_password', false);
 
 -- The two least-privilege historian roles. DEFAULTED TO EMPTY so this file still runs against a
 -- caller that has not been taught to pass them -- the Helm maintenance Job and any operator running
@@ -29,12 +29,12 @@ SELECT set_config('acs_cymru.bi_reader_password', :'bi_reader_password', false);
 \else
   \set fdw_reader_password ''
 \endif
-SELECT set_config('acs_cymru.ingest_writer_password', :'ingest_writer_password', false);
-SELECT set_config('acs_cymru.fdw_reader_password', :'fdw_reader_password', false);
+SELECT set_config('aber.ingest_writer_password', :'ingest_writer_password', false);
+SELECT set_config('aber.fdw_reader_password', :'fdw_reader_password', false);
 
 DO $$
 DECLARE
-  v_password text := btrim(coalesce(current_setting('acs_cymru.bi_reader_password', true), ''));
+  v_password text := btrim(coalesce(current_setting('aber.bi_reader_password', true), ''));
   v_role     CONSTANT text := 'powerbi_reader';
   v_dbname   CONSTANT text := current_database();
 BEGIN
@@ -89,7 +89,7 @@ END $$;
 -- run. Still read-only.
 DO $$
 DECLARE
-  v_password text := btrim(coalesce(current_setting('acs_cymru.bi_reader_password', true), ''));
+  v_password text := btrim(coalesce(current_setting('aber.bi_reader_password', true), ''));
   v_role     CONSTANT text := 'grafana_reader';
   v_dbname   CONSTANT text := current_database();
 BEGIN
@@ -290,7 +290,7 @@ END $$;
 
 DO $$
 DECLARE
-  v_password text := btrim(coalesce(current_setting('acs_cymru.ingest_writer_password', true), ''));
+  v_password text := btrim(coalesce(current_setting('aber.ingest_writer_password', true), ''));
   v_role     CONSTANT text := 'ingest_writer';
   v_dbname   CONSTANT text := current_database();
 BEGIN
@@ -359,7 +359,7 @@ END $$;
 
 DO $$
 DECLARE
-  v_password text := btrim(coalesce(current_setting('acs_cymru.fdw_reader_password', true), ''));
+  v_password text := btrim(coalesce(current_setting('aber.fdw_reader_password', true), ''));
   v_role     CONSTANT text := 'fdw_reader';
   v_dbname   CONSTANT text := current_database();
 BEGIN

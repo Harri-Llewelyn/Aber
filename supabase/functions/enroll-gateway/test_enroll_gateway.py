@@ -101,7 +101,7 @@ def rest(path, method="GET", body=None, bearer=None, prefer=None):
             "apikey": PUBLISHABLE_KEY,
             "Authorization": f"Bearer {bearer or SERVICE_ROLE_KEY}",
             "Content-Type": "application/json",
-            "X-ACS-Cymru-Actor": "service",
+            "X-Aber-Actor": "service",
             **({"Prefer": prefer} if prefer else {}),
         },
     )
@@ -251,7 +251,7 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         self.assertEqual(payload["mqtt_username"], self.sparkplug_id)
         # The other half of the address resolve_gateway() looks up FIRST. An appliance told only the
         # node id falls through to the group-agnostic arm, which works until a second group exists.
-        self.assertEqual(payload["sparkplug_group"], "ACS-Cymru")
+        self.assertEqual(payload["sparkplug_group"], "Aber")
 
         # ENDPOINT. Must be an address an appliance can actually resolve -- never the in-network
         # name, which the function refuses to emit.

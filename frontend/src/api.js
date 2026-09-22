@@ -621,9 +621,9 @@ const apiMethods = {
     return {
       blob: await res.blob(),
       filename: filenameFromDisposition(res.headers.get('Content-Disposition')),
-      expiresAt: res.headers.get('X-ACS-Token-Expires-At'),
-      bundleVersion: res.headers.get('X-ACS-Bundle-Version'),
-      sparkplugId: res.headers.get('X-ACS-Sparkplug-Id')
+      expiresAt: res.headers.get('X-Aber-Token-Expires-At'),
+      bundleVersion: res.headers.get('X-Aber-Bundle-Version'),
+      sparkplugId: res.headers.get('X-Aber-Sparkplug-Id')
     };
   },
 

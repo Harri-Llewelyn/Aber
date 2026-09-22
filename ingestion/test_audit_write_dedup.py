@@ -59,7 +59,7 @@ import ingestion  # noqa: E402  (must follow the stubs above)
 import registry  # noqa: E402
 
 
-GROUP = "ACS-Cymru"
+GROUP = "Aber"
 GATEWAY_ID = "gwy" + "1" * 21
 DEVICE_ID = "dev" + "2" * 21
 

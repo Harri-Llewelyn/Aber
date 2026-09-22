@@ -28,8 +28,8 @@ sys.path.insert(0, INGESTION_DIR)
 
 import primary_host  # noqa: E402
 
-HOST_ID = "ACS-Cymru"
-TOPIC = "spBv1.0/STATE/ACS-Cymru"
+HOST_ID = "Aber"
+TOPIC = "spBv1.0/STATE/Aber"
 
 
 class FakePublishInfo:

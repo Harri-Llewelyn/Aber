@@ -570,7 +570,7 @@ module.exports = {
       // SSO is down with them. Same reasoning as disable_login_form = false in grafana/grafana.ini.
       // secretEquals() refuses an unset token, so there is one answer to "is this the token".
       if (secretEquals(token, env.NODERED_ADMIN_TOKEN)) {
-        return { username: 'acs-cymru-break-glass', permissions: '*' };
+        return { username: 'aber-break-glass', permissions: '*' };
       }
 
       // Signature, expiry and audience first, so an unverified token never reaches the network.
@@ -617,7 +617,7 @@ module.exports = {
       jwt.verify(token, env.NODERED_WEBHOOK_JWT_SECRET, {
         algorithms: ['HS256'],
         audience: 'node-red-hooks',
-        issuer: 'acs-cymru-supabase'
+        issuer: 'aber-supabase'
       });
       return next();
     } catch (err) {

@@ -1075,7 +1075,7 @@ never exercises (issue #297).
 edge node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting
 it here would undo that confinement through the back door.
 `scripts/check-broker-config.mjs` asserts all three by delivery: that ingestion may publish
-`ACS-Cymru/Directory/v1/device`, and that neither a gateway nor the i3X principal may read it.
+`Aber/Directory/v1/device`, and that neither a gateway nor the i3X principal may read it.
 
 **The source is the enrolment record, never a birth.** This is the point on which
 [issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)'s design was refused. A registry
@@ -1103,7 +1103,7 @@ interoperability claim would become false the moment the payload left HTTP.
 | :--- | :--- | :--- |
 | `DIRECTORY_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
 | `DIRECTORY_MQTT_TOPIC_PREFIX` | `<SPARKPLUG_GROUP>/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any. The broker's grant is derived from this same value |
-| `SPARKPLUG_GROUP` | `ACS-Cymru` | The site's group, from `ingestion.sparkplugGroup`. Names the Directory subtree above and the group a log line reports when a gateway's row carries none; resolution always uses the row |
+| `SPARKPLUG_GROUP` | `Aber` | The site's group, from `ingestion.sparkplugGroup`. Names the Directory subtree above and the group a log line reports when a gateway's row carries none; resolution always uses the row |
 | `DIRECTORY_MQTT_INTERVAL_SECONDS` | `60` | Republish interval |
 
 ## The Unified Namespace

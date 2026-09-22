@@ -117,7 +117,7 @@ beforeEach(() => {
 
 const TARGET = {
   id: 'gw-sim', name: 'Playback Target', sparkplug_id: 'gwy130000000000400080000',
-  sparkplug_group: 'ACS-Cymru', is_archived: false, gateway_has_broker_credential: true,
+  sparkplug_group: 'Aber', is_archived: false, gateway_has_broker_credential: true,
   devices: [
     { id: 'tdev-1', name: 'Sim Spindle', sparkplug_id: 'dev310000000000400080000', is_archived: false }
   ]
@@ -455,7 +455,7 @@ describe('a failed job', () => {
     api.recentCaptureJobs.mockResolvedValue([{
       id: 'job-9', status: 'FAILED', subject_sparkplug_id: 'gwy120000000000400080000',
       gateways: { name: 'Line 1 Gateway' },
-      error: 'recorded no messages from ACS-Cymru/gwy120000000000400080000'
+      error: 'recorded no messages from Aber/gwy120000000000400080000'
     }])
     renderTab()
     expect(await screen.findByText(/recorded no messages/)).toBeInTheDocument()

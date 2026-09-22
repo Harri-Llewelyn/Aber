@@ -114,7 +114,7 @@ MAX_BULK_ELEMENT_IDS = int(os.getenv("I3X_MAX_BULK_ELEMENT_IDS", "1000"))
 # The site's Sparkplug group, for keying the address space when a topic carries none. Read as
 # SPARKPLUG_GROUP since 0131, which is the one name the chart, the daemon and the database share;
 # the chart never set the older DEFAULT_SPARKPLUG_GROUP, so nothing was relying on it.
-DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "ACS-Cymru")
+DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
 _values: Dict[str, Dict[str, dict]] = {}

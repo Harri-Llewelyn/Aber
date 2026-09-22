@@ -56,7 +56,7 @@ _stub("paho.mqtt.client", Client=object)
 import ingestion  # noqa: E402  (must follow the stubs above)
 import registry  # noqa: E402
 
-GROUP = "ACS-Cymru"
+GROUP = "Aber"
 NODE = "gwy110000000000400080000"
 
 

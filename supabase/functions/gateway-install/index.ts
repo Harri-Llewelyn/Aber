@@ -65,7 +65,7 @@ export default async function handler(req: Request): Promise<Response> {
   const token = (req.headers.get("X-Enrolment-Token") ?? "").trim();
   if (!/^[0-9a-f]{64}$/.test(token)) return json(401, REJECTION);
 
-  const admin = serviceRoleClient(supabaseUrl, serviceRoleKey, { "X-ACS-Cymru-Actor": "service" });
+  const admin = serviceRoleClient(supabaseUrl, serviceRoleKey, { "X-Aber-Actor": "service" });
   const { data, error } = await admin.rpc("peek_gateway_enrollment_token", { p_token: token });
   if (error) {
     console.error(`gateway-install: the token check failed: ${error.message}`);

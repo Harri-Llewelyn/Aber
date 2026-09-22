@@ -8,7 +8,7 @@ but the page is not the authority: an Administrator holds `GRANT UPDATE (value)`
 `system_settings`, so a direct PostgREST write is admitted by RLS and only the trigger stops it.
 A refusal that lived in the browser alone would be a suggestion.
 
-A new gateway lands in the SITE's group. The column default was the literal 'ACS-Cymru' until
+A new gateway lands in the SITE's group. The column default was the literal 'Aber' until
 0131 pointed it at `sparkplug_group_default()`, and a default that silently reverted would give
 every gateway created after it an address in the vendor's namespace while every page went on
 looking correct.
@@ -153,8 +153,8 @@ class TestSparkplugGroupSetting(unittest.TestCase):
             cur.execute(
                 "UPDATE public.gateways SET sparkplug_group = public.sparkplug_group_default()"
                 " WHERE id = '16000000-0000-4000-8000-000000000001'"
-                "   AND sparkplug_group = 'ACS-Cymru'"
-                "   AND public.sparkplug_group_default() <> 'ACS-Cymru'"
+                "   AND sparkplug_group = 'Aber'"
+                "   AND public.sparkplug_group_default() <> 'Aber'"
             )
             cur.execute(
                 "SELECT sparkplug_group FROM public.gateways"
@@ -163,6 +163,32 @@ class TestSparkplugGroupSetting(unittest.TestCase):
             row = cur.fetchone()
             if row is not None:
                 self.assertEqual(row[0], "Plant-7")
+
+    def test_the_fallback_is_the_platforms_current_name(self):
+        # sparkplug_group_default() falls back to a literal when the setting is absent, and 0003
+        # moved that literal with the default. A fallback left on the former name would give the
+        # first gateway of a stack whose settings row went missing an address nobody publishes on.
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM public.system_settings WHERE key = %s", (SETTING_KEY,))
+            cur.execute("SELECT public.sparkplug_group_default()")
+            self.assertEqual(cur.fetchone()[0], "Aber")
+
+    def test_nothing_is_left_on_the_former_name_once_the_site_has_moved(self):
+        # 0003 moves the setting off 'ACS-Cymru' and then every gateway that took that default.
+        # Guarded on the site being on 'Aber': an operator who pinned the former name in the chart
+        # keeps it, and their gateways with it -- that is 0003's rule, not a gap in this test.
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT value #>> '{}' FROM public.system_settings WHERE key = %s",
+                (SETTING_KEY,),
+            )
+            group = cur.fetchone()[0]
+            if group != "Aber":
+                self.skipTest(f"the site is on {group!r}, not the default")
+            cur.execute(
+                "SELECT count(*) FROM public.gateways WHERE sparkplug_group = 'ACS-Cymru'"
+            )
+            self.assertEqual(cur.fetchone()[0], 0)
 
     def test_a_group_with_a_separator_is_still_refused(self):
         for bad in ("a/b", "a+b", "a#b", ""):

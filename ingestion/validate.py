@@ -95,7 +95,7 @@ MALFORMED_DEVICE_ID = "dev" + "f" * 20
 # The Sparkplug Group ID every message in this run is published under; the alias table and the
 # rebirth topic are both scoped by it. Must match gateways.sparkplug_group, which defaults to the
 # site's group (0131), or every check would exercise the deprecated fallback arm.
-VAL_GROUP = os.getenv("SPARKPLUG_GROUP", "ACS-Cymru")
+VAL_GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
 
 # The validator's gateway UUID is pinned so it can hold an ordinary per-gateway MQTT credential:
 # The broker's roles confine a client to `spBv1.0/+/+/<sparkplug_id>/#`, so the username must equal the gateway

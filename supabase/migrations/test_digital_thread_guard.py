@@ -153,7 +153,7 @@ class TestFunctionShape(AuditGuardTestCase):
     def test_actor_resolution_is_preserved(self):
         """Both arms: auth.uid() first, then the SET LOCAL GUC that attributes RPC writes."""
         self.assertIn("auth.uid()", self.function_source)
-        self.assertIn("acs_cymru.actor_id", self.function_source)
+        self.assertIn("aber.actor_id", self.function_source)
 
 
 class TestNoOpUpdatesAreSuppressed(AuditGuardTestCase):
@@ -404,7 +404,7 @@ class TestAttribution(AuditGuardTestCase):
             "wrong arm of the attribution ladder rather than the one it is about."
         )
 
-        self.cur.execute("SET LOCAL \"acs_cymru.actor_id\" = %s", (actor,))
+        self.cur.execute("SET LOCAL \"aber.actor_id\" = %s", (actor,))
         self.cur.execute(
             "UPDATE public.devices SET status = 'OFFLINE' WHERE id = %s", (self.device_id,)
         )

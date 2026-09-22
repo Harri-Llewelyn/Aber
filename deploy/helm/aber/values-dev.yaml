@@ -173,4 +173,4 @@ playback:
 # because every gateway is configured to watch it; the dev cluster has no such gateways, so the
 # fixture picks the word the rest of this stack already uses as its Sparkplug group.
 ingestion:
-  primaryHostId: ACS-Cymru
+  primaryHostId: Aber

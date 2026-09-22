@@ -146,7 +146,7 @@ def publish_as(username, password):
         "broker", "mosquitto_pub",
         "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
         "-u", username, "-P", password,
-        "-t", f"spBv1.0/ACS-Cymru/DBIRTH/{username}/probe", "-m", "x",
+        "-t", f"spBv1.0/Aber/DBIRTH/{username}/probe", "-m", "x",
     )
 
 

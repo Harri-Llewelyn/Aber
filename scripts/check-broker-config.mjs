@@ -350,7 +350,7 @@ try {
       const authed = docker([
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
         'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-u', 'probe', '-P', ACCOUNTS.probe,
-        '-t', 'spBv1.0/ACS-Cymru/DDATA/probe/dev1', '-m', 'x'
+        '-t', 'spBv1.0/Aber/DDATA/probe/dev1', '-m', 'x'
       ]);
       if (authed.status === 0) {
         ok.push('1883 accepts a client whose hash was transplanted from a password file');
@@ -392,57 +392,57 @@ try {
 
       expect(
         'a gateway may publish under its OWN edge node',
-        (delivers(GATEWAY_A, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers(GATEWAY_A, `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         true
       );
       expect(
         'a gateway may NOT publish under another edge node (the forgery gateway binding cannot catch)',
-        (delivers(GATEWAY_A, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_B}/dev1`)),
+        (delivers(GATEWAY_A, `spBv1.0/Aber/DDATA/${GATEWAY_B}/dev1`)),
         false
       );
       expect(
         'an imported gateway account is confined exactly as an issued one',
-        (delivers(GATEWAY_B, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_B}/dev1`)),
+        (delivers(GATEWAY_B, `spBv1.0/Aber/DDATA/${GATEWAY_B}/dev1`)),
         true
       );
       expect(
         'an imported account with no role authenticates and reaches nothing (publish)',
-        (delivers('probe', 'spBv1.0/ACS-Cymru/DDATA/probe/dev1')),
+        (delivers('probe', 'spBv1.0/Aber/DDATA/probe/dev1')),
         false
       );
       expect(
         'an imported account with no role authenticates and reaches nothing (subscribe)',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
         false
       );
       expect(
         'the ingestion principal may NOT publish DDATA',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal may NOT publish DBIRTH',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/DBIRTH/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/DBIRTH/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal MAY publish a rebirth NCMD (alias recovery depends on it)',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
         true
       );
       expect(
         'the i3X principal may publish NOTHING (it refuses writes in code; the broker agrees)',
-        (delivers('factoryplus_i3x', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`)),
+        (delivers('factoryplus_i3x', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
         false
       );
       expect(
         'the monitoring principal may publish NOTHING',
-        (delivers('factoryplus_monitor', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_monitor', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the plugin\'s admin reads NOTHING under spBv1.0 (it speaks to the plugin and nothing else)',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
         false
       );
       // A gateway's own NCMD must reach it through the wildcard subscription the simulator flow and
@@ -451,13 +451,13 @@ try {
       // instead, rebirth recovery breaks silently.
       expect(
         'a gateway receives its own NCMD through a wildcard subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`,
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         true
       );
       expect(
         'a gateway does NOT receive another edge node\'s NCMD through that same subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_B}`,
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_B}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         false
       );
@@ -493,19 +493,19 @@ try {
       // reading the tree would read every machine's telemetry with one credential.
       expect(
         'the ingestion principal MAY publish the Unified Namespace (it is the only writer)',
-        (delivers('factoryplus_ingestion', 'uns/ACS-Cymru/Site/Area/Cell/dev1/Speed',
+        (delivers('factoryplus_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
           'factoryplus_ingestion', 'uns/#')),
         true
       );
       expect(
         'a gateway may NOT read the Unified Namespace (one credential would read the whole plant)',
-        (delivers('factoryplus_ingestion', 'uns/ACS-Cymru/Site/Area/Cell/dev1/Speed',
+        (delivers('factoryplus_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
           GATEWAY_A, 'uns/#')),
         false
       );
       expect(
         'a gateway may NOT publish into the Unified Namespace (only decoded, verified readings belong there)',
-        (delivers(GATEWAY_A, `uns/ACS-Cymru/Site/Area/Cell/${GATEWAY_A}/Speed`,
+        (delivers(GATEWAY_A, `uns/Aber/Site/Area/Cell/${GATEWAY_A}/Speed`,
           'factoryplus_ingestion', 'uns/#')),
         false
       );
@@ -607,7 +607,7 @@ try {
       const passwordC1 = 'gateway-c-secret-0001';
       const passwordC2 = 'gateway-c-secret-0002';
       const pubAsC = (password) => docker(['exec', r.name, 'mosquitto_pub', '-u', GATEWAY_C, '-P', password,
-        '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_C}/dev1`, '-m', 'x']);
+        '-t', `spBv1.0/Aber/DDATA/${GATEWAY_C}/dev1`, '-m', 'x']);
       let issued;
       try {
         issued = issueWithControl(send, GATEWAY_C, passwordC1);
@@ -620,12 +620,12 @@ try {
         ACCOUNTS[GATEWAY_C] = passwordC1;
         expect(
           'an issued gateway may publish under its own edge node, with no reload',
-          (delivers(GATEWAY_C, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_C}/dev1`)),
+          (delivers(GATEWAY_C, `spBv1.0/Aber/DDATA/${GATEWAY_C}/dev1`)),
           true
         );
         expect(
           'an issued gateway may NOT publish under another edge node',
-          (delivers(GATEWAY_C, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+          (delivers(GATEWAY_C, `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
           false
         );
 
@@ -647,7 +647,7 @@ try {
         docker(['exec', r.name, 'sleep', '2']);
         docker(['exec', r.name, 'mosquitto_pub',
           '-u', 'factoryplus_ingestion', '-P', ACCOUNTS.factoryplus_ingestion,
-          '-t', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_C}`, '-m', MARKER]);
+          '-t', `spBv1.0/Aber/NCMD/${GATEWAY_C}`, '-m', MARKER]);
         docker(['exec', r.name, 'sleep', '2']);
         const beforeRotation = docker(['exec', r.name, 'cat', rotated]).stdout || '';
         const sessionWasLive = beforeRotation.includes(MARKER);
@@ -788,7 +788,7 @@ try {
           '-v', `${certs}:/c:ro`, IMAGE,
           'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
           '-u', GATEWAY_A, '-P', ACCOUNTS[GATEWAY_A],
-          '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/tls`, '-m', 'x'
+          '-t', `spBv1.0/Aber/DDATA/${GATEWAY_A}/tls`, '-m', 'x'
         ]);
         if (tls.status === 0) {
           ok.push('8883 completes a verified TLS handshake and accepts an authenticated publish');
@@ -877,7 +877,7 @@ try {
             '-v', `${certs}:/c:ro`, IMAGE,
             'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
             '-u', GATEWAY_A, '-P', ACCOUNTS[GATEWAY_A],
-            '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/tls`, '-m', 'x',
+            '-t', `spBv1.0/Aber/DDATA/${GATEWAY_A}/tls`, '-m', 'x',
           ]);
           if (verified.status === 0) {
             ok.push('8883 serves the issued leaf and a client verifies it against the issued root');
