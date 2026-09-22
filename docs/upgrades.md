@@ -7,7 +7,8 @@ has been yes — and an upgrade that costs a site visit per appliance is an upgr
 which is how a fleet ends up years behind on a platform whose whole point is interoperability.
 
 The short answer here is **no, and it is structural rather than a promise**. What follows is why,
-and — in §4 — the three places where that is not the whole truth.
+and — in §4 — the four places where that is not the whole truth. It holds from 1.0.0 onwards;
+[the floor](#the-floor-100) is what lies below that and what to do about it.
 
 ---
 
@@ -18,7 +19,8 @@ and — in §4 — the three places where that is not the whole truth.
 
 V=<the version you are upgrading to>
 
-# Does it exist? This reads GHCR anonymously and needs no credentials.
+# Does it exist? This reads GHCR anonymously and needs no credentials. A version that is not
+# published reports `not found`; `403 denied` means the package itself is missing or still private.
 helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version "$V"
 
 helm upgrade aber oci://ghcr.io/harri-llewelyn/aber/aber \
@@ -28,7 +30,7 @@ helm upgrade aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --wait --timeout 15m
 ```
 
-Four things about that command:
+Three things about that command:
 
 - **`--version` is not optional in practice.** Without it Helm resolves the newest release, which
   makes the command mean something different next month.
@@ -40,20 +42,57 @@ Four things about that command:
 - **`--wait` is safe here and is not safe on the first install.** The install deadlocks on it — the
   bootstrap hooks set the database roles the workloads wait for — and `deploy/k8s/README.md` gives
   that failure in full. On an upgrade the roles already have their passwords, so there is no cycle.
-- **A release installed from the `acs-cymru` chart cannot be upgraded to this one.** The chart is
-  `aber` now, and the chart name is in every workload's `spec.selector.matchLabels`, which Kubernetes
-  refuses to change in place. That path is uninstall and reinstall: take a backup, `helm uninstall`
-  the old release (the claims survive by policy), install `aber` into a fresh namespace, and restore
-  from the backup. The same wall stood between `factoryplus` and `acs-cymru` (issue #367).
+
+### The floor: 1.0.0
+
+**This contract holds from 1.0.0, the first release published as `aber`.** Everything in this
+document is about moving from a release at or above it to a later one, which is also what
+[`releases.md`](releases.md#upgrading-between-releases) promises in version terms. Anything below it
+is a reinstall, not an upgrade, and two kinds of install are below it.
+
+**0.1.0**, published 2026-08-07 as `oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus` and the
+only release before 1.0. Its chart and five images were withdrawn from GHCR ahead of 1.0, because
+nothing could be upgraded from them; the `v0.1.0` tag stays in git. For a site already running
+it, three things separate it from 1.0, and each is enough on its own:
+
+- **The chart name.** It is `factoryplus`, and the chart name is in every workload's
+  `spec.selector.matchLabels`, which Kubernetes refuses to change in place (`field is immutable`).
+- **PostgreSQL 15.** 1.0 runs 17, and a 17 server does not start on a 15 data directory. The move
+  was made deliberately while the only installation held no operator data;
+  [`postgres-17-migration-plan.md`](postgres-17-migration-plan.md) has the reasoning.
+- **Its schema.** It is older than the oldest schema the migration chain is verified to bring level
+  with a fresh install (below).
+
+**No route is rehearsed for a 0.1.0 database's contents, so a 0.1.0 site installs 1.0 fresh.**
+
+**An install from a checkout before 1.0**, under any chart name. The first of those reasons applies
+here too: the chart was `acs-cymru` until the rename to `aber`. The database can come across:
+
+1. Take a backup, and `helm uninstall` the old release (the claims survive by policy).
+2. Install 1.0 into a new namespace and restore the backup into it, by the runbook in
+   [`supabase/README.md`](../supabase/README.md) §*Backup and Recovery*.
+3. `helm upgrade` that release with the same chart version and values. The restore brings back the
+   schema the backup was taken from, and db-init only brings it forward when it runs again, which
+   is a `post-upgrade` hook.
+
+That holds **only if the database has booted a migration chain from `223b49d^` (2026-09-03) or
+later**. That is the oldest schema `0000` and `0001` are verified against: a database built from
+that chain and then given 1.0's dumps identically to a fresh install, and
+`scripts/verify-schema-equivalence.mjs` checks it. An older database is a fresh install too. The two
+halves are each measured (the restore by the rehearsal at a single version, the schema by that
+check), but nothing has run them end to end across versions.
+
+**A release that moves the floor says so** under *Action required before upgrading*, and this
+section moves with it. [`releases.md`](releases.md#major--1x--200) lists what moves it.
 
 ### What 1.0 renames, and what each rename asks of a site
 
 1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/335)).
 Tiers 1 and 2 were prose and the chart; this is the third tier, the identifiers that exist outside
 the repository. Each row is a value a site already holds somewhere, and the right-hand column is
-what the site does about it. Nothing here is undone by `helm upgrade`, because there is no upgrade
-path from `acs-cymru` to `aber` in the first place: a 0.1.0 stack reaches 1.0 by backup, uninstall,
-install and restore, and the restored database is what the rows below meet.
+what the site does about it. Nothing here is undone by `helm upgrade`, because no install below 1.0
+reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its data comes
+by backup, reinstall and restore, and the restored database is what the rows below meet.
 
 | Was | Is | What a site does |
 | :--- | :--- | :--- |
@@ -66,7 +105,7 @@ install and restore, and the restored database is what the rows below meet.
 | AAS identifier base `https://acs-cymru.local/ids/asset/` (`supabaseFunctions.aas.baseIri`, the `AAS_BASE_IRI` default) | `https://aber.local/ids/asset/` | Identifiers are derived at request time, so every exported shell and submodel id changes with the release. A site that had set `aas.baseIri` to its own authority is unaffected. |
 | Prometheus metric families `acs_ingestion_*`, `acs_historian_*`, `acs_postgres_*` (59 names: the daemon's exporter, the two database exporters' query files) | `aber_ingestion_*`, `aber_historian_*`, `aber_postgres_*` | The shipped dashboards, alert rules, ServiceMonitor and readiness gates move with them. **Series recorded before the upgrade stay under the old names**: Prometheus does not rename history, so every panel starts again at the upgrade and a query of your own that named an old metric returns nothing until it is edited. Keep the old names in a recording rule if you need the join. |
 | Grafana dashboard uids `acs-cymru-platform`, `-cluster`, `-databases`, `-gateway-health`, the provider `acs-cymru-platform`, the contact-point uid `acs-cymru-webhook`, and the alert-rule uids `acs-*` (`acs-gateway-stale`, `acs-archive-backlog`, …) | `aber-…` | On a Grafana that keeps its database across the upgrade, provisioning creates the dashboards, the contact point and the rules afresh under the new uids; the old ones linger and can be deleted by hand, and a bookmarked `/d/acs-cymru-…` or `/alerting/grafana/acs-…` URL no longer resolves. A fresh Grafana sees nothing of this. |
-| Published images `ghcr.io/harri-llewelyn/acs-cymru/<name>` and the chart `oci://ghcr.io/harri-llewelyn/acs-cymru/aber` | `ghcr.io/harri-llewelyn/aber/…` | Pull from the new namespace. The `0.1.0` packages stay where they are; nothing after them is published there. A values file that pins `image.repository` names the new path. |
+| Published images `ghcr.io/harri-llewelyn/acs-cymru/<name>` and the chart `oci://ghcr.io/harri-llewelyn/acs-cymru/aber` | `ghcr.io/harri-llewelyn/aber/…` | Pull from the new namespace. Nothing is published under the old one: the `0.1.0` packages were withdrawn (see [the floor](#the-floor-100)). A values file that pins `image.repository` names the new path. |
 | Internal CA `ClusterIssuer/acs-cymru-ca`, `Certificate/acs-cymru-ca`, Secret `acs-cymru-ca-key-pair` (`deploy/k8s/internal-ca.yaml`), and the bundle files `acs-cymru-ca.pem` / `acs-cymru.crt` | `aber-ca`, `aber-ca-key-pair`, `aber-ca.pem`, `aber.crt` | Apply the new `internal-ca.yaml`. To keep the same CA (so every appliance's pinned digest stays valid), copy the old Secret's `tls.crt` and `tls.key` into `aber-ca-key-pair` before the ClusterIssuer is created; otherwise a new CA is minted and every gateway bundle is re-issued. The chart's `clusterIssuer` values and the backup's `ca.secretName` name the new objects. |
 | The CA download path `/.well-known/acs-cymru/ca.pem` | `/.well-known/aber/ca.pem` | Nothing for an appliance that already holds the CA; the installer the dashboard hands out names the new path. |
 | The gateway appliance's layout: `/etc/acs-cymru`, the `acs_*` playbook variables, `acs-gateway-converge`, the `acs-gateway-*` Compose services, the `ACS_*` installer variables, the `acs-*` flow node ids | `aber…` | **An appliance installed before 1.0 is reinstalled, not converged.** The platform playbook it pulls at the 1.0 tag lays the new tree next to the old one and does not move state between them. Re-enrol it from the dashboard; the identity in the platform is unchanged, so its rows and history stay. |

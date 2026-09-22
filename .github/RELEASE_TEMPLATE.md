@@ -12,6 +12,10 @@
   Anything that is not `helm upgrade` with the values file the site already has: a values key that
   must be set, a backup that must be taken first, a manual step. DELETE THIS SECTION ENTIRELY when
   there is nothing -- its absence is the answer, and "None" reads as an oversight.
+
+  A release `helm upgrade` cannot reach from the previous one moves the floor: a renamed chart, a
+  PostgreSQL major, a schema the chain no longer converges. Name the new floor here, and update
+  "The floor" in docs/upgrades.md in the same release.
 -->
 
 ## Deprecated
