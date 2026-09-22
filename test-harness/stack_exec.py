@@ -9,7 +9,7 @@ Service whose selector is patched so it has no endpoints, or a pod run with the 
 the collector picks it up.
 
 The suites name a TARGET -- "credential", "broker", "supabase-db", "backup-service" -- and this
-module resolves it. KUBE_NAMESPACE and HELM_RELEASE select the release (default acs-cymru, both).
+module resolves it. KUBE_NAMESPACE and HELM_RELEASE select the release (default aber, both).
 
 Every suite that uses this puts test-harness/ on sys.path first, the way test_backup_service.py
 already reaches test_enroll_gateway.py.
@@ -19,16 +19,16 @@ import os
 import subprocess
 import time
 
-NAMESPACE = os.getenv("KUBE_NAMESPACE", "acs-cymru")
-RELEASE = os.getenv("HELM_RELEASE", "acs-cymru")
+NAMESPACE = os.getenv("KUBE_NAMESPACE", "aber")
+RELEASE = os.getenv("HELM_RELEASE", "aber")
 # The Loki `service` label and the chart's pod selector both come from this trio.
 RELEASE_LABELS = {
-    "app.kubernetes.io/name": "acs-cymru",
+    "app.kubernetes.io/name": "aber",
     "app.kubernetes.io/instance": RELEASE,
 }
 # Added to a Service's selector to take it off the network without touching the pod: no pod
 # carries it, so the Service has no endpoints and every caller gets connection refused.
-STOP_LABEL = "acs-cymru.io/stopped"
+STOP_LABEL = "aber.io/stopped"
 
 TARGETS = {
     "credential": {"workload": "deploy/mosquitto", "container": "gateway-credential",

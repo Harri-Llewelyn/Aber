@@ -10,12 +10,12 @@
  *   import { stackCredentials } from './lib/stack-credentials.mjs';
  *   const { SUPABASE_JWT_SECRET } = stackCredentials(['SUPABASE_JWT_SECRET']);
  *
- * ACS_CYMRU_NAMESPACE and ACS_CYMRU_RELEASE select the release (default acs-cymru, acs-cymru).
+ * ACS_CYMRU_NAMESPACE and ACS_CYMRU_RELEASE select the release (default aber, aber).
  */
 import { spawnSync } from 'node:child_process';
 
-export const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru';
-export const RELEASE = process.env.ACS_CYMRU_RELEASE || 'acs-cymru';
+export const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'aber';
+export const RELEASE = process.env.ACS_CYMRU_RELEASE || 'aber';
 
 let cached = null;
 

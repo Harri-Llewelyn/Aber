@@ -1,0 +1,97 @@
+{{- if .Values.supabaseMeta.enabled }}
+{{- $component := "supabase-meta" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{/*
+Schema introspection API backing Supabase Studio's Database pages.
+
+Studio speaks the postgres-meta protocol; pointing it at PostgREST returns error payloads without
+the message/code/formattedError fields Studio's Zod schema requires, which surfaces in the UI as a
+validation error rather than as a misconfiguration. The TAG IS PINNED to the version the official
+self-hosted stack pairs with the Studio tag -- v0.91.0 omitted "formattedError" and failed that
+schema on the Database page.
+*/}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-meta
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-meta
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.supabaseMeta.replicas }}
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres-meta
+          image: "{{ .Values.supabaseMeta.image.repository }}:{{ .Values.supabaseMeta.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseMeta.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PG_META_PORT
+              value: "8080"
+            - name: PG_META_DB_HOST
+              value: {{ include "aber.supabaseDb.host" . | quote }}
+            - name: PG_META_DB_PORT
+              value: {{ include "aber.supabaseDb.port" . | quote }}
+            - name: PG_META_DB_NAME
+              value: postgres
+            # supabase_admin: Studio's Database pages introspect the whole catalogue, including
+            # objects the scoped roles cannot see.
+            - name: PG_META_DB_USER
+              value: supabase_admin
+            {{- include "aber.secretEnv" (dict "name" "PG_META_DB_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            {{- if .Values.postgresTls.enabled }}
+            # postgres-meta spells the mode in its own connection string and takes the CA as PEM.
+            - name: PG_META_DB_SSL_MODE
+              value: verify-full
+            {{- include "aber.dbCaPemEnv" (dict "ctx" . "name" "PG_META_DB_SSL_ROOT_CERT") | nindent 12 }}
+            {{- end }}
+            # Encrypts stored connection strings. Studio must be given the SAME value or it cannot
+            # read what postgres-meta wrote.
+            {{- include "aber.secretEnv" (dict "name" "CRYPTO_KEY" "secretName" $secretName "key" "PG_META_CRYPTO_KEY") | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          resources:
+            {{- toYaml .Values.supabaseMeta.resources | nindent 12 }}
+{{- end }}

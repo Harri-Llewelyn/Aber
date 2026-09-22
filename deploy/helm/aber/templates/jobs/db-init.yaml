@@ -1,0 +1,341 @@
+{{- if and .Values.initJobs.enabled .Values.supabaseDb.enabled }}
+{{- $component := "db-init" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $fullname := include "aber.fullname" . -}}
+---
+{{/*
+The seed, as a ConfigMap. MIRRORED from supabase/seed.sql by scripts/sync-helm-chart-files.mjs --
+Helm cannot read outside its chart -- and CI runs that script with --check.
+
+THE MIGRATIONS ARE NOT HERE. They are baked into the db-init image and read from its filesystem;
+supabase/db-init/Dockerfile carries the reasoning. In short: a ConfigMap cannot exceed 1 MiB, which
+forced the chain to be gzipped, and Helm's release Secret has the SAME ceiling while carrying those
+bytes twice -- as chart files and again base64-encoded into the rendered ConfigMap, neither copy
+compressible. No size of file satisfies both as the chain grows.
+
+THE SEED STAYS A ConfigMap: one small file, and the one an operator might legitimately replace at
+install time, since demo accounts are a deployment choice and the schema is not.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-seed" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+{{- range $path, $bytes := .Files.Glob "files/seed/*.sql" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-db-init" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # WEIGHT 10 -- after db-roles-init (0), before storage-init (20).
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.initJobs.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.initJobs.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-supabase-db" "host" (include "aber.supabaseDb.host" .) "port" (include "aber.supabaseDb.port" .) "user" "postgres" "db" "postgres" "passwordKey" "POSTGRES_PASSWORD") | nindent 8 }}
+        {{- if .Values.supabaseAuth.enabled }}
+        {{/*
+          WAITING FOR GOTRUE IS NOT OPTIONAL, and it is the ordering constraint that is easiest to
+          miss: GoTrue creates and owns the `auth` schema, and the migrations build on it --
+          auth.users, auth.oauth_clients, the auth.uid()/auth.jwt() helpers every RLS policy calls.
+          Run them first and 0001 fails part-way through, leaving a HALF-APPLIED SCHEMA, which is
+          the worst outcome available here because the next replay starts from an inconsistent
+          state rather than a clean one.
+
+        */}}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-auth" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-auth:9999/health >/dev/null 2>&1" "describe" "supabase-auth (it owns the auth schema the migrations build on)") | nindent 8 }}
+        {{- end }}
+      containers:
+        - name: db-init
+          {{/*
+            THIS REPOSITORY'S OWN IMAGE, and the only reason it exists is to carry /migrations --
+            it is supabase/postgres with the chain copied in, at the server's own tag, because
+            psql's client version is what parses this SQL and a client older than the server
+            mis-handles syntax the migrations rely on.
+          */}}
+          image: {{ include "aber.image" (dict "ctx" . "image" .Values.dbInit.image) | quote }}
+          imagePullPolicy: {{ .Values.dbInit.image.pullPolicy }}
+          env:
+            {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            # TimescaleDB connection, handed to the migrations as psql variables so
+            # 0001_baseline_schema.sql can build its postgres_fdw link without hardcoding
+            # credentials.
+            #
+            # M2: HOST timescaledb, PORT 5432 -- the in-cluster address and the port the server
+            # listens on. NOT 5433, which is only the dev loop's forwarded port. A foreign server
+            # pointed at 5433 fails as a relation-level error from PostgREST, which reads as a
+            # schema fault; `helm test` (M6) queries the foreign table to catch exactly that.
+            {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
+            - name: TS_HOST
+              value: {{ include "aber.timescale.host" . | quote }}
+            - name: TS_PORT
+              value: {{ include "aber.timescale.port" . | quote }}
+            # The CA as the SUPABASE server sees it, for the postgres_fdw link it opens to the
+            # historian; empty means the link is not verified, which is only right with TLS off.
+            - name: TS_SSLROOTCERT
+              value: {{ ternary "/etc/acs-cymru/postgres/tls/ca.crt" "" .Values.postgresTls.enabled | quote }}
+            - name: TS_DBNAME
+              value: {{ .Values.timescaledb.database | quote }}
+            - name: TS_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            {{- include "aber.secretEnv" (dict "name" "TS_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "GRAFANA_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "GRAFANA_OAUTH_CLIENT_SECRET") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "NODERED_WEBHOOK_JWT_SECRET" "secretName" $secretName "key" "NODERED_WEBHOOK_JWT_SECRET") | nindent 12 }}
+            # M3. These two are why changing an ingress hostname is safe: both client rows are
+            # upserted with DO UPDATE from these values on every replay, so a `helm upgrade` that
+            # changes publicBaseDomain re-registers the OAuth clients in the SAME operation. A
+            # hardcoded URL in the seed is rewritten back on every boot instead -- which is exactly
+            # what Grafana's did until it was parameterised.
+            - name: GRAFANA_PUBLIC_URL
+              value: {{ include "aber.grafanaUrl" . | quote }}
+            # Studio's client (0081), and the address its redirect_uri is built from. OPTIONAL for
+            # the same reason the gateway's copy is: `routes.studio` is false by default, and an
+            # install that never publishes the console has no credential for it. Absent, 0081 logs
+            # a WARNING and registers nothing.
+            - name: STUDIO_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: STUDIO_OAUTH_CLIENT_SECRET
+                  optional: true
+            - name: STUDIO_PUBLIC_URL
+              value: {{ include "aber.studioUrl" . | quote }}
+            # The forge's client (0094), and the address its redirect_uri is built from -- the
+            # same helper Gitea's ROOT_URL and the Ingress host come from. Optional like Studio's,
+            # so an operator's existing Secret still runs the migrations; absent, 0094 warns and
+            # registers nothing.
+            - name: GITEA_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: GITEA_OAUTH_CLIENT_SECRET
+                  optional: true
+            - name: GITEA_PUBLIC_URL
+              value: {{ include "aber.giteaUrl" . | quote }}
+            - name: NODERED_OAUTH_CALLBACK_URL
+              value: {{ printf "%s/auth/strategy/callback" (include "aber.noderedUrl" .) | quote }}
+            {{/*
+              The site's Sparkplug group. 0131 seeds it on the first boot and RAISES on any later
+              boot whose value differs, so this env is what makes the chart and the database one
+              answer rather than two. The same helper the daemon and the broker read.
+            */}}
+            - name: SPARKPLUG_GROUP
+              value: {{ include "aber.sparkplugGroup" . | quote }}
+            {{/*
+              The cold archive's site key. 0132 adopts it on the boot that first supplies one and
+              RAISES afterwards if it differs: it is the leftmost segment of every object key, so
+              a changed value orphans everything already written. Empty is the normal state --
+              remote archiving is then unconfigured and nothing is exported.
+            */}}
+            - name: ARCHIVE_SITE_KEY
+              value: {{ .Values.coldArchive.s3.siteKey | default "" | quote }}
+            {{/*
+              The rest of the destination. A SEED, not the source: 0134 writes each into its
+              settings row only while that row is empty, so a chart value configures a new stack
+              and never overwrites what an Administrator later set from the Cold Storage page.
+            */}}
+            - name: ARCHIVE_ENDPOINT
+              value: {{ .Values.coldArchive.s3.endpoint | default "" | quote }}
+            - name: ARCHIVE_REGION
+              value: {{ .Values.coldArchive.s3.region | default "" | quote }}
+            - name: ARCHIVE_BUCKET
+              value: {{ .Values.coldArchive.s3.bucket | default "" | quote }}
+            - name: ARCHIVE_ACCESS_KEY_ID
+              value: {{ .Values.coldArchive.s3.accessKeyId | default "" | quote }}
+            - name: ARCHIVE_PATH_STYLE
+              value: {{ .Values.coldArchive.s3.pathStyle | default false | quote }}
+            - name: ARCHIVE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: ARCHIVE_S3_SECRET_ACCESS_KEY
+                  optional: true
+            {{- /*
+              Creates the Supabase-side `grafana_reader` in archived migration 0027 -- the role Grafana
+              connects as to read public.storage_footprint. THE SAME CREDENTIAL as the
+              historian's reader of the same name, deliberately: it is the same tool, and a
+              second secret to rotate for it is a second secret to forget. Privileges are
+              granted per database and the two share nothing but the password. Empty skips the
+              role rather than creating one with a blank secret, matching timescaledb/roles.sql.
+            */}}
+            {{- include "aber.secretEnv" (dict "name" "BI_READER_PASSWORD" "secretName" $secretName "key" "BI_READER_PASSWORD") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "FDW_READER_PASSWORD" "secretName" $secretName "key" "FDW_READER_PASSWORD") | nindent 12 }}
+            {{- /* Stored in Vault by 0038 so a trigger on `gateways` can reach the
+                   revoke-gateway-credential function through the gateway. `supabase-db ->
+                   supabase-kong` is already an admitted flow; `supabase-db -> gateway-credential`
+                   deliberately is NOT, which is why revocation goes through a function rather than
+                   dialling the credential service directly. The publishable key only gets past
+                   the gateway's key check. */}}
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "FORGE_SWEEP_SECRET" "secretName" $secretName "key" "FORGE_SWEEP_SECRET") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              # PGOPTIONS BOUNDS THE DDL WAIT AND PICKS THE VICTIM. db-init takes exclusive
+              # locks on tables supabase-realtime is concurrently reading for its subscriptions,
+              # and without a timeout Postgres resolves the inversion by choosing a deadlock victim
+              # -- which can be REALTIME, taking every open dashboard's live updates down so a
+              # migration can proceed. A one-shot Job that retries is the better loser (issue #40).
+              export PGOPTIONS="-c lock_timeout=5s"
+              PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "aber.supabaseDb.host" . }} -p {{ include "aber.supabaseDb.port" . }} -U postgres -d postgres"
+
+              echo 'Configuring PostgreSQL search_path...'
+              $PSQL -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;'
+
+              # -------------------------------------------------------------------------------
+              # THE CHAIN IS NOW IN PROGRESS, AND ANYTHING GATED ON IT MUST WAIT.
+              #
+              # `completed_at` is cleared here and stamped after seed.sql, and the e2e-validate
+              # Job's init container blocks until it is non-null. Without the clear, a `helm
+              # upgrade` would find the PREVIOUS boot's completion recorded and start conformance
+              # against a chain that is mid-replay. 0072 has the account.
+              #
+              # `|| true` ONLY BECAUSE OF BOOT ONE: 0072 is what creates this table, so it does not
+              # exist on a database that has never been migrated. The stamp at the end is what the
+              # gate reads, and that one is not tolerant of an error.
+              # -------------------------------------------------------------------------------
+              $PSQL -c 'UPDATE public.schema_bootstrap SET started_at = now(), completed_at = NULL' >/dev/null 2>&1 || true
+
+              # -------------------------------------------------------------------------------
+              # THE MIGRATIONS ARE IN THE IMAGE, at /migrations, copied there by
+              # supabase/db-init/Dockerfile. No ConfigMap, no decompression, no scratch volume.
+              #
+              # STILL FAILS CLOSED on an empty directory: a mistyped COPY, a .dockerignore that
+              # grows an entry, or an image tag older than the chart all produce a container with
+              # fewer migrations than expected. Without this the loop applies nothing, exits 0, and
+              # every downstream service fails against a database with no schema -- which reads as
+              # a dozen unrelated faults rather than one missing step.
+              # -------------------------------------------------------------------------------
+              COUNT=$(ls -1 /migrations/*.sql 2>/dev/null | wc -l)
+              if [ "$COUNT" -eq 0 ]; then
+                echo 'No migrations found at /migrations/*.sql in the db-init image.' >&2
+                echo 'That directory is baked in by supabase/db-init/Dockerfile; an image built' >&2
+                echo 'without it, or an older tag, is the usual cause. Check which tag resolved:' >&2
+                echo '  kubectl -n <ns> get job -l app.kubernetes.io/component=db-init -o jsonpath="{..image}"' >&2
+                exit 1
+              fi
+              echo "Found $COUNT migration(s) in the image."
+
+              # ORDERING IS LEXICAL: `for f in /migrations/*.sql`. The
+              # numeric prefixes are what make that correct; a migration added without one would
+              # sort unpredictably against the rest.
+              echo 'Applying Supabase database migrations...'
+              {{/*
+                RETRIED ONLY ON A DEADLOCK, never on anything else.
+
+                db-init takes DDL locks on tables supabase-realtime is concurrently reading to
+                evaluate its subscriptions, so the two can invert lock order and either side can be
+                chosen as the victim. Seen as `exit 3` with the rest of the chain unapplied, which
+                left `public.storage_footprint` dropped by 0001 and never recreated by 0027.
+
+                Retrying is safe BY CONSTRUCTION here and nowhere else: every migration is
+                idempotent and replayed on every boot already. Deliberately not a blanket retry --
+                a genuine schema error retried three times only delays the failure and prints it
+                three times.
+              */}}
+              for f in /migrations/*.sql; do
+                [ -f "$f" ] || continue
+                echo "Executing migration $f..."
+                attempt=1
+                while :; do
+                  if $PSQL \
+                    -v ts_host="$TS_HOST" \
+                    -v ts_port="$TS_PORT" \
+                    -v ts_dbname="$TS_DBNAME" \
+                    -v ts_user="$TS_USER" \
+                    -v ts_password="$TS_PASSWORD" \
+                    -v ts_sslrootcert="$TS_SSLROOTCERT" \
+                    -v nodered_admin_token="$NODERED_ADMIN_TOKEN" \
+                    -v grafana_oauth_client_secret="$GRAFANA_OAUTH_CLIENT_SECRET" \
+                    -v grafana_public_url="$GRAFANA_PUBLIC_URL" \
+                    -v studio_oauth_client_secret="$STUDIO_OAUTH_CLIENT_SECRET" \
+                    -v studio_public_url="$STUDIO_PUBLIC_URL" \
+                    -v gitea_oauth_client_secret="$GITEA_OAUTH_CLIENT_SECRET" \
+                    -v gitea_public_url="$GITEA_PUBLIC_URL" \
+                    -v nodered_oauth_client_secret="$NODERED_OAUTH_CLIENT_SECRET" \
+                    -v nodered_webhook_jwt_secret="$NODERED_WEBHOOK_JWT_SECRET" \
+                    -v nodered_redirect_uri="$NODERED_OAUTH_CALLBACK_URL" \
+                    -v bi_reader_password="$BI_READER_PASSWORD" \
+                    -v ts_fdw_user="${FDW_READER_PASSWORD:+fdw_reader}" \
+                    -v ts_fdw_password="$FDW_READER_PASSWORD" \
+                    -v supabase_functions_url="http://{{ include "aber.fullname" . }}-supabase-kong:8000/functions/v1" \
+                    -v supabase_anon_key="$SUPABASE_PUBLISHABLE_KEY" \
+                    -v gateway_revoke_secret="$GATEWAY_REVOKE_SECRET" \
+                    -v forge_sweep_secret="$FORGE_SWEEP_SECRET" \
+                    -v sparkplug_group="$SPARKPLUG_GROUP" \
+                    -v archive_site_key="$ARCHIVE_SITE_KEY" \
+                    -v archive_endpoint="$ARCHIVE_ENDPOINT" \
+                    -v archive_region="$ARCHIVE_REGION" \
+                    -v archive_bucket="$ARCHIVE_BUCKET" \
+                    -v archive_access_key_id="$ARCHIVE_ACCESS_KEY_ID" \
+                    -v archive_path_style="$ARCHIVE_PATH_STYLE" \
+                    -v archive_secret_access_key="$ARCHIVE_SECRET_ACCESS_KEY" \
+                    -f "$f" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi
+                  cat /tmp/migration.log
+                  if [ "$attempt" -ge 3 ] || ! grep -qE "deadlock detected|due to lock timeout" /tmp/migration.log; then
+                    echo "Migration $f failed." >&2; exit 1
+                  fi
+                  echo "Deadlock on $f (attempt $attempt) -- retrying in 3s." >&2
+                  attempt=$((attempt+1)); sleep 3
+                done
+              done
+
+              # Runs AFTER the migrations, not before: it inserts GoTrue users and user_roles rows
+              # against tables 0001 creates.
+              if [ -f /seed/seed.sql ]; then
+                echo 'Executing seed.sql...'
+                $PSQL -f /seed/seed.sql
+              fi
+
+              # THE END OF THE CHAIN, RECORDED. A non-null completed_at means every migration
+              # AND seed.sql succeeded on this boot -- which is what the e2e-validate Job waits for
+              # instead of waiting for 0001's `public.devices` to appear. Deliberately NOT tolerant
+              # of an error: 0072 has certainly run by now, so a failure here is a real one.
+              echo 'Marking the schema bootstrap complete...'
+              $PSQL -c "INSERT INTO public.schema_bootstrap (id, completed_at) VALUES (true, now()) ON CONFLICT (id) DO UPDATE SET completed_at = excluded.completed_at"
+
+              echo 'Supabase database initialized successfully.'
+          volumeMounts:
+            {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
+        - name: seed
+          configMap:
+            name: {{ printf "%s-seed" $fullname }}
+{{- end }}

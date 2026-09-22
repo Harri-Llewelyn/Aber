@@ -1,6 +1,6 @@
 # Kubernetes Hosting — Design and Rationale
 
-This document is the **why** behind the Helm chart in `deploy/helm/acs-cymru`: the decisions that
+This document is the **why** behind the Helm chart in `deploy/helm/aber`: the decisions that
 are not obvious from reading the templates, and the failures each one exists to prevent. The
 operational half — install, upgrade, teardown, hardening — is
 [`deploy/k8s/README.md`](../deploy/k8s/README.md).
@@ -65,7 +65,7 @@ There is one deliberate exception, covered in §3.4 (Realtime's tenant hostname)
 
 ## 1. Tooling decision
 
-**Helm, one umbrella chart, in `deploy/helm/acs-cymru/`.**
+**Helm, one umbrella chart, in `deploy/helm/aber/`.**
 
 Rationale, briefly, since the alternative is reasonable:
 
@@ -299,7 +299,7 @@ files (§3.5).
 
 ```
 deploy/
-  helm/acs-cymru/
+  helm/aber/
     Chart.yaml
     values.yaml                          documented defaults; NO working credentials
     values-dev.yaml                      local k3s: local-path, demo secrets from .env.example
@@ -357,8 +357,8 @@ so the failure is a legible Helm error rather than a CrashLoopBackOff.
 Secret *management* (SOPS / Sealed Secrets / External Secrets Operator) sits outside the chart — see
 §10.4. The chart itself renders a plain Secret.
 
-`acs-cymru.validateSecrets` fails the render listing every missing field by both
-its values path and its environment-variable name; `acs-cymru.validateRealtime` asserts the two
+`aber.validateSecrets` fails the render listing every missing field by both
+its values path and its environment-variable name; `aber.validateRealtime` asserts the two
 Realtime lengths. All are skipped when `secrets.existingSecret` is set, because the values are then
 not the chart's to see — that switch is the seam an external secret manager plugs into with no
 template rewrite, and it is exercised in CI so it cannot rot. The Secret's **keys are the
@@ -406,12 +406,12 @@ hostname, with the default `preserve_host: false`, so the Service name alone did
 preserves the downstream `Host` unless told otherwise, so `supabase/envoy.yaml` carries an explicit
 `host_rewrite_literal` for that route ([`docs/gateway.md`](gateway.md) records it
 as one of the four translation traps).
-The Service name is still load-bearing on both — `acs-cymru.validateRealtimeServiceName` refuses an
+The Service name is still load-bearing on both — `aber.validateRealtimeServiceName` refuses an
 install that renames it — and it is still the Kubernetes-native equivalent of the Compose alias.
 
 The Service is a separate template file from its Deployment, because the *name* is the architectural
 decision and the workload behind it is ordinary.
-`acs-cymru.validateRealtimeServiceName` refuses any other name, mirroring the guard
+`aber.validateRealtimeServiceName` refuses any other name, mirroring the guard
 `supabase-kong-init` applies to `REALTIME_UPSTREAM_URL` on the Compose side — one invariant,
 enforced on both targets.
 
@@ -932,7 +932,7 @@ alongside `e2e-validation`, never instead of it.
 **Two naming traps, both of which fail late and misleadingly:**
 
 - **The `fullname` helper collapses its prefix** when the release name already contains the chart
-  name — so with release `acs-cymru` the objects are `acs-cymru-db-init`, the chart name appearing
+  name — so with release `aber` the objects are `aber-db-init`, the chart name appearing
   once and not twice. Written against the doubled form, the install succeeds and the *first*
   `kubectl logs` says `NotFound`. The release and namespace are job-level variables, so the rule is
   recorded where the names are used and a rename is one line.
@@ -1189,7 +1189,7 @@ Two rules matter more than the rest:
 
 **Two knobs cannot be inferred and are the reason this is opt-in:** which namespace CoreDNS is in,
 and which namespace the ingress controller is in. A wrong value on the second means every route 502s
-while every pod reports healthy. The published-backend list comes from `acs-cymru.ingressRoutes`,
+while every pod reports healthy. The published-backend list comes from `aber.ingressRoutes`,
 the same helper the Ingress uses, so the policy and the routing cannot disagree — including per-route
 opt-outs.
 
@@ -1209,7 +1209,7 @@ stops working** — discovered while trying to patch a kernel, with a message th
 than the mistake. `maxUnavailable` rather than `minAvailable`, so the budget stays correct as replicas
 change. With everything at one replica it renders nothing, which is correct rather than an error.
 
-**HPAs on four components, and the chart refuses the rest.** `acs-cymru.validateAutoscaling` fails
+**HPAs on four components, and the chart refuses the rest.** `aber.validateAutoscaling` fails
 the render for any single-writer workload rather than warning, because the damage is silent — scaling
 `ingestion` duplicates every telemetry row, every quarantine decision and every append-only audit
 row, with no error and no crash, and an autoscaler does it under load. Eight workloads are refused;

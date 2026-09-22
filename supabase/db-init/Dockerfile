@@ -12,7 +12,7 @@
 # shrinks and base64 adds a third on top of each. Measured: 464 KB of a 1,213,920-byte release
 # Secret, against a 1,048,576 limit. `helm install` then fails with
 #
-#     Secret "sh.helm.release.v1.acs-cymru.v1" is invalid: data: Too long
+#     Secret "sh.helm.release.v1.aber.v1" is invalid: data: Too long
 #
 # naming the Secret and nothing about migrations. Un-gzipping is worse in both directions at once:
 # 1,386,004 bytes in the release, and the ConfigMap alone back over its own limit at 1,255,337.

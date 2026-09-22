@@ -20,7 +20,7 @@
 export const BUNDLE_SCHEMA = "acs-cymru/asset-bundle/1";
 
 /** Where the parts sit inside the package. `aasx/files/` is where AASX readers expect supplements. */
-export const BUNDLE_PART_DIR = "aasx/files/acs-cymru";
+export const BUNDLE_PART_DIR = "aasx/files/aber";
 export const BUNDLE_PARTS = {
   manifest: `${BUNDLE_PART_DIR}/manifest.json`,
   thread: `${BUNDLE_PART_DIR}/digital-thread.json`,

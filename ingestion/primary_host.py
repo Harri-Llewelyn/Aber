@@ -23,7 +23,7 @@ did not publish it would leave the ACL's promise unkept on a default install.
 `PRIMARY_HOST_ID` HAS NO DEFAULT. The host id is the contract every third-party gateway is
 configured against -- it goes in the vendor's own configuration screen, not in ours -- so a stack
 inheriting a word nobody chose is worse than one that refuses to start. The chart fails the render
-when it is unset (deploy/helm/acs-cymru/templates/apps/ingestion.yaml), so the ordinary way to meet
+when it is unset (deploy/helm/aber/templates/apps/ingestion.yaml), so the ordinary way to meet
 this is a `helm upgrade` that stops before anything restarts.
 
 THIS DAEMON IS THE SINGLE PRIMARY HOST. i3X is a read-side adapter over what the historian already

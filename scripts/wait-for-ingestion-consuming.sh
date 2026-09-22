@@ -69,14 +69,14 @@
 # so neither one alone is what makes it work.
 #
 # Usage:
-#   NS=acs-cymru sh scripts/wait-for-ingestion-consuming.sh
+#   NS=aber sh scripts/wait-for-ingestion-consuming.sh
 #
 set -eu
 
 TIMEOUT="${WAIT_TIMEOUT_SECONDS:-180}"
 INTERVAL="${WAIT_INTERVAL_SECONDS:-3}"
 PORT="${INGESTION_METRICS_PORT:-9108}"
-NS="${NS:-acs-cymru}"
+NS="${NS:-aber}"
 
 # -------------------------------------------------------------------------------------------------
 # Fetching the endpoint. `ingestion-metrics` is headless and cluster-internal, so this execs into the

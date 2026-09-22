@@ -40,9 +40,9 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 REPO = Path(__file__).resolve().parent.parent
-VALUES = REPO / "deploy" / "helm" / "acs-cymru" / "values.yaml"
+VALUES = REPO / "deploy" / "helm" / "aber" / "values.yaml"
 STATEFULSET = (
-    REPO / "deploy" / "helm" / "acs-cymru" / "templates" / "data" / "timescaledb-statefulset.yaml"
+    REPO / "deploy" / "helm" / "aber" / "templates" / "data" / "timescaledb-statefulset.yaml"
 )
 
 # The launcher, which is one process per instance and outside the background-worker pool.

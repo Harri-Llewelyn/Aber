@@ -1,6 +1,6 @@
 # Kubernetes deployment — runbook
 
-The chart is `deploy/helm/acs-cymru`. The design and its reasoning are in
+The chart is `deploy/helm/aber`. The design and its reasoning are in
 [`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md); this file is the
 operational half.
 
@@ -41,7 +41,7 @@ indefinitely with no error in any container log — `kubectl describe pod` names
 does. This is also why a 2 vCPU node cannot run the stack at all, however much memory it has.
 
 `helm install` refuses that cluster rather than letting you find it later
-(`acs-cymru.validateCapacity`). The floor it compares against is summed from the
+(`aber.validateCapacity`). The floor it compares against is summed from the
 `resources.requests` in your own values, so lowering them or turning components off lowers it
 too — the refusal names both numbers. It runs on install only, never on upgrade, and says nothing
 when it cannot list nodes, so `helm template`, `--dry-run` and a restricted credential are
@@ -136,17 +136,17 @@ speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
 # What versions exist?
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.1.0
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/aber --version 0.1.0
 
-helm install acs-cymru oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru \
+helm install aber oci://ghcr.io/harri-llewelyn/acs-cymru/aber \
   --version 0.1.0 \
-  --namespace acs-cymru --create-namespace \
+  --namespace aber --create-namespace \
   --values my-values.yaml \
   --timeout 15m
 
 # `helm install` returns once the init hooks have finished. Readiness is a separate question:
-for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
-  kubectl -n acs-cymru rollout status "$w" --timeout=10m
+for w in $(kubectl -n aber get statefulset,deploy -o name); do
+  kubectl -n aber rollout status "$w" --timeout=10m
 done
 ```
 
@@ -171,9 +171,9 @@ install. Pin it, in the command and in whatever runs the command.
 
 **There is no `-f values-dev.yaml` on this path** — that file is in the repository, not in your
 hands. But the chart *refuses to render* without credentials rather than generating them (see
-`acs-cymru.validateSecrets`), so an install with no values fails with a message naming the four
+`aber.validateSecrets`), so an install with no values fails with a message naming the four
 it needs. Either write a `my-values.yaml` from
-[`values-prod.yaml.example`](../helm/acs-cymru/values-prod.yaml.example) — which travels **inside
+[`values-prod.yaml.example`](../helm/aber/values-prod.yaml.example) — which travels **inside
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
 
@@ -191,15 +191,15 @@ hand and no `latest` tag to drift onto.
 # Mirror repository-owned config files into the chart (see "Chart files" below).
 node scripts/sync-helm-chart-files.mjs
 
-kubectl create namespace acs-cymru
+kubectl create namespace aber
 
-helm install acs-cymru deploy/helm/acs-cymru \
-  --namespace acs-cymru \
-  --values deploy/helm/acs-cymru/values-dev.yaml \
+helm install aber deploy/helm/aber \
+  --namespace aber \
+  --values deploy/helm/aber/values-dev.yaml \
   --timeout 10m
 
-for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
-  kubectl -n acs-cymru rollout status "$w" --timeout=10m
+for w in $(kubectl -n aber get statefulset,deploy -o name); do
+  kubectl -n aber rollout status "$w" --timeout=10m
 done
 ```
 
@@ -234,28 +234,28 @@ them are the asymmetric kind that surface days later on whichever component was 
 ## Verify
 
 ```bash
-kubectl -n acs-cymru get pods
-kubectl -n acs-cymru rollout status statefulset/timescaledb
-kubectl -n acs-cymru rollout status statefulset/supabase-db
+kubectl -n aber get pods
+kubectl -n aber rollout status statefulset/timescaledb
+kubectl -n aber rollout status statefulset/supabase-db
 ```
 
 **The init hooks run *after* the workloads are created**, so `helm install` can return before the
 migrations have finished. Check them explicitly:
 
 ```bash
-kubectl -n acs-cymru logs job/acs-cymru-db-roles-init   # scoped role passwords
-kubectl -n acs-cymru logs job/acs-cymru-db-init         # migrations + seed
-kubectl -n acs-cymru logs job/acs-cymru-storage-init    # the asset-3d-models bucket
+kubectl -n aber logs job/aber-db-roles-init   # scoped role passwords
+kubectl -n aber logs job/aber-db-init         # migrations + seed
+kubectl -n aber logs job/aber-storage-init    # the asset-3d-models bucket
 
 # Schema actually applied?
-kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
+kubectl -n aber exec -it statefulset/supabase-db -- \
   psql -U postgres -d postgres -c '\dt public.*'
 ```
 
 The historian's bootstrap must also have run — this should list `assets` and `telemetry`:
 
 ```bash
-kubectl -n acs-cymru exec -it statefulset/timescaledb -- \
+kubectl -n aber exec -it statefulset/timescaledb -- \
   psql -U postgres -d postgres -c '\dt'
 ```
 
@@ -264,8 +264,8 @@ repairable in place**. The postgres entrypoint runs `/docker-entrypoint-initdb.d
 an *empty* data directory, so:
 
 ```bash
-helm uninstall acs-cymru -n acs-cymru
-kubectl -n acs-cymru delete pvc data-timescaledb-0
+helm uninstall aber -n aber
+kubectl -n aber delete pvc data-timescaledb-0
 # then reinstall
 ```
 
@@ -296,7 +296,7 @@ render refuses those two routes unless `ingress.tls` terminates TLS. Traefik lis
 
 ```bash
 curl -H 'Host: app.localhost' http://127.0.0.1/
-kubectl -n acs-cymru get ingress
+kubectl -n aber get ingress
 ```
 
 Remove a route without disabling the service — `docs` is the usual candidate, since it is not meant
@@ -446,7 +446,7 @@ The chart refuses to render a LoadBalancer deployment whose certificate has no e
 all. Get the address and put it in the SANs:
 
 ```bash
-kubectl -n acs-cymru get svc mosquitto-external \
+kubectl -n aber get svc mosquitto-external \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
@@ -534,8 +534,8 @@ Two levels, and the distinction matters: one is safe to run against anything, th
 ### `helm test` — the cheap gate, mutates nothing
 
 ```bash
-helm test acs-cymru -n acs-cymru
-kubectl -n acs-cymru logs acs-cymru-test-fdw
+helm test aber -n aber
+kubectl -n aber logs aber-test-fdw
 ```
 
 Takes about a second and proves the **`postgres_fdw` link** end to end: the foreign server exists and
@@ -554,12 +554,12 @@ layers away from the cause.
 Off by default, because they seed and delete fixtures, drive real MQTT traffic and take minutes:
 
 ```bash
-helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru \
-  -f deploy/helm/acs-cymru/values-dev.yaml --set e2e.enabled=true
+helm upgrade aber deploy/helm/aber -n aber \
+  -f deploy/helm/aber/values-dev.yaml --set e2e.enabled=true
 
-kubectl -n acs-cymru wait --for=condition=complete \
-  job/acs-cymru-e2e-validate --timeout=20m
-kubectl -n acs-cymru logs job/acs-cymru-e2e-validate
+kubectl -n aber wait --for=condition=complete \
+  job/aber-e2e-validate --timeout=20m
+kubectl -n aber logs job/aber-e2e-validate
 ```
 
 - **`validate.py`** — the same 20 checks `npm run dev:test` runs from the host. In-cluster it needs
@@ -579,7 +579,7 @@ violations — skip themselves while the suite still reports success.
 
 Object names come from the chart's `fullname` helper, which **collapses the usual
 `<release>-<chart>` prefix when the release name already contains the chart name**. With release
-`acs-cymru` the Jobs are `acs-cymru-e2e-validate`, with the chart name appearing once.
+`aber` the Jobs are `aber-e2e-validate`, with the chart name appearing once.
 
 ### Running `validate.py` from the host instead
 
@@ -589,11 +589,11 @@ Object names come from the chart's `fullname` helper, which **collapses the usua
 ## Upgrade / uninstall
 
 ```bash
-helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru -f <values> --wait
+helm upgrade aber deploy/helm/aber -n aber -f <values> --wait
 
-helm uninstall acs-cymru -n acs-cymru
+helm uninstall aber -n aber
 # PVCs SURVIVE uninstall, by design — volumeClaimTemplates are not garbage collected.
-kubectl -n acs-cymru get pvc          # delete deliberately, never as cleanup habit
+kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 ```
 
 ---
@@ -632,7 +632,7 @@ exist to make that hard to get wrong.
 
 ```bash
 NS=ghcr.io/harri-llewelyn/acs-cymru
-V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml | head -1 \
+V=$(grep -E '^appVersion:' deploy/helm/aber/Chart.yaml | head -1 \
     | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
 # Edge functions — context is the REPOSITORY ROOT by convention (the image copies only supabase/functions/)
@@ -733,7 +733,7 @@ consumer's machine is an authentication error on a repository that is public.
 After the first successful release, once per package:
 
 ```bash
-for p in acs-cymru edge-runtime ingestion node-red frontend test-runner; do
+for p in aber edge-runtime ingestion node-red frontend test-runner; do
   gh api --method PATCH -H "Accept: application/vnd.github+json" \
     "/user/packages/container/acs-cymru%2F$p" -f visibility=public
 done
@@ -747,7 +747,7 @@ clicks per package under *Profile → Packages → <package> → Package setting
 Verify from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.2.0
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/aber --version 0.2.0
 ```
 
 ### What the release does not do
@@ -812,12 +812,12 @@ editing.
 Debugging a suspected policy drop:
 
 ```bash
-kubectl -n acs-cymru get networkpolicy
-kubectl -n acs-cymru describe networkpolicy acs-cymru-egress-supabase-db
+kubectl -n aber get networkpolicy
+kubectl -n aber describe networkpolicy aber-egress-supabase-db
 # Prove it from inside the source pod, which distinguishes DNS from connectivity:
-kubectl -n acs-cymru exec deploy/ingestion -- getent hosts mosquitto
+kubectl -n aber exec deploy/ingestion -- getent hosts mosquitto
 # python, not `sh -c 'echo > /dev/tcp/...'`: the image's sh is dash, which has no /dev/tcp
-kubectl -n acs-cymru exec deploy/ingestion -- python -c "import socket; socket.create_connection(('mosquitto', 8883), 5)" && echo reachable
+kubectl -n aber exec deploy/ingestion -- python -c "import socket; socket.create_connection(('mosquitto', 8883), 5)" && echo reachable
 ```
 
 **If everything goes unready the moment you enable it**, your CNI does not exempt kubelet probes from
@@ -857,7 +857,7 @@ peers from it, so the two cannot disagree about who may clone — which also mea
 in the usual way: a gateway that cannot reach `gitea:22` does not converge, and nothing in the stack
 reports it as a policy decision.
 
-**At the default the rule names no peer at all, deliberately.** `acs-cymru.giteaSshIngressRule`
+**At the default the rule names no peer at all, deliberately.** `aber.giteaSshIngressRule`
 renders `- ports: [22]` with no `from` when the list is empty or contains `0.0.0.0/0`, and an
 `ipBlock` list only when it has been narrowed. The two are not the same object even though both read
 as "anything":
@@ -906,8 +906,8 @@ logical dump cannot rebuild a dead node. The reasoning behind the tier 1 dumps i
 
 ```bash
 helm upgrade ... --set backup.enabled=true --set backup.persistence.size=100Gi
-kubectl -n acs-cymru get cronjob acs-cymru-backup
-kubectl -n acs-cymru create job --from=cronjob/acs-cymru-backup backup-now   # run one now
+kubectl -n aber get cronjob aber-backup
+kubectl -n aber create job --from=cronjob/aber-backup backup-now   # run one now
 ```
 
 `pg_dump -Fc` of both databases, nightly, onto a PVC that **survives `helm uninstall`** — deleting the
@@ -929,9 +929,9 @@ ones that share one. The mechanism, the tables and the restore runbook are in
 Ad hoc, without waiting for the schedule:
 
 ```bash
-kubectl -n acs-cymru exec -i statefulset/supabase-db -- \
+kubectl -n aber exec -i statefulset/supabase-db -- \
   env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > supabase-db.dump
-kubectl -n acs-cymru exec -i statefulset/timescaledb -- \
+kubectl -n aber exec -i statefulset/timescaledb -- \
   env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > timescaledb.dump
 ```
 
@@ -942,7 +942,7 @@ not have to infer which files belong together.
 Restore:
 
 ```bash
-kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
+kubectl -n aber exec -it statefulset/supabase-db -- \
   pg_restore -U supabase_admin -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
 ```
 
@@ -975,9 +975,9 @@ kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
 > Wrap it:
 >
 > ```bash
-> kubectl -n acs-cymru exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_pre_restore()'
+> kubectl -n aber exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_pre_restore()'
 > # ... pg_restore ...
-> kubectl -n acs-cymru exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_post_restore()'
+> kubectl -n aber exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_post_restore()'
 > ```
 >
 > Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this and
@@ -1000,7 +1000,7 @@ take is caught as its own failure rather than as a suspiciously successful resto
 The same code runs by hand against any cluster:
 
 ```bash
-export NS=acs-cymru POSTGRES_PASSWORD=... DB_PASSWORD=...
+export NS=aber POSTGRES_PASSWORD=... DB_PASSWORD=...
 scripts/rehearse-restore.sh seed
 scripts/rehearse-restore.sh snapshot before.txt
 scripts/rehearse-restore.sh backup ./rehearsal
@@ -1087,7 +1087,7 @@ Two need more:
 
 ```bash
 # The gateway's API keys are substituted by an initContainer:
-kubectl -n acs-cymru rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-kong
 # The OAuth client secrets are HASHED INTO auth.oauth_clients by db-init:
 helm upgrade ...   # re-runs the post-upgrade hook
 ```
@@ -1340,7 +1340,7 @@ not even be able to see (`existingSecret`). After rotating `SUPABASE_ANON_KEY` o
 `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```bash
-kubectl -n acs-cymru rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-kong
 ```
 
 ### The init hooks are safe to re-run, and that is load-bearing
@@ -1365,7 +1365,7 @@ listening on 1883 on that machine** (a local broker, a leftover container) leave
 `mosquitto-external` at `<pending>` with no obvious cause.
 
 ```bash
-kubectl -n acs-cymru get svc mosquitto-external
+kubectl -n aber get svc mosquitto-external
 ```
 
 With `mosquitto.tls.enabled` the same applies to **8883**, and to `tlsNodePort` if you are on
@@ -1480,7 +1480,7 @@ survives a restart, what does not, what causes one and how often to expect it �
 customer-facing [`docs/i3x-openapi.yaml`](../../docs/i3x-openapi.yaml), because a client integrating
 against this endpoint has to build the re-create-on-404 path that the i3X lifecycle already requires.
 
-**All nine single-writer workloads are enumerated once**, in `acs-cymru.singleWriterWorkloads` in
+**All nine single-writer workloads are enumerated once**, in `aber.singleWriterWorkloads` in
 `_helpers.tpl`. The autoscaling guard derives its refusal set from that block and CI parses the same
 block for its replica/strategy check, so neither keeps a copy that can fall behind it.
 
@@ -1502,7 +1502,7 @@ forever.
 
 Helm cannot read outside its own chart directory, but several files the chart needs are the same
 ones the suites and scripts read from the working tree. `scripts/sync-helm-chart-files.mjs` mirrors them into
-`deploy/helm/acs-cymru/files/`, the copies are committed (a packaged chart must install with no
+`deploy/helm/aber/files/`, the copies are committed (a packaged chart must install with no
 build step), and CI runs the script with `--check` to prove they are current.
 
 ```bash

@@ -84,4 +84,4 @@ COPY frontend/src/utils/sparkplugDatatype.js \
 
 # Overrides the ingestion daemon's CMD. Each Job names the suite it wants explicitly; this default
 # exists so a bare `docker run` of this image does something legible rather than starting a daemon.
-CMD ["python", "-c", "print('acs-cymru test-runner: pass a suite, e.g. python validate.py or python supabase/functions/aas-export/test_aas_export.py')"]
+CMD ["python", "-c", "print('aber test-runner: pass a suite, e.g. python validate.py or python supabase/functions/aas-export/test_aas_export.py')"]

@@ -244,7 +244,7 @@ export function ColdStorageTab({ showToast, userRole }) {
                     <div>List what is eligible:</div>
                     <code>kubectl exec deploy/ingestion -- python -m cold_archive --dry-run</code>
                     <div style={{ marginTop: '8px' }}>Or run a pass now:</div>
-                    <code>kubectl create job --from=cronjob/acs-cymru-cold-archive archive-now</code>
+                    <code>kubectl create job --from=cronjob/aber-cold-archive archive-now</code>
                   </div>
                 </>
               ) : (

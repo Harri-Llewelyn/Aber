@@ -66,7 +66,7 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 // 2. README's component table pins the same image tags the chart does. The chart's values are
 // parsed by shape: a `repository:` line followed by its `tag:` line, comments between allowed.
 // -------------------------------------------------------------------------------------------------
-const CHART_VALUES = read('deploy/helm/acs-cymru/values.yaml');
+const CHART_VALUES = read('deploy/helm/aber/values.yaml');
 const chartPins = new Map();
 {
   let repo = null;
@@ -117,7 +117,7 @@ const chartPins = new Map();
       }
     }
   };
-  walk(join(REPO, 'deploy/helm/acs-cymru/templates'));
+  walk(join(REPO, 'deploy/helm/aber/templates'));
 
   const readme = read('README.md');
   const section = readme.slice(readme.indexOf('## Components'));
@@ -164,12 +164,12 @@ const chartPins = new Map();
       if (e.isDirectory()) walk(f);
       else if (e.name.endsWith('.yaml')) {
         const text = readFileSync(f, 'utf8');
-        if (!text.includes('acs-cymru.scrapeAnnotations')) continue;
+        if (!text.includes('aber.scrapeAnnotations')) continue;
         for (const m of text.matchAll(/\$component\s*:=\s*"([a-z0-9-]+)"/g)) jobs.add(m[1]);
       }
     }
   };
-  walk(join(REPO, 'deploy/helm/acs-cymru/templates'));
+  walk(join(REPO, 'deploy/helm/aber/templates'));
 
   // The map is declared by 0001 and redeclared by 0103; the LAST declaration in the chain wins.
   const mapped = [];
@@ -212,7 +212,7 @@ const chartPins = new Map();
 // it or not.
 // -------------------------------------------------------------------------------------------------
 {
-  const CHART = read('deploy/helm/acs-cymru/Chart.yaml');
+  const CHART = read('deploy/helm/aber/Chart.yaml');
   const known = new Set(chartPins.values());
   for (const key of ['version', 'appVersion']) {
     const m = CHART.match(new RegExp(`^${key}:\\s*["']?([^"'\\s]+)`, 'm'));
@@ -235,7 +235,7 @@ const chartPins = new Map();
   // Mirrors are checked through their sources; the archive and the incident log are records of
   // what was true, not claims about what is. So is a document that opens by declaring itself
   // historical -- the version it names is the one that motivated the work it records.
-  const RECORD = /^(?:docs\/incidents\.md$|supabase\/migrations\/archive\/|frontend\/dist\/|deploy\/helm\/acs-cymru\/files\/)/;
+  const RECORD = /^(?:docs\/incidents\.md$|supabase\/migrations\/archive\/|frontend\/dist\/|deploy\/helm\/aber\/files\/)/;
   const declaresItselfHistorical = (body) => /^>\s*\*\*Historical/m.test(body.split('\n').slice(0, 10).join('\n'));
 
   /** Every claim on one line, judged. `[]` when the line makes none. */
@@ -260,7 +260,7 @@ const chartPins = new Map();
   // The pattern's own positive and negative controls. Without these the check passes silently once
   // the last claim is corrected, and a later edit that breaks the regex looks identical to a clean
   // tree -- the failure this repository keeps meeting in other forms.
-  const mustCatch = 'this stack pins 9.9.9, see deploy/helm/acs-cymru/values.yaml';
+  const mustCatch = 'this stack pins 9.9.9, see deploy/helm/aber/values.yaml';
   // Copied from scripts/generate-mtconnect-vocabulary.mjs: a real sentence this must not flag.
   const mustPass = 'The namespace pins `v2.0`, the major line -- deliberately NOT SCHEMA_VERSION';
   if (!judge(mustCatch).some(Boolean)) {
@@ -527,7 +527,7 @@ function edgeFunctionNames() {
 // chart resolves from Chart.AppVersion.
 // -------------------------------------------------------------------------------------------------
 {
-  const values = read('deploy/helm/acs-cymru/values.yaml');
+  const values = read('deploy/helm/aber/values.yaml');
   const built = [
     ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
   ].map((m) => m[1]);
@@ -618,7 +618,7 @@ function edgeFunctionNames() {
     (f) =>
       /\.(js|jsx|ts|mjs|py|sql|md|ya?ml)$/.test(f) &&
       !f.startsWith('supabase/migrations/archive/') &&
-      !f.startsWith('deploy/helm/acs-cymru/files/') &&
+      !f.startsWith('deploy/helm/aber/files/') &&
       f !== 'supabase/functions/_shared/gatewayPlatform.generated.ts' &&
       !f.startsWith('.claude/') &&
       !f.startsWith('frontend/dist/')
@@ -1321,7 +1321,7 @@ function edgeFunctionNames() {
 {
   const lib = read('scripts/lib/mosquitto-credentials.mjs');
   const worker = read('ingestion/playback_worker.py');
-  const chartSrc = read('deploy/helm/acs-cymru/templates/apps/playback.yaml');
+  const chartSrc = read('deploy/helm/aber/templates/apps/playback.yaml');
 
   const libPath = lib.match(/PLAYBACK_CREDENTIAL_FILE\s*=\s*'([^']+)'/)?.[1];
   const workerPath = worker.match(/"PLAYBACK_CREDENTIAL_FILE",\s*"([^"]+)"/)?.[1];
@@ -1360,7 +1360,7 @@ function edgeFunctionNames() {
 }
 
 {
-  const chart = read('deploy/helm/acs-cymru/templates/supabase/rest.yaml');
+  const chart = read('deploy/helm/aber/templates/supabase/rest.yaml');
 
   const chartName = chart.match(/name:\s*PGRST_DB_PRE_REQUEST\s*\n\s*value:\s*([A-Za-z0-9_.]+)/)?.[1];
 
@@ -1633,7 +1633,7 @@ function edgeFunctionNames() {
       'the [auth.generic_oauth] `name` is the literal text on the Grafana login button',
     'frontend/src/pages/OAuthConsent.jsx':
       'the OAuth consent screen, which names the identity a user is being asked to share',
-    'deploy/helm/acs-cymru/values.yaml':
+    'deploy/helm/aber/values.yaml':
       'supabaseStudio.organizationName is displayed in Studio',
     // Swagger UI renders info.title as the page heading. Whole-file, because every other Factory+
     // reference in this repository is to the framework and belongs in docs/openapi.yaml, which is

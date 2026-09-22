@@ -1,0 +1,151 @@
+{{- if .Values.observability.enabled }}
+{{- $component := "prometheus" -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $cfg := .Values.observability.prometheus -}}
+{{/*
+=================================================================================================
+Prometheus -- the metrics store the dashboards and alert rules read. It stores; Grafana
+evaluates; Alloy collects.
+
+IT SCRAPES NOTHING, ITSELF INCLUDED. Every series arrives by remote-write from the Alloy
+DaemonSet (obs/alloy.yaml), which is where discovery, the scrape interval and the `service`
+label live. Keeping one collector means one place to read when a target is missing. The
+receiver is unauthenticated, as Prometheus's API is; both are ClusterIP only and, under
+networkPolicy, reachable from Alloy and Grafana alone.
+
+No `--web.enable-lifecycle`: it enables POST /-/quit, an unauthenticated remote shutdown.
+=================================================================================================
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-prometheus-config" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      # Matches Alloy's scrape interval; rate() over 5m needs several samples inside the window.
+      scrape_interval: {{ .Values.observability.alloy.scrapeInterval }}
+      evaluation_interval: {{ .Values.observability.alloy.scrapeInterval }}
+      external_labels:
+        stack: aber
+---
+{{- if $cfg.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-prometheus" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # Thirty days of series. Reproducible only by waiting thirty days.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - {{ $cfg.persistence.accessMode }}
+  {{- include "aber.storageClass" (dict "ctx" . "component" $cfg.persistence) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ $cfg.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    # Single writer on a ReadWriteOnce TSDB.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        {{- include "aber.scrapeAnnotations" (dict "port" 9090 "path" "/metrics") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # prom/prometheus runs as nobody (65534); local-path provisions a root-owned directory.
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: prometheus
+          image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
+          imagePullPolicy: {{ $cfg.image.pullPolicy }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ $cfg.retentionTime }}
+            - --storage.tsdb.retention.size={{ $cfg.retentionSize }}
+            # Alloy's remote_write lands here.
+            - --web.enable-remote-write-receiver
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            periodSeconds: 20
+            failureThreshold: 4
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: {{ printf "%s-prometheus-config" $fullname }}
+        - name: data
+          {{- if $cfg.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-prometheus" $fullname }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

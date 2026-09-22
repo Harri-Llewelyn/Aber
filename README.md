@@ -89,7 +89,7 @@ the dashboard reads PostgREST and subscribes to Realtime.
 ## Deployment
 
 **Kubernetes is the deployment target.** The Helm chart in
-[`deploy/helm/acs-cymru`](deploy/helm/acs-cymru) deploys the whole platform onto k3s, or onto k3d
+[`deploy/helm/aber`](deploy/helm/aber) deploys the whole platform onto k3s, or onto k3d
 for development; the runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md) and the design
 record is [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md). The one thing that
 runs on Docker Compose is the gateway appliance: a Raspberry Pi runs the bundle the dashboard hands
@@ -113,7 +113,7 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 # appVersion, and the chart pulls them under exactly these names: a local build that is
 # tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
 NS=ghcr.io/harri-llewelyn/acs-cymru
-V=0.1.0                                       # appVersion in deploy/helm/acs-cymru/Chart.yaml
+V=0.1.0                                       # appVersion in deploy/helm/aber/Chart.yaml
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
 docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
@@ -130,20 +130,20 @@ docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestio
 k3d cluster create acs-cymru --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" --wait
 k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
-  gateway-credential backup-service db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c acs-cymru
+  gateway-credential backup-service db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c aber
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 
-kubectl create namespace acs-cymru
-helm install acs-cymru deploy/helm/acs-cymru -n acs-cymru \
-  -f deploy/helm/acs-cymru/values-dev.yaml --timeout 15m
+kubectl create namespace aber
+helm install aber deploy/helm/aber -n aber \
+  -f deploy/helm/aber/values-dev.yaml --timeout 15m
 
 # NOT `--wait` — it deadlocks the first install. See deploy/k8s/README.md.
-for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
-  kubectl -n acs-cymru rollout status "$w" --timeout=10m
+for w in $(kubectl -n aber get statefulset,deploy -o name); do
+  kubectl -n aber rollout status "$w" --timeout=10m
 done
 
-helm test acs-cymru -n acs-cymru          # the postgres_fdw gate
+helm test aber -n aber          # the postgres_fdw gate
 ```
 
 Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
@@ -151,7 +151,7 @@ Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `
 neither of which is HTTP and so neither of which can ride an Ingress.
 
 - **`values-dev.yaml` carries published demo credentials, and they are in git.** `npm run setup`
-  writes `deploy/helm/acs-cymru/values-local.yaml` (gitignored) with credentials minted for this
+  writes `deploy/helm/aber/values-local.yaml` (gitignored) with credentials minted for this
   install; for anything another person can reach, start from `values-prod.yaml.example` and point
   `secrets.existingSecret` at an externally managed Secret.
 - **`npm run dev:reset` is the way back to a blank stack**: it uninstalls, drops every claim and
@@ -313,7 +313,7 @@ administrator, who can set a password through the Auth API or Studio instead.
 | **[`tutorial/`](tutorial/README.md)** | The walkthrough for a blank install: one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it |
 | **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, the development loop, upgrade, teardown, hardening, releases |
-| [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
+| [`deploy/helm/aber/`](deploy/helm/aber) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
 | [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the three places that is not the whole truth |
@@ -471,7 +471,7 @@ the render fails naming them rather than publishing a login nobody can complete.
 reaching it is a port-forward:
 
 ```bash
-kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
+kubectl -n <ns> port-forward svc/supabase-studio 54323:3000
 ```
 
 Two consequences worth stating on the front page; both are detailed in

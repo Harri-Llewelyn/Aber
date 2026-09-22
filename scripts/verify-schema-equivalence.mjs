@@ -94,7 +94,7 @@ const IMAGE = 'supabase/postgres:17.6.1.160';
 // container: this read was `docker exec acs-cymru_supabase_db` until Compose was dropped, and that
 // name then existed nowhere else in the repository -- so this script could not run at all, which
 // is how a squash's acceptance test comes to be unavailable to the squash that needs it.
-const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru';
+const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'aber';
 const LIVE_DB_POD = process.env.ACS_CYMRU_DB_POD || 'supabase-db-0';
 const LIVE_DB_CONTAINER = 'supabase-db';
 

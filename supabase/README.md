@@ -190,7 +190,7 @@ shrinks and base64 adds a third on top of each: 464 KB of a 1,213,920-byte relea
 1,048,576 limit, and `helm install` failing with
 
 ```
-Secret "sh.helm.release.v1.acs-cymru.v1" is invalid: data: Too long
+Secret "sh.helm.release.v1.aber.v1" is invalid: data: Too long
 ```
 
 which names the Secret and nothing about migrations. Un-gzipping is worse in both directions at
@@ -237,7 +237,7 @@ flaky quarantine bugs**, because on a runner where db-init won the race the whol
 - **The clear matters as much as the stamp.** A row left complete by the previous boot would
   satisfy the gate instantly while a `helm upgrade` replayed the chain — the identical race, one
   deployment later.
-- **`SELECT 1/count(*) …` is deliberate.** `acs-cymru.waitForPostgres` reads the **exit code**, and
+- **`SELECT 1/count(*) …` is deliberate.** `aber.waitForPostgres` reads the **exit code**, and
   a query matching no rows still exits 0 — which is why the old probe could not have expressed "and
   the chain has finished" whichever table it named. The division makes an empty result an error.
 
@@ -2362,7 +2362,7 @@ To see what is eligible, or to force a pass:
 
 ```bash
 kubectl exec deploy/ingestion -- python -m cold_archive --dry-run
-kubectl create job --from=cronjob/acs-cymru-cold-archive archive-now
+kubectl create job --from=cronjob/aber-cold-archive archive-now
 ```
 
 > This paragraph described a `cold-archiver` Compose service running `--loop` on
@@ -4297,7 +4297,7 @@ port-forwards (`npm run dev:forward`), and the passwords come from `POSTGRES_PAS
 Without a port-forward, `kubectl exec` directly:
 
 ```bash
-kubectl -n acs-cymru exec statefulset/supabase-db -- \
+kubectl -n aber exec statefulset/supabase-db -- \
   pg_dump -Fp -Z6 -U supabase_admin -d postgres > supabase-db.sql.gz
 ```
 
@@ -4479,33 +4479,33 @@ is running; until then `request_backup()` refuses, naming it. This is the runboo
 # The directory, off the backup PVC as a streamed tar (a directory `kubectl cp` may land the
 # directory or its contents, and the two restore differently). Then the two databases as above:
 # .dump files by default (backupService.format), so restore-databases.sh runs pg_restore.
-POD=$(kubectl -n acs-cymru get pod -l app.kubernetes.io/component=backup-service -o jsonpath='{.items[0].metadata.name}')
-kubectl -n acs-cymru exec "$POD" -- tar -czf - -C /backups <stamp> | tar -xzf - -C ./backups
+POD=$(kubectl -n aber get pod -l app.kubernetes.io/component=backup-service -o jsonpath='{.items[0].metadata.name}')
+kubectl -n aber exec "$POD" -- tar -czf - -C /backups <stamp> | tar -xzf - -C ./backups
 
 # pgsodium's root key FIRST, onto the fresh database's volume, and a restart so the server reads
 # it: Vault's rows are ciphertext under this key, and the fresh server minted its own.
 # restore-databases.sh verifies Vault decrypts and names this step if it does not.
-kubectl -n acs-cymru exec -i statefulset/supabase-db -c supabase-db -- \
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- \
   sh -c 'umask 077; cat > /var/lib/postgresql/data/pgsodium_root.key' < ./backups/<stamp>/vault-key-<stamp>.txt
-kubectl -n acs-cymru delete pod supabase-db-0 --wait
-kubectl -n acs-cymru rollout status statefulset/supabase-db
+kubectl -n aber delete pod supabase-db-0 --wait
+kubectl -n aber rollout status statefulset/supabase-db
 
 BACKUP_DIR=./backups/<stamp> BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 
 # The storage objects, into the storage pod's volume.
-POD=$(kubectl -n acs-cymru get pod -l app.kubernetes.io/component=supabase-storage -o jsonpath='{.items[0].metadata.name}')
-kubectl -n acs-cymru exec -i "$POD" -- tar -xzf - -C /var/lib/storage < ./backups/<stamp>/storage-objects-<stamp>.tar.gz
+POD=$(kubectl -n aber get pod -l app.kubernetes.io/component=supabase-storage -o jsonpath='{.items[0].metadata.name}')
+kubectl -n aber exec -i "$POD" -- tar -xzf - -C /var/lib/storage < ./backups/<stamp>/storage-objects-<stamp>.tar.gz
 
 # A volume the workload holds open (the forge, then the broker): scale it to zero, replace the
 # volume's contents through a helper pod holding the same claim, scale it back. The forge archive
 # restores the host keys, so appliances keep cloning; the broker archive restores the document,
 # and the boot reconcile keeps every account it holds.
 restore_volume() {   # <deployment> <archive>; the claim is the deployment's "data" volume
-  CLAIM=$(kubectl -n acs-cymru get "deploy/$1" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')
-  IMAGE=$(kubectl -n acs-cymru get "deploy/$1" -o jsonpath='{.spec.template.spec.containers[0].image}')
-  kubectl -n acs-cymru scale "deploy/$1" --replicas=0
-  kubectl -n acs-cymru wait --for=delete pod -l "app.kubernetes.io/component=$1" --timeout=5m
-  kubectl -n acs-cymru apply -f - <<EOF
+  CLAIM=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')
+  IMAGE=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.containers[0].image}')
+  kubectl -n aber scale "deploy/$1" --replicas=0
+  kubectl -n aber wait --for=delete pod -l "app.kubernetes.io/component=$1" --timeout=5m
+  kubectl -n aber apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata: { name: volume-restore-$1 }
@@ -4515,11 +4515,11 @@ spec:
   containers: [{ name: restore, image: "$IMAGE", command: [sleep, "3600"], volumeMounts: [{ name: data, mountPath: /volume }] }]
   volumes: [{ name: data, persistentVolumeClaim: { claimName: $CLAIM } }]
 EOF
-  kubectl -n acs-cymru wait --for=condition=Ready "pod/volume-restore-$1" --timeout=5m
-  kubectl -n acs-cymru exec -i "volume-restore-$1" -- sh -c 'rm -rf /volume/* /volume/.[!.]*; tar -xzf - -C /volume' < "$2"
-  kubectl -n acs-cymru delete pod "volume-restore-$1"
-  kubectl -n acs-cymru scale "deploy/$1" --replicas=1
-  kubectl -n acs-cymru rollout status "deploy/$1"
+  kubectl -n aber wait --for=condition=Ready "pod/volume-restore-$1" --timeout=5m
+  kubectl -n aber exec -i "volume-restore-$1" -- sh -c 'rm -rf /volume/* /volume/.[!.]*; tar -xzf - -C /volume' < "$2"
+  kubectl -n aber delete pod "volume-restore-$1"
+  kubectl -n aber scale "deploy/$1" --replicas=1
+  kubectl -n aber rollout status "deploy/$1"
 }
 restore_volume gitea     ./backups/<stamp>/forge-<stamp>.tar.gz
 restore_volume mosquitto ./backups/<stamp>/broker-<stamp>.tar.gz

@@ -54,7 +54,7 @@ import {
 } from '../utils/releaseVersion'
 
 const CHART_CONFIG = fs.readFileSync(
-  path.resolve(__dirname, '../../../deploy/helm/acs-cymru/templates/apps/frontend.yaml'), 'utf8')
+  path.resolve(__dirname, '../../../deploy/helm/aber/templates/apps/frontend.yaml'), 'utf8')
 const PLACEHOLDER = fs.readFileSync(path.resolve(__dirname, '../../public/config.js'), 'utf8')
 
 const openMenu = async () => {

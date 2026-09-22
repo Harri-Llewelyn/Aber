@@ -1,0 +1,176 @@
+# =============================================================================================
+# Local k3s development profile.
+#
+#   helm install aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml
+#
+# EVERY CREDENTIAL BELOW IS A PUBLISHED DEMO VALUE, the demonstration set. They are in
+# git, they are in the repository's CI logs, and they are the same on every developer's machine.
+# That is fine for a laptop k3s and is NEVER acceptable anywhere else -- values-prod.yaml.example
+# is the starting point for anything reachable by another person.
+#
+# The anon and service-role keys are JWTs signed by jwtSecret below; the three are a matching set
+# and must be replaced together. See the note on `secrets` in values.yaml.
+# =============================================================================================
+
+global:
+  # Every `*.localhost` name is this machine: browsers resolve it themselves, Windows and
+  # systemd-resolved resolve it for everything else, and browsers treat it as a secure context,
+  # which the Studio and forge logins need over plain HTTP (they set Secure cookies, which any
+  # other http host loses). Feeds both the Ingress rules and the browser-facing URLs the OAuth
+  # clients are registered with -- one value, so they cannot disagree.
+  publicBaseDomain: localhost
+  scheme: http
+  # k3s's built-in provisioner. Node-local and ReadWriteOnce -- see values.yaml.
+  storageClass: local-path
+
+secrets:
+  jwtSecret: super-secret-jwt-token-with-at-least-32-characters
+  anonKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
+  serviceRoleKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJleHAiOjIwMDAwMDAwMDB9.GWSHLKn253lfP0FAYobjuXvQkQGcYhKVJ6Y0IJOo-lA
+  # The keys callers present; demo values, as the two JWTs above are.
+  publishableKey: sb_publishable_acscymru_dev_0000000000000000
+  secretKey: sb_secret_acscymru_dev_00000000000000000000
+  postgresPassword: postgres
+  timescalePassword: postgres
+
+  # THE TWO HISTORIAN ROLES, required by `aber.validateSecrets` since
+  # 898bfb3. This fixture did not carry them, so `helm template -f values-dev.yaml` failed at
+  # NOTES.txt for four days and nothing said so -- every CI run was failing at the billing gate
+  # before it reached the step. Distinct values rather than one shared password: the whole point of
+  # the pair is that the FDW mapping and the ingestion daemon authenticate as different roles, and
+  # a fixture that gives them the same secret cannot catch a mix-up between them.
+  ingestWriterPassword: acscymru-ingest-writer
+  fdwReaderPassword: acscymru-fdw-reader
+
+  # THE TWO MACHINE-PRINCIPAL KEYS, and their absence is a CRASH LOOP rather than a render error.
+  # The chart has always carried the plumbing -- secret.yaml maps both, and the two Deployments
+  # read them -- but this fixture left them empty, so `helm install` succeeded and the ingestion
+  # pod halted itself: "CRITICAL SECURITY ERROR: Supabase client is uninitialized ... refusing to
+  # start MQTT loop in fail-open state." Correct behaviour, ten minutes of `0 of 1 updated
+  # replicas are available`, and a failure that names neither the chart nor this file.
+  #
+  # Demonstration JWTs signed by the jwtSecret above:
+  # Service_Ingestor is sub b0000000-...-0002 (0046) and Service_Playback is ...-0003 (0056).
+  # Neither is `service_role` -- that is the whole point of Machine Identities, and copying the
+  # service key here instead would produce a working stack that proves nothing.
+  ingestionKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiZXhwIjoyMDAwMDAwMDAwfQ.j-rSyTImEPP3Etuq304tYycMSKrk0mxcI_9Pmew3seI
+  playbackKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZXhwIjoyMDAwMDAwMDAwfQ.40LLl4zKVmdJOBBkG-sKUZjXkhESdgzEg8c0aK-DVr4
+
+  # Realtime's own metrics endpoint, separate from the session JWT secret.
+  realtimeMetricsJwtSecret: acscymru_realtime_metrics_jwt_secret_development_only
+
+  # EXACTLY 16 characters, and AT LEAST 64 characters. The chart asserts both.
+  realtimeDbEncKey: supabaserealtime
+  realtimeSecretKeyBase: 8f2c1d4b7a9e0356c8b1f4d72e5a90c3b6d8f1a4e7c025d9a3e6b8c1f4d7a0e39
+
+  pgMetaCryptoKey: aber-pg-meta-crypto-key
+
+  # The platform principals; see values.yaml for why the validator's username is a sparkplug_id
+  # and not free text. One shared password here only because this file is the CI fixture.
+  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionPassword: acscymru123
+  mqttI3xUser: factoryplus_i3x
+  mqttI3xPassword: acscymru123
+  mqttValidatorUser: gwy110000000000400080000
+  mqttValidatorPassword: acscymru123
+  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorPassword: acscymru123
+  # The plugin's admin. Required: the broker's initContainer exits without it.
+  mqttDynsecAdminUser: dynsec-admin
+  mqttDynsecAdminPassword: acscymru123dynsecadmin
+  # The four simulated cell gateways. Set here because node-red-init fails closed on a broker node
+  # whose declared `acsCredentialsEnv` pair is missing -- without these the init container exits 1
+  # and Node-RED never starts, which on k3d reads as a stuck rollout rather than as a credential.
+  mqttGwCncMachiningPassword: acscymru123
+  mqttGwRoboticAssemblyPassword: acscymru123
+  mqttGwAgvFleetPassword: acscymru123
+  mqttGwFacilityBmsPassword: acscymru123
+
+  # The bearer token supabase-functions presents to the gateway-credential sidecar.
+  #
+  # NOT OPTIONAL, AND NOT A DEFAULT THE SERVICE CAN INVENT. It exits 2 on anything shorter than 32
+  # characters rather than running open -- that service can issue a broker account for any edge
+  # node, and the gateway's role makes an account the ability to publish telemetry as that gateway. Unset, the
+  # sidecar CrashLoopBackOffs, which takes the whole mosquitto POD out of Ready and stalls every
+  # workload that waits on the broker. The symptom is i3x-service and ingestion timing out, naming
+  # neither this value nor the container that refused to start.
+  mqttCredentialServiceToken: acs-cymru-dev-credential-service-token-not-a-secret
+
+  giteaAdminPassword: gitea-admin
+  giteaMachinePassword: acs-platform-machine-account
+  # The forge's door (0094).
+  giteaOAuthClientSecret: change-me-gitea-oauth-client-secret
+  giteaProxyHmacSecret: change-me-gitea-proxy-hmac-secret
+  giteaWebhookSecret: change-me-gitea-webhook-secret
+  # Studio's door: on here because ingress.routes.studio is, below.
+  studioOAuthClientSecret: change-me-studio-oauth-client-secret
+  studioProxyHmacSecret: change-me-studio-proxy-hmac-secret
+
+  grafanaAdminUser: admin
+  grafanaAdminPassword: admin
+  grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret
+  grafanaAlertWebhookSecret: change-me-grafana-alert-webhook-bearer-min-32-chars
+  # Grafana connects to the historian as `powerbi_reader`, never as `postgres`.
+  biReaderPassword: acscymru123
+
+  noderedCredentialSecret: acscymrusecret
+  noderedOAuthClientSecret: change-me-nodered-oauth-client-secret
+  noderedWebhookJwtSecret: change-me-nodered-webhook-signing-key-min-32-chars
+  # Break-glass path stays shut by default.
+  noderedAdminToken: ""
+
+# Studio's route is off by default as an exposure decision (values.yaml). On a loopback domain
+# there is nothing to expose, and with it on the Directory's studio link works.
+ingress:
+  routes:
+    studio: true
+
+# Small volumes: a laptop k3s is usually running on the same disk as everything else, and
+# local-path takes the space from the node's filesystem immediately.
+timescaledb:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+
+supabaseDb:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 2Gi
+
+# The dev loop reaches both databases through port-forwards on `localhost`, which the certificate
+# has to name for a host-side client to verify it. `npm run dev:up` turns the TLS itself on.
+postgresTls:
+  extraDnsSans:
+    - localhost
+
+# The one-liner over plain HTTP, on this laptop cluster alone: it has no ingress TLS to pin, and
+# the installer would otherwise refuse to be minted or served (values.yaml says why).
+supabaseFunctions:
+  gatewayEnrolment:
+    allowPlaintextInstaller: true
+
+# On here, off in values.yaml, and the dev loop is the reason. The worker is a diagnostic tool a
+# production install has no use for until it has a playback target; but with it off nothing
+# exercises the publish path at all, so the only cover it had was three unit suites over
+# `plan_playback()`. `test_playback_replay.py` replays a fixture onto the seeded Playback gateway
+# through the real worker, real broker and real daemon, and needs the Deployment running.
+# No credential is set here: one is minted and DELIVERED during that suite, which is the half
+# that has broken twice.
+playback:
+  enabled: true
+
+# REQUIRED, and values.yaml deliberately ships it empty. A real site names its own primary host
+# because every gateway is configured to watch it; the dev cluster has no such gateways, so the
+# fixture picks the word the rest of this stack already uses as its Sparkplug group.
+ingestion:
+  primaryHostId: ACS-Cymru

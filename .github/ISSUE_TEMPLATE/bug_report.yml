@@ -89,7 +89,7 @@ body:
     attributes:
       label: Logs and error output
       description: >
-        Paste the relevant output — `kubectl -n acs-cymru logs <pod>`, the browser
+        Paste the relevant output — `kubectl -n aber logs <pod>`, the browser
         console, or a failing suite's output. It is rendered as a code block, so no backticks
         needed. **Redact credentials before pasting**; a container's environment is dumped in some
         of these.
