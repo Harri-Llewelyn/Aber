@@ -8,14 +8,30 @@ historian, and leaves through one API, one Unified Namespace and one digital thr
 
 An industrial, asset-centric platform: real-time telemetry streaming, shopfloor cell mapping,
 zero-touch edge device onboarding, row-level security, continuous Digital Thread audit logging,
-AAS V3 export, and edge flow management. It speaks Factory+ Sparkplug B on the wire and began as
-a fork of the **AMRC Connectivity Stack (ACS)**.
+AAS V3 export, and edge flow management. It speaks Factory+ Sparkplug B on the wire, and it was
+inspired by the **AMRC Connectivity Stack (ACS)**; [how far that goes](#relationship-to-acs) is below.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where ACS ships bespoke microservices, Aber uses Supabase, TimescaleDB, Grafana and
 > Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
 > the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
 > cold archival — sixteen edge functions, an i3X server and a React dashboard.
+
+## Relationship to ACS
+
+**Aber is an independent project.** It was built from the ground up, taking the AMRC Connectivity
+Stack's documentation as its inspiration, and contains no ACS code. It does not follow ACS releases
+and is not intended to merge back. It is not affiliated with or endorsed by the AMRC.
+
+What it keeps is interoperability with Factory+:
+
+- **On the wire:** Sparkplug B, with the Factory+ metric naming rule and payload marker.
+- **The Directory:** the read half of the Factory+ Directory's REST contract, at the unprefixed
+  `/ping` and `/v1/…` paths a Factory+ client expects
+  ([`fplus-directory`](supabase/README.md#the-factory-directory-adapter)), and its documents on MQTT
+  ([`directory_publish.py`](ingestion/README.md#the-directory-on-mqtt)).
+- **Identifiers are local.** Schema and service UUIDs are minted by each deployment rather than
+  registered with the AMRC, and every response that carries one says so.
 
 ---
 

@@ -967,7 +967,7 @@ batch arriving mid-heal never waits on a network round trip. It stays resident s
 
 Sparkplug binds each metric name to an **integer alias** in a birth certificate, and thereafter
 publishes DATA carrying the alias alone with no name. That is the normal production configuration
-for a real gateway — including upstream ACS's `aber-edge`.
+for a real gateway — including ACS's `acs-edge`.
 
 Until this was implemented the daemon read only `metric.name`, so an alias-optimised gateway
 **ingested zero metrics and logged nothing**. It was a total, silent data-loss path for any

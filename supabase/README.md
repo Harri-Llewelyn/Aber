@@ -4605,7 +4605,7 @@ a floor plan.
 
 ### `asset-3d-models` is public-read, and that is not laziness
 
-An exported AAS `File` element's URL has to be dereferenceable by a viewer holding no Factory+
+An exported AAS `File` element's URL has to be dereferenceable by a viewer holding no Aber
 session — that is what makes the shell a document rather than a pointer into this stack. A signed
 URL would expire, which turns every shell already handed out into a time bomb.
 
