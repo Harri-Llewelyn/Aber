@@ -149,7 +149,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
     <AuthShell
       theme={theme}
       onToggleTheme={toggleTheme}
-      title="Aber Supabase Portal"
+      title={mode === 'forgot' ? 'Reset your password' : 'Sign in to Aber'}
       subtitle={mode === 'forgot'
         ? 'Enter your email address and a link to choose a new password will be sent to it'
         : 'Sign in with your platform account'}
