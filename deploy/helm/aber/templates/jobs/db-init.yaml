@@ -139,6 +139,12 @@ spec:
                   optional: true
             - name: GITEA_PUBLIC_URL
               value: {{ include "aber.giteaUrl" . | quote }}
+            # The Directory rows for Swagger UI and the four Supabase services are repointed at
+            # these on every boot, as the Grafana, Studio, Node-RED and forge rows are above.
+            - name: DOCS_PUBLIC_URL
+              value: {{ include "aber.docsUrl" . | quote }}
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ include "aber.supabaseUrl" . | quote }}
             - name: NODERED_OAUTH_CALLBACK_URL
               value: {{ printf "%s/auth/strategy/callback" (include "aber.noderedUrl" .) | quote }}
             {{/*
@@ -282,6 +288,8 @@ spec:
                     -v studio_public_url="$STUDIO_PUBLIC_URL" \
                     -v gitea_oauth_client_secret="$GITEA_OAUTH_CLIENT_SECRET" \
                     -v gitea_public_url="$GITEA_PUBLIC_URL" \
+                    -v docs_public_url="$DOCS_PUBLIC_URL" \
+                    -v supabase_public_url="$SUPABASE_PUBLIC_URL" \
                     -v nodered_oauth_client_secret="$NODERED_OAUTH_CLIENT_SECRET" \
                     -v nodered_webhook_jwt_secret="$NODERED_WEBHOOK_JWT_SECRET" \
                     -v nodered_redirect_uri="$NODERED_OAUTH_CALLBACK_URL" \
