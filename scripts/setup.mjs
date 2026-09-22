@@ -212,7 +212,7 @@ if (domain) {
   console.log('   REMOTE GATEWAYS CANNOT BE ENROLLED. Set global.publicBaseDomain in the file later.');
 }
 console.log('');
-console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / acscymru123 and the');
+console.log('⚠️  Demo LOGINS are separate and unchanged: admin@aber.local / aber123 and the');
 console.log('   other three accounts are seeded by supabase/seed.sql. Change them before anyone else');
 console.log('   can reach this stack.');
 console.log('');

@@ -28,7 +28,7 @@ info:
     because an OAuth client presents client credentials and has no way to add a Supabase
     header. Both still validate the bearer token themselves.
 
-    Sign in first with `admin@acs-cymru.local` / `acscymru123` (local dev seed).
+    Sign in first with `admin@aber.local` / `aber123` (local dev seed).
 
     > ⚠️ **"Example Value" is documentation, not data.** Swagger UI synthesises samples from
     > this spec's schemas whether or not those rows exist. Press **Execute** and read the
@@ -168,8 +168,8 @@ paths:
             schema:
               type: object
               properties:
-                email: { type: string, format: email, example: admin@acs-cymru.local }
-                password: { type: string, format: password, example: acscymru123 }
+                email: { type: string, format: email, example: admin@aber.local }
+                password: { type: string, format: password, example: aber123 }
                 refresh_token:
                   type: string
                   description: Send this instead of email/password when `grant_type=refresh_token`.

@@ -45,8 +45,8 @@ REPO = Path(__file__).resolve().parent.parent
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@acs-cymru.local")
-ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "acscymru123")
+ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@aber.local")
+ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "aber123")
 
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 

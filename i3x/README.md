@@ -174,7 +174,7 @@ layer` — because RLS grants reads to `authenticated`, not `anon`. Get one with
 ```bash
 curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
   -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Content-Type: application/json" \
-  -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
+  -d '{"email":"admin@aber.local","password":"aber123"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
 ```
 
@@ -205,7 +205,7 @@ conformant i3X server** — it discovers everything through the spec's explorato
 is nothing to write here. It asks this service questions in English on behalf of a model.
 
 **Verified against this server on 2026-08-22** by driving the published package over stdio, as
-`operator@acs-cymru.local` so that RLS was actually in the path. Every claim below was observed, not
+`operator@aber.local` so that RLS was actually in the path. Every claim below was observed, not
 inferred from the package's README — which matters, because the configuration this section used to
 carry named a package that does not exist.
 

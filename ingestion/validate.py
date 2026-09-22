@@ -243,7 +243,7 @@ def probe_nodered_editor_login():
         anon = SUPABASE_PUBLISHABLE_KEY
         token = json.loads(fetch(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-            json.dumps({"email": "admin@acs-cymru.local", "password": "acscymru123"}).encode(),
+            json.dumps({"email": "admin@aber.local", "password": "aber123"}).encode(),
             {"apikey": anon, "Content-Type": "application/json"},
         ).read())["access_token"]
 
@@ -316,7 +316,7 @@ def probe_nodered_editor_login():
         if flows_res.status != 200:
             return False, f"editor session cannot read the flows: GET /flows -> {flows_res.status}."
 
-        return True, ("admin@acs-cymru.local signed in through Supabase Auth; the editor session "
+        return True, ("admin@aber.local signed in through Supabase Auth; the editor session "
                       "reads /settings and /flows and carries permissions='*' (Deploy enabled).")
     except Exception as err:
         return False, f"{type(err).__name__}: {err}"
@@ -1506,8 +1506,8 @@ def verify_results():
         try:
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-                data=json.dumps({"email": "admin@acs-cymru.local",
-                                 "password": "acscymru123"}).encode(),
+                data=json.dumps({"email": "admin@aber.local",
+                                 "password": "aber123"}).encode(),
                 headers={"apikey": anon, "Content-Type": "application/json"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:

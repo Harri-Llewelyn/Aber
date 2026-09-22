@@ -37,8 +37,8 @@ SHARED_SHELL = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "shell
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
-DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
+DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
+DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
 # Provisioned by this suite, not seeded. See the note in test_aas_export.py -- the two share
 # test-harness/aas_fixture.py so they cannot disagree about what a conformance subject is.
 TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "")

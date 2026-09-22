@@ -17,7 +17,7 @@ import App from '../App'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@acs-cymru.local',
+    email: 'admin@aber.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -250,7 +250,7 @@ describe('Merged navigation shell', () => {
       // The title is load-bearing: the button has no visible text, so this string is also its
       // accessible name.
       const title = trigger().getAttribute('title')
-      expect(title).toContain('admin@acs-cymru.local')
+      expect(title).toContain('admin@aber.local')
       // usePermissions resolves the role from the database before falling back to the built-in map,
       // so it arrives a tick after the bar does.
       await waitFor(() => expect(trigger().getAttribute('title')).toContain('Administrator'))
@@ -268,7 +268,7 @@ describe('Merged navigation shell', () => {
       fireEvent.click(trigger())
 
       const menu = screen.getByRole('menu')
-      expect(within(menu).getByText('admin@acs-cymru.local')).toBeTruthy()
+      expect(within(menu).getByText('admin@aber.local')).toBeTruthy()
       // The role is in the menu, so it must be present.
       await waitFor(() => expect(within(menu).getByText('Administrator')).toBeTruthy())
       expect(trigger()).toHaveAttribute('aria-expanded', 'true')

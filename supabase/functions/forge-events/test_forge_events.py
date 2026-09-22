@@ -96,10 +96,10 @@ def push(sparkplug_id, ref="refs/heads/main", sha="a" * 40, owner=ORGANISATION, 
             "id": sha,
             "message": message,
             "timestamp": "2026-09-10T12:00:00Z",
-            "committer": {"name": "Some Body", "email": "somebody@acs-cymru.local"},
+            "committer": {"name": "Some Body", "email": "somebody@aber.local"},
         },
         "commits": [],
-        "pusher": {"login": "a0000000-0000-0000-0000-000000000001", "email": "admin@acs-cymru.local"},
+        "pusher": {"login": "a0000000-0000-0000-0000-000000000001", "email": "admin@aber.local"},
     }
 
 
@@ -193,7 +193,7 @@ class TestWhatIsRecorded(ForgeEventsBase):
         row = self.head()
         self.assertEqual(row["forge_head_sha"], sha)
         self.assertEqual(row["forge_head_message"], "Tighten the OPC UA poll", "not the first line of the message")
-        self.assertEqual(row["forge_head_by"], "admin@acs-cymru.local")
+        self.assertEqual(row["forge_head_by"], "admin@aber.local")
         self.assertTrue(row["forge_head_at"].startswith("2026-09-10T12:00:00"), row["forge_head_at"])
         # No such repository in the forge, so no flows.json to hash: "not known", never "unchanged".
         self.assertIsNone(row["forge_head_flow_sha256"])

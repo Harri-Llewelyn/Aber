@@ -111,8 +111,8 @@ async function environmentFromFile(file) {
 async function environmentFromStack(name) {
   const supabaseUrl = (process.env.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
   const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-  const email = process.env.AAS_TEST_EMAIL || 'admin@acs-cymru.local';
-  const password = process.env.AAS_TEST_PASSWORD || 'acscymru123';
+  const email = process.env.AAS_TEST_EMAIL || 'admin@aber.local';
+  const password = process.env.AAS_TEST_PASSWORD || 'aber123';
 
   if (!anonKey) throw new Error('SUPABASE_PUBLISHABLE_KEY is not set; run `npm run setup` first.');
 

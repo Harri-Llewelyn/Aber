@@ -28,7 +28,7 @@ FORGE_URL = os.getenv("GITEA_TEST_URL", "http://localhost:3003")
 MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "acs_platform")
 MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "acs-platform-machine-account")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
-PASSWORD = os.getenv("ACS_SEED_PASSWORD", "acscymru123")
+PASSWORD = os.getenv("ACS_SEED_PASSWORD", "aber123")
 
 # See test_enroll_gateway.py, which carries the reasoning: where the caller installed the forge, an
 # unreachable one is a fault, and a setUpClass skip removes the class from a run that still reports
@@ -43,9 +43,9 @@ def skip_or_fail(message):
     raise unittest.SkipTest(message)
 
 PERSONAS = {
-    "Administrator": ("admin@acs-cymru.local", "a0000000-0000-0000-0000-000000000001", "administrators"),
-    "Shopfloor_Manager": ("manager@acs-cymru.local", "a0000000-0000-0000-0000-000000000002", "managers"),
-    "Operator": ("operator@acs-cymru.local", "a0000000-0000-0000-0000-000000000003", None),
+    "Administrator": ("admin@aber.local", "a0000000-0000-0000-0000-000000000001", "administrators"),
+    "Shopfloor_Manager": ("manager@aber.local", "a0000000-0000-0000-0000-000000000002", "managers"),
+    "Operator": ("operator@aber.local", "a0000000-0000-0000-0000-000000000003", None),
 }
 
 

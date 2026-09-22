@@ -32,7 +32,7 @@ from test_enroll_gateway import (  # noqa: E402
 # Differs from every other suite's fixture id in its FIRST block (sparkplug_id is the first 21 hex
 # characters of the uuid).
 TEST_GW_ID = "f7a11000-0000-4000-8000-000000000001"
-OPERATOR_EMAIL = os.getenv("ACS_OPERATOR_EMAIL", "operator@acs-cymru.local")
+OPERATOR_EMAIL = os.getenv("ACS_OPERATOR_EMAIL", "operator@aber.local")
 
 
 def mint(bearer, gateway_id=TEST_GW_ID):

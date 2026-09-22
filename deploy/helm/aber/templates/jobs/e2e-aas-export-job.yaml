@@ -120,9 +120,9 @@ spec:
             # Shopfloor_Manager may export, and so may the read-scoped Operator and Auditor -- unlike
             # approve-quarantine, because an export is a read.
             - name: AAS_TEST_EMAIL
-              value: admin@acs-cymru.local
+              value: admin@aber.local
             - name: AAS_TEST_PASSWORD
-              value: acscymru123
+              value: aber123
             - name: STORAGE_MODEL_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
             - name: PYTHONUNBUFFERED
