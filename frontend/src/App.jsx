@@ -19,6 +19,7 @@ import { useEscapeKey } from './hooks/useEscapeKey'
 import { useSidebarMode } from './hooks/useSidebarMode'
 import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
+import { AberMark } from './components/common/AberMark'
 
 /* There is no sign-up form. Registration is disabled server-side by GOTRUE_DISABLE_SIGNUP, so
    accounts arrive by invitation, admin provisioning or an upstream identity provider; a client-side
@@ -31,7 +32,6 @@ const OAUTH_CONSENT_PATH = '/oauth/consent'
 const RESET_PASSWORD_PATH = '/reset-password'
 
 import {
-  IconFactory,
   IconKeyboard,
   IconHelp,
   IconSun,
@@ -149,7 +149,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
     <AuthShell
       theme={theme}
       onToggleTheme={toggleTheme}
-      title="Aber Supabase Portal"
+      title={mode === 'forgot' ? 'Reset your password' : 'Sign in to Aber'}
       subtitle={mode === 'forgot'
         ? 'Enter your email address and a link to choose a new password will be sent to it'
         : 'Sign in with your platform account'}
@@ -508,7 +508,7 @@ function Dashboard({ session, onSignOut }) {
           title="Aber — go to the Site Map page"
           aria-label="Aber, go to the Site Map page"
         >
-          <div className="brand-icon"><IconFactory size={18} /></div>
+          <div className="brand-icon"><AberMark size={28} /></div>
           <div className="brand-text">
             {/* Titled because .brand-name truncates: it is the region that yields space to the
                 search box and the session controls. */}

@@ -1,6 +1,7 @@
 import React from 'react'
 import AmbientPipeline from '../common/AmbientPipeline'
-import { IconFactory, IconSun, IconMoon } from '../common/Icons'
+import { IconSun, IconMoon } from '../common/Icons'
+import { AberMark } from '../common/AberMark'
 
 /**
  * The chrome every pre-authentication screen shares: the animated ground, the theme toggle and
@@ -25,8 +26,8 @@ export function AuthShell({ theme, onToggleTheme, title, subtitle, children }) {
 
       <div className="card" style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '12px', background: 'var(--accent-dim)', color: 'var(--accent)', marginBottom: '12px' }}>
-            <IconFactory size={36} />
+          <div style={{ display: 'inline-flex', color: 'var(--accent-strong)', marginBottom: '14px' }}>
+            <AberMark size={56} />
           </div>
           <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>{title}</h2>
           {subtitle && <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>{subtitle}</p>}

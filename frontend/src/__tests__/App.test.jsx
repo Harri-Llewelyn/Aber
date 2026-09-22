@@ -56,7 +56,7 @@ describe('App Component', () => {
       expect(screen.getByText('Sign In')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Aber Supabase Portal')).toBeInTheDocument()
+    expect(screen.getByText('Sign in to Aber')).toBeInTheDocument()
     expect(screen.getByText('Email Address')).toBeInTheDocument()
   })
 
@@ -90,7 +90,7 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('Aber Supabase Portal')).toBeInTheDocument()
+      expect(screen.getByText('Sign in to Aber')).toBeInTheDocument()
     })
 
     expect(screen.getByText(/session is no longer valid/i)).toBeInTheDocument()

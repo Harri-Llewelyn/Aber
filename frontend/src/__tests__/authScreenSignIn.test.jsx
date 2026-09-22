@@ -103,6 +103,8 @@ describe('forgot your password', () => {
 
     fireEvent.click(screen.getByText('Forgot your password?'))
     expect(screen.queryByLabelText(/^Password$/i)).toBeNull()
+    expect(screen.getByText('Reset your password')).toBeInTheDocument()
+    expect(screen.queryByText('Sign in to Aber')).toBeNull()
 
     fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'someone@example.com' } })
     fireEvent.click(screen.getByText('Send reset link'))
