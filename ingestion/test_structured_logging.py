@@ -212,7 +212,7 @@ class DropPairTestCase(unittest.TestCase):
     def test_the_logged_field_and_the_prometheus_label_are_the_same_string(self):
         """
         THE WHOLE POINT OF §12, AS AN ASSERTION. A panel showing a spike in
-        `acs_ingestion_messages_dropped_total{reason="gateway_binding"}` is a drill-down into a
+        `aber_ingestion_messages_dropped_total{reason="gateway_binding"}` is a drill-down into a
         log store only if the LINES carry that same string. If the label and the field could
         differ, the drill-down would be a second guess at what to search for.
         """

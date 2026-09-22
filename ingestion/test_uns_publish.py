@@ -244,7 +244,7 @@ class Defaults(unittest.TestCase):
         for reason in uns_publish.SKIP_REASONS:
             self.assertIn("uns_skipped_%s" % reason, metrics.COUNTER_MAP)
             name, labels = metrics.COUNTER_MAP["uns_skipped_%s" % reason]
-            self.assertEqual(name, "acs_ingestion_uns_skipped_total")
+            self.assertEqual(name, "aber_ingestion_uns_skipped_total")
             self.assertEqual(labels, {"reason": reason})
         self.assertIn("uns_published", metrics.COUNTER_MAP)
 

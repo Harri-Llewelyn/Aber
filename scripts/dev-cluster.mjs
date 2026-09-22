@@ -404,12 +404,12 @@ async function waitForStack () {
     // COMPARED AS NUMBERS. A gauge's value is a float in the exposition format, so the same 1 is
     // spelled `1` by one exporter and `1.0` by another; matching the text made this wait depend on
     // which. It read `1.0` as "not subscribed" and timed out against a daemon that was.
-    const up = Number(/^acs_ingestion_up (\S+)/m.exec(r.out)?.[1])
-    const connected = Number(/^acs_ingestion_mqtt_connected (\S+)/m.exec(r.out)?.[1])
+    const up = Number(/^aber_ingestion_up (\S+)/m.exec(r.out)?.[1])
+    const connected = Number(/^aber_ingestion_mqtt_connected (\S+)/m.exec(r.out)?.[1])
     if (up === 1 && connected === 1) { console.log('  subscribed'); return }
     await sleep(3000)
   }
-  die('the ingestion daemon never reported itself subscribed (acs_ingestion_mqtt_connected)')
+  die('the ingestion daemon never reported itself subscribed (aber_ingestion_mqtt_connected)')
 }
 
 function helmTest () {

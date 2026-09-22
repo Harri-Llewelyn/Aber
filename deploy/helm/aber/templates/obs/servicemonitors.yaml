@@ -98,7 +98,7 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
   It scrapes `ingestion-metrics`, the headless Service in apps/ingestion.yaml, which exists solely
   because a ServiceMonitor selects Services rather than Pods.
 
-  `acs_ingestion_messages_dropped_total` is the series worth a panel: any non-zero value is
+  `aber_ingestion_messages_dropped_total` is the series worth a panel: any non-zero value is
   telemetry that was NOT written, and under report-by-exception nothing ever restates it.
 */}}
 {{- if and .Values.ingestion.enabled .Values.ingestion.metrics.enabled -}}

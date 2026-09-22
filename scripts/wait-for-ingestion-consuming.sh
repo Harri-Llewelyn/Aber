@@ -25,7 +25,7 @@
 # Because `apps/ingestion.yaml` argues against it and is right:
 #
 #   readiness would gate scraping, and the moment worth scraping is the one where the daemon is
-#   unhealthy. `acs_ingestion_up` and a flat `messages_total` say "running but consuming nothing",
+#   unhealthy. `aber_ingestion_up` and a flat `messages_total` say "running but consuming nothing",
 #   which is a diagnosis; a target that has vanished says only that something is wrong somewhere.
 #
 # A probe would also pull the pod out of `ingestion-metrics` -- which sets
@@ -35,10 +35,10 @@
 # =================================================================================================
 # WHAT IT ACTUALLY WAITS FOR
 #
-#   acs_ingestion_up 1                     the endpoint is being served
-#   sum(acs_ingestion_messages_total) > 0  and something has been consumed
+#   aber_ingestion_up 1                     the endpoint is being served
+#   sum(aber_ingestion_messages_total) > 0  and something has been consumed
 #
-# THE SECOND CONDITION IS THE ONE THAT MATTERS. `acs_ingestion_up` is 1 as soon as the HTTP server
+# THE SECOND CONDITION IS THE ONE THAT MATTERS. `aber_ingestion_up` is 1 as soon as the HTTP server
 # is listening, which happens before the MQTT subscription is live -- so waiting on it alone
 # reproduces the bug with extra steps. A non-zero message count cannot be reached without a
 # delivered message, and the simulators publish continuously, so a genuinely subscribed daemon
@@ -46,7 +46,7 @@
 #
 # SUMMED ACROSS THE LABELLED SERIES, because `messages_total` is deliberately NOT exported --
 # metrics.py: "it is the sum of the labelled series above, and a scraper summing them would
-# double-count." Grepping for a bare `acs_ingestion_messages_total ` finds nothing, forever.
+# double-count." Grepping for a bare `aber_ingestion_messages_total ` finds nothing, forever.
 #
 # =================================================================================================
 # SEQUENCE GAP WARNINGS ARE EXPECTED WHILE THIS WAITS
@@ -106,12 +106,12 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
     # NORMALISED THROUGH %d, because a gauge's value is a float in the exposition format: the
     # same 1 is spelled `1` by one exporter and `1.0` by another, and comparing the text made this
     # wait depend on which.
-    last_up="$(printf '%s\n' "$body" | awk '/^acs_ingestion_up /{v=$2; found=1} END{if(found) printf "%d", v; else print "absent"}')"
-    last_sub="$(printf '%s\n' "$body" | awk '/^acs_ingestion_mqtt_connected /{v=$2; found=1} END{if(found) printf "%d", v; else print "absent"}')"
-    last_msgs="$(printf '%s\n' "$body" | awk '/^acs_ingestion_messages_total\{/{s+=$NF} END{printf "%d", s+0}')"
+    last_up="$(printf '%s\n' "$body" | awk '/^aber_ingestion_up /{v=$2; found=1} END{if(found) printf "%d", v; else print "absent"}')"
+    last_sub="$(printf '%s\n' "$body" | awk '/^aber_ingestion_mqtt_connected /{v=$2; found=1} END{if(found) printf "%d", v; else print "absent"}')"
+    last_msgs="$(printf '%s\n' "$body" | awk '/^aber_ingestion_messages_total\{/{s+=$NF} END{printf "%d", s+0}')"
 
     if [ "$last_up" = "1" ] && [ "$last_sub" = "1" ]; then
-      echo "ingestion is subscribed: acs_ingestion_up=1, acs_ingestion_mqtt_connected=1, ${last_msgs} message(s) consumed so far, after ${elapsed}s"
+      echo "ingestion is subscribed: aber_ingestion_up=1, aber_ingestion_mqtt_connected=1, ${last_msgs} message(s) consumed so far, after ${elapsed}s"
       exit 0
     fi
   fi
@@ -130,21 +130,21 @@ done
 echo "" >&2
 echo "TIMED OUT after ${TIMEOUT}s: the ingestion daemon is not consuming." >&2
 echo "" >&2
-echo "  last acs_ingestion_up:                  ${last_up}" >&2
-echo "  last acs_ingestion_mqtt_connected:      ${last_sub}" >&2
-echo "  last sum(acs_ingestion_messages_total): ${last_msgs}" >&2
+echo "  last aber_ingestion_up:                  ${last_up}" >&2
+echo "  last aber_ingestion_mqtt_connected:      ${last_sub}" >&2
+echo "  last sum(aber_ingestion_messages_total): ${last_msgs}" >&2
 echo "" >&2
 if [ "$last_up" = "none" ]; then
   echo "The metrics endpoint answered nothing at all. The daemon is not serving on ${PORT} --" >&2
   echo "check whether it is still in its init containers, or halted at startup: it refuses to" >&2
   echo "start its MQTT loop without SUPABASE_INGESTION_KEY and says so in its own logs." >&2
 elif [ "$last_sub" = "absent" ]; then
-  echo "The endpoint is up and does not export acs_ingestion_mqtt_connected at all. That gauge" >&2
+  echo "The endpoint is up and does not export aber_ingestion_mqtt_connected at all. That gauge" >&2
   echo "arrived with this wait; a daemon image predating it cannot answer, and the gate cannot" >&2
   echo "tell 'not subscribed' from 'too old to say'. Rebuild the ingestion image." >&2
 else
   echo "The endpoint is up and the daemon is NOT SUBSCRIBED. It is running and deaf -- which is" >&2
-  echo "the state acs_ingestion_up exists to distinguish from a dead target. Check the broker" >&2
+  echo "the state aber_ingestion_up exists to distinguish from a dead target. Check the broker" >&2
   echo "credential and the MQTT connection in the daemon's own logs; a refused connection is" >&2
   echo "logged there as 'Failed to connect to MQTT Broker'." >&2
 fi

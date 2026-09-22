@@ -132,13 +132,13 @@ spec:
           CI's own "wait for the ingestion daemon to be consuming" step does not cover this, for the
           reason the block above gives: a workflow step runs concurrently with a plain Job.
 
-          `acs_ingestion_mqtt_connected`, NOT `acs_ingestion_up`. `up` says the process is alive,
+          `aber_ingestion_mqtt_connected`, NOT `aber_ingestion_up`. `up` says the process is alive,
           which it is throughout the failure; the subscription is the thing being waited on. Read
           from the headless metrics Service, which sets `publishNotReadyAddresses` precisely so an
           unhealthy daemon can still be scraped.
         */}}
         {{- if .Values.ingestion.enabled }}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-ingestion" "command" "wget -q -O - http://ingestion-metrics:9108/metrics 2>/dev/null | awk '/^acs_ingestion_mqtt_connected /{found=($2==1)} END{exit found?0:1}'" "describe" "the ingestion daemon to be subscribed to spBv1.0/# (every check that asserts on consumed telemetry)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-ingestion" "command" "wget -q -O - http://ingestion-metrics:9108/metrics 2>/dev/null | awk '/^aber_ingestion_mqtt_connected /{found=($2==1)} END{exit found?0:1}'" "describe" "the ingestion daemon to be subscribed to spBv1.0/# (every check that asserts on consumed telemetry)") | nindent 8 }}
         {{- end }}
       containers:
         - name: validate

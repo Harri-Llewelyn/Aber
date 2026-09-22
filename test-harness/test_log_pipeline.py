@@ -234,7 +234,7 @@ class DropPairTestCase(unittest.TestCase):
         cls.device = "dev" + secrets.token_hex(11)[:21]
 
         cls.before = prom_scalar(
-            f'sum(acs_ingestion_messages_dropped_total{{reason="{REASON}"}})')
+            f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
 
         client = mqtt.Client(protocol=mqtt.MQTTv5)
         client.username_pw_set(user or "", password)
@@ -261,7 +261,7 @@ class DropPairTestCase(unittest.TestCase):
         after = self.before
         while time.time() < deadline:
             after = prom_scalar(
-                f'sum(acs_ingestion_messages_dropped_total{{reason="{REASON}"}})')
+                f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
             if after > self.before:
                 return
             time.sleep(5)
@@ -320,7 +320,7 @@ class DropPairTestCase(unittest.TestCase):
         """
         labels = {
             r["metric"]["reason"]
-            for r in prom_query("acs_ingestion_messages_dropped_total")
+            for r in prom_query("aber_ingestion_messages_dropped_total")
             if "reason" in r["metric"]
         }
         self.assertIn(REASON, labels,

@@ -277,7 +277,7 @@ spec:
 
             That is precisely the wrong behaviour here. The moment worth scraping is the one where
             the daemon is unhealthy, and a readiness probe would remove the evidence exactly then.
-            `acs_ingestion_up` and a flat `messages_total` say "running but consuming nothing",
+            `aber_ingestion_up` and a flat `messages_total` say "running but consuming nothing",
             which is a diagnosis; a target that has vanished says only that something is wrong
             somewhere.
 

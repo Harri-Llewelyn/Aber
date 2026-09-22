@@ -100,7 +100,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "e2e-validate"       "to" "mosquitto"          "port" $brokerPort "why" "publishes Sparkplug fixtures")
   (dict "from" "e2e-validate"       "to" $gw      "port" 8000 "why" "seeds through PostgREST")
   (dict "from" "e2e-validate"       "to" "node-red"           "port" 1880 "why" "check 7 probes all three auth surfaces")
-  (dict "from" "e2e-validate"       "to" "ingestion"          "port" 9108 "why" "its wait-for-ingestion initContainer reads acs_ingestion_mqtt_connected off the metrics endpoint -- without it the suite publishes before the daemon has subscribed and QoS 0 drops the fixtures")
+  (dict "from" "e2e-validate"       "to" "ingestion"          "port" 9108 "why" "its wait-for-ingestion initContainer reads aber_ingestion_mqtt_connected off the metrics endpoint -- without it the suite publishes before the daemon has subscribed and QoS 0 drops the fixtures")
   (dict "from" "e2e-aas-export"     "to" $gw      "port" 8000 "why" "invokes aas-export and signs in")
 
   (dict "from" "backup"             "to" "supabase-db"        "port" 5432 "why" "pg_dump")
