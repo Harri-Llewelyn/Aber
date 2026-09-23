@@ -757,6 +757,16 @@ const apiMethods = {
   },
 
   /**
+   * How long raw telemetry is kept, and whether the archiver last reported archiving on (0005).
+   * Null when the historian could not be read, which is not the same as "kept indefinitely".
+   */
+  rawTelemetryWindow: async () => {
+    const { data, error } = await supabase.rpc('raw_telemetry_window');
+    if (error) throw new Error(error.message || 'Could not read the raw telemetry window');
+    return Array.isArray(data) ? (data[0] || null) : (data || null);
+  },
+
+  /**
    * Whether an S3 credential is in the vault (`0134`). Never what it is — nothing reads it back to
    * a browser, so this is the only question a page can ask about it.
    *

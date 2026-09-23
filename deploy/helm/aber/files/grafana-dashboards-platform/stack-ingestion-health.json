@@ -634,7 +634,7 @@
       },
       "type": "stat",
       "title": "Raw Retention Horizon",
-      "description": "How far back the raw hypertable's chunks reach. Read from chunk BOUNDARIES in the catalog, not from min(time) -- a storage dashboard must not be the reason for a full scan of the historian. Should track TIMESCALE_RETAIN_FOR; a horizon well past it means the retention policy is not running.",
+      "description": "How far back the raw hypertable's chunks reach. Read from chunk BOUNDARIES in the catalog, not from min(time) -- a storage dashboard must not be the reason for a full scan of the historian. Should track timescaledb.retention.retainFor; a horizon well past it means the retention job is not running, or is holding chunks the cold archive has not verified.",
       "gridPos": {
         "h": 5,
         "w": 6,

@@ -62,7 +62,7 @@ from ingestion import (  # noqa: E402
     _connect_timescaledb,
 )
 
-DEFAULT_TIER_AFTER_DAYS = 90
+DEFAULT_TIER_AFTER_DAYS = 14
 
 # The layout version in every object key. It changes only if the key shape or the exported column
 # set has to change incompatibly: new objects go to v=2 and readers of v=1 keep working, so nothing
@@ -206,6 +206,8 @@ def read_settings():
         # inside a bucket other sites may share, so a fallback would be a guess at identity. Empty
         # means unconfigured, and every path that would write refuses on it.
         "site_key": "",
+        # Whether the values above came from the database. report_armed() acts only on a read.
+        "read": False,
     }
     try:
         from supabase import create_client
@@ -227,9 +229,31 @@ def read_settings():
             settings["tier_after_days"] = int(by_key["archive.tier_after_days"])
         if "archive.site_key" in by_key:
             settings["site_key"] = str(by_key["archive.site_key"] or "")
+        settings["read"] = True
     except Exception as err:  # noqa: BLE001 - see the docstring
         log(f"could not read archive.* settings ({err}); using compiled-in defaults")
     return settings
+
+
+def report_armed(conn, settings, dry_run):
+    """
+    Tell the historian whether archiving is on. Its retention job reads it: while archiving is on,
+    only chunks this archive has verified may be dropped, so an outage grows the volume rather
+    than deleting what was never exported.
+
+    Only a setting actually read is reported. An unreadable one would fall back to `enabled =
+    false` and switch that protection off, so the last report stands instead.
+    """
+    if dry_run or not settings.get("read"):
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT public.cold_archive_report_armed(%s)", (settings["enabled"],))
+        conn.commit()
+    except psycopg2.Error as err:
+        conn.rollback()
+        log(f"could not report archive.enabled to the historian ({err}); its retention job "
+            "keeps the last report")
 
 
 # -------------------------------------------------------------------------------------------------
@@ -1030,6 +1054,7 @@ def main():
             # RE-READ EVERY PASS, so switching the setting off stops the next pass rather than
             # needing the container restarted. The switch on the Settings page is the control.
             settings = read_settings()
+            report_armed(conn, settings, args.dry_run)
             if not settings["enabled"] and not args.force:
                 if args.loop is None:
                     log("archive.enabled is off; nothing to do.")

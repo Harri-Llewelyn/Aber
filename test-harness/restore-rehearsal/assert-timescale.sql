@@ -79,16 +79,17 @@ BEGIN
     RAISE EXCEPTION 'expected a refresh policy for each of the 3 rollups, found % -- the aggregates will never update again', v_count;
   END IF;
 
+  -- The raw window is a custom job (timescaledb/retention.sql), not policy_retention.
   SELECT count(*) INTO v_count FROM timescaledb_information.jobs
-   WHERE proc_name = 'policy_retention';
+   WHERE proc_name = 'telemetry_raw_retention';
   IF v_count < 1 THEN
-    RAISE EXCEPTION 'no retention policy survived the restore -- the historian will grow without bound';
+    RAISE EXCEPTION 'no retention job survived the restore -- the historian will grow without bound';
   END IF;
 
   -- Scheduled, not merely present. A job row with scheduled = false is a policy that exists and
   -- never runs, which reads as configured in every view an operator would check.
   SELECT count(*) INTO v_count FROM timescaledb_information.jobs
-   WHERE proc_name IN ('policy_retention', 'policy_refresh_continuous_aggregate')
+   WHERE proc_name IN ('telemetry_raw_retention', 'policy_refresh_continuous_aggregate')
      AND NOT scheduled;
   IF v_count > 0 THEN
     RAISE EXCEPTION '% policy job(s) came back UNSCHEDULED -- present in every catalogue view and never running', v_count;

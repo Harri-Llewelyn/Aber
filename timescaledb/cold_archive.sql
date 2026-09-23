@@ -4,10 +4,10 @@
 -- Reconciled on every boot by timescaledb-maintenance. Idempotent: every object is CREATE ... IF
 -- NOT EXISTS or CREATE OR REPLACE.
 --
--- retention.sql drops raw chunks older than TIMESCALE_RETAIN_FOR with nothing written down. Cold
--- archival replaces delete with move: the chunk is written to Parquet on object storage, read
--- back and verified, recorded in the manifest, and only then dropped. One CHECK constraint
--- enforces the order:
+-- retention.sql's job drops raw chunks older than the raw window, and while archiving is on only
+-- chunks this manifest has verified. Cold archival is the move: the chunk is written to Parquet
+-- on object storage, read back and verified, recorded in the manifest, and only then dropped. One
+-- CHECK constraint enforces the order:
 --
 --     CHECK (dropped_at IS NULL OR verified_at IS NOT NULL)
 --

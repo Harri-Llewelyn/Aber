@@ -39,6 +39,7 @@ const SURFACE = [
   { relation: 'public.telemetry_horizons',   created_by: '0111' },
   { relation: 'timescale.storage_footprint', created_by: '0027' },
   { relation: 'public.storage_footprint',    created_by: '0027' },
+  { relation: 'timescale.telemetry_raw_window', created_by: '0005' },
 ];
 
 /** psql inside the database pod, as the owner, over the socket: no password and no port-forward. */
