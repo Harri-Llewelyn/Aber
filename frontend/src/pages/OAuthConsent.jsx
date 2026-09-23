@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase, SUPABASE_URL } from '../lib/supabaseClient'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 /**
  * OAuth consent screen for Supabase Auth's OIDC server. GoTrue implements the OAuth 2.1
@@ -14,6 +15,7 @@ const API_BASE = `${SUPABASE_URL}/auth/v1`
 export function OAuthConsent() {
   const [state, setState] = useState({ status: 'loading' })
   const [submitting, setSubmitting] = useState(false)
+  useDocumentTitle('Authorize')
 
   const authorizationId = new URLSearchParams(window.location.search).get('authorization_id')
 

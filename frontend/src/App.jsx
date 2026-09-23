@@ -17,6 +17,7 @@ import { describeResetError } from './utils/authErrors'
 import { useClickOutside } from './hooks/useClickOutside'
 import { useEscapeKey } from './hooks/useEscapeKey'
 import { useSidebarMode } from './hooks/useSidebarMode'
+import { useDocumentTitle } from './hooks/useDocumentTitle'
 import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
 import { AberMark } from './components/common/AberMark'
@@ -97,6 +98,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
   const [mode, setMode] = useState('signin')
   const [resetSent, setResetSent] = useState(null)
   const passwordRef = useRef(null)
+  useDocumentTitle(mode === 'forgot' ? 'Reset password' : 'Sign in')
 
   const handleAuth = async (e) => {
     e.preventDefault()
@@ -477,6 +479,9 @@ function Dashboard({ session, onSignOut }) {
   // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
   // visible whichever page is open.
   const firingAlerts = usePlatformAlerts(showToast)
+
+  // The page's rail label, and the pill's count, so the tab and the bar never disagree.
+  useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length)
 
   // What the rail flags in the warning colour: quarantine, offline gateways, unfiled cells. Owned
   // here for the same reason the alerts are.

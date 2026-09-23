@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useTheme } from '../hooks/useTheme'
 import { AuthShell } from '../components/auth/AuthShell'
 import { HoldToReveal } from '../components/common/HoldToReveal'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 /** GoTrue's default minimum; a shorter value is refused server-side with a less helpful message. */
 const MIN_PASSWORD_LENGTH = 6
@@ -19,6 +20,7 @@ export function ResetPasswordScreen({ email, onDone }) {
   const [revealed, setRevealed] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
+  useDocumentTitle('Reset password')
 
   const submit = async (e) => {
     e.preventDefault()
