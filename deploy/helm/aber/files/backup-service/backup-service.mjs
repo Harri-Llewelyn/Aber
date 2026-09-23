@@ -97,6 +97,9 @@ const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 // pgsodium's root key, relative to the database's data directory, where the chart's getkey script
 // keeps it. Vault's rows are ciphertext under it and nothing else. Empty: not archived.
 const VAULT_KEY_FILE = process.env.VAULT_KEY_FILE ?? 'pgsodium_root.key';
+// false while pgBackRest backs the historian up (timescaledb.physicalBackup). The manifest then
+// records timescaledb=physical, and restore-databases.sh expects the historian restored already.
+const DUMP_TIMESCALE = process.env.DUMP_TIMESCALE !== 'false';
 
 const log = (...args) => console.log(`[backup-service] ${new Date().toISOString()}`, ...args);
 
@@ -352,7 +355,11 @@ async function takeBackup(job) {
 
   const components = [];
   components.push(await dumpDatabase('supabase-db', SUPABASE, partialDir, stamp));
-  components.push(await dumpDatabase('timescaledb', TIMESCALE, partialDir, stamp));
+  if (DUMP_TIMESCALE) {
+    components.push(await dumpDatabase('timescaledb', TIMESCALE, partialDir, stamp));
+  } else {
+    log('historian: backed up by pgBackRest; not dumped');
+  }
 
   if (VAULT_KEY_FILE) {
     log('archiving the pgsodium root key');
@@ -396,7 +403,7 @@ async function takeBackup(job) {
     'mode=direct',
     `format=${FORMAT}`,
     `supabase_db=${byName['supabase-db'].file}`,
-    `timescaledb=${byName['timescaledb'].file}`,
+    `timescaledb=${byName['timescaledb']?.file ?? 'physical'}`,
     byName['vault-key'] ? `vault_key=${byName['vault-key'].file}` : null,
     byName['storage-objects'] ? `storage=${byName['storage-objects'].file}` : null,
     byName['forge'] ? `forge=${byName['forge'].file}` : null,

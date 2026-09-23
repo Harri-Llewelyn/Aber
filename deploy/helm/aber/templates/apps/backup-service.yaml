@@ -130,6 +130,10 @@ spec:
             - name: TIMESCALE_DB
               value: {{ .Values.timescaledb.database | quote }}
             {{- include "aber.secretEnv" (dict "name" "TIMESCALE_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            # false while pgBackRest backs the historian up (timescaledb.physicalBackup): the manifest
+            # records timescaledb=physical instead of a dump.
+            - name: DUMP_TIMESCALE
+              value: {{ ternary "false" "true" (not (not (include "aber.physicalBackupOn" .))) | quote }}
             - name: BACKUP_DIR
               value: /backups
             - name: BACKUP_RETENTION_DAYS

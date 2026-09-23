@@ -105,7 +105,16 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
 | Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
 | Storage (models, captures, floor plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
-| Backups | `backup.retentionDays` (14), on a 20 Gi volume | each backup includes the historian | see #403 |
+| Logical backups | `backup.retentionDays` (14), on a 20 Gi volume | the platform database, and the historian unless physical backup is on | the platform database; the historian is physical at this size |
+| Historian physical backup repository | `physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~45 GB | ~2.3 TB, three quarters of it WAL |
+| Unarchived WAL, while archiving is failing | `physicalBackup.archiveQueueMax` (8 GiB), on the historian's volume | ~90 MB an hour | ~27 GB an hour |
+
+**The physical backup's repository is mostly WAL at fleet scale.** Measured on the restore
+rehearsal (*Backing up the historian*): a full backup was 7.7 to 9.7 % of the database after
+pgBackRest's zstd, on synthetic values that compress better than real ones, so the table plans on
+25 %; and every raw row cost about **760 bytes of WAL, 140 in the repository**, counting the
+compression and rollup writes it causes later. The table's figures take the rollups at their full
+retention, weekly fulls and two of them kept.
 
 **The rollups dominate, and they are not compressed.** At S the 1-minute rollup alone reaches
 about 46 GB, more than the historian's default 20 Gi volume; at S's rate that volume fills in
@@ -741,6 +750,10 @@ docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gat
 # code itself is projected from a ConfigMap (scripts/backup-service.mjs), so this is runtime only.
 docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
 
+# The historian -- timescale/timescaledb with pgBackRest, which timescaledb.physicalBackup runs inside
+# the server's container (archive_command, restore_command) and in its backup sidecar.
+docker build -f timescaledb/Dockerfile          -t $NS/timescaledb:$V timescaledb
+
 # The API documentation site — THE SPECS, baked in. swaggerapi/swagger-ui with docs/openapi.yaml
 # and docs/i3x-openapi.yaml copied to the document root; context is the repository root, where they
 # live. They travel in the image for the same reason the migrations do: swagger-ui is their only
@@ -750,10 +763,6 @@ docker build -f swagger-ui/Dockerfile           -t $NS/swagger-ui:$V .
 # db-init — THE SCHEMA, baked in. supabase/postgres with supabase/migrations/*.sql copied to
 # /migrations; context is supabase/, where that directory lives. It exists because the chain cannot
 # travel in the chart: a ConfigMap is capped at 1 MiB, which forced it to be gzipped, and Helm's
-# The historian -- timescale/timescaledb with pgBackRest, which timescaledb.physicalBackup runs inside
-# the server's container (archive_command, restore_command) and in its backup sidecar.
-docker build -f timescaledb/Dockerfile          -t $NS/timescaledb:$V timescaledb
-
 # release Secret has the same cap while holding those bytes TWICE -- as chart files and again
 # base64-encoded into the rendered ConfigMap, neither copy compressible. Satisfying one limit broke
 # the other. See supabase/db-init/Dockerfile for the measurements.
@@ -1035,8 +1044,9 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
   every policy denies.
 - **`digital_thread` is the reason this matters most** — telemetry can be re-derived from a rebirth, an
   append-only audit trail cannot.
-- **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
-  wants pgBackRest or WAL archiving.
+- **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. The
+  historian has a physical backup for that (*Backing up the historian*, below); the platform
+  database does not.
 - **`destination: s3` needs an image with the `aws` CLI.** The `supabase/postgres` image has none, and
   the Job refuses rather than producing an unsigned request.
 
@@ -1056,6 +1066,103 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
 >
 > Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this and
 > verifies `public.telemetry` through the wrapper afterwards.
+
+#### Backing up the historian
+
+**A logical dump of the historian stops being a backup as the fleet grows.** It cannot finish
+inside its own night at fleet scale, a restore replays every row through the indexes, and it
+recovers to the moment it ran and no later. So the historian has a **physical** backup (#403):
+pgBackRest takes a full backup weekly and a differential daily, and archives every WAL segment as
+it is written, so a restore reaches any moment inside the retained backups. **The cold archive
+stays the copy of history.** Raw chunks older than `retainFor` leave as Parquet on remote object
+storage and are in no backup; the physical backup covers what the historian holds now: the raw
+window, the rollups and the archive's manifest.
+
+```bash
+kubectl -n aber create secret generic historian-backup \
+  --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=... \
+  --from-literal=REPO_CIPHER_PASS="$(openssl rand -base64 48)"
+```
+
+```yaml
+timescaledb:
+  physicalBackup:
+    enabled: true
+    repo:
+      type: s3
+      s3:
+        endpoint: https://s3.eu-west-2.amazonaws.com
+        region: eu-west-2
+        bucket: aber-historian-backup
+        existingSecret: historian-backup
+```
+
+- **Turning it on restarts the historian**, because `archive_mode` is read at start, and the
+  sidecar takes a full backup as soon as the maintenance Job has run.
+- **The nightly logical dump then skips the historian.** Its manifest records
+  `timescaledb=physical`, and `scripts/restore-databases.sh` expects the historian to have been
+  restored first.
+- **Keep a copy of `REPO_CIPHER_PASS` off site.** Every file is encrypted with it before it leaves
+  the site, and without it the backups cannot be read.
+- **Under `networkPolicy.enabled`, the endpoint needs a rule** in `networkPolicy.extraEgress` for
+  the `timescaledb` pod, or archiving fails at connect time.
+- **`repo.type: posix` keeps the repository on a volume in the cluster.** That survives a dropped
+  table and a corrupted data directory. It does not survive the loss of the node, so use it for a
+  development stack or beside an off-site snapshot.
+
+**What runs.** The server archives each WAL segment through `archive_command`, asynchronously,
+spooling on its own data volume; a segment is pushed when it fills or after
+`archiveTimeoutSeconds` (60), which bounds how much a restore can lose on a quiet historian. The
+`pgbackrest` sidecar in the pod takes the daily backup at `hourUtc` (full on `fullOn`) and records
+each run in `public.physical_backup_runs`. Two alerts watch it: **Historian Backup Stale** (no
+successful backup for 36 hours) and **Historian WAL Archiving Failing** (the last attempt failed and
+nothing has been archived for 10 minutes). While archiving fails, unarchived WAL collects on the
+data volume up to `archiveQueueMax`, after which pgBackRest drops it and a restore cannot cross the
+gap; that is what the second alert is there to prevent.
+
+```bash
+kubectl -n aber exec timescaledb-0 -c pgbackrest -- pgbackrest --stanza=historian info
+kubectl -n aber exec timescaledb-0 -c pgbackrest -- /bin/sh /opt/aber/historian-backup.sh full
+```
+
+The second takes a backup now and records it like a scheduled one.
+
+**Restore.**
+
+```bash
+node scripts/restore-historian.mjs --info                                    # what the repository holds
+node scripts/restore-historian.mjs                                           # the latest archived moment
+node scripts/restore-historian.mjs --target "2026-09-23 14:05:00+00"         # a moment
+node scripts/restore-historian.mjs --set 20260920-010002F                    # one backup, no WAL after it
+```
+
+It stops the historian, restores the data directory in a pod built from the sidecar's own spec
+(same image, configuration and credentials), starts the historian, and waits for recovery to
+replay the WAL and promote onto a new timeline. Readings written after the target are gone, and
+ingestion carries on from now. After losing the whole stack: install the chart with the same
+`physicalBackup` values, restore the historian, then run `scripts/restore-databases.sh` for the
+platform database.
+
+**How long a restore takes.** Two terms: pgBackRest writing the data directory from the latest
+full and differential, which is the backup's compressed bytes across the link to the repository,
+and recovery replaying the WAL written since that backup, on one process. With a differential
+every day, the replay is at most a day of WAL. Rehearsed on the development node
+([`test-harness/README.md`](../../test-harness/README.md), *Restoring the historian*):
+
+| | Measured: 100 devices, 14 days, 12 GiB historian | Arithmetic: 1,000 devices at 1 Hz, 1.1 TB historian |
+| :--- | :--- | :--- |
+| Data directory | 20 s for 0.9 GiB of backup, from MinIO on the same disk | ~45 min for ~280 GB at 1 Gbit/s to the object store |
+| WAL replay | 295 s for 28.6 GiB (about 100 MiB/s) | up to ~1.8 h for the ~650 GB a day writes |
+| **Worst case, a target just before the next daily backup** | **under a minute** (a day of WAL is ~2 GB) | **about 2.5 hours** |
+
+The right-hand column is arithmetic from the left, not a measurement: the link, the disk and the
+CPU running redo each move it. Rehearse at the site's own size before quoting an RTO; the
+rehearsal takes `--devices` and `--days`.
+
+- **A repository that holds another database's stanza** (a historian reinstalled onto an empty
+  volume, pointed at the old repository) makes the sidecar's archive check fail: the new database
+  has a different system identifier. Restore into it with the script above, which is what an
+  empty volume usually means, or give the new historian its own `repo.s3.path`.
 
 #### Rehearsing the restore, weekly and by hand
 

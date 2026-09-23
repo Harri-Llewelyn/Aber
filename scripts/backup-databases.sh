@@ -53,6 +53,9 @@ SUPABASE_DB_PORT="${SUPABASE_DB_PORT:-54322}"
 SUPABASE_DB_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
 
 TIMESCALE_SERVICE="${TIMESCALE_SERVICE:-timescaledb}"
+# false where pgBackRest backs the historian up (timescaledb.physicalBackup): the manifest records
+# timescaledb=physical and restore-databases.sh leaves the historian to scripts/restore-historian.mjs.
+DUMP_TIMESCALE="${DUMP_TIMESCALE:-true}"
 TIMESCALE_DB_USER="${DB_USER:-postgres}"
 TIMESCALE_DB_NAME="${DB_NAME:-postgres}"
 TIMESCALE_DB_HOST="${TIMESCALE_HOST:-localhost}"
@@ -129,8 +132,12 @@ log "backup $STAMP  (format=$BACKUP_FORMAT dir=$BACKUP_DIR)"
 dump_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
         "$SUPABASE_DB_HOST" "$SUPABASE_DB_PORT" "$SUPABASE_DB_PASSWORD"
 
-dump_db "timescaledb" "$TIMESCALE_SERVICE" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
-        "$TIMESCALE_DB_HOST" "$TIMESCALE_DB_PORT" "$TIMESCALE_DB_PASSWORD"
+if [ "$DUMP_TIMESCALE" = "true" ]; then
+  dump_db "timescaledb" "$TIMESCALE_SERVICE" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
+          "$TIMESCALE_DB_HOST" "$TIMESCALE_DB_PORT" "$TIMESCALE_DB_PASSWORD"
+else
+  log "skipping the historian (DUMP_TIMESCALE=false): pgBackRest backs it up"
+fi
 
 if [ "$INCLUDE_STORAGE" = "true" ]; then
   dump_storage
@@ -146,7 +153,7 @@ MANIFEST="$BACKUP_DIR/manifest-${STAMP}.txt"
   echo "stamp=$STAMP"
   echo "format=$BACKUP_FORMAT"
   echo "supabase_db=supabase-db-${STAMP}.${DUMP_EXT}"
-  echo "timescaledb=timescaledb-${STAMP}.${DUMP_EXT}"
+  if [ "$DUMP_TIMESCALE" = "true" ]; then echo "timescaledb=timescaledb-${STAMP}.${DUMP_EXT}"; else echo "timescaledb=physical"; fi
   [ "$INCLUDE_STORAGE" = "true" ] && echo "storage=storage-objects-${STAMP}.tar.gz"
   echo "created_by=scripts/backup-databases.sh"
 } > "$MANIFEST"
