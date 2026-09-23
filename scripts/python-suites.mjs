@@ -231,6 +231,13 @@ export const SUITES = {
       'a drop self-healed; under RBE, lose the DDATA that said INTERRUPTED and every consumer ' +
       'holds ACTIVE forever.',
   },
+  'ingestion/test_json_payload.py': {
+    lanes: ['unit'],
+    why:
+      'The JSON Sparkplug encoding the appliance template publishes. A metric\x27s own timestamp ' +
+      'must survive parse_sparkplug_payload() as it does on the protobuf path, or a report-by-' +
+      'exception refresh and a batched reading are filed at the time the message was built.',
+  },
   'ingestion/test_telemetry_batching.py': {
     lanes: ['unit'],
     why:

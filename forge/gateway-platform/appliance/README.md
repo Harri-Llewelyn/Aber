@@ -58,22 +58,37 @@ appliance** until the next approved deploy overwrites it.
 
 ## The sample flow
 
-Two things, both meant to be replaced by your own work:
+Three things:
 
 - **a heartbeat every 30 seconds**, which is what keeps this gateway reported ONLINE. Leave it, or
   replace it with something that beats at least as often — the dashboard calls a gateway `STALE`
-  after 90 seconds of silence.
-- **`▶ ADD YOUR OWN DEVICE`**, an inject node that publishes a birth certificate for a device the
-  platform has never heard of.
+  after 90 seconds of silence. It updates the gateway's row; it writes nothing to the historian.
+- **`publish by exception`**, where device readings go. Send it
+  `msg.payload = { device, metrics: { <name>: <value> } }` — from your own flows through the
+  **device readings** link. It births each device, then publishes only the metrics that moved:
+  any change for a boolean or a string, and for a number any change unless you set a deadband for
+  it at the top of the node. Every 120 seconds it republishes every metric at its last value; that
+  refresh is each device's proof of life, and it must stay well inside the platform's 300-second
+  device-offline timeout.
+- **`▶ SEND A DEVICE READING`**, which sends an example reading for a machine called `press-01`.
 
-That second one is worth understanding, because it is the whole onboarding model:
+The example is worth clicking, because it is the whole onboarding model:
 
 > You do not pre-register devices. A device announces itself with a `DBIRTH`, the platform puts it
 > in a **quarantine queue** and drops its data, and an operator approves it in the dashboard. Only
 > then is its telemetry stored.
 
-Click the inject node, then look at **Devices → quarantine** in the dashboard. Edit `DEVICE_ID` in
-the function node to name your actual machine.
+Click the inject node, then look at **Devices → quarantine** in the dashboard. Click again and only
+the metrics that moved are published. Edit `DEVICE_ID` in **example reading** to name your machine.
+
+**Why by exception.** On a shopfloor most values are static most of the time: a machine state that
+changes a few times an hour, a setpoint that changes once a shift. Publishing them on a timer writes
+the same row into the historian thousands of times a day. Reading them back needs the gaps filled,
+since a missing bucket means unchanged rather than unknown: `telemetry_gapfill()` on the historian
+does that.
+
+All of this shares one Sparkplug `seq` for the edge node, as the specification requires. The
+platform follows it across every message type, and a gap is how it knows a change was lost.
 
 ## What this appliance reports about itself
 

@@ -9,8 +9,11 @@
  * heartbeat is driven only by its injects, and all three collector branches terminate in the cache;
  * 5. every `env.get()` the flow reads is a variable `bootstrap.mjs` writes into /data/gateway.env;
  * 6. the deployed-flow branch reads the file `bootstrap.mjs` and `flow-sync.mjs` agree on, and the
- * broker-root branch the one `bootstrap.mjs` and `aber-gateway-converge` agree on. It does not check
- * that the flow works; that needs a broker, an enrolment and hardware.
+ * broker-root branch the one `bootstrap.mjs` and `aber-gateway-converge` agree on; 7. the heartbeat,
+ * the example reading and the exception publisher, run in a stub of Node-RED's function sandbox,
+ * share one Sparkplug seq, birth before data, publish only what moved, and refresh inside the
+ * daemon's device-offline timeout. It does not check the flow against a broker; that needs an
+ * enrolment and hardware.
  *
  * Usage: node scripts/check-gateway-flow-template.mjs [--verbose]
  */
@@ -273,6 +276,78 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     );
   } else {
     pass(`all ${wanted.length} environment variables the flow reads are exported by bootstrap`);
+  }
+}
+
+
+// 7. Report by exception, run rather than read. The function bodies are executed in a stub of the
+// sandbox Node-RED gives them (msg, node, context, flow, env), wired as the template wires them, and
+// the messages reaching the broker node are asserted in order.
+{
+  const heartbeat = byId['aber-node-msg'];
+  const example = byId['aber-device-fn'];
+  const rbe = byId['aber-rbe'];
+  const refresh = byId['aber-rbe-refresh'];
+  if (!heartbeat || !example || !rbe || !refresh) {
+    fail('the heartbeat, example reading, publish-by-exception or refresh node is gone; the device '
+      + 'path cannot be exercised.');
+  } else {
+    const store = () => { const m = new Map(); return { get: (k) => m.get(k), set: (k, v) => m.set(k, v) }; };
+    const flowCtx = store();
+    const contexts = new Map();
+    const warnings = [];
+    const run = (node, msg, body = node.func) => {
+      if (!contexts.has(node.id)) contexts.set(node.id, store());
+      const fn = new vm.Script(`(function (msg, node, context, flow, global, env, RED) {\n${body}\n})`)
+        .runInNewContext({ Date, Math, Number, Object, JSON, String });
+      const stub = { warn: (w) => warnings.push(w), status: () => {}, log: () => {} };
+      const res = fn(msg, stub, contexts.get(node.id), flowCtx, store(), { get: () => undefined }, {});
+      if (res == null) return [];
+      const first = Array.isArray(res) ? res[0] : res;
+      return Array.isArray(first) ? first : [first];
+    };
+    const click = () => run(rbe, run(example, {})[0]);
+    const kinds = (msgs) => msgs.map((m) => `${m.topic.split('/')[2]}#${m.payload.seq}`);
+    const names = (m) => m.payload.metrics.map((x) => x.name).sort();
+    const checks = [];
+    const expect = (label, got, want) => checks.push([label, JSON.stringify(got) === JSON.stringify(want), got, want]);
+
+    expect('NBIRTH starts the seq', kinds(run(heartbeat, { payload: 'NBIRTH' })), ['NBIRTH#0']);
+    const first = click();
+    expect('the first reading births the device, on the next seq', kinds(first), ['DBIRTH#1']);
+    expect('the birth declares every metric and Device Control/Rebirth', first[0] && names(first[0]),
+      ['CycleCount', 'Device Control/Rebirth', 'Properties/Manufacturer', 'Running', 'Temperature']);
+    const second = click();
+    expect('the next reading is DDATA on the next seq', kinds(second), ['DDATA#2']);
+    expect('a metric that did not move is not published', second[0]
+      && ['Running', 'Properties/Manufacturer'].some((n) => names(second[0]).includes(n)), false);
+    expect('every published metric carries the reading\'s timestamp', second[0]
+      && second[0].payload.metrics.every((m) => m.timestamp === second[0].payload.timestamp), true);
+    expect('the heartbeat continues the same seq', kinds(run(heartbeat, { payload: 'NDATA' })), ['NDATA#3']);
+    const refreshed = run(rbe, { payload: refresh.payload });
+    expect('a refresh republishes every metric', refreshed[0] && names(refreshed[0]),
+      ['CycleCount', 'Properties/Manufacturer', 'Running', 'Temperature']);
+    run(heartbeat, { payload: 'NBIRTH' });
+    expect('after an NBIRTH the refresh re-births the device', kinds(run(rbe, { payload: 'refresh' })), ['DBIRTH#1']);
+    expect('a new metric name needs a new birth', kinds(run(rbe, { payload: { device: 'press-01', metrics: { Vibration: 1.5 } } })), ['DBIRTH#2']);
+    expect('a malformed reading is refused, not published', run(rbe, { payload: { device: 'a/b', metrics: {} } }), []);
+
+    const banded = rbe.func.replace('const DEADBAND = {', 'const DEADBAND = {\n    Level: { absolute: 0.5 },');
+    const level = (v) => kinds(run(rbe, { payload: { device: 'tank-01', metrics: { Level: v } } }, banded));
+    level(10.0);
+    expect('a move inside the deadband is suppressed', level(10.3), []);
+    expect('a move past it, measured from the last PUBLISHED value, is not', level(10.6).length, 1);
+
+    const timeout = Number((read('ingestion/ingestion.py').match(/DEVICE_OFFLINE_TIMEOUT_SECONDS", "(\d+)"/) || [])[1]);
+    const every = Number(refresh.repeat);
+    expect(`the refresh (${every}s) is well inside the device-offline timeout (${timeout}s)`,
+      Number.isFinite(timeout) && every > 0 && every <= timeout / 2, true);
+
+    const failed = checks.filter(([, good]) => !good);
+    for (const [label, , got, want] of failed) {
+      fail(`report by exception: ${label}\n         got  ${JSON.stringify(got)}\n         want ${JSON.stringify(want)}`);
+    }
+    if (!failed.length) pass(`report by exception behaves as documented (${checks.length} assertions)`);
   }
 }
 
