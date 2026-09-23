@@ -15,8 +15,9 @@
 -- a brief loss of function, never of control. Do not enable RLS here or grant before the
 -- policies exist.
 --
--- The 3D-model bucket is public read (an AAS `File` URL must resolve with no session) and writes
--- are gated on device-management authority. Depends on public.has_role() from 0001.
+-- The 3D-model bucket's objects are public (an AAS `File` URL must resolve with no session);
+-- listing and writing are gated on device-management authority. Depends on public.has_role()
+-- from 0001.
 -- =============================================================================================
 
 \set ON_ERROR_STOP on
@@ -39,10 +40,18 @@ END $$;
 -- the access control for the table and must not depend on that remaining true.
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
+-- Public reads (/object/public/...) are served by the bucket's `public` flag and never consult a
+-- SELECT policy. SELECT governs listing, and storage-api cannot upload or remove without it (its
+-- writes read the row back), so it takes the same authority as writing: the geometry is public,
+-- the inventory of which devices have a model is not.
 DROP POLICY IF EXISTS "asset_3d_models_public_read" ON storage.objects;
-CREATE POLICY "asset_3d_models_public_read" ON storage.objects
-  FOR SELECT TO anon, authenticated
-  USING (bucket_id = 'asset-3d-models');
+DROP POLICY IF EXISTS "asset_3d_models_select_privileged" ON storage.objects;
+CREATE POLICY "asset_3d_models_select_privileged" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'asset-3d-models'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+  );
 
 DROP POLICY IF EXISTS "asset_3d_models_insert_privileged" ON storage.objects;
 CREATE POLICY "asset_3d_models_insert_privileged" ON storage.objects
