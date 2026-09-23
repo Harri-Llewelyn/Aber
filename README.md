@@ -702,6 +702,7 @@ cd frontend && npm test                 # Frontend — 1,600+ tests
 npm run test:py                         # Python unit lane — no services needed
 npm run test:db                         # database lane, against a throwaway Postgres
 npm run dev:test                        # validate.py and the stack lane, against the k3d cluster
+npm run lint                            # the nine static checks in docs/static-analysis.md
 ```
 
 **`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
@@ -776,6 +777,7 @@ are in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 | :--- | :--- |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Working rules, and what to run before opening a pull request |
 | [`docs/testing.md`](docs/testing.md) | Every suite and what it needs, the six CI jobs, the release workflow |
+| [`docs/static-analysis.md`](docs/static-analysis.md) | The lints and scans, what each judges, and how a finding is accepted |
 | [`docs/handover.md`](docs/handover.md) | Packaging a hand-off — what to purge before transferring a tree |
 | [`docs/releases.md`](docs/releases.md) | What a release promises — the supported window, the version policy and the deprecation path |
 | [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability privately, and the supported version window |
