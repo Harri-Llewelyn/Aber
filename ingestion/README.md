@@ -934,6 +934,11 @@ is backpressure — and only then drops, with `reason="write_queue_full"`, so a 
 slow costs latency and a writer that is stuck costs a counted drop rather than a hung daemon.
 `aber_ingestion_write_queue_depth` is the saturation signal: it grows only while the writer is behind.
 
+**The table above is a bench measurement of the write path alone**, taken against the database with
+nothing else in the way. What the assembled stack sustains — broker, directory, caches and disk all
+in the path, and the queue depth above as the signal — is measured by the load harness:
+[`../test-harness/README.md`](../test-harness/README.md), *The scale envelope*.
+
 **A SIGTERM drains the queue before the process exits**, bounded by
 `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` (8, inside the pod's termination grace period). A restart under load
 loses nothing the daemon had accepted; the log says how many were queued and, if the bound was hit,

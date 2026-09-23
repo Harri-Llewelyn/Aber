@@ -1,0 +1,113 @@
+{{- if .Values.loadTest.enabled }}
+{{- $component := "load-test" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $brokerTls := and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients -}}
+{{/*
+=================================================================================================
+`test-harness/load_generator.py`, run as a Job IN the namespace.
+
+IN-CLUSTER BECAUSE THE MEASUREMENT DEMANDS IT: publishing from a developer's machine through a
+port-forward measures the forward. This Job shares the node with the stack it loads, which is
+stated with the results rather than corrected for.
+
+NEVER PART OF AN INSTALL. `loadTest.enabled` is false and `scripts/load-test.mjs run` renders this
+one template and applies it, so a `helm upgrade` cannot start a load run by accident. It needs a
+fleet and a broker account that `scripts/load-test.mjs up` provisions first.
+=================================================================================================
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-load-test" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  # NO RETRIES. A saturated stack is the result, not a flake, and a second attempt would start
+  # against a queue the first one left full.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ .Values.loadTest.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          The daemon's SUBSCRIPTION, not its pod: Sparkplug fixtures go out at QoS 0, so anything
+          published before it subscribes is gone rather than queued, and the run would report a
+          stack that dropped everything.
+        */}}
+        {{- if .Values.ingestion.enabled }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-ingestion" "command" "wget -q -O - http://ingestion-metrics:9108/metrics 2>/dev/null | awk '/^aber_ingestion_mqtt_connected /{found=($2==1)} END{exit found?0:1}'" "describe" "the ingestion daemon to be subscribed to spBv1.0/# (there is nothing to measure until it is)") | nindent 8 }}
+        {{- end }}
+      containers:
+        - name: load-generator
+          # The test-runner image, which is the ingestion image plus the suites. Built from
+          # test-harness/Dockerfile with the REPOSITORY ROOT as context.
+          image: {{ include "aber.image" (dict "image" .Values.loadTest.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.loadTest.image.pullPolicy }}
+          command:
+            - python
+            - load_generator.py
+            - --plan
+            - {{ .Values.loadTest.plan | quote }}
+            - --metrics-per-message
+            - {{ .Values.loadTest.metricsPerMessage | quote }}
+            - --settle
+            - {{ .Values.loadTest.settleSeconds | quote }}
+          env:
+            {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
+            - name: DB_HOST
+              value: {{ include "aber.timescale.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "aber.timescale.port" . | quote }}
+            - name: DB_NAME
+              value: {{ .Values.timescaledb.database | quote }}
+            - name: DB_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            {{- include "aber.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- include "aber.brokerClientEnv" . | nindent 12 }}
+            - name: SUPABASE_URL
+              value: {{ include "aber.supabase.internalUrl" . | quote }}
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_SECRET_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY") | nindent 12 }}
+            - name: INGESTION_METRICS_URL
+              value: "http://ingestion-metrics:9108/metrics"
+            # The fallback for a fixture gateway row carrying no group of its own.
+            - name: SPARKPLUG_GROUP
+              value: {{ include "aber.sparkplugGroup" . | quote }}
+            - name: LOADGEN_PREFIX
+              value: {{ .Values.loadTest.prefix | quote }}
+            {{/*
+              The fixture accounts' password, from a Secret this chart does not create:
+              `scripts/load-test.mjs up` issues the accounts and writes it. A run against a fleet
+              that was never provisioned fails here, which is the right place.
+            */}}
+            - name: LOADGEN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.loadTest.credentialSecret | default (printf "%s-load-test" (include "aber.fullname" .)) | quote }}
+                  key: LOADGEN_PASSWORD
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            {{- toYaml .Values.loadTest.resources | nindent 12 }}
+          {{- if or $brokerTls .Values.postgresTls.enabled }}
+          volumeMounts:
+            {{- if $brokerTls }}
+            {{- include "aber.brokerClientCaMount" . | nindent 12 }}
+            {{- end }}
+            {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
+          {{- end }}
+      {{- if or $brokerTls .Values.postgresTls.enabled }}
+      volumes:
+        {{- if $brokerTls }}
+        {{- include "aber.brokerClientCaVolume" . | nindent 8 }}
+        {{- end }}
+        {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
+      {{- end }}
+{{- end }}

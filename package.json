@@ -26,6 +26,11 @@
     "dev:test": "node scripts/dev-cluster.mjs test",
     "dev:forward": "node scripts/dev-cluster.mjs forward",
     "dev:reset": "node scripts/dev-cluster.mjs reset",
-    "dev:down": "node scripts/dev-cluster.mjs down"
+    "dev:down": "node scripts/dev-cluster.mjs down",
+    "//load": "Synthetic Sparkplug load against a running stack, for the scale envelope (test-harness/README.md). up provisions a fleet and one broker account per synthetic gateway; run renders the chart's load-test Job and applies it on its own, so no helm upgrade is involved; down deletes the rows and the accounts. Nothing here is reachable by installing the chart.",
+    "load:up": "node scripts/load-test.mjs up",
+    "load:run": "node scripts/load-test.mjs run",
+    "load:status": "node scripts/load-test.mjs status",
+    "load:down": "node scripts/load-test.mjs down"
   }
 }
