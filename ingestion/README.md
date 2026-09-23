@@ -87,8 +87,14 @@ past PostgREST's `max-rows` — every `DIRECTORY_REFRESH_SECONDS` (5) and re-fil
 the same keys and identity sources the per-entity path would have produced, so nothing downstream
 can tell which path filled the cache. The hot path then misses only for an id the directory does
 not hold, and that miss costs what it always did. A failed pass changes nothing: entries expire on
-their TTL and the per-entity lookup takes over. The pass warns when the directory holds more ids
-than `MAX_ENTITIES_PER_CACHE`, because a cache that cannot hold the fleet evicts what it just filled.
+their TTL and the per-entity lookup takes over.
+
+**Each pass sizes the caches to the directory before filling them**: a key per device identity
+(`sparkplug_id`, and `reported_identity` where there is one), a row per gateway, a device per
+schema entry, plus `MAX_ENTITIES_PER_CACHE` of headroom for ids the directory does not hold. A
+fixed capacity of 1000 was measured failing at 1,200 devices (#395, `test-harness/README.md`,
+*Device count*): the caches evicted every entry inside its TTL, every message paid a PostgREST
+round trip, and the rate the stack could take fell to a quarter.
 
 **One window is left open knowingly.** The DBIRTH path mutates a cached row in place after writing
 the same change to Supabase, so the next birth inside the TTL does not re-detect it. A pass that
@@ -1318,7 +1324,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
 | `PRIMARY_HOST_ID` | **required** | The Sparkplug primary host id — see [The Primary Host](#the-primary-host-and-the-state-every-gateway-watches). The daemon refuses to start without it |
 | `MAX_ALIASES_PER_NODE` | `5000` | Cap on the per-node alias table |
-| `MAX_ENTITIES_PER_CACHE` | `1000` | Cap on each entity resolution cache. Same reasoning, applied to the caches keyed by the id seen on the wire |
+| `MAX_ENTITIES_PER_CACHE` | `1000` | Headroom on each entity resolution cache beyond what the directory holds, for ids seen on the wire that it does not; the whole capacity when the refresher is off |
 | `DIRECTORY_REFRESH_SECONDS` | `5` | Seconds between directory refresh passes — see [The directory refresher](#the-directory-refresher). `0` disables the thread |
 | `TELEMETRY_BATCH_MAX_MESSAGES` | `500` | Messages per historian transaction, at most — see [The historian writer](#the-historian-writer) |
 | `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop |
@@ -1447,7 +1453,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
 | `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
 | `aber_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
-| `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by `MAX_ENTITIES_PER_CACHE`. |
+| `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by the directory plus `MAX_ENTITIES_PER_CACHE`. |
 | `aber_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
 | `aber_ingestion_gateway_clock_offset_seconds` | `edge_node` | Gauge. How far that appliance's clock is from this server's, **positive meaning it is ahead**. Derived from the timestamp on its own heartbeat against the time that heartbeat arrived — no appliance change, nothing added to the wire. See below. |
 | `aber_ingestion_gateway_clock_measured_timestamp_seconds` | `edge_node` | Gauge. When that offset was last measured. **Read the offset only beside this**: a gauge holds its last value indefinitely, so an appliance powered down mid-fault reports it forever. |
