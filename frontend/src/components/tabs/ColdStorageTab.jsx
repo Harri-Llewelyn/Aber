@@ -9,7 +9,6 @@ import { ArchiveCredentialModal } from '../modals/ArchiveCredentialModal'
 import {
   ARCHIVE_BACKLOG_TOLERANCE_DAYS,
   COLD_STATES,
-  DESTINATION_FIELDS,
   backlogTone,
   coldStateLabel,
   coldStateMeaning,

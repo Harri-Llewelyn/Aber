@@ -11,7 +11,7 @@
  * and asserting that on a route which hides credentials the header and query forms are
  * indistinguishable upstream. Both modes share EXPECTED so two inventories cannot drift.
  *
- * Usage: node scripts/check-gateway-surface.mjs [--verbose] | --runtime [baseUrl] | --runtime
+ * Usage: node scripts/check-gateway-surface.mjs | --runtime [baseUrl] | --runtime
  * --authenticated [baseUrl] (needs SUPABASE_PUBLISHABLE_KEY). The base URL is the first non-flag
  * argument, or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the
  * runtime modes use `node:http`; see probeOnce.
@@ -23,9 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const verbose = process.argv.includes('--verbose');
 const read = (p) => readFileSync(join(REPO, p), 'utf8');
-const log = (m) => verbose && console.log(`       ${m}`);
 
 const problems = [];
 const ok = [];

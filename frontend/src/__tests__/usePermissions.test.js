@@ -2,7 +2,6 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { usePermissions } from '../hooks/usePermissions'
 import { PERMISSION_UUIDS } from '../constants'
-import { supabase } from '../lib/supabaseClient'
 
 vi.mock('../lib/supabaseClient', () => {
   const mockQueryBuilder = {

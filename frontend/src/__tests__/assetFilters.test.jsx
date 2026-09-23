@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
-import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
 vi.mock('../api', async () => {

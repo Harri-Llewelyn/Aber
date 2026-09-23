@@ -455,7 +455,6 @@ export function ApprovalsTab({
   onOpenSubject
 }) {
   const [proposals, setProposals] = useState([])
-  const [devices, setDevices]     = useState([])
   // Ids the before/after table resolves to names. Empty is a working state: every value falls back
   // to its uuid, which is what the page did before.
   const [locationNames, setLocationNames] = useState(() => new Map())
@@ -474,16 +473,14 @@ export function ApprovalsTab({
 
   const loadAll = useCallback(async (signal) => {
     try {
-      const [rows, deviceRows, cellRows, areaRows] = await Promise.all([
+      const [rows, cellRows, areaRows] = await Promise.all([
         api.get('/api/v1/proposals', { signal }),
-        api.get('/api/v1/assets', { signal }).catch(() => []),
         // Names only, and tolerated failures: a reviewer who cannot read the cell list still gets
         // the queue, with ids where names would have been.
         api.get('/api/v1/cells', { signal }).catch(() => []),
         api.get('/api/v1/areas', { signal }).catch(() => [])
       ])
       setProposals(rows)
-      setDevices((deviceRows || []).filter(d => !d.is_archived))
       // Archived cells included: a proposal filed before one was archived still names it, and the
       // reviewer deciding it needs to see which cell that was.
       setLocationNames(locationNameMap(cellRows, areaRows))

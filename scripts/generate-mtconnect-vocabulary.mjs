@@ -189,7 +189,6 @@ if (beginAt < 0 || endAt < 0 || endAt < beginAt) {
     `markers not found in ${SEED}. Expected a block delimited by:\n  ${BEGIN_MARKER}\n  ${END_MARKER}`
   );
 }
-const lineEnd = seed.indexOf('\n', beginAt);
 const updated = seed.slice(0, beginAt) + header + '\n' + body + '\n' + seed.slice(endAt);
 writeFileSync(SEED, updated, 'utf8');
 

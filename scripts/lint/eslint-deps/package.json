@@ -1,0 +1,12 @@
+{
+  "name": "aber-eslint",
+  "private": true,
+  "description": "The ESLint install scripts/lint-js.mjs runs, pinned. Installed into .cache/lint/eslint by `npm ci`; nothing else in the repository depends on it.",
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.12.0"
+  }
+}
