@@ -91,6 +91,12 @@
  *   node scripts/test-db.mjs --no-run     # bring up and migrate only, then stop
  *   node scripts/test-db.mjs -k test_role # run only suites whose filename contains this
  *   node scripts/test-db.mjs --with-history  # replay the chain against a deployed stack's rows
+ *   node scripts/test-db.mjs --lint-only  # migrate, lint the schema, stop (npm run lint:db)
+ *   node scripts/test-db.mjs --no-lint    # skip the schema lint
+ *
+ * THE SCHEMA IS LINTED after the chain applies and before any suite commits a fixture, with the
+ * SQL behind Studio's advisors (splinter) and plpgsql_check over every PL/pgSQL body. A finding not
+ * in scripts/lint/database-allowlist.json fails the run; see scripts/lib/db-lint.mjs.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -100,6 +106,9 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import { MIGRATION_VARS } from './migration-vars.mjs'
+import {
+  SPLINTER, splinterSql, splinterScript, plpgsqlCheckScript, splinterFindings, plpgsqlFindings, judge, report,
+} from './lib/db-lint.mjs'
 import { suitesInLane } from './python-suites.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -124,6 +133,8 @@ const historyFile = args.find(a => a.startsWith('--history-file='))?.split('=').
 const historyOut = args.find(a => a.startsWith('--history-out='))?.split('=').slice(1).join('=') || null
 const HISTORY_NS = process.env.ABER_NAMESPACE || 'aber'
 const HISTORY_POD = process.env.ABER_DB_POD || 'supabase-db-0'
+const lintOnly = args.includes('--lint-only')
+const noLint = args.includes('--no-lint')
 const filterIdx = args.findIndex(a => a === '-k')
 const filter = filterIdx !== -1 ? args[filterIdx + 1] : null
 
@@ -404,6 +415,37 @@ function loadHistoryAndReplay () {
   applyChain('against that history')
 }
 
+// -------------------------------------------------------------------------------------------
+// Lint the schema, before any suite commits a fixture
+// -------------------------------------------------------------------------------------------
+async function lintSchema () {
+  const allow = JSON.parse(readFileSync(path.join(REPO, 'scripts', 'lint', 'database-allowlist.json'), 'utf8'))
+  const sql = (script) => {
+    const r = run('docker', [
+      'exec', '-i', '-e', `PGPASSWORD=${PASSWORD}`, CONTAINER,
+      'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-h', 'localhost', '-U', 'postgres', '-d', 'postgres', '-At', '-f', '-'
+    ], { input: script, maxBuffer: 1 << 28 })
+    if (r.status !== 0) die('the schema lint did not run.', r.stderr)
+    return r.stdout
+  }
+  console.log(`\n${c.bold('Linting the schema')}${c.dim(`  splinter ${SPLINTER.commit.slice(0, 12)}, plpgsql_check`)}`)
+  let text
+  try {
+    text = await splinterSql(REPO)
+  } catch (err) {
+    die(`splinter could not be loaded: ${err.message}`)
+  }
+  const splinterOk = report('splinter', judge(splinterFindings(sql(splinterScript(text))), allow.splinter), c)
+  const plpgsqlOk = report('plpgsql_check', judge(plpgsqlFindings(sql(plpgsqlCheckScript(['public']))), allow.plpgsql_check), c)
+  return splinterOk && plpgsqlOk
+}
+
+const lintOk = noLint ? true : await lintSchema()
+if (lintOnly) {
+  if (!keep) teardown()
+  process.exit(lintOk ? 0 : 1)
+}
+
 if (noRun) {
   console.log(`\n${c.green('Ready.')} Point a suite at it with:`)
   console.log(c.dim(`  SUPABASE_DB_PORT=${PORT} python supabase/migrations/test_audit_domain.py`))
@@ -462,6 +504,7 @@ if (failed.length > 0) {
 } else {
   console.log(c.green(`All ${suites.length} suites passed.`))
 }
+if (!lintOk) console.log(c.red('The schema lint found something new; see "Linting the schema" above.'))
 
 if (keep) {
   console.log(c.dim(`\nContainer ${CONTAINER} left running on port ${PORT}.`))
@@ -470,4 +513,4 @@ if (keep) {
   teardown()
 }
 
-process.exit(failed.length > 0 ? 1 : 0)
+process.exit(failed.length > 0 || !lintOk ? 1 : 0)
