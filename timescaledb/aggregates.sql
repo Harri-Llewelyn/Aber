@@ -2,9 +2,10 @@
 -- Telemetry rollups and the latest-value view.
 --
 -- Applied on every boot by the chart's maintenance hook Job.
--- It takes three psql variables:
+-- It takes four psql variables:
 --
 --     -v rollup_1m_retain='180 days' -v rollup_5m_retain='1 year' -v rollup_1h_retain='5 years'
+--     -v rollup_compress_after='2 days'
 --
 -- `never` (also `off`, `none`, `disabled`) removes a policy without dropping the rollup. Not in
 -- timescaledb/init/, for the reason retention.sql is not: initdb scripts never reach an existing
@@ -25,6 +26,11 @@
 SELECT set_config('aber.rollup_1m_retain', :'rollup_1m_retain', false);
 SELECT set_config('aber.rollup_5m_retain', :'rollup_5m_retain', false);
 SELECT set_config('aber.rollup_1h_retain', :'rollup_1h_retain', false);
+-- Optional: a stack whose chart predates rollup compression passes no value, which keeps the
+-- rollups uncompressed as they were.
+\if :{?rollup_compress_after}
+SELECT set_config('aber.rollup_compress_after', :'rollup_compress_after', false);
+\endif
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. telemetry_latest -- one row per (asset, metric), evaluated remotely.
@@ -162,16 +168,40 @@ DECLARE
   spec     record;
   raw_val  text;
   retain   interval;
+  compress interval;
+  chunk    interval;
+  enabled  boolean;
 BEGIN
+  -- Compression of the rollups. Refresh reaches back late_data, and a compressed bucket is still
+  -- refreshable, but compressing inside that window would rewrite a chunk on every refresh, so the
+  -- setting has to clear it.
+  raw_val := btrim(coalesce(current_setting('aber.rollup_compress_after', true), ''));
+  IF raw_val <> '' AND NOT (lower(raw_val) = ANY (disabled)) THEN
+    BEGIN
+      compress := raw_val::interval;
+    EXCEPTION WHEN others THEN
+      RAISE EXCEPTION 'aber.rollup_compress_after is ''%'', which is not a PostgreSQL interval.', raw_val;
+    END;
+    IF compress <= late_data THEN
+      RAISE EXCEPTION
+        'timescaledb.rollups.compressAfter is %, which is inside the % the refresh reaches back for '
+        'late data. Set it longer than that, e.g. ''2 days''.', compress, late_data;
+    END IF;
+  END IF;
+
   FOR spec IN
     SELECT * FROM (VALUES
-      ('telemetry_1m', INTERVAL '1 minute',  INTERVAL '1 minute',  'aber.rollup_1m_retain'),
-      ('telemetry_5m', INTERVAL '5 minutes', INTERVAL '5 minutes', 'aber.rollup_5m_retain'),
+      -- chunk_width is the rollup's own chunk span, set rather than inherited: TimescaleDB gives a
+      -- rollup ten times the raw interval AT ITS CREATION, which was 70 days on a stack older than
+      -- the sized raw chunks, and a chunk is compressed only once all of it is older than
+      -- compressAfter. About a day of rows per chunk for the one-minute view at any fleet.
+      ('telemetry_1m', INTERVAL '1 minute',  INTERVAL '1 minute',  'aber.rollup_1m_retain', INTERVAL '1 day'),
+      ('telemetry_5m', INTERVAL '5 minutes', INTERVAL '5 minutes', 'aber.rollup_5m_retain', INTERVAL '7 days'),
       -- The 1h view refreshes on a 5-minute schedule, NOT hourly. Its end_offset still holds back
       -- the incomplete bucket, so this costs little and means a dashboard on the hourly rollup is
       -- never an hour stale.
-      ('telemetry_1h', INTERVAL '1 hour',    INTERVAL '5 minutes', 'aber.rollup_1h_retain')
-    ) AS t(view_name, bucket_width, schedule, guc)
+      ('telemetry_1h', INTERVAL '1 hour',    INTERVAL '5 minutes', 'aber.rollup_1h_retain', INTERVAL '30 days')
+    ) AS t(view_name, bucket_width, schedule, guc, chunk_width)
   LOOP
     raw_val := btrim(coalesce(current_setting(spec.guc, true), ''));
     retain  := NULL;
@@ -206,9 +236,38 @@ BEGIN
     ELSE
       RAISE NOTICE 'rollup %: retained indefinitely', spec.view_name;
     END IF;
+
+    -- Chunks created from now on; a wider chunk already open keeps its span until it closes.
+    SELECT d.time_interval INTO chunk
+      FROM timescaledb_information.continuous_aggregates c
+      JOIN timescaledb_information.dimensions d
+        ON d.hypertable_schema = c.materialization_hypertable_schema
+       AND d.hypertable_name   = c.materialization_hypertable_name
+     WHERE c.view_name = spec.view_name;
+    IF chunk IS DISTINCT FROM spec.chunk_width THEN
+      PERFORM set_chunk_time_interval(spec.view_name::regclass, spec.chunk_width);
+    END IF;
+
+    -- The columnstore, segmented by series as the raw hypertable is (retention.sql), so a
+    -- dashboard's one-series read decompresses one segment. Set once: re-issuing it raises once
+    -- compressed chunks exist. Existing compressed chunks stay compressed when the policy is off.
+    SELECT c.compression_enabled INTO enabled
+      FROM timescaledb_information.continuous_aggregates c WHERE c.view_name = spec.view_name;
+    IF compress IS NOT NULL AND NOT coalesce(enabled, false) THEN
+      EXECUTE format('ALTER MATERIALIZED VIEW %I SET (timescaledb.enable_columnstore = true, '
+                     'timescaledb.segmentby = %L, timescaledb.orderby = %L)',
+                     spec.view_name, 'asset_id, metric_name', 'bucket DESC');
+    END IF;
+    CALL remove_columnstore_policy(spec.view_name, if_exists => TRUE);
+    IF compress IS NOT NULL THEN
+      CALL add_columnstore_policy(spec.view_name, after => compress);
+      RAISE NOTICE 'rollup %: chunks of %, compressed once older than %', spec.view_name, spec.chunk_width, compress;
+    ELSE
+      RAISE NOTICE 'rollup %: chunks of %, not compressed', spec.view_name, spec.chunk_width;
+    END IF;
   END LOOP;
 
-  -- The rollups outlive the raw data: retention.sql drops raw chunks (90 days by default), and
+  -- The rollups outlive the raw data: retention.sql drops raw chunks (14 days by default), and
   -- these keep shape, excursions and state transitions far longer at a fraction of the size.
   RAISE NOTICE 'telemetry rollups reconciled (1m -> 5m -> 1h, real-time aggregation on).';
 END $$;

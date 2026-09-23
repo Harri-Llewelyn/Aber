@@ -293,6 +293,11 @@ timescaledb:
     oneMinuteRetainFor: "180 days"
     fiveMinuteRetainFor: "1 year"
     oneHourRetainFor: "5 years"
+    # Rollup chunks are compressed once older than this (about 5x smaller, and faster to read for
+    # one series). Longer than the 25 hours the refresh reaches back for late data; `never` turns
+    # it off and leaves chunks already compressed as they are. On a stack whose rollups were made
+    # before this, compression starts when their current chunk closes (aggregates.sql).
+    compressAfter: "2 days"
   # --- Physical backup (pgBackRest) -------------------------------------------------------------
   # The historian's backup at fleet scale: a full backup weekly, a differential daily, and every WAL
   # segment archived as it is written, so a restore reaches any moment inside the retained backups.
