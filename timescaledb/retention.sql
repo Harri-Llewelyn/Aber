@@ -2,10 +2,11 @@
 -- TimescaleDB compression and retention policy reconciliation
 --
 -- Applied on every boot by the chart's maintenance hook Job,
--- against a database that already holds the hypertable. It takes two psql variables:
+-- against a database that already holds the hypertable. It takes these psql variables:
 --
 --     -v compress_after='7 days'      -v retain_after='90 days'
 --     -v compress_after='never'       -v retain_after='never'      (policy removed)
+--     -v chunk_interval='12 hours'    optional; absent or empty leaves the interval as it is
 --
 -- Not in /docker-entrypoint-initdb.d: the postgres entrypoint runs initdb scripts only on an
 -- empty data directory, so a policy defined there could never be changed on a running stack.
@@ -20,6 +21,11 @@
 -- does not descend into dollar-quoted strings.
 SELECT set_config('aber.compress_after', :'compress_after', false);
 SELECT set_config('aber.retain_after',   :'retain_after',   false);
+\if :{?chunk_interval}
+SELECT set_config('aber.chunk_interval', :'chunk_interval', false);
+\else
+SELECT set_config('aber.chunk_interval', '', false);
+\endif
 
 DO $$
 DECLARE
@@ -30,9 +36,12 @@ DECLARE
 
   raw_compress text := btrim(coalesce(current_setting('aber.compress_after', true), ''));
   raw_retain   text := btrim(coalesce(current_setting('aber.retain_after',   true), ''));
+  raw_chunk    text := btrim(coalesce(current_setting('aber.chunk_interval', true), ''));
 
   v_compress interval;
   v_retain   interval;
+  v_chunk    interval;
+  was_chunk  interval;
   compressed boolean;
 BEGIN
   IF to_regclass('public.telemetry') IS NULL THEN
@@ -63,6 +72,36 @@ BEGIN
         'TIMESCALE_RETAIN_FOR=''%'' is not a PostgreSQL interval. Use a form like ''90 days'' or '
         '''5 years'', or ''never'' to keep telemetry indefinitely.', raw_retain;
     END;
+  END IF;
+
+  IF raw_chunk <> '' THEN
+    BEGIN
+      v_chunk := raw_chunk::interval;
+    EXCEPTION WHEN others THEN
+      RAISE EXCEPTION
+        'timescaledb.retention.chunkInterval=''%'' is not a PostgreSQL interval. Use a form like '
+        '''12 hours'' or ''1 day''.', raw_chunk;
+    END;
+    IF v_chunk < interval '1 minute' THEN
+      RAISE EXCEPTION 'timescaledb.retention.chunkInterval=''%'' is below one minute.', raw_chunk;
+    END IF;
+  END IF;
+
+  -- -------------------------------------------------------------------------------------------
+  -- Chunk interval
+  -- -------------------------------------------------------------------------------------------
+  -- Compression never touches the open chunk, so its span plus compress_after is the raw data
+  -- held uncompressed whatever the policy says. set_chunk_time_interval() applies to chunks
+  -- created afterwards; existing chunks keep the span they were made with.
+  SELECT d.time_interval INTO was_chunk
+  FROM timescaledb_information.dimensions d
+  WHERE d.hypertable_schema = 'public' AND d.hypertable_name = 'telemetry' AND d.column_name = 'time';
+
+  IF v_chunk IS NOT NULL AND v_chunk IS DISTINCT FROM was_chunk THEN
+    PERFORM set_chunk_time_interval('public.telemetry', v_chunk);
+    RAISE NOTICE 'chunk interval: % (was %), for chunks created from now on', v_chunk, was_chunk;
+  ELSE
+    RAISE NOTICE 'chunk interval: % (unchanged)', was_chunk;
   END IF;
 
   -- -------------------------------------------------------------------------------------------

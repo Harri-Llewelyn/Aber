@@ -329,8 +329,8 @@ groups:
       # This is the telling.
       #
       # The value is DAYS PAST THE THRESHOLD, from the newest verified `range_end`. Up to one chunk
-      # interval of backlog is normal: chunks are seven days and one is not eligible until its whole
-      # span is past the threshold, so a perfectly healthy site sits between zero and seven days
+      # interval of backlog is normal: chunks are at most seven days and one is not eligible until
+      # its whole span is past the threshold, so a healthy site sits between zero and seven days
       # overdue. FOURTEEN is two of those -- comfortably beyond normal, and still two weeks before
       # anyone is short of disk. A threshold of "any backlog" would fire on every install, every
       # week, correctly, and be switched off.

@@ -2169,8 +2169,8 @@ prefixes without opening a file.
   makes a retry produce the same key — which is what keeps overwrite-on-retry correct rather than
   dangerous.
 
-**The month-boundary rule.** `year=`/`month=` come from `range_start`, and chunks are seven days,
-so around a dozen times a year a chunk straddles a month: one beginning 29 March holds April
+**The month-boundary rule.** `year=`/`month=` come from `range_start`, and a chunk can span up to
+seven days, so a chunk can straddle a month: one beginning 29 March holds April
 readings under `month=03`. The manifest is the authoritative index; the partitions are a
 convenience for a reader that does not have it, and such a reader must widen by one partition on
 each side.
@@ -2285,9 +2285,9 @@ It surfaces in two places, from one function so they cannot disagree:
   tolerance by `check-docs-drift.mjs`.
 
 **Up to one chunk interval of backlog is normal**, and the threshold is chosen around that. Chunks
-are seven days and `cold_tier_candidates()` bounds on `range_end`, so a chunk is not eligible until
-its whole span has passed the threshold: a perfectly healthy site sits between zero and seven days
-overdue. Fourteen is two of those — beyond anything the ordinary cadence produces, and still two
+are at most seven days (`timescaledb.retention.chunkInterval`'s ceiling) and
+`cold_tier_candidates()` bounds on `range_end`, so a chunk is not eligible until its whole span has
+passed the threshold: a healthy site sits between zero and seven days overdue. Fourteen is two of those — beyond anything the ordinary cadence produces, and still two
 weeks before a historian with retention off is short of disk. Alerting on any backlog at all would
 fire on every install, every week, correctly, and be switched off.
 

@@ -157,9 +157,9 @@ spec:
 {{- end }}
 
               echo 'Reconciling compression and retention policies...'
-              {{/* retainFor is DERIVED when empty: `never` once cold archival has a destination,
-                   90 days otherwise. See aber.timescaleRetainFor. */}}
-              $PSQL -v compress_after={{ .Values.timescaledb.retention.compressAfter | quote }} -v retain_after={{ include "aber.timescaleRetainFor" . | quote }} -f /sql/retention.sql
+              {{/* chunkInterval, compressAfter and retainFor are DERIVED when empty; see
+                   aber.timescaleChunkInterval, aber.timescaleCompressAfter, aber.timescaleRetainFor. */}}
+              $PSQL -v chunk_interval={{ include "aber.timescaleChunkInterval" . | quote }} -v compress_after={{ include "aber.timescaleCompressAfter" . | quote }} -v retain_after={{ include "aber.timescaleRetainFor" . | quote }} -f /sql/retention.sql
               {{- if .Values.timescaledb.rollups.enabled }}
 
               echo 'Reconciling telemetry rollups...'

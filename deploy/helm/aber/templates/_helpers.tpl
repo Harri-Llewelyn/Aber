@@ -1500,3 +1500,44 @@ never
 90 days
 {{- end -}}
 {{- end -}}
+
+{{/*
+aber.timescaleChunkInterval -- the raw hypertable's chunk span, `timescaledb.retention.chunkInterval`
+or derived from `expectedRowsPerDay`: a quarter of the historian's memory limit at 367 bytes a
+row, in whole hours, clamped to 1 hour .. 7 days. Whole days are written as days.
+
+Values stored by an older chart have no expectedRowsPerDay (`helm upgrade --reuse-values`), and
+keep the 7 days they ran with.
+*/}}
+{{- define "aber.timescaleChunkInterval" -}}
+{{- $r := .Values.timescaledb.retention -}}
+{{- if $r.chunkInterval -}}
+{{- $r.chunkInterval -}}
+{{- else if not (hasKey $r "expectedRowsPerDay") -}}
+7 days
+{{- else -}}
+{{- $rows := $r.expectedRowsPerDay | float64 -}}
+{{- if le $rows 0.0 -}}
+{{- fail (printf "\n\naber: timescaledb.retention.expectedRowsPerDay is %v. It sizes the historian's chunks and must be\npositive: devices x metrics x samples per metric a day. Or set timescaledb.retention.chunkInterval.\n" $r.expectedRowsPerDay) -}}
+{{- end -}}
+{{- $res := .Values.timescaledb.resources | default dict -}}
+{{- $mem := (($res.limits | default dict).memory) | default (($res.requests | default dict).memory) -}}
+{{- if not $mem -}}
+{{- fail "\n\naber: timescaledb.resources sets no memory limit or request, so the chunk interval cannot be derived.\nSet timescaledb.retention.chunkInterval.\n" -}}
+{{- end -}}
+{{- $rowsPerChunk := divf (divf (include "aber.memBytes" $mem | float64) 4.0) 367.0 -}}
+{{- $hours := mulf (divf $rowsPerChunk $rows) 24.0 | floor | int -}}
+{{- $hours = max 1 (min 168 $hours) -}}
+{{- if eq (mod $hours 24) 0 -}}
+{{- $days := div $hours 24 -}}
+{{- printf "%d %s" $days (ternary "day" "days" (eq $days 1)) -}}
+{{- else -}}
+{{- printf "%d %s" $hours (ternary "hour" "hours" (eq $hours 1)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* aber.timescaleCompressAfter -- `timescaledb.retention.compressAfter`, or one chunk interval. */}}
+{{- define "aber.timescaleCompressAfter" -}}
+{{- .Values.timescaledb.retention.compressAfter | default (include "aber.timescaleChunkInterval" .) -}}
+{{- end -}}

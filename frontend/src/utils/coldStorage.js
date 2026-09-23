@@ -111,10 +111,11 @@ export function coldStorageSummary(rows) {
 /**
  * Days past the tiering threshold before a backlog is worth acting on.
  *
- * UP TO ONE CHUNK INTERVAL IS NORMAL. Chunks are seven days and one is not eligible for export
- * until its whole span is past the threshold, so a perfectly healthy site sits between zero and
- * seven days behind. Fourteen is two of those: beyond anything the ordinary cadence produces, and
- * still two weeks before a historian with retention off is short of disk.
+ * UP TO ONE CHUNK INTERVAL IS NORMAL. Chunks are at most seven days (the chart's ceiling on
+ * timescaledb.retention.chunkInterval) and one is not eligible for export until its whole span is
+ * past the threshold, so a healthy site sits between zero and seven days behind. Fourteen is two of
+ * those: beyond anything the ordinary cadence produces, and still two weeks before a historian
+ * with retention off is short of disk.
  *
  * The same number is the Archive Backlog alert rule's threshold
  * (grafana/provisioning/alerting/alert-rules.yaml, `aber-archive-backlog`). A page that called a
