@@ -2037,7 +2037,7 @@ groups:
                 uid: __expr__
 
       # -------------------------------------------------------------------------------------------
-      # 6. A COLLECTOR IS FAILING, which is the rule that keeps the other five honest.
+      # 6. A COLLECTOR IS FAILING, which is the rule that keeps the others in this group honest.
       #
       # THE EXPORTER DOES NOT FAIL A SCRAPE WHEN A COLLECTOR FAILS. It logs an error, keeps serving,
       # and `pg_exporter_last_scrape_error` stays 0 -- so that collector's series simply stop
@@ -2103,6 +2103,127 @@ groups:
                 - evaluator:
                     type: lt
                     params: [1]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 7. THE HISTORIAN'S BACKUP HAS STOPPED. The sidecar takes one backup a day
+      # (timescaledb.physicalBackup) and records each in physical_backup_runs; 36 hours without a
+      # successful one is a missed day. Gated on archive_mode, so a stack without physical backup
+      # never raises it. Before the first backup succeeds the clock runs from when backup was switched
+      # on (aber_historian_backup_clock), so a first full that takes hours does not page.
+      # -------------------------------------------------------------------------------------------
+      - uid: aber-db-historian-backup-stale
+        title: Historian Backup Stale
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The historian has had no successful physical backup for
+            {{ humanizeDuration $values.B.Value }}. A restore can reach no later than the last one.
+            The sidecar's log names the cause: kubectl -n aber logs timescaledb-0 -c pgbackrest
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                (time() - max(aber_historian_backup_clock_since_time))
+                and on () (max(aber_historian_wal_archive_enabled) == 1)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [129600]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 8. WAL IS NOT REACHING THE BACKUP REPOSITORY. The last attempt failed and nothing has been
+      # archived since. PostgreSQL keeps the unarchived WAL, so the data volume fills until
+      # archiveQueueMax, where pgBackRest drops it and a point-in-time restore can no longer cross
+      # the gap. `for: 10m` rides out a brief endpoint outage.
+      # -------------------------------------------------------------------------------------------
+      - uid: aber-db-historian-wal-archiving
+        title: Historian WAL Archiving Failing
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The historian has not archived WAL for {{ humanizeDuration $values.B.Value }} and its
+            last attempt failed. Unarchived WAL accumulates on the data volume until
+            archiveQueueMax, after which it is dropped. Usually the repository endpoint or its
+            credentials: kubectl -n aber logs timescaledb-0 -c timescaledb | grep archive
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                (time() - max(aber_historian_wal_archive_last_archived_time))
+                and on () (max(aber_historian_wal_archive_last_failed_time) > max(aber_historian_wal_archive_last_archived_time))
+                and on () (max(aber_historian_wal_archive_enabled) == 1)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
               datasource:
                 type: __expr__
                 uid: __expr__

@@ -394,6 +394,10 @@ python timescaledb/test_extension_version.py
 # The worker pool against the workers the server may launch, and the chart's defaults against
 # each other. Also needs no stack for its second half.
 python timescaledb/test_worker_pool.py
+# The historian's physical backup: a full backup recorded where the Historian Backup Stale alert
+# reads, the repository agreeing, and a switched WAL segment archived. Skips with the backup off;
+# the dev loop turns it on. Reads the repository through the sidecar with kubectl.
+python timescaledb/test_physical_backup.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py

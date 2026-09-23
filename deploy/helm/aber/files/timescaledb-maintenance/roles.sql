@@ -208,6 +208,12 @@ BEGIN
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
   END IF;
 
+  -- The physical backup runs, for the Historian Backup alert (physical_backup.sql).
+  IF to_regclass('public.physical_backup_runs') IS NOT NULL THEN
+    EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', v_role);
+    EXECUTE format('GRANT SELECT ON public.physical_backup_runs TO %I', v_role);
+  END IF;
+
   RAISE NOTICE
     'roles: % holds pg_monitor and no password, so it reads pg_stat_* from the sidecar on '
     'loopback and cannot authenticate from the network.', v_role;

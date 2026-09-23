@@ -293,6 +293,66 @@ timescaledb:
     oneMinuteRetainFor: "180 days"
     fiveMinuteRetainFor: "1 year"
     oneHourRetainFor: "5 years"
+  # --- Physical backup (pgBackRest) -------------------------------------------------------------
+  # The historian's backup at fleet scale: a full backup weekly, a differential daily, and every WAL
+  # segment archived as it is written, so a restore reaches any moment inside the retained backups.
+  # The cold archive stays the copy of raw telemetry older than retainFor; this copies what the
+  # historian holds now, rollups included. See deploy/k8s/README.md, "Backing up the historian".
+  #
+  # Turning it on restarts the historian (archive_mode is read at start) and takes a full backup
+  # as soon as the server is up. While it is on, the nightly logical dump skips the historian.
+  physicalBackup:
+    enabled: false
+    # The hour (UTC, 0-23) the daily backup starts, and the day of the week (0 = Sunday) it is a
+    # full backup; a differential on the other six. Not a cron string: the sidecar that runs it
+    # has no cron daemon.
+    hourUtc: 1
+    fullOn: 0
+    # Full backups kept. Each full carries the differentials and the WAL taken after it, so 2 keeps
+    # between one and two weeks of restore points.
+    retainFull: 2
+    # A WAL segment is archived when it fills or after this many seconds, whichever is first, so
+    # this bounds how much a restore can lose on a quiet historian.
+    archiveTimeoutSeconds: 60
+    # WAL waiting to be pushed, beyond which pgBackRest drops it rather than filling the data
+    # volume. A drop leaves a gap no restore can cross until the next backup. It is how long an
+    # outage of the repository can last before that happens, and the data volume needs this much
+    # free: measured at about 760 bytes of WAL a raw row, 8GiB is four days for 100 devices x 10
+    # metrics every 30 s and about 18 minutes for 1,000 devices x 10 metrics at 1 Hz
+    # (deploy/k8s/README.md, "What grows"). The Historian WAL Archiving alert fires at 10 minutes.
+    archiveQueueMax: 8GiB
+    # Parallel compression and transfer processes during backup and restore.
+    processMax: 2
+    repo:
+      # s3: an object store off site, the one that survives losing the site. posix: a volume in
+      # this cluster, which survives a dropped table and a corrupted data directory and not the
+      # loss of the node.
+      type: s3
+      # s3 only. The bucket must already exist; the backups are written under `path` in it.
+      # UNDER networkPolicy.enabled the endpoint needs a rule in networkPolicy.extraEgress.
+      s3:
+        # The full URL, https only (pgBackRest speaks nothing else to S3).
+        endpoint: ""
+        region: ""
+        bucket: ""
+        path: /aber/historian
+        # MinIO and most self-hosted gateways address buckets by path.
+        pathStyle: false
+        # A Secret holding AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and REPO_CIPHER_PASS. The
+        # cipher pass encrypts every file (aes-256-cbc) before it leaves the site; keep a copy of
+        # it off site too, because without it the backups cannot be read.
+        existingSecret: ""
+        verifyTls: true
+        # A Secret holding `ca.crt`, for an endpoint with a private CA.
+        caSecret: ""
+      posix:
+        size: 50Gi
+        storageClass: ""
+    # The sidecar that takes the scheduled backups. A backup reads the whole data directory, so
+    # the memory is for pgBackRest's buffers per process, not for the data.
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 512Mi }
   resources:
     requests:
       cpu: 100m

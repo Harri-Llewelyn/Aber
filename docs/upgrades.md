@@ -7,7 +7,7 @@ has been yes — and an upgrade that costs a site visit per appliance is an upgr
 which is how a fleet ends up years behind on a platform whose whole point is interoperability.
 
 The short answer here is **no, and it is structural rather than a promise**. What follows is why,
-and — in §4 — the four places where that is not the whole truth. It holds from 1.0.0 onwards;
+and — in §4 — the five places where that is not the whole truth. It holds from 1.0.0 onwards;
 [the floor](#the-floor-100) is what lies below that and what to do about it.
 
 ---
@@ -329,7 +329,14 @@ The historian's image preloads `timescaledb` alone, and `-c` **replaces** that v
 appending to it, so the chart names both libraries with `timescaledb` first. A build that dropped it
 would start a server that does not know what a hypertable is.
 
-### 4.4 A renamed metric orphans its history
+### 4.4 Turning the historian's physical backup on or off restarts it
+
+`timescaledb.physicalBackup.enabled` sets `archive_mode`, another postmaster setting, so switching
+it either way rolls `timescaledb-0` once. Turning it on also stops the nightly logical dump taking
+the historian; turning it off puts the historian back in the dump and leaves the repository where
+it is. See `deploy/k8s/README.md`, *Backing up the historian*.
+
+### 4.5 A renamed metric orphans its history
 
 `metric_catalog` registers every metric name with its standard and semantic id. A future version that
 **renames** a metric would leave the old name's history under the old name — the historian records

@@ -874,6 +874,13 @@ export const SUITES = {
       'Background worker sizing. A pool too small for the continuous aggregates does not error -- ' +
       'the aggregates just stop refreshing, and every dashboard reading them goes quietly stale.',
   },
+  'timescaledb/test_physical_backup.py': {
+    lanes: ['stack'],
+    why:
+      'The historian backup sidecar took a full backup, recorded it where the Historian Backup ' +
+      'Stale alert reads, and a WAL segment switched now reaches the repository. Skips when ' +
+      'physical backup is off; the dev loop turns it on with a posix repository.',
+  },
   'timescaledb/test_extension_version.py': {
     lanes: ['stack'],
     why:

@@ -67,9 +67,16 @@ const MIRRORS = [
       // Kubernetes and the whole target could not install. Not a missing feature: a broken
       // deployment path, unreported for a fortnight because CI was down.
       name === 'cold_archive.sql' ||
+      name === 'physical_backup.sql' ||
       name === 'roles.sql',
     why: 'Telemetry lifecycle: the extension update, compression/retention policies, the rollup '
        + 'views, the storage footprint view and the read-only BI roles, reconciled on every boot',
+  },
+  {
+    source: join('timescaledb', 'pgbackrest'),
+    dest: 'timescaledb-pgbackrest',
+    match: (name) => name.endsWith('.sh'),
+    why: 'The schedule the historian backup sidecar runs (timescaledb.physicalBackup)',
   },
   // THE MIGRATIONS ARE NOT MIRRORED. They are baked into the db-init image by
   // supabase/db-init/Dockerfile and read from its filesystem, so the chart carries none of them.

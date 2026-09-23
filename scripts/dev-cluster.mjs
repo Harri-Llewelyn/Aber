@@ -349,6 +349,10 @@ async function installChart ({ tls, e2e }) {
     '--set', 'backup.enabled=true', '--set', 'backupService.enabled=true',
     '--set', 'backup.includeStorage=true', '--set', 'backup.includeForge=true',
     '--set', 'backup.includeBroker=true',
+    // The historian's physical backup, into a volume in the cluster; the stack lane asserts a full
+    // backup was taken and WAL is being archived (timescaledb/test_physical_backup.py).
+    '--set', 'timescaledb.physicalBackup.enabled=true', '--set', 'timescaledb.physicalBackup.repo.type=posix',
+    '--set', 'timescaledb.physicalBackup.repo.posix.size=5Gi',
     '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`]
   // What an appliance is told to dial. The browser-facing hosts stay on the loopback domain, which
   // resolves on this machine whatever the resolver does; the two functions that hand an appliance
