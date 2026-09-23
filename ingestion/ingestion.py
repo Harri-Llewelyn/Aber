@@ -18,10 +18,11 @@ from metrics import start_metrics_server
 import registry
 from registry import (
     count, count_labelled, counter_snapshot, observe_uns_seconds, observe_write_seconds,
-    WRITE_SECONDS_BUCKETS,
+    WRITE_SECONDS_BUCKETS,  # noqa: F401 -- re-exported; test_metrics_endpoint reads it from here
 )
 from conformance import (
-    MetricConstraint, ModelledSchema, constraint_violations, enforceable_violation,
+    MetricConstraint, ModelledSchema,  # noqa: F401 -- re-exported; test_payload_conformance reads them
+    constraint_violations, enforceable_violation,
     modelled_constraints, payload_violations, violation_signature,
 )
 # capture.py owns the capture file format, so the daemon and the CLI cannot diverge.
@@ -154,7 +155,7 @@ SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
 # -----------------------------------------------------------------------------
 supabase_client = None
 try:
-    from supabase import create_client, Client
+    from supabase import create_client
     if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
         # Names the daemon as the actor behind its writes; log_digital_thread_event() reads it from
         # the `request.headers` GUC and accepts only 'ingestion' / 'service' / 'migration'.

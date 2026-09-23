@@ -33,7 +33,6 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
 import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
@@ -662,7 +661,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         repo = f"/api/v1/repos/{self.organisation}/{self.repo_name()}"
         templates = {t["file_name"] for t in self.forge(f"{repo}/issue_templates")}
         self.assertIn(".gitea/ISSUE_TEMPLATE/incident.md", templates, templates)
-        labels = {l["name"] for l in self.forge(f"{repo}/labels")}
+        labels = {label["name"] for label in self.forge(f"{repo}/labels")}
         self.assertIn("incident", labels, labels)
         # And `main` is protected afterwards, not instead: the seed did not cost the review gate.
         self.assertFalse(self.forge(f"{repo}/branch_protections/main")["enable_push"])
