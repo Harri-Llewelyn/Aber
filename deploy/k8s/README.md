@@ -165,7 +165,7 @@ kubectl config set-cluster k3d-aber --server=https://127.0.0.1:<port>
 stack lane added: the same steps CI's k8s-validation job runs, repeatable on a laptop.
 
 ```bash
-npm run dev:up        # cluster if absent, cert-manager and the internal CA, the ten images built
+npm run dev:up        # cluster if absent, cert-manager and the internal CA, the eleven images built
                       # and imported, helm upgrade --install with values-dev.yaml, every hook and
                       # rollout waited for, the daemon subscribed, helm test
 npm run dev:test      # validate.py and the stack lane from the host, through port-forwards
@@ -201,7 +201,7 @@ run this stack; **from a checkout** if you are changing it.
 
 ### A. From the published chart (no checkout, no image builds)
 
-The chart and the ten images this repository builds are published to GHCR as OCI artefacts. Helm
+The chart and the eleven images this repository builds are published to GHCR as OCI artefacts. Helm
 speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
@@ -750,6 +750,10 @@ docker build -f swagger-ui/Dockerfile           -t $NS/swagger-ui:$V .
 # db-init — THE SCHEMA, baked in. supabase/postgres with supabase/migrations/*.sql copied to
 # /migrations; context is supabase/, where that directory lives. It exists because the chain cannot
 # travel in the chart: a ConfigMap is capped at 1 MiB, which forced it to be gzipped, and Helm's
+# The historian -- timescale/timescaledb with pgBackRest, which timescaledb.physicalBackup runs inside
+# the server's container (archive_command, restore_command) and in its backup sidecar.
+docker build -f timescaledb/Dockerfile          -t $NS/timescaledb:$V timescaledb
+
 # release Secret has the same cap while holding those bytes TWICE -- as chart files and again
 # base64-encoded into the rendered ConfigMap, neither copy compressible. Satisfying one limit broke
 # the other. See supabase/db-init/Dockerfile for the measurements.
@@ -765,7 +769,7 @@ docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
 docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
                                                 -t $NS/test-runner:$V .
 
-for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service db-init swagger-ui test-runner; do
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service timescaledb db-init swagger-ui test-runner; do
   k3d image import $NS/$i:$V -c <cluster>   # or push to your registry
 done
 ```
@@ -774,7 +778,7 @@ done
 
 ## Publishing a release
 
-[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the ten images and
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the eleven images and
 then the chart, to GHCR over OCI, on a `v*` tag.
 
 ```bash

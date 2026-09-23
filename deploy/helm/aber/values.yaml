@@ -216,9 +216,11 @@ secrets:
 timescaledb:
   enabled: true
   image:
-    repository: timescale/timescaledb
-    # A version, not a floating tag.
-    tag: 2.29.2-pg17
+    # Built from timescaledb/Dockerfile: timescale/timescaledb:2.29.2-pg17 with pgBackRest added,
+    # which physicalBackup needs inside the server's container. Runs the server, the maintenance
+    # Job and the certificate-reload sidecar.
+    repository: ghcr.io/harri-llewelyn/aber/timescaledb
+    tag: ""
     pullPolicy: IfNotPresent
   database: postgres
   username: postgres

@@ -74,7 +74,7 @@ spec:
           install with a relation error that reads as a chart fault.
         */}}
         - name: wait-for-telemetry-table
-          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
@@ -105,7 +105,7 @@ spec:
           {{- end }}
       containers:
         - name: maintenance
-          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}

@@ -37,6 +37,6 @@ ghcr.io/harri-llewelyn/aber/aber  <version>   (chart)
 ```
 
 <!--
-  The ten images publish at the same version. The release workflow's job summary lists them; paste
+  The eleven images publish at the same version. The release workflow's job summary lists them; paste
   it here so a pull can be checked against the release.
 -->

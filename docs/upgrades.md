@@ -201,6 +201,14 @@ telemetry older than 14 days that no archive holds. The rollups keep their own w
 the old window, set `retainFor` before upgrading.** See `supabase/README.md`, *Raw telemetry is
 kept for a stated window*.
 
+**The historian runs this repository's image from the same release.** `timescaledb.image` moves
+from `timescale/timescaledb:2.29.2-pg17` to `ghcr.io/harri-llewelyn/aber/timescaledb` at the
+chart's version: the same image with pgBackRest added, for `timescaledb.physicalBackup`. Same
+PostgreSQL, same TimescaleDB, same data directory, so the upgrade restarts the historian once and
+changes nothing on its volume. A site that mirrors images into its own registry adds this one to
+the list; a site that pinned `timescaledb.image` in its values keeps the upstream image and cannot
+turn physical backup on until it unpins it.
+
 ### Migrations are forward-only
 
 There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;

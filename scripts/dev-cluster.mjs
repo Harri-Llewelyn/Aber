@@ -2,8 +2,8 @@
 /**
  * The development loop on a local k3d cluster: build, import, install, wait, test.
  *
- *   node scripts/dev-cluster.mjs up        create the cluster if absent, build and import the ten
- *                                          images, install or upgrade the chart, wait until the stack
+ *   node scripts/dev-cluster.mjs up        create the cluster if absent, build and import every
+ *                                          image, install or upgrade the chart, wait until the stack
  *                                          is consuming, run `helm test`
  *   node scripts/dev-cluster.mjs test      the stack lane and validate.py from the host, through
  *                                          port-forwards on the ports the suites default to
@@ -74,6 +74,8 @@ const IMAGES = [
   { name: 'i3x-service', file: 'i3x/Dockerfile', context: '.' },
   { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: 'gateway-credential' },
   { name: 'backup-service', file: 'backup-service/Dockerfile', context: 'backup-service' },
+  // The historian: timescale/timescaledb with pgBackRest, for timescaledb.physicalBackup.
+  { name: 'timescaledb', file: 'timescaledb/Dockerfile', context: 'timescaledb' },
   { name: 'db-init', file: 'supabase/db-init/Dockerfile', context: 'supabase' },
   // Carries docs/openapi.yaml and docs/i3x-openapi.yaml, so a spec edit needs this rebuild.
   { name: 'swagger-ui', file: 'swagger-ui/Dockerfile', context: '.' },
@@ -238,7 +240,7 @@ function ensureCertManager () {
 // ---------------------------------------------------------------------------------------------
 function buildImages (version, only) {
   const describe = describeVersion()
-  step(`build ${only ? only.join(', ') : 'the ten images'} as ${IMG_NS}/<name>:${version}`)
+  step(`build ${only ? only.join(', ') : `the ${IMAGES.length} images`} as ${IMG_NS}/<name>:${version}`)
   for (const img of IMAGES) {
     if (only && !only.includes(img.name)) continue
     const args = ['build', '-f', img.file, '-t', `${IMG_NS}/${img.name}:${version}`]

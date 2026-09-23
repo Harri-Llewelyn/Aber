@@ -74,3 +74,11 @@ supabaseFunctions:
   enabled: false
 e2e:
   enabled: false
+
+# --- The historian on its upstream image ---------------------------------------------------------
+# The rehearsal restores the historian from the service's pg_dump, so it needs no pgBackRest and
+# does not build the chart's historian image; this is the image that one is built FROM.
+timescaledb:
+  image:
+    repository: timescale/timescaledb
+    tag: 2.29.2-pg17

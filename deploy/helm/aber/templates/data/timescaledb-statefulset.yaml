@@ -109,7 +109,7 @@ spec:
         {{- toYaml .Values.timescaledb.podSecurityContext | nindent 8 }}
       containers:
         - name: timescaledb
-          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           {{- /*
             THE WORKER POOL, PASSED AS SERVER FLAGS RATHER THAN A postgresql.conf.
@@ -212,7 +212,7 @@ spec:
             {{- include "aber.dbTlsServerMounts" (dict "db" "timescaledb") | nindent 12 }}
             {{- end }}
         {{- if .Values.postgresTls.enabled }}
-        {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (printf "%s:%s" .Values.timescaledb.image.repository .Values.timescaledb.image.tag) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
+        {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .)) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
         {{- end }}
         {{- if .Values.databaseMetrics.enabled }}
         {{- include "aber.dbMetricsExporter" (dict "ctx" . "db" $component "database" .Values.timescaledb.database) | nindent 8 }}

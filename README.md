@@ -142,6 +142,7 @@ docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true -t $NS/
 docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
 docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
+docker build -f timescaledb/Dockerfile          -t $NS/timescaledb:$V timescaledb
 docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
 docker build -f swagger-ui/Dockerfile           -t $NS/swagger-ui:$V .
 docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V -t $NS/test-runner:$V .
@@ -151,7 +152,7 @@ docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestio
 k3d cluster create aber --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" --wait
 k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
-  gateway-credential backup-service db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c aber
+  gateway-credential backup-service timescaledb db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c aber
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 
@@ -393,8 +394,8 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
 | `test-db-tls` | `supabase/postgres:17.6.1.160` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
-| `timescaledb` | `timescale/timescaledb:2.29.2-pg17`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `timescaledb:5432`; `:9187` is scraped |
-| `timescaledb-maintenance` | `timescale/timescaledb:2.29.2-pg17` | hook Job: extension, retention, rollups, roles |
+| `timescaledb` | `ghcr.io/harri-llewelyn/aber/timescaledb` (`timescale/timescaledb:2.29.2-pg17` with pgBackRest), `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar, and the `pgbackrest` backup sidecar when `timescaledb.physicalBackup` is on | `timescaledb:5432`; `:9187` is scraped |
+| `timescaledb-maintenance` | `ghcr.io/harri-llewelyn/aber/timescaledb` | hook Job: extension, retention, rollups, roles |
 
 ---
 
