@@ -304,8 +304,8 @@
     {
       "id": 17,
       "type": "timeseries",
-      "title": "Messages Dropped by Reason",
-      "description": "Messages the daemon REFUSED, by reason, from `aber_ingestion_messages_dropped_total`. This is telemetry that was not recorded and will not be restated.\n\nTHIS PANEL IS HALF AN INSTRUMENT. The counter says a drop happened and how many; it cannot say WHICH DEVICE, under which edge node, because the metrics endpoint is served without a credential and carries no device data of any kind by design. That half is in the log store -- click any series to open it filtered to the same reason.\n\nThe two halves cannot disagree: `drop(\"<reason>\")` in ingestion.py derives the Prometheus label and the logged field from one string, and ingestion/test_structured_logging.py asserts they stay identical.\n\nTHE LINK SELECTS ON `service=\"ingestion\"`. The chart's Alloy applies that label; an external log stack must relabel `service` to the workload name or this link returns nothing.",
+      "title": "Messages Lost: Refused, Shed, Missed",
+      "description": "Three records of telemetry that was not written, which do not add up and are not stacked together.\n\nREFUSED, stacked by reason: messages the daemon received and declined, from `aber_ingestion_messages_dropped_total`. `write_queue_full` is the writer falling behind.\n\nSHED BY THE BROKER: `broker_publish_messages_dropped` from the Mosquitto exporter. Telemetry is QoS 0, so Mosquitto discards messages for a subscriber that cannot keep up; they never reach the daemon, and no reason above counts them. Broker-wide, not per subscriber. Alert: Broker Shedding Messages.\n\nMISSED IN SEQUENCE: `aber_ingestion_sequence_messages_missed_total`, the daemon inferring loss from Sparkplug `seq` gaps. Its series exists only once a node has gapped, so it reads 0 until then. A lower bound (`seq` is 8-bit), and the same loss as a broker shed when the subscriber shedding is this daemon.\n\nThe counter says how many; WHICH DEVICE is in the log store, because the metrics endpoint carries no device data. Click a refused series to open the logs for its reason. The link selects on `service=\"ingestion\"`, which the chart's Alloy applies; an external log stack must relabel `service` to the workload name.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -317,6 +317,24 @@
         "y": 14
       },
       "targets": [
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(broker_publish_messages_dropped[$__rate_interval]))",
+          "legendFormat": "shed by the broker"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(aber_ingestion_sequence_messages_missed_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "missed in sequence (lower bound)"
+        },
         {
           "refId": "A",
           "datasource": {
@@ -347,7 +365,66 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "normal",
+                  "group": "B"
+                }
+              },
+              {
+                "id": "links",
+                "value": []
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "normal",
+                  "group": "C"
+                }
+              },
+              {
+                "id": "links",
+                "value": []
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
