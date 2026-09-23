@@ -1359,9 +1359,12 @@ if __name__ == "__main__":
         print("[test_aas_export] jsonschema not installed: official-schema validation skipped")
     # Teardown AFTER the report, so a failing run still leaves its console output intact -- and
     # only when this run created the subject, or the AAS_TEST_DEVICE escape hatch would delete
-    # somebody's real asset.
+    # somebody's real asset. `exit=False` keeps the teardown reachable, so the exit status is
+    # set here from the result; the runner reads nothing else.
+    result = None
     try:
-        unittest.main(verbosity=2, exit=False)
+        result = unittest.main(verbosity=2, exit=False).result
     finally:
         if LIVE and PROVISION_FIXTURE:
             aas_fixture.teardown(SUPABASE_URL, TOKEN, PUBLISHABLE_KEY)
+    sys.exit(0 if result is not None and result.wasSuccessful() else 1)
