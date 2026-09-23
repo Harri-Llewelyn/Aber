@@ -308,19 +308,24 @@ class TheDefault(unittest.TestCase):
     the broker ACL is the only thing standing in front of it once it is on.
     """
 
-    def _reload_with(self, value):
-        previous = os.environ.get("DIRECTORY_MQTT_ENABLED")
-        if value is None:
-            os.environ.pop("DIRECTORY_MQTT_ENABLED", None)
-        else:
-            os.environ["DIRECTORY_MQTT_ENABLED"] = value
+    def _reload_with(self, value, group="Aber"):
+        """Reload with DIRECTORY_MQTT_ENABLED and SPARKPLUG_GROUP set, None meaning unset."""
+        names = {"DIRECTORY_MQTT_ENABLED": value, "SPARKPLUG_GROUP": group,
+                 "DIRECTORY_MQTT_TOPIC_PREFIX": None}
+        previous = {name: os.environ.get(name) for name in names}
+        for name, wanted in names.items():
+            if wanted is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = wanted
         try:
             return importlib.reload(directory_publish)
         finally:
-            if previous is None:
-                os.environ.pop("DIRECTORY_MQTT_ENABLED", None)
-            else:
-                os.environ["DIRECTORY_MQTT_ENABLED"] = previous
+            for name, was in previous.items():
+                if was is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = was
 
     def tearDown(self):
         importlib.reload(directory_publish)
@@ -332,6 +337,19 @@ class TheDefault(unittest.TestCase):
     def test_it_starts_when_asked(self):
         module = self._reload_with("true")
         self.assertTrue(module.start(FakeClient(), FakeSupabase()))
+
+    def test_the_prefix_is_derived_from_the_group(self):
+        self.assertEqual(self._reload_with("true", group="Broughton").DIRECTORY_MQTT_TOPIC_PREFIX,
+                         "Broughton/Directory/v1")
+
+    def test_it_refuses_to_start_with_no_group_to_publish_under(self):
+        """
+        The group has no default (ingestion.sparkplugGroup is required), so with neither it nor a
+        prefix there is no topic; inventing one would publish where the broker grants nothing.
+        """
+        module = self._reload_with("true", group=None)
+        self.assertEqual(module.DIRECTORY_MQTT_TOPIC_PREFIX, "")
+        self.assertFalse(module.start(FakeClient(), FakeSupabase()))
 
     def test_it_refuses_to_start_with_nothing_to_derive_from(self):
         """

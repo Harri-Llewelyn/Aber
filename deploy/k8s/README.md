@@ -154,6 +154,8 @@ speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 # What versions exist?
 helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.1.0
 
+# my-values.yaml must name ingestion.primaryHostId and ingestion.sparkplugGroup: both are fixed
+# for the life of the site, neither has a default, and the render refuses without them.
 helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --version 0.1.0 \
   --namespace aber --create-namespace \

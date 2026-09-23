@@ -147,7 +147,7 @@ rendering the default for it is the rename, not a disagreement.
 {{- define "aber.sparkplugGroup" -}}
 {{- $g := .Values.ingestion.sparkplugGroup | default "" -}}
 {{- if not $g -}}
-{{- fail "\n\naber: ingestion.sparkplugGroup is empty.\n\nIt is the Sparkplug group id -- the second segment of every topic this site publishes. Leave the\nkey out to take the default (Aber), or name the site's own group:\n\n  --set ingestion.sparkplugGroup=<the group this plant publishes under>\n\nOne topic level: no '/', '+', '#' or whitespace.\n" -}}
+{{- fail "\n\naber: ingestion.sparkplugGroup is not set.\n\nIt is the Sparkplug group id -- the second segment of every topic this site publishes -- and it is\nfixed at the first boot: changing it later re-addresses every gateway and all existing history.\nThere is deliberately no default, so the site names its own:\n\n  --set ingestion.sparkplugGroup=<the group this plant publishes under>\n\nOne topic level: no '/', '+', '#' or whitespace.\n" -}}
 {{- end -}}
 {{- if regexMatch "[/+#[:space:]]" $g -}}
 {{- fail (printf "\n\naber: ingestion.sparkplugGroup is %q, which is not one topic level.\n\nThe group is one segment of `spBv1.0/<group>/<TYPE>/<node>`, and the broker's Directory grant is\nderived from it. A value containing '/', '+', '#' or whitespace addresses a subtree nothing grants,\nand the broker drops the publish silently at QoS 0.\n" $g) -}}

@@ -42,6 +42,8 @@
  */
 
 export const MIGRATION_VARS = {
+  // The chart requires it and 0002 refuses to seed without it; the dev group.
+  sparkplug_group: 'Aber',
   supabase_anon_key: 'test-anon-key-not-a-real-jwt',
   gateway_revoke_secret: 'test-revoke-secret',
   forge_sweep_secret: 'test-sweep-secret',

@@ -97,6 +97,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   // The ISA-95 site, one setting. Empty until an administrator names it.
   const siteName = useSetting('site.name', '')
+  const sparkplugGroup = useSetting('sparkplug.group_id', '')
 
   /**
    * What the panel shows: a lane by key, an area by id, or a cell by id. Ids rather than objects
@@ -298,9 +299,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading site map…</div>
 
   const gw = gatewayFleetCounts(gwList)
-  // The ISA-95 enterprise is the Sparkplug group the gateways publish under; several groups are
-  // all named. The playback gateway is not a member of the plant.
-  const enterprise = [...new Set(gwList.filter(g => !g.is_shadow && g.sparkplug_group).map(g => g.sparkplug_group))].join(' / ')
+  // The ISA-95 enterprise is the site's Sparkplug group, named at install. The gateways' own
+  // groups answer only when the setting cannot be read; several are all named, and the playback
+  // gateway is not a member of the plant.
+  const enterprise = sparkplugGroup
+    || [...new Set(gwList.filter(g => !g.is_shadow && g.sparkplug_group).map(g => g.sparkplug_group))].join(' / ')
 
   const unfiledCells = cells.filter(c => !c.area_id && !c.is_archived)
   const columns = COLUMNS_FOR(areas.length)

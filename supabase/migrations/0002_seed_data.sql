@@ -7611,7 +7611,7 @@ ON CONFLICT (name) DO NOTHING;
 -- rather than a literal -- psql does not substitute `:variables` inside dollar quotes. Each is
 -- seeded only into an empty value, so the chart names a destination once and the page owns it
 -- from then on.
-\if :{?sparkplug_group}           \else \set sparkplug_group 'Aber'  \endif
+\if :{?sparkplug_group}           \else \set sparkplug_group ''      \endif
 \if :{?archive_site_key}          \else \set archive_site_key          '' \endif
 \if :{?archive_endpoint}          \else \set archive_endpoint          '' \endif
 \if :{?archive_region}            \else \set archive_region            '' \endif
@@ -7726,9 +7726,16 @@ SELECT public.seed_setting(
 -- spBv1.0/<group>/<TYPE>/<node>, so a separator in it addresses a subtree nothing grants.
 DO $$
 DECLARE
-    v_group  text := coalesce(nullif(current_setting('aber.sparkplug_group', true), ''), 'Aber');
+    v_group  text := coalesce(current_setting('aber.sparkplug_group', true), '');
     v_stored text;
 BEGIN
+    -- No default, as the chart has none: db-init always passes ingestion.sparkplugGroup, and a run
+    -- without it would otherwise seed a group nobody chose into a setting that can never change.
+    IF v_group = '' THEN
+        RAISE EXCEPTION
+            '0002: sparkplug_group is not set. db-init passes the chart''s ingestion.sparkplugGroup; '
+            'a manual run passes -v sparkplug_group=<group>. It is fixed at the first boot.';
+    END IF;
     IF v_group ~ '[/+#[:space:]]' THEN
         RAISE EXCEPTION
             '0002: sparkplug_group % is not one topic level. The group is one segment of '
