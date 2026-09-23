@@ -54,6 +54,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
 
 METRICS_URL = os.getenv("INGESTION_METRICS_URL", "http://ingestion-metrics:9108/metrics")
+# The BROKER's own exporter, and the only place a message lost between publisher and daemon
+# is counted. Telemetry is QoS 0, so Mosquitto sheds rather than buffers for a subscriber
+# that has stopped reading -- and the daemon cannot count what never reached it. Optional:
+# the exporter is present only when metrics are enabled, and a run without it is still valid,
+# it just cannot say where an undelivered message went.
+BROKER_METRICS_URL = os.getenv("BROKER_METRICS_URL", "http://mosquitto:9234/metrics")
 
 # TimescaleDB, for the storage figures. Optional: without it every other measurement still runs.
 DB_HOST = os.getenv("DB_HOST", "")
@@ -245,7 +251,8 @@ def parse_exposition(text, at=None):
     The exposition as {name: value} for plain series and {name: {labels: value}} for labelled ones.
 
     Labelled series are keyed by the label string as exposed, so a caller asks for
-    `sample.labelled['aber_ingestion_messages_total']['msg_type="DDATA"']`.
+    `sample.labelled['aber_ingestion_messages_total']['msg_type="ddata"']` -- the daemon
+    lowercases the type, so `Sample.received_of` is the way to ask rather than a literal.
     """
     plain, labelled = {}, defaultdict(dict)
     for line in text.splitlines():
@@ -270,6 +277,20 @@ def scrape():
         return parse_exposition(response.read().decode("utf-8"))
 
 
+def broker_dropped_total():
+    """
+    Messages the broker discarded rather than delivered, or None when it cannot be asked.
+
+    Never fatal: this is corroboration for a gap the run can already see, not the measurement.
+    """
+    try:
+        with urllib.request.urlopen(BROKER_METRICS_URL, timeout=10) as response:
+            return parse_exposition(response.read().decode("utf-8")).get(
+                "broker_publish_messages_dropped", None)
+    except Exception:
+        return None
+
+
 class Sample:
     def __init__(self, plain, labelled, at):
         self.plain = plain
@@ -289,10 +310,21 @@ class Sample:
         return out
 
     def received_ddata(self):
+        return self.received_of("DDATA")
+
+    def received_of(self, *types):
+        """
+        The daemon counts `messages_<msg_type.lower()>`, so its label reads `msg_type="ddata"`
+        while the topic and the Sparkplug specification both say DDATA. Matching case-sensitively
+        on the topic's spelling silently returns zero, which reads as "the daemon received
+        nothing" -- indistinguishable from a broker that dropped the lot.
+        """
+        wanted = {f'msg_type="{t.lower()}"' for t in types}
+        total = 0.0
         for labels, value in self.labelled.get("aber_ingestion_messages_total", {}).items():
-            if 'msg_type="DDATA"' in labels:
-                return value
-        return 0.0
+            if labels.lower() in wanted:
+                total += value
+        return total
 
     def write_buckets(self):
         """The write histogram's cumulative buckets as {upper bound: count}."""
@@ -543,6 +575,7 @@ def run_step(publishers, rate, duration, settle):
 
     time.sleep(settle)
     before = scrape()
+    broker_before = broker_dropped_total()
     sent_at_sample = sum(p.published for p in publishers)
     abandoned_at_sample = sum(p.abandoned for p in publishers)
     depths = []
@@ -554,6 +587,7 @@ def run_step(publishers, rate, duration, settle):
         except Exception:
             pass
     after = scrape()
+    broker_after = broker_dropped_total()
     published = sum(p.published for p in publishers) - sent_at_sample
     abandoned = sum(p.abandoned for p in publishers) - abandoned_at_sample
     for publisher in publishers:
@@ -594,6 +628,9 @@ def run_step(publishers, rate, duration, settle):
         "written_per_second": round(written / window, 1) if window else 0.0,
         "rows_per_second": round(metrics_written / window, 1) if window else 0.0,
         "undelivered": max(int(published - received), 0),
+        "broker_dropped": (
+            max(int(broker_after - broker_before), 0)
+            if broker_before is not None and broker_after is not None else None),
         "queue_depth_start": int(depth_start),
         "queue_depth_end": int(depth_end),
         "queue_depth_max": int(max(depths + [depth_end, depth_start])),
@@ -617,30 +654,35 @@ def verdict(steps):
     dropped = [s for s in steps if s["dropped"]]
     limited = [s for s in steps if s["generator_limited"]]
     sustained = [s for s in steps if not s["saturated"] and not s["generator_limited"]]
-    highest = max((s["written_per_second"] for s in sustained), default=0.0)
+    # A plan whose every step gave way has no sustained rate to name -- a soak of one step, held
+    # to see whether the ramp's answer holds, is the usual case -- and "0 msg/s" would read as a
+    # stack that wrote nothing.
+    highest = max((s["written_per_second"] for s in sustained), default=None)
+    highest_text = (f"{highest:.0f} msg/s written" if highest is not None
+                    else "none in this plan held")
 
     if saturated:
         first = saturated[0]
         return (
             f"The historian writer's queue grew at {first['target_rate']:.0f} msg/s "
             f"(depth {first['queue_depth_start']} -> {first['queue_depth_end']}). "
-            f"Highest sustained rate: {highest:.0f} msg/s written."
+            f"Highest sustained rate: {highest_text}."
         )
     if dropped:
         first = dropped[0]
         reasons = ", ".join(f"{r} x{int(v)}" for r, v in first["dropped"].items())
         return (
             f"Messages were dropped at {first['target_rate']:.0f} msg/s ({reasons}). "
-            f"Highest sustained rate: {highest:.0f} msg/s written."
+            f"Highest sustained rate: {highest_text}."
         )
     if limited:
         first = limited[0]
         return (
             f"The stack kept up with every step. This generator could not reach "
             f"{first['target_rate']:.0f} msg/s (published {first['published_per_second']:.0f}), so "
-            f"the limit above {highest:.0f} msg/s is the generator's and not the stack's."
+            f"the limit above {highest or 0:.0f} msg/s is the generator's and not the stack's."
         )
-    return f"The stack sustained every step in the plan; highest {highest:.0f} msg/s written."
+    return f"The stack sustained every step in the plan; highest {highest or 0:.0f} msg/s written."
 
 
 def render(report):
@@ -649,10 +691,10 @@ def render(report):
     lines.append(f"Fleet: {report['gateways']} gateways, {report['devices']} devices, "
                  f"{report['metrics_per_message']} metrics per message")
     lines.append("")
-    header = ("| target | published/s | received/s | written/s | rows/s | queue end | msg/txn "
-              "| write mean | p95 | verdict |")
+    header = ("| target | published/s | received/s | written/s | rows/s | undelivered | queue end "
+              "| msg/txn | write mean | p95 | verdict |")
     lines.append(header)
-    lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
+    lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
     for step in report["steps"]:
         # Saturation and drops are reported together where both happened: a full queue is what
         # produces `write_queue_full`, and a note carrying only one of them loses the other.
@@ -666,10 +708,15 @@ def render(report):
             note = f"generator-limited ({step['abandoned']} abandoned)"
         else:
             note = "sustained"
+        # An undelivered message is the one loss the daemon cannot see, so say who dropped it
+        # where the broker was able to confirm it.
+        if step["undelivered"] and step.get("broker_dropped"):
+            note += f"; broker shed {step['broker_dropped']:,}"
         lines.append(
             f"| {step['target_rate']:.0f} | {step['published_per_second']:.0f} "
             f"| {step['received_per_second']:.0f} | {step['written_per_second']:.0f} "
-            f"| {step['rows_per_second']:.0f} | {step['queue_depth_end']} "
+            f"| {step['rows_per_second']:.0f} | {step['undelivered']:,} "
+            f"| {step['queue_depth_end']} "
             f"| {step['messages_per_transaction']:.0f} "
             f"| {step['write_mean_ms'] if step['write_mean_ms'] is not None else '-'} ms "
             f"| {step['write_p95_bucket_ms'] if step['write_p95_bucket_ms'] is not None else '-'} ms "
@@ -765,7 +812,7 @@ def main():
         consumed = sum(
             value - birth_before.labelled.get("aber_ingestion_messages_total", {}).get(labels, 0.0)
             for labels, value in sample.labelled.get("aber_ingestion_messages_total", {}).items()
-            if 'msg_type="DBIRTH"' in labels or 'msg_type="NBIRTH"' in labels
+            if labels.lower() in ('msg_type="dbirth"', 'msg_type="nbirth"')
         )
         if consumed >= births:
             break

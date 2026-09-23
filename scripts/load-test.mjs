@@ -54,6 +54,11 @@ if (!/^[A-Za-z0-9-]+$/.test(PREFIX)) die(`--prefix '${PREFIX}' must be letters, 
 // `_` is a LIKE wildcard, and every fixture name carries three of them.
 const LIKE = `${PREFIX}\\_%' ESCAPE '\\`;
 
+// Node has no synchronous sleep, and this script is deliberately sequential.
+function sleepSync (ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function kubectl (args, opts = {}) {
   return spawnSync('kubectl', ['-n', NAMESPACE, ...args], { encoding: 'utf8', maxBuffer: 1 << 28, ...opts });
 }
@@ -227,7 +232,25 @@ function run () {
   console.log(`  ${applied.stdout.trim()}`);
 
   step('Waiting for the generator to start');
-  const ready = kubectl(['wait', '--for=condition=ready', 'pod', '-l', `job-name=${JOB}`, '--timeout=10m'],
+  // `kubectl wait` on a LABEL SELECTOR exits non-zero the moment it matches nothing, rather than
+  // waiting for something to match -- and the Job controller has not created the pod yet when the
+  // apply returns. The first run of this script raced exactly there and printed the Job's events
+  // for a pod that was starting normally. So wait for the pod to EXIST first, by name.
+  let podName = '';
+  const appears = Date.now() + 120_000;
+  while (Date.now() < appears) {
+    const found = kubectl(['get', 'pods', '-l', `job-name=${JOB}`,
+      '-o', 'jsonpath={.items[0].metadata.name}']);
+    podName = (found.stdout || '').trim();
+    if (podName) break;
+    sleepSync(2000);
+  }
+  if (!podName) {
+    console.error(`  no pod was created for the Job within 120s; the Job's events:`);
+    kubectl(['describe', 'job', JOB], { stdio: 'inherit' });
+    process.exit(1);
+  }
+  const ready = kubectl(['wait', '--for=condition=ready', `pod/${podName}`, '--timeout=10m'],
     { stdio: 'inherit' });
   if (ready.status !== 0) {
     console.error('  the pod did not become ready; the Job\'s events:');

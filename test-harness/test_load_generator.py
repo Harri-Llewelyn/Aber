@@ -60,6 +60,9 @@ def step(**overrides):
         "target_rate": 100.0, "published_per_second": 100.0, "written_per_second": 100.0,
         "queue_depth_start": 0, "queue_depth_end": 0,
         "dropped": {}, "saturated": False, "generator_limited": False,
+        "received_per_second": 100.0, "rows_per_second": 1000.0,
+        "undelivered": 0, "broker_dropped": 0, "abandoned": 0,
+        "messages_per_transaction": 1.0, "write_mean_ms": 1.0, "write_p95_bucket_ms": 2.0,
     }
     base.update(overrides)
     return base
@@ -89,8 +92,12 @@ class ExpositionTest(unittest.TestCase):
         "# TYPE aber_ingestion_up gauge",
         "aber_ingestion_up 1.0",
         "aber_ingestion_write_queue_depth 42.0",
-        'aber_ingestion_messages_total{msg_type="DDATA"} 900.0',
-        'aber_ingestion_messages_total{msg_type="DBIRTH"} 12.0',
+        # LOWERCASE, as the daemon writes it: it counts `messages_<msg_type.lower()>`. The first
+        # run of this generator read zero received messages for exactly this reason, while the
+        # write path was busy -- the fixture had been written to the topic's spelling, not the
+        # daemon's, so the suite agreed with the bug.
+        'aber_ingestion_messages_total{msg_type="ddata"} 900.0',
+        'aber_ingestion_messages_total{msg_type="dbirth"} 12.0',
         'aber_ingestion_messages_dropped_total{reason="write_queue_full"} 7.0',
         'aber_ingestion_messages_dropped_total{reason="gateway_binding"} 3.0',
         'aber_ingestion_write_seconds_bucket{le="0.005"} 10.0',
@@ -113,6 +120,19 @@ class ExpositionTest(unittest.TestCase):
 
     def test_ddata_is_taken_from_the_labelled_message_counter(self):
         self.assertEqual(self.sample.received_ddata(), 900.0)
+
+    def test_the_message_type_is_matched_whatever_case_the_daemon_exposes(self):
+        """
+        The daemon lowercases the type; the topic and the specification say DDATA. A
+        case-sensitive match returns 0.0, which is indistinguishable from a broker that
+        delivered nothing -- so the run reports a stack receiving no messages while writing
+        them at full rate.
+        """
+        for spelling in ("DDATA", "ddata", "DData"):
+            self.assertEqual(self.sample.received_of(spelling), 900.0, spelling)
+
+    def test_births_are_counted_across_both_birth_types(self):
+        self.assertEqual(self.sample.received_of("DBIRTH", "NBIRTH"), 12.0)
 
     def test_drops_are_summed_across_reasons_and_readable_one_by_one(self):
         self.assertEqual(self.sample.dropped_total(), 10.0)
@@ -220,6 +240,15 @@ class VerdictTest(unittest.TestCase):
         ])
         self.assertIn("write_queue_full", result)
 
+    def test_a_soak_whose_only_step_gave_way_does_not_report_zero_as_the_rate(self):
+        """The 1250 msg/s soak of 2026-09-23: one step, saturated. It wrote 1226/s, not 0."""
+        result = load_generator.verdict([
+            step(target_rate=1250, written_per_second=1226, saturated=True,
+                 queue_depth_start=78, queue_depth_end=1050),
+        ])
+        self.assertNotIn("rate: 0 msg/s", result)
+        self.assertIn("none in this plan held", result)
+
     def test_a_plan_the_stack_absorbed_says_so(self):
         result = load_generator.verdict([step(target_rate=100, written_per_second=100)])
         self.assertIn("sustained every step", result)
@@ -231,6 +260,36 @@ class VerdictTest(unittest.TestCase):
             step(target_rate=1000, written_per_second=505, saturated=True),
         ])
         self.assertIn("480 msg/s", result)
+
+
+class UndeliveredTest(unittest.TestCase):
+    """
+    A message lost between the publisher and the daemon is the one loss the daemon cannot count:
+    telemetry is QoS 0, so the broker sheds it for a subscriber that has stopped reading and every
+    `aber_ingestion_messages_dropped_total` reason stays at zero. A run that showed only the
+    daemon's counters would report a clean saturation and hide the data loss underneath it.
+    """
+
+    def report(self, **overrides):
+        return {"gateways": 1, "devices": 1, "metrics_per_message": 10, "verdict": "-",
+                "steps": [step(**overrides)]}
+
+    def test_the_broker_s_own_counter_explains_an_undelivered_gap(self):
+        out = load_generator.render(self.report(
+            target_rate=2000, published_per_second=2000, received_per_second=1540,
+            written_per_second=1506, undelivered=41_400, broker_dropped=22_127, saturated=True))
+        self.assertIn("broker shed 22,127", out)
+        self.assertIn("queue growing", out)
+
+    def test_a_gap_the_broker_cannot_confirm_is_not_attributed_to_it(self):
+        """No exporter means no claim: the gap is still reported, its cause is not invented."""
+        out = load_generator.render(self.report(
+            target_rate=2000, undelivered=41_400, broker_dropped=None))
+        self.assertIn("41,400", out)
+        self.assertNotIn("broker shed", out)
+
+    def test_every_step_carries_the_undelivered_column(self):
+        self.assertIn("undelivered", load_generator.render(self.report()))
 
 
 class TimestampTest(unittest.TestCase):

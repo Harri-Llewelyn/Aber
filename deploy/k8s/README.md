@@ -61,9 +61,20 @@ and the two databases, Prometheus and Loki grow against their retention settings
 keeps 30 days or 8 GB of metrics, whichever comes first. Size for the retention you configure.
 
 **What the stack does under load is a separate question, and it is measured separately.**
-[`test-harness/README.md`](../../test-harness/README.md), *The scale envelope*, carries the method
-and the figures: sustained messages per second, device count, metric count, chunk growth, and which
-of them gives way first.
+[`test-harness/README.md`](../../test-harness/README.md), *The scale envelope*, carries the method,
+the full tables and what was not measured. The headline, measured 2026-09-23 on a 16 vCPU
+development node with the historian at its stock tuning in a 1 GiB container:
+
+| | Measured | Where it breaks first |
+| :--- | :--- | :--- |
+| **Sustained** | **1,000 msg/s** (10,000 rows/s) held for 20 minutes, queue flat at 3 → 7 | — |
+| **Knee** | 1,250 msg/s: held 90 s, failed a 20-minute soak | the historian writer's single thread reaches a 0.98 duty cycle with 15 of 16 vCPU idle |
+| **Beyond it** | 1,500 msg/s and up: queue grows to its 10,000 cap | the broker sheds QoS 0 telemetry the daemon never sees and no counter in the stack records |
+| **Disk** | 367 bytes per row, 74 % of it index | 295 GiB/day per 1,000 devices at 1 msg/s × 10 metrics, before compression |
+
+The knee is architectural — one writer, one transaction per batch, a commit that waits on fsync —
+so a bigger node does not move it. Size the historian's disk from the last row and the fleet's
+rate from the first.
 
 ### Local cluster with k3d
 
