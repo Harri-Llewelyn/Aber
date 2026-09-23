@@ -225,9 +225,15 @@ timescaledb:
   persistence:
     enabled: true
     size: 20Gi
-    # Inherits global.storageClass when empty.
+    # Inherits global.storageClass when empty. THE CLASS SETS THE INGEST CEILING: every commit
+    # waits on an fsync of the WAL, so local NVMe or SSD, not a network volume. See
+    # deploy/k8s/README.md, "The disk under the historian".
     storageClass: ""
     accessMode: ReadWriteOnce
+  # Compression of full-page images in the WAL (off, pglz, lz4, zstd). Measured on this workload:
+  # 0.5-4.7% fewer WAL bytes, more as checkpoints come closer together, at no measurable time.
+  # It does not reduce the number of fsyncs, which is what sets the ingest ceiling.
+  walCompression: lz4
   # The image's `postgres` user is uid/gid 70 (Alpine). The entrypoint runs as root and chowns,
   # so this only becomes load-bearing if `runAsUser` is ever set.
   podSecurityContext:

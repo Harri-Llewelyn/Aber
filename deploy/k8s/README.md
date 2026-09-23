@@ -57,8 +57,62 @@ Expect the install itself to saturate four cores — it is the most CPU-hungry m
 finishes rather than fails. Steady-state CPU on an idle stack is under half a core.
 
 These figures are an **idle stack with no gateways connected**. Ingestion throughput moves CPU,
-and the two databases, Prometheus and Loki grow against their retention settings — `observability`
-keeps 30 days or 8 GB of metrics, whichever comes first. Size for the retention you configure.
+and the volumes below grow against their own bounds. Size the disk from them, not from the idle
+figure.
+
+#### The disk under the historian
+
+**The historian's ingest ceiling is the latency of an fsync on the disk under its WAL.** The
+daemon writes telemetry on one thread, one transaction per batch, and every commit waits for its
+WAL to reach the disk. At low rates the mean write in the scale envelope was about 4 ms, almost all
+of it that fsync. The single writer's duty cycle is fsync latency times transactions a second
+([`test-harness/README.md`](../../test-harness/README.md), *Results*), so the ceiling moves with
+the disk, not with CPU. The envelope was measured on a Docker Desktop virtual disk: local NVMe can
+be several times faster, a network volume several times slower.
+
+- **Put the historian on local NVMe or SSD.** On k3s, `local-path` places the volume on whatever
+  the node has. `timescaledb.persistence.storageClass` chooses the class.
+- **Put the WAL on its own volume where the platform allows it.** Commits then do not queue
+  behind the data files' writes.
+- **`timescaledb.walCompression` is `lz4` by default.** It compresses the full-page images in the
+  WAL: 0.5 to 4.7 % fewer WAL bytes when measured, more as checkpoints come closer together, at no
+  measurable cost. It does not reduce the number of fsyncs, so it does not move the ceiling.
+- **`commit_delay` does nothing here.** Group commit shares one fsync between concurrent
+  committers, and the writer is one thread.
+
+#### What grows, and what bounds it
+
+Disk is returned only when a chunk or partition is dropped (#393); deleting rows frees nothing.
+Each row below grows until its own bound. The per-row figures were measured on
+`timescale/timescaledb:2.29.2-pg17` with synthetic telemetry shaped like the stack's (24-character
+asset ids, ten metric names): raw **309 bytes a row, 72 % of it index**; a rollup row **179 to 185
+bytes**. Compressed raw was **8.4 bytes a row**, but that is 37× on smooth synthetic values; real
+signals compress less, so plan on 10×.
+
+The two example fleets are **S**, 100 devices × 10 metrics every 30 s (2.9 M rows a day, 1,000
+series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,000 series).
+
+| What | Bound | S | F |
+| :--- | :--- | ---: | ---: |
+| Raw telemetry, open chunk + `compressAfter` (uncompressed) | `timescaledb.retention.chunkInterval` × 2 | ~0.9 GB | ~22 GB |
+| Raw telemetry, the rest of the window (compressed) | `retainFor`, 14 days | ~1 GB | ~375 GB |
+| `telemetry_1m` (not compressed) | `oneMinuteRetainFor`, 180 days | ~46 GB | ~464 GB |
+| `telemetry_5m` (not compressed) | `fiveMinuteRetainFor`, 1 year | ~19 GB | ~188 GB |
+| `telemetry_1h` (not compressed) | `oneHourRetainFor`, 5 years | ~8 GB | ~81 GB |
+| WAL, each database | `max_wal_size`, 1 GB by default | 1 GB | 1 GB |
+| `digital_thread` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
+| Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
+| Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
+| Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
+| Storage (models, captures, floor plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
+| Backups | `backup.retentionDays` (14), on a 20 Gi volume | each backup includes the historian | see #403 |
+
+**The rollups dominate, and they are not compressed.** At S the 1-minute rollup alone reaches
+about 46 GB, more than the historian's default 20 Gi volume; at S's rate that volume fills in
+roughly two months. Rollup rows are written for each bucket with data, so a report-by-exception
+fleet (#400) that refreshes every 120 s writes about half as many 1-minute rows. Compressing the
+rollups (measured at about 5×) is #415. Until then, size the historian from the rollup rows and
+their retention, or shorten `oneMinuteRetainFor`.
 
 **What the stack does under load is a separate question, and it is measured separately.**
 [`test-harness/README.md`](../../test-harness/README.md), *The scale envelope*, carries the method,
@@ -73,8 +127,8 @@ development node with the historian at its stock tuning in a 1 GiB container:
 | **Disk** | 367 bytes per row, 74 % of it index | 295 GiB/day per 1,000 devices at 1 msg/s × 10 metrics, before compression |
 
 The knee is architectural — one writer, one transaction per batch, a commit that waits on fsync —
-so a bigger node does not move it. Size the historian's disk from the last row and the fleet's
-rate from the first.
+so a bigger node does not move it, and a faster disk does (*The disk under the historian*). Size
+the historian's disk from *What grows* and the fleet's rate from the first row.
 
 ### Local cluster with k3d
 

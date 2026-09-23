@@ -136,6 +136,8 @@ spec:
             - max_parallel_workers={{ .Values.timescaledb.workers.parallel }}
             - -c
             - timescaledb.telemetry_level={{ .Values.timescaledb.telemetryLevel }}
+            - -c
+            - wal_compression={{ .Values.timescaledb.walCompression | default "off" }}
             {{- if and .Values.databaseMetrics.enabled .Values.databaseMetrics.statementStats }}
             {{- /*
               TIMESCALEDB STAYS FIRST IN THE LIST. The image writes `shared_preload_libraries =
