@@ -87,17 +87,34 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   const jsLength = need(js, /SPARKPLUG_ID_LENGTH\s*=\s*(\d+)/, 'SPARKPLUG_ID_LENGTH in sparkplugId.js');
   const jsRegex = need(js, /SPARKPLUG_ID_REGEX\s*=\s*\/\^\(([a-z|]+)\)\[0-9a-f\]\{(\d+)\}\$\//, 'SPARKPLUG_ID_REGEX in sparkplugId.js');
 
-  // e.g. ('dev'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21)). A generated column
-  // cannot be replaced by a later migration, so scanning the whole chain must still find exactly
-  // the two in 0001.
-  const generated = [...SCHEMA.matchAll(
+  // e.g. ('dev'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21)). 0001 declares each
+  // column twice, in its CREATE TABLE IF NOT EXISTS and in the ADD COLUMN IF NOT EXISTS that
+  // converges an older table, so declarations are grouped by the table statement they sit in:
+  // exactly devices and gateways, and every declaration of one table must agree.
+  const declarations = [...SCHEMA.matchAll(
     /sparkplug_id text GENERATED ALWAYS AS \(\('([a-z]+)'::text \|\| substr\(encode\(uuid_send\(id\), 'hex'::text\), 1, (\d+)\)\)\) STORED/g
-  )];
-  if (generated.length !== 2) {
-    problems.push(`sparkplugId: expected 2 generated sparkplug_id columns (devices, gateways) across the applied chain, found ${generated.length}`);
+  )].map((m) => {
+    const tables = [...SCHEMA.slice(0, m.index).matchAll(/^(?:CREATE TABLE(?: IF NOT EXISTS)?|ALTER TABLE(?: ONLY)?(?: IF EXISTS)?) public\.(\w+)/gm)];
+    return { table: tables.length ? tables[tables.length - 1][1] : '(unknown)', prefix: m[1], width: m[2] };
+  });
+  const byTable = new Map();
+  for (const d of declarations) {
+    const key = `${d.prefix}/${d.width}`;
+    byTable.set(d.table, (byTable.get(d.table) ?? new Set()).add(key));
+  }
+  const tableNames = [...byTable.keys()].sort().join(',');
+  const conflicting = [...byTable].filter(([, forms]) => forms.size > 1);
+  if (tableNames !== 'devices,gateways') {
+    problems.push(`sparkplugId: expected generated sparkplug_id columns on devices and gateways, found them on "${tableNames}"`);
+  } else if (conflicting.length > 0) {
+    for (const [table, forms] of conflicting) {
+      problems.push(`sparkplugId: ${table}.sparkplug_id is declared ${forms.size} different ways across the chain: ${[...forms].join(' vs ')}`);
+    }
   } else if (jsDevice && jsGateway && jsHex && jsLength && jsRegex) {
-    const sqlPrefixes = generated.map((m) => m[1]).sort();
-    const sqlWidths = [...new Set(generated.map((m) => m[2]))];
+    const generated = [...byTable.values()].map((forms) => [...forms][0].split('/'));
+    ok.push(`sparkplugId: ${declarations.length} declarations resolve to one column each on devices and gateways`);
+    const sqlPrefixes = generated.map(([prefix]) => prefix).sort();
+    const sqlWidths = [...new Set(generated.map(([, width]) => width))];
     compare('sparkplugId', 'type prefixes', [jsDevice[1], jsGateway[1]].sort().join(','), sqlPrefixes.join(','));
     if (sqlWidths.length !== 1) {
       problems.push(`sparkplugId: the two generated columns disagree on hex width: ${sqlWidths.join(' vs ')}`);
