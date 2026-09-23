@@ -99,18 +99,29 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO service_role;
 
 -- Self-check. The failure this guards against is silent in the direction that matters least and
 -- loudest in the direction that matters most: a MISSING policy denies, so the 3D model viewer
--- simply shows nothing and nobody reads a log. Assert the set is complete instead.
+-- simply shows nothing and nobody reads a log. Assert the set is complete instead. By name, not by
+-- count: a policy another chart version left behind is reported, and does not fail the boot.
 DO $$
 DECLARE
-  n int;
+  expected CONSTANT text[] := ARRAY[
+    'asset_3d_models_select_privileged', 'asset_3d_models_insert_privileged',
+    'asset_3d_models_update_privileged', 'asset_3d_models_delete_privileged'];
+  missing text[];
+  extra   text[];
 BEGIN
-  SELECT count(*) INTO n FROM pg_policies
-   WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'asset_3d_models_%';
-  IF n <> 4 THEN
-    RAISE EXCEPTION 'expected 4 asset_3d_models_* policies on storage.objects, found %', n;
+  SELECT array_agg(e) INTO missing FROM unnest(expected) e
+   WHERE NOT EXISTS (SELECT 1 FROM pg_policies p
+                      WHERE p.schemaname = 'storage' AND p.tablename = 'objects' AND p.policyname = e);
+  IF missing IS NOT NULL THEN
+    RAISE EXCEPTION 'asset-3d-models policies missing on storage.objects: %', missing;
   END IF;
-  RAISE NOTICE 'storage policies reconciled (4 policies on storage.objects).';
+  SELECT array_agg(policyname) INTO extra FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'asset\_3d\_models\_%' AND policyname <> ALL (expected);
+  IF extra IS NOT NULL THEN
+    RAISE WARNING 'asset-3d-models policies this file does not create: %. Drop them if nothing needs them.', extra;
+  END IF;
+  RAISE NOTICE 'storage policies reconciled (4 asset-3d-models policies on storage.objects).';
 END $$;
 
 -- =============================================================================================
