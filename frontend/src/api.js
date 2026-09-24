@@ -2081,6 +2081,8 @@ const apiMethods = {
         // a row that predates the column reads UNKNOWN, and the Directory page says so in words
         // instead of guessing on its behalf.
         exposure: s.exposure,
+        // The image the release deploys for the service (0007); null when nothing recorded one.
+        image: s.image ?? null,
         status: s.status,
         last_heartbeat: s.last_heartbeat
       }));

@@ -575,6 +575,26 @@ timestamp, the most convincing kind. `scripts/check-docs-drift.mjs` asserts ever
 exists in `prometheus.yml`; the issue that requested this named `kong`, which had already become
 `envoy` by the time it was built.
 
+### The Directory names the image each service runs (`0007_the_directory_names_the_image_each_service_runs.sql`)
+
+`directory_services.image` is the image reference the release deploys for a row's workload, and
+the Directory's Version column shows its tag. It comes from the chart, not from the cluster:
+
+- `aber.directoryImages` in `_helpers.tpl` renders a JSON map, component to image, using the same
+  expression each workload's own `image:` uses. A component the chart does not deploy is left out.
+- db-init passes it to every migration as `directory_images`. `0007` calls
+  `record_directory_images()` with it, which writes the sixteen chart-managed rows and clears any
+  whose component is absent. Rows registered by anything else are not touched.
+- A runner that passes no map (`npm run test:db`, `verify-schema-equivalence.mjs`) records nothing.
+
+So the column is the release's pin, recorded at each install and upgrade. It does not see a
+container that failed to roll out, or a mutable tag that now points at a different image.
+Host Metrics Exporter carries Alloy's image, because node_exporter's collectors run inside Alloy.
+
+The component list is written twice, as the `served_by` rows in `0007` and the helper's lists, and
+`check-docs-drift.mjs` holds the two equal and checks that each component is one the chart
+renders. Adding a row the chart deploys means adding it to both.
+
 ### Migrations that must run once, and the ledger that decides (`0040`, `0053`)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
