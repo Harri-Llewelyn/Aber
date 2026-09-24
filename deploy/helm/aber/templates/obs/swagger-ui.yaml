@@ -75,6 +75,10 @@ spec:
               value: "true"
             - name: DISPLAY_REQUEST_DURATION
               value: "true"
+            # Off. The default draws a badge fetched from validator.swagger.io, passing it the
+            # spec's URL. `none` is Swagger UI's own spelling for disabled.
+            - name: VALIDATOR_URL
+              value: none
           readinessProbe:
             httpGet:
               path: /

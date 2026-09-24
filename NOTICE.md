@@ -109,16 +109,16 @@ project's own repository.
 
 | Component | Project |
 | :--- | :--- |
-| `supabase/postgres:17.6.1.160` | PostgreSQL and its extensions, packaged by Supabase |
+| `supabase/postgres:17.6.1.175` | PostgreSQL and its extensions, packaged by Supabase |
 | `postgrest/postgrest:v14.12` | PostgREST |
 | `supabase/gotrue:v2.189.0` | Supabase Auth |
 | `supabase/realtime:v2.102.3` | Supabase Realtime |
 | `supabase/storage-api:v1.60.4` | Supabase Storage |
-| `supabase/edge-runtime:v1.74.2` | Supabase Edge Runtime |
+| `supabase/edge-runtime:v1.77.0` | Supabase Edge Runtime |
 | `supabase/postgres-meta:v0.96.6` | Supabase postgres-meta |
 | `supabase/studio:2026.07.07-sha-a6a04f2` | Supabase Studio |
 | `envoyproxy/envoy:v1.39.1` | Envoy Proxy |
-| `swaggerapi/swagger-ui:v5.32.14` | Swagger UI |
+| `swaggerapi/swagger-ui:v5.33.0` | Swagger UI |
 | `node:24-alpine`, `alpine:3.24` | Node.js, Alpine Linux and their packages |
 
 ## Standards and vocabularies

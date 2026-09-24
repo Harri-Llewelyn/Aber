@@ -562,7 +562,7 @@ never report ready against perfectly healthy servers:
 
 **A fourth, invisible in the compose file — the edge runtime has no health endpoint at all.**
 Compose declares no healthcheck for `supabase-functions`, so nothing recorded this. Probed directly
-against `supabase/edge-runtime:v1.74.2`:
+against `supabase/edge-runtime:v1.77.0`:
 
 | Path | Response |
 |---|---|

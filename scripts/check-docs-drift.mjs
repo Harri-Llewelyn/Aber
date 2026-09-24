@@ -667,12 +667,16 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
-    // EMPTY, AND THAT IS THE EXPECTED STATE just after a squash. The baseline is generated from
-    // a dump of the finished database, so every function appears in it exactly once, in its
-    // final form -- there is nothing left for a later migration to replace. Entries return as
-    // soon as a migration added after the fold redeclares something the baseline holds, and
-    // each one records WHY that replacement is meant. See README.md, "There is no 0017", for
-    // the case where an unrecorded one would have regressed audit attribution.
+    // Empty just after a squash: the baseline is generated from a dump of the finished database,
+    // so every function appears in it exactly once, in its final form. Entries return as soon as
+    // a migration added after the fold redeclares something the baseline holds, and each one
+    // records WHY that replacement is meant. See README.md, "There is no 0017", for the case
+    // where an unrecorded one would have regressed audit attribution.
+
+    // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
+    // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
+    // the pre-0006 form and folds forward at the next squash.
+    'public.digital_thread_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -914,6 +918,9 @@ function edgeFunctionNames() {
     'VITE_GITEA_URL',        // an endpoint, public -- the forge's door; a link and a sign-out beacon
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_APP_VERSION',      // a git describe string, shown in the UI on purpose
+    // A BuildKit switch, not a value: opts the build stage into the release's SBOM scan. Not
+    // VITE_-prefixed, so Vite never inlines it.
+    'BUILDKIT_SBOM_SCAN_STAGE',
   ]);
 
   const df = read('frontend/Dockerfile');
@@ -2445,6 +2452,62 @@ function edgeFunctionNames() {
       `all ${declaredIn.size} setting(s) are declared in exactly one migration ` +
         `(${new Set([...declaredIn.values()].flat()).size} files declare one)`
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 23. Nothing in the stack reports usage or checks for updates by itself.
+//
+// Each service below does one or the other by default, and each switch is one line that an upgrade
+// or a regenerated config file can drop without anything failing. deploy/k8s/README.md,
+// "Outbound connections", lists them. Grafana's are also refused as GF_* variables in its
+// template, because an environment variable overrides grafana.ini silently.
+// -------------------------------------------------------------------------------------------------
+{
+  const GRAFANA_INI = 'grafana/grafana.ini';
+  const ini = {};
+  let section = '';
+  for (const line of read(GRAFANA_INI).split(/\r?\n/)) {
+    const header = line.match(/^\[([^\]]+)\]\s*$/);
+    if (header) { section = header[1]; continue; }
+    const kv = line.match(/^([a-z_]+)\s*=\s*(.*?)\s*$/);
+    if (kv) ini[`${section}.${kv[1]}`] = kv[2];
+  }
+  const GRAFANA_OFF = {
+    'analytics.reporting_enabled': 'false',
+    'analytics.check_for_updates': 'false',
+    'analytics.check_for_plugin_updates': 'false',
+    'news.news_feed_enabled': 'false',
+    'security.disable_gravatar': 'true',
+    'plugins.preinstall_auto_update': 'false',
+    'plugins.public_key_retrieval_disabled': 'true',
+  };
+  const grafanaTemplate = read('deploy/helm/aber/templates/obs/grafana.yaml');
+
+  const SWITCHES = [
+    ['deploy/helm/aber/templates/obs/alloy.yaml', /^\s*- --disable-reporting\s*$/m, 'Alloy runs with --disable-reporting'],
+    ['loki/loki.yaml', /^analytics:\s*\n\s+reporting_enabled:\s*false\s*$/m, 'Loki analytics.reporting_enabled is false'],
+    ['node-red/node-red-init.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the stack's Node-RED declares telemetry off"],
+    ['forge/gateway-platform/appliance/bootstrap.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the appliance's Node-RED declares telemetry off"],
+    ['deploy/helm/aber/values.yaml', /^\s+telemetryLevel:\s*"off"\s*$/m, 'TimescaleDB telemetryLevel is "off"'],
+    ['deploy/helm/aber/templates/apps/gitea.yaml', /GITEA__cron\.update_checker__ENABLED\s*\n\s*value:\s*"false"/, "Gitea's update checker is disabled"],
+    ['deploy/helm/aber/templates/obs/swagger-ui.yaml', /name: VALIDATOR_URL\s*\n\s*value:\s*none\s*$/m, "Swagger UI's online validator is disabled"],
+  ];
+
+  const offences = [];
+  for (const [key, want] of Object.entries(GRAFANA_OFF)) {
+    if (ini[key] !== want) offences.push(`${GRAFANA_INI}: [${key.replace('.', '] ')} is ${ini[key] ?? 'unset'}, want ${want}`);
+    const env = `GF_${key.replace('.', '_').toUpperCase()}`;
+    if (grafanaTemplate.includes(env)) offences.push(`templates/obs/grafana.yaml sets ${env}, which overrides grafana.ini`);
+  }
+  for (const [file, pattern, what] of SWITCHES) {
+    if (!pattern.test(read(file))) offences.push(`${file}: expected ${what}`);
+  }
+
+  if (offences.length) {
+    fail('a service would report usage or check for updates:\n' + offences.map((o) => `        ${o}`).join('\n'));
+  } else {
+    pass(`all ${Object.keys(GRAFANA_OFF).length + SWITCHES.length} usage-report and update-check switches are off`);
   }
 }
 
