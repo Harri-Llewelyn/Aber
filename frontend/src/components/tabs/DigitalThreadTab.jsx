@@ -1264,6 +1264,34 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     if (next) setSelectedEventId(next.event_id)
   }
 
+  /**
+   * ← and → step the drawer while it has a selected event. Bound here rather than in App.jsx: the
+   * keys mean nothing without a selection, and the index they move lives here. One listener per
+   * selection, reading the current position through a ref, so it is not re-installed every render.
+   *
+   * Stands down for an editable target and for a modified keystroke, the guard the `?` handler in
+   * App.jsx uses: the filter bar's selects and date inputs consume arrow keys natively, and a
+   * focused select must not both change its value and step the drawer. No wrap: stepTo() ignores
+   * an out-of-range index, matching the disabled buttons.
+   */
+  const navRef = useRef({ selectedIndex, stepTo })
+  navRef.current = { selectedIndex, stepTo }
+  const hasSelection = !!selected
+  useEffect(() => {
+    if (!hasSelection) return
+    const onKey = (e) => {
+      if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      e.preventDefault()
+      const { selectedIndex: i, stepTo: step } = navRef.current
+      step(e.key === 'ArrowLeft' ? i - 1 : i + 1)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [hasSelection])
+
   /** Whether the loaded set already IS one transaction, which is what lets the drawer stop hedging. */
   const isTransactionIsolated = !!selected?.causation_id
     && nameFilter.trim() === String(selected.causation_id)
@@ -1753,7 +1781,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 disabled={selectedIndex <= 0}
                 title={selectedIndex <= 0
                   ? 'This is the oldest recorded change to this asset'
-                  : 'Step back to the previous change to this asset'}
+                  : 'Step back to the previous change to this asset (←)'}
               >
                 ◀ Previous
               </button>
@@ -1763,7 +1791,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 disabled={selectedIndex >= selectedLaneEvents.length - 1}
                 title={selectedIndex >= selectedLaneEvents.length - 1
                   ? 'This is the most recent change to this asset'
-                  : 'Step forward to the next change to this asset'}
+                  : 'Step forward to the next change to this asset (→)'}
               >
                 Next ▶
               </button>
