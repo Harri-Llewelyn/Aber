@@ -305,14 +305,14 @@ supabaseDb:
   enabled: true
   image:
     repository: supabase/postgres
-    tag: 17.6.1.160
+    tag: 17.6.1.175
     pullPolicy: IfNotPresent
   persistence:
     enabled: true
     size: 20Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  # supabase/postgres:17.6.1.160 is Alpine; its `postgres` user is uid 100 / gid 101. Same
+  # supabase/postgres:17.6.1.175 is Alpine; its `postgres` user is uid 100 / gid 101. Same
   # caveat as timescaledb: the entrypoint chowns, so this matters only with `runAsUser`.
   podSecurityContext:
     fsGroup: 101

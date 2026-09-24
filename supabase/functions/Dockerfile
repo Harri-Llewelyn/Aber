@@ -15,7 +15,7 @@
 #
 # PINNED. The runtime and the functions are versioned together on purpose -- main/index.ts is an
 # allow-list against a specific edge-runtime API.
-FROM supabase/edge-runtime:v1.74.2
+FROM supabase/edge-runtime:v1.77.0
 
 # The functions themselves, including main/ -- the allow-list stating what each one may reach. An
 # unregistered function 404s before a worker spawns, so main/index.ts must ship alongside them.

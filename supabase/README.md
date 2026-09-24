@@ -1066,7 +1066,7 @@ revoke last would destroy precisely those grants with nothing left to re-apply t
 **`PUBLIC` is deliberately absent from that list.** The image's recorded default for functions is
 `{postgres=X,anon=X,authenticated=X,service_role=X}` — `PUBLIC` is not in it — so revoking `PUBLIC`
 removes something never recorded and changes nothing, while PostgreSQL still applies its hardwired
-`EXECUTE`-to-`PUBLIC` to every new function. Verified against `supabase/postgres:17.6.1.160`: a
+`EXECUTE`-to-`PUBLIC` to every new function. Verified against `supabase/postgres:17.6.1.175`: a
 function created *after* such a revoke still comes out holding `=X/postgres`. What removes it is
 `0071`'s end-of-chain sweep, on the first boot as much as any later one — the two fixes are
 complementary, not alternatives.

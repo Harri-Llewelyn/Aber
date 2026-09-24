@@ -361,11 +361,11 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | Component | Image | Reached at |
 | :--- | :--- | :--- |
 | `alloy` | `grafana/alloy:v1.11.2` | the one collector: logs, metrics and host metrics; `alloy:12345` |
-| `backup` | `supabase/postgres:17.6.1.160` | the nightly CronJob, when the backup service is off |
+| `backup` | `supabase/postgres:17.6.1.175` | the nightly CronJob, when the backup service is off |
 | `backup-service` | `ghcr.io/harri-llewelyn/aber/backup-service` | the Backups page's worker (`backupService.enabled`) |
 | `cold-archive` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: exports, verifies and drops cold chunks |
 | `db-init` | `ghcr.io/harri-llewelyn/aber/db-init` | hook Job: the migration chain, on every install and upgrade |
-| `db-roles-init` | `supabase/postgres:17.6.1.160` | hook Job: the Supabase roles and their passwords |
+| `db-roles-init` | `supabase/postgres:17.6.1.175` | hook Job: the Supabase roles and their passwords |
 | `e2e-aas-export` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
 | `e2e-validate` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
 | `frontend` | `ghcr.io/harri-llewelyn/aber/frontend` | `app.<domain>` |
@@ -381,9 +381,9 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `prometheus` | `prom/prometheus:v3.14.0` | `prometheus:9090`, read by Grafana |
 | `realtime` | `supabase/realtime:v2.102.3` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
 | `storage-init` | `node:24-alpine` | hook Job: the storage buckets |
-| `storage-policies` | `supabase/postgres:17.6.1.160` | hook Job: the storage RLS policies |
+| `storage-policies` | `supabase/postgres:17.6.1.175` | hook Job: the storage RLS policies |
 | `supabase-auth` | `supabase/gotrue:v2.189.0` | behind `api.<domain>/auth/v1` |
-| `supabase-db` | `supabase/postgres:17.6.1.160`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
+| `supabase-db` | `supabase/postgres:17.6.1.175`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
 | `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (Service `supabase-kong:8000`), Studio on 8001, the forge on 8002 |
 | `supabase-functions` | `ghcr.io/harri-llewelyn/aber/edge-runtime` | behind `api.<domain>/functions/v1` |
 | `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
@@ -391,8 +391,8 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `supabase-storage` | `supabase/storage-api:v1.60.4` | behind `api.<domain>/storage/v1` |
 | `supabase-studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `studio.<domain>`, off by default, behind the gateway's login |
 | `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
-| `test-db-tls` | `supabase/postgres:17.6.1.160` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
-| `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
+| `test-db-tls` | `supabase/postgres:17.6.1.175` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
+| `test-fdw` | `supabase/postgres:17.6.1.175` | `helm test`: the postgres_fdw gate |
 | `timescaledb` | `timescale/timescaledb:2.29.2-pg17`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `timescaledb:5432`; `:9187` is scraped |
 | `timescaledb-maintenance` | `timescale/timescaledb:2.29.2-pg17` | hook Job: extension, retention, rollups, roles |
 

@@ -5,7 +5,6 @@
   "DS-0002 gateway-credential/Dockerfile": "The image ends without a USER: tracked in #419.",
   "DS-0002 ingestion/Dockerfile": "The image ends without a USER: tracked in #419.",
   "DS-0002 mosquitto/tls-init/Dockerfile": "The image ends without a USER: tracked in #419.",
-  "DS-0002 node-red/Dockerfile": "The image ends without a USER: tracked in #419.",
   "DS-0002 supabase/db-init/Dockerfile": "The image ends without a USER: tracked in #419.",
   "DS-0002 supabase/functions/Dockerfile": "The image ends without a USER: tracked in #419.",
   "DS-0002 swagger-ui/Dockerfile": "The image ends without a USER: tracked in #419.",

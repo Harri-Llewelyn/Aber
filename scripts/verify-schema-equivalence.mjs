@@ -89,7 +89,7 @@ import { readdirSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const IMAGE = 'supabase/postgres:17.6.1.160';
+const IMAGE = 'supabase/postgres:17.6.1.175';
 // The running stack's Supabase Postgres, which the auth fixture is taken from. A POD, not a
 // container: this read was `docker exec aber_supabase_db` until Compose was dropped, and that
 // name then existed nowhere else in the repository -- so this script could not run at all, which

@@ -92,6 +92,10 @@ RUN npm run build
 
 # Stage 2: Serve static production assets using NGINX
 FROM nginx:alpine
+
+# Alpine packages from the base, taken to the current fixes the distribution ships: a fix Alpine ships
+# between two base cuts reaches the release rather than waiting for the next base (#347).
+RUN apk upgrade --no-cache
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
