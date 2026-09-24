@@ -164,14 +164,28 @@ class TestSparkplugGroupSetting(unittest.TestCase):
             if row is not None:
                 self.assertEqual(row[0], "Plant-7")
 
-    def test_the_fallback_is_the_platforms_current_name(self):
-        # sparkplug_group_default() falls back to a literal when the setting is absent, and 0003
-        # moved that literal with the default. A fallback left on the former name would give the
-        # first gateway of a stack whose settings row went missing an address nobody publishes on.
+    def test_an_absent_setting_is_refused_rather_than_named(self):
+        # No group has a default since #389. A settings row that went missing must not hand the
+        # next gateway a group nobody chose; the insert fails instead, naming the setting.
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM public.system_settings WHERE key = %s", (SETTING_KEY,))
-            cur.execute("SELECT public.sparkplug_group_default()")
-            self.assertEqual(cur.fetchone()[0], "Aber")
+            with self.assertRaises(psycopg2.errors.RaiseException) as raised:
+                cur.execute("SELECT public.sparkplug_group_default()")
+            self.assertIn("sparkplug.group_id", str(raised.exception))
+
+    def test_the_seed_refuses_a_run_that_names_no_group(self):
+        # 0002's own block, read out of the migration so a copy here cannot drift from it. db-init
+        # always passes the chart's value; a run without one must stop rather than seed a group
+        # into a setting that can never change.
+        here = os.path.dirname(os.path.abspath(__file__))
+        seed = open(os.path.join(here, "0002_seed_data.sql"), encoding="utf-8").read()
+        start = seed.index("DO $$", seed.index("-- READ-ONLY ONCE SEEDED"))
+        block = seed[start:seed.index("END;\n$$;", start) + len("END;\n$$;")]
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT set_config('aber.sparkplug_group', '', true)")
+            with self.assertRaises(psycopg2.errors.RaiseException) as raised:
+                cur.execute(block)
+            self.assertIn("sparkplug_group is not set", str(raised.exception))
 
     def test_nothing_is_left_on_the_former_name_once_the_site_has_moved(self):
         # 0003 moves the setting off 'ACS-Cymru' and then every gateway that took that default.

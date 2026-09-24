@@ -370,7 +370,7 @@ FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 # is also what gateways.sparkplug_group defaults to. Used only to describe the fallback in a log
 # line; resolution never assumes it -- a gateway is resolved on the (group, node) pair its own row
 # carries.
-DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
+DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "")
 
 class DirectoryUnavailable(Exception):
     """

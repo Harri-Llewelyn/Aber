@@ -488,10 +488,10 @@ from one group to a request from another — precisely the collision this closes
 every site published its own machine data under it. The group is the first segment of the namespace
 a plant's data lives in, and it belongs to the plant.
 
-It is now `ingestion.sparkplugGroup` in the chart. `0131` seeds it into the `sparkplug.group_id`
-setting on the first boot, and the column defaults to `sparkplug_group_default()`, which reads that
-row. The default value is unchanged, so an install that never names a group publishes exactly what
-it published before.
+It is now `ingestion.sparkplugGroup` in the chart, and it has **no default**: the render refuses
+until the site names one, as it does for `ingestion.primaryHostId`. `0131` seeds it into the
+`sparkplug.group_id` setting on the first boot, and the column defaults to
+`sparkplug_group_default()`, which reads that row and raises if it is absent.
 
 **The setting is read-only and a mismatch raises**, which are two halves of the same decision.
 Changing the group at runtime splits the topic tree at that instant: everything published before is

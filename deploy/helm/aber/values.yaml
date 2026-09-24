@@ -883,17 +883,18 @@ ingestion:
   # The Sparkplug group id: the second segment of every topic this site publishes
   # (`spBv1.0/<group>/<TYPE>/<node>`) and the enterprise segment of its Unified Namespace.
   #
-  # FIXED AT INSTALL, and 0131 enforces that. It is seeded into the read-only `sparkplug.group_id`
-  # setting on the first boot, shown on the Settings page, and db-init REFUSES a later boot whose
-  # value differs -- because changing the group re-addresses every gateway, every appliance bundle
-  # and every row of history keyed on the old pair. That is a migration, not a preference.
+  # REQUIRED, and deliberately without a default, for primaryHostId's reason: it is in every topic
+  # this site publishes, and a site whose machine data lived under a name nobody chose would be the
+  # platform's name in every consumer's subscription. Rendering fails while it is empty.
   #
-  # Unlike primaryHostId this has a default, `Aber`, the platform's own name. A stack installed
-  # before 1.0 holds `ACS-Cymru`, the platform's former name; that one pair is not a mismatch, and
-  # 0003 moves the setting and every gateway still on it to `Aber` on the first boot under this
-  # chart -- each physical gateway is then re-pointed (docs/upgrades.md). One topic level: no `/`,
-  # `+`, `#` or whitespace.
-  sparkplugGroup: Aber
+  # FIXED AT INSTALL. It is seeded into the read-only `sparkplug.group_id` setting on the first
+  # boot, shown on the Settings page, and db-init REFUSES a later boot whose value differs --
+  # because changing the group re-addresses every gateway, every appliance bundle and every row of
+  # history keyed on the old pair. That is a migration, not a preference. An install from before
+  # 1.0 names the group it already has (`ACS-Cymru` is moved to `Aber` by 0003; docs/upgrades.md).
+  #
+  # One topic level: no `/`, `+`, `#` or whitespace.
+  sparkplugGroup: ""
   # The Directory's MQTT half. Off by default: a topic has no caller, so publishing puts the
   # whole address space behind the broker's roles alone.
   #
