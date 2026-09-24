@@ -272,6 +272,45 @@ function ExposureCell({ exposure }) {
   )
 }
 
+/**
+ * The version an image reference names: its tag (`grafana/grafana:13.2.0` reads `13.2.0`). A
+ * registry port is not a tag, a digest-only reference shows the digest's first 12 hex characters,
+ * and an untagged one is what Docker pulls for it, `latest`. Null when there is no reference.
+ */
+export function imageVersion(ref) {
+  const s = String(ref ?? '').trim()
+  if (!s) return null
+  const [name, digest] = s.split('@')
+  const colon = name.indexOf(':', name.lastIndexOf('/') + 1)
+  if (colon !== -1 && colon < name.length - 1) return name.slice(colon + 1)
+  if (digest) return `sha256:${digest.replace(/^sha256:/, '').slice(0, 12)}`
+  return 'latest'
+}
+
+/**
+ * The version of the image this release deploys for the service, with the full reference in the
+ * tooltip. db-init records it from the chart (migration 0007), so it is the release's pin rather
+ * than an observation of the running container. No image is said in words.
+ */
+function VersionCell({ image }) {
+  const version = imageVersion(image)
+  if (version) {
+    return (
+      <span
+        className="mono"
+        title={`${image} -- the image this release deploys, recorded from the chart at the last install or upgrade`}
+      >
+        {version}
+      </span>
+    )
+  }
+  return (
+    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="No image recorded. The chart records one for each service it deploys; this one is disabled in this deployment or was registered by something other than the chart.">
+      not recorded
+    </span>
+  )
+}
+
 function ServiceTable({ rows, onNotify }) {
   // Read once per render rather than per row. `window` is guarded because this module is imported
   // by tests that render without a location.
@@ -286,6 +325,7 @@ function ServiceTable({ rows, onNotify }) {
           <tr>
             <th title="Service name">Service Name</th>
             <th title="Architecture category">Service Type</th>
+            <th title="The image tag this release deploys for the service; hover a version for the full image reference. Recorded from the chart by db-init on every install and upgrade">Version</th>
             <th title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
             <th title="Where the service can be reached from, as a property of its port binding. Set by archived migration 0084 and describing the seeded loopback bindings; a deployment that publishes differently updates it">Reach</th>
             <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
@@ -296,6 +336,9 @@ function ServiceTable({ rows, onNotify }) {
             <tr key={s.service_uuid}>
               <td><strong>{s.service_name}</strong></td>
               <td><span className="badge badge-neutral">{s.service_type}</span></td>
+              <td className="cell-version">
+                <VersionCell image={s.image} />
+              </td>
               <td className="cell-endpoint">
                 <EndpointCell
                   url={s.endpoint_url}
@@ -345,9 +388,10 @@ export function DirectoryTab({ showToast }) {
   return (
     <>
       <PageHeading icon={<IconBookOpen size={15} />} title="Directory">
-        Every service this deployment runs, grouped by what it is for: where to reach it, whether
-        anything in the stack observes it, and whether that address works from anywhere but the
-        deployment host. The rows are registered by migration, not added here.
+        Every service this deployment runs, grouped by what it is for: which version the release
+        deploys, where to reach it, whether anything in the stack observes it, and whether that
+        address works from anywhere but the deployment host. The rows are registered by migration,
+        not added here.
       </PageHeading>
 
       {/* No search box or type picker: the grouping solves the scanning problem those controls

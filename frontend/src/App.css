@@ -1145,14 +1145,15 @@ tbody tr:hover { background: var(--bg-glass); }
 .table-directory {
   table-layout: fixed;
   /* Below this the fixed columns crush rather than wrap, so `.table-wrap` scrolls instead. */
-  min-width: 760px;
+  min-width: 880px;
 }
 
-.table-directory th:nth-child(1) { width: 26%; }  /* Service name */
-.table-directory th:nth-child(2) { width: 16%; }  /* Service type */
-.table-directory th:nth-child(3) { width: 30%; }  /* Endpoint URL */
-.table-directory th:nth-child(4) { width: 14%; }  /* Status */
-.table-directory th:nth-child(5) { width: 14%; }  /* Last heartbeat */
+.table-directory th:nth-child(1) { width: 20%; }  /* Service name */
+.table-directory th:nth-child(2) { width: 14%; }  /* Service type */
+.table-directory th:nth-child(3) { width: 14%; }  /* Version */
+.table-directory th:nth-child(4) { width: 28%; }  /* Endpoint URL */
+.table-directory th:nth-child(5) { width: 12%; }  /* Reach */
+.table-directory th:nth-child(6) { width: 12%; }  /* Liveness */
 
 /* Compact rows: the directory is a reference list read top to bottom, not a work surface with
    per-row actions. */
@@ -1166,6 +1167,10 @@ tbody tr:hover { background: var(--bg-glass); }
 /* An endpoint is one unbroken token (`http://127.0.0.1:54321/functions/v1`), which a fixed
    column cannot break at a space. Without this it overruns its cell into STATUS. */
 .table-directory .cell-endpoint { overflow-wrap: anywhere; }
+
+/* A tag is one token too, and some are long (`2026.07.07-sha-a6a04f2`). */
+.table-directory .cell-version { overflow-wrap: anywhere; }
+.table-directory .cell-version .mono { font-size: 12px; }
 
 /* An endpoint reads as a control, and its shape says which: an accent-bordered one opens, a muted
    one copies. */

@@ -494,6 +494,14 @@ export const SUITES = {
       'rather than the old literal, so a default that silently reverted would address every ' +
       "gateway created afterwards in the vendor's namespace while every page looked correct.",
   },
+  'supabase/migrations/test_directory_images.py': {
+    lanes: ['db'],
+    why:
+      "0007's Directory versions. Every chart-managed row is reached by the component map, a " +
+      'component the chart stops deploying is cleared rather than left showing the last release, a ' +
+      'row the chart does not manage is left alone, and no API role can call the writer -- so the ' +
+      'versions on the page are the ones db-init recorded and nobody else.',
+  },
   'supabase/migrations/test_system_settings_rls.py': {
     lanes: ['db'],
     why:

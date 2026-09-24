@@ -293,6 +293,10 @@ python supabase/migrations/test_system_settings_rls.py
 # the trigger refuses it -- a read-only control in the browser alone would be a suggestion. Also
 # that gateways.sparkplug_group now defaults to the setting rather than the old literal.
 python supabase/migrations/test_sparkplug_group_setting.py
+# The Directory's Version column (0007). The chart's component -> image map reaches every row it
+# manages, clears a component the chart stops deploying, leaves other registrations alone, and the
+# writer is callable by db-init only.
+python supabase/migrations/test_directory_images.py
 # Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
 # property is in the function body rather than in a grant, so a gate that stops working fails open
 # with the page looking exactly as it should. Both directions per role, and `anon` stopped by the

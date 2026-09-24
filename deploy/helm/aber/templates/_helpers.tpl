@@ -98,6 +98,47 @@ silently change which Postgres the databases run.
 {{- end -}}
 
 {{/*
+The image serving each Directory row, as JSON keyed by component, for db-init to record in
+`directory_services.image` (migration 0007). Each value is rendered by the same expression as the
+workload's own `image:`, and a component the chart does not deploy is left out so its row is
+cleared. Alloy is listed only when its node_exporter collectors run: that is the row it serves.
+check-docs-drift.mjs holds these components equal to 0007's `served_by` list.
+*/}}
+{{- define "aber.directoryImages" -}}
+{{- $v := .Values -}}
+{{- $out := dict -}}
+{{- $pinned := list
+      (list "supabase-studio" $v.supabaseStudio.enabled $v.supabaseStudio.image)
+      (list "mosquitto" $v.mosquitto.enabled $v.mosquitto.image)
+      (list "timescaledb" $v.timescaledb.enabled $v.timescaledb.image)
+      (list "grafana" $v.grafana.enabled $v.grafana.image)
+      (list "supabase-envoy" $v.supabaseEnvoy.enabled $v.supabaseEnvoy.image)
+      (list "supabase-auth" $v.supabaseAuth.enabled $v.supabaseAuth.image)
+      (list "supabase-rest" $v.supabaseRest.enabled $v.supabaseRest.image)
+      (list "supabase-db" $v.supabaseDb.enabled $v.supabaseDb.image)
+      (list "prometheus" $v.observability.enabled $v.observability.prometheus.image)
+      (list "alloy" (and $v.observability.enabled $v.observability.alloy.hostMetrics) $v.observability.alloy.image)
+      (list "gitea" $v.gitea.enabled $v.gitea.image) -}}
+{{- range $pinned -}}
+{{- if index . 1 -}}
+{{- $image := index . 2 -}}
+{{- $_ := set $out (index . 0) (printf "%s:%s" $image.repository $image.tag) -}}
+{{- end -}}
+{{- end -}}
+{{- $built := list
+      (list "node-red" $v.nodeRed.enabled $v.nodeRed.image)
+      (list "supabase-functions" $v.supabaseFunctions.enabled $v.supabaseFunctions.image)
+      (list "ingestion" $v.ingestion.enabled $v.ingestion.image)
+      (list "swagger-ui" $v.swaggerUi.enabled $v.swaggerUi.image) -}}
+{{- range $built -}}
+{{- if index . 1 -}}
+{{- $_ := set $out (index . 0) (include "aber.image" (dict "image" (index . 2) "ctx" $)) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
 The Prometheus and Loki the Grafana datasources point at.
 
 Empty in values resolves to the chart's own stores when observability.enabled; with it off, an

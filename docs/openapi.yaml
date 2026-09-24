@@ -4112,6 +4112,15 @@ components:
             recorded. The two can disagree and both are needed — Studio is `NETWORK` while its
             `endpoint_url` is still the loopback default, and a loopback *address* cannot be used
             from a remote browser however broadly the *port* is published.
+        image:
+          type: string
+          nullable: true
+          example: 'grafana/grafana:13.2.0'
+          description: >-
+            The image reference (`repository:tag`) the release deploys for the service, recorded by
+            db-init from the chart on every install and upgrade (`0007`). It is the release's pin,
+            not an observation of the running container. `null` when the chart does not deploy the
+            service, or when something other than the chart registered it.
         status: { type: string, example: ACTIVE }
         last_heartbeat: { type: string, format: date-time, nullable: true }
         registered_schema_id: { type: string, format: uuid, nullable: true }
