@@ -123,7 +123,10 @@ anything?" — is answered by the first section or by its absence:
 | **Added** | New capability, and the values key that turns it on |
 | **Images and chart** | The published tags, so a pull can be checked against the release |
 
-[`.github/RELEASE_TEMPLATE.md`](../.github/RELEASE_TEMPLATE.md) is that skeleton.
+[`.github/RELEASE_TEMPLATE.md`](../.github/RELEASE_TEMPLATE.md) is that skeleton. The release
+workflow opens the release as a draft from it, with `aber-<version>-sbom.tar.gz` attached: every
+image's SBOM and provenance, and the digests the signatures are over. The notes are then written by
+hand; nothing here is generated from commits.
 
 **Watch the repository's releases** to be told. On GitHub: *Watch → Custom → Releases*. There is no
 mailing list and no announcement channel; adding one nobody reads would be worse than saying so.
@@ -134,6 +137,12 @@ mailing list and no announcement channel; adding one nobody reads would be worse
 
 [`SECURITY.md`](../SECURITY.md) is the reporting route. Its supported-version window is this
 document's — the latest minor — and the two are deliberately not invented separately.
+
+**Every release is signed and carries a bill of materials.** Each image and the chart is signed
+keyless by the release workflow, bound to `release.yml` at the tag; each image carries an SPDX SBOM
+and SLSA provenance in its registry index. That is what lets a site ask, of a release built before
+an advisory existed, whether the advisory applies — without pulling the image. What each is and how
+to verify it is in [`SECURITY.md`](../SECURITY.md#what-a-release-carries-and-how-to-check-it).
 
 ---
 

@@ -4,10 +4,12 @@ import { IconX } from '../common/Icons'
 
 /**
  * What the keyboard does, in one place. Every row is a shortcut that exists; the application binds
- * the palette, its two movement keys and its opener, plus Escape through one hook. The browser's
- * own keys are included because Tab is the only way to reach the navigation rail without a mouse,
- * and it makes the rail expand. Plain strings, never matched against: the bindings live with the
- * components that own them.
+ * the palette, its two movement keys and its opener, the Digital Thread drawer's two stepping keys,
+ * plus Escape through one hook. The browser's own keys are included because Tab is the only way to
+ * reach the navigation rail without a mouse, and it makes the rail expand. Plain strings, never
+ * matched against: the bindings live with the components that own them.
+ *
+ * A row's keys are a chord unless it says `join: 'or'`, in which case they are alternatives.
  */
 
 /** Windows and Linux say Ctrl, macOS says Cmd, and a shortcuts list that says the wrong one is worse than none. */
@@ -21,9 +23,16 @@ export function shortcutGroups({ mac = false } = {}) {
       title: 'Search',
       items: [
         { keys: [mod, 'K'], description: 'Focus the search box from anywhere' },
-        { keys: ['↑', '↓'], description: 'Move through the results' },
+        { keys: ['↑', '↓'], join: 'or', description: 'Move through the results' },
         { keys: ['Enter'], description: 'Open the highlighted result' },
         { keys: ['Esc'], description: 'Clear the box and dismiss the results' }
+      ]
+    },
+    {
+      title: 'Digital Thread',
+      items: [
+        // Bound by DigitalThreadTab, and only while its drawer has a selected event.
+        { keys: ['←', '→'], join: 'or', description: 'Step to the previous or next change to the selected asset' }
       ]
     },
     {
@@ -85,9 +94,9 @@ export function ShortcutsModal({ onClose }) {
                 <div className="shortcut-keys">
                   {item.keys.map((key, i) => (
                     <React.Fragment key={key}>
-                      {/* `then`, not `+`, between the two movement keys: they are alternatives.
-                          Joining them with a plus would read as a chord nobody can press. */}
-                      {i > 0 && <span className="shortcut-join">{item.keys.length === 2 && (key === '↓') ? 'or' : '+'}</span>}
+                      {/* `or` between alternatives: joining ↑ ↓ or ← → with a plus would read as
+                          a chord nobody can press. */}
+                      {i > 0 && <span className="shortcut-join">{item.join === 'or' ? 'or' : '+'}</span>}
                       <kbd className="shortcut-key">{key}</kbd>
                     </React.Fragment>
                   ))}

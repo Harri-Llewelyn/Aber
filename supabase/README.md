@@ -1066,7 +1066,7 @@ revoke last would destroy precisely those grants with nothing left to re-apply t
 **`PUBLIC` is deliberately absent from that list.** The image's recorded default for functions is
 `{postgres=X,anon=X,authenticated=X,service_role=X}` — `PUBLIC` is not in it — so revoking `PUBLIC`
 removes something never recorded and changes nothing, while PostgreSQL still applies its hardwired
-`EXECUTE`-to-`PUBLIC` to every new function. Verified against `supabase/postgres:17.6.1.160`: a
+`EXECUTE`-to-`PUBLIC` to every new function. Verified against `supabase/postgres:17.6.1.175`: a
 function created *after* such a revoke still comes out holding `=X/postgres`. What removes it is
 `0071`'s end-of-chain sweep, on the first boot as much as any later one — the two fixes are
 complementary, not alternatives.
@@ -1507,6 +1507,36 @@ database column is `causation_id` — so one thing read as two, which is how it 
 ids in a drawer that shows three. The UI and the export now both say **Transaction ID**, the same
 precedent `mutation_id` already set for `digital_thread.id`, and each tooltip names its SQL column so
 an id can be carried into a query without guessing.
+
+
+### The drawer knows how many rows a transaction wrote (`0006`)
+
+`digital_thread_page()` returns `transaction_rows` with each event: how many rows share its
+`causation_id`, counted over the whole table rather than the page, and `NULL` where there is no
+causation. `idx_digital_thread_causation` covers the lookup, so it is one index probe per row on
+the page.
+
+**Why the page could not work it out.** The drawer's "Same transaction" list is drawn from the
+loaded, filtered events. A transaction whose other rows are outside the entity or action filter, or
+on a page not yet fetched, looks identical to a single-row act, so the section hedged and offered
+"Show whole transaction" to every event, including the ones where it reloads the same single row.
+With the count known the three states are plain: one row, and nothing to offer; every row loaded,
+and the list is complete; rows missing, how many, and the control that loads them. The count chip
+is the transaction's size minus one, whatever is loaded. A server without the field gets the hedge
+back, because a bare sibling list is a lower bound again.
+
+**Counted under the caller's own policies.** The function is `SECURITY INVOKER`, so the subquery
+sees what `digital_thread_select_asset` and `digital_thread_select_security` admit. A
+Shopfloor_Manager's count omits the security lane, which is the number of rows "Show whole
+transaction" could load for them.
+
+**Deleted entities are counted, and the control now reveals them.** A delete's own row is about an
+entity no live table holds, so the default view hides it. The count includes it, and "Show whole
+transaction" turns the deleted-entities toggle on along with clearing the entity and action filters;
+otherwise a reader would be told a row is missing and shown no way to reach it.
+
+The CSV export carries the number as `transaction_rows` beside `transaction_id`.
+`test_digital_thread_paging.py` covers the field; `digitalThreadCausation.test.jsx` the drawer.
 
 
 ### The lane a Manager was offered and denied (`0120`)

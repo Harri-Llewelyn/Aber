@@ -186,6 +186,7 @@
     "upsertable", "upserted", "upserts", "urandom", "urllib", "urlopen", "urlquery", "usename", "userinfo",
     "usesuper", "usetls", "valuehere", "vdma", "velero", "verifyservercert", "virt", "vite", "vmid",
     "vonage", "vundefined", "webauthn", "webstore", "winnat", "wordmark", "workholding", "workos",
-    "xact", "zvei"
+    "xact", "zvei",
+    "buildkit", "cosign", "fulcio", "kyverno", "rekor", "sbom", "sboms", "sigstore", "slsa", "spdx", "syft"
   ]
 }

@@ -82,7 +82,7 @@ spec:
               # tables are owned by supabase_storage_admin (storage-api created them), and
               # `postgres` is neither a superuser nor a member of that role in this image, so
               # ALTER TABLE ... ENABLE ROW LEVEL SECURITY fails with "must be owner of table
-              # objects". Verified against 17.6.1.160.
+              # objects". Verified against 17.6.1.175.
               psql -v ON_ERROR_STOP=1 -h supabase-db -U supabase_admin -d postgres -f /sql/storage-policies.sql
           volumeMounts:
             - name: sql

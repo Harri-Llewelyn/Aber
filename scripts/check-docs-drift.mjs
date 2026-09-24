@@ -667,12 +667,16 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
-    // EMPTY, AND THAT IS THE EXPECTED STATE just after a squash. The baseline is generated from
-    // a dump of the finished database, so every function appears in it exactly once, in its
-    // final form -- there is nothing left for a later migration to replace. Entries return as
-    // soon as a migration added after the fold redeclares something the baseline holds, and
-    // each one records WHY that replacement is meant. See README.md, "There is no 0017", for
-    // the case where an unrecorded one would have regressed audit attribution.
+    // Empty just after a squash: the baseline is generated from a dump of the finished database,
+    // so every function appears in it exactly once, in its final form. Entries return as soon as
+    // a migration added after the fold redeclares something the baseline holds, and each one
+    // records WHY that replacement is meant. See README.md, "There is no 0017", for the case
+    // where an unrecorded one would have regressed audit attribution.
+
+    // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
+    // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
+    // the pre-0006 form and folds forward at the next squash.
+    'public.digital_thread_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -914,6 +918,9 @@ function edgeFunctionNames() {
     'VITE_GITEA_URL',        // an endpoint, public -- the forge's door; a link and a sign-out beacon
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_APP_VERSION',      // a git describe string, shown in the UI on purpose
+    // A BuildKit switch, not a value: opts the build stage into the release's SBOM scan. Not
+    // VITE_-prefixed, so Vite never inlines it.
+    'BUILDKIT_SBOM_SCAN_STAGE',
   ]);
 
   const df = read('frontend/Dockerfile');

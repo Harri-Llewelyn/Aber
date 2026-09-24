@@ -387,8 +387,9 @@ const MUTATION_ID_HELP =
 
 const TRANSACTION_ID_HELP =
   'The database transaction that wrote this row. Every audit row carrying the same one was written '
-  + 'by a SINGLE act -- an approval that also rebound a schema, a delete that cascaded. Use "Show '
-  + 'whole transaction" below to load all of them. It is unique within this database only, and is '
+  + 'by a SINGLE act -- an approval that also rebound a schema, a delete that cascaded. Where the '
+  + 'act wrote more than is loaded, "Show whole transaction" below loads all of them. It is unique '
+  + 'within this database only, and is '
   + 'not preserved by a restore from a dump: group by it, never store it as a reference. It is '
   + '`digital_thread.causation_id` in SQL and `transaction_id` in the CSV export.'
 
@@ -548,8 +549,8 @@ const EmptyValue = ({ label }) => <span className="dt-diff-empty">{label}</span>
 /**
  * The other audit rows written by the same transaction. Ordered by `event_id` ascending, the order
  * the rows were written; `recorded_at` is the transaction start time and identical across them.
- * Drawn from the fetched, filtered set, so a sibling outside the current filter is not counted, and
- * the control says so.
+ * Drawn from the fetched, filtered set, so a sibling outside the current filter is not listed;
+ * `transaction_rows` on the event says how many there are in all (0006).
  */
 export function causationSiblings(event, events) {
   // NULL is not a group: rows written before causation existed carry none, and matching NULLs would
@@ -564,51 +565,71 @@ export function causationSiblings(event, events) {
 }
 
 /**
- * Rendered whenever the row carries a transaction, siblings or not: a group whose other members
- * are outside the current filter looks identical to a single-row act, and the control that
- * resolves the difference is the one thing that must not be hidden in that case.
+ * Rendered whenever the row carries a transaction, siblings or not. Two numbers decide what it
+ * says: `event.transaction_rows`, how many rows the transaction wrote, counted by
+ * digital_thread_page() over the whole table (0006); and `siblings`, drawn from the loaded,
+ * filtered set. One row, and there is nothing to offer; every row loaded, and the list is
+ * complete; rows missing, how many, and the control that loads them. Without the count (a server
+ * without 0006) the section hedges instead, because a group whose other members are outside the
+ * filter then looks identical to a single-row act.
  *
- * `isolated` means the search IS this transaction, so the loaded set is the whole of it and the
- * count can be stated rather than hedged.
+ * `isolated` means the search already IS this transaction, so the control would do what has been
+ * done; rows still missing then are on pages not yet fetched.
  */
 function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransaction, isolated }) {
   if (!event?.causation_id) return null
+
+  const known = Number.isFinite(event.transaction_rows)
+  const loaded = siblings.length
+  // The other rows the act wrote, and how many of them are not on this page.
+  const others = known ? Math.max(0, event.transaction_rows - 1) : null
+  const missing = known ? Math.max(0, others - loaded) : null
+
+  const some = (n) => (n === 1 ? 'One other change' : `${n} other changes`)
+  const hint = !known
+    ? (isolated
+        ? (loaded === 0
+            ? 'Nothing else was written by this act.'
+            : `${some(loaded)} written by this act, and this is all of them.`)
+        : (loaded === 0
+            ? 'Nothing else written by this act is loaded — which is not the same as there '
+              + 'being nothing else.'
+            : `${some(loaded)} ${loaded === 1 ? 'was' : 'were'} written by the same act. `
+              + 'Limited to the events currently loaded and filtered.'))
+    : (others === 0
+        ? 'Nothing else was written by this act.'
+        : missing === 0
+          ? `${some(others)} written by this act, and this is all of them.`
+          : `${some(others)} ${others === 1 ? 'was' : 'were'} written by this act. `
+            + `${missing === 1 ? 'One' : missing} of them ${missing === 1 ? 'is' : 'are'} not loaded: `
+            + (isolated
+                ? 'on a page not yet fetched.'
+                : 'outside the current filters, or on a page not yet fetched.'))
+
+  // Offered when there is something to load. Not once the search is this transaction: a control
+  // that would do what has been done reads as though it might do something more.
+  const offerControl = !isolated && (!known || missing > 0)
+  // The true count where it is known. Without it, zero loaded siblings is an unknown rather than a
+  // total, and a "0" chip beside a hint that says so asserts the very thing the hint is refusing to.
+  const chip = known ? others : ((isolated || loaded > 0) ? loaded : null)
 
   return (
     <div className="dt-causation">
       <div className="context-panel-section-label">
         Same transaction
-        {/* A count only where there is one to give. Outside an isolated transaction, zero loaded
-            siblings is an unknown rather than a total, and a "0" chip beside a hint that says so
-            asserts the very thing the hint is refusing to. */}
-        {(isolated || siblings.length > 0) && (
-          <span className="section-count">{siblings.length}</span>
-        )}
+        {chip !== null && <span className="section-count">{chip}</span>}
       </div>
 
-      <p className="dt-causation-hint">
-        {isolated
-          ? (siblings.length === 0
-              ? 'Nothing else was written by this act.'
-              : `${siblings.length === 1 ? 'One other change' : `${siblings.length} other changes`} `
-                + 'written by this act, and this is all of them.')
-          : (siblings.length === 0
-              ? 'Nothing else written by this act is loaded — which is not the same as there '
-                + 'being nothing else.'
-              : `${siblings.length === 1 ? 'One other change was' : `${siblings.length} other changes were`} `
-                + 'written by the same act. Limited to the events currently loaded and filtered.')}
-      </p>
+      <p className="dt-causation-hint">{hint}</p>
 
-      {/* Absent once the search is already this transaction: a control that would do what has been
-          done reads as though it might do something more. */}
-      {!isolated && (
+      {offerControl && (
         <button
           type="button"
           className="btn btn-ghost btn-sm dt-causation-all"
           onClick={() => onShowTransaction(event.causation_id)}
           title={`Search for transaction ${event.causation_id}, so every row it wrote is loaded `
-               + 'whatever kind of entity it touched. Clears the entity and action filters, which '
-               + 'would each hide part of one act.'}
+               + 'whatever kind of entity it touched. Clears the entity and action filters and '
+               + 'shows deleted entities, each of which would hide part of one act.'}
         >
           Show whole transaction
         </button>
@@ -1062,13 +1083,16 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
    *
    * The entity and action filters are cleared because one act crosses both by definition -- an
    * approval that rebinds a schema writes an UPDATE on `devices` and a PROPOSAL_APPLIED row, and
-   * either filter would hide half of it and leave the count looking complete. The time range is
-   * kept: the rows share one `recorded_at`, so a range holding this event holds its siblings.
+   * either filter would hide half of it and leave the count looking complete. Deleted entities
+   * are shown for the same reason: a delete's own row is about an entity no live table holds, and
+   * `transaction_rows` counts it (0006). The time range is kept: the rows share one
+   * `recorded_at`, so a range holding this event holds its siblings.
    */
   const showWholeTransaction = (causationId) => {
     setNameFilter(String(causationId))
     setEntityTypeFilter('')
     setActionFilter('')
+    setShowPurged(true)
   }
 
   const resetFilters = () => {
@@ -1264,6 +1288,34 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
     if (next) setSelectedEventId(next.event_id)
   }
 
+  /**
+   * ← and → step the drawer while it has a selected event. Bound here rather than in App.jsx: the
+   * keys mean nothing without a selection, and the index they move lives here. One listener per
+   * selection, reading the current position through a ref, so it is not re-installed every render.
+   *
+   * Stands down for an editable target and for a modified keystroke, the guard the `?` handler in
+   * App.jsx uses: the filter bar's selects and date inputs consume arrow keys natively, and a
+   * focused select must not both change its value and step the drawer. No wrap: stepTo() ignores
+   * an out-of-range index, matching the disabled buttons.
+   */
+  const navRef = useRef({ selectedIndex, stepTo })
+  navRef.current = { selectedIndex, stepTo }
+  const hasSelection = !!selected
+  useEffect(() => {
+    if (!hasSelection) return
+    const onKey = (e) => {
+      if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      e.preventDefault()
+      const { selectedIndex: i, stepTo: step } = navRef.current
+      step(e.key === 'ArrowLeft' ? i - 1 : i + 1)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [hasSelection])
+
   /** Whether the loaded set already IS one transaction, which is what lets the drawer stop hedging. */
   const isTransactionIsolated = !!selected?.causation_id
     && nameFilter.trim() === String(selected.causation_id)
@@ -1294,6 +1346,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       // the drawer calls them Mutation ID and Transaction ID. One name per thing, across all three.
       mutation_id:    e.event_id,
       transaction_id: e.causation_id ?? '',
+      // How many rows the transaction wrote in all (0006), so a reader of the export can tell a
+      // single-row act from a group the filters cut. Empty where the row has no transaction.
+      transaction_rows: e.transaction_rows ?? '',
       action:         e.event_type,
       classification: MARKERS[a.kind].label,
       actor:          actorLabel(e),
@@ -1753,7 +1808,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 disabled={selectedIndex <= 0}
                 title={selectedIndex <= 0
                   ? 'This is the oldest recorded change to this asset'
-                  : 'Step back to the previous change to this asset'}
+                  : 'Step back to the previous change to this asset (←)'}
               >
                 ◀ Previous
               </button>
@@ -1763,7 +1818,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 disabled={selectedIndex >= selectedLaneEvents.length - 1}
                 title={selectedIndex >= selectedLaneEvents.length - 1
                   ? 'This is the most recent change to this asset'
-                  : 'Step forward to the next change to this asset'}
+                  : 'Step forward to the next change to this asset (→)'}
               >
                 Next ▶
               </button>
