@@ -194,6 +194,13 @@ The same step sets the raw hypertable's chunk interval, derived from
 7 days it was made with, so the smaller floor arrives once that chunk closes. `compressAfter`,
 when left empty, follows it; a site that set `compressAfter` explicitly keeps its value.
 
+**The raw window becomes 14 days, and the upgrade applies it.** A chart that left
+`timescaledb.retention.retainFor` empty ran 90 days (or `never`, with a destination in the chart's
+values). The same step now installs the 14-day retention job, and its first daily run drops raw
+telemetry older than 14 days that no archive holds. The rollups keep their own windows. **To keep
+the old window, set `retainFor` before upgrading.** See `supabase/README.md`, *Raw telemetry is
+kept for a stated window*.
+
 ### Migrations are forward-only
 
 There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;

@@ -70,7 +70,7 @@ aber_historian_job:
         description: "The TimescaleDB background job id"
     - proc_name:
         usage: "LABEL"
-        description: "The policy procedure: policy_retention, policy_compression, policy_refresh_continuous_aggregate"
+        description: "The job procedure: telemetry_raw_retention, policy_compression, policy_refresh_continuous_aggregate"
     - runs_total:
         usage: "COUNTER"
         description: "Times this job has run"

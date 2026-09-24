@@ -330,6 +330,10 @@ BEGIN
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.cold_tier_droppable() TO %I', v_role);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.cold_tier_drop_verified() TO %I', v_role);
   END IF;
+  -- The archiver reports whether archiving is on, which decides what the retention job may drop.
+  IF to_regprocedure('public.cold_archive_report_armed(boolean)') IS NOT NULL THEN
+    EXECUTE format('GRANT EXECUTE ON FUNCTION public.cold_archive_report_armed(boolean) TO %I', v_role);
+  END IF;
 
   -- REVOKED EXPLICITLY rather than left ungranted, for the same reason the readers above do it:
   -- this file is the authority on the role's reach, not a description of how it was first set up.

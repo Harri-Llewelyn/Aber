@@ -264,3 +264,67 @@ def test_a_mistyped_date_is_refused_before_anything_is_fetched(parse_instant):
         parse_instant("last-april", "--from")
     assert "--from" in str(raised.value)
     assert "ISO date" in str(raised.value)
+
+
+class _Cursor:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        if self.conn.raises:
+            raise self.conn.raises
+        self.conn.executed.append((sql, params))
+
+
+class _Conn:
+    """Records what report_armed() sends, in place of a historian connection."""
+
+    def __init__(self, raises=None):
+        self.executed, self.commits, self.rollbacks, self.raises = [], 0, 0, raises
+
+    def cursor(self):
+        return _Cursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_a_setting_that_was_read_is_reported(cold_archive, enabled):
+    conn = _Conn()
+    cold_archive.report_armed(conn, {"enabled": enabled, "read": True}, dry_run=False)
+    assert conn.executed == [("SELECT public.cold_archive_report_armed(%s)", (enabled,))]
+    assert conn.commits == 1
+
+
+def test_an_unread_setting_is_not_reported_as_off(cold_archive):
+    """
+    read_settings() falls back to enabled = false when the platform cannot be reached. Reporting
+    that would let the historian's retention job drop chunks the archive never exported.
+    """
+    conn = _Conn()
+    cold_archive.report_armed(conn, {"enabled": False, "read": False}, dry_run=False)
+    assert conn.executed == []
+
+
+def test_a_dry_run_reports_nothing(cold_archive):
+    conn = _Conn()
+    cold_archive.report_armed(conn, {"enabled": True, "read": True}, dry_run=True)
+    assert conn.executed == []
+
+
+def test_a_historian_without_the_function_does_not_stop_the_run(cold_archive):
+    import psycopg2
+
+    conn = _Conn(raises=psycopg2.errors.UndefinedFunction("no such function"))
+    cold_archive.report_armed(conn, {"enabled": True, "read": True}, dry_run=False)
+    assert conn.rollbacks == 1 and conn.commits == 0

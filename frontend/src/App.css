@@ -806,6 +806,10 @@ html, body, #root {
   color: var(--text-muted);
 }
 
+.page-heading .page-heading-note {
+  color: var(--text);
+}
+
 /* ===== Cards & Containers ===== */
 .card {
   background: var(--bg-card);

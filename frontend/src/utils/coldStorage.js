@@ -178,3 +178,35 @@ export function destinationSummary({ endpoint = '', bucket = '', siteKey = '' } 
   const base = `${endpoint.trim().replace(/\/+$/, '')}/${bucket.trim()}`
   return siteKey.trim() ? `${base}/site=${siteKey.trim()}/` : `${base}/`
 }
+
+/** A window in seconds as `14 days`, `12 hours` or `1 day`; whole days when it divides evenly. */
+export function formatWindow(seconds) {
+  const s = Number(seconds)
+  if (!Number.isFinite(s) || s <= 0) return null
+  const unit = s % 86400 === 0 ? ['day', 86400] : ['hour', 3600]
+  const n = Math.round(s / unit[1])
+  return `${n} ${unit[0]}${n === 1 ? '' : 's'}`
+}
+
+/**
+ * The one sentence the page states about the raw window (`raw_telemetry_window()`, 0005), or null
+ * when the historian could not say. `archiveEnabled` is the page's own setting; `archive_armed` is
+ * what the archiver last reported to the historian, which is what the retention job obeys.
+ */
+export function rawWindowStatement(window, archiveEnabled) {
+  if (!window) return null
+  const kept = window.raw_window_seconds == null
+    ? 'Raw telemetry is kept indefinitely.'
+    : `Raw telemetry is kept for ${formatWindow(window.raw_window_seconds)}.`
+  const older = window.raw_window_seconds == null
+    ? ''
+    : archiveEnabled
+      ? ' Older readings are in the 1-minute, 5-minute and 1-hour rollups, and here on cold storage.'
+      : ' Older readings are in the 1-minute, 5-minute and 1-hour rollups only.'
+  // Switched on, and the archiver has not run since: the window still drops unexported chunks.
+  const pending = archiveEnabled && !window.archive_armed && window.raw_window_seconds != null
+    ? ' The archiver has not run since archiving was switched on; until it does, raw chunks '
+      + 'past the window are dropped without being exported.'
+    : ''
+  return kept + older + pending
+}

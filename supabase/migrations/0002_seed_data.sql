@@ -7789,26 +7789,27 @@ SELECT public.seed_setting(
     'Cold Storage',
     'Archive telemetry before dropping it',
     'When on, telemetry chunks past the threshold below are exported to Parquet on the configured '
-    'S3 endpoint and verified there before the raw rows are dropped. When off, TimescaleDB''s '
-    'retention policy drops them outright and they are not recoverable. Exporting also requires a '
-    'site key and an endpoint in the chart: without them nothing is written and the exporter says '
-    'so.',
-    'off — retention.sql drops chunks with no archive'
+    'S3 endpoint and verified there before the raw rows are dropped, and the raw retention window '
+    'drops only chunks the archive has verified. When off, the window drops them outright and they '
+    'are not recoverable. Exporting also requires a site key and a destination: without them '
+    'nothing is written and the exporter says so.',
+    'off — the raw window drops chunks with no archive'
 );
 
--- BOUNDED AT THE BOTTOM BY THE ROLLUPS' OWN HORIZON, not by taste. Exporting a chunk younger than
--- the compression window means writing rows that are still being compressed, and a threshold of
--- days rather than months makes the object count grow without making anything more recoverable.
+-- The same 14 days as the chart's raw window (timescaledb.retention.retainFor), so raw telemetry is
+-- kept for one stated span with or without an archive. Seeded only on a first boot: an existing
+-- install keeps the value it has.
 SELECT public.seed_setting(
     'archive.tier_after_days',
-    to_jsonb(90),
+    to_jsonb(14),
     'number',
     'Cold Storage',
     'Archive chunks older than (days)',
     'How old a telemetry chunk must be before it is exported. Measured against the END of the '
-    'chunk''s range, so a chunk still accepting late-arriving readings is never exported. Should '
-    'match the raw retention window: archiving later than retention drops means losing data.',
-    'TIMESCALE_RETAIN_FOR in .env (90 days)'
+    'chunk''s range, so a chunk still accepting late-arriving readings is never exported. Keep it '
+    'at the raw retention window: while archiving is on, the window drops only chunks the archive '
+    'has verified, so a larger value keeps raw telemetry longer rather than losing it.',
+    'timescaledb.retention.retainFor (14 days)'
 );
 
 -- THE SITE KEY IS FIXED ONCE ANYTHING HAS BEEN WRITTEN UNDER IT. It is this site's identity in

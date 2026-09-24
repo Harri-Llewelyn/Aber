@@ -2028,9 +2028,9 @@ out of the Capture page's subject tables. Starting a playback is unaffected — 
 
 ### Cold telemetry archival (`0068`)
 
-Raw telemetry used to leave one way: `timescaledb/retention.sql` adds a TimescaleDB retention
-policy that **drops** chunks past `TIMESCALE_RETAIN_FOR`, on a timer, recording nothing. Cold
-archival turns that delete into a move.
+Raw telemetry leaves the historian one of two ways: the raw window (`timescaledb.retention.retainFor`)
+**drops** chunks past it, or cold archival **moves** them. The window never drops a chunk archiving
+is waiting on; see *Raw telemetry is kept for a stated window*.
 
 **The ordering is the whole feature**, and it is enforced in three independent places rather than
 by a careful sequence in one file:
@@ -2248,25 +2248,40 @@ database, and it belongs on local storage where the browser can sign a URL for i
 install's bundles stay where they were written; `asset_exports.object_bucket` is per row, which is
 what makes that safe to say.
 
-#### Enabling it stands retention down, and the chart now does that for you (`0133`)
+#### Raw telemetry is kept for a stated window, with or without an archive
 
-Both mechanisms drop chunks and the timer wins the race for anything the archiver has not reached.
-Since `0132` that race is run over a network link, where an outage is measured in days rather than
-seconds, so `timescaledb.retention.retainFor` is **derived when left empty**:
+**Raw telemetry is kept for 14 days; older readings are in the 1-minute, 5-minute and 1-hour
+rollups, and on cold storage while archiving is on.** That is the sentence the Cold Storage page
+states, read from the historian rather than restated here.
 
-| `retainFor` | `coldArchive.s3` configured | Result |
+The window is `timescaledb.retention.retainFor` (`14 days`; `never` keeps raw indefinitely). It is
+enforced by one job on the historian, `telemetry_raw_retention()` in
+[`timescaledb/retention.sql`](../timescaledb/retention.sql), not by TimescaleDB's retention policy,
+which drops on a timer with no knowledge of the archive. Each daily run drops the oldest chunks
+that ended more than the window ago, and stops at the first it may not drop:
+
+| Chunk | Archiving off | Archiving on |
 | :--- | :--- | :--- |
-| empty (shipped default) | yes | `never` |
-| empty | no | `90 days` |
-| anything explicit | either | exactly what you wrote |
+| no manifest row | dropped | **kept**: not exported yet |
+| exported, not verified | **kept**: export in flight | **kept** |
+| verified | dropped, and stamped in the manifest | dropped, and stamped in the manifest |
 
-An explicit `90 days` beside a configured endpoint is left alone: that is a site saying it accepts
-the deletion, and it is not the chart's decision to overrule. `retention.sql` still warns when it
-sees a manifest with rows and a drop policy being added — but a warning at boot is not read by
-whoever configured the endpoint a year later, which is why the default moved.
+So an archive outage grows the historian's volume, which the Archive Backlog alert below reports,
+instead of the window deleting telemetry nothing exported.
 
-`never` means the historian's volume grows until somebody acts. That is the better of the two
-failures — recoverable, and it loses nothing — **provided somebody is told it is coming.**
+**"Archiving on" is what the archiver last reported**, because `archive.enabled` lives in this
+database and the historian cannot read it. `python -m cold_archive` reports it on every run
+(`cold_archive_report_armed()`), and only when it actually read the setting: an unreadable setting
+falls back to off, and reporting that would switch the protection off. Between switching archiving
+on and the archiver's next run (03:15 by default) the window still drops unexported chunks; the
+Cold Storage page says so while it lasts.
+
+Before 1.0 the window was derived from the chart's destination fields: `never` with a destination,
+90 days without. Since `0134` the destination is set on the page, so a stack configured there got
+the 90-day timer racing the archiver. **An upgrade from that chart drops raw telemetry older than
+14 days on the job's first run**; set `retainFor: "90 days"` before upgrading to keep it. A new
+install seeds `archive.tier_after_days` at 14 to match; an existing one keeps its value, which is
+safe either way, since a threshold longer than the window keeps raw longer rather than losing it.
 
 #### How far behind the archive is
 
@@ -4397,6 +4412,10 @@ only) queues a `backup_jobs` row through `request_backup()`, and the **backup se
 backup and records a `backups` row.
 The shape is the Capture page's: the job is the act, the row is the artefact, and the page reads
 both and writes neither.
+
+**What a backup of the historian covers.** Raw telemetry for the raw window (14 days by default)
+and the rollups beyond it. Raw readings older than the window are only on cold storage, which no
+backup includes; see *Raw telemetry is kept for a stated window*.
 
 **What the service takes.** Both databases as their superusers (`supabase_admin`, for the reason
 above), the storage objects, the forge, the broker's volume and the internal CA, into one

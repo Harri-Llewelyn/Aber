@@ -2,6 +2,8 @@
 
 Telemetry that has aged out of the live historian and been written to object storage. The readings are still there and still yours; they are no longer in the database, and they are no longer on the path any dashboard queries.
 
+The sentence under the page heading says how long the historian keeps raw telemetry and where older readings are. While archiving is on, the historian drops a raw chunk only once this page lists it as verified, so an archive that falls behind grows the database rather than losing readings.
+
 ## What the controls do
 
 - **Object** is the file on object storage. **Range** is the window of time it covers, and **Chunk** the historian partition it came from.

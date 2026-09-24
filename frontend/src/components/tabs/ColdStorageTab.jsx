@@ -19,6 +19,7 @@ import {
   formatBytes,
   missingDestination,
   overdueDays,
+  rawWindowStatement,
 } from '../../utils/coldStorage'
 
 /**
@@ -43,6 +44,8 @@ export function ColdStorageTab({ showToast, userRole }) {
   // appear. This is the other half, and it fails SOFT: the catalogue is still worth rendering
   // without it, so a backlog that cannot be read leaves the figure absent rather than the page.
   const [backlog, setBacklog] = useState(null)
+  // How long raw telemetry is kept. Soft for the same reason: no row means the page says nothing.
+  const [rawWindow, setRawWindow] = useState(null)
 
   // The destination, which only an Administrator can see: 0134 flags these rows `sensitive`, so
   // for anybody else the reads below return the fallback and the card is not rendered at all.
@@ -63,6 +66,9 @@ export function ColdStorageTab({ showToast, userRole }) {
     api.coldArchiveBacklog()
       .then(setBacklog)
       .catch(() => setBacklog(null))
+    api.rawTelemetryWindow()
+      .then(setRawWindow)
+      .catch(() => setRawWindow(null))
     // Whether, never what. Fails soft to "not set", which is the state that prompts action.
     api.archiveCredentialIsSet()
       .then(setCredentialSet)
@@ -103,7 +109,11 @@ export function ColdStorageTab({ showToast, userRole }) {
     <div className="page-layout">
       <div className="page-main">
 
-        <PageHeading icon={<IconDatabase size={15} />} title="Cold storage">
+        <PageHeading
+          icon={<IconDatabase size={15} />}
+          title="Cold storage"
+          note={rawWindowStatement(rawWindow, archiveEnabled)}
+        >
           Telemetry that has aged out of the historian and been written to object storage, and the
           catalogue of what went where. The objects are held off this cluster and are the only
           remaining copy of the spans they cover: nothing on this page deletes one, and there is no
@@ -251,8 +261,8 @@ export function ColdStorageTab({ showToast, userRole }) {
                 <div className="empty-text">
                   No telemetry has been archived. Cold storage is off until{' '}
                   <strong>Settings → Cold Storage → Archive telemetry before dropping it</strong> is
-                  turned on; until then TimescaleDB’s retention policy drops old chunks outright and
-                  they are not recoverable.
+                  turned on; until then raw chunks past the retention window are dropped outright and
+                  are not recoverable.
                 </div>
               )}
             </div>

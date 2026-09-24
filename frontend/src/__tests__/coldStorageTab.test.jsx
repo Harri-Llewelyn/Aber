@@ -3,13 +3,14 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ColdStorageTab } from '../components/tabs/ColdStorageTab'
-import { coldStorageSummary, formatBytes, coldStateLabel } from '../utils/coldStorage'
+import { coldStorageSummary, formatBytes, coldStateLabel, formatWindow, rawWindowStatement } from '../utils/coldStorage'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
   api: {
     listColdStorage: vi.fn(),
     coldArchiveBacklog: vi.fn(),
+    rawTelemetryWindow: vi.fn(),
     archiveCredentialIsSet: vi.fn(),
     setArchiveCredential: vi.fn(),
     get: vi.fn(),
@@ -73,6 +74,8 @@ beforeEach(() => {
   // on the line before it renders.
   vi.clearAllMocks()
   api.archiveCredentialIsSet.mockResolvedValue(false)
+  // No row: the historian could not say, so the page states no window.
+  api.rawTelemetryWindow.mockResolvedValue(null)
   // The page reads `archive.enabled` through useSetting, which calls api.get. An empty list means
   // the fallback, `false`, so tests not about the switch get the same state.
   api.get.mockResolvedValue([])
@@ -546,5 +549,48 @@ describe('the destination card', () => {
     expect(copy).toHaveAccessibleName(
       /https:\/\/s3\.eu-west-2\.amazonaws\.com\/plant-history\/site=broughton-7f3a9c21\//,
     )
+  })
+})
+
+describe('the raw window statement', () => {
+  const FOURTEEN_DAYS = 14 * 86400
+
+  it('formats whole days as days and anything else as hours', () => {
+    expect(formatWindow(FOURTEEN_DAYS)).toBe('14 days')
+    expect(formatWindow(86400)).toBe('1 day')
+    expect(formatWindow(12 * 3600)).toBe('12 hours')
+    expect(formatWindow(null)).toBeNull()
+  })
+
+  it('says nothing when the historian could not be read', () => {
+    expect(rawWindowStatement(null, true)).toBeNull()
+  })
+
+  it('names the rollups alone as the older copy while archiving is off', () => {
+    expect(rawWindowStatement({ raw_window_seconds: FOURTEEN_DAYS, archive_armed: false }, false))
+      .toBe('Raw telemetry is kept for 14 days. Older readings are in the 1-minute, 5-minute and 1-hour rollups only.')
+  })
+
+  it('adds cold storage once the archiver has reported archiving on', () => {
+    const s = rawWindowStatement({ raw_window_seconds: FOURTEEN_DAYS, archive_armed: true }, true)
+    expect(s).toMatch(/and here on cold storage.$/)
+    expect(s).not.toMatch(/has not run/)
+  })
+
+  it('warns while archiving is on and the archiver has not reported it', () => {
+    // The retention job obeys the report, so until then it drops chunks it has not exported.
+    expect(rawWindowStatement({ raw_window_seconds: FOURTEEN_DAYS, archive_armed: false }, true))
+      .toMatch(/has not run since archiving was switched on/)
+  })
+
+  it('states an indefinite window without naming an older copy', () => {
+    expect(rawWindowStatement({ raw_window_seconds: null, archive_armed: false }, false))
+      .toBe('Raw telemetry is kept indefinitely.')
+  })
+
+  it('is rendered under the page heading', async () => {
+    api.rawTelemetryWindow.mockResolvedValue({ raw_window_seconds: FOURTEEN_DAYS, archive_armed: false })
+    await show([row()])
+    expect(await screen.findByText(/^Raw telemetry is kept for 14 days./)).toHaveClass('page-heading-note')
   })
 })

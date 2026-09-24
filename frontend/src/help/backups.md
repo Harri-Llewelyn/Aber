@@ -2,6 +2,8 @@
 
 Take a backup of the whole platform without a shell, and see which backups exist. A backup is both databases, the key their Vault secrets are encrypted under, the 3D model objects, the forge, the broker's accounts and, where the platform issues its own certificates, the internal CA, written by the backup service onto its own volume. Nothing on this page produces a backup itself: **Take a backup** queues a request and the service does the work, so the row shows up as queued, then running, then either a stored backup or a failure with its reason.
 
+**The historian in a backup holds raw telemetry for the raw window (14 days unless the site changed it) and the 1-minute, 5-minute and 1-hour rollups.** Raw readings older than the window are only on cold storage, which no backup includes.
+
 ## What the controls do
 
 - **Take a backup** queues one now. The note is kept with the backup and is the thing to read when choosing which one to restore from, so say why it was taken.
