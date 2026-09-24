@@ -1041,6 +1041,39 @@ reasoning is from Cilium's documented semantics (#235).
 `mqttAllowedCidrs` has the same shape and the same SNAT, and has **not** been changed: that rule is
 opt-in, and the broker's exposure is a posture an operator chooses per site.
 
+### Outbound connections
+
+Nothing in the stack reports usage or checks for updates by itself. These are the upstream defaults
+that would, and where each is switched off:
+
+| Service | What its default does | Switched off in |
+| :--- | :--- | :--- |
+| Grafana | usage reports to Grafana Labs; Grafana and plugin update checks every 10 minutes; the news feed; gravatar lookups; plugin signing keys and plugin upgrades from grafana.com | `grafana/grafana.ini` |
+| Alloy | reports its enabled components to Grafana Labs | `--disable-reporting`, `templates/obs/alloy.yaml` |
+| Loki | usage reports to Grafana Labs | `analytics.reporting_enabled`, `loki/loki.yaml` |
+| Node-RED, on the stack and on each appliance | a daily ping to telemetry.nodered.org for update notifications, and an editor dialog asking to enable it | `telemetry` in `node-red/node-red-init.mjs` and the appliance's `bootstrap.mjs` |
+| TimescaleDB | a daily telemetry report | `timescaledb.telemetryLevel: "off"` |
+| Gitea | a release check | `GITEA__cron.update_checker__ENABLED`, `templates/apps/gitea.yaml` |
+| Swagger UI | a validator badge loaded from validator.swagger.io, carrying the spec's URL | `VALIDATOR_URL: none`, `templates/obs/swagger-ui.yaml` |
+
+`scripts/check-docs-drift.mjs` fails if any of these is switched back on.
+
+**What still leaves the stack**, each because something a person uses depends on it:
+
+- Grafana installs any preinstalled plugin it lacks, once, at first boot. Logs Drilldown is one. A
+  site with no route to grafana.com runs without them; the Prometheus, Loki and PostgreSQL
+  datasources are bundled in the image. The `drop-shadowed-plugins` init container removes a
+  downloaded copy of any plugin the image bundles, so the image's version is the one that runs.
+  The plugin catalogue page queries grafana.com when an administrator opens it.
+- Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
+  palette manager's Install tab and its update badges read it.
+- The dashboard's fonts come from Google Fonts (#438).
+- The edge functions fetch their dependencies from esm.sh and deno.land on first load (#437).
+- Destinations a site configures itself, such as a remote cold archive or backup target.
+
+An administrator can opt Node-RED into update notifications from its User Settings. The runtime
+keeps that choice over `settings.js`.
+
 ### PDBs and HPAs
 
 ```bash

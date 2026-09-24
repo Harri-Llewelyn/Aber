@@ -2456,6 +2456,62 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 23. Nothing in the stack reports usage or checks for updates by itself.
+//
+// Each service below does one or the other by default, and each switch is one line that an upgrade
+// or a regenerated config file can drop without anything failing. deploy/k8s/README.md,
+// "Outbound connections", lists them. Grafana's are also refused as GF_* variables in its
+// template, because an environment variable overrides grafana.ini silently.
+// -------------------------------------------------------------------------------------------------
+{
+  const GRAFANA_INI = 'grafana/grafana.ini';
+  const ini = {};
+  let section = '';
+  for (const line of read(GRAFANA_INI).split(/\r?\n/)) {
+    const header = line.match(/^\[([^\]]+)\]\s*$/);
+    if (header) { section = header[1]; continue; }
+    const kv = line.match(/^([a-z_]+)\s*=\s*(.*?)\s*$/);
+    if (kv) ini[`${section}.${kv[1]}`] = kv[2];
+  }
+  const GRAFANA_OFF = {
+    'analytics.reporting_enabled': 'false',
+    'analytics.check_for_updates': 'false',
+    'analytics.check_for_plugin_updates': 'false',
+    'news.news_feed_enabled': 'false',
+    'security.disable_gravatar': 'true',
+    'plugins.preinstall_auto_update': 'false',
+    'plugins.public_key_retrieval_disabled': 'true',
+  };
+  const grafanaTemplate = read('deploy/helm/aber/templates/obs/grafana.yaml');
+
+  const SWITCHES = [
+    ['deploy/helm/aber/templates/obs/alloy.yaml', /^\s*- --disable-reporting\s*$/m, 'Alloy runs with --disable-reporting'],
+    ['loki/loki.yaml', /^analytics:\s*\n\s+reporting_enabled:\s*false\s*$/m, 'Loki analytics.reporting_enabled is false'],
+    ['node-red/node-red-init.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the stack's Node-RED declares telemetry off"],
+    ['forge/gateway-platform/appliance/bootstrap.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the appliance's Node-RED declares telemetry off"],
+    ['deploy/helm/aber/values.yaml', /^\s+telemetryLevel:\s*"off"\s*$/m, 'TimescaleDB telemetryLevel is "off"'],
+    ['deploy/helm/aber/templates/apps/gitea.yaml', /GITEA__cron\.update_checker__ENABLED\s*\n\s*value:\s*"false"/, "Gitea's update checker is disabled"],
+    ['deploy/helm/aber/templates/obs/swagger-ui.yaml', /name: VALIDATOR_URL\s*\n\s*value:\s*none\s*$/m, "Swagger UI's online validator is disabled"],
+  ];
+
+  const offences = [];
+  for (const [key, want] of Object.entries(GRAFANA_OFF)) {
+    if (ini[key] !== want) offences.push(`${GRAFANA_INI}: [${key.replace('.', '] ')} is ${ini[key] ?? 'unset'}, want ${want}`);
+    const env = `GF_${key.replace('.', '_').toUpperCase()}`;
+    if (grafanaTemplate.includes(env)) offences.push(`templates/obs/grafana.yaml sets ${env}, which overrides grafana.ini`);
+  }
+  for (const [file, pattern, what] of SWITCHES) {
+    if (!pattern.test(read(file))) offences.push(`${file}: expected ${what}`);
+  }
+
+  if (offences.length) {
+    fail('a service would report usage or check for updates:\n' + offences.map((o) => `        ${o}`).join('\n'));
+  } else {
+    pass(`all ${Object.keys(GRAFANA_OFF).length + SWITCHES.length} usage-report and update-check switches are off`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');
