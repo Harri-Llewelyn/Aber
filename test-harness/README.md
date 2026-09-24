@@ -127,14 +127,15 @@ feel like, and which is reached first.
 
 | Ceiling | Value | What happens at it |
 | :--- | :--- | :--- |
-| `MAX_ENTITIES_PER_CACHE` | 1000 per cache | Beyond it the directory refresher evicts what it just filled, and the hot path pays a PostgREST round trip per message. The refresher warns; `aber_ingestion_cache_evictions_total` counts it |
+| `MAX_ENTITIES_PER_CACHE` | 1000 per cache, beyond the directory | Headroom for ids the directory does not hold. The refresher sizes each cache to the directory plus this, so the fleet is not a ceiling (#395); ids the directory lacks are. `aber_ingestion_cache_evictions_total` counts what it evicts |
 | `TELEMETRY_QUEUE_MAX_MESSAGES` | 10 000 | The callback thread blocks for 5 s, then drops the DDATA as `reason="write_queue_full"` |
 | `TELEMETRY_BATCH_MAX_MESSAGES` | 500 | One transaction carries at most this many messages, so batching stops helping above it |
 | `DIRECTORY_REFRESH_SECONDS` | 5 | The whole directory is read this often; its cost grows with the fleet, on a thread the hot path does not share |
 
-There are **three** caches on that bound — device, gateway and schema — counted separately, so 1000
-is per cache rather than for all of them. A fleet of 8 gateways and 50 devices each sits well
-inside it; 8 × 200 does not.
+There are **three** caches — device, gateway and schema — each sized on every refresher pass to
+what the directory holds plus that headroom: a key per device identity (a device with a
+reported identity takes two), a row per gateway, and a device per schema entry. Until #395 the
+capacity was a fixed 1000, and *Device count* below is what that did to a fleet past it.
 
 The schema cache is the one to watch on a synthetic fleet, because the fixture attaches no schema
 to anything. `AUDIT_PAYLOAD_REJECTIONS` is on by default, so every device's constraints are looked
@@ -241,6 +242,39 @@ the broker exporter's `broker_publish_messages_dropped`, which nothing in the st
 A growing queue is visible and recoverable; this is neither. It began at 1250 — 1.8 % of the
 soak's traffic — well before the daemon's queue was anywhere near its 10,000 cap.
 
+#### Device count
+
+Measured 2026-09-23 (#395) at a fixed 100 msg/s for 300 s, so the rate knee stays out of the
+way: 8 gateways, fleets of 800 to 1,600 devices, the caches at their old fixed capacity of 1000.
+Idle, the stack makes 1.3 PostgREST requests a second.
+
+| Devices | Births | PostgREST req/s | Cache entries, device / schema | Evicted in the run, device / schema |
+| ---: | ---: | ---: | ---: | ---: |
+| 800 | 67/s | 3.7 | 813 / 804 | 0 / 0 |
+| 1,000 | 125/s | 12.1 | 1,000 / 1,000 | 0 / 4 |
+| 1,200 | 120/s | **117** | 1,000 / 1,000 | 60,152 / 31,492 |
+| 1,600 | 100/s | **147** | 1,000 / 1,000 | 103,845 / 30,819 |
+
+**Past the wall every message paid a directory round trip, and the rate envelope went with
+it.** 100 msg/s still held. At 1,600 devices the rate steps wrote 207, 227 and 256 msg/s of 250,
+500 and 1,000 offered, the broker shedding the rest (2,134, 25,346 and 72,870 messages) while
+the callback thread waited on PostgREST: a quarter of the 1,000 msg/s measured at 400 devices.
+The births were never the problem: 100 to 132 a second at every size.
+
+The refresher now sizes each cache to the directory before filling it. The same 1,600 devices
+afterwards:
+
+| Offered | Written | PostgREST req/s | Evicted | Write mean |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 msg/s | 100 | 16.6 (the schema lookups and the births) | 0 | 5.0 ms |
+| 250 msg/s | 250 | | 0 | 4.9 ms |
+| 500 msg/s | 500 | 7.3 across the three steps | 0 | 4.6 ms |
+| 1,000 msg/s | 1,000 | | 0 | 15.1 ms |
+
+Device count now costs memory and the refresher's read, one request per 1,000 rows every 5 s,
+and not throughput. A fleet whose devices report their own identity takes two device-cache
+keys each, so under the old cap it would have met the wall at 500.
+
 #### Storage
 
 Measured across 14.7 M rows of the 1250 soak: **366.8 bytes per row on disk, and 74 % of that
@@ -257,8 +291,6 @@ with the rollups beside it.
 
 #### Not measured
 
-* **Device count.** 400 devices birthed in 4–8 s (51–101 births/s) every time and the cache
-  evicted nothing; the sweep towards the 1,000-per-cache wall was not run.
 * **Metric count.** 10 per message throughout (5 in the shakedown). Rows per message is the
   multiplier that turns 1,000 msg/s into 10,000 rows/s, and it was not varied.
 * **Compressed storage**, for the reason above. It has since been measured on synthetic telemetry

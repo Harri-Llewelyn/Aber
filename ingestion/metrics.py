@@ -239,7 +239,7 @@ HELP = {
         "faults and this is what separates them. A LOWER BOUND: seq is 8-bit, so a single gap "
         "larger than 255 wraps and is undercounted. Read it with the gap counter, never alone.",
     "aber_ingestion_cache_entries":
-        "Entries currently held in each entity resolution cache. Bounded by MAX_ENTITIES_PER_CACHE.",
+        "Entries currently held in each entity resolution cache. Bounded by the directory plus MAX_ENTITIES_PER_CACHE.",
     "aber_ingestion_cache_evictions_total":
         "Entries dropped from a cache because it was at its capacity bound. NON-ZERO IS THE "
         "INTERESTING CASE: either the fleet is larger than the cap, or something is publishing "
