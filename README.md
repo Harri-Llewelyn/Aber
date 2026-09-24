@@ -506,8 +506,9 @@ Two consequences worth stating on the front page; both are detailed in
   from `msg.req.headers`.
 - **The `asset-3d-models` bucket is public-read**, because an exported AAS `File` URL must resolve
   for a viewer holding no session and a signed URL would turn every shell already handed out into a
-  time bomb. Anything in it must carry nothing beyond machine geometry. Writes are gated on
-  `device:manage`, not merely `authenticated`.
+  time bomb. Anything in it must carry nothing beyond machine geometry. The objects are public; the
+  listing is not: keys are `<device_uuid>/<file>`, so listing the bucket, like writing to it, is
+  gated on `device:manage`, not merely `authenticated`.
 
 ### Machine identities
 
