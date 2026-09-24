@@ -372,9 +372,10 @@ reports can tell replayed data apart through a join they already make, and synth
 exactly like real ones — which is the behaviour under test when the question is "do the rollups
 work".
 
-**Distinct from `deployment`**, which is about where the connector runs rather than whether the
-readings are real. An appliance out on the plant network replaying a capture is
-`deployment = 'remote'`, `is_simulated = true`.
+**A separate column from `deployment`**, which is about where the connector runs rather than
+whether the readings are real, but not an independent one: the table holds a simulated gateway to
+`deployment = 'host'` (`gateways_simulated_is_host`). A capture is replayed onto a simulated
+gateway, so never onto a remote one.
 
 ### Where captures are kept
 

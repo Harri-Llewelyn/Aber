@@ -150,6 +150,28 @@ describe('GatewayRepositoryPanel — host-run gateways', () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
     expect(screen.queryByText(/virtual/i)).toBeNull()
   })
+
+  // Simulated is host-run, so it reached the host text, which says its connector runs in Node-RED.
+  // Nothing says what generates a simulated gateway's readings: the load generator is one.
+  it('says a simulated gateway is simulated, without claiming Node-RED runs it', () => {
+    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host', is_simulated: true }} canOpenForge />)
+    expect(screen.getByText(/A simulated gateway has no repository of its own/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Its connector runs in this stack's own/i)).toBeNull()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
+  })
+
+  it('says playback publishes as a shadow gateway, which is also simulated', () => {
+    render(
+      <GatewayRepositoryPanel
+        gateway={{ ...GATEWAY, deployment: 'host', is_simulated: true, is_shadow: true }}
+        canOpenForge
+      />
+    )
+    expect(screen.getByText(/A shadow gateway has no repository of its own/i)).toBeInTheDocument()
+    expect(screen.getByText(/Playback publishes as it/i)).toBeInTheDocument()
+    expect(screen.queryByText(/simulated gateway/i)).toBeNull()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
+  })
 })
 
 describe('GatewayRepositoryPanel — archived in the forge', () => {

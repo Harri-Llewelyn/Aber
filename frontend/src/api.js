@@ -2726,8 +2726,8 @@ const apiMethods = {
         access_url: body.access_url
       };
       if ('deployment' in body) patch.deployment = body.deployment === 'host' ? 'host' : 'remote';
-      // Separate from deployment and not derived from it: a remote appliance replaying a capture is
-      // remote and simulated at once.
+      // Sent separately from deployment, but not independent of it: the table holds a simulated
+      // gateway to 'host' (gateways_simulated_is_host), so pairing it with 'remote' is refused.
       if ('is_simulated' in body) patch.is_simulated = !!body.is_simulated;
       // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
       if ('description' in body) patch.description = emptyToNull(body.description);
