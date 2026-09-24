@@ -114,9 +114,9 @@ import { suitesInLane } from './python-suites.mjs'
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 // PINNED TO THE SAME TAG THE STACK RUNS. The bootstrap above is a list of things that are true of
-// 17.6.1.160 specifically -- `postgres` not being superuser is the loudest -- so a floating tag
+// 17.6.1.175 specifically -- `postgres` not being superuser is the loudest -- so a floating tag
 // would break this script on an image bump with an error about schema ownership that names nothing.
-const IMAGE = 'supabase/postgres:17.6.1.160'
+const IMAGE = 'supabase/postgres:17.6.1.175'
 const CONTAINER = 'aber_test_db'
 
 // NOT 54322. That is the live stack's published port, and the entire point of this script is to

@@ -8,7 +8,11 @@
 # the next `helm upgrade`. The dev loop rebuilds every image on `node scripts/dev-cluster.mjs up`.
 #
 # Built from the repository root, so both specs resolve; .dockerignore negates each by name.
-FROM swaggerapi/swagger-ui:v5.32.14
+FROM swaggerapi/swagger-ui:v5.33.0
+
+# The base's Alpine packages, taken to the distribution's current fixes: a fix Alpine ships between
+# two base cuts reaches the release rather than waiting for the next base (#347).
+RUN apk upgrade --no-cache
 
 # openapi.yaml is the gateway-fronted platform surface; i3x-openapi.yaml is the i3X server, a
 # different origin with a different auth model. The Deployment's URLS env names both by these paths.

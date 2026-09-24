@@ -26,7 +26,13 @@
 # `supabaseDb.image.tag` in values.yaml. psql's client version is what parses this SQL, and a
 # client older than the server silently mis-handles syntax the migrations rely on -- so the two
 # must not drift.
-FROM supabase/postgres:17.6.1.160
+FROM supabase/postgres:17.6.1.175
+
+# gosu is the base entrypoint's tool for starting postgres as root and dropping to the postgres user
+# (docker-entrypoint.sh, the `postgres` branch). This image never starts postgres -- the Job sets
+# its own command -- and the binary carried the image's only fixable findings, a stale Go toolchain
+# (#347). Removed rather than carried.
+RUN rm /usr/local/bin/gosu
 
 # TOP LEVEL ONLY. `supabase/migrations/archive/` holds the superseded migrations, kept as reasoning
 # and deliberately never executed -- a recursive copy would replay every one of them. The glob is
