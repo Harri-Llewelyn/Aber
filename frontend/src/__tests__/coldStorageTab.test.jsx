@@ -348,8 +348,8 @@ describe('how far behind the archive is', () => {
     screen.getByText('Unexported since').parentElement.querySelectorAll('div')[1].style.color
 
   it('stays neutral inside one chunk interval', async () => {
-    // A chunk is not eligible until its whole seven-day span has passed the threshold, so a
-    // healthy site is always a few days behind. Colouring that amber would train the reader to
+    // A chunk is not eligible until its whole span (up to seven days) has passed the threshold,
+    // so a healthy site can be a few days behind. Colouring that amber would train the reader to
     // ignore the colour by the second week of every install.
     await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 5 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())

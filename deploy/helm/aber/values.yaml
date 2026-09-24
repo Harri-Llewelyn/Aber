@@ -248,10 +248,26 @@ timescaledb:
   # removes the policy.
   retention:
     enabled: true
-    # How old a chunk must be before it is converted to the columnstore. Does NOT bound the
-    # late-arrival window (inserts into compressed chunks succeed); only the daemon's
-    # TELEMETRY_MAX_AGE_SECONDS does.
-    compressAfter: "7 days"
+    # Telemetry rows the fleet writes a day: devices x metrics x samples per metric a day. The
+    # default is 100 devices x 10 metrics every 30 seconds. Sizes chunkInterval when that is empty.
+    expectedRowsPerDay: 2880000
+    # The time span of one raw telemetry chunk. Compression never touches the open chunk, so this
+    # plus compressAfter is the uncompressed floor no policy lowers.
+    #
+    # DERIVED WHEN EMPTY so a chunk, indexes included, is about a quarter of the historian's
+    # memory limit (TimescaleDB's sizing guidance), at the measured 367 bytes a row
+    # (test-harness/README.md, Storage): whole hours, clamped to 1 hour .. 7 days.
+    #
+    #   2Gi limit, 2,880,000 rows a day             -> 12 hours
+    #   2Gi limit, 1,000 devices x 10 metrics x 1 Hz -> 1 hour (the clamp; the historian needs
+    #                                                   more memory than the chart ships)
+    #
+    # Applies to chunks created after the change; the open chunk keeps the width it was made with.
+    chunkInterval: ""
+    # How old a chunk must be before it is converted to the columnstore. Empty is one chunk
+    # interval. Does NOT bound the late-arrival window (inserts into compressed chunks succeed);
+    # only the daemon's TELEMETRY_MAX_AGE_SECONDS does.
+    compressAfter: ""
     # A HARD DELETE with no undo, and DERIVED when left empty rather than defaulted in place.
     #
     #   empty + a configured coldArchive.s3 destination  ->  never

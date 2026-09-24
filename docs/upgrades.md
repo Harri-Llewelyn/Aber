@@ -188,6 +188,12 @@ than letting the stack carry on — which is the whole difference between this a
 
 An operator does nothing: as above, upgrading is still `helm upgrade`.
 
+The same step sets the raw hypertable's chunk interval, derived from
+`timescaledb.retention.expectedRowsPerDay` and the historian's memory limit unless
+`chunkInterval` is set. It applies to chunks created after the upgrade: the open chunk keeps the
+7 days it was made with, so the smaller floor arrives once that chunk closes. `compressAfter`,
+when left empty, follows it; a site that set `compressAfter` explicitly keeps its value.
+
 ### Migrations are forward-only
 
 There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;

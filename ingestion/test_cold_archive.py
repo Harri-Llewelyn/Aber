@@ -106,7 +106,7 @@ def test_the_partition_follows_the_start_across_a_month_boundary(object_key_for)
     """
     A chunk beginning 29 March holds April readings under `month=03`, and that is deliberate.
 
-    Chunks are seven days and months are not, so this happens about a dozen times a year. The
+    A chunk spans up to seven days and months do not align with it, so this happens routinely. The
     manifest is the authoritative index; the Hive partitions are a convenience for a reader that
     does not have it, and such a reader must widen by one partition on each side. Pinned here so
     the rule is not "fixed" later by someone who meets it as a bug.
