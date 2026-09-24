@@ -29,18 +29,43 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
   if (!canOpenForge) return null
 
   /**
-   * A host-run gateway has no repository: its connector runs in this stack's Node-RED, whose
-   * `flows.json` is the whole instance, and repositories are created only when an appliance enrols
-   * with a deploy key. The panel says so rather than hiding.
+   * A host-run gateway has no repository: repositories are created only when an appliance enrols
+   * with a deploy key. The panel says so rather than hiding. Simulated and shadow gateways arrive
+   * here too (the table holds simulated to 'host' and shadow to simulated), but Node-RED is not
+   * necessarily what publishes as them, so each type is described on its own. Shadow is tested
+   * first because a shadow gateway is also simulated.
    */
   if (gateway?.deployment === 'host') {
+    let reason
+    if (gateway.is_shadow) {
+      reason = (
+        <>
+          A shadow gateway has no repository of its own. Playback publishes as it, replaying a
+          capture, so there is no flow to edit.
+        </>
+      )
+    } else if (gateway.is_simulated) {
+      reason = (
+        <>
+          A simulated gateway has no repository of its own. Its readings are generated inside this
+          stack rather than by an appliance. If a flow in this stack's own Node-RED generates them,
+          edit it in the Node-RED editor.
+        </>
+      )
+    } else {
+      reason = (
+        <>
+          A host-run gateway has no repository of its own. Its connector runs in this stack's own
+          Node-RED, which several host gateways can share — one <span className="mono">flows.json</span> is
+          that whole instance. Edit it in the Node-RED editor instead.
+        </>
+      )
+    }
     return (
       <div>
         <div className="form-label" style={{ margin: 0 }}>Repository</div>
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-          A host-run gateway has no repository of its own. Its connector runs in this stack's own
-          Node-RED, which several host gateways can share — one <span className="mono">flows.json</span> is
-          that whole instance. Edit it in the Node-RED editor instead.
+          {reason}
         </div>
       </div>
     )
