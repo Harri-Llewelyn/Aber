@@ -8,6 +8,17 @@
 # deploy/k8s/README.md. Credentials are the built-in GITHUB_TOKEN with `packages: write`. GHCR
 # creates every new package private and GITHUB_TOKEN cannot change that; deploy/k8s/README.md
 # carries the `gh` commands for the one-time visibility flip.
+#
+# Every image is published with an SPDX SBOM and SLSA provenance in its index, and every image and
+# the chart is signed with cosign, keyless: the signature is bound to this workflow's OIDC identity
+# (`id-token: write`), so there is no key to hold or leak, and a consumer verifies against the
+# identity `<repo>/.github/workflows/release.yml@refs/tags/v<version>`. The signing certificate is
+# recorded in Sigstore's public transparency log, which names this repository and this file -- a
+# release signed while the repository is private publishes that it exists. SECURITY.md says what a
+# consumer can check; .github/scripts/sign-and-verify.sh runs those same checks here, so a release
+# cannot report green with an artefact nothing signed or an image nothing attested. The SBOMs are
+# also attached to the GitHub Release as files, for the site that asks for one without a registry
+# client.
 name: Release
 
 on:
@@ -38,6 +49,8 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  # Keyless signing: cosign exchanges this run's OIDC token for a short-lived certificate.
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -101,7 +114,7 @@ jobs:
         run: node scripts/check-docs-drift.mjs
 
   # The eight independent images, in parallel. ingestion is not here: test-runner is built FROM it,
-  # and the two have to share a runner. See build-ingestion-chain below.
+  # and the two are one Bake build. See build-ingestion-chain below.
   build-images:
     name: Image — ${{ matrix.name }}
     needs: prepare-release
@@ -186,7 +199,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Pinned to a commit, as #421 will pin the rest: this one holds the signing identity.
+      - name: Install cosign
+        if: needs.prepare-release.outputs.push == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
       - name: Build & Push
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
@@ -201,16 +220,37 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
             org.opencontainers.image.licenses=MIT
+          # An SPDX SBOM of the final filesystem (Syft, run by BuildKit) and SLSA provenance naming
+          # the source, the Dockerfile, every build argument and every base image by digest, both
+          # attached to the image index. `mode=max` because `min` omits the materials, which is
+          # the half that answers "was this built from what it says". The index gains an
+          # `unknown/unknown` entry on the GHCR package page: that is the attestation manifest.
+          # docker-bake.hcl declares the same two for the ingestion chain.
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
-  # ingestion, then test-runner FROM it: one job, one runner, one local image store. test-runner is
-  # `FROM ${INGESTION_IMAGE}`, so its base must be resolvable at build time; split across two jobs
-  # it is not, and the failure is a `403 Forbidden` pulling the base (nothing pushed on a dry run, a
-  # private package on a first release, a separate runner otherwise). This job does not set up
-  # Buildx: `docker/setup-buildx-action` selects a `docker-container` builder with its own image
-  # store, which makes a locally built base invisible to the build that consumes it and produces the
-  # same 403. The cost is the GHA layer cache, which is acceptable on a tag. test-runner is
+      # Sign by digest, verify the signature as a consumer would, and refuse an image whose SBOM or
+      # provenance did not arrive. Nothing to sign on a dry run: nothing was pushed.
+      - name: Sign & Verify
+        if: needs.prepare-release.outputs.push == 'true'
+        env:
+          EXPECTED_IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+          IMAGE: ${{ matrix.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: .github/scripts/sign-and-verify.sh "$IMAGE_NAMESPACE/$IMAGE@$DIGEST"
+
+  # ingestion, then test-runner FROM it, as one `docker buildx bake` of docker-bake.hcl. test-runner
+  # is `FROM ${INGESTION_IMAGE}`, and its base is the ingestion image built seconds earlier at the
+  # version being released, which no registry holds yet (nothing pushed on a dry run, a private
+  # package on a first release); Bake's `target:` context hands the first build's result to the
+  # second inside BuildKit, so both run on the `docker-container` driver that the attestations
+  # need. Two bake runs rather than one `--push`: the first writes both images to OCI archives so
+  # their attestations can be checked before anything is published -- and on a dry run at all --
+  # and the second publishes from the cache the first filled. A pushed ingestion beside a
+  # test-runner that failed to build would be a half-published release whose missing half is the
+  # thing that reports on it. No GHA layer cache here, which is acceptable on a tag. test-runner is
   # published so the conformance suites can be pointed at the cluster they judge; `e2e.enabled` is
   # still false by default.
   build-ingestion-chain:
@@ -218,13 +258,17 @@ jobs:
     needs: prepare-release
     runs-on: ubuntu-latest
     env:
-      V: ${{ needs.prepare-release.outputs.version }}
+      # docker-bake.hcl reads these.
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+      REVISION: ${{ github.sha }}
+      BUILDER_ID: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
 
-      # Deliberately NO docker/setup-buildx-action -- see the header. Both builds must run on the
-      # default `docker` driver so the second can see what the first produced.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Log In To GHCR
         if: needs.prepare-release.outputs.push == 'true'
@@ -234,56 +278,58 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Context is the REPOSITORY ROOT: ingestion/Dockerfile compiles sparkplug_b.proto with protoc
-      # and the .proto lives there.
-      - name: Build ingestion
+      - name: Install cosign
+        if: needs.prepare-release.outputs.push == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # `--allow=fs.write`: Bake refuses to write outside the working directory without it, and
+      # the archives must not land inside the build context.
+      - name: Build Both
         run: |
           set -eu
-          docker build -f ingestion/Dockerfile -t "$IMAGE_NAMESPACE/ingestion:$V" \
-            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            --label "org.opencontainers.image.version=$V" \
-            --label "org.opencontainers.image.licenses=MIT" \
-            .
+          mkdir -p /tmp/oci
+          docker buildx bake -f docker-bake.hcl ingestion-chain --allow=fs.write=/tmp/oci \
+            --set 'ingestion.output=type=oci,dest=/tmp/oci/ingestion.tar' \
+            --set 'test-runner.output=type=oci,dest=/tmp/oci/test-runner.tar'
 
-      # The guard that turns a silent registry fallback into a legible failure: `docker build` pulls
-      # a missing base by default, so without this a broken local store degrades into the 403 this
-      # job exists to avoid.
-      - name: Assert The Base Is Local Before Building On It
+      # The guard that turns a silent omission into a legible failure: attestations are a build
+      # option, and a build that cannot produce them succeeds without them. The archive's top-level
+      # index points at the image index; the attestation manifests are its entries annotated
+      # `vnd.docker.reference.type`. Expected: 1, holding both the SBOM and the provenance.
+      - name: Assert Both Carry Attestations
         run: |
           set -eu
-          REF="$IMAGE_NAMESPACE/ingestion:$V"
-          if ! docker image inspect "$REF" >/dev/null 2>&1; then
-            echo "::error::$REF is not in this runner's local image store."
-            echo "::error::test-runner would fall back to pulling it from GHCR and fail with 403."
-            echo "::error::Most likely cause: a Buildx builder was selected, so the build above"
-            echo "::error::wrote to a container image store instead of the docker daemon."
-            exit 1
-          fi
-          echo "  ok  $REF is local -- test-runner will build against it without a pull"
+          for t in ingestion test-runner; do
+            TAR="/tmp/oci/$t.tar"
+            IDX=$(tar -xOf "$TAR" index.json | jq -r '.manifests[0].digest')
+            N=$(tar -xOf "$TAR" "blobs/sha256/${IDX#sha256:}" \
+              | jq '[.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length')
+            if [ "$N" -lt 1 ]; then
+              echo "::error::$t was built without an attestation manifest: no SBOM, no provenance."
+              exit 1
+            fi
+            echo "  ok  $t carries $N attestation manifest(s)"
+          done
 
-      # Repository root again: test_aas_export.py resolves five files relative to parents[3].
-      # INGESTION_IMAGE is passed explicitly because the base is the image built seconds ago at the
-      # version being released, which no committed default can name.
-      - name: Build test-runner From The Local ingestion
-        run: |
-          set -eu
-          docker build -f test-harness/Dockerfile -t "$IMAGE_NAMESPACE/test-runner:$V" \
-            --build-arg "INGESTION_IMAGE=$IMAGE_NAMESPACE/ingestion:$V" \
-            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            --label "org.opencontainers.image.version=$V" \
-            --label "org.opencontainers.image.licenses=MIT" \
-            .
-
-      # Pushed only after BOTH have built. A pushed ingestion beside a test-runner that failed to
-      # build would be a half-published release whose missing half is the thing that reports on it.
+      # Pushed only after BOTH have built. The metadata file names what was pushed, by digest, for
+      # the signing step; `image.name` is the tagged reference and the tag is dropped in favour of
+      # the digest.
       - name: Push Both
         if: needs.prepare-release.outputs.push == 'true'
         run: |
           set -eu
-          docker push "$IMAGE_NAMESPACE/ingestion:$V"
-          docker push "$IMAGE_NAMESPACE/test-runner:$V"
+          docker buildx bake -f docker-bake.hcl ingestion-chain --push --metadata-file /tmp/bake-metadata.json
+          jq -r 'to_entries[] | .value as $v
+                 | ($v["image.name"] | split(",")[0] | split(":")[:-1] | join(":")) + "@" + $v["containerimage.digest"]' \
+            /tmp/bake-metadata.json > /tmp/pushed.txt
+          test "$(wc -l < /tmp/pushed.txt)" -eq 2
+          cat /tmp/pushed.txt
+
+      - name: Sign & Verify
+        if: needs.prepare-release.outputs.push == 'true'
+        env:
+          EXPECTED_IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        run: xargs .github/scripts/sign-and-verify.sh < /tmp/pushed.txt
 
   # The chart, last, and only once every image it can name exists.
   publish-chart:
@@ -359,9 +405,40 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' \
             | helm registry login "$REGISTRY" -u '${{ github.actor }}' --password-stdin
 
-      - name: Push
+      # A second login, for cosign: `helm registry login` writes Helm's own credential file, which
+      # cosign does not read.
+      - name: Log In To GHCR For cosign
         if: needs.prepare-release.outputs.push == 'true'
-        run: helm push '${{ steps.package.outputs.package }}' "$CHART_REPO"
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        if: needs.prepare-release.outputs.push == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # `helm push` prints the digest it pushed; that, never the tag, is what gets signed.
+      - name: Push
+        id: push
+        if: needs.prepare-release.outputs.push == 'true'
+        run: |
+          set -eu
+          helm push '${{ steps.package.outputs.package }}' "$CHART_REPO" | tee /tmp/helm-push.log
+          DIGEST=$(sed -nE 's/^Digest: (sha256:[0-9a-f]{64}).*$/\1/p' /tmp/helm-push.log)
+          test -n "$DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      # The chart is an OCI artefact like the images and is signed the same way; it carries no
+      # SBOM or provenance, so only the signature is checked.
+      - name: Sign & Verify
+        if: needs.prepare-release.outputs.push == 'true'
+        env:
+          EXPECTED_IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+          CHECK_ATTESTATIONS: 'false'
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: .github/scripts/sign-and-verify.sh "$IMAGE_NAMESPACE/aber@$DIGEST"
 
       # Pull it back. `helm push` reporting success proves the layers were accepted, not that the
       # chart is resolvable by version: the chart name becomes the last path segment, and it is easy
@@ -378,6 +455,8 @@ jobs:
           helm show chart "/tmp/pulled/aber-$V.tgz"
 
       - name: Summary
+        env:
+          EXPECTED_IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
         run: |
           V='${{ needs.prepare-release.outputs.version }}'
           {
@@ -388,13 +467,82 @@ jobs:
             echo "### aber $V"
             echo
             echo '```bash'
+            echo "cosign verify $IMAGE_NAMESPACE/aber:$V \\"
+            echo "  --certificate-identity $EXPECTED_IDENTITY \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo
             echo "helm install aber $CHART_REPO/aber --version $V \\"
             echo "  --namespace aber --create-namespace \\"
             echo "  --values my-values.yaml"
             echo '```'
             echo
-            echo "Images published at \`$V\`:"
+            echo "Images published at \`$V\`, each signed with the same identity and carrying an SBOM and provenance:"
             for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
               echo "- \`$IMAGE_NAMESPACE/$img:$V\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The SBOMs as files on the GitHub Release, for the site that asks for one without a registry
+  # client. Read back from the registry rather than kept from the build, so they are what was
+  # published; the registry copy stays the authoritative one, because the image signature covers
+  # it and nothing signs a release asset. The release is opened as a DRAFT from
+  # .github/RELEASE_TEMPLATE.md when nothing has opened it yet -- the notes are still written by
+  # hand (docs/releases.md) -- and reused when the maintainer got there first. Tags only: a
+  # `workflow_dispatch` publish has no tag to hang a release on, and its SBOMs are in the registry.
+  attach-sboms:
+    name: SBOMs On The GitHub Release
+    needs: [prepare-release, build-images, build-ingestion-chain, publish-chart]
+    if: needs.prepare-release.outputs.push == 'true' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    env:
+      V: ${{ needs.prepare-release.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      # The packages are private until the one-time visibility flip.
+      - name: Log In To GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One SPDX document per image, plus one per build stage a Dockerfile opted into the scan
+      # (the frontend's node_modules), plus the provenance, plus the digests the signatures are
+      # over. An image with no SBOM fails here too, though Sign & Verify has already refused it.
+      - name: Read The SBOMs Back Out Of The Registry
+        run: |
+          set -eu
+          OUT="/tmp/aber-$V-sbom"
+          mkdir -p "$OUT"
+          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
+            REF="$IMAGE_NAMESPACE/$img:$V"
+            docker buildx imagetools inspect "$REF" --format '{{json .SBOM}}' > /tmp/sbom.json
+            jq -e '.SPDX' /tmp/sbom.json > "$OUT/$img-$V.spdx.json"
+            jq -c '.AdditionalSPDXs[]?' /tmp/sbom.json | nl -ba -w1 | while IFS=$'\t' read -r n doc; do
+              printf '%s\n' "$doc" | jq . > "$OUT/$img-$V.build-stage-$n.spdx.json"
+            done
+            docker buildx imagetools inspect "$REF" --format '{{json .Provenance.SLSA}}' \
+              | jq -e . > "$OUT/$img-$V.provenance.json"
+            echo "$REF@$(docker buildx imagetools inspect "$REF" --format '{{.Manifest.Digest}}')" >> "$OUT/DIGESTS"
+            echo "  ok  $img"
+          done
+          echo "$IMAGE_NAMESPACE/aber:$V@$(docker buildx imagetools inspect "$IMAGE_NAMESPACE/aber:$V" --format '{{.Manifest.Digest}}')" >> "$OUT/DIGESTS"
+          tar -czf "/tmp/aber-$V-sbom.tar.gz" -C /tmp "aber-$V-sbom"
+          ls -la "$OUT"
+
+      - name: Attach To The GitHub Release
+        run: |
+          set -eu
+          TAG="v$V"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "$TAG" --notes-file .github/RELEASE_TEMPLATE.md
+            echo "Opened $TAG as a draft; fill in the notes and publish it."
+          fi
+          gh release upload "$TAG" "/tmp/aber-$V-sbom.tar.gz" --clobber
+          echo "  ok  aber-$V-sbom.tar.gz attached to $TAG"

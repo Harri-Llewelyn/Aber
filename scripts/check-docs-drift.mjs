@@ -918,6 +918,9 @@ function edgeFunctionNames() {
     'VITE_GITEA_URL',        // an endpoint, public -- the forge's door; a link and a sign-out beacon
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_APP_VERSION',      // a git describe string, shown in the UI on purpose
+    // A BuildKit switch, not a value: opts the build stage into the release's SBOM scan. Not
+    // VITE_-prefixed, so Vite never inlines it.
+    'BUILDKIT_SBOM_SCAN_STAGE',
   ]);
 
   const df = read('frontend/Dockerfile');
