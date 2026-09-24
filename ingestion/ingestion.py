@@ -2760,6 +2760,11 @@ def parse_sparkplug_payload(msg):
                     metric.int_value = int(m['int_value'])
                 if 'datatype' in m and m['datatype'] is not None:
                     metric.datatype = int(m['datatype'])
+                # The metric's own reading time, which the protobuf path already honours: a
+                # report-by-exception refresh or a batched reading is filed when it was taken.
+                ts = m.get('timestamp')
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
+                    metric.timestamp = int(ts)
             return payload
         except Exception:
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)

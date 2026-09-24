@@ -37,6 +37,9 @@ python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
+# The JSON encoding the appliance publishes: a metric's own timestamp survives the parse, so a
+# report-by-exception refresh or a batched reading is filed when it was taken.
+python ingestion/test_json_payload.py
 python ingestion/test_mqtt_tls.py
 # The Directory's MQTT half. Mostly assertions about what it does NOT do: the publisher is
 # fed from the enrolment record, so one test reads directory_publish.py's own source and
