@@ -614,6 +614,8 @@ The sample flow includes a **▶ SEND A DEVICE READING** inject. Click it and an
 as `UNKNOWN_DEVICE`, and its data is dropped until an operator approves it. Your own flows send
 readings the same way, to the **publish by exception** node, which publishes only the metrics that
 moved and republishes every metric every 120 seconds as the device's proof of life.
+When the platform notices a lost message it asks for a rebirth, and the appliance answers with a
+birth of the node and every device at its last values.
 
 That is the intended path. There is no device registration step and no API to call from the flow — the
 gateway announces, the platform quarantines, a human approves.

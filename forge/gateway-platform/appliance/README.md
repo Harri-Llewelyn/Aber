@@ -90,6 +90,13 @@ does that.
 All of this shares one Sparkplug `seq` for the edge node, as the specification requires. The
 platform follows it across every message type, and a gap is how it knows a change was lost.
 
+**When a change is lost, the platform asks for a rebirth, and this appliance answers it.** The
+platform publishes `Node Control/Rebirth` on this node's `NCMD` topic; **answer a rebirth
+request** replies with an `NBIRTH` and then a `DBIRTH` for every device at its last values, so the
+lost change is restated at once rather than at the next refresh. A `Device Control/Rebirth` on a
+device's `DCMD` topic re-births that device alone. Any other command is logged and ignored: this
+appliance writes nothing to the machines behind it.
+
 ## What this appliance reports about itself
 
 Every 30s the heartbeat carries a handful of facts about the appliance, so "what is that gateway

@@ -1032,8 +1032,10 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
   healthy daemon reports a failure whose text describes a serious fault. Check 9b exists to assert
   the very throttle that causes it. Space runs by more than `REBIRTH_REQUEST_INTERVAL_SECONDS`, and
   when in doubt grep the daemon's log for `REBIRTH REQUESTED`: the line states the deadline.
-- **The demo Node-RED simulator does not answer a rebirth** — it publishes on a timer and
-  subscribes to no command topic. That is a simulator limitation, not a daemon one.
+- **The gateway appliance answers it** (`forge/gateway-platform/appliance/`, #414): an `NBIRTH`,
+  then a `DBIRTH` for every device at its last values, all on the node's one `seq`. A
+  `Device Control/Rebirth` on `DCMD` re-births one device. A gateway of your own has to answer it
+  too, or a lost change waits for its next report.
 
 ## The Directory on MQTT
 

@@ -166,19 +166,21 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   } else {
     // Anything wired into the heartbeat can delay or fail it, and a gateway that stops beating is
     // reported STALE and then OFFLINE. A host-metric collector writes to a cache the heartbeat
-    // reads instead of being chained into its path.
+    // reads instead of being chained into its path. The rebirth handler is the one other feeder: it
+    // sends an NBIRTH of its own when a host asks, beside the injects rather than between them, and
+    // a command it cannot read produces nothing.
     const feeds = flow.filter((n) => (n.wires?.[0] || []).includes(HEARTBEAT)).map((n) => n.id).sort();
-    const expected = ['aber-birth-tick', 'aber-data-tick'];
+    const expected = ['aber-birth-tick', 'aber-cmd', 'aber-data-tick'];
     if (JSON.stringify(feeds) !== JSON.stringify(expected)) {
       fail(
-        `the heartbeat is fed by [${feeds.join(', ')}]; expected only its two injects `
+        `the heartbeat is fed by [${feeds.join(', ')}]; expected only its two injects and the rebirth handler `
         + `[${expected.join(', ')}].\n`
         + '         Anything else on that path can delay or fail the heartbeat, and a gateway that\n'
         + '         stops beating is reported STALE and then OFFLINE -- a worse failure than any\n'
         + '         metric it could be collecting.'
       );
     } else {
-      pass('the heartbeat is driven by its two injects and nothing else');
+      pass('the heartbeat is driven by its two injects and the rebirth handler, and nothing else');
     }
   }
 
@@ -296,16 +298,19 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     const flowCtx = store();
     const contexts = new Map();
     const warnings = [];
-    const run = (node, msg, body = node.func) => {
+    // Every output port's messages, as arrays. `run` keeps the first port, which is the one the
+    // broker node hangs off for every function here.
+    const runAll = (node, msg, body = node.func) => {
       if (!contexts.has(node.id)) contexts.set(node.id, store());
       const fn = new vm.Script(`(function (msg, node, context, flow, global, env, RED) {\n${body}\n})`)
-        .runInNewContext({ Date, Math, Number, Object, JSON, String });
+        .runInNewContext({ Date, Math, Number, Object, JSON, String, Buffer });
       const stub = { warn: (w) => warnings.push(w), status: () => {}, log: () => {} };
       const res = fn(msg, stub, contexts.get(node.id), flowCtx, store(), { get: () => undefined }, {});
       if (res == null) return [];
-      const first = Array.isArray(res) ? res[0] : res;
-      return Array.isArray(first) ? first : [first];
+      const ports = Array.isArray(res) ? res : [res];
+      return ports.map((p) => (p == null ? [] : Array.isArray(p) ? p : [p]));
     };
+    const run = (node, msg, body) => runAll(node, msg, body)[0] || [];
     const click = () => run(rbe, run(example, {})[0]);
     const kinds = (msgs) => msgs.map((m) => `${m.topic.split('/')[2]}#${m.payload.seq}`);
     const names = (m) => m.payload.metrics.map((x) => x.name).sort();
@@ -337,6 +342,52 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     level(10.0);
     expect('a move inside the deadband is suppressed', level(10.3), []);
     expect('a move past it, measured from the last PUBLISHED value, is not', level(10.6).length, 1);
+
+    // Rebirth requests (#414), in the bytes the platform sends: these are build_rebirth_payload()'s
+    // output with its timestamp pinned, and protobuf messages built the same way for the rest.
+    const cmd = byId['aber-cmd'];
+    if (!cmd) {
+      checks.push(['the rebirth handler exists', false, 'missing', 'aber-cmd']);
+    } else {
+      const hex = (h) => Buffer.from(h, 'hex');
+      const NCMD = 'spBv1.0/__SPARKPLUG_GROUP__/NCMD/__SPARKPLUG_ID__';
+      const DCMD = (d) => `spBv1.0/__SPARKPLUG_GROUP__/DCMD/__SPARKPLUG_ID__/${d}`;
+      const DAEMON_NCMD = hex('0880d8c1a28c34121a0a144e6f646520436f6e74726f6c2f52656269727468200b7001');
+      const DCMD_REBIRTH = hex('0880d8c1a28c34120b0a05626453657120045803121c0a1644657669636520436f6e74726f6c2f52656269727468200b70011807');
+      const NCMD_REBOOT = hex('0880d8c1a28c3412190a134e6f646520436f6e74726f6c2f5265626f6f74200b70011807');
+      const NCMD_FALSE = hex('0880d8c1a28c34121a0a144e6f646520436f6e74726f6c2f52656269727468200b70001807');
+
+      const asked = runAll(cmd, { topic: NCMD, payload: DAEMON_NCMD });
+      expect('the daemon\'s NCMD asks the heartbeat for an NBIRTH', asked[0] && asked[0].map((m) => m.payload), ['NBIRTH']);
+      const [births, refreshes] = runAll(heartbeat, asked[0][0]);
+      expect('the NBIRTH restarts the seq', kinds(births), ['NBIRTH#0']);
+      expect('and asks publish by exception for a refresh', refreshes.map((m) => m.payload), ['refresh']);
+      expect('which re-births every device at its last values, in seq order',
+        kinds(run(rbe, refreshes[0])), ['DBIRTH#1', 'DBIRTH#2']);
+      expect('the NDATA after it continues that seq', kinds(run(heartbeat, { payload: 'NDATA' })), ['NDATA#3']);
+      expect('an NDATA asks for no refresh', runAll(heartbeat, { payload: 'NDATA' })[1], []);
+
+      const one = runAll(cmd, { topic: DCMD('press-01'), payload: DCMD_REBIRTH });
+      expect('a DCMD rebirth goes to publish by exception for that device', one[1] && one[1].map((m) => m.payload), [{ rebirth: 'press-01' }]);
+      const reborn = run(rbe, one[1][0]);
+      expect('and re-births that device alone', reborn.map((m) => m.topic.split('/').slice(2).join('/')),
+        ['DBIRTH/__SPARKPLUG_ID__/press-01']);
+      expect('with every metric it has published', reborn[0] && names(reborn[0]),
+        ['CycleCount', 'Device Control/Rebirth', 'Properties/Manufacturer', 'Running', 'Temperature', 'Vibration']);
+      expect('a rebirth of a device that has published nothing is refused', run(rbe, { payload: { rebirth: 'ghost-01' } }), []);
+
+      expect('any other command is ignored', runAll(cmd, { topic: NCMD, payload: NCMD_REBOOT }), []);
+      expect('Rebirth = false is not a request', runAll(cmd, { topic: NCMD, payload: NCMD_FALSE }), []);
+      expect('bytes that are not Sparkplug are ignored', runAll(cmd, { topic: NCMD, payload: hex('0a7f') }), []);
+      expect('the JSON encoding is read too', runAll(cmd, {
+        topic: NCMD,
+        payload: Buffer.from(JSON.stringify({ metrics: [{ name: 'Node Control/Rebirth', boolean_value: true }] })),
+      })[0].map((m) => m.payload), ['NBIRTH']);
+
+      const inputs = flow.filter((n) => n.type === 'mqtt in' && (n.wires?.[0] || []).includes('aber-cmd'));
+      expect('the handler hears this node\'s NCMD and its devices\' DCMD, as buffers',
+        inputs.map((n) => `${n.topic} ${n.datatype}`).sort(), [`${DCMD('+')} buffer`, `${NCMD} buffer`]);
+    }
 
     const timeout = Number((read('ingestion/ingestion.py').match(/DEVICE_OFFLINE_TIMEOUT_SECONDS", "(\d+)"/) || [])[1]);
     const every = Number(refresh.repeat);
