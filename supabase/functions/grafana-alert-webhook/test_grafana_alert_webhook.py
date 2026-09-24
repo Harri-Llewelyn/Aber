@@ -12,7 +12,6 @@ notification that does not close the occurrence it belongs to.
 The mirror is held to the real thing by test_matches_the_typescript_shape below, which reads
 index.ts and asserts the literals this file encodes still appear in it.
 """
-import json
 import re
 import unittest
 from pathlib import Path

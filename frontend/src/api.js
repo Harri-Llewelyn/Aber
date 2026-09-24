@@ -1476,7 +1476,7 @@ const apiMethods = {
     }
   },
 
-  get: async (path, options = {}) => {
+  get: async (path, _options = {}) => {
     const entityDigitalThreadMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/digital-thread/);
     if (entityDigitalThreadMatch) {
       const rawEntityType = entityDigitalThreadMatch[1];
@@ -2225,7 +2225,7 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  post: async (path, body, options = {}) => {
+  post: async (path, body, _options = {}) => {
     /**
      * File a proposal. A plain INSERT: `Operator` holds an INSERT policy on this one table, and
      * routing it through an RPC would put the grant somewhere the RLS policy is not. The errors are
@@ -2606,7 +2606,7 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  put: async (path, body, options = {}) => {
+  put: async (path, body, _options = {}) => {
     /**
      * Edit an open proposal: the patch and the rationale, the only two columns the transition
      * guard lets a proposer move. This is what makes the per-asset cap livable: told there is
@@ -2965,7 +2965,7 @@ const apiMethods = {
     });
   },
 
-  delete: async (path, options = {}) => {
+  delete: async (path, _options = {}) => {
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
       const { error } = await supabase.from('links').delete().eq('id', id);

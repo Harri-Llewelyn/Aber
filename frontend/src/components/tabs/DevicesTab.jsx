@@ -6,14 +6,12 @@ import { trackRequest } from '../../lib/apiActivity'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
-import { downloadCSV } from '../../utils/downloadCSV'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { downloadBlob } from '../../utils/downloadBlob'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
-import { ActionMenu } from '../common/ActionMenu'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
@@ -81,7 +79,7 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewThread, onPropose, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewThread, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
@@ -221,12 +219,6 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     if (window.location.search) {
       window.history.replaceState({}, '', window.location.pathname)
     }
-  }
-
-  const handleClearSearch = () => {
-    setSearchQuery('')
-    clearUrlQuery()
-    if (onClearFilter) onClearFilter()
   }
 
   const handleSchemaFilterChange = (val) => {
@@ -411,18 +403,6 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     } finally {
       setExportingAas(null)
     }
-  }
-
-  const reassignGatewayInline = async (asset, newGwId) => {
-    try {
-      await api.put(`/api/v1/devices/${asset.asset_id}`, {
-        asset_name: asset.asset_name,
-        active_gateway_id: newGwId || null
-      })
-      await loadAll()
-      const gwName = gateways.find(g => g.gateway_id === newGwId)?.gateway_name || 'Unassigned'
-      showToast(`Device '${asset.asset_name}' gateway reassigned to '${gwName}'`, 'success')
-    } catch (e) { showToast(e.message, 'error') }
   }
 
   const approveQuarantine = async (assetId, body) => {

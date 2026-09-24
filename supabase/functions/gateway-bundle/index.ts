@@ -482,9 +482,9 @@ See README.md for the rest, including what to do if the token has expired.
         "Cache-Control": "no-store",
       },
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("gateway-bundle failed:", err);
-    return json(500, { error: "Could not generate the bundle", details: err?.message });
+    return json(500, { error: "Could not generate the bundle", details: err instanceof Error ? err.message : String(err) });
   }
 }
 

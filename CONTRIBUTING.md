@@ -118,6 +118,10 @@ the file plainly exists — so a forgotten `COPY` passes every test and every ot
 crash-loops the container on the first boot that runs it. `check-image-sources.mjs` is the one that
 sees it.
 
+**The static checks fail on anything new.** `npm run lint` runs all nine; each is listed in
+[`docs/static-analysis.md`](docs/static-analysis.md) with its allow-list. A finding that is right
+about the code is fixed; one that is not goes in the allow-list with a reason a reviewer can check.
+
 Getting started with the stack itself — prerequisites, `npm run setup`, and bringing it up on
 k3d or a cluster — is in the [README](README.md).
 

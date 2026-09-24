@@ -370,10 +370,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 {visibleSchemas.map(sch => {
                   const count = deviceCountFor(sch.schema_uuid)
                   const status = schemaStatus(sch)
-                  const draft = schemas.find(s =>
-                    s.parent_schema_id === sch.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT
-                  )
-                  const forkBlocked = !canManageSchema || !!draft
                   return (
                     <tr
                       key={sch.schema_uuid}

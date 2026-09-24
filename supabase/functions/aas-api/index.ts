@@ -46,16 +46,8 @@ const problem = (status: number, text: string, code = String(status)) =>
 
 /**
  * base64url, as IDTA 02002 requires for every Identifier in a path: `/` in plain base64 would split
- * one identifier across two segments. Padding is stripped on encode and accepted on decode. Encoded
- * through TextEncoder because `btoa` throws above U+00FF and an IRI may carry non-ASCII.
+ * one identifier across two segments. Padding is accepted whether or not the caller sent it.
  */
-function b64urlEncode(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
 function b64urlDecode(value: string): string | null {
   try {
     const padded = value.replace(/-/g, "+").replace(/_/g, "/") +

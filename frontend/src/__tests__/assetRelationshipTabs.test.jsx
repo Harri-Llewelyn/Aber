@@ -1,10 +1,9 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
-import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -39,16 +38,6 @@ const gateway = {
       gateway_cell_id: 'cell-1', location_source: 'inherited', cell_mismatch: false
     }
   ]
-}
-
-/* A device whose cell is its own, not its gateway's. Dropping onto Unassigned clears the explicit
-   cell, and the default fixture has none to clear; staging compares each move against the committed
-   row and drops the ones that change nothing. */
-const explicitlyFiledDevice = {
-  ...gateway.devices[0],
-  cell_id: 'cell-1',
-  explicit_cell_id: 'cell-1',
-  location_source: 'explicit'
 }
 
 const staleGateway = {

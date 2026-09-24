@@ -11,7 +11,7 @@
  *
  * No YAML dependency: this runs in CI before any `npm install`, and the shapes it reads are narrow.
  */
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, normalize, posix } from 'node:path';
 
@@ -1123,7 +1123,7 @@ function edgeFunctionNames() {
     /ALTER TABLE (?:ONLY )?public\.([a-z0-9_]+)\s+ADD COLUMN (?:IF NOT EXISTS )?([a-z][a-z0-9_]*)/gi;
 
   const columns = new Map();
-  for (const [file, sql] of migSrc) {
+  for (const [, sql] of migSrc) {
     for (const m of sql.matchAll(CREATE_TABLE)) {
       for (const line of m[2].split('\n')) {
         // Four-space indent is how this schema writes a column; a constraint continuation or a

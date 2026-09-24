@@ -361,7 +361,7 @@ def preflight_supabase_admin():
         print(f"❌ PREFLIGHT: cannot reach the Supabase database as the owner ({label}).")
         print(f"   {exc}")
         print("   Set SUPABASE_DB_HOST / SUPABASE_DB_PORT / SUPABASE_DB_NAME / SUPABASE_DB_USER /")
-        print("   POSTGRES_PASSWORD. From the HOST the port is 54322 (the dev loop forwards it");
+        print("   POSTGRES_PASSWORD. From the HOST the port is 54322 (the dev loop forwards it")
         print("   there to avoid colliding with a local PostgreSQL); IN-CLUSTER it is 5432 and the")
         print("   host is `supabase-db`. Without this, audit-row cleanup cannot run.")
         return False
@@ -902,7 +902,7 @@ def run_simulation():
         time.sleep(3)
         SEEDED["ncmd_after_first"] = len(CAPTURED_NCMD)
 
-        print(f"\n--- A second undeclared alias immediately after -> expect NO further NCMD ---")
+        print("\n--- A second undeclared alias immediately after -> expect NO further NCMD ---")
         client.publish(
             f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{alias_dev}",
             make_alias_only_payload({ALIAS_UNDECLARED_SECOND: 2.0}, now_ms + 3000),
@@ -1092,10 +1092,6 @@ def verify_results():
                 "id", SEEDED.get("schema_uuid")
             ).execute()
 
-            re_res = supabase_client.table("schemas").select("schema_definition").eq(
-                "id", SEEDED.get("schema_uuid")
-            ).execute()
-            re_definition = re_res.data[0]["schema_definition"] if re_res.data else None
             cleared = unmodelled_metrics(
                 declared, device_schema_definitions(SEEDED.get("known_uuid")))
 

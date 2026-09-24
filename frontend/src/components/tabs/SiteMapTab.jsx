@@ -64,7 +64,7 @@ const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
  * assets are filed on their own pages, and cells are placed on the plan from the Cells page. One
  * context panel serves the lanes, the areas and the pins: whichever was clicked last.
  */
-export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, showToast, hasPermission, onNavigateTab, activeAlerts = [] }) {
+export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, showToast, onNavigateTab, activeAlerts = [] }) {
   const [cells, setCells]     = useState([])
   const [areas, setAreas]     = useState([])
   const [gwList, setGwList]   = useState([])

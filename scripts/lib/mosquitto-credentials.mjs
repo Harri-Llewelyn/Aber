@@ -194,6 +194,7 @@ export function hashArgvForUsername(username, password) {
 
 /** A platform principal's password: non-empty printable text, at most 128 characters. */
 export function assertPrincipalPassword(password) {
+  // eslint-disable-next-line no-control-regex -- refusing control characters is the point
   if (typeof password !== 'string' || !/^[^\x00-\x1f\x7f]{1,128}$/.test(password)) {
     throw new CredentialError('password must be 1-128 characters with no control characters', 'invalid_password');
   }

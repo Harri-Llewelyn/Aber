@@ -160,6 +160,11 @@ COMMENT ON FUNCTION public.storage_footprint_rows() IS
   'the historian. SECURITY DEFINER so a dashboard role that may not read telemetry can still be '
   'told how large it is; returns no observation, asset id or metric name.';
 
+-- PostgreSQL grants EXECUTE to PUBLIC on creation, which let every role that can connect call a
+-- SECURITY DEFINER function, powerbi_reader included. Revoked on every boot; roles.sql grants it
+-- to the roles that read the footprint.
+REVOKE ALL ON FUNCTION public.storage_footprint_rows() FROM PUBLIC;
+
 -- ---------------------------------------------------------------------------------------------
 -- 2. The relation postgres_fdw maps and Grafana queries
 -- ---------------------------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import React from 'react'
 import fs from 'node:fs'
 import path from 'node:path'
-import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ActionButton } from '../components/common/ActionButton'
 import { ConfirmModal } from '../components/modals/ConfirmModal'

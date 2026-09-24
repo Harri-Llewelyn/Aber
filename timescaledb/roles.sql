@@ -240,6 +240,12 @@ BEGIN
       'roles self-check: % can SELECT telemetry_latest, which it must not', v_role;
   END IF;
 
+  IF to_regprocedure('public.storage_footprint_rows()') IS NOT NULL
+     AND has_function_privilege(v_role, 'public.storage_footprint_rows()', 'EXECUTE') THEN
+    RAISE EXCEPTION
+      'roles self-check: % can execute storage_footprint_rows(), which it must not', v_role;
+  END IF;
+
   RAISE NOTICE 'roles self-check passed: % reads the rollups and cannot reach raw telemetry.',
     v_role;
 
@@ -404,6 +410,9 @@ BEGIN
   END IF;
   IF to_regclass('public.storage_footprint') IS NOT NULL THEN
     EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
+    -- The view calls storage_footprint_rows(), and a function in a view body is checked against the
+    -- querying role; storage.sql revokes the PUBLIC grant this used to ride on.
+    EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
   END IF;
 
   -- No writes, stated rather than implied.

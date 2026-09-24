@@ -1340,12 +1340,12 @@ class TestAssetBundle(unittest.TestCase):
         # A CSV part's rows are its lines less the header; both parts are oldest-first.
         raw_lines = self.zip.read("aasx/files/aber/telemetry-raw.csv").decode().split("\r\n")
         self.assertEqual(raw_lines[0], "time,metric_name,val_double,val_string,val_bool")
-        self.assertEqual(m["telemetry"]["raw"]["rows"], len([l for l in raw_lines[1:] if l]))
+        self.assertEqual(m["telemetry"]["raw"]["rows"], len([line for line in raw_lines[1:] if line]))
         # The hourly header is the rollup's own columns: the first live run of this class found a
         # column the view does not have, and PostgREST fails the whole request for one.
         hourly_lines = self.zip.read("aasx/files/aber/telemetry-1h.csv").decode().split("\r\n")
         self.assertEqual(hourly_lines[0], "bucket,metric_name,avg_double,min_double,max_double,last_double,last_string,last_bool,n_double,n_rows")
-        self.assertEqual(m["telemetry"]["hourly"]["rows"], len([l for l in hourly_lines[1:] if l]))
+        self.assertEqual(m["telemetry"]["hourly"]["rows"], len([line for line in hourly_lines[1:] if line]))
         # The fixture just arrived: nothing has been read from it, so the fixture also proves the
         # two standing exclusions are stated on an otherwise empty bundle.
         self.assertTrue(any("never read back" in s for s in m["not_included"]))

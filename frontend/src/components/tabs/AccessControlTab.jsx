@@ -35,7 +35,6 @@ import {
   tokenStatusDetail,
   tokenStatusLabel,
   tokenStatusTone,
-  TOKEN_STATES,
 } from '../../utils/serviceIdentities'
 import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
 

@@ -8,7 +8,7 @@
  * with a tooltip.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
