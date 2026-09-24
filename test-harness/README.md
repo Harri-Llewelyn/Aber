@@ -250,7 +250,10 @@ compression runs after 7 days, so the compressed figure is not yet measurable fr
 On that basis, a thousand devices at one message a second with 10 metrics each write
 864 M rows and **295 GiB a day** before compression; one 7-day chunk of that is about 2 TiB, and
 the 90-day retention holds thirteen of them. The bytes are measured; the fleet and rate are a
-stated basis a reader can redo for their own.
+stated basis a reader can redo for their own. That was the configuration of the run: the chunk
+interval is now sized to the fleet (#394) and the raw window is 14 days (#401), and
+[`deploy/k8s/README.md`](../deploy/k8s/README.md), *What grows*, carries the current arithmetic
+with the rollups beside it.
 
 #### Not measured
 
@@ -258,7 +261,9 @@ stated basis a reader can redo for their own.
   evicted nothing; the sweep towards the 1,000-per-cache wall was not run.
 * **Metric count.** 10 per message throughout (5 in the shakedown). Rows per message is the
   multiplier that turns 1,000 msg/s into 10,000 rows/s, and it was not varied.
-* **Compressed storage**, for the reason above.
+* **Compressed storage**, for the reason above. It has since been measured on synthetic telemetry
+  shaped like this (8.4 bytes a row, an upper bound on smooth values), with the rollups' bytes a
+  row beside it, in `deploy/k8s/README.md`, *What grows*; a load run's own chunk still is not.
 * **Anything on the production hardware profile.** The 4 vCPU / 8 GiB minimum in
   `deploy/k8s/README.md` was not loaded; this node has four times the CPU and the knee still did
   not touch it.
