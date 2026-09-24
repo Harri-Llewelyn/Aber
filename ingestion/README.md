@@ -1458,6 +1458,15 @@ own it), `gateway_archived`, `device_archived`, `quarantined_or_unregistered`, `
 `write_queue_full` (the writer's queue stayed full for the put timeout), and the four
 directory-unavailable reasons below.
 
+**Loss this counter cannot see.** Telemetry is QoS 0, so when the daemon falls behind, Mosquitto
+discards messages for it before they are delivered, and no `reason` ever counts them. The broker's
+own record is `broker_publish_messages_dropped` on the Mosquitto exporter (port 9234): broker-wide,
+not per subscriber, and zero in steady state. The daemon infers the same loss from Sparkplug `seq`
+(`aber_ingestion_sequence_gaps_total`, below). The Ingestion dashboard's *Messages Lost* panel
+shows all three; the `Broker Shedding Messages` alert fires on any increase. Measured in
+[`test-harness/README.md`](../test-harness/README.md) *Results*: a 20-minute soak at 1,250 msg/s
+lost 27,299 messages this way while every drop reason read zero.
+
 **`device_archived` is one reason for all three message kinds**, unlike the directory-unavailable
 family: a birth, a death and a reading are refused for the same cause and at the same cost, and
 the log line beside each says which kind it was. It is the only refusal standing between a
@@ -1508,7 +1517,7 @@ That is worth knowing rather than smoothing away.
 
 ### Alert rules — shipped
 
-**All seven are provisioned**, in the `Ingestion Pipeline` group of
+**Every rule in the table is provisioned**, in the `Ingestion Pipeline` group of
 [`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
 reading the chart's own Prometheus.
 
@@ -1522,6 +1531,7 @@ looks wrong.
 | Telemetry being dropped | `sum(rate(aber_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero, and `for: 5m` is what absorbs a restart. |
 | Binding rejections rising | `rate(aber_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
 | Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
+| Broker shedding messages | `sum(increase(broker_publish_messages_dropped[5m])) > 0` | 1m | **Zero is the steady state.** A shed message never reached the daemon, so the drop rule cannot see it. Broker-wide: Message loss rising beside it places the loss on the historian path. |
 | Message loss | `increase(aber_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
 | Historian writer saturating | `sum(rate(aber_ingestion_write_seconds_sum[5m])) > 0.5` | 10m | The writer thread's occupancy, read straight off the histogram. Half is the warning: the daemon keeps up, and a burst or a slower historian takes it the rest of the way. Queue depth is deliberately not the trigger — it moves only once the writer is already behind, and a full queue's drops reach the drop rule anyway. |
 | Gateway clock skew | `abs(aber_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |

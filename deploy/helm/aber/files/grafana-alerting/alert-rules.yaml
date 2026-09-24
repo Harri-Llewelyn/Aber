@@ -1078,6 +1078,66 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # -------------------------------------------------------------------------------------------
+      # 8. THE BROKER IS SHEDDING. Telemetry is QoS 0, so Mosquitto discards messages for a
+      # subscriber that cannot keep up, and a discarded message never reaches the daemon: rule 2
+      # reads zero throughout. broker_publish_messages_dropped (the Mosquitto exporter) is the only
+      # direct record. The counter is broker-wide, not per subscriber; rule 5 rising beside it
+      # places the loss on the historian path. Zero is the steady state, so any increase fires.
+      # -------------------------------------------------------------------------------------------
+      - uid: aber-broker-shedding
+        title: Broker Shedding Messages
+        condition: C
+        for: 1m
+        # No series exists while the exporter is disabled (mosquitto.metrics.enabled).
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The broker discarded about {{ printf "%.0f" $values.B.Value }} messages in five minutes
+            for a subscriber that could not keep up. They were not delivered and will not be restated. If
+            aber_ingestion_sequence_gaps_total is rising too, the subscriber is the ingestion
+            daemon and this is telemetry missing from the historian.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum(increase(broker_publish_messages_dropped[5m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
   # ===============================================================================================
   # THE LOG PIPELINE. Loki and Alloy hold the evidence for every other fault here, so their own
   # failure destroys the record of itself. Four rules for four distinct failures:
