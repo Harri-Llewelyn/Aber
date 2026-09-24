@@ -3244,7 +3244,7 @@ COMMENT ON COLUMN public.gateways.credential_revoked_at IS 'When this gateway''s
 --
 
 -- COLUMN gateways.is_simulated :: COMMENT
-COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s telemetry is generated rather than observed -- a broker playback target, or a simulator. Devices INHERIT this through their gateway_id and carry no flag of their own (see 0052''s header): the containment rules a stored device-level copy would need two triggers to maintain are given for nothing by the join. Distinct from `deployment`, which is about where the connector runs rather than whether the readings are real -- a remote appliance replaying a capture is deployment=''remote'', simulated=true.';
+COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s telemetry is generated rather than observed -- a broker playback target, or a simulator. Devices INHERIT this through their gateway_id and carry no flag of their own (see 0052''s header): the containment rules a stored device-level copy would need two triggers to maintain are given for nothing by the join. Distinct from `deployment`, which is about where the connector runs rather than whether the readings are real, but not independent of it: gateways_simulated_is_host holds a simulated gateway to deployment=''host'', so a capture is never replayed onto a remote one.';
 
 --
 
