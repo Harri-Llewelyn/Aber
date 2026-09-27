@@ -1,16 +1,7 @@
--- =============================================================================================
--- The historian's physical backup runs, as the backup sidecar reports them.
---
--- Reconciled on every boot by timescaledb-maintenance. Idempotent.
---
--- pgBackRest keeps its own record in the repository; this is the copy the database can be asked
--- about, so the exporter can raise the Historian Backup alert when backups stop. Written only by
--- physical_backup_record(), which only the superuser can execute; the sidecar
--- (timescaledb/pgbackrest/historian-backup.sh) calls it over the pod's socket after every run.
--- Empty while timescaledb.physicalBackup is off. Related: deploy/k8s/README.md, "Backing up the
--- historian".
--- =============================================================================================
-
+-- The historian's physical backup runs, one row per run of the pgbackrest sidecar, written only by
+-- physical_backup_record(), which only the superuser can execute. The exporter reads it for the
+-- Historian Backup Stale alert. Empty while timescaledb.physicalBackup is off. Reconciled on every
+-- boot, idempotent. Reasoning: timescaledb/README.md.
 \set ON_ERROR_STOP on
 
 CREATE TABLE IF NOT EXISTS public.physical_backup_runs (
