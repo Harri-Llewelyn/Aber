@@ -20,7 +20,8 @@ worth adopting:
 | `elementId` (unique, persistent) | `sparkplug_id` |
 | `displayName` (human-readable when practical) | `name` |
 | `isExtended` (publishes beyond its type) | Unmodelled, derived by `deviceTags.js` |
-| `sourceTypeId` / `typeNamespaceUri` | `semantic_id` / `standard` |
+| `sourceTypeId` | `schemas.semantic_id`, else the schema name |
+| Namespace, `typeNamespaceUri` | two local namespaces, for types and for relationships ([Address space](#address-space)) |
 | `quality` | derived at read time, like `gateway_status` |
 
 **i3X introduces no new type system.** That was the stated reason for rejecting native AAS Submodel
@@ -72,7 +73,7 @@ i3x:site                          (synthetic root — the only parentId: null)
 └── <gwy…>                        site-wide gateways
 ```
 
-Four mappings that are decisions rather than mechanics:
+Six mappings that are decisions rather than mechanics:
 
 - **`parentId` is the cell, not the gateway.** i3X gives an Object one parent; a device here has two
   (a cell — where it is; a gateway — how its data arrives). `HasParent` is organizational hierarchy,
@@ -92,6 +93,12 @@ Four mappings that are decisions rather than mechanics:
   emitted by nothing for as long as the service existed — the conformance suite samples only the
   first five edges, and it took fixing the three checks queued ahead of it in CI for those five to
   include one that exposed this. `test_every_edge_has_its_inverse` walks the whole graph instead.
+- **Every type is local, so `GET /namespaces` lists two.** i3X groups ObjectTypes and
+  RelationshipTypes into namespaces and reaches an Object's through its type. A schema is a JSON
+  Schema written here even when its metrics come from MTConnect or OPC UA, so its type belongs to
+  the local namespace, and the relationships have their own. A vocabulary is where a metric's
+  semantic id comes from, not a namespace any type belongs to: listing one would promise a client
+  types it never meets (#459). `test_i3x_service.py` holds the list to the namespaces in use.
 - **`quality` is derived at read time.** Quarantined or stale → `Uncertain`; never published →
   `GoodNoData` with no value. A `quality` column on the hypertable would be a stored verdict that
   goes stale the moment the gateway does.
@@ -103,7 +110,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | Method | Path | Notes |
 | :--- | :--- | :--- |
 | GET | `/info` | **Unauthenticated.** Capabilities + health |
-| GET | `/namespaces` | Local, relationships, and each vocabulary in use |
+| GET | `/namespaces` | The two every type belongs to: local and relationships |
 | GET | `/objecttypes` | `schemas` rows + synthetic Site/Cell/Gateway types |
 | POST | `/objecttypes/query` | |
 | GET | `/relationshiptypes` | Six types, all registered with their `reverseOf` |
@@ -453,7 +460,7 @@ section is what it would have to improve on.
 
 ## The address-space cache
 
-Assembling the address space costs **six PostgREST reads**, and several endpoints load it two or
+Assembling the address space costs **five PostgREST reads**, and several endpoints load it two or
 three times in one request — `/types/{id}` builds types and then objects; the bulk value reads
 rebuild it per call. A conformance client polling in a loop was therefore spending 12–18 queries a
 tick rebuilding a graph that had not changed.

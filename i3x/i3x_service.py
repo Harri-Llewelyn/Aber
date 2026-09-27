@@ -175,7 +175,7 @@ class PostgrestClient:
 """
 Short-TTL address-space cache, KEYED BY THE CALLER'S TOKEN.
 
-The address space was reassembled from scratch on every request -- six PostgREST reads, and
+The address space was reassembled from scratch on every request -- five PostgREST reads, and
 several endpoints load it two or three times in one call (`/types/{id}` builds types and then
 objects; the bulk value reads rebuild it per request), so a single conformance client polling in a
 loop was costing 12-18 queries a tick. Fine for a demonstrator, wrong for anything watching.
@@ -247,7 +247,7 @@ def _load_address_space(pg: PostgrestClient) -> dict:
             # returned by a later branch that forgot to check the clock.
             del _space_cache[key]
 
-    # DELIBERATELY OUTSIDE THE LOCK. The read is six network round trips; holding the lock across
+    # DELIBERATELY OUTSIDE THE LOCK. The read is five network round trips; holding the lock across
     # it would serialise every caller in the process behind the slowest PostgREST response, which
     # is a worse property than the duplicate read that two simultaneous misses can now cause. A
     # duplicate read is wasteful; a global stall is an outage.
@@ -264,11 +264,11 @@ def _load_address_space(pg: PostgrestClient) -> dict:
 
 def _read_address_space(pg: PostgrestClient) -> dict:
     """
-    Read the whole visible address space in six queries.
+    Read the whole visible address space in five queries.
 
-    Six reads rather than one per object -- cells, gateways, devices, device_locations, schemas and
-    metric_catalog: the object graph needs cross-references (a cell's children, a gateway's
-    devices) that no single embed expresses, so everything is joined in memory here.
+    Five reads rather than one per object -- cells, gateways, devices, device_locations and schemas:
+    the object graph needs cross-references (a cell's children, a gateway's devices) that no single
+    embed expresses, so everything is joined in memory here.
 
     UNCACHED. Every caller should go through `_load_address_space()`; this is the cold read behind
     it, separated so the cache has something to call and so a test can measure the difference.
@@ -306,21 +306,12 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         {"select": "id,schema_name,description,schema_definition,semantic_id,version,status,"
                    "change_description"},
     )
-    # `standard` lives on metric_catalog, NOT on schemas -- a schema spans metrics from several
-    # vocabularies at once (the default one deliberately covers all three), so there is no single
-    # standard to hang on it. The namespace list is therefore "which vocabularies this deployment
-    # actually uses", read from the catalog, rather than anything a schema row could assert.
-    try:
-        catalog = pg.get("metric_catalog", {"select": "standard"})
-    except SubscriptionError:
-        catalog = []
     return {
         "cells": cells,
         "gateways": gateways,
         "devices": devices,
         "locations": {row["id"]: row.get("effective_cell_id") for row in locations},
         "schemas": schemas,
-        "standards": {row.get("standard") for row in catalog if row.get("standard")},
     }
 
 
@@ -831,8 +822,8 @@ def h_info(req: Handler) -> None:
 
 
 def h_namespaces(req: Handler) -> None:
-    space = _load_address_space(req._pg())
-    req._ok(A.namespaces(space["standards"]))
+    req._bearer()
+    req._ok(A.namespaces())
 
 
 def h_objecttypes(req: Handler) -> None:

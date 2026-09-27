@@ -20,35 +20,20 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
 # The synthetic objects. Prefixed so they cannot collide with a sparkplug_id (24 chars, `gwy`/`dev`)
 # or a UUID.
 SITE_ELEMENT_ID = "i3x:site"
 UNASSIGNED_ELEMENT_ID = "i3x:unassigned"
 
-# Namespaces. One per vocabulary already in the database, plus this deployment's own. The local one
-# is the same `aber.local` authority the semantic ids use -- an id under mtconnect.org or
-# iso.org would assert an interoperability that does not exist, and that rule does not stop being
-# true because the transport changed.
+# Namespaces. i3X groups TYPES into namespaces, and every type served here is this deployment's own:
+# a schema is a JSON Schema authored here even when every metric it names comes from a standard.
+# So GET /namespaces lists these two and nothing else, and every Object's typeNamespaceUri is the
+# local one. A vocabulary such as MTConnect is where a metric's semantic id comes from, not a
+# namespace any type belongs to; listing one would promise types a client never meets (#459).
 NS_LOCAL = "https://aber.local/i3x"
 NS_RELATIONSHIPS = "https://aber.local/i3x/relationships"
-
-# THE KEYS ARE `metric_catalog.standard` VALUES, VERBATIM, and that is the whole contract. They are
-# the strings in frontend/src/utils/standards.js `STANDARDS` -- spaces, not hyphens. `namespaces()`
-# looks them up and SKIPS anything it cannot resolve, so a key that does not match the column drops
-# a whole vocabulary out of GET /namespaces with no error anywhere: the endpoint answers 200 with a
-# shorter list, which reads as "this deployment does not use that standard" rather than as a bug.
-# `ISO-22400` and `OPC-UA` were spelled that way here and matched nothing for exactly that reason.
-# test_standard_namespaces_cover_every_known_standard pins them against standards.js.
-STANDARD_NAMESPACES = {
-    "MTConnect": "https://mtconnect.org/v2.0",
-    "ISO 22400": "https://aber.local/semantics/iso22400",
-    "OPC UA": "https://opcfoundation.org/UA",
-    # Issued by ASHRAE, not minted here -- archived migration 0013 CHECKs that every seeded id sits under
-    # this namespace.
-    "ASHRAE 223P": "http://data.ashrae.org/standard223#",
-}
 
 # Synthetic ObjectTypes for the three levels that have no `schemas` row. Cells and gateways are
 # infrastructure, not modelled equipment; giving them a real schema row would put them in the
@@ -162,20 +147,12 @@ def relationship_types() -> List[dict]:
     ]
 
 
-def namespaces(standards_in_use: Iterable[str]) -> List[dict]:
-    out = [
-        {"uri": NS_LOCAL, "displayName": "Factory+ Local"},
-        {"uri": NS_RELATIONSHIPS, "displayName": "Factory+ Relationships"},
+def namespaces() -> List[dict]:
+    """The namespaces the served types belong to: ObjectTypes in NS_LOCAL, relationships in theirs."""
+    return [
+        {"uri": NS_LOCAL, "displayName": "Aber Local"},
+        {"uri": NS_RELATIONSHIPS, "displayName": "Aber Relationships"},
     ]
-    for standard in sorted(set(s for s in standards_in_use if s)):
-        uri = STANDARD_NAMESPACES.get(standard)
-        if uri:
-            out.append({"uri": uri, "displayName": standard})
-    return out
-
-
-def schema_type_namespace(standard: Optional[str]) -> str:
-    return STANDARD_NAMESPACES.get(standard or "", NS_LOCAL)
 
 
 def object_type_from_schema(row: dict) -> dict:
@@ -189,7 +166,7 @@ def object_type_from_schema(row: dict) -> dict:
     return {
         "elementId": row["id"],
         "displayName": row.get("schema_name") or row["id"],
-        "namespaceUri": schema_type_namespace(row.get("standard")),
+        "namespaceUri": NS_LOCAL,
         # The semantic id when there is one -- that is precisely "the identifier of the concept this
         # type instantiates", which is what sourceTypeId means. Falling back to the name keeps the
         # field populated for locally-minted schemas.

@@ -152,9 +152,10 @@ paths:
       tags: [Discovery]
       summary: Namespaces in use
       description: |
-        The local namespace, the relationship namespace, and one entry per **vocabulary
-        actually referenced by a schema in this deployment** — MTConnect, ISO 22400, OPC UA
-        and friends appear only when something uses them.
+        The local namespace, which every ObjectType belongs to, and the relationship namespace.
+        **No vocabulary is listed:** a schema is a type written here even when its metrics come
+        from MTConnect or OPC UA, and a namespace no type belongs to would promise a client
+        types it never meets.
       responses:
         '200':
           description: Namespaces this address space draws on.
@@ -849,8 +850,8 @@ components:
     Namespace:
       type: object
       properties:
-        uri: { type: string, format: uri, example: 'https://mtconnect.org/v2.0' }
-        displayName: { type: string, example: MTConnect }
+        uri: { type: string, format: uri, example: 'https://aber.local/i3x' }
+        displayName: { type: string, example: Aber Local }
 
     ObjectType:
       type: object
