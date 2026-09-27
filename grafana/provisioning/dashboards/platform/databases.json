@@ -1,7 +1,7 @@
 {
   "uid": "aber-databases",
   "title": "Databases",
-  "description": "Server-side condition of both databases, from the postgres_exporter sidecar in each database pod. Pick one with the Database selector; the historian row is always timescaledb, because its series exist nowhere else.",
+  "description": "Both databases, from the postgres_exporter sidecar in each pod. Pick one with the Database selector. The historian panels are always timescaledb; their series exist nowhere else.",
   "tags": [
     "aber",
     "platform"
@@ -60,7 +60,7 @@
       "id": 2,
       "type": "stat",
       "title": "Connections Used",
-      "description": "Backends open as a fraction of `max_connections`. The denominator comes from a custom query, not the exporter's `settings` collector -- that one emits a series per GUC and is switched off. Without it a backend count has no scale.",
+      "description": "Backends open as a fraction of `max_connections`. The denominator comes from a custom query; the exporter's `settings` collector is off because it emits a series per GUC.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -303,7 +303,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "Cache Hit Ratio",
-      "description": "Share of block reads served from shared buffers. Read it alongside the panel to its right: a low ratio with no block read time is not hurting anyone, and that pair is the whole judgement.",
+      "description": "Share of block reads served from shared buffers. Judge it with Block I/O Time beside it: a low ratio with no read wait is hurting nobody.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -351,7 +351,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Block I/O Time",
-      "description": "Seconds per second spent waiting on block reads and writes. THIS is what separates a slow disk from lock contention -- the distinction `aber_ingestion_write_seconds` cannot make from the client side, and the one the single-writer ceiling is argued on.",
+      "description": "Seconds per second waiting on block reads and writes. This separates a slow disk from lock contention, which the client-side `aber_ingestion_write_seconds` cannot do.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -425,7 +425,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "WAL Size",
-      "description": "Bytes of write-ahead log on disk. Growth that does not fall back after a checkpoint means WAL is being retained -- an inactive replication slot, or archiving that is failing.",
+      "description": "Write-ahead log on disk. Growth that does not fall back after a checkpoint means WAL is being retained: an inactive replication slot, or failing archiving.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -472,7 +472,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Checkpoints per Hour",
-      "description": "Timed checkpoints are the scheduled ones. REQUESTED checkpoints are the database being forced into one by WAL volume: a requested rate above the timed rate means `max_wal_size` is too small for the write rate.",
+      "description": "Timed checkpoints are scheduled; requested ones are forced by WAL volume. A requested rate above the timed rate means `max_wal_size` is too small for the write rate.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -533,7 +533,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Buffers Written",
-      "description": "Buffers per second written by the checkpointer and by the background writer. A backend writing its own buffers is the case neither of these covers, and the one that stalls queries.",
+      "description": "Buffers per second written by the checkpointer and the background writer. A backend writing its own buffers is the case neither covers, and the one that stalls queries.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -662,7 +662,7 @@
       "id": 15,
       "type": "timeseries",
       "title": "Deadlocks",
-      "description": "Deadlocks per second. ANY sustained non-zero value is two transactions taking the same locks in different orders; the database resolves it by killing one, so the application sees an error the database considers handled.",
+      "description": "Any sustained non-zero value is two transactions taking the same locks in different orders. The database kills one, so the application sees an error the database considers handled.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -710,7 +710,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "Transaction ID Age",
-      "description": "age(datfrozenxid) -- TRANSACTIONS, NOT SECONDS, whatever the metric name says. The exporter calls this series `..._seconds`; it is an XID count, verified against the server. PostgreSQL refuses writes cluster-wide at 2^31 (about 2.1e9), and autovacuum should hold this near `autovacuum_freeze_max_age` (200M by default) -- so a line climbing without falling back is vacuum not keeping up, usually behind a long-lived transaction.",
+      "description": "age(datfrozenxid) in TRANSACTIONS, not seconds, whatever the metric name says. Writes stop cluster-wide at 2^31; autovacuum should hold this near 200M. Climbing without falling back means vacuum is blocked, usually by a long transaction.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -770,7 +770,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Chunks by Hypertable",
-      "description": "Chunks per hypertable, and how many are in the columnstore. The GAP between the two lines is what the compression policy has not reached; a gap that grows is the policy falling behind the ingest rate.",
+      "description": "Chunks per hypertable, and how many are in the columnstore. The gap between the lines is what compression has not reached; a growing gap is the policy falling behind ingest.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -831,7 +831,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "Storage by Relation",
-      "description": "Bytes per relation -- a POINT-IN-TIME table read turned into a series by scraping it. The slope is the growth rate: the thing to size a volume against, and the input `tier_after_days` should be chosen from rather than guessed at.",
+      "description": "Bytes per relation, scraped from a point-in-time table read. The slope is the growth rate: size the volume against it, and choose `tier_after_days` from it.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -883,7 +883,7 @@
       "id": 20,
       "type": "stat",
       "title": "Compression Ratio",
-      "description": "Uncompressed bytes divided by compressed, across the compressed hypertables. EMPTY rather than zero where nothing is compressed yet: the query filters NULLs instead of coalescing them, so a blank panel means no columnstore, not a ratio of nothing.",
+      "description": "Uncompressed bytes over compressed, across compressed hypertables. Blank, not zero, when nothing is compressed yet: the query filters NULLs rather than coalescing them.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -950,7 +950,7 @@
       "id": 21,
       "type": "stat",
       "title": "Policy Jobs Failing",
-      "description": "Jobs whose last run did not succeed, counting only jobs that have actually run. A job that has NEVER run also reports 0 for its last run, which is why the runs count is in the condition -- the table below shows both.",
+      "description": "Jobs whose last run failed, among jobs that have run at all. A never-run job also reports 0 for its last run, so the runs count is part of the condition.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1012,7 +1012,7 @@
       "id": 22,
       "type": "table",
       "title": "Policy Jobs",
-      "description": "Every TimescaleDB background job: retention, compression and continuous-aggregate refresh. `Last run` distinguishes a job that FAILED from one that has NEVER RUN -- both report 0, and only `Runs` tells them apart.",
+      "description": "Every TimescaleDB background job: retention, compression and rollup refresh. A failed job and a never-run job both report 0 for `Last run`; only `Runs` tells them apart.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1185,7 +1185,7 @@
       "id": 24,
       "type": "stat",
       "title": "Collectors Failing",
-      "description": "Collectors that could not run on the last scrape. THE ONLY PLACE A PARTIAL FAILURE SHOWS: a collector that errors -- a missing extension, a privilege the role turns out not to hold -- leaves the exporter serving, the scrape succeeding and `pg_exporter_last_scrape_error` at 0, so its series simply disappear from every panel above. Anything but 0 here means this dashboard is missing data.",
+      "description": "Collectors that errored on the last scrape. This is the only place it shows: the scrape still succeeds and the collector's series simply vanish from the panels above. Anything but 0 means missing data.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1247,7 +1247,7 @@
       "id": 25,
       "type": "timeseries",
       "title": "Scrape Duration",
-      "description": "Total time the exporter spent collecting, per scrape. The custom queries are what can grow here as the historian does, because they aggregate over `timescaledb_information`; a duration approaching the scrape interval means the next scrape starts before this one finished.",
+      "description": "Time the exporter spent collecting, per scrape. The custom queries grow with the historian, since they aggregate `timescaledb_information`; a duration nearing the scrape interval means scrapes overlap.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

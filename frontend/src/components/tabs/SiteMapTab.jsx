@@ -640,7 +640,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                 <span>Site Map</span>
                 <HelpTip
                   label="About the site map"
-                  text="The plant from the top, all of it at once: the enterprise and site the Unified Namespace publishes under, the lanes for what belongs to no area — site-wide, simulated, and anything still waiting to be placed — then every area drawn as its own plan. A cell is a pin on its area's plan, coloured by the state of the devices that resolve to it, and a click opens its details. An area's name opens what its plan cannot show: the cells with no place on it, and its Area-Wide assets. Plans are uploaded per area on the Areas page; a cell is placed from the Cells page."
+                  text="Every area drawn as its plan, its cells pinned and coloured by device state. The lanes above hold what belongs to no area. Upload plans on the Areas page; place cells from the Cells page."
                 />
               </div>
               {/* The legend decodes the pin colours below and the tile dots in the lanes. */}

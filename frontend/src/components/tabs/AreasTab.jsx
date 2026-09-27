@@ -273,7 +273,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             Areas
             <HelpTip
               label="About areas"
-              text="An area is the ISA-95 level between the site and its cells: one part of the campus, such as a building. Cells are filed into areas so the Unified Namespace can name where a reading came from, and so the Site Map can show one area at a time."
+              text="The ISA-95 level between the site and its cells: one part of the campus, such as a building. Cells are filed into areas so the Unified Namespace can say where a reading came from."
             />
           </h3>
           <button

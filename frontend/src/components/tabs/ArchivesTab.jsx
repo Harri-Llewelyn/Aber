@@ -169,7 +169,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
             Archived Entities
             <HelpTip
               label="About archived entities"
-              text="An archived entity is out of commission but not gone: it keeps its identity and history, leaves the asset pages, and runs a retention timer to an auto-purge date. Restore returns it to service with everything intact. A device can be exported as a bundle here before it is deleted."
+              text="Out of commission but not gone: identity and history kept, hidden from the asset pages, a timer running to auto-purge. Restore returns it intact. Export a device as a bundle before it is purged."
             />
           </h3>
         </div>
@@ -254,7 +254,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
             Retired Entities
             <HelpTip
               label="About retired entities"
-              text="A retired entity was archived and then deleted, by its timer or by hand. Its record is gone; this is the tombstone the database wrote as it went, with links to what survives: its digital thread, a gateway's repository in the forge, and any bundle exported while it was alive. Its readings stay in the historian under its id until retention or the cold tier takes them."
+              text="Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the digital thread, a forge repository, any exported bundle. Readings stay in the historian under its id."
             />
           </h3>
         </div>

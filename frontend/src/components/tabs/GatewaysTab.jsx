@@ -396,7 +396,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             Gateways
             <HelpTip
               label="About gateways"
-              text="A gateway is an edge node: the thing that publishes to the broker, and the identity every topic beneath it is pinned to. Its devices reach the platform through it, so status here is derived from the last heartbeat rather than from anything the gateway asserts about itself."
+              text="An edge node: what publishes to the broker, and the identity every topic beneath it is pinned to. Status is derived from its last heartbeat, not from anything the gateway asserts about itself."
             />
           </h3>
           <button
@@ -465,7 +465,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <button
             className={`btn btn-sm ${showShadowGateways ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadowGateways(v => !v)}
-            title="The Playback gateway (archived migration 0060). It publishes recorded captures as shadow devices and is not a connector to any machine, so it is hidden by default — but it stays reachable, because minting its broker credential is the one act an operator must perform on it."
+            title="The Playback gateway publishes recorded captures as shadow devices and connects to no machine, so it is hidden by default. It stays reachable so its broker credential can be minted."
           >
             <IconRadio size={13} /> Show playback gateway
           </button>
