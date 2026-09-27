@@ -96,7 +96,7 @@
   },
   "historian_splinter": {
     "extension_in_public_timescaledb": "TimescaleDB installs itself in public, and the historian is not exposed through PostgREST, which is what this lint guards.",
-    "function_search_path_mutable_public_telemetry_gapfill_1e9eb9aa115bfaab42a247d25305ccb6": "SECURITY INVOKER, executed by grafana_reader against its own grants; the same class as #384, pinned when that is."
+    "function_search_path_mutable_public_telemetry_gapfill_e3c432d688e38a7fd174ef602c75c04c": "SECURITY INVOKER, executed by grafana_reader against its own grants; the same class as #384, pinned when that is."
   },
   "historian_plpgsql_check": {}
 }
