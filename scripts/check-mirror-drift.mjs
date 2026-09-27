@@ -376,6 +376,39 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// -------------------------------------------------------------------------------------------------
+// 7. The ASHRAE 223P metric group. The form's prefill (utils/ashrae223.js) and the seed must name the
+// same one, and it must be the only group registered under the standard: they forked once (#456),
+// the form filing under `Building` while the seeded metrics sat under an unregistered `BMS`.
+// -------------------------------------------------------------------------------------------------
+{
+  const js = need(read('frontend/src/utils/ashrae223.js'), /export const ASHRAE223_GROUP = '([^']+)'/,
+    'ASHRAE223_GROUP in utils/ashrae223.js');
+  const registered = [...SCHEMA.matchAll(
+    /INSERT INTO public\.metric_groups \(id, name, description, standard\)\s*VALUES \('[^']*', '([^']+)',\s*'(?:[^']|'')*',\s*'ASHRAE 223P'\)/g
+  )].map((m) => m[1]);
+  // Both seed forms: one row per INSERT, and an INSERT ... SELECT over a VALUES list that names the
+  // standard once in the SELECT.
+  const seededGroups = new Set([
+    ...[...SCHEMA.matchAll(/^INSERT INTO public\.metric_catalog VALUES \('[^']*', '([^'/]+)\/[^']*',.*'ASHRAE 223P', '/gm)]
+      .map((m) => m[1]),
+    ...[...SCHEMA.matchAll(/INSERT INTO public\.metric_catalog \([^)]*\)\s*SELECT[^;]*?'ASHRAE 223P'[^;]*?FROM \(VALUES([\s\S]*?)\) AS /g)]
+      .flatMap((m) => [...m[1].matchAll(/\(\s*'([^'/]+)\/[^']*',/g)].map((v) => v[1])),
+  ]);
+  if (js && seededGroups.size === 0) {
+    problems.push('ashrae223Group: found no seeded ASHRAE 223P metric -- the seed\'s shape changed, so half of this check is no longer checking anything');
+  }
+  if (js && registered.length !== 1) {
+    problems.push(`ashrae223Group: expected one metric group registered under ASHRAE 223P, found ${JSON.stringify(registered)}`);
+  } else if (js) {
+    compare('ashrae223Group', 'the group 223P metrics file under', js[1], registered[0]);
+    const strays = [...seededGroups].filter((g) => g !== registered[0]);
+    if (strays.length) {
+      problems.push(`ashrae223Group: seeded 223P metrics file under ${JSON.stringify(strays)}, not the registered '${registered[0]}'`);
+    }
+  }
+}
+
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nSQL-to-JavaScript mirror drift:');

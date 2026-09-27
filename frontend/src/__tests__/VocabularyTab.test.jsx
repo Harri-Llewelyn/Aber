@@ -208,7 +208,7 @@ describe('Vocabulary page — Use hands off to the Schemas page', () => {
 
   it('identifies a 223P class by name, and offers no Use on a relation', async () => {
     // The Metrics page's Concept picker leaves relations out; if Use still handed one over, the
-    // form would compose `Building/hasProperty`, a metric named after a predicate. Same rule, both
+    // form would compose `BMS/hasProperty`, a metric named after a predicate. Same rule, both
     // doors: isMetricConcept().
     const onUseEntry = vi.fn()
     renderTab({ onUseEntry })

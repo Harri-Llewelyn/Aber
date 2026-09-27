@@ -1,14 +1,14 @@
 /**
  * The ASHRAE 223P vocabulary, as served from `ashrae223_vocabulary`. A 223P concept is not
- * positional: `Fan` is a class of thing, so every concept files under one group, `Building`, and
+ * positional: `Fan` is a class of thing, so every concept files under one group, `BMS`, and
  * the operator supplies which fan. The standard is still in public review, so these concepts may
  * change before publication.
  */
 
 import { STANDARDS } from './standards'
 
-/** The single metric group 223P concepts file under. Registered by archived migration 0013. */
-export const ASHRAE223_GROUP = 'Building'
+/** The single metric group 223P concepts file under, registered in 0002_seed_data.sql. */
+export const ASHRAE223_GROUP = 'BMS'
 
 /** Concepts, ordered by label -- what a reader scans -- rather than by local name. */
 export function concepts(vocabulary) {
@@ -26,7 +26,7 @@ export function conceptByName(vocabulary, name) {
 
 /**
  * Whether a concept is one a metric can be attached to: everything but the relations. `hasProperty`
- * is a predicate between two things, so a metric named after it (`Building/hasProperty`) would name
+ * is a predicate between two things, so a metric named after it (`BMS/hasProperty`) would name
  * nothing. Classes, abstract classes and the root `Concept` all denote things. One rule for the
  * form's Concept picker and the Vocabulary page's Use action, so the two cannot disagree.
  */

@@ -101,6 +101,25 @@ class TestSeededRows(SeedTestCase):
                 }
                 self.assertEqual(found, {standard})
 
+    def test_every_metric_group_is_registered_under_its_metrics_standard(self):
+        """
+        The other direction: one standard spread over two groups. 223P's seeded metrics once sat
+        under an unregistered `BMS` while the form filed under `Building` (#456), and the picker
+        showed the one under Local and the other under ASHRAE 223P with nothing in it.
+        """
+        strays = self.rows(
+            "SELECT DISTINCT c.metric_group, c.standard, g.standard FROM public.metric_catalog c "
+            "  LEFT JOIN public.metric_groups g ON g.name = c.metric_group "
+            " WHERE c.standard IS NOT NULL AND c.metric_group IS NOT NULL "
+            "   AND g.standard IS DISTINCT FROM c.standard"
+        )
+        self.assertEqual(strays, [], "(group, metrics' standard, group's registered standard)")
+
+    def test_ashrae_223p_registers_one_group(self):
+        groups = [r[0] for r in self.rows(
+            "SELECT name FROM public.metric_groups WHERE standard = 'ASHRAE 223P' ORDER BY name")]
+        self.assertEqual(groups, ["BMS"])
+
     def test_no_seeded_row_is_missing_its_standard_or_semantic_id(self):
         """A row created with standard = NULL is the exact defect this migration exists to prevent."""
         bad = self.rows(
@@ -174,6 +193,51 @@ SEEDED_BY_0018 = {
         "OEE/OEE", "OEE/UTILIZATION", "OEE/SCRAP_RATIO", "OEE/MTBF", "OEE/MTTR",
     ],
 }
+
+
+class TestWhatStaysCorrectable(SeedTestCase):
+    """
+    name and datatype are a wire contract a device is configured against, so the immutability
+    trigger freezes them. semantic_id and permitted_values are transcriptions about a standard, and
+    must stay correctable in place (docs/vocabularies.md, PackML). Each probe is rolled back.
+    """
+
+    ROW = "Controller/EXECUTION"
+    CORRECTABLE = (
+        "UPDATE public.metric_catalog SET semantic_id = semantic_id || '-corrected' WHERE name = %s",
+        "UPDATE public.metric_catalog SET permitted_values = ARRAY['CORRECTED'] WHERE name = %s",
+    )
+    FROZEN = (
+        "UPDATE public.metric_catalog SET name = name || '_RENAMED' WHERE name = %s",
+        "UPDATE public.metric_catalog SET datatype = CASE WHEN datatype = 10 THEN 12 ELSE 10 END WHERE name = %s",
+    )
+
+    def update(self, statement):
+        conn = connect()
+        conn.autocommit = False
+        try:
+            with conn.cursor() as cur:
+                cur.execute(statement, (self.ROW,))
+                return cur.rowcount, None
+        except psycopg2.Error as exc:
+            return 0, exc
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_semantic_id_and_permitted_values_can_be_corrected(self):
+        for statement in self.CORRECTABLE:
+            with self.subTest(statement=statement):
+                rows, error = self.update(statement)
+                self.assertIsNone(error, f"refused: {error}")
+                self.assertEqual(rows, 1, f"{self.ROW} is not seeded")
+
+    def test_name_and_datatype_are_frozen(self):
+        for statement in self.FROZEN:
+            with self.subTest(statement=statement):
+                _, error = self.update(statement)
+                self.assertIsNotNone(error, "accepted")
+                self.assertIn("immutable", str(error))
 
 
 class TestProvenanceResolves(SeedTestCase):
