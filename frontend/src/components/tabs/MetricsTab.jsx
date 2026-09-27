@@ -343,8 +343,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // It is not what refuses the write -- metric_catalog's INSERT and UPDATE policies check
   // has_role('Administrator') -- so this disables the control rather than deciding anything.
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
-  // Gates Restore as well as Deprecate: one act and its inverse.
-  const canDeprecateMetric = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  // Deprecate and Restore write metric_catalog too, so they share Add Metric's gate. A permission a
+  // Shopfloor_Manager holds, such as archive:manage, would offer a button the database refuses.
+  const canDeprecateMetric = canManageSchema
 
   /**
    * Narrows the catalog by metric name only: matching description or units would return rows whose
