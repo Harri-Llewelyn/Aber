@@ -4591,6 +4591,22 @@ user who did it; `BACKUP_TAKEN`, `BACKUP_FAILED` and `BACKUP_PRUNED` as `service
 `audit_domain_for()` files both entity types under `security` by its fail-closed default, which is
 where an act on the whole database belongs.
 
+**The page lists runs, not backups.** Every finished `backup_jobs` row, newest first, 30 to a page
+and filtered to all, completed or failed. A completed run carries its `backups` row through the
+`backups.job_id` foreign key while the files exist, and says it was pruned once `backup_forget()`
+has removed the row; job rows are never deleted, so the list is the history. A failure is history
+too once a later backup succeeds, so the current condition is one line of its own, shown only when
+the latest run that completed or failed was a failure, or when the last success is older than 36
+hours (before the first success, the first job recorded is the clock). The second is what a
+stopped service produces, since a service that is not running records no failure. A stack with no
+job row at all has never run the service, and the page shows its empty state and nothing else
+(#474).
+
+**Grafana reads the same clock through `backup_health` (0011).** `grafana_reader` may read views
+and no table, and `backup_jobs` is Administrator-only; the view runs as its owner and exposes one
+row, `last_success_at` and `age_seconds`, and none while no job exists. The *Backup Stale* rule
+fires past 36 hours; its reasoning is in [`grafana/README.md`](../grafana/README.md).
+
 **What was decided, and why the alternatives were not taken.**
 
 - *The artefact lives on a volume, not in a Storage bucket.* Uploading to a bucket needs the

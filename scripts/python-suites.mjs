@@ -502,6 +502,15 @@ export const SUITES = {
       'row the chart does not manage is left alone, and no API role can call the writer -- so the ' +
       'versions on the page are the ones db-init recorded and nobody else.',
   },
+  'supabase/migrations/test_backup_health.py': {
+    lanes: ['db'],
+    why:
+      "0011's clock for the Backup Stale rule. No row while no job exists, or every stack without " +
+      'the backup service alerts 36 hours after install; the first job recorded until one ' +
+      'succeeds, so a service that never ran what it queued is reported; the last success after ' +
+      'that, unmoved by later failures; and no browser role reads it, since it runs past the ' +
+      "Administrator-only RLS on backup_jobs.",
+  },
   'supabase/migrations/test_system_settings_rls.py': {
     lanes: ['db'],
     why:

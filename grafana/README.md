@@ -39,7 +39,7 @@ and needs a metric that exists in `metric_catalog`, which `check-docs-drift.mjs`
 
 **Datasources.** The `supabase` datasource connects as `grafana_reader`, which may `SELECT` the
 views the rules name (`platform_health`, `gateway_health`, `digital_thread_partition_health`,
-`storage_footprint`) and no base table, so a browser-SSO-fronted service never holds the plant's
+`storage_footprint`, `backup_health`) and no base table, so a browser-SSO-fronted service never holds the plant's
 inventory; a rule that queried `public.devices` fails as `permission denied` and sits in error
 health. `asset_config` lives in Supabase and `postgres_fdw` runs Supabase → TimescaleDB only, so a
 per-device limit travels as a published metric. The `prometheus` datasource exists only where the
@@ -66,9 +66,10 @@ enrolment is measured in hours, a queue changes when a person approves something
 Prometheus rules are rates over 5 to 15 minute windows.
 
 **Thresholds shared with the frontend are held in step by guards.** `check-docs-drift.mjs` reads
-the CA rule's thirty days against `CERT_EXPIRY_WARN_DAYS` and the archive rule's fourteen against
-`ARCHIVE_BACKLOG_TOLERANCE_DAYS`; `check-mirror-drift.mjs` holds the 90s staleness threshold
-between `gateway_status` and the frontend.
+the CA rule's thirty days against `CERT_EXPIRY_WARN_DAYS`, the archive rule's fourteen against
+`ARCHIVE_BACKLOG_TOLERANCE_DAYS` and the backup rule's 36 hours against `BACKUP_STALE_HOURS`;
+`check-mirror-drift.mjs` holds the 90s staleness threshold between `gateway_status` and the
+frontend.
 
 ## Delivery: the contact point and the policy tree
 
@@ -147,7 +148,8 @@ that never fired.
 ## Platform Conditions
 
 The stack's own health, not the machines'. Every rule reads one row per condition from
-`public.platform_health` (or `gateway_health`) through the `supabase` datasource.
+`public.platform_health` (or `gateway_health`, or `backup_health`) through the `supabase`
+datasource.
 
 ### Gateway Stale (`aber-gateway-stale`)
 
@@ -208,6 +210,26 @@ disk. A threshold of "any backlog" would fire on every install, every week, corr
 switched off. One hour because the exporter runs nightly: the number moves once a day, and a
 shorter window would only re-report the same reading. The view emits this row only while
 `archive.enabled` is on, so NoData means a stack that does not archive.
+
+### Backup Stale (`aber-backup-stale`)
+
+Warning, `for: 0s`, over 36 hours. No platform backup (the backup service's dump of both
+databases, the keys and the volumes) has succeeded for a day and a half. The schedule is nightly by
+default (`backup.schedule`), so 36 hours is one missed night with half a day in hand for a slow run
+or a restart; the window is the delay, so there is no `for`. The Backups page shows its line on the
+same number, `BACKUP_STALE_HOURS`, and a guard holds the two equal. A site that sets a sparser
+schedule has to change both.
+
+The value is `backup_health.age_seconds` (0011), which is how `grafana_reader` sees `backup_jobs`,
+a table only an Administrator may read. The clock is the start of the last completed backup, the
+moment its data is as of; before the first success it is the first job recorded. That is what
+covers the case the page's failure line misses: a backup service that is not running records no
+failure, only a nightly job nobody claims. While no job has ever been recorded the view has no
+row, so a stack installed with `backupService.enabled: false`, and every CI run, reads NoData, which
+is OK. What the clock cannot tell apart from a fault: a service switched off after it has run keeps
+its history, and pg_cron keeps queueing a job no process claims, so the rule fires until the
+service returns or the rule is silenced. The same holds for a site that empties `backup.schedule`
+and backs up only on request.
 
 ## Ingestion Pipeline
 

@@ -297,6 +297,10 @@ python supabase/migrations/test_sparkplug_group_setting.py
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the
 # writer is callable by db-init only.
 python supabase/migrations/test_directory_images.py
+# The Backup Stale rule's clock (0011). No row while no backup job exists; the first job recorded
+# until one succeeds, then the start of the last success, which a later failure does not move; and
+# anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
+python supabase/migrations/test_backup_health.py
 # Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
 # property is in the function body rather than in a grant, so a gate that stops working fails open
 # with the page looking exactly as it should. Both directions per role, and `anon` stopped by the
