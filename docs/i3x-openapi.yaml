@@ -181,6 +181,11 @@ paths:
         Rows from `schemas` — **a `schema_definition` already is a JSON Schema**, so there is
         no translation step — plus the synthetic Site, Cell, Gateway and untyped-device types
         that give the structural objects something to point at.
+      parameters:
+        - name: namespaceUri
+          in: query
+          schema: { type: string, format: uri, example: 'https://aber.local/i3x' }
+          description: 'Return only the types in this namespace. One this server does not serve gives an empty list, not an error.'
       responses:
         '200':
           description: All object types visible to this caller.
@@ -231,6 +236,11 @@ paths:
         gives an Object one parent, `HasParent` is organizational hierarchy, so the cell wins
         and the data path becomes `ConnectsVia`/`ProvidesConnectivityFor`. Collapsing them
         would make a host-run gateway unrepresentable.
+      parameters:
+        - name: namespaceUri
+          in: query
+          schema: { type: string, format: uri, example: 'https://aber.local/i3x/relationships' }
+          description: 'Return only the types in this namespace. One this server does not serve gives an empty list, not an error.'
       responses:
         '200':
           description: All relationship types.

@@ -627,6 +627,40 @@ class ColumnCheckingPostgrest:
         return [{c: row.get(c) for c in selected} for row in self.rows.get(relation, [])]
 
 
+class FakeRequest:
+    """
+    Stands in for `Handler` in a handler call: a path, a parsed body, and a PostgREST. With no
+    PostgREST given, reaching for one fails the test, which is how a test asserts that a request
+    was refused before anything was read.
+    """
+
+    def __init__(self, path="/v1/", body=None, pg=None):
+        self.path = path
+        self.body = {} if body is None else body
+        self.pg = pg
+        self.status = None
+        self.result = None
+
+    _query = i3x_service.Handler._query
+
+    def _body(self):
+        return self.body
+
+    def _bearer(self):
+        return "Bearer test"
+
+    def _pg(self):
+        if self.pg is None:
+            raise AssertionError("the handler read PostgREST before validating its input")
+        return self.pg
+
+    def _ok(self, result, status=200, detail=None):
+        self.status, self.result = status, result
+
+    def _bulk(self, results):
+        self.status, self.result = 200, results
+
+
 class _FakeResponse:
     def __init__(self, status, body):
         self.status_code = status
@@ -861,6 +895,47 @@ class TestNamespaces(unittest.TestCase):
         # A local type under mtconnect.org or opcfoundation.org would claim that body defined it.
         for namespace in A.namespaces():
             self.assertTrue(namespace["uri"].startswith("https://aber.local/"), namespace["uri"])
+
+
+class TestNamespaceFilter(unittest.TestCase):
+    """`GET /objecttypes` and `GET /relationshiptypes` honour `?namespaceUri=`."""
+
+    def setUp(self):
+        i3x_service._space_cache_clear()
+
+    def tearDown(self):
+        i3x_service._space_cache_clear()
+
+    def served(self, handler, query=""):
+        req = FakeRequest(path="/v1/types" + query, pg=ColumnCheckingPostgrest())
+        handler(req)
+        self.assertEqual(req.status, 200)
+        return req.result
+
+    def test_no_filter_returns_every_type(self):
+        self.assertEqual(len(self.served(i3x_service.h_objecttypes)), len(A.SYNTHETIC_TYPES))
+        self.assertEqual(
+            len(self.served(i3x_service.h_relationshiptypes)), len(A.RELATIONSHIP_TYPES)
+        )
+
+    def test_each_namespace_returns_only_its_own_types(self):
+        encoded = "?namespaceUri=https%3A%2F%2Faber.local%2Fi3x"
+        object_types = self.served(i3x_service.h_objecttypes, encoded)
+        self.assertEqual(len(object_types), len(A.SYNTHETIC_TYPES))
+        self.assertEqual(self.served(i3x_service.h_relationshiptypes, encoded), [])
+
+        relationships = self.served(
+            i3x_service.h_relationshiptypes, "?namespaceUri=" + A.NS_RELATIONSHIPS
+        )
+        self.assertEqual(len(relationships), len(A.RELATIONSHIP_TYPES))
+        self.assertEqual(
+            self.served(i3x_service.h_objecttypes, "?namespaceUri=" + A.NS_RELATIONSHIPS), []
+        )
+
+    def test_an_unknown_namespace_is_an_empty_list(self):
+        for handler in (i3x_service.h_objecttypes, i3x_service.h_relationshiptypes):
+            with self.subTest(handler=handler.__name__):
+                self.assertEqual(self.served(handler, "?namespaceUri=urn:nothing"), [])
 
 
 class ModelledMetricsContractTest(unittest.TestCase):

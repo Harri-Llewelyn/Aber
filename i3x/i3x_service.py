@@ -853,8 +853,14 @@ def h_namespaces(req: Handler) -> None:
     req._ok(A.namespaces())
 
 
+def _in_namespace(req: Handler, types: List[dict]) -> List[dict]:
+    """`?namespaceUri=` keeps the types in that namespace; one that serves nothing gives []."""
+    uri = req._query().get("namespaceUri")
+    return [t for t in types if t["namespaceUri"] == uri] if uri else types
+
+
 def h_objecttypes(req: Handler) -> None:
-    req._ok(_build_types(_load_address_space(req._pg())))
+    req._ok(_in_namespace(req, _build_types(_load_address_space(req._pg()))))
 
 
 def h_objecttypes_query(req: Handler) -> None:
@@ -884,7 +890,7 @@ def h_objecttypes_query(req: Handler) -> None:
 
 def h_relationshiptypes(req: Handler) -> None:
     req._bearer()
-    req._ok(A.relationship_types())
+    req._ok(_in_namespace(req, A.relationship_types()))
 
 
 def h_relationshiptypes_query(req: Handler) -> None:

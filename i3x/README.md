@@ -122,9 +122,9 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | :--- | :--- | :--- |
 | GET | `/info` | **Unauthenticated.** Capabilities + health |
 | GET | `/namespaces` | The two every type belongs to: local and relationships |
-| GET | `/objecttypes` | `schemas` rows + synthetic Site/Cell/Gateway types |
+| GET | `/objecttypes` | `schemas` rows + synthetic Site/Cell/Gateway types. `?namespaceUri=` |
 | POST | `/objecttypes/query` | |
-| GET | `/relationshiptypes` | Six types, all registered with their `reverseOf` |
+| GET | `/relationshiptypes` | Six types, all registered with their `reverseOf`. `?namespaceUri=` |
 | POST | `/relationshiptypes/query` | |
 | GET | `/objects` | `?typeElementId=`, `?root=true`, `?includeMetadata=true` |
 | POST | `/objects/list` | Bulk, **results in request order** |
