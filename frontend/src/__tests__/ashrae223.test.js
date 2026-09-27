@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   concepts, conceptByName, ashrae223Sections, ashrae223Prefill, conceptTooltip, metricConcepts,
-  ASHRAE223_GROUP
+  isMetricConcept, ASHRAE223_GROUP
 } from '../utils/ashrae223'
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName, deriveMetricGroup } from '../utils/metricGroup'
@@ -49,6 +49,16 @@ describe('conceptByName', () => {
   it('returns null rather than guessing', () => {
     expect(conceptByName(vocabulary, 'NotAConcept')).toBeNull()
     expect(conceptByName(vocabulary, '')).toBeNull()
+  })
+})
+
+describe('isMetricConcept', () => {
+  it('is the one rule the picker and the Use action share', () => {
+    expect(isMetricConcept(vocabulary[0])).toBe(true)            // Fan, a Class
+    expect(isMetricConcept(vocabulary[3])).toBe(false)           // connectsTo, a Relation
+    expect(isMetricConcept({ name: 'Concept', concept_kind: 'Concept' })).toBe(true)
+    expect(isMetricConcept({ name: 'X', concept_kind: 'AbstractClass' })).toBe(true)
+    expect(isMetricConcept(null)).toBe(false)
   })
 })
 

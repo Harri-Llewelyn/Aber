@@ -25,12 +25,18 @@ export function conceptByName(vocabulary, name) {
 }
 
 /**
- * The concepts a metric can be attached to: everything but the relations. `hasProperty` is a
- * predicate between two things, so a metric named after it (`Building/hasProperty`) would name
- * nothing. Classes, abstract classes and the root `Concept` all denote things.
+ * Whether a concept is one a metric can be attached to: everything but the relations. `hasProperty`
+ * is a predicate between two things, so a metric named after it (`Building/hasProperty`) would name
+ * nothing. Classes, abstract classes and the root `Concept` all denote things. One rule for the
+ * form's Concept picker and the Vocabulary page's Use action, so the two cannot disagree.
  */
+export function isMetricConcept(concept) {
+  return !!concept && concept.concept_kind !== 'Relation'
+}
+
+/** The vocabulary narrowed to the concepts a metric can be attached to. */
 export function metricConcepts(vocabulary) {
-  return (vocabulary || []).filter(c => c && c.concept_kind !== 'Relation')
+  return (vocabulary || []).filter(isMetricConcept)
 }
 
 /**
