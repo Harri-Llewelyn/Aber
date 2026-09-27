@@ -420,14 +420,16 @@ i3X `sourceTypeId`.
   dots and hyphens, so the ASHRAE concept `Constituent-CO2` is registered as
   `BMS/CO2_CONCENTRATION`. The join still uses the vocabulary's own unmodified key.
 
-**One inconsistency this surfaced and deliberately did not fix.** `0002`'s rows mint semantic ids
-*path-shaped* (`…/mtconnect/v2.0/Axes/C/ANGLE`) where `mtconnect_vocabulary` mints them
-*type-shaped* (`…/mtconnect/v2.0/DataItemType/ANGLE`). Both are under the locally-minted
-`aber.local` namespace, so neither asserts a false interoperability and neither is wrong —
-they are two conventions for the same thing, and `0002`'s predates the vocabulary tables.
-Reconciling them is deprecate-and-supersede with its own reasoning to write.
-`test_metric_catalog_seed.py` scopes its provenance assertions to the rows `0018` owns for exactly
-this reason.
+**An MTConnect metric's semantic id names its data item type (#457).** The original seed rows and
+the Add Metric form once built the id from the whole name (`…/mtconnect/v2.0/Axes/C/ANGLE`), which
+names one data item: `Axes/W/POSITION` could never share a concept with `Axes/X/POSITION`, and an
+AAS consumer grouping Properties by `semanticId` split them. Every MTConnect row now carries the
+vocabulary's concept id (`…/mtconnect/v2.0/DataItemType/ANGLE`), with the component path, instance
+and subType left to the name and `sub_type`. `0002` seeds that form, `mtconnectSemanticId()` derives
+it, and `0009_mtconnect_metrics_carry_their_data_item_type_id.sql` repoints a database seeded
+earlier. It is an UPDATE because `semantic_id` is correctable in place. Only a row still holding
+the name-built id is touched, and only when its type is in `mtconnect_vocabulary`; a NOTICE counts
+any left behind. `test_metric_catalog_seed.py` holds every MTConnect row to its type's id.
 
 ### Metric name format (0007)
 

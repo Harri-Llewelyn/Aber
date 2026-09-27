@@ -75,7 +75,13 @@ before proposing a change:
 
 ## How a vocabulary entry becomes a metric
 
-Two decisions shape every metric the form creates from a vocabulary, whatever the standard:
+Three decisions shape every metric the form creates from a vocabulary, whatever the standard:
+
+- **A metric's semantic id names the concept, not the metric.** ISO 22400, OPC UA and 223P take
+  the vocabulary row's id. An MTConnect metric takes its data item type's id,
+  `…/mtconnect/v2.0/DataItemType/<TYPE>`, so `Axes/X/POSITION` and `Axes/W/POSITION` share one;
+  the component path, instance and subType stay in the name and `sub_type` (#457). A custom
+  MTConnect type is a local extension and gets no id.
 
 - **`metric_catalog.category` is MTConnect's observation category for every standard.** It is
   CHECK-constrained to `SAMPLE`, `EVENT` or `CONDITION` (or null). MTConnect rows carry their own;
