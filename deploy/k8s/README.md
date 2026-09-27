@@ -1417,6 +1417,7 @@ Retention is thirty days in both stores. Nothing to enable; nothing to install f
 | `supabase-rest` | 3001 | `/metrics` | nothing — the admin listener is always bound |
 | `grafana` | 3000 | `/metrics` | nothing |
 | `mosquitto` | 9234 | `/metrics` | `mosquitto.metrics.enabled` (the exporter sidecar) |
+| `supabase-db`, `timescaledb` | 9187 | `/metrics` | `databaseMetrics.enabled` (default on; the postgres_exporter sidecars) |
 | `prometheus`, `loki`, `alloy` | 9090, 3100, 12345 | `/metrics` | nothing |
 
 **The node's kubelet is scraped as well** (`observability.alloy.kubeletMetrics`, default on): its

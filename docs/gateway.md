@@ -122,3 +122,29 @@ service-role JWTs were accepted alongside the new pair while every consumer move
 and Kong deleted from the chart on 2026-09-13, before any deployment existed. The migration
 protocol and its findings are in this file's git history under its former name,
 `docs/gateway-migration.md`.
+
+### What Kong taught
+
+Facts measured on Kong that the design record once carried, kept so they are not re-derived if a
+Kong-based gateway comes back:
+
+- **`key-auth` accepts an empty key.** Rendering the config in Helm with `secrets.existingSecret`
+  set registered empty keys, and the gateway came up with its authentication off. That is why
+  substitution moved to an initContainer, which Envoy inherited (design record §4.5).
+- **Kong took the upstream `Host` from the service's hostname** (`preserve_host: false`), so naming
+  the Service `realtime-dev` was enough for Realtime's tenant. Envoy preserves the downstream `Host`,
+  hence its explicit `host_rewrite_literal` (design record §3.4).
+- **There is no 3.x `-alpine` image.** Kong stopped publishing alpine variants after 3.3.1, so
+  `kong:3.9.3-alpine` was a 404 and the pin dropped the suffix for a Debian image.
+- **3.0 made the Prometheus plugin's per-entity metrics opt-in.** `status_code_metrics`,
+  `latency_metrics` and `bandwidth_metrics` default to `false`, so a bare `- name: prometheus`
+  exported node-level gauges only while the target stayed UP. The scrape needed the plugin and the
+  status listener, for 57 `kong_*` series; PostgREST 12.2.0 exposed no metrics, so its traffic was
+  measured on Kong.
+- **`KONG_PLUGINS` replaces the bundled plugin set rather than extending it.** The three plugin
+  lists had to agree or Kong refused to boot, with an error naming the config file rather than the
+  variable, and a CI guard held them equal. `rate-limiting` was bundled and unavailable for the
+  same reason; `policy: local` was the right choice, as DB-less mode cannot run `cluster`.
+- **Compose's `supabase-kong-init` rendered the template with `sed`** because Kong 2.8 could not
+  read environment variables from declarative config. 3.x can (`${{env.VAR}}`), but using it would
+  have put the service-role key in Kong's environment, where `docker inspect` prints it.

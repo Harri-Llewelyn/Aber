@@ -233,7 +233,7 @@ reports 17.10 with TimescaleDB 2.29.1, every init service exits 0, and:
   values, RLS scoping, anon privilege baseline).
 - `test_aas_export.py` — **58/58 pass**, including validation against the official IDTA schema and
   the 3D model upload, which exercises the new storage grants end to end.
-- Realtime completes the WebSocket upgrade through Kong (`101 Switching Protocols`); publication
+- Realtime completes the WebSocket upgrade through the gateway (`101 Switching Protocols`); publication
   is scoped to `cells`/`devices`/`gateways`; `wal_level = logical`. The replication slot is created
   lazily on first subscribe, so its absence with no client attached is expected, not a fault.
 - **The backup CronJob's constraint tested directly**: `pg_dump` from the `supabase/postgres` image
