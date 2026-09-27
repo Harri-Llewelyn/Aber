@@ -70,8 +70,11 @@ before proposing a change:
   **ignores `semantic_id_type`** (`semanticReference()` in
   [`supabase/functions/_shared/aas/shell.ts`](../supabase/functions/_shared/aas/shell.ts)) —
   correct AAS V3 for IRIs and IRDIs alike, so IRDIs export with no code change. `semantic_id_type`
-  is validation metadata here, not export input. A `ModelReference` would be emitted wrongly as an
-  `ExternalReference`; nothing sets one. **Each id also gets a `ConceptDescription`** in the
+  is validation metadata here, not export input, and it is IRI or IRDI only: `ModelReference` was
+  withdrawn by `0012`, because a ModelReference is a typed key chain into a model that one text
+  column cannot hold and the exporter cannot emit. The form infers IRDI for any ISO/IEC 11179-6
+  shape, the IEC CDD `0112/2///61987#ABA565#009` and an ECLASS pair joined by `/` included.
+  **Each id also gets a `ConceptDescription`** in the
   Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
   `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
@@ -249,9 +252,10 @@ The seam is between things you *do* — the schema registry and the metric catal
 deployment's state — and things you *look up*, which is the half that grows whenever a standard is
 adopted rather than when anyone here decides it should.
 
-**Use still works across the split.** The Vocabulary page hands the Schemas page an *identifier*
+**Use still works across the split.** The Vocabulary page hands the Metrics page an *identifier*
 (`{ standard, name }`, or `{ standard, companionSpec, name }` for OPC UA, whose vocabulary is keyed
-on the pair), and Schemas resolves it against the vocabularies it already loads for its type picker.
+on the pair), and the Metrics page resolves it against the vocabularies it already loads for the
+Add Metric form's type picker.
 The rules that turn a vocabulary row into a metric therefore stay in one place instead of being
 copied onto the new page.
 

@@ -945,6 +945,10 @@ paths:
         Only a `draft` row is writable. A PATCH against an `active` or `archived` version is
         rejected by `prevent_active_schema_mutation()` — including with the service role.
 
+        A draft inherits its parent's `semantic_id` and `semantic_id_type` from `fork_schema()`,
+        so the draft is where a wrong claim is corrected or cleared. The dashboard's draft save
+        sends the pair together, with the type NULL whenever the id is.
+
         `version` and `status` cannot be set directly: use the two RPCs below.
       parameters:
         - { name: id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
@@ -1130,10 +1134,10 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     patch:
       tags: [Registry]
-      summary: Deprecate or restore a metric
+      summary: Deprecate, restore, or correct the semantic id of a metric
       description: |
         `name` and `datatype` are refused by `enforce_metric_catalog_immutability()`; every other
-        column may change. The two lifecycle writes the dashboard makes:
+        column may change. The three writes the dashboard makes:
 
         * **Deprecate** — `{"deprecated": true, "superseded_by": "<uuid>" | null}`, sent by
           `POST /api/v1/metric-catalog/{id}/deprecate`. The schema builder stops offering the
@@ -1141,6 +1145,11 @@ paths:
         * **Restore** — `{"deprecated": false, "superseded_by": null}`, sent by
           `POST /api/v1/metric-catalog/{id}/restore`. The pointer is cleared with the flag:
           a current metric that still named a replacement would be current and replaced at once.
+        * **Edit** — `{"semantic_id": "<id>" | null, "semantic_id_type": "IRI" | "IRDI" | null}`,
+          sent by `PUT /api/v1/metric-catalog/{id}`. Only the pair, with the type NULL whenever the
+          id is. A semantic id is an assertion about the metric, not part of what a device
+          publishes, so it is corrected in place; every shell exported from a schema that models the
+          metric carries the new id.
 
         Administrator only (`metric_catalog_update_privileged`). A caller the policy does not admit
         matches no row, so nothing changes and no error is raised; send
@@ -1158,6 +1167,8 @@ paths:
               properties:
                 deprecated: { type: boolean }
                 superseded_by: { type: string, format: uuid, nullable: true, description: 'The replacement. NULL on restore.' }
+                semantic_id: { type: string, nullable: true }
+                semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
       responses:
         '200': { description: 'Updated, with `Prefer: return=representation`. An empty array means no row was admitted.' }
         '204': { description: Updated. }
@@ -3745,11 +3756,13 @@ components:
     SemanticIdType:
       type: string
       nullable: true
-      enum: [IRI, IRDI, ModelReference]
+      enum: [IRI, IRDI]
       description: |
-        Which kind of AAS Reference `semantic_id` is. CHECK-constrained — a bad value would
-        surface as an invalid AAS Reference at export time. **Never half-populated**: the pair
-        is written together or not at all.
+        Which kind of AAS Reference `semantic_id` is: an IRI (a URL or URN) or an IRDI (an ECLASS
+        or IEC CDD code). CHECK-constrained (`0012`); both export as an `ExternalReference`.
+        `ModelReference` was withdrawn because the exporter cannot emit one. **Never
+        half-populated**: the dashboard writes the pair together, with the type NULL whenever the
+        id is.
 
     LocationScope:
       type: string

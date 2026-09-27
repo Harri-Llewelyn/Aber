@@ -230,6 +230,99 @@ class TestWhatStaysCorrectable(SeedTestCase):
                 self.assertIn("immutable", str(error))
 
 
+class TestReferenceTypesAreIriAndIrdi(SeedTestCase):
+    """
+    0012 withdraws ModelReference from `schemas.semantic_id_type` and
+    `metric_catalog.semantic_id_type`: the exporter emits every id as an ExternalReference, which a
+    ModelReference is not. Each probe runs in its own transaction and is rolled back.
+    """
+
+    MIGRATION_0012 = Path(__file__).with_name("0012_a_semantic_id_is_an_iri_or_an_irdi.sql")
+    CONSTRAINTS = (("schemas", "schemas_semantic_id_type_valid"),
+                   ("metric_catalog", "metric_catalog_semantic_id_type_valid"))
+    INSERTS = {
+        "schemas": "INSERT INTO public.schemas (schema_name, schema_definition, semantic_id, semantic_id_type)"
+                   " VALUES ('Fixture0012_Schema', '{\"type\": \"object\"}'::jsonb, 'urn:example:fixture', %s)",
+        "metric_catalog": "INSERT INTO public.metric_catalog (name, datatype, semantic_id, semantic_id_type)"
+                          " VALUES ('Fixture0012/Value', 9, 'urn:example:fixture', %s)",
+    }
+
+    def in_transaction(self, work):
+        """Run `work(cur)` on a fresh connection and roll everything back."""
+        conn = connect()
+        conn.autocommit = False
+        try:
+            with conn.cursor() as cur:
+                return work(cur)
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def constraint_oids(self, cur):
+        cur.execute(
+            "SELECT conname, oid FROM pg_constraint WHERE conname IN %s ORDER BY conname",
+            (tuple(name for _, name in self.CONSTRAINTS),),
+        )
+        return cur.fetchall()
+
+    def test_both_checks_refuse_model_reference(self):
+        for table, constraint in self.CONSTRAINTS:
+            with self.subTest(table=table):
+                def probe(cur, table=table):
+                    cur.execute("SAVEPOINT probe")
+                    with self.assertRaises(psycopg2.errors.CheckViolation) as refused:
+                        cur.execute(self.INSERTS[table], ("ModelReference",))
+                    cur.execute("ROLLBACK TO SAVEPOINT probe")
+                    # The same row with a type still allowed goes in, so the refusal was the type.
+                    for allowed in ("IRI", "IRDI"):
+                        cur.execute("SAVEPOINT probe")
+                        cur.execute(self.INSERTS[table], (allowed,))
+                        cur.execute("ROLLBACK TO SAVEPOINT probe")
+                    return refused.exception
+                self.assertIn(constraint, str(self.in_transaction(probe)))
+
+    def test_a_replay_does_not_replace_the_constraints(self):
+        """Guarded on the definition: on a database already narrowed, 0012 changes nothing."""
+        sql = self.MIGRATION_0012.read_text(encoding="utf-8")
+
+        def replay(cur):
+            before = self.constraint_oids(cur)
+            cur.execute(sql)
+            after_first = self.constraint_oids(cur)
+            cur.execute(sql)
+            return before, after_first, self.constraint_oids(cur)
+
+        before, after_first, after_second = self.in_transaction(replay)
+        self.assertEqual(len(before), 2, "a semantic_id_type CHECK is missing")
+        self.assertEqual(after_first, before, "0012 replaced a constraint that was already narrowed")
+        self.assertEqual(after_second, before, "a second replay of 0012 replaced a constraint")
+
+    def test_a_model_reference_row_stops_the_migration_with_what_to_change(self):
+        """
+        A database whose row still holds ModelReference: 0012 names the table and the fix rather
+        than failing on a CHECK violation, and leaves the row as it was.
+        """
+        sql = self.MIGRATION_0012.read_text(encoding="utf-8")
+
+        def provoke(cur):
+            cur.execute(
+                "ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_semantic_id_type_valid,"
+                " ADD CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (semantic_id_type IS NULL"
+                " OR semantic_id_type IN ('IRI', 'IRDI', 'ModelReference'))"
+            )
+            cur.execute(self.INSERTS["metric_catalog"], ("ModelReference",))
+            with self.assertRaises(psycopg2.errors.RaiseException) as raised:
+                cur.execute(sql)
+            return raised.exception
+
+        error = self.in_transaction(provoke)
+        self.assertIn("public.metric_catalog", str(error))
+        self.assertIn("ModelReference", str(error))
+        hint = error.diag.message_hint or ""
+        self.assertIn("IRI", hint)
+        self.assertIn("IRDI", hint)
+
+
 class TestProvenanceResolves(SeedTestCase):
     """
     Every semantic id 0018 wrote must still be findable in the vocabulary it was SELECTed from.

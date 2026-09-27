@@ -47,12 +47,13 @@ export const STANDARD_OPTIONS = [
 ]
 
 /**
- * The AAS (IEC 63278) Reference types `semantic_id_type` may take. Mirrors the CHECK constraint in
- * 0001_baseline_schema.sql; keep the two in step.
+ * The AAS (IEC 63278) Reference types `semantic_id_type` may take. Mirrors the CHECK constraints
+ * 0012_a_semantic_id_is_an_iri_or_an_irdi.sql leaves on `schemas` and `metric_catalog`; keep them in
+ * step. Both export as an ExternalReference, which is all the exporter can emit.
  */
-export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI', 'ModelReference']
+export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI']
 
-/** The type to assume for a semantic id that looks like a URL. Every seeded id is one. */
+/** The type to assume for a semantic id that looks like a URL. Every seeded catalog id is one. */
 export const DEFAULT_SEMANTIC_ID_TYPE = 'IRI'
 
 /**
@@ -103,16 +104,45 @@ export function mtconnectVocabularySemanticId(kind, name) {
 }
 
 /**
+ * One ISO/IEC 11179-6 IRDI: a registration authority (a four-digit ICD, then organisation parts
+ * separated by `-` or `/`, some of them empty), a `#`, the data identifier, a `#`, the version.
+ * ECLASS writes `0173-1#02-AAO677#002`, IEC CDD `0112/2///61987#ABA565#009`.
+ */
+const IRDI = String.raw`\d{4}(?:[-/][A-Za-z0-9_]*)*#[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*#\d+`
+
+/** An IRDI, or several joined by `/` as an ECLASS property-value pair is. Anchored at both ends. */
+const IRDI_PATH = new RegExp(`^${IRDI}(?:/${IRDI})*$`)
+
+/**
  * Best guess at which kind of AAS Reference an identifier is. Conservative: it recognises the two
- * unambiguous shapes and leaves the rest to the operator. An IRDI looks like
- * `0173-1#02-AAO677#002`.
+ * unambiguous shapes and leaves the rest to the operator.
  */
 export function inferSemanticIdType(value) {
   const v = (value || '').trim()
   if (!v) return ''
   if (/^https?:\/\//i.test(v) || /^urn:/i.test(v)) return 'IRI'
-  if (/^\d{4}-[^#]*#[^#]+#\d+$/.test(v)) return 'IRDI'
+  if (IRDI_PATH.test(v)) return 'IRDI'
   return ''
+}
+
+/**
+ * A semantic id and its reference type as they are stored: the id trimmed, and no type without an
+ * id. Forms compare this form of the pair to decide whether anything changed.
+ */
+export function storedSemanticIdPair(semanticId, semanticIdType) {
+  const id = (semanticId || '').trim()
+  return { semanticId: id, semanticIdType: id ? (semanticIdType || '') : '' }
+}
+
+/**
+ * The reference type to show once the semantic id changes from `previousId` to `nextId`. A blank id
+ * has no type. A type that agreed with the guess for the previous id follows the new guess, so
+ * replacing an IRI with an IRDI retypes it; a type the operator chose against the guess is kept.
+ */
+export function followSemanticIdType(previousId, previousType, nextId) {
+  if (!(nextId || '').trim()) return ''
+  const guessed = !previousType || previousType === inferSemanticIdType(previousId)
+  return guessed ? inferSemanticIdType(nextId) : previousType
 }
 
 /** Display label for a `standard` value as stored (NULL/'' meaning a local extension). */

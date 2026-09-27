@@ -430,6 +430,36 @@ earlier. It is an UPDATE because `semantic_id` is correctable in place. Only a r
 the name-built id is touched, and only when its type is in `mtconnect_vocabulary`; a NOTICE counts
 any left behind. `test_metric_catalog_seed.py` holds every MTConnect row to its type's id.
 
+### A semantic id is an IRI or an IRDI (`0012_a_semantic_id_is_an_iri_or_an_irdi.sql`)
+
+**ModelReference is withdrawn, because nothing could emit one.** `schemas.semantic_id_type` and
+`metric_catalog.semantic_id_type` allowed `IRI`, `IRDI` and `ModelReference`. `semanticReference()`
+in the AAS exporter ignores the type and writes every id as an `ExternalReference` with one
+`GlobalReference` key: right for an IRI or an IRDI, wrong for a ModelReference, which is a typed key
+chain into a model that one text column cannot carry. The two forms offered it and disagreed about
+what it meant, so the first operator to pick it would have published a wrong shell. It can come
+back once something emits it, as a reference to a `ConceptDescription` in the same Environment.
+
+`0012` narrows both CHECKs to IRI and IRDI. It first counts rows still holding `ModelReference`,
+and fails the boot naming the table and the fix (set IRI or IRDI, or clear the pair, as the owner)
+rather than rewriting them: which of the two was meant is the operator's call.
+`idta_submodel_templates` already allowed only the two.
+
+**Replaced on each full boot until the next squash.** `0001` replays first and re-asserts its
+three-value CHECK, so `0012` sees `ModelReference` in the definition and narrows it again. The
+replacement is guarded on that definition, so a replay of `0012` alone changes nothing, and the
+pg_dump digest is the same either way. At the next squash the two-value form folds into `0001` and
+`0012` retires. `test_metric_catalog_seed.py` holds both CHECKs to refusing `ModelReference`, a
+replay to leaving the constraints alone, and a `ModelReference` row to stopping the migration with
+the fix in its HINT.
+
+**Correcting an id is a dashboard action now.** A catalog metric's semantic id was always mutable
+(`enforce_metric_catalog_immutability()` freezes only `name` and `datatype`); the Metrics page's
+Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate and refused by
+`metric_catalog_update_privileged` for anyone but an Administrator. A draft schema's pair, which
+`fork_schema()` copies from its parent, is edited in the draft editor and saved with the draft.
+`log_digital_thread_event()` already records both as UPDATEs, so neither needed a trigger change.
+
 ### Metric name format (0007)
 
 Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics

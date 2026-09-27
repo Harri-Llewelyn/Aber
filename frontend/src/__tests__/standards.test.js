@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, DEFAULT_SEMANTIC_ID_TYPE,
-  inferSemanticIdType, standardLabel, LOCAL_EXTENSION_LABEL,
+  inferSemanticIdType, followSemanticIdType, storedSemanticIdPair, standardLabel,
+  LOCAL_EXTENSION_LABEL,
   LOCAL_SEMANTIC_NAMESPACE, MTCONNECT_SEMANTIC_NAMESPACE, ISO22400_SEMANTIC_NAMESPACE,
   mtconnectSemanticId, mtconnectVocabularySemanticId
 } from '../utils/standards'
@@ -29,8 +30,10 @@ describe('standards registry', () => {
     expect(MTCONNECT_STANDARD).toBe(STANDARDS.MTCONNECT)
   })
 
-  it('mirrors the CHECK constraint on semantic_id_type (archived migration 0029)', () => {
-    expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI', 'ModelReference'])
+  it('mirrors the CHECK constraints on semantic_id_type (migration 0012)', () => {
+    // ModelReference is withdrawn: the exporter emits every id as an ExternalReference, and one
+    // text column cannot carry a ModelReference's typed key chain.
+    expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI'])
     expect(SEMANTIC_ID_TYPES).toContain(DEFAULT_SEMANTIC_ID_TYPE)
   })
 })
@@ -49,12 +52,67 @@ describe('inferSemanticIdType', () => {
     expect(inferSemanticIdType('0173-1#02-AAO677#002')).toBe('IRDI')
   })
 
+  it('recognises the IEC CDD form the Digital Nameplate seeds', () => {
+    // 0002_seed_data.sql, ManufacturerName and ManufacturerProductRoot. Empty registration
+    // authority parts and an underscore in the organisation part are both in the seed.
+    expect(inferSemanticIdType('0112/2///61987#ABA565#009')).toBe('IRDI')
+    expect(inferSemanticIdType('0112/2///61360_7#AAS011#001')).toBe('IRDI')
+  })
+
+  it('recognises the ECLASS property-value pair the Digital Nameplate seeds', () => {
+    // 0002_seed_data.sql, AssetSpecificProperties: two IRDIs joined by a slash.
+    expect(inferSemanticIdType('0173-1#02-ABI218#003/0173-1#01-AGZ672#004')).toBe('IRDI')
+  })
+
+  it('does not call an IRDI-like near miss an IRDI', () => {
+    expect(inferSemanticIdType('0173-1#02-AAO677')).toBe('')             // no version
+    expect(inferSemanticIdType('173-1#02-AAO677#002')).toBe('')          // three-digit ICD
+    expect(inferSemanticIdType('0173-1##002')).toBe('')                  // no data identifier
+    expect(inferSemanticIdType('0173-1#02-AAO677#002/')).toBe('')        // dangling pair
+    expect(inferSemanticIdType('see 0173-1#02-AAO677#002')).toBe('')     // free text around one
+    expect(inferSemanticIdType('0173-1#02-AAO677#002 (ECLASS)')).toBe('')
+  })
+
+  it('reads a URL holding an IRDI as the IRI it is', () => {
+    expect(inferSemanticIdType('https://eclass.example/0173-1#02-AAO677#002')).toBe('IRI')
+  })
+
   it('guesses nothing rather than guessing wrong', () => {
     // A wrong inference is worse than none: it is prefilled, so it gets believed and saved.
     expect(inferSemanticIdType('ActualPosition')).toBe('')
     expect(inferSemanticIdType('')).toBe('')
     expect(inferSemanticIdType(null)).toBe('')
     expect(inferSemanticIdType('  ')).toBe('')
+  })
+})
+
+describe('followSemanticIdType', () => {
+  const IRI = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate'
+  const IRDI = '0112/2///61987#ABA565#009'
+
+  it('guesses the type for a first id', () => {
+    expect(followSemanticIdType('', '', IRI)).toBe('IRI')
+  })
+
+  it('retypes an id whose type was the guess, so replacing an IRI with an IRDI says IRDI', () => {
+    expect(followSemanticIdType(IRI, 'IRI', IRDI)).toBe('IRDI')
+  })
+
+  it('keeps a type chosen against the guess', () => {
+    expect(followSemanticIdType('ActualPosition', 'IRI', 'ActualPositionX')).toBe('IRI')
+  })
+
+  it('clears the type with the id, so a retracted claim leaves nothing half-filled', () => {
+    expect(followSemanticIdType(IRI, 'IRI', '')).toBe('')
+    expect(followSemanticIdType('ActualPosition', 'IRDI', '   ')).toBe('')
+  })
+})
+
+describe('storedSemanticIdPair', () => {
+  it('trims the id and drops a type that has no id', () => {
+    expect(storedSemanticIdPair('  urn:x  ', 'IRI')).toEqual({ semanticId: 'urn:x', semanticIdType: 'IRI' })
+    expect(storedSemanticIdPair('', 'IRDI')).toEqual({ semanticId: '', semanticIdType: '' })
+    expect(storedSemanticIdPair(null, null)).toEqual({ semanticId: '', semanticIdType: '' })
   })
 })
 
