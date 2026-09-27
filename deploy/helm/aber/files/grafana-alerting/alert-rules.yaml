@@ -1142,7 +1142,7 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            The root filesystem on {{ $labels.instance }} has {{ humanizePercentage $values.B }}
+            The root filesystem on {{ $labels.instance }} has {{ humanizePercentage $values.B.Value }}
             free. Both databases, the metrics store and the log store write to it, and each of
             them stops when it is full. Prune backups, shorten retention, or grow the volume.
         data:
@@ -1207,7 +1207,7 @@ groups:
         annotations:
           summary: >-
             Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} is at
-            {{ humanizePercentage $values.B }} of its memory limit. Past it the kernel kills the
+            {{ humanizePercentage $values.B.Value }} of its memory limit. Past it the kernel kills the
             process and the kubelet restarts the container. Raise the limit in the chart's
             resources for that workload, or find the growth.
         data:
@@ -1320,7 +1320,7 @@ groups:
         annotations:
           summary: >-
             Claim {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is
-            {{ humanizePercentage $values.B }} full. The store on it stops when it is; grow the
+            {{ humanizePercentage $values.B.Value }} full. The store on it stops when it is; grow the
             claim (the storage class must allow expansion), shorten that store's retention, or
             prune what it holds.
         data:
@@ -1375,7 +1375,7 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            Node {{ $labels.instance }} has {{ humanizePercentage $values.B }} of its memory
+            Node {{ $labels.instance }} has {{ humanizePercentage $values.B.Value }} of its memory
             available. The kubelet evicts pods below its threshold and the kernel kills below
             its own. Lower the memory requests and limits of the stores, or give the node memory.
         data:
@@ -1430,7 +1430,7 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            Node {{ $labels.instance }} has been {{ humanizePercentage $values.B }} busy for
+            Node {{ $labels.instance }} has been {{ humanizePercentage $values.B.Value }} busy for
             fifteen minutes. The Cluster dashboard's CPU by Pod panel says which workload;
             the historian's continuous aggregates and Loki's compaction are the usual ones.
         data:
@@ -1492,7 +1492,7 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            {{ $labels.job }} is at {{ humanizePercentage $values.B }} of max_connections and has
+            {{ $labels.job }} is at {{ humanizePercentage $values.B.Value }} of max_connections and has
             been for five minutes. At 100% it refuses every new connection at once -- PostgREST's
             pool, the ingestion writer and the edge functions together. Find what is holding them
             open (the Backends by State panel separates `idle in transaction` from `active`) before
