@@ -1375,7 +1375,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
               Digital Thread
               <HelpTip
                 label="About the Digital Thread"
-                text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable by any application role. Administrators and Auditors also see the security lane: role assignments, service identities, settings, backups and backup jobs."
+                text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable. Administrators and Auditors also see the security lane: roles, service identities, settings and backups."
               />
             </h3>
             {/* WHAT IS LOADED, not what matches. Export writes the events the page is holding,
@@ -1428,7 +1428,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             style={{ width: '150px' }}
             value={actionFilter}
             onChange={e => setActionFilter(e.target.value)}
-            title="Filter by the database action recorded on the audit row -- the same value the event drawer shows as a badge. The coloured markers below are a SEPARATE, derived classification; see the key beside the timeline."
+            title="Filter by the database action recorded on the audit row, as the event drawer's badge shows it. The coloured markers below are a separate classification; see the key beside the timeline."
           >
             <option value="">Any action</option>
             {Object.entries(DIGITAL_THREAD_ACTIONS).map(([value, label]) => (

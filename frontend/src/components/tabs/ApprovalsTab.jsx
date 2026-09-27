@@ -627,7 +627,7 @@ export function ApprovalsTab({
               Awaiting a decision
               <HelpTip
                 label="About the open queue"
-                text="The working queue, oldest first. Select a row to see exactly what would change and to decide it. Approving applies the change immediately in one transaction, so a proposal that would break a rule fails here rather than later."
+                text="The working queue, oldest first. Select a row to see exactly what would change. Approving applies it in one transaction, so a proposal that breaks a rule fails here rather than later."
               />
             </h3>
           </div>

@@ -304,7 +304,7 @@ export function AccessControlTab({ showToast }) {
                 value={credentialFilter}
                 onChange={e => setCredentialFilter(e.target.value)}
                 aria-label="Filter gateways by credential state"
-                title="Filter by the Credential column. Archived gateways keep their row and their history, and 0038 has already rotated their broker credential to a password nobody holds; they can be issued a new one only after being restored."
+                title="Filter by the Credential column. An archived gateway's credential was rotated to a password nobody holds; it can be issued a new one only after being restored."
               >
                 <option value="current">Current ({filterCounts.current})</option>
                 <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
@@ -495,7 +495,7 @@ export function AccessControlTab({ showToast }) {
                 <span className="section-count">{orphanAccounts.length}</span>
                 <HelpTip
                   label="About orphaned accounts"
-                  text="Broker accounts shaped like a gateway id that no gateway row claims. Either the gateway was deleted straight from the broker, or an account was issued on the host for a gateway that never had a row. scripts/revoke-orphaned-broker-accounts.mjs disables these; it never deletes."
+                  text="Broker accounts shaped like a gateway id that no gateway row claims: the gateway was deleted from the broker directly, or the account never had a row. revoke-orphaned-broker-accounts.mjs disables them; it never deletes."
                 />
               </h3>
             </div>
@@ -561,7 +561,7 @@ export function AccessControlTab({ showToast }) {
               Database principals
               <HelpTip
                 label="About database principals"
-                text="The identities the stack's own processes authenticate as. None has an email or password, so none can sign in: each is named by a token, holds permissions of its own rather than a person's role, and writes only through gates that check which one is calling."
+                text="Identities for the stack's own processes. None has an email or password, so none can sign in: each is named by a token and holds permissions of its own rather than a person's role."
               />
             </h3>
             {/* Offered only when the list could be read: a caller the RPC refused would be refused
@@ -815,7 +815,7 @@ export function AccessControlTab({ showToast }) {
               {inventory && <span className="section-count">{platformAccounts.length}</span>}
               <HelpTip
                 label="About broker accounts"
-                text="The accounts the stack's own processes authenticate to the broker as, read live from its Dynamic Security plugin. mosquitto-init creates each from an MQTT_<NAME>_USER and _PASSWORD pair at boot and holds it at the role its name declares. The validator's test gateway is one of these: created at boot so ingestion/validate.py can publish as a gateway, and absent on a stack that leaves its pair unset."
+                text="The broker accounts the stack's own processes use, read live from Dynamic Security. mosquitto-init creates each at boot from its MQTT_<NAME>_USER and _PASSWORD pair; the validator's test gateway is one of them."
               />
             </h3>
           </div>
@@ -884,7 +884,7 @@ export function AccessControlTab({ showToast }) {
               Broker roles
               <HelpTip
                 label="About broker roles"
-                text="The roles the Dynamic Security plugin enforces: what each account may publish, receive and subscribe to. The rules are read live from the broker; what a role is FOR is declared in the repository (mosquitto/dynsec-roles.json) and checked against the policy at build time."
+                text="What each account may publish, receive and subscribe to, read live from Dynamic Security. What a role is for is declared in mosquitto/dynsec-roles.json and checked against the policy at build time."
               />
             </h3>
           </div>

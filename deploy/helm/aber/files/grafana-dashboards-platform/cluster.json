@@ -13,7 +13,7 @@
     "from": "now-1h",
     "to": "now"
   },
-  "description": "The node, one namespace's workloads and its volumes: the node exporter, cAdvisor and the kubelet, scraped by the chart's Alloy. Object inventory (what is Pending, why a Job failed) is not here by design -- kubectl and Headlamp show it without a second metrics service.",
+  "description": "The node, this namespace's workloads and its volumes, from the node exporter, cAdvisor and the kubelet via Alloy. Object inventory (Pending pods, failed Jobs) is left to kubectl and Headlamp.",
   "templating": {
     "list": [
       {
@@ -194,7 +194,7 @@
       "id": 4,
       "type": "stat",
       "title": "Root Disk Used",
-      "description": "The filesystem every store here writes to. Blank on k3d, whose root is an overlay mount the exporter excludes; on k3s it is the node disk. The Host Disk Filling rule fires at 85%.",
+      "description": "The filesystem every store writes to. Blank on k3d, whose overlay root the exporter excludes. The Host Disk Filling rule fires at 85%.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -802,7 +802,7 @@
       "id": 14,
       "type": "bargauge",
       "title": "Restarts in the Last Hour",
-      "description": "Container starts in the window, counted as changes of the start time on the same series. A rollout counts as one. `kubectl logs --previous` has the last words of the one before.",
+      "description": "Container starts in the window; a rollout counts as one. `kubectl logs --previous` has the last words of the one before.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -964,7 +964,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "CPU Throttling",
-      "description": "Share of scheduler periods in which the container hit its CPU limit. Only a container WITH a CPU limit can throttle; the chart sets requests and memory limits by default, so this is empty until a CPU limit is added.",
+      "description": "Share of scheduler periods in which the container hit its CPU limit. Empty until a CPU limit is set; the chart sets none by default.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1093,7 +1093,7 @@
       "id": 19,
       "type": "bargauge",
       "title": "Volume Used",
-      "description": "Bytes on each PersistentVolumeClaim, as the kubelet measures them. Claims reporting the same figure share one filesystem and are shown as one row: on local-path (k3s's default) that is every claim, and the row is the node disk.",
+      "description": "Bytes per claim as the kubelet measures them. Claims sharing a filesystem show as one row: on local-path, k3s's default, that is every claim and the row is the node disk.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1186,7 +1186,7 @@
       "id": 20,
       "type": "bargauge",
       "title": "Volume Fill",
-      "description": "Used against capacity per claim, claims sharing one filesystem shown as one row. On local-path (k3s's default) that is every claim and this tracks Root Disk Used; on a provisioner that sizes volumes it is the per-claim figure the Volume Filling rule reads.",
+      "description": "Used against capacity per claim, one row per filesystem. On local-path this tracks Root Disk Used; on a provisioner that sizes volumes it is the figure the Volume Filling rule reads.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

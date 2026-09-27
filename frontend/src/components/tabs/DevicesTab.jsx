@@ -674,7 +674,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             Devices
             <HelpTip
               label="About devices"
-              text="A device is an asset that publishes telemetry through a gateway. What it is modelled to publish comes from its schema; what it actually publishes is what the historian records. This page surfaces the two disagreeing: a quarantine, an unmodelled metric, or a device that has never birthed."
+              text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: quarantine, unmodelled metrics, or no birth yet."
             />
           </h3>
           <button
@@ -758,7 +758,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         <button
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
-          title="Show only devices that are overdue their first birth, still matched by legacy name, publishing metrics their schema does not model, or needing a cell — unassigned, filed in a cell their gateway does not serve, or pointing at an archived cell. Quarantined devices are listed separately in the onboarding queue below."
+          title="Show only devices needing attention: overdue their first birth, matched by legacy name, publishing unmodelled metrics, or needing a cell. Quarantined devices are in the onboarding queue below."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
@@ -769,7 +769,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           <button
             className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadows(v => !v)}
-            title="Shadow devices created by broker playback (archived migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
+            title="Shadow devices created by broker playback, one per device a capture recorded, so a replay is never mistaken for live plant data. Hidden by default because they are not machines."
           >
             <IconPlay size={13} /> Show shadow devices ({shadowCount})
           </button>
@@ -1003,7 +1003,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               Zero-Touch Onboarding Quarantine Queue
               <HelpTip
                 label="About the quarantine queue"
-                text="A gateway published a birth for a device this platform does not know, so the reading was held rather than recorded against a guess. Approve & Assign admits it as a new device; if it is one already registered under another name, the queue offers the match to accept instead. Reject discards the payload. Nothing here is recorded as plant history until it is approved."
+                text="A birth arrived for a device this platform does not know, so its readings are held, not recorded. Approve & Assign admits it, or accept the suggested match to an existing device. Reject discards it."
               />
               <span
                 className="section-count"

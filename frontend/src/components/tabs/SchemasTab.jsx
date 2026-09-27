@@ -275,7 +275,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             Schemas
             <HelpTip
               label="About schemas"
-              text="A schema is the contract a device is modelled to publish against, built from the metrics on the Metrics page. A published schema is read-only: changes are made by creating the next version, which forks it into an editable draft. Publishing a draft activates it, archives its predecessor and moves every device across in one transaction. Version numbers are assigned by the database."
+              text="What a device is modelled to publish, built from the Metrics page. A published schema is read-only: create the next version to get an editable draft. Publishing it moves every device across at once."
             />
             {visibleSchemas.length !== schemas.length && (
               <span
