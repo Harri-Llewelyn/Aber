@@ -15,6 +15,7 @@
   "KSV-0014 Deployment/frontend container/frontend": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/gitea container/gitea": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/gitea container/gitea-init": "Writable root filesystem: tracked in #419.",
+  "KSV-0014 Deployment/grafana container/drop-shadowed-plugins": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/grafana container/grafana": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/grafana container/render-alerting": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/grafana container/render-datasource": "Writable root filesystem: tracked in #419.",
