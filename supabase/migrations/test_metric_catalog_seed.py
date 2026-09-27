@@ -176,6 +176,45 @@ SEEDED_BY_0018 = {
 }
 
 
+class TestWhatStaysCorrectable(SeedTestCase):
+    """
+    name and datatype are a wire contract a device is configured against, so the immutability
+    trigger freezes them. semantic_id and permitted_values are transcriptions about a standard, and
+    must stay correctable in place (docs/vocabularies.md, PackML). Each probe is rolled back.
+    """
+
+    ROW = "Controller/EXECUTION"
+
+    def update(self, assignment):
+        conn = connect()
+        conn.autocommit = False
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE public.metric_catalog SET {assignment} WHERE name = %s", (self.ROW,))
+                return cur.rowcount, None
+        except psycopg2.Error as exc:
+            return 0, exc
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_semantic_id_and_permitted_values_can_be_corrected(self):
+        for assignment in ("semantic_id = semantic_id || '-corrected'",
+                           "permitted_values = ARRAY['CORRECTED']"):
+            with self.subTest(assignment=assignment):
+                rows, error = self.update(assignment)
+                self.assertIsNone(error, f"{assignment} was refused: {error}")
+                self.assertEqual(rows, 1, f"{self.ROW} is not seeded")
+
+    def test_name_and_datatype_are_frozen(self):
+        for assignment in ("name = name || '_RENAMED'",
+                           "datatype = CASE WHEN datatype = 10 THEN 12 ELSE 10 END"):
+            with self.subTest(assignment=assignment):
+                _, error = self.update(assignment)
+                self.assertIsNotNone(error, f"{assignment} was accepted")
+                self.assertIn("immutable", str(error))
+
+
 class TestProvenanceResolves(SeedTestCase):
     """
     Every semantic id 0018 wrote must still be findable in the vocabulary it was SELECTed from.

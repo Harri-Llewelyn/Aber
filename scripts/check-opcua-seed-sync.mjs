@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { COMMENT_BEGIN, COMMENT_END, tableCommentStatement } from './lib/opcua-vocabulary-comment.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SEED = join(ROOT, 'supabase', 'migrations', '0002_seed_data.sql');
@@ -145,6 +146,20 @@ for (const [, , groupName] of groupStatements) {
   if (groupName.includes('/')) {
     fail(`metric group '${groupName}' contains a slash`,
          'metric_groups_name_is_one_segment rejects it: a group is one path segment, not a path.');
+  }
+}
+
+// The table comment is recomputed from the whole seed, so a specification added by hand fails here
+// until the generator is re-run.
+{
+  const beginAt = seed.indexOf(COMMENT_BEGIN);
+  const endAt = seed.indexOf(COMMENT_END);
+  if (beginAt < 0 || endAt < beginAt) fail('the opcua_vocabulary table comment block is missing from 0002_seed_data.sql');
+  const actual = seed.slice(beginAt, endAt).split('\n').find((l) => l.startsWith('COMMENT ON TABLE'));
+  const expected = tableCommentStatement(seed, Object.keys(NAMESPACES));
+  if (actual !== expected) {
+    fail('the opcua_vocabulary table comment does not name the specifications the seed holds',
+         `expected ${expected}`, `actual   ${actual ?? '(none)'}`);
   }
 }
 

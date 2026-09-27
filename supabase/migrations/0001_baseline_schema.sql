@@ -11280,8 +11280,6 @@ ALTER TABLE public.opcua_vocabulary
 --
 
 -- TABLE opcua_vocabulary :: COMMENT
-COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data points (OPC 40001 Machinery, OPC 40010 Robotics). Reference data, not deployment state. node_id holds a browse path, not a resolvable numeric NodeId -- see the migration header.';
-
 --
 
 -- permissions :: TABLE
