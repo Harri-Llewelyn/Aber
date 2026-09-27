@@ -53,6 +53,13 @@ describe('Digital Thread entity types', () => {
     }
   })
 
+  it('records the metric catalog in the asset lane, as 0010 classifies it (#468)', () => {
+    // Who deprecated a metric, and who restored it, is readable by a Shopfloor_Manager: the
+    // catalog itself is readable by every authenticated user.
+    const metric = DIGITAL_THREAD_ENTITY_TYPES.find(e => e.table === 'metric_catalog')
+    expect(metric).toMatchObject({ kind: 'METRIC', domain: 'asset' })
+  })
+
   it('covers the audit domains 0070 added, which is what drifted', () => {
     // Named rather than counted. These three reached the audit trigger in 0070 and none of the
     // three lists was extended, which is the whole of #141; a count would pass against any seven.

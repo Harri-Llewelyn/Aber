@@ -10,7 +10,7 @@ The catalog of metrics every schema is built from. A metric is a name, a datatyp
 - **Sparkplug Datatype** is how the value is encoded on the wire, and the one field that cannot be changed afterwards. ISO 22400 and OPC UA entries fill it in; a 223P concept names a thing rather than a reading, so it leaves the choice to you and the metric cannot be added until you make it.
 - **Search** reaches a known metric without opening every group. The groups are collapsed by default and carry a count, so a shut catalog still says what is in it.
 - **Deprecate** retires a metric from the schema builder and can name the metric that supersedes it. The confirmation says how many schemas model it.
-- **Restore**, on the Deprecated Metrics card, is the way back: it offers the metric to schema authors again and clears the replacement it named. It asks first, as Deprecate does.
+- **Restore**, on the Deprecated Metrics card, is the way back: it offers the metric to schema authors again and clears the replacement it named. It asks first, as Deprecate does. Both are recorded in the Digital Thread, under Metric catalog, with who made them.
 
 ## What the states mean
 

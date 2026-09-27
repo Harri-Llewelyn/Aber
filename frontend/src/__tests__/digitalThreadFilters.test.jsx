@@ -576,6 +576,18 @@ describe('Digital Thread event classification', () => {
     expect(critical.length).toBe(2)
   })
 
+  it('paints a metric deprecation as critical and its restore as operational (#468)', () => {
+    // Both are UPDATEs on metric_catalog; `deprecated` rising is a retirement, as `is_archived` is.
+    const deprecate = {
+      event_type: 'UPDATE',
+      old_data: { name: 'Controller/EXECUTION', deprecated: false, superseded_by: null },
+      new_data: { name: 'Controller/EXECUTION', deprecated: true, superseded_by: 'm2' }
+    }
+    const restore = { event_type: 'UPDATE', old_data: deprecate.new_data, new_data: deprecate.old_data }
+    expect(classifyEvent(deprecate, diffFields(deprecate.old_data, deprecate.new_data))).toBe('critical')
+    expect(classifyEvent(restore, diffFields(restore.old_data, restore.new_data))).toBe('operational')
+  })
+
   /* Shapes taken from a reseeded stack: the commonest event is a device's first DBIRTH, which
      arrives as one update touching three columns at once, and classifying on any one in isolation
      gets it wrong. */

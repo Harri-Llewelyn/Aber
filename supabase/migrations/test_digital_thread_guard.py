@@ -472,6 +472,121 @@ class TestMigrationIsIdempotent(AuditGuardTestCase):
         )
 
 
+class TestMetricCatalogReachesTheThread(AuditGuardTestCase):
+    """
+    0010 (#468). Deprecating is the only way to retire a metric, and `metric_catalog` carried no
+    trigger, so neither a deprecation nor its reversal said who made it or when. Both are UPDATEs
+    on the catalog row, recorded by this file's function like any other.
+    """
+
+    def _metric(self, stem, **extra):
+        name = f"GuardTest/{stem}_{uuid.uuid4().hex[:8]}"
+        columns = ["name", "datatype", *extra]
+        self.cur.execute(
+            f"INSERT INTO public.metric_catalog ({', '.join(columns)})"
+            f" VALUES ({', '.join(['%s'] * len(columns))}) RETURNING id::text",
+            (name, 12, *extra.values()),
+        )
+        return self.cur.fetchone()[0]
+
+    def _person(self, role):
+        """
+        A signed-in person holding `role`. Email, password AND an identity row, because
+        is_machine_principal() (0048) calls anything lacking all three a machine, and a machine
+        is neither attributed as `user` nor allowed a role.
+        """
+        person = str(uuid.uuid4())
+        self.cur.execute("SAVEPOINT person;")
+        try:
+            self.cur.execute(
+                "INSERT INTO auth.users (id, email, encrypted_password) VALUES (%s, %s, %s);",
+                (person, f"{person}@guard.test", "not-a-real-hash"),
+            )
+            self.cur.execute("RELEASE SAVEPOINT person;")
+        except psycopg2.Error:
+            self.cur.execute("ROLLBACK TO SAVEPOINT person;")
+            self.cur.execute("INSERT INTO auth.users (id) VALUES (%s);", (person,))
+        self.cur.execute(
+            "INSERT INTO auth.identities (user_id, provider, provider_id, identity_data)"
+            " VALUES (%s, 'email', %s, %s::jsonb);",
+            (person, person, '{"sub": "%s"}' % person),
+        )
+        self.cur.execute(
+            "INSERT INTO public.user_roles (user_id, role_id)"
+            " SELECT %s, id FROM public.roles WHERE name = %s;",
+            (person, role),
+        )
+        return person
+
+    def test_the_trigger_is_attached(self):
+        self.cur.execute(
+            "SELECT tgname FROM pg_trigger "
+            " WHERE tgrelid = 'public.metric_catalog'::regclass AND NOT tgisinternal"
+            "   AND tgfoid = 'public.log_digital_thread_event()'::regprocedure"
+        )
+        self.assertEqual([r[0] for r in self.cur.fetchall()], ["trg_metric_catalog_digital_thread"])
+
+    def test_a_deprecation_is_logged_with_its_replacement(self):
+        replacement = self._metric("NEW")
+        metric = self._metric("OLD")
+        self._mark()
+        self.cur.execute(
+            "UPDATE public.metric_catalog SET deprecated = true, superseded_by = %s WHERE id = %s",
+            (replacement, metric),
+        )
+        rows = self.audit_rows("metric_catalog")
+        self.assertEqual([r[1] for r in rows], ["UPDATE"])
+        _, _, old, new = rows[0]
+        self.assertEqual((old["deprecated"], new["deprecated"]), (False, True))
+        self.assertEqual(new["superseded_by"], replacement)
+
+    def test_a_restore_is_logged(self):
+        replacement = self._metric("NEW")
+        metric = self._metric("OLD", deprecated=True, superseded_by=replacement)
+        self._mark()
+        self.cur.execute(
+            "UPDATE public.metric_catalog SET deprecated = false, superseded_by = NULL WHERE id = %s",
+            (metric,),
+        )
+        rows = self.audit_rows("metric_catalog")
+        self.assertEqual(len(rows), 1, "restoring a metric left no record")
+        _, _, old, new = rows[0]
+        self.assertEqual((old["deprecated"], old["superseded_by"]), (True, replacement))
+        self.assertEqual((new["deprecated"], new["superseded_by"]), (False, None))
+
+    def test_a_replayed_seed_update_is_not(self):
+        """
+        0002 re-applies `permitted_values` on every boot with an unguarded UPDATE. It writes the
+        value the row already holds, so the function's own no-op rule must keep it off the thread.
+        """
+        metric = self._metric("SEEDED", permitted_values=["READY", "ACTIVE"])
+        self._mark()
+        self.cur.execute(
+            "UPDATE public.metric_catalog SET permitted_values = ARRAY['READY', 'ACTIVE'] WHERE id = %s",
+            (metric,),
+        )
+        self.assertEqual(self.audit_count("metric_catalog"), 0,
+                         "a replayed seed that changed nothing was recorded on every boot")
+
+    def test_the_row_names_the_administrator_and_lands_in_the_asset_lane(self):
+        """The question #468 asks of a deprecation: who, through the path the dashboard takes."""
+        metric = self._metric("ATTRIBUTED")
+        admin = self._person("Administrator")
+        self._mark()
+        self.cur.execute("SET LOCAL ROLE authenticated;")
+        self.cur.execute('SET LOCAL "request.jwt.claims" = %s;', ('{"sub": "%s"}' % admin,))
+        self.cur.execute("UPDATE public.metric_catalog SET deprecated = true WHERE id = %s", (metric,))
+        self.assertEqual(self.cur.rowcount, 1, "the Administrator's deprecation reached no row")
+        self.cur.execute("RESET ROLE;")
+
+        self.cur.execute(
+            "SELECT changed_by::text, actor_source, audit_domain FROM public.digital_thread "
+            " WHERE id > %s AND entity_type = 'metric_catalog'",
+            (self._high_water,),
+        )
+        self.assertEqual(self.cur.fetchall(), [(admin, "user", "asset")])
+
+
 class TestNameplateEditsReachTheThread(AuditGuardTestCase):
     """
     0122, AND THE REASON IT IS HERE RATHER THAN IN ITS OWN FILE.
