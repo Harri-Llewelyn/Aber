@@ -169,8 +169,7 @@ kubectl config set-cluster k3d-aber --server=https://127.0.0.1:<port>
 stack lane added: the same steps CI's k8s-validation job runs, repeatable on a laptop.
 
 ```bash
-npm run dev:up        # cluster if absent, Traefik's client-address setting (see Install),
-                      # cert-manager and the internal CA, the ten images built
+npm run dev:up        # cluster if absent, cert-manager and the internal CA, the ten images built
                       # and imported, helm upgrade --install with values-dev.yaml, every hook and
                       # rollout waited for, the daemon subscribed, helm test
 npm run dev:test      # validate.py and the stack lane from the host, through port-forwards
@@ -188,7 +187,7 @@ resolves only where the resolver answers nip.io names carrying private addresses
 refuse to, as DNS-rebind protection). `--domain=<LAN address>.nip.io` moves every host onto the LAN
 where it does, and those two logins then need `ingress.tls`. `up` also enables the
 backup service, taking storage and the forge too, and generates the forge
-sweep secret once; the stack lane exercises all of it. `--no-tls` leaves the listener off,
+sweep secret once; the stack lane exercises all of it. It applies Traefik's client-address setting from *Install* too, before cert-manager. `--no-tls` leaves the listener off,
 `--no-build` reuses the images already in the node, `--only=ingestion` rebuilds a subset, `--e2e`
 adds the in-cluster conformance Jobs.
 
