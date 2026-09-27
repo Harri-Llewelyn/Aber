@@ -673,6 +673,36 @@ class _FakeResponse:
         return self._body
 
 
+CELL_A = "11111111-1111-1111-1111-111111111111"
+CELL_B = "22222222-2222-2222-2222-222222222222"
+AREA = "33333333-3333-3333-3333-333333333333"
+
+
+def _seeded_rows() -> dict:
+    """Two cells; a device placed explicitly, one inheriting its gateway's cell, one unplaced."""
+    return {
+        "cells": [
+            {"id": CELL_A, "name": "Cell A", "description": "Welding"},
+            {"id": CELL_B, "name": "Cell B", "description": None},
+        ],
+        "gateways": [{"id": "g1", "sparkplug_id": "gwy-1", "name": "Gateway", "cell_id": CELL_B}],
+        "devices": [
+            {"id": "d-explicit", "sparkplug_id": "dev-explicit", "name": "Placed",
+             "gateway_id": "g1", "cell_id": CELL_A},
+            {"id": "d-inherits", "sparkplug_id": "dev-inherits", "name": "Inherits",
+             "gateway_id": "g1", "cell_id": None},
+            {"id": "d-nowhere", "sparkplug_id": "dev-nowhere", "name": "Nowhere",
+             "gateway_id": None, "cell_id": None},
+        ],
+        "device_locations": [
+            {"device_id": "d-explicit", "effective_cell_id": CELL_A, "effective_area_id": AREA},
+            {"device_id": "d-inherits", "effective_cell_id": CELL_B, "effective_area_id": AREA},
+            {"device_id": "d-nowhere", "effective_cell_id": None, "effective_area_id": None},
+        ],
+        "schemas": [],
+    }
+
+
 class TestAddressSpaceReads(unittest.TestCase):
     """
     The reads behind the address space, against the schema the migrations build.
@@ -680,38 +710,6 @@ class TestAddressSpaceReads(unittest.TestCase):
     Every device was once filed under Unassigned because the location read selected a column
     the view does not have, PostgREST answered 400, and the failure was read as "no rows".
     """
-
-    CELL = "11111111-1111-1111-1111-111111111111"
-    OTHER_CELL = "22222222-2222-2222-2222-222222222222"
-    AREA = "33333333-3333-3333-3333-333333333333"
-
-    def seeded(self):
-        gateway = {"id": "g1", "sparkplug_id": "gwy-1", "name": "Gateway", "cell_id": self.OTHER_CELL}
-        devices = [
-            {"id": "d-explicit", "sparkplug_id": "dev-explicit", "name": "Placed",
-             "gateway_id": "g1", "cell_id": self.CELL},
-            {"id": "d-inherits", "sparkplug_id": "dev-inherits", "name": "Inherits",
-             "gateway_id": "g1", "cell_id": None},
-            {"id": "d-nowhere", "sparkplug_id": "dev-nowhere", "name": "Nowhere",
-             "gateway_id": None, "cell_id": None},
-        ]
-        locations = [
-            {"device_id": "d-explicit", "effective_cell_id": self.CELL,
-             "effective_area_id": self.AREA},
-            {"device_id": "d-inherits", "effective_cell_id": self.OTHER_CELL,
-             "effective_area_id": self.AREA},
-            {"device_id": "d-nowhere", "effective_cell_id": None, "effective_area_id": None},
-        ]
-        return {
-            "cells": [
-                {"id": self.CELL, "name": "Cell A", "description": "Welding"},
-                {"id": self.OTHER_CELL, "name": "Cell B", "description": None},
-            ],
-            "gateways": [gateway],
-            "devices": devices,
-            "device_locations": locations,
-            "schemas": [],
-        }
 
     def test_the_migrations_are_parsed(self):
         # A parser that found nothing would make every other test here refuse everything; one
@@ -737,13 +735,13 @@ class TestAddressSpaceReads(unittest.TestCase):
         self.assertEqual([relation for relation, _ in pg.calls], ["telemetry"])
 
     def test_a_device_is_filed_under_its_resolved_cell(self):
-        space = i3x_service._read_address_space(ColumnCheckingPostgrest(self.seeded()))
+        space = i3x_service._read_address_space(ColumnCheckingPostgrest(_seeded_rows()))
         objects = i3x_service._build_objects(space)
-        self.assertEqual(objects["dev-explicit"]["parentId"], self.CELL)
-        self.assertEqual(objects["dev-inherits"]["parentId"], self.OTHER_CELL, "inherits its gateway's")
+        self.assertEqual(objects["dev-explicit"]["parentId"], CELL_A)
+        self.assertEqual(objects["dev-inherits"]["parentId"], CELL_B, "inherits its gateway's")
         self.assertEqual(objects["dev-nowhere"]["parentId"], A.UNASSIGNED_ELEMENT_ID)
-        self.assertIn("dev-explicit", objects[self.CELL]["metadata"]["relationships"]["HasChildren"])
-        self.assertEqual(space["locations"]["d-explicit"]["effective_area_id"], self.AREA)
+        self.assertIn("dev-explicit", objects[CELL_A]["metadata"]["relationships"]["HasChildren"])
+        self.assertEqual(space["locations"]["d-explicit"]["effective_area_id"], AREA)
 
     def _respond(self, failing, status, body):
         def fake_get(url, **_kwargs):
@@ -796,7 +794,7 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
     SEMANTIC = "https://admin-shell.io/idta/example/Mill/1/0"
 
     def space(self):
-        rows = TestAddressSpaceReads().seeded()
+        rows = _seeded_rows()
         rows["schemas"] = [
             {"id": "s-semantic", "schema_name": "Mill", "semantic_id": self.SEMANTIC,
              "schema_definition": {"properties": {"Spindle/SPEED": {}}}},
@@ -871,7 +869,7 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
         def value(element_id):
             return i3x_service._current_value(objects, space, element_id)["value"]
 
-        cell_a, cell_b = TestAddressSpaceReads.CELL, TestAddressSpaceReads.OTHER_CELL
+        cell_a, cell_b = CELL_A, CELL_B
         # Three devices and two cells; the site's children are the cells, Unassigned and a
         # site-wide gateway.
         self.assertEqual(value(A.SITE_ELEMENT_ID), {"cellCount": 2, "deviceCount": 3})
@@ -951,7 +949,7 @@ class TestRequestValidation(unittest.TestCase):
                 self.assertEqual(caught.exception.status, 400)
 
     def test_max_depth_zero_still_reads_the_whole_composition(self):
-        rows = TestAddressSpaceReads().seeded()
+        rows = _seeded_rows()
         req = FakeRequest(
             body={"elementIds": [A.SITE_ELEMENT_ID], "maxDepth": 0},
             pg=ColumnCheckingPostgrest(rows),
