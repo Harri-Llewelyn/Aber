@@ -1,27 +1,21 @@
 #!/usr/bin/env node
-/**
- * Write the broker's Dynamic Security document before the broker starts.
- *
- * Runs in the credential service's image (node plus the broker's own mosquitto_passwd) as the
- * broker's assemble-config initContainer. It reconciles the stored document with the repository's roles and the platform
- * principals from the environment, imports a legacy password file when there is no document yet,
- * and refuses to write anything that would lose a client. mosquitto/README.md states the rules;
- * scripts/lib/mosquitto-dynsec.mjs implements them.
- *
- * Environment:
- *   DYNSEC_FILE                  where the document lives (default /mosquitto/data/dynamic-security.json)
- *   DYNSEC_POLICY_FILE           the roles (default /policy/dynsec-roles.json)
- *   PRIMARY_HOST_ID              the Sparkplug primary host id, required; the ingestion role is
- *                                granted write on `spBv1.0/STATE/<id>` and nothing wider
- *   DIRECTORY_MQTT_TOPIC_PREFIX  the Directory subtree, required; the ingestion role is granted
- *                                `<prefix>/#`, and the daemon publishes to the same rendered value
- *   LEGACY_PASSWORD_FILE         imported when DYNSEC_FILE does not exist (default none)
- *   DYNSEC_REQUIRED_PRINCIPALS   space-separated env names that must carry a password; MONITOR is
- *                                always required
- *   MQTT_DYNSEC_ADMIN_USER / MQTT_DYNSEC_ADMIN_PASSWORD   the credential service's account, required
- *   MQTT_<NAME>_USER / MQTT_<NAME>_PASSWORD               one pair per PLATFORM_PRINCIPALS entry
- *   MQTT_BROKER_UID              the owner of the written file (default 1883)
- */
+// Writes the broker's Dynamic Security document before the broker starts, as its assemble-config
+// initContainer on the credential service's image (node plus the broker's own mosquitto_passwd). It
+// reconciles the stored document with the repository's roles and the platform principals from the
+// environment, imports a legacy password file when there is no document yet, and refuses to write
+// anything that would lose a client. mosquitto/README.md states the rules; lib/mosquitto-dynsec.mjs
+// implements them.
+//
+// Environment:
+//   DYNSEC_FILE                  the document (default /mosquitto/data/dynamic-security.json)
+//   DYNSEC_POLICY_FILE           the roles (default /policy/dynsec-roles.json)
+//   PRIMARY_HOST_ID              required; the ingestion role is granted write on spBv1.0/STATE/<id>
+//   DIRECTORY_MQTT_TOPIC_PREFIX  required; the ingestion role is granted <prefix>/#
+//   LEGACY_PASSWORD_FILE         imported when DYNSEC_FILE does not exist (default none)
+//   DYNSEC_REQUIRED_PRINCIPALS   space-separated env names that must carry a password; MONITOR always
+//   MQTT_DYNSEC_ADMIN_USER / MQTT_DYNSEC_ADMIN_PASSWORD   the credential service's account, required
+//   MQTT_<NAME>_USER / MQTT_<NAME>_PASSWORD               one pair per PLATFORM_PRINCIPALS entry
+//   MQTT_BROKER_UID              the owner of the written file (default 1883)
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync, chownSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync,
@@ -55,12 +49,9 @@ const LEGACY_FILE = process.env.LEGACY_PASSWORD_FILE || '';
 const BROKER_UID = Number.parseInt(process.env.MQTT_BROKER_UID || '1883', 10);
 const REQUIRED = new Set(['MONITOR', ...(process.env.DYNSEC_REQUIRED_PRINCIPALS || '').split(/\s+/).filter(Boolean)]);
 
-/**
- * Hash one password with the broker's own tool. Not a reimplementation: the hash has to be read by
- * the mosquitto that verifies it, and mosquitto_passwd is the one implementation guaranteed to
- * match. The password never touches the shell as text (the argv passes it positionally), and the
- * broker's PBKDF2 parameters are whatever the tool writes.
- */
+// Hashed by the broker's own mosquitto_passwd, the one implementation guaranteed to match the
+// mosquitto that verifies it. The password rides argv positionally and never touches the shell as
+// text; the PBKDF2 parameters are whatever the tool writes.
 function hashed(username, password, roles) {
   let argv;
   try {
@@ -82,10 +73,8 @@ function main() {
     fail(`cannot read the roles at ${POLICY_FILE}: ${err.message}`);
   }
 
-  // The primary host's write grant, which is one literal topic derived from the deployment's host
-  // id rather than a line in the roles file. Required, and the message says why: the ingestion
-  // daemon refuses to start without the same value, so a broker reconciled without it would admit
-  // a daemon that cannot boot.
+  // The primary host's write grant: one literal topic derived from the deployment's host id, not a
+  // line in the roles file. Required, because the daemon refuses to start without the same value.
   const primaryHostId = (process.env.PRIMARY_HOST_ID || '').trim();
   if (!primaryHostId) {
     fail('PRIMARY_HOST_ID is empty. It names the Sparkplug primary host application whose STATE '
@@ -100,10 +89,9 @@ function main() {
   }
   log(`primary host '${primaryHostId}': granting the ingestion role write on ${primaryHostStateTopic(primaryHostId)}`);
 
-  // The Directory subtree, for the same reason: it is named after the site's Sparkplug group, and
-  // the chart renders one prefix for this reconcile and for the daemon that publishes into it.
-  // Required rather than defaulted here, so a chart that stopped passing it fails at the broker
-  // rather than granting a subtree nobody publishes to.
+  // The Directory subtree, for the same reason: the chart renders one prefix for this reconcile and
+  // for the daemon that publishes into it, since a mismatch at QoS 0 is silent. Required rather than
+  // defaulted, so a chart that stopped passing it fails here.
   const directoryPrefix = (process.env.DIRECTORY_MQTT_TOPIC_PREFIX || '').trim();
   if (!directoryPrefix) {
     fail('DIRECTORY_MQTT_TOPIC_PREFIX is empty. It names the subtree the ingestion daemon writes '
@@ -118,13 +106,13 @@ function main() {
   }
   log(`directory: granting the ingestion role ${directoryTopicFilter(directoryPrefix)}`);
 
-  // The managed clients: the admin, then each platform principal with a password.
   const adminUser = process.env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin';
   const adminPassword = process.env.MQTT_DYNSEC_ADMIN_PASSWORD || '';
   if (!adminPassword) {
     fail('MQTT_DYNSEC_ADMIN_PASSWORD is empty. The credential service authenticates as this account; '
       + 'without it no gateway can be issued or revoked. Run: node scripts/setup.mjs');
   }
+  // The managed clients: the admin, then each platform principal that has a password.
   const managed = [hashed(adminUser, adminPassword, [ADMIN_ROLE])];
   const platformRoles = new Map();
 
@@ -185,9 +173,9 @@ function main() {
     fail(err.message);
   }
 
-  // Atomic: written beside the document and renamed, so the broker can never open a half-written
-  // file. Owned by the broker's uid at 0600, because the plugin rewrites it on every change and
-  // warns on anything world-readable.
+  // Atomic: written beside the document and renamed, so the broker never opens a half-written file.
+  // Owned by the broker's uid at 0600, because the plugin rewrites it on every change and warns on
+  // anything world-readable.
   mkdirSync(dirname(FILE), { recursive: true });
   const tmp = `${FILE}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(config, null, '\t')}\n`, { mode: 0o600 });

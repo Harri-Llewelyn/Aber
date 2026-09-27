@@ -1,32 +1,13 @@
 #!/usr/bin/env node
-/**
- * The broker credential service.
- *
- * WHY IT EXISTS. `enroll-gateway` runs in a Deno edge worker with no way to reach the broker's
- * control topic, and it must not be given the plugin's admin credential: that is authority over
- * every principal on the broker, held by a component reachable through the gateway. So the
- * authority sits here, behind three verbs that name a gateway and nothing else:
- *
- *   POST /credentials   issue (or re-issue) one gateway's account: its role, the client, a password
- *   POST /revocations   disable one gateway's account, which disconnects its live session
- *   GET  /clients       the broker's own list of clients and roles, for the Access Control page
- *   GET  /ca            the root the broker presents, its dates, and its public key's pin
- *
- * It holds no database credential and is not published outside the container network. The admin
- * account it authenticates as reaches `$CONTROL/dynamic-security/#` and no other topic
- * (mosquitto/README.md), so a holder of this service's bearer token can issue and revoke gateway
- * accounts, and can read the inventory, and cannot read a message. Nothing here deletes a client
- * or a role: deleting a role a client holds took the broker down when measured.
- *
- * ONE SHAPE. The plugin persists its own document, so there is no durable copy for
- * this service to write and no broker to signal: a command answered without error is applied and
- * saved. The service speaks `mosquitto_rr` from the broker's own image, one request per command,
- * so the binary and the broker never disagree about the protocol. It is a sidecar in the broker's
- * pod and dials loopback.
- *
- * The playback delivery (0078): the worker runs in another pod, so the password goes into the
- * Secret that pod mounts. The Role behind that is `get` and `patch` on one Secret by name.
- */
+// The broker credential service: the authority to issue and revoke gateway accounts, kept out of the
+// edge worker that enrols them and behind four verbs that name a gateway and nothing else:
+//   POST /credentials   issue (or re-issue) one gateway's account: its role, the client, a password
+//   POST /revocations   disable one gateway's account, which disconnects its live session
+//   GET  /clients       the broker's own list of clients and roles, for the Access Control page
+//   GET  /ca            the root the broker presents, its dates, and its public key's pin
+// A sidecar in the broker's pod, speaking mosquitto_rr from the broker's own image to the plugin on
+// loopback; it holds no database credential and is not published outside the container network.
+// Reasoning: mosquitto/README.md, "The credential service and the boot reconcile".
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { X509Certificate, createHash, timingSafeEqual } from 'node:crypto';
@@ -43,45 +24,25 @@ import {
 import { assertOk, isRefusal, issueWithControl, summariseInventory } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
-// -------------------------------------------------------------------------------------------------
-// Configuration
-// -------------------------------------------------------------------------------------------------
 const PORT = Number.parseInt(process.env.MQTT_CREDENTIAL_SERVICE_PORT || '9010', 10);
 const TOKEN = process.env.MQTT_CREDENTIAL_SERVICE_TOKEN || '';
 
-// The broker, and the plugin's admin account.
 const MQTT_HOST = process.env.MQTT_HOST || 'mosquitto';
 const MQTT_PORT = Number.parseInt(process.env.MQTT_PORT || '1883', 10);
 const ADMIN_USER = process.env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin';
 const ADMIN_PASSWORD = process.env.MQTT_DYNSEC_ADMIN_PASSWORD || '';
 
-
-/**
- * The broker's CA, returned alongside the credential.
- *
- * An appliance needs three things that must all describe the SAME broker: a username, a password,
- * and the root that signs the certificate it will be shown. This service sits beside the broker,
- * so it is the one component that can read the CA the broker is actually presenting.
- * It is not a secret: a root certificate contains no private key. `ca.key` sits beside it and is
- * deliberately not read.
- */
+// The root the broker presents, read beside it. Not a secret; ca.key alongside is deliberately not read.
 const CA_FILE = process.env.MQTT_CA_FILE || '/mosquitto/certs/ca.crt';
 
-// Kubernetes only: the playback delivery's Secret.
 const SECRET_NAME = process.env.MOSQUITTO_SECRET || 'mosquitto-passwords';
 const PLAYBACK_SECRET_KEY = 'playback_credentials.json';
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 
 const log = (...args) => console.log('[gateway-credential]', ...args);
 
-/**
- * REFUSE TO START WITHOUT A TOKEN, rather than defaulting to one or running open.
- *
- * A default would be in this file, therefore in the repository, therefore known. Running open would
- * mean any workload that can reach this port can issue a broker account for any edge node, and the
- * broker confines an account to `spBv1.0/+/+/<its id>/#`, which is the ability to publish telemetry
- * as any gateway on the site. 32 characters minimum: this is a bearer credential compared in full.
- */
+// Refuse to start without a token: a default would be in the repository, and running open would let
+// anything that can reach this port publish telemetry as any gateway on the site.
 if (TOKEN.length < 32) {
   console.error(
     '[gateway-credential] MQTT_CREDENTIAL_SERVICE_TOKEN is unset or shorter than 32 characters.\n'
@@ -101,13 +62,8 @@ if (!ADMIN_PASSWORD) {
   process.exit(2);
 }
 
-// -------------------------------------------------------------------------------------------------
-// Authentication
-// -------------------------------------------------------------------------------------------------
-/**
- * Constant-time bearer comparison. timingSafeEqual throws on a length mismatch, which would itself
- * leak the length, so the lengths are compared first and both branches still run a comparison.
- */
+// Constant time. timingSafeEqual throws on a length mismatch, which would itself leak the length,
+// so the lengths are compared first and both branches still run a comparison.
 function tokenMatches(presented) {
   const a = Buffer.from(presented || '', 'utf8');
   const b = Buffer.from(TOKEN, 'utf8');
@@ -124,25 +80,14 @@ function authorised(req) {
   return match ? tokenMatches(match[1]) : false;
 }
 
-// -------------------------------------------------------------------------------------------------
-// The control topic
-// -------------------------------------------------------------------------------------------------
-/**
- * One command to the plugin, its one response back. A non-zero exit or an empty reply is the
- * broker being unreachable, which is 502 to the caller; a reply carrying `error` is the plugin
- * refusing, which the caller decides about.
- */
+// One command, one reply. No answer is the broker unreachable (502 to the caller); a reply carrying
+// `error` is the plugin refusing, which the caller decides about.
 const control = controlSender({
   host: MQTT_HOST, port: MQTT_PORT, username: ADMIN_USER, password: ADMIN_PASSWORD,
 });
 
-// -------------------------------------------------------------------------------------------------
-// Kubernetes API (playback delivery only)
-// -------------------------------------------------------------------------------------------------
-/**
- * A request to the API server, authenticated by the pod's ServiceAccount. The token is read on
- * every call rather than cached: projected tokens are short-lived and rotated in place.
- */
+// Authenticated by the pod's ServiceAccount. The token is read on every call, not cached: projected
+// tokens are short-lived and rotated in place.
 function k8sRequest(method, path, body) {
   const token = readFileSync(`${SA_DIR}/token`, 'utf8').trim();
   const ca = readFileSync(`${SA_DIR}/ca.crt`);
@@ -187,21 +132,10 @@ function namespace() {
     || readFileSync(`${SA_DIR}/namespace`, 'utf8').trim();
 }
 
-/**
- * Hand a freshly-issued password to the playback worker, by writing it where the worker reads.
- *
- * The plaintext exists in exactly two places for exactly as long as this request: here, and in the
- * browser that will show it once. A delivery that does not happen now cannot happen later.
- *
- * THIS FUNCTION MAKES NO DECISION ABOUT WHO IS ELIGIBLE. `deliver` is decided by
- * `authorize_host_gateway_credential()` (0078) from `is_simulated` and arrives already answered;
- * this service holds a `sparkplug_id` and no database connection, by design.
- *
- * MERGED, NOT OVERWRITTEN: a stack can have several playback targets, issued one at a time.
- */
+// Hands a fresh password to the playback worker by patching the Secret its pod mounts (archived migration
+// 0078); the Role behind it is get and patch on one Secret by name. Decides nothing about
+// eligibility: `deliver` arrives already answered by the database. Merged, not overwritten.
 async function deliverToPlayback(sparkplugId, password) {
-  // A second key in the broker's Secret, so this pod's Role needs `patch` on one Secret by name.
-  // The playback Deployment mounts this key alone via `items:`.
   const ns = namespace();
   const path = `/api/v1/namespaces/${ns}/secrets/${SECRET_NAME}`;
 
@@ -232,8 +166,8 @@ async function issue(sparkplugId, password, { deliver = false } = {}) {
 
   const { replaced } = issueWithControl(control, sparkplugId, password);
 
-  // NULL RATHER THAN AN ERROR when there is no CA. enroll-gateway treats a missing CA as fatal --
-  // Remote gateways connect over 8883 exclusively -- but a plaintext-only stack can still issue.
+  // NULL rather than an error with no CA: Remote gateways need it, but a plaintext-only stack can
+  // still issue.
   let caCert = null;
   try {
     caCert = readFileSync(CA_FILE, 'utf8');
@@ -241,7 +175,7 @@ async function issue(sparkplugId, password, { deliver = false } = {}) {
     log(`no CA at ${CA_FILE}; returning ca_cert: null (MQTTS callers will refuse this)`);
   }
 
-  // AFTER THE BROKER, NOT BEFORE. A delivery failure is logged and does not fail the issue: the
+  // After the broker, not before: a delivery failure is logged and does not fail the issue, since the
   // account exists and the browser is about to show the password.
   let delivery = null;
   if (deliver) {
@@ -258,14 +192,12 @@ async function issue(sparkplugId, password, { deliver = false } = {}) {
     ca_cert: caCert,
     playback_delivery: delivery,
     replaced,
-    // Always true now: the plugin applies a command to the running broker as it answers it. Kept
-    // so the callers that report it to an operator keep one shape.
+    // Always true now that the plugin applies a command as it answers it; kept so callers keep one shape.
     applied_to_running_broker: true,
     apply_method: 'dynsec',
   };
 }
 
-/** Disable the account. The plugin disconnects a live session and refuses the next CONNECT. */
 function revoke(sparkplugId) {
   assertGatewayId(sparkplugId);
   const response = control({ command: 'disableClient', username: sparkplugId });
@@ -274,26 +206,17 @@ function revoke(sparkplugId) {
   return { revoked: true, existed: true };
 }
 
-/** The broker's own inventory. Usernames, roles and the disabled flag; never hash material. */
 function inventory() {
   const clients = assertOk(control({ command: 'listClients', verbose: true }));
   const roles = assertOk(control({ command: 'listRoles', verbose: true }));
   return { ...summariseInventory(clients, roles), read_at: new Date().toISOString() };
 }
 
-/**
- * The root the broker presents, read from the same file `/credentials` hands to an enrolling
- * appliance. Returned as the certificate, the window it is valid for, and the pin of its public
- * key -- the SHA-256 of the SubjectPublicKeyInfo in base64, which is what
- * `supabase/functions/_shared/caPin.ts` computes and what an appliance's `openssl` prints.
- *
- * THE KEY OUTLIVES THE CERTIFICATE. `deploy/k8s/internal-ca.yaml` re-issues the root with
- * `rotationPolicy: Never`, so a re-issue moves `not_after` and leaves `spki_sha256` where it was;
- * a changed pin is a new key, which is the case a fleet has to be walked through.
- *
- * NOT A SECRET: a root certificate carries no private key, and `ca.key` beside it is not read.
- * Authenticated all the same, because this port is the credential service's and holds one door.
- */
+// The root as the certificate, its validity window, and the pin of its public key: the SHA-256 of
+// the SubjectPublicKeyInfo in base64, which is what caPin.ts computes and an appliance's openssl
+// prints. The key outlives the certificate (the CA is re-issued with rotationPolicy: Never), so a
+// re-issue moves not_after and leaves the pin; a changed pin is a new key, the case a fleet is
+// walked through. Not a secret, but authenticated because this port holds one door.
 function certificateAuthority() {
   let pem;
   try {
@@ -321,9 +244,6 @@ function certificateAuthority() {
   };
 }
 
-// -------------------------------------------------------------------------------------------------
-// HTTP
-// -------------------------------------------------------------------------------------------------
 function send(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
@@ -359,6 +279,8 @@ async function parseJson(req) {
   }
 }
 
+// A CredentialError maps to a 4xx or 502 by its code. Anything else is logged in full and returned
+// in summary, since the detail can name a Secret, a namespace or a path.
 function sendError(res, err) {
   if (err instanceof CredentialError) {
     const status = err.code === 'body_too_large' ? 413
@@ -368,7 +290,6 @@ function sendError(res, err) {
     if (status === 502) console.error('[gateway-credential]', err.message);
     return send(res, status, { error: err.message, code: err.code });
   }
-  // Logged in full, returned in summary: the detail can name a Secret, a namespace or a path.
   console.error('[gateway-credential] request failed:', err);
   return send(res, 502, { error: 'credential operation failed', code: 'backend_unavailable' });
 }
@@ -376,7 +297,7 @@ function sendError(res, err) {
 const server = createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://localhost');
 
-  // UNAUTHENTICATED, and deliberately empty of detail: liveness only.
+  // Unauthenticated, and deliberately empty of detail: liveness only.
   if (req.method === 'GET' && pathname === '/healthz') {
     return send(res, 200, { status: 'ok' });
   }
@@ -384,8 +305,8 @@ const server = createServer(async (req, res) => {
   const routes = new Set(['/credentials', '/revocations', '/clients', '/ca']);
   if (!routes.has(pathname)) return send(res, 404, { error: 'not found' });
 
+  // No detail about why: distinguishing "no header" from "wrong token" is a hint.
   if (!authorised(req)) {
-    // No detail about why. A response distinguishing "no header" from "wrong token" is a hint.
     log(`rejected an unauthenticated request from ${req.socket.remoteAddress}`);
     return send(res, 401, { error: 'unauthorized' });
   }
@@ -396,9 +317,8 @@ const server = createServer(async (req, res) => {
       return send(res, 200, inventory());
     }
 
-    // 404 AND NOT 502 when there is no CA: a plaintext-only stack is a deployment that has none,
-    // not a broker that could not be reached, and the caller publishing a trust bundle has to be
-    // able to tell those apart before it writes one.
+    // 404 and not 502 when there is no CA: a plaintext-only stack is a deployment that has none, not a
+    // broker that could not be reached, and the caller publishing a trust bundle has to tell those apart.
     if (pathname === '/ca') {
       if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
       try {
@@ -421,24 +341,23 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { sparkplug_id: sparkplugId, ...result });
     }
 
-    // The password is generated HERE when the caller does not supply one, which is the normal
-    // path: a value generated at the point of use is one fewer copy in transit.
+    // Generated here when the caller supplies none, the normal path: one fewer copy in transit.
     const password = parsed.password || generatePassword();
-    // STRICTLY `=== true`, so an absent key, a null, or a truthy string cannot turn delivery on.
+    // Strictly === true, so an absent key, a null or a truthy string cannot turn delivery on.
     const deliver = parsed.deliver_to_playback === true;
 
     const result = await issue(sparkplugId, password, { deliver });
     log(`issued ${result.replaced ? '(re-issued)' : '(new)'} credential for ${sparkplugId}`);
 
-    // The password is returned ONCE. The plugin stores a hash; this response is the only copy.
+    // Returned once. The plugin stores a hash; this response is the only copy.
     return send(res, 200, { ...result, password });
   } catch (err) {
     return sendError(res, err);
   }
 });
 
+// 0.0.0.0 is the container's interface, not the host's: the port is not published.
 server.listen(PORT, '0.0.0.0', () => {
-  // 0.0.0.0 is the CONTAINER's interface, not the host's: the port is not published.
   log(`listening on :${PORT} (broker ${MQTT_HOST}:${MQTT_PORT} as ${ADMIN_USER})`);
 });
 
