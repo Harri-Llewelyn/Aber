@@ -237,7 +237,8 @@ class TestReferenceTypesAreIriAndIrdi(SeedTestCase):
     ModelReference is not. Each probe runs in its own transaction and is rolled back.
     """
 
-    MIGRATION_0012 = Path(__file__).with_name("0012_a_semantic_id_is_an_iri_or_an_irdi.sql")
+    MIGRATION_0012 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "0012_a_semantic_id_is_an_iri_or_an_irdi.sql")
     CONSTRAINTS = (("schemas", "schemas_semantic_id_type_valid"),
                    ("metric_catalog", "metric_catalog_semantic_id_type_valid"))
     INSERTS = {
@@ -246,6 +247,10 @@ class TestReferenceTypesAreIriAndIrdi(SeedTestCase):
         "metric_catalog": "INSERT INTO public.metric_catalog (name, datatype, semantic_id, semantic_id_type)"
                           " VALUES ('Fixture0012/Value', 9, 'urn:example:fixture', %s)",
     }
+
+    def migration_sql(self):
+        with open(self.MIGRATION_0012, encoding="utf-8") as f:
+            return f.read()
 
     def in_transaction(self, work):
         """Run `work(cur)` on a fresh connection and roll everything back."""
@@ -283,7 +288,7 @@ class TestReferenceTypesAreIriAndIrdi(SeedTestCase):
 
     def test_a_replay_does_not_replace_the_constraints(self):
         """Guarded on the definition: on a database already narrowed, 0012 changes nothing."""
-        sql = self.MIGRATION_0012.read_text(encoding="utf-8")
+        sql = self.migration_sql()
 
         def replay(cur):
             before = self.constraint_oids(cur)
@@ -302,7 +307,7 @@ class TestReferenceTypesAreIriAndIrdi(SeedTestCase):
         A database whose row still holds ModelReference: 0012 names the table and the fix rather
         than failing on a CHECK violation, and leaves the row as it was.
         """
-        sql = self.MIGRATION_0012.read_text(encoding="utf-8")
+        sql = self.migration_sql()
 
         def provoke(cur):
             cur.execute(
