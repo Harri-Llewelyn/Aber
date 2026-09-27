@@ -76,6 +76,33 @@ Envoy semantics that produce a stack that looks fine and is not are listed in th
 header: first-match route order, the key in Realtime's query string, Realtime reading its tenant
 from the Host label, per-route credential hiding, and the Directory routes keeping their path.
 
+## The client's address
+
+Traefik establishes the caller's address, and the gateway passes it on. Traefik writes
+`X-Forwarded-For` from the connection it receives and replaces any a client sent, because it
+trusts no forwarded header unless `forwardedHeaders.trustedIPs` names the sender. Envoy runs with
+`use_remote_address` unset, which leaves the header as it arrived. GoTrue keys its sign-in, token
+refresh, OTP, verify and MFA limits on the first address in it (`supabaseAuth.rateLimitHeader`).
+`/oauth/token`, where Grafana, Node-RED and the gateway's two logins exchange their codes, has no
+limit.
+
+Three things break it, each without an error:
+
+- **Traefik's Service on `externalTrafficPolicy: Cluster`, which is k3s's default.** kube-proxy
+  rewrites every outside request's source to the node's pod-network address, so every client is
+  one client and one limit serves the whole site.
+  [`deploy/k8s/traefik-config.yaml`](../deploy/k8s/traefik-config.yaml) sets `Local`; the
+  runbook's *Install* section applies it.
+- **A proxy in front of Traefik.** Every request then comes from the proxy. It needs naming in
+  `forwardedHeaders.trustedIPs`, and it must replace a client's `X-Forwarded-For` rather than
+  append to it, since GoTrue reads the first address.
+- **A caller that bypasses Traefik**, such as an in-cluster service or a port-forward to the
+  gateway (the stack-lane suites sign in this way), sends no header. GoTrue logs a warning and
+  does not limit it.
+
+[`supabase/test_auth_rate_limit.py`](../supabase/test_auth_rate_limit.py) proves, on the
+development cluster, that one client spending its limit leaves another able to sign in.
+
 ## Rendering
 
 The template carries thirteen `__UPPER_SNAKE__` placeholders. The initContainer substitutes them

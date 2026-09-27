@@ -883,6 +883,15 @@ export const SUITES = {
       'collected at all -- while the container stayed healthy, `alloy validate` passed and every ' +
       'static check in this repository reported PASS.',
   },
+  'supabase/test_auth_rate_limit.py': {
+    lanes: ['stack'],
+    why:
+      'The sign-in limit is per client, through Traefik and the gateway. Two settings have to ' +
+      'agree and each fails silently alone: without GOTRUE_RATE_LIMIT_HEADER nothing is limited, ' +
+      'and with it but Traefik on externalTrafficPolicy Cluster every client arrives as one ' +
+      'address, so a single brute-forcer locks the whole site out. A probe pod spends its limit; ' +
+      'the host must still sign in.',
+  },
   'timescaledb/test_worker_pool.py': {
     lanes: ['stack'],
     why:

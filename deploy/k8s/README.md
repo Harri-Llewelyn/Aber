@@ -187,7 +187,7 @@ resolves only where the resolver answers nip.io names carrying private addresses
 refuse to, as DNS-rebind protection). `--domain=<LAN address>.nip.io` moves every host onto the LAN
 where it does, and those two logins then need `ingress.tls`. `up` also enables the
 backup service, taking storage and the forge too, and generates the forge
-sweep secret once; the stack lane exercises all of it. `--no-tls` leaves the listener off,
+sweep secret once; the stack lane exercises all of it. It applies Traefik's client-address setting from *Install* too, before cert-manager. `--no-tls` leaves the listener off,
 `--no-build` reuses the images already in the node, `--only=ingestion` rebuilds a subset, `--e2e`
 adds the in-cluster conformance Jobs.
 
@@ -201,7 +201,54 @@ the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 ## Install
 
 Two paths, and they are for genuinely different situations. **From the registry** if you want to
-run this stack; **from a checkout** if you are changing it.
+run this stack; **from a checkout** if you are changing it. Both start with one change to Traefik.
+
+### First: Traefik keeps each client's address
+
+Once per cluster, before installing. This is
+[`traefik-config.yaml`](traefik-config.yaml), which the development loop applies too:
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        externalTrafficPolicy: Local
+EOF
+
+# k3s's helm controller redeploys Traefik within a minute; then this prints Local.
+kubectl -n kube-system get svc traefik -o jsonpath='{.spec.externalTrafficPolicy}'
+```
+
+**Why.** GoTrue limits sign-in, token refresh, OTP and MFA per client, keyed on the first address
+in `X-Forwarded-For` (`supabaseAuth.rateLimitHeader`), and Traefik writes that header from the
+connection it receives. k3s installs Traefik's Service with `externalTrafficPolicy: Cluster`, under
+which kube-proxy rewrites every outside request's source to the node's own pod-network address, so
+the whole site is one client with one limit: thirty sign-ins, then one every two seconds, shared by
+everyone, and one person guessing passwords locks everybody out. `Local` delivers each request with
+its source intact. [`docs/gateway.md`](../../docs/gateway.md#the-clients-address) has the path end
+to end.
+
+**On more than one node,** ServiceLB then lists only the nodes running a ready Traefik pod as the
+Service's addresses, and a node without one drops traffic sent to it rather than forwarding it:
+point DNS at the listed addresses. **If outside traffic reaches the nodes through NAT** (a public
+cloud's addresses, for example), do not set k3s's `node-external-ip` on any node: k3s documents
+that `Local` does not work with it.
+
+**Where the address cannot be kept,** set `supabaseAuth.rateLimitHeader: ""`. That turns GoTrue's
+limits off, which is better than the one limit shared by the whole site that you would get otherwise.
+
+**A proxy of your own in front of the cluster** makes every request arrive from the proxy. Add its
+address to Traefik's trusted senders in the same `valuesContent`, under
+`ports.web.forwardedHeaders.trustedIPs` (and `ports.websecure` with ingress TLS), and have the
+proxy *replace* any `X-Forwarded-For` a client sent rather than append to it: GoTrue takes the
+first address, and an appended header leaves that one in the client's hands.
 
 ### A. From the published chart (no checkout, no image builds)
 
