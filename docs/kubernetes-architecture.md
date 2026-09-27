@@ -170,7 +170,11 @@ export is the platform's root for the one-liner's pin.
   repository, so this is no longer optional; `frontend/.dockerignore` excludes `node_modules`,
   where the host's tree can carry platform-specific binaries the alpine builder cannot execute. It
   deliberately does **not** exclude `public/`, which now carries `config.js`.
-- **The Dockerfile removes itself from the functions directory after copying.** Inert today —
+- **Dependencies are resolved at build time.** The build caches every import against
+  `deno.lock` and boots each function with no network, so the image runs where nothing is
+  reachable (`supabase/README.md`, *Edge function dependencies*).
+- **The Dockerfile removes itself and `offline-check.sh` from the functions directory after
+  copying.** Inert today —
   `main/index.ts` is an allow-list, so nothing dispatches to it — but a stray non-TypeScript file
   in the functions root is what a future runtime's directory scan trips over.
 - Compose keeps bind-mounting, for hot-reload. Both run identical code; only delivery differs.

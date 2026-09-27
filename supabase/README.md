@@ -3002,9 +3002,36 @@ that warning.
   `NODERED_ADMIN_TOKEN` and `GRAFANA_OAUTH_CLIENT_SECRET` to functions with no use for them. Each
   registry entry now lists only what that function reads.
 
-Because each worker is isolated, shared code **cannot** be imported from a sibling directory — a
-worker only reads files beneath its own service path. That is why `resolveUserRole` and
-`sparkplugToXsd` are duplicated rather than extracted ([issue #9](https://github.com/Harri-Llewelyn/Aber/issues/9)).
+Shared code lives in `functions/_shared/` and is imported by relative path: `servicePath` decides
+which directory a worker boots, not what its module graph may import. Reading files at runtime is
+still confined to the service path.
+
+### Edge function dependencies
+
+Nothing is fetched when a function loads. `functions/deno.json` declares the dependencies as an
+import map, and code imports the bare names (`@supabase/supabase-js`, `fflate`, `djwt`).
+`functions/deno.lock` pins them: npm packages by the registry's integrity hash, the `deno.land`
+modules djwt imports by content hash.
+
+- **The image resolves them.** The Dockerfile's `modules` stage runs `deno cache --frozen` with
+  Deno 2.1.4, the Deno that edge-runtime v1.77.0 embeds (`edge-runtime --version`), and copies the
+  module cache into the image as `DENO_DIR=/home/deno/deno-dir`. `--frozen` fails the build when the
+  lock does not cover the module graph; bytes that differ from the lock fail its integrity check.
+- **The build proves it.** The `offline-check` stage boots every function directory under
+  `RUN --network=none` and fails on the router's boot error or on a directory missing from
+  `FUNCTION_REGISTRY`. The image keeps the report at `/home/deno/offline-check.txt`.
+- **Every worker reads the lock.** The runtime finds `deno.json` and `deno.lock` above each
+  entrypoint and resolves npm packages from the lock, so it never asks for a version the cache does
+  not hold. Loading the lock reads each package's cached registry metadata, so an image built
+  without the cache cannot start even the main service offline. `noModuleCache: false` in
+  `main/index.ts` is what lets workers use the cache; `true` would refetch everything.
+- **Changing a dependency.** Edit `deno.json`, run `npm run functions:lock`, and commit both files.
+  The script runs the Dockerfile's `denoland/deno` image. Renovate's deno manager maintains the lock
+  with `constraints.deno`, the same version. The `denoland/deno` tag and that constraint move by
+  hand, when edge-runtime's embedded Deno does: a lock written by another Deno can be in a format
+  the build cannot read.
+- `npm run lint:deno` enforces `no-import-prefix`, so a specifier written into an import instead of
+  `deno.json` fails lint.
 
 ### `approve_quarantined_device()`
 

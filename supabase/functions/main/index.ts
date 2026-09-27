@@ -271,6 +271,7 @@ Deno.serve(async (req: Request) => {
       servicePath,
       memoryLimitMb: 150,
       workerTimeoutMs: 60 * 1000,
+      // The image's module cache is the only source of dependencies; true would refetch them.
       noModuleCache: false,
       importMapPath: null,
       envVars,

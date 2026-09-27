@@ -1068,8 +1068,11 @@ that would, and where each is switched off:
 - Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
   palette manager's Install tab and its update badges read it.
 - The dashboard's fonts come from Google Fonts (#438).
-- The edge functions fetch their dependencies from esm.sh and deno.land on first load (#437).
 - Destinations a site configures itself, such as a remote cold archive or backup target.
+
+The edge functions load their dependencies from the image. The image build resolves them against
+a lock file and boots every function with no network, so a function that would fetch fails the
+build instead (`supabase/README.md`, *Edge function dependencies*).
 
 An administrator can opt Node-RED into update notifications from its User Settings. The runtime
 keeps that choice over `settings.js`.
