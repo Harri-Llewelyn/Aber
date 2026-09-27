@@ -379,13 +379,35 @@ class DrillDownLinkTestCase(unittest.TestCase):
         cls.alloy = open(ALLOY_TEMPLATE, encoding="utf-8").read()
         cls.dash = json.load(open(cls.dash_path, encoding="utf-8"))
 
-    def link(self):
+    def drop_panel(self):
+        # Found by what it plots rather than by its title, which names more than this one counter.
         for panel in self.dash["panels"]:
-            if panel.get("title") == "Messages Dropped by Reason":
-                links = panel["fieldConfig"]["defaults"].get("links", [])
-                self.assertTrue(links, "the drop panel has no data link, so there is no drill-down")
-                return links[0]["url"]
-        self.fail("no 'Messages Dropped by Reason' panel -- the drill-down has no origin")
+            exprs = [t.get("expr", "") for t in panel.get("targets", [])]
+            if any("aber_ingestion_messages_dropped_total" in e for e in exprs):
+                return panel
+        self.fail("no panel plots aber_ingestion_messages_dropped_total -- the drill-down has no origin")
+
+    def link(self):
+        links = self.drop_panel()["fieldConfig"]["defaults"].get("links", [])
+        self.assertTrue(links, "the drop panel has no data link, so there is no drill-down")
+        return links[0]["url"]
+
+    def test_series_with_no_reason_carry_no_link(self):
+        """
+        The panel also plots the broker's shed count and the sequence-gap inference, which have no
+        `reason` label. The default link would open a query for an empty reason, so every other
+        target must override `links` to nothing.
+        """
+        panel = self.drop_panel()
+        reasoned = {t["refId"] for t in panel["targets"] if "aber_ingestion_messages_dropped_total" in t.get("expr", "")}
+        unlinked = {
+            o["matcher"]["options"] for o in panel["fieldConfig"].get("overrides", [])
+            if o["matcher"].get("id") == "byFrameRefID"
+            and any(p["id"] == "links" and p["value"] == [] for p in o["properties"])
+        }
+        for target in panel["targets"]:
+            if target["refId"] not in reasoned:
+                self.assertIn(target["refId"], unlinked, f"series {target['refId']} inherits the reason link")
 
     def test_the_panel_selects_a_label_the_collector_actually_sets(self):
         """

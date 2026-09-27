@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
+import { PERMISSION_UUIDS } from '../constants'
 
 /**
  * The Type column and the control behind it, in the Gateways tab. What is asserted: the four values
@@ -262,5 +263,26 @@ describe('the Cell Zone control', () => {
     openEdit()
     expect(typeSelect().compareDocumentPosition(cellSelect()) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy()
+  })
+})
+
+describe('the Type control in a proposal', () => {
+  // deployment and is_simulated are not proposable, so the patch drops them; a control left live
+  // would let an Operator change the type and file a proposal that silently omits it.
+  it('is disabled, and says why, for someone who may only propose', async () => {
+    api.get.mockImplementation(routeGet([gateway()]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={(p) => p === PERMISSION_UUIDS.PROPOSAL_CREATE} />)
+    await waitFor(() => expect(screen.getByText('Playback_Lab')).toBeTruthy())
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('Playback_Lab'))
+    fireEvent.click(within(document.querySelector('.context-panel')).getByText('Propose a Change'))
+    expect(typeSelect().disabled).toBe(true)
+    expect(screen.getByText(/connector runs — an Administrator changes it/)).toBeTruthy()
+  })
+
+  it('stays live for someone who may manage gateways', async () => {
+    await show([gateway()])
+    openEdit()
+    expect(typeSelect().disabled).toBe(false)
+    expect(screen.queryByText(/connector runs — an Administrator changes it/)).toBeNull()
   })
 })

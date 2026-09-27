@@ -9,7 +9,6 @@ import { ArchiveCredentialModal } from '../modals/ArchiveCredentialModal'
 import {
   ARCHIVE_BACKLOG_TOLERANCE_DAYS,
   COLD_STATES,
-  DESTINATION_FIELDS,
   backlogTone,
   coldStateLabel,
   coldStateMeaning,
@@ -136,19 +135,7 @@ export function ColdStorageTab({ showToast, userRole }) {
               Cold telemetry
               <HelpTip
                 label="About cold telemetry"
-                text={
-                  'Telemetry past the retention threshold is exported to Apache Parquet on object '
-                  + 'storage, read back and checked, and only then dropped from the hypertable. '
-                  + 'Each row is one chunk. Nothing is deleted by this page: export and drop are '
-                  + 'run by the cold_archive process.\n\n'
-                  + 'Once a chunk reaches On cold storage its object is the ONLY copy of that span '
-                  + '— the rows behind it were dropped because the export verified, so losing the '
-                  + 'object loses that history and there is nothing to restore it from. The '
-                  + 'objects are held at the S3 endpoint this stack was installed against, outside '
-                  + 'the cluster and outside its backups: nothing here can delete them, and '
-                  + 'nothing here can prove their retention either. That is the provider’s to '
-                  + 'configure and yours to check.'
-                }
+                text="Chunks past the retention threshold are exported to Parquet on object storage, verified, then dropped. The object is then the only copy of that span, and it sits outside the cluster and its backups."
               />
             </h3>
           </div>
@@ -371,7 +358,7 @@ function DestinationCard({ summary, missing, archiveEnabled, credentialSet, onCr
           Destination
           <HelpTip
             label="About the destination"
-            text="Where cold telemetry is written. An archived object is the only remaining copy of that span, so the destination is deliberately outside this cluster. The endpoint, region, bucket and key ID are settings; the secret key is held in the vault and is never read back."
+            text="Where cold telemetry is written, deliberately outside this cluster, since an archived object is the only copy of its span. Endpoint, region, bucket and key ID are settings; the secret key stays in the vault."
           />
         </h3>
       </div>

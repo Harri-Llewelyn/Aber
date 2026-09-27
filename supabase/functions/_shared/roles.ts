@@ -19,6 +19,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0
  * caller.
  */
 export async function resolveUserRole(
+  // deno-lint-ignore no-explicit-any -- callers pass clients created without a schema type
   client: SupabaseClient<any, any, any>,
   userId: string,
 ): Promise<string | null> {

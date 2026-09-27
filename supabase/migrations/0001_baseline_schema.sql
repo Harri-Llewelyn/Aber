@@ -2831,13 +2831,20 @@ COMMENT ON FUNCTION public.fork_schema(parent_schema_id uuid, change_description
 
 -- sparkplug_group_default() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.sparkplug_group_default() RETURNS text
-    LANGUAGE sql STABLE
+    LANGUAGE plpgsql STABLE
     SET search_path TO 'public', 'pg_catalog'
     AS $$
-    SELECT coalesce(
-        (SELECT value #>> '{}' FROM public.system_settings WHERE key = 'sparkplug.group_id'),
-        'Aber'
-    );
+DECLARE
+    v_group text;
+BEGIN
+    SELECT nullif(value #>> '{}', '') INTO v_group
+      FROM public.system_settings WHERE key = 'sparkplug.group_id';
+    IF v_group IS NULL THEN
+        RAISE EXCEPTION 'the sparkplug.group_id setting is not set, so a gateway has no group to take'
+          USING HINT = 'db-init seeds it from the chart''s ingestion.sparkplugGroup on the first boot.';
+    END IF;
+    RETURN v_group;
+END;
 $$;
 
 
@@ -2846,7 +2853,7 @@ ALTER FUNCTION public.sparkplug_group_default() OWNER TO postgres;
 --
 
 -- FUNCTION sparkplug_group_default() :: COMMENT
-COMMENT ON FUNCTION public.sparkplug_group_default() IS 'The site''s Sparkplug group, for gateways.sparkplug_group''s DEFAULT. Falls back to the historical literal so a row can still be inserted if the setting is ever absent -- an INSERT that failed on a missing settings row would be a worse failure than a gateway in the old group.';
+COMMENT ON FUNCTION public.sparkplug_group_default() IS 'The site''s Sparkplug group, for gateways.sparkplug_group''s DEFAULT. Raises when the setting is absent rather than naming a group nobody chose; 0002 seeds it on every boot from the chart.';
 
 
 SET default_tablespace = '';
@@ -3237,7 +3244,7 @@ COMMENT ON COLUMN public.gateways.credential_revoked_at IS 'When this gateway''s
 --
 
 -- COLUMN gateways.is_simulated :: COMMENT
-COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s telemetry is generated rather than observed -- a broker playback target, or a simulator. Devices INHERIT this through their gateway_id and carry no flag of their own (see 0052''s header): the containment rules a stored device-level copy would need two triggers to maintain are given for nothing by the join. Distinct from `deployment`, which is about where the connector runs rather than whether the readings are real -- a remote appliance replaying a capture is deployment=''remote'', simulated=true.';
+COMMENT ON COLUMN public.gateways.is_simulated IS 'True when this gateway''s telemetry is generated rather than observed -- a broker playback target, or a simulator. Devices INHERIT this through their gateway_id and carry no flag of their own (see 0052''s header): the containment rules a stored device-level copy would need two triggers to maintain are given for nothing by the join. Distinct from `deployment`, which is about where the connector runs rather than whether the readings are real, but not independent of it: gateways_simulated_is_host holds a simulated gateway to deployment=''host'', so a capture is never replayed onto a remote one.';
 
 --
 

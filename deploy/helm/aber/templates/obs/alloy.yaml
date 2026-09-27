@@ -435,6 +435,8 @@ spec:
             - run
             - --server.http.listen-addr=0.0.0.0:12345
             - --storage.path=/var/lib/alloy/data
+            # Alloy reports which components it runs to Grafana Labs unless told not to.
+            - --disable-reporting
             - /etc/alloy/config.alloy
           env:
             - name: NODE_NAME

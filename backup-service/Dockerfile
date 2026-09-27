@@ -6,7 +6,12 @@
 #
 # THE TAG MUST MATCH THE CHART'S supabase-db PIN. check-docs-drift.mjs couples this FROM to
 # `supabaseDb.image.tag` in values.yaml, the same way it does supabase/db-init.
-FROM supabase/postgres:17.6.1.160
+FROM supabase/postgres:17.6.1.175
+
+# gosu is the base entrypoint's tool for starting postgres as root and dropping to the postgres user.
+# This image never starts postgres -- the chart's command is node -- and the binary carried the
+# image's only fixable findings, a stale Go toolchain (#347). Removed rather than carried.
+RUN rm /usr/local/bin/gosu
 
 # Alpine. node runs the service; sqlite3 takes the consistent copy of the forge's database; GNU
 # tar (the package named `tar`) replaces busybox's for --exclude and a second -C.

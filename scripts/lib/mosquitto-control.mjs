@@ -1,22 +1,15 @@
-/**
- * One request to the broker's Dynamic Security plugin, through `mosquitto_rr`.
- *
- * The service runs the binary locally; the operator CLI and the orphan sweep run it inside the
- * broker container through `docker exec` or `kubectl exec`. All three build the same argument
- * vector (controlArgv says why the payload is on it), so the three cannot disagree about the
- * protocol.
- */
+// One request to the broker's Dynamic Security plugin, through mosquitto_rr. The service runs the
+// binary locally; the operator CLI and the orphan sweep run it inside the broker container through
+// docker exec or kubectl exec. All three build the same argument vector (controlArgv says why the
+// payload is on it), so the three cannot disagree about the protocol.
 import { execFileSync } from 'node:child_process';
 
 import { CredentialError } from './mosquitto-credentials.mjs';
 import { controlArgv, controlPayload, parseControlResponse } from './mosquitto-dynsec.mjs';
 
-/**
- * @param {object} connection  { host, port, username, password }
- * @param {string[]} [prefix]  what runs the binary: [] locally, or a `docker exec <name>` /
- *                             `kubectl exec <pod> -c mosquitto --` vector.
- * @returns {(command: object) => object}  sends one command and returns its response
- */
+// connection: { host, port, username, password }. prefix: what runs the binary, [] locally or a
+// `docker exec <name>` / `kubectl exec <pod> -c mosquitto --` vector. Returns a function that sends
+// one command and returns its response.
 export function controlSender(connection, prefix = []) {
   return (command) => {
     const [cmd, ...rest] = [...prefix, 'mosquitto_rr', ...controlArgv(connection, controlPayload([command]))];

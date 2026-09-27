@@ -11,7 +11,7 @@
  *
  * No YAML dependency: this runs in CI before any `npm install`, and the shapes it reads are narrow.
  */
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, normalize, posix } from 'node:path';
 
@@ -667,12 +667,16 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
-    // EMPTY, AND THAT IS THE EXPECTED STATE just after a squash. The baseline is generated from
-    // a dump of the finished database, so every function appears in it exactly once, in its
-    // final form -- there is nothing left for a later migration to replace. Entries return as
-    // soon as a migration added after the fold redeclares something the baseline holds, and
-    // each one records WHY that replacement is meant. See README.md, "There is no 0017", for
-    // the case where an unrecorded one would have regressed audit attribution.
+    // Empty just after a squash: the baseline is generated from a dump of the finished database,
+    // so every function appears in it exactly once, in its final form. Entries return as soon as
+    // a migration added after the fold redeclares something the baseline holds, and each one
+    // records WHY that replacement is meant. See README.md, "There is no 0017", for the case
+    // where an unrecorded one would have regressed audit attribution.
+
+    // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
+    // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
+    // the pre-0006 form and folds forward at the next squash.
+    'public.digital_thread_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -914,6 +918,9 @@ function edgeFunctionNames() {
     'VITE_GITEA_URL',        // an endpoint, public -- the forge's door; a link and a sign-out beacon
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_APP_VERSION',      // a git describe string, shown in the UI on purpose
+    // A BuildKit switch, not a value: opts the build stage into the release's SBOM scan. Not
+    // VITE_-prefixed, so Vite never inlines it.
+    'BUILDKIT_SBOM_SCAN_STAGE',
   ]);
 
   const df = read('frontend/Dockerfile');
@@ -1123,7 +1130,7 @@ function edgeFunctionNames() {
     /ALTER TABLE (?:ONLY )?public\.([a-z0-9_]+)\s+ADD COLUMN (?:IF NOT EXISTS )?([a-z][a-z0-9_]*)/gi;
 
   const columns = new Map();
-  for (const [file, sql] of migSrc) {
+  for (const [, sql] of migSrc) {
     for (const m of sql.matchAll(CREATE_TABLE)) {
       for (const line of m[2].split('\n')) {
         // Four-space indent is how this schema writes a column; a constraint continuation or a
@@ -1388,6 +1395,64 @@ function edgeFunctionNames() {
     } else {
       pass(`PGRST_DB_PRE_REQUEST names ${chartName}, and a migration declares it`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Every variable a function declares is set on the functions Deployment
+//
+// main/index.ts forwards a worker nothing but the names its registry entry lists, and a name the
+// Deployment never sets is skipped silently, so the function reads `undefined` and refuses or
+// degrades on every call while the pod stays Ready. GRAFANA_ALERT_WEBHOOK_SECRET shipped that way
+// from the Compose removal: Grafana held the secret, the functions Deployment did not, and no alert
+// reached the dashboard on any Kubernetes install while every rule reported healthy.
+{
+  const registry = read('supabase/functions/main/index.ts');
+  const chart = read('deploy/helm/aber/templates/supabase/functions.yaml');
+
+  const from = registry.indexOf('const COMMON_ENV');
+  const to = registry.indexOf('function envForFunction');
+  const declared = new Set(
+    [...registry.slice(from, to).matchAll(/"([A-Z][A-Z0-9_]+)"/g)].map((m) => m[1])
+  );
+
+  // Set by something other than the Deployment's env list, each with what sets it.
+  const elsewhere = {
+    ABER_CA_PEM: 'the image entrypoint reads it from the mounted platform root',
+    ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+    ASSET_EXPORT_MAX_THREAD_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+  };
+
+  const set = new Set([
+    ...[...chart.matchAll(/^\s*-\s*name:\s*([A-Z][A-Z0-9_]+)\s*$/gm)].map((m) => m[1]),
+    ...[...chart.matchAll(/"aber\.(?:optional)?[sS]ecretEnv"\s*\(dict\s+"name"\s+"([A-Z][A-Z0-9_]+)"/g)]
+      .map((m) => m[1]),
+  ]);
+
+  const missing = [...declared].filter((n) => !set.has(n) && !(n in elsewhere));
+  const stale = Object.keys(elsewhere).filter((n) => !declared.has(n));
+
+  if (!declared.size || !set.size) {
+    fail(
+      'the function registry or the functions Deployment could not be read ' +
+        `(${declared.size} declared, ${set.size} set); one of them has moved.`
+    );
+  } else if (missing.length) {
+    fail(
+      `${missing.length} variable(s) the function registry declares are set nowhere on ` +
+        'supabase-functions, so the worker never receives them and the function fails on every ' +
+        `call while the pod stays Ready: ${missing.join(', ')}`
+    );
+  } else if (stale.length) {
+    fail(
+      `${stale.join(', ')} is listed here as set elsewhere but no function declares it any more; ` +
+        'remove it from the list.'
+    );
+  } else {
+    pass(
+      `all ${declared.size} variable(s) the function registry declares are set on ` +
+        `supabase-functions (${Object.keys(elsewhere).length} by something other than its env list)`
+    );
   }
 }
 
@@ -1980,6 +2045,34 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// Every humanize call in an alert summary is given a float
+//
+// `$values.B` is a struct (Labels, Value) with a String() method, so `{{ $values.B }}` prints and
+// `printf "%.0f" $values.B.Value` formats -- but `humanizePercentage $values.B` fails the whole
+// template with `can't convert template.Value to float`, and Grafana then delivers the summary as
+// its raw template text. Six rules shipped that way; the error appears only in Grafana's own log.
+{
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+  const offences = [];
+  let calls = 0;
+  for (const [i, line] of rules.split('\n').entries()) {
+    for (const m of line.matchAll(/\{\{\s*humanize\w*\s+(\$values\.[A-Z]\w*)((?:\.\w+)?)\s*\}\}/g)) {
+      calls += 1;
+      if (m[2] !== '.Value') offences.push(`line ${i + 1}: ${m[0]}`);
+    }
+  }
+  if (offences.length) {
+    fail(
+      `${offences.length} humanize call(s) in the alert summaries are given the whole $values ` +
+        'struct rather than its .Value; Grafana fails to expand the template and delivers the ' +
+        'summary as raw template text:\n  ' + offences.join('\n  ')
+    );
+  } else {
+    pass(`all ${calls} humanize call(s) in the alert summaries pass a float`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // The buckets agree in all three places that decide whether one works
 //
 // A bucket created with no policies is invisible to every browser role; a policy naming a bucket
@@ -2464,6 +2557,109 @@ function edgeFunctionNames() {
       `all ${declaredIn.size} setting(s) are declared in exactly one migration ` +
         `(${new Set([...declaredIn.values()].flat()).size} files declare one)`
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 23. Nothing in the stack reports usage or checks for updates by itself.
+//
+// Each service below does one or the other by default, and each switch is one line that an upgrade
+// or a regenerated config file can drop without anything failing. deploy/k8s/README.md,
+// "Outbound connections", lists them. Grafana's are also refused as GF_* variables in its
+// template, because an environment variable overrides grafana.ini silently.
+// -------------------------------------------------------------------------------------------------
+{
+  const GRAFANA_INI = 'grafana/grafana.ini';
+  const ini = {};
+  let section = '';
+  for (const line of read(GRAFANA_INI).split(/\r?\n/)) {
+    const header = line.match(/^\[([^\]]+)\]\s*$/);
+    if (header) { section = header[1]; continue; }
+    const kv = line.match(/^([a-z_]+)\s*=\s*(.*?)\s*$/);
+    if (kv) ini[`${section}.${kv[1]}`] = kv[2];
+  }
+  const GRAFANA_OFF = {
+    'analytics.reporting_enabled': 'false',
+    'analytics.check_for_updates': 'false',
+    'analytics.check_for_plugin_updates': 'false',
+    'news.news_feed_enabled': 'false',
+    'security.disable_gravatar': 'true',
+    'plugins.preinstall_auto_update': 'false',
+    'plugins.public_key_retrieval_disabled': 'true',
+  };
+  const grafanaTemplate = read('deploy/helm/aber/templates/obs/grafana.yaml');
+
+  const SWITCHES = [
+    ['deploy/helm/aber/templates/obs/alloy.yaml', /^\s*- --disable-reporting\s*$/m, 'Alloy runs with --disable-reporting'],
+    ['loki/loki.yaml', /^analytics:\s*\n\s+reporting_enabled:\s*false\s*$/m, 'Loki analytics.reporting_enabled is false'],
+    ['node-red/node-red-init.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the stack's Node-RED declares telemetry off"],
+    ['forge/gateway-platform/appliance/bootstrap.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the appliance's Node-RED declares telemetry off"],
+    ['deploy/helm/aber/values.yaml', /^\s+telemetryLevel:\s*"off"\s*$/m, 'TimescaleDB telemetryLevel is "off"'],
+    ['deploy/helm/aber/templates/apps/gitea.yaml', /GITEA__cron\.update_checker__ENABLED\s*\n\s*value:\s*"false"/, "Gitea's update checker is disabled"],
+    ['deploy/helm/aber/templates/obs/swagger-ui.yaml', /name: VALIDATOR_URL\s*\n\s*value:\s*none\s*$/m, "Swagger UI's online validator is disabled"],
+  ];
+
+  const offences = [];
+  for (const [key, want] of Object.entries(GRAFANA_OFF)) {
+    if (ini[key] !== want) offences.push(`${GRAFANA_INI}: [${key.replace('.', '] ')} is ${ini[key] ?? 'unset'}, want ${want}`);
+    const env = `GF_${key.replace('.', '_').toUpperCase()}`;
+    if (grafanaTemplate.includes(env)) offences.push(`templates/obs/grafana.yaml sets ${env}, which overrides grafana.ini`);
+  }
+  for (const [file, pattern, what] of SWITCHES) {
+    if (!pattern.test(read(file))) offences.push(`${file}: expected ${what}`);
+  }
+
+  if (offences.length) {
+    fail('a service would report usage or check for updates:\n' + offences.map((o) => `        ${o}`).join('\n'));
+  } else {
+    pass(`all ${Object.keys(GRAFANA_OFF).length + SWITCHES.length} usage-report and update-check switches are off`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 24. The Directory's image map names the same components in the migration and the chart.
+//
+// `0007`'s `served_by` rows say which component serves each chart-managed Directory row, and the
+// chart's `aber.directoryImages` says which image each component runs. A component named on one
+// side only leaves its row reading "not recorded", with nothing failing. Each must also be a
+// component some template declares, or a rename in the chart has the same effect.
+// -------------------------------------------------------------------------------------------------
+{
+  const MIGRATION = 'supabase/migrations/0007_the_directory_names_the_image_each_service_runs.sql';
+  const HELPERS = 'deploy/helm/aber/templates/_helpers.tpl';
+  const sql = read(MIGRATION);
+  const tpl = read(HELPERS);
+
+  const servedBy = new Set(
+    [...sql.matchAll(/\('f1111111-[0-9a-f-]+'::uuid,\s*'([a-z0-9-]+)'\)/g)].map((m) => m[1])
+  );
+  const start = tpl.indexOf('define "aber.directoryImages"');
+  const body = start === -1 ? '' : tpl.slice(start, tpl.indexOf('toJson $out', start));
+  const mapped = new Set([...body.matchAll(/\(list "([a-z0-9-]+)" /g)].map((m) => m[1]));
+  const declared = new Set(
+    allFiles
+      .filter((f) => f.startsWith('deploy/helm/aber/templates/') && f.endsWith('.yaml'))
+      .flatMap((f) => [...read(f).matchAll(/\$component := "([a-z0-9-]+)"/g)].map((m) => m[1]))
+  );
+
+  if (!servedBy.size || !mapped.size) {
+    fail(
+      `check 24 read ${servedBy.size} component(s) from ${MIGRATION} and ${mapped.size} from ` +
+        `${HELPERS}'s aber.directoryImages; the extraction no longer matches one of them`
+    );
+  } else {
+    const offences = [
+      ...[...servedBy].filter((c) => !mapped.has(c)).map((c) => `${c} serves a row in 0007 and has no image in aber.directoryImages`),
+      ...[...mapped].filter((c) => !servedBy.has(c)).map((c) => `${c} has an image in aber.directoryImages and serves no row in 0007`),
+      ...[...mapped].filter((c) => !declared.has(c)).map((c) => `${c} is not a component any template declares`),
+    ];
+    if (offences.length) {
+      fail(
+        'the Directory image map disagrees with itself:\n' + offences.map((o) => `        ${o}`).join('\n')
+      );
+    } else {
+      pass(`the Directory image map names the same ${mapped.size} chart component(s) in 0007 and the chart`);
+    }
   }
 }
 

@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.sql
 
 # The daemon's own configuration, reused rather than re-declared: this runs in the same image and
 # must reach the same historian and the same platform identity. Importing it also means a change to
@@ -317,7 +318,8 @@ def export_chunk(conn, chunk_schema, chunk_name):
     import pyarrow.parquet as pq
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(f'SELECT * FROM "{chunk_schema}"."{chunk_name}"')
+        cur.execute(psycopg2.sql.SQL("SELECT * FROM {}.{}").format(
+            psycopg2.sql.Identifier(chunk_schema), psycopg2.sql.Identifier(chunk_name)))
         rows = cur.fetchall()
 
     if not rows:

@@ -179,8 +179,13 @@ spec:
             {{- include "aber.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
             {{- /* Verified by forge-sweep, for the same reason (0099). */}}
             {{- include "aber.secretEnv" (dict "name" "FORGE_SWEEP_SECRET" "secretName" $secretName "key" "FORGE_SWEEP_SECRET") | nindent 12 }}
+            {{- /* Verified by grafana-alert-webhook: the bearer Grafana's contact point presents
+                   (obs/grafana.yaml renders the same key into it). Without it the function answers
+                   503 to every notification and no alert reaches platform_alerts, while the rules
+                   and the pod both report healthy. */}}
+            {{- include "aber.secretEnv" (dict "name" "GRAFANA_ALERT_WEBHOOK_SECRET" "secretName" $secretName "key" "GRAFANA_ALERT_WEBHOOK_SECRET") | nindent 12 }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
-          # supabase/edge-runtime:v1.74.2 by probing it directly:
+          # supabase/edge-runtime:v1.77.0 by probing it directly:
           #
           #   /_internal/health  404   "rejected request for unregistered function '_internal'"
           #   /health            404   same -- the allow-list treats it as a function name

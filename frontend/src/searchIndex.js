@@ -29,7 +29,7 @@ export const PAGE_KEYWORDS = {
   // that name as often as by its own.
   'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
-  'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness'],
+  'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
   'digital-thread': ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed'],
   'capture':        ['record', 'recording', 'replay', 'playback', 'shadow'],
   'cold-storage':   ['parquet', 'tiered', 'object storage', 'minio', 'telemetry archive', 's3'],

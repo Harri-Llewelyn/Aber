@@ -282,7 +282,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             Cells
             <HelpTip
               label="About cells"
-              text="A cell is a zone of an Area and what groups the assets in it. A gateway belongs to one, and a device inherits its gateway's unless it names its own. The dashboard, the alerts and the Grafana folders are all organised by cell."
+              text="A zone of an area that groups the assets in it. A gateway belongs to one cell; a device inherits its gateway's unless it names its own. Alerts and Grafana folders follow cells."
             />
           </h3>
           {/* The primary action in the header, where every card keeps its. */}

@@ -13,7 +13,7 @@
     "from": "now-1h",
     "to": "now"
   },
-  "description": "Platform-side health: what the ingestion daemon is landing in the historian, and how the hypertable and its rollups are growing. Reads only objects that exist on the HISTORIAN -- `gateways` and `asset_config` live in Supabase and were queried here by mistake, which is why those panels are gone rather than fixed.",
+  "description": "What the ingestion daemon lands in the historian, and how the hypertable and its rollups grow. Reads only objects on the historian; `gateways` and `asset_config` live in Supabase.",
   "panels": [
     {
       "type": "row",
@@ -32,7 +32,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Telemetry Rows Ingested (per second)",
-      "description": "Rows landing in the `telemetry` hypertable, bucketed at one minute. This is the historian-side view of ingestion throughput. The daemon's own drop counters are NOT here and are a different question: this counts what was WRITTEN, and `Messages Dropped by Reason` below counts what was refused. A fall here with no rise there is a quiet plant; a fall here WITH a rise there is a fault.",
+      "description": "Rows landing in `telemetry` per second: what was written. Messages Lost below counts what was not. A fall here with no rise there is a quiet plant; a fall here with a rise there is a fault.",
       "datasource": {
         "type": "postgres",
         "uid": "timescaledb"
@@ -85,7 +85,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Ingestion Rate by Device",
-      "description": "Per-device write rate. Under report-by-exception a flat line at zero is a device whose values are not moving, NOT a device that has stopped -- absence and steadiness are the same signal here, which is what the 5-minute keepalive bounds.",
+      "description": "Per-device write rate. Under report-by-exception a flat zero is a device whose values are not moving, not one that has stopped; the 5-minute keepalive is what bounds the difference.",
       "datasource": {
         "type": "postgres",
         "uid": "timescaledb"
@@ -260,7 +260,7 @@
       "id": 6,
       "type": "stat",
       "title": "Rows in Hypertable",
-      "description": "Total raw observations retained. Raw is dropped on the retention policy while the rollups outlive it -- that split is deliberate and is what lets a question about last spring be answered at all.",
+      "description": "Raw observations retained. Raw is dropped by the retention policy while the rollups outlive it, which is what lets a question about last spring still be answered.",
       "datasource": {
         "type": "postgres",
         "uid": "timescaledb"
@@ -304,8 +304,8 @@
     {
       "id": 17,
       "type": "timeseries",
-      "title": "Messages Dropped by Reason",
-      "description": "Messages the daemon REFUSED, by reason, from `aber_ingestion_messages_dropped_total`. This is telemetry that was not recorded and will not be restated.\n\nTHIS PANEL IS HALF AN INSTRUMENT. The counter says a drop happened and how many; it cannot say WHICH DEVICE, under which edge node, because the metrics endpoint is served without a credential and carries no device data of any kind by design. That half is in the log store -- click any series to open it filtered to the same reason.\n\nThe two halves cannot disagree: `drop(\"<reason>\")` in ingestion.py derives the Prometheus label and the logged field from one string, and ingestion/test_structured_logging.py asserts they stay identical.\n\nTHE LINK SELECTS ON `service=\"ingestion\"`. The chart's Alloy applies that label; an external log stack must relabel `service` to the workload name or this link returns nothing.",
+      "title": "Messages Lost: Refused, Shed, Missed",
+      "description": "Three counts that do not add up. Refused: declined by the daemon, by reason. Shed: dropped by the broker for a slow subscriber, unseen by the daemon. Missed: inferred from Sparkplug `seq` gaps. Click a refused series for the logs, which name the device.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -317,6 +317,24 @@
         "y": 14
       },
       "targets": [
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(broker_publish_messages_dropped[$__rate_interval]))",
+          "legendFormat": "shed by the broker"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(aber_ingestion_sequence_messages_missed_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "missed in sequence (lower bound)"
+        },
         {
           "refId": "A",
           "datasource": {
@@ -347,7 +365,66 @@
             }
           ]
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "normal",
+                  "group": "B"
+                }
+              },
+              {
+                "id": "links",
+                "value": []
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "normal",
+                  "group": "C"
+                }
+              },
+              {
+                "id": "links",
+                "value": []
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -382,7 +459,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Rollup Bucket Coverage",
-      "description": "Buckets materialised in each rollup. The hierarchy is 1m -> 5m -> 1h, each built from the one before, so a gap that appears only in the coarser views is a refresh policy problem rather than an ingestion one.",
+      "description": "Buckets materialised in each rollup. The hierarchy is 1m, 5m, 1h, each built from the one before, so a gap only in the coarser views is a refresh policy problem, not ingestion.",
       "datasource": {
         "type": "postgres",
         "uid": "timescaledb"
@@ -531,7 +608,7 @@
       },
       "type": "stat",
       "title": "Audit Trail (never pruned)",
-      "description": "public.digital_thread. THE ONE RELATION HERE WITH NO RETENTION POLICY BY DESIGN -- it is append-only to every application role and migration 0003 blocks UPDATE and DELETE, so this number only ever rises. Watching it is the point of separating it from `metadata`.",
+      "description": "public.digital_thread, the one relation here with no retention policy: append-only, with UPDATE and DELETE blocked since migration 0003, so this number only rises.",
       "gridPos": {
         "h": 5,
         "w": 6,
@@ -581,7 +658,7 @@
       },
       "type": "stat",
       "title": "Raw Telemetry Compression",
-      "description": "Bytes after compression as a fraction of before, for the raw hypertable. Empty in TWO cases and they are not the same: TIMESCALE_COMPRESS_AFTER is 'never', or the policy is on and no chunk has aged past it yet. hypertable_compression_stats() reports NULL for both, so storage_footprint passes NULL through rather than inventing a zero -- 'compressed to nothing' and 'nothing compressed' must not render alike.",
+      "description": "Compressed bytes over uncompressed for the raw hypertable. Blank in two different cases: compression is off (TIMESCALE_COMPRESS_AFTER 'never'), or no chunk has aged past the policy yet. Blank is not zero.",
       "gridPos": {
         "h": 5,
         "w": 6,
@@ -634,7 +711,7 @@
       },
       "type": "stat",
       "title": "Raw Retention Horizon",
-      "description": "How far back the raw hypertable's chunks reach. Read from chunk BOUNDARIES in the catalog, not from min(time) -- a storage dashboard must not be the reason for a full scan of the historian. Should track timescaledb.retention.retainFor; a horizon well past it means the retention job is not running, or is holding chunks the cold archive has not verified.",
+      "description": "How far back raw chunks reach, from catalog boundaries rather than a scan. Should track timescaledb.retention.retainFor; well past it means retention is not running, or is waiting on the cold archive.",
       "gridPos": {
         "h": 5,
         "w": 6,
@@ -685,7 +762,7 @@
       },
       "type": "barchart",
       "title": "Storage by Tier",
-      "description": "Where the bytes are. 'Total stored is 4 GB' tells an operator nothing they can act on; '3.6 GB is raw telemetry retention will drop, 300 MB is an audit trail nothing will ever drop' tells them what to do next.",
+      "description": "Where the bytes are, by what will happen to them: raw telemetry that retention will drop, rollups that outlive it, and an audit trail nothing will ever drop.",
       "gridPos": {
         "h": 9,
         "w": 10,
@@ -735,7 +812,7 @@
       },
       "type": "table",
       "title": "Relations by Size",
-      "description": "Every relation, both databases, largest first. `chunks` and the compression columns are empty for platform tables because those are hypertable concepts -- NULL rather than zero, since a plain table is not 'compressed to nothing', it is one the question does not apply to. `collected_at` advancing is what proves the FDW read is live rather than a cached foreign scan.",
+      "description": "Every relation in both databases, largest first. `chunks` and the compression columns are blank for plain tables, since the question does not apply. `collected_at` advancing proves the FDW read is live, not cached.",
       "gridPos": {
         "h": 9,
         "w": 14,

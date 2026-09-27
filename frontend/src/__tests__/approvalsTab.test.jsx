@@ -14,7 +14,6 @@ import {
   locationNameMap
 } from '../components/tabs/ApprovalsTab'
 import { api } from '../api'
-import { PERMISSION_UUIDS } from '../constants'
 
 vi.mock('../api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }

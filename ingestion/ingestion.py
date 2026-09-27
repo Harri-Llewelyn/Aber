@@ -18,10 +18,11 @@ from metrics import start_metrics_server
 import registry
 from registry import (
     count, count_labelled, counter_snapshot, observe_uns_seconds, observe_write_seconds,
-    WRITE_SECONDS_BUCKETS,
+    WRITE_SECONDS_BUCKETS,  # noqa: F401 -- re-exported; test_metrics_endpoint reads it from here
 )
 from conformance import (
-    MetricConstraint, ModelledSchema, constraint_violations, enforceable_violation,
+    MetricConstraint, ModelledSchema,  # noqa: F401 -- re-exported; test_payload_conformance reads them
+    constraint_violations, enforceable_violation,
     modelled_constraints, payload_violations, violation_signature,
 )
 # capture.py owns the capture file format, so the daemon and the CLI cannot diverge.
@@ -88,8 +89,12 @@ REBIRTH_REQUEST_INTERVAL_SECONDS = int(os.getenv("REBIRTH_REQUEST_INTERVAL_SECON
 # looping births with fresh aliases would otherwise grow it without limit.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 
-# Capacity bound on each entity cache. The keys are ids seen on the wire, so a TTL alone is not a
-# bound: expiry is only checked on read. 1000 is above any plausible fleet.
+# Headroom on each entity cache for ids the directory does not hold: negative entries, and ids
+# seen on the wire before the refresher's next pass. The keys come from the wire, so a TTL alone
+# is not a bound: expiry is only checked on read. The directory refresher sizes each cache to the
+# directory PLUS this, so the fleet always fits; with the refresher off this is the whole
+# capacity. A fixed 1000 was measured failing at 1,200 devices: every entry was evicted within
+# its TTL and every message cost a PostgREST round trip (test-harness/README.md, #395).
 MAX_ENTITIES_PER_CACHE = int(os.getenv("MAX_ENTITIES_PER_CACHE", "1000"))
 
 # Negative entries share the TTL. The write sites in process_dbirth() set or pop the entry, so a
@@ -150,7 +155,7 @@ SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
 # -----------------------------------------------------------------------------
 supabase_client = None
 try:
-    from supabase import create_client, Client
+    from supabase import create_client
     if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
         # Names the daemon as the actor behind its writes; log_digital_thread_event() reads it from
         # the `request.headers` GUC and accepts only 'ingestion' / 'service' / 'migration'.
@@ -366,7 +371,7 @@ FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 # is also what gateways.sparkplug_group defaults to. Used only to describe the fallback in a log
 # line; resolution never assumes it -- a gateway is resolved on the (group, node) pair its own row
 # carries.
-DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
+DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "")
 
 class DirectoryUnavailable(Exception):
     """
@@ -457,6 +462,17 @@ class TTLCache:
                 self._data.popitem(last=False)
                 self.evictions += 1
             self._data[key] = (value, time.time())
+
+    def resize(self, maxsize):
+        """Change the capacity; shrinking evicts the oldest. Returns True if it changed."""
+        with self._lock:
+            if maxsize == self.maxsize:
+                return False
+            self.maxsize = maxsize
+            while len(self._data) > self.maxsize:
+                self._data.popitem(last=False)
+                self.evictions += 1
+            return True
 
     def pop(self, key, default=None):
         with self._lock:
@@ -1148,6 +1164,14 @@ def refresh_directory_caches():
     since the pass began is superseded by the directory's copy, which already carries that write.
     """
     devices = _directory_rows("devices", _DEVICE_COLUMNS)
+    # Sized before it is filled, so the pass never evicts what it is about to write. A device
+    # takes a key for each identity it has; the schema cache is keyed by the device's uuid.
+    device_keys = sum(1 for row in devices for column in ("reported_identity", "sparkplug_id")
+                      if row.get(column))
+    if _device_cache.resize(device_keys + MAX_ENTITIES_PER_CACHE):
+        logger.info("Device cache sized to %d: %d directory keys and %d of headroom.",
+                    _device_cache.maxsize, device_keys, MAX_ENTITIES_PER_CACHE)
+    _schema_cache.resize(len(devices) + MAX_ENTITIES_PER_CACHE)
     # reported_identity first so that a wire id that is one device's sparkplug_id and another's
     # reported_identity resolves as resolve_device() resolves it: sparkplug_id wins.
     for column, source in (("reported_identity", SOURCE_REPORTED_IDENTITY),
@@ -1161,6 +1185,7 @@ def refresh_directory_caches():
             _device_cache.set(key, cached)
 
     gateways = _directory_rows("gateways", _GATEWAY_COLUMNS)
+    _gateway_cache.resize(len(gateways) + MAX_ENTITIES_PER_CACHE)
     for row in gateways:
         key = row.get("sparkplug_id")
         if not key:
@@ -1171,13 +1196,6 @@ def refresh_directory_caches():
         # other than its registered one still takes the per-entity path, which warns about it.
         _gateway_cache.set((row.get("sparkplug_group") or "", key), cached)
 
-    if len(_device_cache) >= _device_cache.maxsize:
-        logger.warning(
-            "The directory holds more device ids (%d) than MAX_ENTITIES_PER_CACHE (%d): the "
-            "cache cannot hold the fleet and resolution falls back to per-entity lookups for "
-            "whatever it evicts. Raise MAX_ENTITIES_PER_CACHE.",
-            len(_device_cache), _device_cache.maxsize,
-        )
     return len(devices), len(gateways)
 
 def start_directory_refresher():
@@ -2760,6 +2778,11 @@ def parse_sparkplug_payload(msg):
                     metric.int_value = int(m['int_value'])
                 if 'datatype' in m and m['datatype'] is not None:
                     metric.datatype = int(m['datatype'])
+                # The metric's own reading time, which the protobuf path already honours: a
+                # report-by-exception refresh or a batched reading is filed when it was taken.
+                ts = m.get('timestamp')
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
+                    metric.timestamp = int(ts)
             return payload
         except Exception:
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)

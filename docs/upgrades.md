@@ -143,7 +143,10 @@ is publishing after it, having done nothing.** It does not re-enrol, re-register
 **The other half of the address is fixed too, by a different mechanism.** `spBv1.0/<group>/…` takes
 its group from `ingestion.sparkplugGroup`, which `0131` seeds into a read-only setting on the first
 boot and holds there: a later boot whose chart value differs aborts `db-init` rather than
-re-addressing the fleet quietly. So an upgrade cannot move a site's topics, and changing the group
+re-addressing the fleet quietly. **Since 1.0 the key has no default**, so a site whose values
+never named it (it took the chart's `Aber`) adds `ingestion.sparkplugGroup: Aber`, or whatever the
+Settings page shows under *Site*, before upgrading; the render refuses otherwise. So an upgrade
+cannot move a site's topics, and changing the group
 deliberately is a stated procedure in [`supabase/README.md`](../supabase/README.md#changing-it-deliberately)
 rather than an edit.
 

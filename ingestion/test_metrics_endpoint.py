@@ -47,7 +47,7 @@ class ExpositionTestCase(unittest.TestCase):
         about what is NOT exported has to be made about samples and never about the whole body.
         """
         text = registry.render() if text is None else text
-        return [l for l in text.splitlines() if l and not l.startswith("#")]
+        return [line for line in text.splitlines() if line and not line.startswith("#")]
 
     def counted(self, **flat):
         for name, value in flat.items():
@@ -220,7 +220,7 @@ class ExpositionTestCase(unittest.TestCase):
         exported = self.counted(messages_total=12, messages_ddata=12)
         self.assertNotIn("aber_ingestion_messages_total 12.0", exported)
         self.assertEqual(
-            1, len([l for l in exported if l.startswith("aber_ingestion_messages_total")]))
+            1, len([line for line in exported if line.startswith("aber_ingestion_messages_total")]))
         # And it still reads back under its flat name, which is what the STATS log line reports.
         self.assertEqual(12, registry.counter_snapshot()["messages_total"])
 
@@ -277,7 +277,7 @@ class ExpositionTestCase(unittest.TestCase):
         # quiet stack is indistinguishable from a broken exporter.
         body = registry.render()
         self.assertTrue(body.endswith("\n"))
-        self.assertEqual([], [l for l in self.lines(body) if not l.endswith(" 0.0")])
+        self.assertEqual([], [line for line in self.lines(body) if not line.endswith(" 0.0")])
 
 
 # =================================================================================================
@@ -294,7 +294,8 @@ class EndpointTestCase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.shutdown(); cls.server.server_close()
+        cls.server.shutdown()
+        cls.server.server_close()
 
     def get(self, path):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}") as r:
@@ -333,7 +334,8 @@ class EndpointTestCase(unittest.TestCase):
                 )
             self.assertEqual(500, ctx.exception.code)
         finally:
-            server.shutdown(); server.server_close()
+            server.shutdown()
+            server.server_close()
 
     def test_a_port_that_cannot_be_bound_returns_None_rather_than_raising(self):
         """
@@ -369,7 +371,8 @@ class EndpointTestCase(unittest.TestCase):
             self.assertIsNotNone(server)
             self.assertGreater(server.server_address[1], 0)
         finally:
-            server.shutdown(); server.server_close()
+            server.shutdown()
+            server.server_close()
 
 
 # =================================================================================================
@@ -682,7 +685,7 @@ class DirectoryUnavailableDropTestCase(unittest.TestCase):
         out = registry.render()
         self.assertIn(
             'aber_ingestion_messages_dropped_total{reason="dbirth_directory_unavailable"} 1.0',
-            [l for l in out.splitlines() if l and not l.startswith("#")],
+            [line for line in out.splitlines() if line and not line.startswith("#")],
         )
 
 

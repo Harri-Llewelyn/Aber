@@ -3,7 +3,10 @@
   them -- not assembled from commit subjects. docs/releases.md promises these headings, so keep
   them and their order; delete a section only when it is genuinely empty.
 
-  `gh release create v<version> --notes-file <this, filled in>`
+  release.yml opens the release as a DRAFT with this as its body and aber-<version>-sbom.tar.gz
+  attached. Fill it in and publish:
+
+  `gh release edit v<version> --draft=false --notes-file <this, filled in>`
 -->
 
 ## Action required before upgrading
@@ -38,5 +41,6 @@ ghcr.io/harri-llewelyn/aber/aber  <version>   (chart)
 
 <!--
   The eleven images publish at the same version. The release workflow's job summary lists them; paste
-  it here so a pull can be checked against the release.
+  it here so a pull can be checked against the release. The DIGESTS file inside the attached
+  aber-<version>-sbom.tar.gz names each by the digest its signature is over.
 -->

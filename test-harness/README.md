@@ -127,14 +127,15 @@ feel like, and which is reached first.
 
 | Ceiling | Value | What happens at it |
 | :--- | :--- | :--- |
-| `MAX_ENTITIES_PER_CACHE` | 1000 per cache | Beyond it the directory refresher evicts what it just filled, and the hot path pays a PostgREST round trip per message. The refresher warns; `aber_ingestion_cache_evictions_total` counts it |
+| `MAX_ENTITIES_PER_CACHE` | 1000 per cache, beyond the directory | Headroom for ids the directory does not hold. The refresher sizes each cache to the directory plus this, so the fleet is not a ceiling (#395); ids the directory lacks are. `aber_ingestion_cache_evictions_total` counts what it evicts |
 | `TELEMETRY_QUEUE_MAX_MESSAGES` | 10 000 | The callback thread blocks for 5 s, then drops the DDATA as `reason="write_queue_full"` |
 | `TELEMETRY_BATCH_MAX_MESSAGES` | 500 | One transaction carries at most this many messages, so batching stops helping above it |
 | `DIRECTORY_REFRESH_SECONDS` | 5 | The whole directory is read this often; its cost grows with the fleet, on a thread the hot path does not share |
 
-There are **three** caches on that bound — device, gateway and schema — counted separately, so 1000
-is per cache rather than for all of them. A fleet of 8 gateways and 50 devices each sits well
-inside it; 8 × 200 does not.
+There are **three** caches — device, gateway and schema — each sized on every refresher pass to
+what the directory holds plus that headroom: a key per device identity (a device with a
+reported identity takes two), a row per gateway, and a device per schema entry. Until #395 the
+capacity was a fixed 1000, and *Device count* below is what that did to a fleet past it.
 
 The schema cache is the one to watch on a synthetic fleet, because the fixture attaches no schema
 to anything. `AUDIT_PAYLOAD_REJECTIONS` is on by default, so every device's constraints are looked
@@ -231,7 +232,7 @@ because a 500-message transaction takes 330–400 ms and the queue behind it is 
 16 vCPU** (TimescaleDB 0.30, the generator 0.18, the daemon 0.11). Fifteen cores idle while the
 queue climbed. More CPU, more nodes and a bigger historian container will not move this knee; a
 second writer, or a commit that does not wait, would. That is a design decision, recorded here and
-not made here.
+not made here. A quarter of the CPU did not move it either: see *On the minimum profile*.
 
 **Beyond it the stack loses data with no counter to show it.** Telemetry is QoS 0. When the
 daemon's MQTT thread falls behind, Mosquitto sheds for that subscriber, and the message never
@@ -240,6 +241,108 @@ through every run above, including the one that lost 56,871 messages in 75 s. Th
 the broker exporter's `broker_publish_messages_dropped`, which nothing in the stack alerts on.
 A growing queue is visible and recoverable; this is neither. It began at 1250 — 1.8 % of the
 soak's traffic — well before the daemon's queue was anywhere near its 10,000 cap.
+
+#### On the minimum profile
+
+Measured 2026-09-23 (#409) on a node capped to the documented minimum: a k3d node created with
+`--servers-memory 8g`, then `docker update --cpus=4`. The same chart, historian tuning, fleet
+and plan as above, with the daemon carrying #395's cache sizing. The generator still shares the
+node, so it takes its CPU from the four.
+
+**10 metrics a message**, the ramp:
+
+| target | published/s | received/s | written/s | rows/s | undelivered | queue end | msg/txn | write mean | p95 | verdict |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| 100 | 100 | 100 | 100 | 1,000 | 0 | 0 | 4 | 6.21 ms | 10 ms | sustained |
+| 250 | 250 | 250 | 250 | 2,500 | 1 | 0 | 4 | 4.77 ms | 10 ms | sustained |
+| 500 | 500 | 500 | 500 | 5,001 | 3 | 0 | 4 | 4.43 ms | 10 ms | sustained |
+| 1000 | 1000 | 1000 | 1000 | 9,995 | 11 | 6 | 10 | 9.21 ms | 25 ms | sustained |
+| 1250 | 1250 | 1250 | 1250 | 12,501 | 0 | 3 | 31 | 24.53 ms | 100 ms | sustained |
+| 1500 | 1500 | 1500 | 1473 | 14,732 | 0 | 2,924 | 500 | 336.92 ms | 500 ms | queue growing |
+| 1750 | 1750 | 1471 | 1440 | 14,398 | 20,953 | 10,000 | 500 | 343.03 ms | 500 ms | queue growing; broker shed 16,654 |
+| 2000 | 2000 | 1438 | 1433 | 14,331 | 42,191 | 10,000 | 500 | 344.0 ms | 500 ms | queue growing; broker shed 43,016 |
+
+and a 20-minute soak at 1250: **sustained**, 1,250 written a second, queue 21 at the end, write
+mean 24.3 ms, 8 undelivered.
+
+**The knee did not move.** Up to 1,000 every step's write mean is within 0.6 ms of the 16 vCPU
+ramp, 1,250 holds its 90 s on both, the queue grows at 1,500, and the broker sheds from 1,750.
+The 1250 soak held here where it failed there, and that is not the smaller node doing better:
+the writer's duty cycle read 0.98–0.99 at 1,250 on both, so whether that rate lasts 20 minutes
+turns on the virtual disk's fsync latency on the day. 1,000 msg/s is the figure for both
+profiles. CPU was not what broke: the node averaged 2.5 of its 4 vCPU through the 1250 soak,
+generator included, and peaked at 3.0.
+
+**2 metrics a message**, standing in for report by exception (#400), where a DDATA carries only
+what changed:
+
+| target | published/s | received/s | written/s | rows/s | undelivered | queue end | msg/txn | write mean | p95 | verdict |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| 100 | 100 | 100 | 100 | 200 | 0 | 0 | 4 | 3.12 ms | 5 ms | sustained |
+| 250 | 250 | 250 | 250 | 500 | 0 | 0 | 4 | 2.79 ms | 5 ms | sustained |
+| 500 | 500 | 500 | 500 | 1,000 | 0 | 0 | 4 | 2.78 ms | 5 ms | sustained |
+| 1000 | 1000 | 1000 | 1000 | 2,000 | 0 | 7 | 4 | 3.29 ms | 5 ms | sustained |
+| 1250 | 1250 | 1250 | 1250 | 2,500 | 0 | 7 | 6 | 4.26 ms | 10 ms | sustained |
+| 1500 | 1500 | 1500 | 1500 | 3,000 | 0 | 1 | 7 | 4.55 ms | 10 ms | sustained |
+| 1750 | 1750 | 1750 | 1750 | 3,500 | 1 | 7 | 9 | 4.92 ms | 10 ms | sustained |
+| 2000 | 2000 | 2000 | 2000 | 4,000 | 3 | 16 | 11 | 5.35 ms | 10 ms | sustained |
+
+and a 20-minute soak at 2000: **sustained**, queue 24 at the end, write mean 5.04 ms, 28
+undelivered. The node peaked at 3.3 of its 4 vCPU.
+
+Above 2,000, a second ramp on 2026-09-24, the same node with the fleet provisioned afresh:
+
+| target | published/s | received/s | written/s | rows/s | undelivered | queue end | msg/txn | write mean | p95 | verdict |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| 2000 | 2000 | 2000 | 2000 | 4,000 | 12 | 0 | 9 | 4.09 ms | 10 ms | sustained |
+| 2500 | 2500 | 2500 | 2500 | 5,000 | 0 | 9 | 18 | 6.99 ms | 25 ms | sustained *(90 s only — see the soak)* |
+| 3000 | 3000 | 2723 | 2588 | 5,176 | 20,802 | 9,690 | 45 | 16.86 ms | 50 ms | queue growing |
+
+and a 20-minute soak at 2500: **queue growing**, 0 → 9,538, with 2,454 written a second at a
+write mean of 7.77 ms and the broker shedding 39,184 messages (1.3 %). The ramp's steps above
+3,000 started on the backlog the 3,000 step left and measure nothing, and a test run on the host
+overlapped the 3,000 step, so that row says only that the queue grew.
+
+**For this shape 2,000 msg/s is the sustained figure and 2,500 the knee**: twice the messages of
+the 10-metric figure, but 4,000 rows/s against 10,000. A message costs the broker, the daemon's
+decode and the generator the same whatever it carries. Through the failed soak the writer's duty
+cycle read 0.95, and the node's CPU averaged 3.3 of its 4 vCPU, reaching the cap, against 2.5 at
+the 10-metric knee. So at this shape the minimum profile runs short of CPU and of writer at once,
+and which gives first was not separated. On disk a row took 331–339 bytes at 2 metrics and
+361–366 at 10.
+
+#### Device count
+
+Measured 2026-09-23 (#395) at a fixed 100 msg/s for 300 s, so the rate knee stays out of the
+way: 8 gateways, fleets of 800 to 1,600 devices, the caches at their old fixed capacity of 1000.
+Idle, the stack makes 1.3 PostgREST requests a second.
+
+| Devices | Births | PostgREST req/s | Cache entries, device / schema | Evicted in the run, device / schema |
+| ---: | ---: | ---: | ---: | ---: |
+| 800 | 67/s | 3.7 | 813 / 804 | 0 / 0 |
+| 1,000 | 125/s | 12.1 | 1,000 / 1,000 | 0 / 4 |
+| 1,200 | 120/s | **117** | 1,000 / 1,000 | 60,152 / 31,492 |
+| 1,600 | 100/s | **147** | 1,000 / 1,000 | 103,845 / 30,819 |
+
+**Past the wall every message paid a directory round trip, and the rate envelope went with
+it.** 100 msg/s still held. At 1,600 devices the rate steps wrote 207, 227 and 256 msg/s of 250,
+500 and 1,000 offered, the broker shedding the rest (2,134, 25,346 and 72,870 messages) while
+the callback thread waited on PostgREST: a quarter of the 1,000 msg/s measured at 400 devices.
+The births were never the problem: 100 to 132 a second at every size.
+
+The refresher now sizes each cache to the directory before filling it. The same 1,600 devices
+afterwards:
+
+| Offered | Written | PostgREST req/s | Evicted | Write mean |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 msg/s | 100 | 16.6 (the schema lookups and the births) | 0 | 5.0 ms |
+| 250 msg/s | 250 | | 0 | 4.9 ms |
+| 500 msg/s | 500 | 7.3 across the three steps | 0 | 4.6 ms |
+| 1,000 msg/s | 1,000 | | 0 | 15.1 ms |
+
+Device count now costs memory and the refresher's read, one request per 1,000 rows every 5 s,
+and not throughput. A fleet whose devices report their own identity takes two device-cache
+keys each, so under the old cap it would have met the wall at 500.
 
 #### Storage
 
@@ -257,16 +360,12 @@ with the rollups beside it.
 
 #### Not measured
 
-* **Device count.** 400 devices birthed in 4–8 s (51–101 births/s) every time and the cache
-  evicted nothing; the sweep towards the 1,000-per-cache wall was not run.
-* **Metric count.** 10 per message throughout (5 in the shakedown). Rows per message is the
-  multiplier that turns 1,000 msg/s into 10,000 rows/s, and it was not varied.
+* **Metric counts other than 10 and 2**, and the 2-metric shape on anything but the minimum
+  profile, where its knee meets the CPU cap and the writer together.
 * **Compressed storage**, for the reason above. It has since been measured on synthetic telemetry
   shaped like this (8.4 bytes a row, an upper bound on smooth values), with the rollups' bytes a
   row beside it, in `deploy/k8s/README.md`, *What grows*; a load run's own chunk still is not.
-* **Anything on the production hardware profile.** The 4 vCPU / 8 GiB minimum in
-  `deploy/k8s/README.md` was not loaded; this node has four times the CPU and the knee still did
-  not touch it.
+* **The recommended profile.** 8 vCPU / 16 GiB sits between the two nodes measured, which agree.
 
 #### What the run found in the harness
 

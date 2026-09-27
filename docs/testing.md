@@ -37,6 +37,9 @@ python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
+# The JSON encoding the appliance publishes: a metric's own timestamp survives the parse, so a
+# report-by-exception refresh or a batched reading is filed when it was taken.
+python ingestion/test_json_payload.py
 python ingestion/test_mqtt_tls.py
 # The Directory's MQTT half. Mostly assertions about what it does NOT do: the publisher is
 # fed from the enrolment record, so one test reads directory_publish.py's own source and
@@ -290,6 +293,10 @@ python supabase/migrations/test_system_settings_rls.py
 # the trigger refuses it -- a read-only control in the browser alone would be a suggestion. Also
 # that gateways.sparkplug_group now defaults to the setting rather than the old literal.
 python supabase/migrations/test_sparkplug_group_setting.py
+# The Directory's Version column (0007). The chart's component -> image map reaches every row it
+# manages, clears a component the chart stops deploying, leaves other registrations alone, and the
+# writer is callable by db-init only.
+python supabase/migrations/test_directory_images.py
 # Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
 # property is in the function body rather than in a grant, so a gate that stops working fails open
 # with the page looking exactly as it should. Both directions per role, and `anon` stopped by the
@@ -676,16 +683,20 @@ never on a branch:
 | Job | Covers |
 | :--- | :--- |
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
-| **build-images** | The eight independent images, in parallel, pushed to GHCR |
-| **build-ingestion-chain** | `ingestion`, then `test-runner` **on the same runner** — the latter is built `FROM` the former, so the base must be in the local image store |
-| **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back |
+| **build-images** | The eight independent images, in parallel, each pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
+| **build-ingestion-chain** | `ingestion`, then `test-runner` `FROM` it, as one `docker buildx bake` of `docker-bake.hcl`; built to OCI archives first so the attestations are asserted before (and without) a push, then pushed, signed and verified |
+| **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back, sign the pushed digest and verify it |
+| **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
 
 The tag is the single place the version is written — it stamps the ten image tags, the chart
 `version` and `appVersion` in one run. **Images publish before the chart**, because a chart naming
 images that do not exist yet does not fail: `helm install` succeeds and the workloads sit in
-`ImagePullBackOff` while everything else comes up healthy. Installation, the one-time GHCR
-visibility step, and what a release deliberately does *not* do (no `latest`, no arm64, no signing)
-are in [`deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release).
+`ImagePullBackOff` while everything else comes up healthy. **Nothing publishes unsigned or
+unattested**: [`sign-and-verify.sh`](../.github/scripts/sign-and-verify.sh) runs the consumer's
+verification inside the release and refuses an image whose SBOM or provenance did not arrive.
+Installation, the one-time GHCR visibility step, what is signed and how, and what a release
+deliberately does *not* do (no `latest`, no arm64) are in
+[`deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release).
 
 **What the release promises a site** — the supported window, what makes a version major, the
 deprecation path and the release-note headings — is [`releases.md`](releases.md). This section is

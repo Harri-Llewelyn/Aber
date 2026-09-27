@@ -609,9 +609,13 @@ what makes the substitution safe.
 
 ## 10. Adding devices — nothing is pre-registered
 
-The sample flow includes an **▶ ADD YOUR OWN DEVICE** inject. Click it and the device publishes a
-Sparkplug `DBIRTH`; it then appears in the dashboard's **quarantine queue** as `UNKNOWN_DEVICE`, and
-its data is dropped until an operator approves it.
+The sample flow includes a **▶ SEND A DEVICE READING** inject. Click it and an example device,
+`press-01`, publishes a Sparkplug `DBIRTH`; it then appears in the dashboard's **quarantine queue**
+as `UNKNOWN_DEVICE`, and its data is dropped until an operator approves it. Your own flows send
+readings the same way, to the **publish by exception** node, which publishes only the metrics that
+moved and republishes every metric every 120 seconds as the device's proof of life.
+When the platform notices a lost message it asks for a rebirth, and the appliance answers with a
+birth of the node and every device at its last values.
 
 That is the intended path. There is no device registration step and no API to call from the flow — the
 gateway announces, the platform quarantines, a human approves.
