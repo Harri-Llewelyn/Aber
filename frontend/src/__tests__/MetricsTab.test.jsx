@@ -235,13 +235,17 @@ describe('Deprecated Metrics card', () => {
     expect(within(deprecatedTable()).getByText('temperature')).toBeTruthy()
   })
 
-  it('disables Restore without the archive permission, as Deprecate is', async () => {
-    render(<MetricsTab showToast={vi.fn()} hasPermission={(p) => p !== PERMISSION_UUIDS.ARCHIVE_MANAGE} />)
+  it('disables Restore and Deprecate for a Shopfloor Manager, who holds archive:manage and not schema:manage', async () => {
+    render(<MetricsTab showToast={vi.fn()} hasPermission={(p) => p !== PERMISSION_UUIDS.SCHEMA_MANAGE} />)
     await waitFor(() => expect(deprecatedTable()).toBeTruthy())
 
     const restore = within(deprecatedTable()).getByRole('button', { name: /Restore/ })
     expect(restore.disabled).toBe(true)
     expect(restore.title).toBe('Requires Admin permissions')
+    await waitForCatalog()
+    const deprecate = within(catalogTable()).getAllByRole('button', { name: /Deprecate/ })
+    expect(deprecate.length).toBeGreaterThan(0)
+    for (const button of deprecate) expect(button.disabled).toBe(true)
   })
 })
 
