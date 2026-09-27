@@ -7,8 +7,8 @@ import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, I
 /**
  * One box that answers three questions: where is the page called X (the nav), where is the card or
  * setting called X (`searchIndex.js`), and what is this UUID (resolved against the database, and
- * always also offered to the Digital Thread, which knows twelve kinds where `resolveId` reads
- * five). A UUID is detected, not declared: nothing in the static index can look like one. Names
+ * always also offered to the Digital Thread, which knows every kind in DIGITAL_THREAD_ENTITY_TYPES
+ * where `resolveId` reads five). A UUID is detected, not declared: nothing in the static index can look like one. Names
  * are searched too, because the page-level box can only be used by somebody who knows which page
  * the thing is on. The estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the
  * page's own box works with a set.
@@ -110,9 +110,9 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     // only effect.
     //
     // THE THREAD IS OFFERED WHETHER OR NOT A PROBE ANSWERED. `resolveId` reads five tables, and
-    // the Digital Thread records twelve kinds -- a setting, a backup, a proposal, a person had a
+    // the Digital Thread records more kinds -- a setting, a backup, a proposal, a person had a
     // copyable id in the drawer and nowhere in the app that would take it. The thread's own search
-    // matches `entity_id` for every kind, so this one row is the answer for all seven it cannot
+    // matches `entity_id` for every kind, so this one row is the answer for every kind it cannot
     // name, and it stays offered for the five it can: an asset's history is the other question
     // somebody pasting an id is asking.
     if (looksLikeId) {

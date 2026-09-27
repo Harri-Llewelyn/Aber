@@ -1490,7 +1490,7 @@ never alive.
 
 **The event drawer hands a reader three copyable ids and only one of them went anywhere.** Entity ID
 had a single consumer in the platform — the global search's `resolveId`, which probes five tables
-(areas, cells, gateways, devices, schemas) while the Digital Thread records **twelve** kinds. So a
+(areas, cells, gateways, devices, schemas) while the Digital Thread recorded **twelve** kinds. So a
 setting, a backup, a backup job, a proposal, a service identity or a person had a copyable id in the
 drawer and nothing in the app that would take it. Mutation ID and the transaction had no consumer at
 all: no filter, no search, no RPC argument.

@@ -330,11 +330,12 @@ describe('the palette', () => {
 
     /**
      * THE ID HAD ONE CONSUMER AND IT COVERED FIVE KINDS. `resolveId` probes areas, cells,
-     * gateways, devices and schemas; the Digital Thread records twelve, so the copyable Entity ID
-     * in its drawer was a dead end for a setting, a backup, a proposal or a person. The thread's
-     * own search matches `entity_id` whatever kind carries it, so this row is the answer for all
-     * seven -- and it is offered for the other five too, because "what happened to this" is the
-     * second question somebody pasting an id is asking.
+     * gateways, devices and schemas; the Digital Thread records every kind in
+     * DIGITAL_THREAD_ENTITY_TYPES, so the copyable Entity ID in its drawer was a dead end for a
+     * setting, a backup, a proposal or a person. The thread's own search matches `entity_id`
+     * whatever kind carries it, so this row is the answer for the rest -- and it is offered for
+     * the five too, because "what happened to this" is the second question somebody pasting an id
+     * is asking.
      */
     it('offers the Digital Thread for an id no asset probe could name', async () => {
       api.resolveId.mockResolvedValue([])
