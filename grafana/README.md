@@ -70,6 +70,80 @@ the CA rule's thirty days against `CERT_EXPIRY_WARN_DAYS` and the archive rule's
 `ARCHIVE_BACKLOG_TOLERANCE_DAYS`; `check-mirror-drift.mjs` holds the 90s staleness threshold
 between `gateway_status` and the frontend.
 
+## Delivery: the contact point and the policy tree
+
+**The contact point file is a template.** Like `datasources.template.yml`, an initContainer
+substitutes the `__PLACEHOLDER__` forms with `sed` into an emptyDir mounted at
+`/etc/grafana/provisioning/alerting`, and Grafana runs its stock `/run.sh`. The substituter
+asserts that no `__UPPER_SNAKE__` marker survives, because an unsubstituted placeholder reaching
+Grafana would be a contact point that authenticates with the literal string, which the webhook
+rejects with 401, reported by Grafana as a delivery failure buried in its own logs, several steps
+from the cause.
+
+**Grafana is not given `service_role`, and that is the whole point of the file.** The obvious way
+to let Grafana write to Supabase is to hand it the service-role key. That key bypasses RLS
+entirely and can rewrite `digital_thread`, and this stack has already corrected exactly this shape
+once: Grafana used to connect to the historian as the `postgres` superuser, a service fronted by
+browser SSO holding the credential that owns the database, and the fix was the read-only
+`grafana_reader` role. Handing it `service_role` would be strictly worse than the credential that
+was removed, and on Kubernetes the provisioning file is mounted from a Secret precisely so this one
+is not readable by anything with namespace read. So Grafana holds a narrow bearer secret that
+authorises one thing, recording an alert. The edge function checks it and then uses its own
+service-role client internally, the same shape `nodered_webhook_jwt_secret` gives the quarantine
+webhook.
+
+**Two credentials are in play, and they do different jobs.** `apikey` in a request header gets
+past the gateway: `/functions/v1/` is gated, only four routes are exempt and this is not one of
+them, so without it the request is refused at the gateway and never reaches the function. The
+publishable key is public by construction, shipped to every browser, and the gateway strips it on
+this route, so it is not forwarded upstream either. `Authorization: Bearer` is the secret the
+function checks, and it is the one that matters. They are kept separate because they authenticate
+at different layers, and conflating them is how Grafana ends up holding a credential broader than
+"may record an alert".
+
+**The `apikey` moved out of the query string**, and the reason it was ever there has expired.
+Grafana's webhook integration used to expose exactly one header pair (`authorization_scheme` and
+`authorization_credentials`), which is spent on the bearer secret, so the only remaining place for
+a second credential was the URL. A query-string credential is logged: it lands in Grafana's own
+delivery log and in the access log of anything between Grafana and the gateway, a poor place for a
+value to sit even when that value is public. Grafana's `headers` map, on 11.6 or newer, removed
+the constraint. If this ever runs on a Grafana without `headers`, the symptom is specific: Grafana
+ignores the unknown setting, the gateway refuses the request with 401 for a missing `apikey`, the
+notification fails in Grafana's delivery log while the rule itself still reports correctly, and
+nothing appears in the edge function's log because nothing reached it.
+
+**`maxAlerts: 0` and resolved messages on.** Zero means no cap; a cap silently truncates the alert
+array, and a multi-dimensional rule over six devices can legitimately deliver six instances in one
+notification, so dropping some would leave the dashboard showing a subset with nothing indicating
+that. Resolved notifications are the entire mechanism by which the dashboard's toast clears and
+the Topbar pill decrements; Grafana defaults them on, and the file says so because switching them
+off would leave every alert latched on in the UI forever with the rule showing Normal.
+
+**One route.** There is exactly one consumer, the dashboard, so a tree with per-severity branches
+would branch on a distinction nothing downstream acts on differently. `severity` still travels as
+a label and lands in `platform_alerts.severity`, where the UI colours on it; routing is not the
+place to encode it. The file replaces the default policy tree for org 1, which is what makes it
+deterministic: Grafana ships a root route pointing at an email contact point with no SMTP
+configured, and leaving it in place means every alert also generates a delivery failure in
+Grafana's log.
+
+**The three timers.** `group_wait: 5s` is how long the first notification for a new group is held,
+so a multi-dimensional rule that trips three devices in one evaluation delivers one webhook
+carrying three instances rather than three webhooks; it is comfortably inside the fastest rule's
+1m interval, so it costs no perceptible latency while still batching. `group_interval: 10s` is the
+minimum gap before a group that has already notified sends again because its membership changed,
+a second device joining the same excursion; short, because the dashboard is a live operational
+view and a device entering alarm is precisely the thing not to sit on. `repeat_interval: 12h` is
+re-notification for something still firing and unchanged, long on purpose: the dashboard holds
+state, `platform_alerts` keeps the occurrence open and the pill keeps counting it, so a repeat
+delivers nothing new and only rewrites the same row. The mechanism exists to recover from a lost
+notification, and twelve hours is the interval at which that recovery is worth having without
+noise; a short repeat would rewrite every open alert's row continuously and make the realtime feed
+chatter. `group_by` is not set, so Grafana groups by every label, which is right for a
+multi-dimensional rule: grouping by alertname alone would batch six devices' instances into one
+group sharing one repeat timer, and a device that resolved would be indistinguishable from one
+that never fired.
+
 ## Platform Conditions
 
 The stack's own health, not the machines'. Every rule reads one row per condition from
