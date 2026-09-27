@@ -3410,6 +3410,40 @@ routing and authentication surface against a reviewed inventory, because `valida
 root by convention; the appliance's files reach the functions as a generated module under
 `_shared/`), so a rollback rolls the functions back with it.
 
+### What the file relies on that Envoy does not say
+
+The template's own comments state each route and filter; the semantics they depend on are these,
+because each one produces a stack that looks fine and is not when it is forgotten.
+
+- **Route order is first-match.** `/storage/v1/object/public/` precedes `/storage/v1/`, and the
+  userinfo paths precede `/functions/v1/`, so an exemption is a route placed before the gate.
+- **Realtime keeps its key and rewrites its Host.** The Realtime client puts the key in the
+  WebSocket URL's query string, so a header-only check leaves Realtime permanently 401; it also
+  parses the key, so the gateway replaces it with the JWT it stands for rather than stripping it.
+  Realtime reads its tenant from the leading Host label, so `host_rewrite_literal` is required.
+- **Credential hiding is per route.** Every other route strips the key from both the header and
+  the query string, because a query-string `apikey` reaching PostgREST is parsed as a column filter
+  (`PGRST100`).
+- **The Directory routes keep their path.** `main/index.ts` reads the first segment to pick a
+  worker, so the rewrite carries `/fplus-directory/` in front of the original path.
+- **SDS takes one secret per file.** A path config source carrying two resources is accepted at
+  boot and rejected at runtime, so each login listener reads its client secret and its HMAC secret
+  from separate files.
+- **The session cap is per door.** `default_refresh_token_expires_in: 3600s` matches
+  `GOTRUE_JWT_EXP` and re-derives who is at the keyboard hourly; it is set on the two login
+  listeners rather than stack-wide, which would also expire the wall-mounted dashboards.
+- **Cookies are scoped by host, not port.** The forge listener renames every cookie the `oauth2`
+  filter sets, because on `localhost` its door and Studio's would otherwise sign each other out.
+- **`%REQ_WITHOUT_QUERY%` is an extension.** The login listeners log the path without its query
+  because `/oauth2/callback` carries the authorization code there, and the formatter has to be
+  registered in the access log or Envoy refuses the whole configuration.
+- **The placement filter fails open on a 5xx.** `forge-membership` runs as `ext_authz` with
+  `failure_mode_allow`: a function that cannot answer lets the request through, because the role
+  in the token was already admitted by RBAC; a 403 and a 302 (a dead session, to
+  `/oauth2/signout`) are honoured, and only the `Authorization` header travels to it.
+- **Clusters are `STRICT_DNS`.** Envoy re-resolves on its refresh interval, and a recreated
+  container changes address.
+
 ### The second listener, which is Studio's login (`0081`)
 
 **The gateway carries a second listener on `8001`, and everything above describes the first.** They
