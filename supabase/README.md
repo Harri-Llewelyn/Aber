@@ -847,10 +847,12 @@ and no sweep is needed.
 
 ### What is stale, and what is merely quiet (`0029`, `0061`)
 
-`platform_health` is the one view Grafana's platform rules read, and its `gateway_stale` arm is the
-only thing standing between an appliance going quiet and somebody being told. It is therefore also
-the arm most easily ruined, and it was: `0029` excluded archived gateways and nothing else, which
-was correct until `0060` seeded a gateway that is *never* expected to heartbeat.
+`platform_health` is the view most of Grafana's platform rules read (the others read
+`gateway_health`, `backup_health` and `digital_thread_partition_health`), and its `gateway_stale`
+arm is the only thing standing between an appliance going quiet and somebody being told. It is
+therefore also the arm most easily ruined, and it was: `0029` excluded archived gateways and
+nothing else, which was correct until `0060` seeded a gateway that is *never* expected to
+heartbeat.
 
 **Nothing publishes as the `Playback` gateway until a playback runs**, which is deliberate — it is
 why `start_playback_job()` gates on credential possession rather than on `status = 'ONLINE'`. So it
@@ -1518,7 +1520,7 @@ never alive.
 
 **The event drawer hands a reader three copyable ids and only one of them went anywhere.** Entity ID
 had a single consumer in the platform — the global search's `resolveId`, which probes five tables
-(areas, cells, gateways, devices, schemas) while the Digital Thread records **twelve** kinds. So a
+(areas, cells, gateways, devices, schemas) while the Digital Thread recorded **twelve** kinds. So a
 setting, a backup, a backup job, a proposal, a service identity or a person had a copyable id in the
 drawer and nothing in the app that would take it. Mutation ID and the transaction had no consumer at
 all: no filter, no search, no RPC argument.
@@ -3098,7 +3100,9 @@ modules djwt imports by content hash.
   hand, when edge-runtime's embedded Deno does: a lock written by another Deno can be in a format
   the build cannot read.
 - `npm run lint:deno` enforces `no-import-prefix`, so a specifier written into an import instead of
-  `deno.json` fails lint.
+  `deno.json` fails lint. It also runs `deno check --frozen` over every entrypoint with the
+  Dockerfile's `denoland/deno` image, so a type error, or an import the lock does not cover, fails
+  it too.
 
 ### `approve_quarantined_device()`
 

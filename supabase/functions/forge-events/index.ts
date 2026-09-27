@@ -76,7 +76,7 @@ function hex(bytes: ArrayBuffer | Uint8Array): string {
   return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function hmacSha256Hex(secret: string, body: Uint8Array): Promise<string> {
+async function hmacSha256Hex(secret: string, body: BufferSource): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -95,7 +95,7 @@ function sameHex(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function signatureIsValid(presented: string | null, body: Uint8Array, secret: string): Promise<boolean> {
+export async function signatureIsValid(presented: string | null, body: BufferSource, secret: string): Promise<boolean> {
   if (!presented) return false;
   return sameHex(presented.trim().toLowerCase(), await hmacSha256Hex(secret, body));
 }

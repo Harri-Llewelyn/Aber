@@ -145,14 +145,14 @@ export default async function handler(req: Request): Promise<Response> {
 
   // Authorisation: user_roles, read with the service key -- a lookup, not a decision made by the
   // caller's own access. A failed lookup is not evidence of a role; it is a 5xx below.
+  // A const, so the isAdmitted() result held in `admitted` below narrows it to a team role; a `let`
+  // does not narrow through a check stored in a variable.
   const asService = serviceRoleClient(supabaseUrl, serviceKey);
-  let role: string | null;
-  try {
-    role = await resolveUserRole(asService, user.id);
-  } catch (err) {
+  const role = await resolveUserRole(asService, user.id).catch((err) => {
     console.error(`forge-membership: role lookup threw for ${user.id}: ${err instanceof Error ? err.message : err}`);
-    return json({ error: "Could not resolve the caller's role" }, 503);
-  }
+    return undefined;
+  });
+  if (role === undefined) return json({ error: "Could not resolve the caller's role" }, 503);
 
   const cfg = forgeConfig();
   if (!cfg) {

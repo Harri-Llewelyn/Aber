@@ -58,17 +58,19 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/sparkplugDatatype.js` | `functions/_shared/aas/sparkplugToXsd.ts` |
 | `utils/model3d.js` | `functions/_shared/aas/model3dContentType.ts` |
 | `utils/standards.js` (`mtconnectSemanticId()`) | `mtconnect_vocabulary.semantic_id`, as `0002` seeds it |
+| `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
+| `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 
-All nine are now guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or
-`test_aas_export.py`. `sparkplugId.js` matters most — it derives an **immutable wire identity**, so
-a divergence cannot be corrected in place.
+Each is guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or `test_aas_export.py`.
+`sparkplugId.js` matters most — it derives an **immutable wire identity**, so a divergence cannot
+be corrected in place.
 
 `check-mirror-drift.mjs` reads the **whole applied migration chain in filename order and takes the
 last definition of each function**, because migrations are replayed on every boot with no ledger:
-`ensure_gateway_status_view()` is declared in `0001` and redeclared in `0025`, and for a while the
-guard was reading the dead one.
+`ensure_gateway_status_view()` was declared in `0001` and redeclared in archived `0025`, and for a
+while the guard was reading the dead one.
 
-A tenth mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
+One more mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
 contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by four implementations in
 three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 

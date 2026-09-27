@@ -82,8 +82,10 @@ class DigitalThreadPaging(unittest.TestCase):
 
     def setUp(self):
         self.cur = self.conn.cursor()
-        # The rows this suite reasons about, and nothing else: every assertion is scoped to the
-        # entity ids seeded here, so a stack with a populated thread does not change the answers.
+        # The rows this suite reasons about, and nothing else: every page and count is scoped with
+        # p_entity_ids to the entities seeded here. Unscoped, a thread that already holds rows (a
+        # dev stack, `test:db --with-history`) sorts these 2026-01-01 rows last, past the walk's
+        # page limit.
         self.cur.execute(
             """
             INSERT INTO public.digital_thread
@@ -92,11 +94,13 @@ class DigitalThreadPaging(unittest.TestCase):
                    timestamptz '2026-01-01 00:00:00+00' + make_interval(mins => (i / %s)),
                    'migration'
               FROM generate_series(1, %s) i
-            RETURNING id
+            RETURNING id, entity_id
             """,
             (BATCH, BATCH * BATCHES),
         )
-        self.seeded = sorted(r[0] for r in self.cur.fetchall())
+        rows = self.cur.fetchall()
+        self.seeded = sorted(r[0] for r in rows)
+        self.entities = [r[1] for r in rows]
 
     def tearDown(self):
         self.conn.rollback()
@@ -106,18 +110,19 @@ class DigitalThreadPaging(unittest.TestCase):
     # Helpers
     # ---------------------------------------------------------------------------------------
     def page(self, cursor=None, limit=PAGE, **kwargs):
-        """One call to digital_thread_page(), returning (ids, next_cursor, payload)."""
+        """One page over the seeded entities, returned as (ids, next_cursor, payload)."""
         self.cur.execute(
             """
             SELECT public.digital_thread_page(
                 p_limit              => %s,
                 p_include_purged     => true,
+                p_entity_ids         => %s::uuid[],
                 p_action             => %s,
                 p_before_recorded_at => %s,
                 p_before_id          => %s
             )
             """,
-            (limit, kwargs.get("action"),
+            (limit, self.entities, kwargs.get("action"),
              (cursor or {}).get("recorded_at"), (cursor or {}).get("id")),
         )
         payload = self.cur.fetchone()[0]
@@ -141,14 +146,13 @@ class DigitalThreadPaging(unittest.TestCase):
     def test_a_walk_visits_every_seeded_row_exactly_once(self):
         """The whole contract in one assertion: no repeats, no gaps, nothing invented."""
         seen, _ = self.walk()
-        mine = [i for i in seen if i in set(self.seeded)]
         self.assertEqual(
-            sorted(mine), self.seeded,
-            "the walk did not cover the seeded rows exactly once -- a repeat or a skip, and "
-            "neither raises",
+            sorted(seen), self.seeded,
+            "the walk did not cover the seeded rows exactly once -- a repeat, a skip or a row "
+            "from outside the fixture, and none of them raises",
         )
         self.assertEqual(
-            len(mine), len(set(mine)),
+            len(seen), len(set(seen)),
             "the walk served the same row on more than one page",
         )
 
@@ -167,20 +171,19 @@ class DigitalThreadPaging(unittest.TestCase):
                 """
                 SELECT count(*), min(recorded_at)
                   FROM (SELECT recorded_at FROM public.digital_thread
-                         WHERE (%s::timestamptz IS NULL OR recorded_at < %s::timestamptz)
+                         WHERE entity_id = ANY(%s::uuid[])
+                           AND (%s::timestamptz IS NULL OR recorded_at < %s::timestamptz)
                          ORDER BY recorded_at DESC LIMIT %s) s
                 """,
-                (ts, ts, PAGE),
+                (self.entities, ts, ts, PAGE),
             )
             count, ts = self.cur.fetchone()
             if not count:
                 break
             reached += count
 
-        self.cur.execute("SELECT count(*) FROM public.digital_thread")
-        total = self.cur.fetchone()[0]
         self.assertLess(
-            reached, total,
+            reached, len(self.seeded),
             "a recorded_at-only cursor reached every row, so this fixture has no same-timestamp "
             "batch and the composite-key tests are not testing anything",
         )
@@ -219,7 +222,8 @@ class DigitalThreadPaging(unittest.TestCase):
     def test_a_cursor_missing_its_timestamp_is_ignored_not_obeyed(self):
         self.cur.execute(
             "SELECT public.digital_thread_page(p_limit => %s, p_include_purged => true, "
-            "p_before_id => %s)", (PAGE, self.seeded[-1]),
+            "p_entity_ids => %s::uuid[], p_before_id => %s)",
+            (PAGE, self.entities, self.seeded[-1]),
         )
         payload = self.cur.fetchone()[0]
         self.assertEqual(len(payload["events"]), PAGE,
@@ -228,7 +232,8 @@ class DigitalThreadPaging(unittest.TestCase):
     def test_a_cursor_missing_its_id_is_ignored_not_obeyed(self):
         self.cur.execute(
             "SELECT public.digital_thread_page(p_limit => %s, p_include_purged => true, "
-            "p_before_recorded_at => %s)", (PAGE, "2026-01-01 00:02:00+00"),
+            "p_entity_ids => %s::uuid[], p_before_recorded_at => %s)",
+            (PAGE, self.entities, "2026-01-01 00:02:00+00"),
         )
         payload = self.cur.fetchone()[0]
         self.assertEqual(len(payload["events"]), PAGE,
@@ -250,11 +255,10 @@ class DigitalThreadPaging(unittest.TestCase):
     def test_a_filter_still_applies_on_the_second_page(self):
         """A cursor must narrow the range and nothing else."""
         seen, _ = self.walk(action="INSERT")
-        mine = [i for i in seen if i in set(self.seeded)]
-        self.assertEqual(sorted(mine), self.seeded)
+        self.assertEqual(sorted(seen), self.seeded)
 
         seen_none, _ = self.walk(action="DELETE")
-        self.assertEqual([i for i in seen_none if i in set(self.seeded)], [])
+        self.assertEqual(seen_none, [])
 
     # ---------------------------------------------------------------------------------------
     # The index that makes this affordable

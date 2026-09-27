@@ -550,7 +550,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     property("EdgeGatewayName", "xs:string", gateway?.name ?? null),
     property("EdgeGatewaySparkplugId", "xs:string", gateway?.sparkplug_id ?? null),
     property("Status", "xs:string", device.status),
-  ].filter((element): element is Record<string, unknown> => element !== null);
+  ].filter((element) => element !== null);
 
   const submodels: Record<string, unknown>[] = [
     {
