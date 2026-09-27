@@ -390,8 +390,7 @@ gateway as `STALE`.
 and the only insert path is the operator-facing form behind `POST /api/v1/metric-catalog`. Good
 property — but it means a mixed-standard fleet is registered by hand, one form at a time, and
 `name` is UNIQUE and IMMUTABLE, so the first row to claim a name owns it permanently along with
-whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export and the
-i3X `sourceTypeId`.
+whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export.
 
 `0018` front-runs that for the demonstrator's metric set. Three properties worth knowing:
 
