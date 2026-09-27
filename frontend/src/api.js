@@ -1074,14 +1074,47 @@ const apiMethods = {
   // Backups (0101). Administrator only on both tables and every RPC; the bytes never come here.
   // -------------------------------------------------------------------------------------------
 
-  /** Every backup that exists on the backup volume, newest first. */
-  listBackups: async () => {
+  /**
+   * One page of finished backup runs (`backup_jobs`), newest first. Each carries the backup it
+   * produced as `backup`, null for a failed or cancelled run and for one the retention window has
+   * pruned. Fetches one row past `limit` so `more` says whether a next page exists.
+   */
+  listBackupRuns: async ({ statuses = ['COMPLETED', 'FAILED', 'CANCELLED'], limit = 30 } = {}) => {
     const { data, error } = await supabase
-      .from('backups')
-      .select('*')
-      .order('taken_at', { ascending: false });
-    if (error) throw new Error(error.message || 'Could not list backups');
-    return data || [];
+      .from('backup_jobs')
+      .select('*, backups(*)')
+      .in('status', statuses)
+      .order('finished_at', { ascending: false })
+      .limit(limit + 1);
+    if (error) throw new Error(error.message || 'Could not list backup runs');
+    // Embedded through backups.job_id, which is not unique, so PostgREST returns an array.
+    const rows = (data || []).map(({ backups, ...job }) => ({
+      ...job, backup: (Array.isArray(backups) ? backups[0] : backups) || null
+    }));
+    return { runs: rows.slice(0, limit), more: rows.length > limit };
+  },
+
+  /**
+   * What the Backups page's current-state line needs, whatever the list's filter and page:
+   * the first job ever recorded, the latest completed one, and the latest that completed or failed.
+   */
+  backupRunSummary: async () => {
+    const columns = 'id, status, created_at, started_at, finished_at';
+    const [first, success, outcome] = await Promise.all([
+      supabase.from('backup_jobs').select(columns)
+        .order('created_at', { ascending: true }).limit(1).maybeSingle(),
+      supabase.from('backup_jobs').select(columns).eq('status', 'COMPLETED')
+        .order('finished_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('backup_jobs').select(columns).in('status', ['COMPLETED', 'FAILED'])
+        .order('finished_at', { ascending: false }).limit(1).maybeSingle()
+    ]);
+    const error = first.error || success.error || outcome.error;
+    if (error) throw new Error(error.message || 'Could not read backup jobs');
+    return {
+      firstRecordedAt: first.data?.created_at || null,
+      lastSuccess: success.data || null,
+      latestOutcome: outcome.data || null
+    };
   },
 
   /** The backup that is queued or running, or null. At most one, by a partial unique index. */
@@ -1095,18 +1128,6 @@ const apiMethods = {
       .maybeSingle();
     if (error) throw new Error(error.message || 'Could not read backup jobs');
     return data || null;
-  },
-
-  /** The last few finished jobs, so a failure is visible after its card has gone. */
-  recentBackupJobs: async (limit = 5) => {
-    const { data, error } = await supabase
-      .from('backup_jobs')
-      .select('*')
-      .in('status', ['COMPLETED', 'FAILED', 'CANCELLED'])
-      .order('finished_at', { ascending: false })
-      .limit(limit);
-    if (error) throw new Error(error.message || 'Could not read backup jobs');
-    return data || [];
   },
 
   /**
