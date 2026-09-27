@@ -679,11 +679,14 @@ class TestSparkplugValues(unittest.TestCase):
         self.assertEqual(self.served(), {"speed": 1.5})
 
     def test_a_negative_json_integer_is_served_as_itself(self):
+        # A JSON number carries its own sign, so an undeclared one is not reported as unsigned.
         body = {"timestamp": 1790000000000, "metrics": [
             {"name": "a", "int_value": -5},
             {"name": "b", "datatype": INT16, "int_value": -32768},
         ]}
-        self.publish("DDATA", raw=json.dumps(body).encode("utf-8"))
+        i3x_service._undeclared_integer_warned_at = 0.0
+        with self.assertNoLogs(i3x_service.logger, "WARNING"):
+            self.publish("DDATA", raw=json.dumps(body).encode("utf-8"))
         self.assertEqual(self.served(), {"a": -5, "b": -32768})
 
 

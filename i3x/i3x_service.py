@@ -1579,11 +1579,16 @@ def decode_metrics(raw: bytes) -> Optional[List[dict]]:
                 value, field = m[key], key
                 break
         datatype = m.get("datatype")
+        if not isinstance(datatype, int) or isinstance(datatype, bool):
+            datatype = None
+        # Marked Int32 as ingestion's JSON arm marks it, so an undeclared negative reads as itself.
+        if field == "int_value" and datatype is None and isinstance(value, int) and -(2**31) <= value < 0:
+            datatype = 3
         out.append(
             {
                 "name": m.get("name") or None,
                 "alias": m.get("alias"),
-                "datatype": datatype if isinstance(datatype, int) and not isinstance(datatype, bool) else None,
+                "datatype": datatype,
                 "field": field,
                 "value": value,
                 "timestamp": _ms_to_iso(m.get("timestamp") or payload_ts),
