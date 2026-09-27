@@ -301,6 +301,39 @@ describe('device DBIRTH parameters', () => {
   });
 });
 
+describe('a metric is deprecated and restored (#468)', () => {
+  const written = { data: [{ id: 'm9' }], error: null };
+
+  it('restores by clearing the flag and the replacement pointer together', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog/m9/restore');
+
+    const call = callFor('metric_catalog');
+    expect(call.op).toBe('update');
+    expect(call.payload).toEqual({ deprecated: false, superseded_by: null });
+    expect(call.filters).toContainEqual(['eq', 'id', 'm9']);
+  });
+
+  it('is not taken by the generic archive restore, which would write is_archived', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog/m9/restore');
+    expect(state.calls.map(c => c.table)).toEqual(['metric_catalog']);
+  });
+
+  it('deprecates with the replacement it was given', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog/m9/deprecate', { superseded_by: 'm2' });
+    expect(callFor('metric_catalog').payload).toEqual({ deprecated: true, superseded_by: 'm2' });
+  });
+
+  it('treats no row back as refused rather than done', async () => {
+    // metric_catalog_update_privileged admits Administrators only; anyone else matches no row and
+    // PostgREST reports success with an empty array.
+    await expect(api.post('/api/v1/metric-catalog/m9/restore')).rejects.toThrow(/^Metric not restored/);
+    await expect(api.post('/api/v1/metric-catalog/m9/deprecate', {})).rejects.toThrow(/^Metric not deprecated/);
+  });
+});
+
 describe('telemetry queries', () => {
   it('reads the telemetry view with filters, ordering and a bounded page', async () => {
     await api.get('/api/v1/telemetry?metric_name=temperature&minutes=15&limit=200&offset=200');

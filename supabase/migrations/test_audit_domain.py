@@ -172,6 +172,15 @@ class TheClassifier(AuditDomainFixture):
             cur.execute("SELECT public.audit_domain_for('schemas', 'UPDATE');")
             self.assertEqual(cur.fetchone()[0], "asset")
 
+    def test_a_metric_is_asset(self):
+        """
+        The same exception, made for the same reason by 0010 (#468): deprecating or restoring a
+        metric is Administrator-only, and `metric_catalog_select_authenticated` is USING (true).
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT public.audit_domain_for('metric_catalog', 'UPDATE');")
+            self.assertEqual(cur.fetchone()[0], "asset")
+
     def test_credential_issued_stays_asset(self):
         """
         THE RULE IS AUTHORITY, NOT SUBJECT MATTER, and this is the case that separates them.
@@ -398,6 +407,30 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
                 self._visible(cur, row_id),
                 "a Shopfloor_Manager cannot read a schema change. The Schemas filter is offered "
                 "to that role, so this is a lane the page draws and the policy empties."
+            )
+
+    def test_a_manager_can_read_a_metric_deprecation(self):
+        """0010 end to end: who deprecated a metric is on the lane the Metric catalog filter reads."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype)"
+                " VALUES ('AuditDomainFixture/Metric', 9) RETURNING id;"
+            )
+            metric = cur.fetchone()[0]
+            cur.execute("UPDATE public.metric_catalog SET deprecated = true WHERE id = %s;", (metric,))
+            cur.execute(
+                "SELECT id, audit_domain FROM public.digital_thread"
+                " WHERE entity_type = 'metric_catalog' AND entity_id = %s AND action = 'UPDATE';",
+                (metric,),
+            )
+            row_id, domain = cur.fetchone()
+            self.assertEqual(domain, "asset", "the deprecation was stamped into the wrong lane")
+
+            as_user(cur, MANAGER_ID)
+            self.assertTrue(
+                self._visible(cur, row_id),
+                "a Shopfloor_Manager cannot read a metric deprecation, though the page offers "
+                "that role the Metric catalog filter."
             )
 
     def test_a_manager_still_reads_a_gateway_credential_issue(self):

@@ -677,6 +677,10 @@ function edgeFunctionNames() {
     // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
     // the pre-0006 form and folds forward at the next squash.
     'public.digital_thread_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
+
+    // 0010 files `metric_catalog` in the asset lane (#468), the same signature and return type.
+    // The baseline's copy fails it closed to security and folds forward at the next squash.
+    'public.audit_domain_for': '0010 adds metric_catalog to the asset lane; the baseline holds the pre-0010 form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

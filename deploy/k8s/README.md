@@ -1218,7 +1218,7 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
 
 > **The historian restore needs TimescaleDB's guards.** `_timescaledb_catalog.continuous_agg`
 > carries circular foreign keys, and restoring it with the extension's background workers live
-> leaves the three rollups from migration `0010` registered but never refreshing — retention and
+> leaves the three rollups from archived migration `0010` registered but never refreshing — retention and
 > compression stop with them, and nothing about the running stack looks wrong until the disk fills.
 > Wrap it:
 >

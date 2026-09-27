@@ -1128,6 +1128,40 @@ paths:
         '201': { description: Created. }
         '400': { description: 'Name format, group spelling, or `semantic_id_type` CHECK violation.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Registry]
+      summary: Deprecate or restore a metric
+      description: |
+        `name` and `datatype` are refused by `enforce_metric_catalog_immutability()`; every other
+        column may change. The two lifecycle writes the dashboard makes:
+
+        * **Deprecate** — `{"deprecated": true, "superseded_by": "<uuid>" | null}`, sent by
+          `POST /api/v1/metric-catalog/{id}/deprecate`. The schema builder stops offering the
+          metric; schemas that model it, and its readings, are unchanged.
+        * **Restore** — `{"deprecated": false, "superseded_by": null}`, sent by
+          `POST /api/v1/metric-catalog/{id}/restore`. The pointer is cleared with the flag:
+          a current metric that still named a replacement would be current and replaced at once.
+
+        Administrator only (`metric_catalog_update_privileged`). A caller the policy does not admit
+        matches no row, so nothing changes and no error is raised; send
+        `Prefer: return=representation` and treat an empty array as refused. Always send a filter,
+        e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.
+      parameters:
+        - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deprecated: { type: boolean }
+                superseded_by: { type: string, format: uuid, nullable: true, description: 'The replacement. NULL on restore.' }
+      responses:
+        '200': { description: 'Updated, with `Prefer: return=representation`. An empty array means no row was admitted.' }
+        '204': { description: Updated. }
+        '400': { description: '`name` or `datatype` in the body; both are immutable.' }
 
   /rest/v1/metric_groups:
     get:

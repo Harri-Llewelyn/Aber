@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
+import { RestoreMetricModal } from '../modals/RestoreMetricModal'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
   groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
@@ -23,7 +24,7 @@ import {
 } from '../../utils/ashrae223'
 import CopyableId from '../common/CopyableId'
 import {
-  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX
+  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX, IconRefreshCw
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 
@@ -86,13 +87,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // for extensions.
   const [newMetric, setNewMetric] = useState(BLANK_METRIC)
   const [deprecateTarget, setDeprecateTarget] = useState(null)
+  const [restoreTarget, setRestoreTarget] = useState(null)
   // Expansion state for the catalog's group sections, keyed by label; absent means collapsed. The
   // headers carry a count, so a collapsed catalog still says what is in it.
   const [expandedGroups, setExpandedGroups] = useState({})
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
   const [catalogSearch, setCatalogSearch] = useState('')
-  const [showDeprecated, setShowDeprecated] = useState(false)
 
   /**
    * A group is open when the operator opened it, or when a search is narrowing the catalog: a
@@ -320,7 +321,18 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       await api.post(`/api/v1/metric-catalog/${deprecateTarget.metric_uuid}/deprecate`, { superseded_by: supersededBy })
       setDeprecateTarget(null)
       load()
-      showToast(`Metric '${deprecateTarget.name}' deprecated`, 'success')
+      showToast(`Metric '${deprecateTarget.name}' deprecated. Deprecated Metrics, below the catalog, can restore it.`, 'success')
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+
+  const handleRestore = async () => {
+    try {
+      await api.post(`/api/v1/metric-catalog/${restoreTarget.metric_uuid}/restore`)
+      setRestoreTarget(null)
+      load()
+      showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success')
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -331,6 +343,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // It is not what refuses the write -- metric_catalog's INSERT and UPDATE policies check
   // has_role('Administrator') -- so this disables the control rather than deciding anything.
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
+  // Gates Restore as well as Deprecate: one act and its inverse.
   const canDeprecateMetric = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
 
   /**
@@ -341,10 +354,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     !catalogSearch || (m.name || '').toLowerCase().includes(catalogSearch.trim().toLowerCase())
 
   const activeCatalog = catalog.filter(m => !m.deprecated).filter(matchesCatalogSearch)
-  const deprecatedCatalog = catalog.filter(m => m.deprecated).filter(matchesCatalogSearch)
+  // Its own card, unfiltered: the search box belongs to the catalog card above it.
+  const deprecatedCatalog = catalog.filter(m => m.deprecated)
   // Grouped by the first dotted segment of the name; ungrouped metrics fall into a trailing bucket.
-  // Deprecated metrics stay a flat tail.
   const catalogGroups = groupCatalog(activeCatalog)
+  // `superseded_by` is a uuid; the Deprecated Metrics card and the restore modal show the name.
+  const metricById = new Map(catalog.map(m => [m.metric_uuid, m]))
 
   // The vocabulary the picker offers: the curated registry (now MTConnect's component types)
   // plus anything already in use.
@@ -451,6 +466,46 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     // A type without a value would export as an AAS Reference with no key. Rejected here rather
     // than nulled on the way out, so the operator sees the field they left half-filled.
     (semanticIdValue !== '' || semanticIdTypeValue === '')
+
+  /** The seven cells the catalog and the Deprecated Metrics card share, so a metric reads the same in both. */
+  const metricCells = (m) => (
+    <>
+      <td>
+        <span className="mono">{m.name}</span>
+        {/* MTConnect permits local extensions, so this marks provenance rather than flagging a
+            problem. */}
+        {!m.standard && m.category && (
+          <span style={{ fontSize: '11px', color: 'var(--text-dim)', marginLeft: '6px', fontStyle: 'italic' }} title="Local extension — not drawn from a standard vocabulary">
+            local
+          </span>
+        )}
+      </td>
+      <td>
+        {m.standard
+          ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`Named from the ${m.standard} vocabulary`}>{m.standard}</span>
+          : <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>{LOCAL_EXTENSION_LABEL}</span>}
+      </td>
+      <td>
+        {m.category
+          ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`MTConnect ${m.category} observation`}>{m.category}</span>
+          : <span style={{ color: 'var(--text-dim)' }}>—</span>}
+      </td>
+      <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{m.units || '—'}</td>
+      <td>{datatypeLabel(m.datatype)}</td>
+      {/* Capped and scrollable: a semantic id is a full IRI, and an unconstrained cell pushes the
+          row's action off-screen. */}
+      <td style={{ maxWidth: '260px' }}>
+        {m.semantic_id
+          ? <CopyableId
+              value={m.semantic_id}
+              label={`semantic id${m.semantic_id_type ? ` (${m.semantic_id_type})` : ''}`}
+              onNotify={showToast}
+            />
+          : <span style={{ color: 'var(--text-dim)' }} title="Not mapped to a standard concept. Legitimate for MTConnect metrics, which have no published per-type identifier.">—</span>}
+      </td>
+      <td style={{ color: 'var(--text-muted)' }}>{m.description || '—'}</td>
+    </>
+  )
 
   return (
     <>
@@ -850,7 +905,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             <div className="empty-text">
               {catalogSearch
                 ? <>No metric matches <strong>{catalogSearch}</strong>.</>
-                : 'No metrics in the catalog yet.'}
+                : deprecatedCatalog.length > 0
+                  ? 'Every metric in the catalog is deprecated.'
+                  : 'No metrics in the catalog yet.'}
             </div>
           </div>
         ) : (
@@ -891,40 +948,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   </tr>
                   {open && group.metrics.map(m => (
                     <tr key={m.metric_uuid}>
-                      <td>
-                        <span className="mono">{m.name}</span>
-                        {/* MTConnect permits local extensions, so this marks provenance rather
-                            than flagging a problem. */}
-                        {!m.standard && m.category && (
-                          <span style={{ fontSize: '11px', color: 'var(--text-dim)', marginLeft: '6px', fontStyle: 'italic' }} title="Local extension — not drawn from a standard vocabulary">
-                            local
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {m.standard
-                          ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`Named from the ${m.standard} vocabulary`}>{m.standard}</span>
-                          : <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>{LOCAL_EXTENSION_LABEL}</span>}
-                      </td>
-                      <td>
-                        {m.category
-                          ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`MTConnect ${m.category} observation`}>{m.category}</span>
-                          : <span style={{ color: 'var(--text-dim)' }}>—</span>}
-                      </td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{m.units || '—'}</td>
-                      <td>{datatypeLabel(m.datatype)}</td>
-                      {/* Capped and scrollable: a semantic id is a full IRI, and an unconstrained
-                          cell pushes the Deprecate button off-screen. */}
-                      <td style={{ maxWidth: '260px' }}>
-                        {m.semantic_id
-                          ? <CopyableId
-                              value={m.semantic_id}
-                              label={`semantic id${m.semantic_id_type ? ` (${m.semantic_id_type})` : ''}`}
-                              onNotify={showToast}
-                            />
-                          : <span style={{ color: 'var(--text-dim)' }} title="Not mapped to a standard concept. Legitimate for MTConnect metrics, which have no published per-type identifier.">—</span>}
-                      </td>
-                      <td style={{ color: 'var(--text-muted)' }}>{m.description || '—'}</td>
+                      {metricCells(m)}
                       <td style={{ textAlign: 'right' }}>
                         <button
                           className={`btn btn-ghost btn-sm ${!canDeprecateMetric ? 'btn-disabled' : ''}`}
@@ -940,56 +964,57 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 </tbody>
                 )
               })}
-
-              {/* Deprecated metrics get their own section, collapsed by default and rendered only
-                  when some exist. */}
-              {deprecatedCatalog.length > 0 && (
-              <tbody>
-                <tr>
-                  <td colSpan={8} style={{ background: 'var(--bg-glass)', padding: 0, borderTop: '1px solid var(--border)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowDeprecated(v => !v)}
-                      aria-expanded={showDeprecated}
-                      style={{
-                        width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
-                        padding: '6px 12px', background: 'none', border: 'none',
-                        cursor: 'pointer', color: 'inherit', textAlign: 'left', font: 'inherit'
-                      }}
-                      title={showDeprecated ? 'Hide deprecated metrics' : 'Show metrics that have been retired and replaced'}
-                    >
-                      {showDeprecated ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                      <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                        Deprecated
-                      </span>
-                      <span className="section-count">{deprecatedCatalog.length}</span>
-                    </button>
-                  </td>
-                </tr>
-                {showDeprecated && deprecatedCatalog.map(m => (
-                  <tr key={m.metric_uuid} style={{ opacity: 0.5 }}>
-                    <td><span className="mono" style={{ textDecoration: 'line-through' }}>{m.name}</span></td>
-                    <td style={{ fontSize: '11px' }}>{m.standard || LOCAL_EXTENSION_LABEL}</td>
-                    <td>{m.category || '—'}</td>
-                    <td style={{ fontSize: '11px' }}>{m.units || '—'}</td>
-                    <td>{datatypeLabel(m.datatype)}</td>
-                    <td className="mono" style={{ fontSize: '11px', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.semantic_id || ''}>
-                      {m.semantic_id || '—'}
-                    </td>
-                    <td style={{ color: 'var(--text-muted)' }}>
-                      <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)' }}>
-                        <IconAlertTriangle size={10} /> DEPRECATED
-                      </span>
-                    </td>
-                    <td></td>
-                  </tr>
-                ))}
-              </tbody>
-              )}
             </table>
           </div>
         )}
       </div>
+
+      {/* Rendered only while something is deprecated. Restore is the way back from Deprecate (#468),
+          so it lives with the rows it applies to rather than behind a toggle in the catalog. */}
+      {!loading && deprecatedCatalog.length > 0 && (
+        <div className="card" style={{ marginBottom: 'var(--stack)' }}>
+          <div className="card-header">
+            <h3 className="section-title">
+              Deprecated Metrics
+              <span className="section-count">{deprecatedCatalog.length}</span>
+              <HelpTip
+                label="About deprecated metrics"
+                text="Withheld from the schema builder, not deleted: schemas that model one keep it, and its readings stay. Restore offers it to schema authors again and clears the replacement it names."
+              />
+            </h3>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Name</th><th title="Which standard vocabulary this metric was named from">Standard</th><th title="MTConnect observation category">Category</th><th title="MTConnect units — SAMPLE data items only">Units</th><th>Datatype</th><th title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures">Semantic ID</th><th>Description</th><th title="The metric named as this one's replacement when it was deprecated">Superseded By</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <tbody>
+                {deprecatedCatalog.map(m => {
+                  const replacement = m.superseded_by ? metricById.get(m.superseded_by) : null
+                  return (
+                    <tr key={m.metric_uuid}>
+                      {metricCells(m)}
+                      <td>
+                        {replacement
+                          ? <span className="mono">{replacement.name}</span>
+                          : <span style={{ color: 'var(--text-dim)' }} title="No replacement was named">—</span>}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          className={`btn btn-ghost btn-sm ${!canDeprecateMetric ? 'btn-disabled' : ''}`}
+                          disabled={!canDeprecateMetric}
+                          onClick={() => canDeprecateMetric && setRestoreTarget(m)}
+                          title={!canDeprecateMetric ? 'Requires Admin permissions' : 'Offer this metric to schema authors again'}
+                        >
+                          <IconRefreshCw size={12} /> Restore
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {deprecateTarget && (
         <DeprecateMetricModal
@@ -998,6 +1023,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           catalog={catalog}
           onConfirm={handleDeprecate}
           onCancel={() => setDeprecateTarget(null)}
+        />
+      )}
+
+      {restoreTarget && (
+        <RestoreMetricModal
+          metric={restoreTarget}
+          replacement={restoreTarget.superseded_by ? metricById.get(restoreTarget.superseded_by) : null}
+          onConfirm={handleRestore}
+          onCancel={() => setRestoreTarget(null)}
         />
       )}
     </>

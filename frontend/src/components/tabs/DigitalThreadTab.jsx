@@ -5,7 +5,7 @@ import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { ContextPanel } from '../common/ContextPanel'
 import {
   IconHistory, IconDownload, IconX, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
-  IconShieldCheck, IconLock, IconClipboardList, IconSettings
+  IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import {
@@ -87,7 +87,7 @@ export const MARKERS = {
   creation:    { label: 'Created',       hint: 'Row created — provisioning, or a first DBIRTH admitting the asset' },
   operational: { label: 'Operational',   hint: 'State change — status, cell, or another running-time property' },
   governance:  { label: 'Configuration', hint: 'Governance change — schema binding or declared configuration' },
-  critical:    { label: 'Lifecycle',     hint: 'Lifecycle event — deleted, archived, or quarantined' }
+  critical:    { label: 'Lifecycle',     hint: 'Lifecycle event — deleted, archived, deprecated, or quarantined' }
 }
 
 /** Deep-enough equality for a JSONB snapshot: scalars by value, objects by serialisation. */
@@ -155,7 +155,8 @@ export function classifyEvent(event, diff) {
 
   const changed = new Set(diff.map(d => d.field))
   const roseTo = (field) => changed.has(field) && event.new_data?.[field] === true
-  if (roseTo('is_archived') || roseTo('is_quarantined')) return 'critical'
+  // `deprecated` is a metric's retirement (#468), as `is_archived` is an asset's.
+  if (roseTo('is_archived') || roseTo('is_quarantined') || roseTo('deprecated')) return 'critical'
 
   for (const field of changed) if (GOVERNANCE_FIELDS.has(field)) return 'governance'
   return 'operational'
@@ -340,6 +341,8 @@ const SECTION_ICONS = {
   ACCESS:             IconShieldCheck,
   'SERVICE IDENTITY': IconLock,
   SCHEMA:             IconClipboardList,
+  // The Metrics page's own icon in the sidebar.
+  METRIC:             IconTag,
   SETTING:            IconSettings
 }
 

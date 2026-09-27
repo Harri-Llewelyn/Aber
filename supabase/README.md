@@ -1154,8 +1154,9 @@ the meaning of a revocation.
 
 ## Audit Trail (`digital_thread`)
 
-Written by `log_digital_thread_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger on `cells`,
-`gateways`, `devices`, `system_settings` and `schemas`; by `log_role_assignment()` on `user_roles`;
+Written by `log_digital_thread_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger on `areas`,
+`cells`, `gateways`, `devices`, `device_nameplate`, `system_settings`, `schemas` and
+`metric_catalog` (`0010`); by `log_role_assignment()` on `user_roles`;
 and by eight RPCs that record acts which are not row mutations at all.
 
 ### Two lanes, and one of them an engineer cannot read (`0070`)
@@ -1605,9 +1606,44 @@ was not cheap to find: **a throwaway database cannot exercise an assertion about
 
 **Nothing compared the two sides, which is why this survived twelve migrations.** The lane a kind
 belongs to was written down twice in two languages, and `TheDashboardAgreesWithTheClassifier` in
-`test_audit_domain.py` now reads the JS table and calls `audit_domain_for()` for each of its twelve
+`test_audit_domain.py` now reads the JS table and calls `audit_domain_for()` for each of its
 entries. Only the JS side is parsed as text; the SQL side is the function itself, so the check
 cannot drift into agreeing with a regex instead of with the database.
+
+
+### A metric's deprecation reaches the thread (`0010`)
+
+**Deprecating is the only way to retire a metric, and it left no record.** `metric_catalog.name`
+is immutable, so deprecate-and-supersede is the exit the catalog assumes, and the Metrics page's
+Deprecated Metrics card can now undo it with a confirmed Restore (#468). The table carried no audit
+trigger, so neither act said who made it or when. `0010` attaches `log_digital_thread_event()` for
+INSERT, UPDATE and DELETE, as on `schemas`. Deprecate and restore are UPDATEs whose diff moves
+`deprecated` (and `superseded_by`), the shape archive and restore already have on the asset tables;
+the timeline paints `deprecated` rising as Lifecycle, as it paints `is_archived`. No new action
+kind was needed.
+
+**The asset lane, for the reason `schemas` is in it.** Writing the catalog is Administrator-only,
+which the authority rule files as security, but `metric_catalog_select_authenticated` is
+`USING (true)`: every authenticated user reads the catalog, so its history is no more secret than
+it is. `audit_domain_for()` is redeclared with `metric_catalog` in the asset arm, the same
+signature and return type, and recorded in `check-docs-drift.mjs`'s `INTENDED_REDECLARATIONS`; the
+baseline's copy is the pre-`0010` form and folds forward at the next squash.
+
+**Re-stamped on every boot, matching nothing on a settled one.** `0001` replays first and restores
+the baseline classifier, which fails `metric_catalog` closed to security, so a row written between
+the two files on one boot (a catalog seed `0002` adds in a later release, once the trigger exists)
+would be stamped into the wrong lane. `0010` moves any such row to `asset`, which is the routing it
+changes rather than a fact about the act, exactly as `0120` did for `schemas`. Its self-check
+asserts the lane, every arm it copied, the trigger, and that no `metric_catalog` row is outside the
+asset lane: its own work, not the table's.
+
+A replay writes nothing: `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, and its unguarded
+`permitted_values` UPDATE writes the value the row holds, which the function's no-op rule drops. A
+restored seed row stays restored for the first of those reasons: no file re-asserts `deprecated`
+(`OEE/PERFORMANCE` is seeded deprecated and can be restored). The metric's lane is
+labelled from `name` in the snapshot and searchable by it; `digital_thread_page()` needs no change,
+and does not call a catalog row deleted (the catalog has no DELETE policy).
+`test_digital_thread_guard.py`, `test_audit_domain.py` and `test_role_permission_split.py` cover it.
 
 
 ### The thread draws every lane (`0128`)
