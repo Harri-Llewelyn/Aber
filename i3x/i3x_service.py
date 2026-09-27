@@ -63,7 +63,8 @@ logger = logging.getLogger("i3x")
 
 SPEC_VERSION = "1.0"
 SERVER_NAME = os.getenv("I3X_SERVER_NAME", "aber-i3x")
-SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "0.1.0")
+# The chart sets it from its appVersion. `dev` marks a process started without the chart.
+SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "dev")
 
 LISTEN_HOST = os.getenv("I3X_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("I3X_PORT", "8090"))

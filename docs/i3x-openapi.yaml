@@ -846,7 +846,7 @@ components:
       type: object
       properties:
         specVersion: { type: string, example: '1.0' }
-        serverVersion: { type: string, example: 0.1.0 }
+        serverVersion: { type: string, example: 0.1.0, description: "The Helm chart's `appVersion`; `dev` when started without the chart." }
         serverName: { type: string, example: aber-i3x }
         capabilities:
           type: object

@@ -410,6 +410,7 @@ clock.
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `I3X_PORT` | `8090` | |
+| `I3X_SERVER_VERSION` | `dev` | `GET /info` `serverVersion`. The chart sets it to its `appVersion` |
 | `SUPABASE_URL` | `http://supabase-kong:8000` | |
 | `SUPABASE_PUBLISHABLE_KEY` | — | For the gateway's key check. **Not** the secret key |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | |
