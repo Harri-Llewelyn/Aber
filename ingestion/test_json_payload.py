@@ -75,5 +75,27 @@ class JsonMetricTimestamps(unittest.TestCase):
         self.assertTrue(payload.metrics[1].boolean_value)
 
 
+class JsonSignedIntegers(unittest.TestCase):
+    """A negative JSON int_value, which the unsigned protobuf field refused and lost the payload for."""
+
+    def read_back(self, metric):
+        return ingestion.sparkplug_integer_value(metric.datatype, metric.int_value)
+
+    def test_a_negative_integer_without_a_datatype_reads_back_as_itself(self):
+        metric = parse([{"name": "Offset", "int_value": -5}]).metrics[0]
+        self.assertEqual((metric.int_value, metric.datatype), (4294967291, 3))
+        self.assertEqual(self.read_back(metric), -5)
+
+    def test_a_declared_datatype_is_kept(self):
+        metric = parse([{"name": "Offset", "datatype": 2, "int_value": -32768}]).metrics[0]
+        self.assertEqual(metric.datatype, 2)
+        self.assertEqual(self.read_back(metric), -32768)
+
+    def test_a_non_negative_integer_is_unchanged(self):
+        metric = parse([{"name": "Count", "int_value": 7}]).metrics[0]
+        self.assertFalse(metric.HasField("datatype"))
+        self.assertEqual(metric.int_value, 7)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

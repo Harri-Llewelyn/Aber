@@ -107,6 +107,7 @@ COUNTER_MAP = {
     # EXPORTED_LABELLED_INSTEAD below is where that is recorded.
     "metrics_unresolved_alias": ("aber_ingestion_alias_unresolved_total", {}),
     "metrics_rejected_schema": ("aber_ingestion_schema_rejected_total", {}),
+    "metrics_integer_datatype_unknown": ("aber_ingestion_integer_datatype_unknown_total", {}),
     # The historian write path.
     "write_failures": ("aber_ingestion_write_failures_total", {}),
     "write_batch_failures": ("aber_ingestion_write_batch_failures_total", {}),
@@ -182,6 +183,10 @@ HELP = {
         "window rather than anything about the device.",
     "aber_ingestion_alias_unresolved_total":
         "Metrics carrying an alias with no known name, pending a rebirth.",
+    "aber_ingestion_integer_datatype_unknown_total":
+        "Integer metrics whose Sparkplug datatype neither the message nor a birth since startup "
+        "declared. They are stored as the unsigned wire value, so a negative signed reading among "
+        "them is recorded as a large positive number. The node's next birth supplies the datatypes.",
     "aber_ingestion_schema_rejected_total":
         "Metrics DROPPED for contradicting their device's bound schema. Non-zero only for a device set to conformance_policy=enforce (0050); this telemetry was not written and cannot be recovered.",
     "aber_ingestion_write_batch_failures_total":

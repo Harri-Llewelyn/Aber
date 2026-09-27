@@ -881,6 +881,18 @@ failing to start and taking the diagnosis with it.
 
 `Asset_ID` and `Asset_Name` are excluded — they carry identity, not telemetry.
 
+**Signed integers are read through the metric's datatype.** Sparkplug carries Int8, Int16 and
+Int32 in the `uint32` `int_value` and Int64 in the `uint64` `long_value` as two's complement, so
+without the datatype an Int32 of −5 reads as 4294967291. Only a birth must carry `datatype`, so the
+daemon keeps the datatypes each NBIRTH and DBIRTH declares, by alias per edge node and by name per
+device, beside the alias table, and reads a DDATA that omits it through them. A signed value is
+masked to its width and sign-extended, which accepts both encodings in use (an Int8 of −5 as
+`0xFFFFFFFB` from Tahu's Java encoder, `0xFB` from its Python one); unsigned types and DateTime
+(epoch milliseconds) are stored as they arrive. With no declared datatype the value is stored
+unsigned, as before, and counted in `aber_ingestion_integer_datatype_unknown_total`: guessing a
+width would corrupt an unsigned counter to repair a signed one. The JSON fallback writes a negative
+number as its 32-bit pattern, marked Int32 if undeclared. `i3x/i3x_service.py` mirrors all of this.
+
 Rows are keyed by **`sparkplug_id`**, never by name, so a rename never breaks a series. The
 `assets` dimension row is upserted on every write with the current display label.
 
@@ -1447,6 +1459,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
 | `aber_ingestion_timestamps_rejected_total` | `edge_node` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. The label names the appliance, which is almost always a clock rather than a device — read it beside the gauge below. |
 | `aber_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
+| `aber_ingestion_integer_datatype_unknown_total` | — | An integer arrived whose datatype neither the message nor a birth since startup declared, and was stored unsigned. A negative signed reading among them is recorded as a large positive number. Sustained means a publisher that never declares datatypes. |
 | `aber_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
 | `aber_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
 | `aber_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
