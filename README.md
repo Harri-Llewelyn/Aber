@@ -188,10 +188,14 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 ## The schema every install applies
 
 Every file in `supabase/migrations/` is applied by the `db-init` Job on every install and upgrade, and re-applied
-harmlessly each time: the schema baseline (`0001`), seed data (`0002`), then `0003` audit
-immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007` metric-name format, `0008` Sparkplug
-group, `0009` withdraws residual `anon` function grants, `0010` telemetry rollups and latest-value
-view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permitted values of a
+harmlessly each time. The schema baseline (`0001`) and seed data (`0002`) fold the incremental
+chain kept in [`supabase/migrations/archive/`](supabase/migrations/archive/README.md), whose
+numbers below `0012` now also name live migrations, so those say "archived". The chain is how
+the schema came to be: archived `0003` audit immutability, archived `0004`, archived `0005`,
+archived `0006` Node-RED SSO, archived `0007` metric-name format, archived `0008` Sparkplug
+group, archived `0009` withdraws residual `anon` function grants, archived `0010` telemetry
+rollups and latest-value view, archived `0011` IDTA Digital Nameplate and per-device nameplate
+data, `0012` permitted values of a
 discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
@@ -274,14 +278,15 @@ boot would silently undo every provisioning run — which is what `public.one_sh
 for — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
-> because `0005` already implements one; a second declaration of `log_digital_thread_event()`
-> would win by filename order on every boot and would have regressed the `actor_source`
-> attribution `0005` adds. The gap in the numbering is deliberate and the reasoning is in
-> [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
+> because archived `0005` already implements one; a second declaration of
+> `log_digital_thread_event()` would win by filename order on every boot and would have regressed
+> the `actor_source` attribution it adds. The gap in the numbering is deliberate and the reasoning
+> is in [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
 >
-> `0026` is that later declaration, written deliberately and on those terms: it reproduces `0005`'s
-> body **in full** and adds two lines, rather than patching it. Its self-check asserts that both the
-> heartbeat suppression guard and the causation stamp are present in the live definition, because
+> `0026` is that later declaration, written deliberately and on those terms: it reproduces
+> archived `0005`'s body **in full** and adds two lines, rather than patching it. Its self-check
+> asserts that both the heartbeat suppression guard and the causation stamp are present in the
+> live definition, because
 > `check-docs-drift.mjs` can verify a redeclaration was *intended* and cannot verify it was
 > *complete*.
 
