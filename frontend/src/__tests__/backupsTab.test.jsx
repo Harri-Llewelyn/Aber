@@ -363,6 +363,8 @@ describe('asking', () => {
     const button = await screen.findByRole('button', { name: /Take a backup/ })
     expect(button).toBeDisabled()
     expect(screen.getByText('Queued')).toBeInTheDocument()
+    // The icon sits on the label's baseline only if IconX forwards its style.
+    expect(screen.getByRole('button', { name: /^Cancel$/ }).querySelector('svg')).toHaveStyle({ verticalAlign: '-2px' })
 
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
     await waitFor(() => expect(api.cancelBackupJob).toHaveBeenCalledWith('j-2'))
