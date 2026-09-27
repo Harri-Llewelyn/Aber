@@ -2,19 +2,21 @@
 Shared template helpers: the values several services must be handed identically.
 
   1. Names and labels   2. Validation, which fails the render   3. Connection strings   4. Env blocks
+
+Each helper carries what a reader needs at the line. The argument and the measurements behind them
+are in docs/kubernetes-architecture.md, "What the shared helpers decide".
 */}}
 
-{{/* ---------------------------------------------------------------------------------------- */}}
-{{/* 1. Names and labels                                                                        */}}
-{{/* ---------------------------------------------------------------------------------------- */}}
-
+{{/* ======================================================================================== */}}
+{{/* 1. Names and labels */}}
+{{/* ======================================================================================== */}}
 {{- define "aber.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
-Release-qualified name, for objects that are NOT addressed by name from inside the stack
-(Secrets, ConfigMaps, Jobs). Services deliberately do not use this -- see below.
+Release-qualified name, for objects not addressed by name from inside the stack (Secrets,
+ConfigMaps, Jobs). Services deliberately do not use it; see aber.labels.
 */}}
 {{- define "aber.fullname" -}}
 {{- if .Values.fullnameOverride -}}
@@ -31,9 +33,9 @@ Release-qualified name, for objects that are NOT addressed by name from inside t
 
 {{/*
 SERVICE NAMES ARE NOT PREFIXED. They are the component names, so in-cluster DNS resolves
-`supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` -- the URLs grafana.ini, settings.js
-and the edge-function environment carry. Two releases of this stack in one namespace is not a
-supported configuration; use two namespaces. Do not rename a Service to tidy it.
+supabase-kong:8000, timescaledb:5432 and mosquitto:1883, the URLs grafana.ini, settings.js and the
+edge-function environment carry. Two releases in one namespace is not supported; use two
+namespaces. Do not rename a Service to tidy it.
 */}}
 {{- define "aber.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
@@ -49,7 +51,9 @@ app.kubernetes.io/part-of: aber
 {{- end }}
 {{- end -}}
 
-{{/* Selector labels for one component. Usage: (dict "ctx" $ "component" "timescaledb") */}}
+{{/*
+Selector labels for one component. Usage: (dict "ctx" $ "component" "timescaledb")
+*/}}
 {{- define "aber.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "aber.name" .ctx }}
 app.kubernetes.io/instance: {{ .ctx.Release.Name }}
@@ -69,7 +73,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 
-{{/* Resolve a per-component storageClass, falling back to the global one. */}}
+{{/*
+A per-component storageClass, falling back to the global one.
+*/}}
 {{- define "aber.storageClass" -}}
 {{- $sc := .component.storageClass | default .ctx.Values.global.storageClass -}}
 {{- if $sc -}}
@@ -78,14 +84,10 @@ storageClassName: {{ $sc | quote }}
 {{- end -}}
 
 {{/*
-`repository:tag` for the images this repository BUILDS, defaulting an empty tag to the chart's
-appVersion so the chart and its images ship from one release tag. An explicit tag still wins, so a
-deployment can pull one component at a different build without forking the chart.
-
-NOT used for third-party images: those pins carry couplings -- realtime and storage-api migrate
-shared schemas on boot, studio is Zod-coupled to a postgres-meta version, node-red is what the
-generated settings.js depends on -- and floating them onto appVersion would make a chart bump
-silently change which Postgres the databases run.
+repository:tag for the images this repository BUILDS, an empty tag defaulting to the chart's
+appVersion so chart and images ship from one release tag; an explicit tag still wins. Not for
+third-party images: those pins carry couplings (realtime and storage-api migrate shared schemas on
+boot, studio is Zod-coupled to a postgres-meta version, node-red is what settings.js depends on).
 
   {{ include "aber.image" (dict "image" .Values.ingestion.image "ctx" .) }}
 */}}
@@ -99,10 +101,9 @@ silently change which Postgres the databases run.
 
 {{/*
 The image serving each Directory row, as JSON keyed by component, for db-init to record in
-`directory_services.image` (migration 0007). Each value is rendered by the same expression as the
-workload's own `image:`, and a component the chart does not deploy is left out so its row is
-cleared. Alloy is listed only when its node_exporter collectors run: that is the row it serves.
-check-docs-drift.mjs holds these components equal to 0007's `served_by` list.
+directory_services.image (migration 0007). Rendered by the same expression as each workload's own
+image:, and a component the chart does not deploy is left out so its row is cleared; Alloy only
+when its node_exporter collectors run. check-docs-drift.mjs holds the list equal to 0007's.
 */}}
 {{- define "aber.directoryImages" -}}
 {{- $v := .Values -}}
@@ -139,11 +140,9 @@ check-docs-drift.mjs holds these components equal to 0007's `served_by` list.
 {{- end -}}
 
 {{/*
-The Prometheus and Loki the Grafana datasources point at.
-
-Empty in values resolves to the chart's own stores when observability.enabled; with it off, an
-empty value fails the render, because a datasource pointed at nothing gives every alert rule
-DatasourceError against a stack that is otherwise healthy.
+The Prometheus the Grafana datasource points at: the chart's own when observability.enabled,
+otherwise the value, and an empty value fails the render because a datasource pointed at nothing
+gives every alert rule DatasourceError against a healthy stack. aber.lokiUrl is the same for Loki.
 */}}
 {{- define "aber.prometheusUrl" -}}
 {{- if .Values.grafana.prometheusUrl -}}
@@ -156,13 +155,10 @@ http://prometheus:9090
 {{- end -}}
 
 {{/*
-The Sparkplug primary host id, validated. The ingestion daemon publishes the STATE birth and death
-certificates under it and the broker's reconcile grants write on that one topic, so the two cannot
-drift.
-
-REQUIRED, WITH NO DEFAULT: every gateway on site is configured to watch `spBv1.0/STATE/<id>`, which
-makes the id part of the contract with equipment this chart has never seen. Failing the render
-rather than installing without it -- the daemon refuses to start, naming only an env var.
+The Sparkplug primary host id, validated to one topic level. REQUIRED, WITH NO DEFAULT: every
+gateway on site watches spBv1.0/STATE/<id>, so it is part of the contract with equipment this
+chart has never seen. The daemon publishes STATE under it and the broker's reconcile grants write
+on that one topic from the same value, so the two cannot drift.
 */}}
 {{- define "aber.primaryHostId" -}}
 {{- $id := .Values.ingestion.primaryHostId | default "" -}}
@@ -177,13 +173,10 @@ rather than installing without it -- the daemon refuses to start, naming only an
 
 {{/*
 The Sparkplug group id: the second segment of every topic this site publishes, and the enterprise
-segment of its Unified Namespace. Fixed at install -- `0131` seeds it into the `sparkplug.group_id`
-setting on the first boot and refuses a later value that differs, because changing it re-addresses
-every gateway rather than changing a preference.
-
-UNLIKE primaryHostId, THIS HAS A DEFAULT, `Aber`. A stack installed before 1.0 holds `ACS-Cymru`,
-the platform's former name; 0003 moves it to `Aber` on the first boot under this chart, so
-rendering the default for it is the rename, not a disagreement.
+segment of its Unified Namespace. Fixed at install: the first boot seeds it into the
+sparkplug.group_id setting and a later value that differs is refused, because changing it
+re-addresses every gateway. Unlike primaryHostId it has a default, Aber; a stack installed before
+1.0 holds the former name, and migration 0003 moves it on the first boot under this chart.
 */}}
 {{- define "aber.sparkplugGroup" -}}
 {{- $g := .Values.ingestion.sparkplugGroup | default "" -}}
@@ -197,10 +190,9 @@ rendering the default for it is the rename, not a disagreement.
 {{- end -}}
 
 {{/*
-The Directory's MQTT prefix, derived from the group unless a deployment names its own. The broker's
-ingestion role is granted `<prefix>/#` at reconcile time from this same value, so the two cannot
-disagree -- which they could when the prefix was a literal in values.yaml and another in the roles
-file.
+The Directory's MQTT prefix, derived from the group unless a deployment names its own. The
+broker's ingestion role is granted <prefix>/# at reconcile time from this same value, so the two
+cannot disagree.
 */}}
 {{- define "aber.directoryTopicPrefix" -}}
 {{- $p := .Values.ingestion.directoryMqttTopicPrefix | default "" -}}
@@ -225,9 +217,9 @@ http://loki:3100
 {{- end -}}
 
 {{/*
-Pod annotations that make a workload a scrape target. Alloy (templates/obs/alloy.yaml) keeps every
-pod carrying `prometheus.io/scrape: "true"`, reads the port and path from the other two, and labels
-the series `service` with the pod's component. A cluster's own Prometheus reads the same convention.
+Pod annotations that make a workload a scrape target: Alloy keeps every pod carrying
+prometheus.io/scrape: "true", reads the port and path from the other two, and labels the series
+service with the pod's component. A cluster's own Prometheus reads the same convention.
 
   {{ include "aber.scrapeAnnotations" (dict "port" 9108 "path" "/metrics") | nindent 8 }}
 */}}
@@ -237,20 +229,14 @@ prometheus.io/port: {{ .port | quote }}
 prometheus.io/path: {{ .path | default "/metrics" | quote }}
 {{- end -}}
 
-{{/* ---------------------------------------------------------------------------------------- */}}
-{{/* 2. Validation                                                                              */}}
-{{/*                                                                                            */}}
-{{/* Every check here FAILS THE RENDER. That is the point: each of these misconfigurations       */}}
-{{/* otherwise produces a stack that reports healthy and then refuses every request, or a        */}}
-{{/* CrashLoopBackOff whose logs name something other than the cause.                            */}}
-{{/* ---------------------------------------------------------------------------------------- */}}
-
+{{/* ======================================================================================== */}}
+{{/* 2. Validation. Every check here FAILS THE RENDER: each misconfiguration otherwise produces a stack that reports healthy and refuses every request, or a CrashLoopBackOff whose logs name something other than the cause. */}}
+{{/* ======================================================================================== */}}
 {{/*
-The Supabase credentials are a SET: `anonKey` and `serviceRoleKey` are JWTs signed by `jwtSecret`,
-and `publishableKey`/`secretKey` are what callers present for the gateway to translate. Generating
-one without the others invalidates the rest and every request then fails at the gateway against a
-stack that looks fine. All supplied or none; the chart never generates them. Skipped under
-`existingSecret`, when the values are not the chart's to see -- see kubernetes-architecture.md §3.2.
+The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by jwtSecret, and
+publishableKey/secretKey are what callers present for the gateway to translate. All supplied or
+none; the chart never generates them. Skipped under existingSecret, when the values are not the
+chart's to see (kubernetes-architecture.md §3.2).
 */}}
 {{- define "aber.validateSecrets" -}}
 {{- if not .Values.secrets.existingSecret -}}
@@ -261,10 +247,9 @@ stack that looks fine. All supplied or none; the chart never generates them. Ski
 {{- end -}}
 {{- end -}}
 {{/*
-GRAFANA IS THE ONLY CONSUMER of the BI reader password: the maintenance Job reads an empty value as
-"do not create the role", which is right for a stack with no reporting tool. With Grafana enabled
-its render-datasource initContainer refuses to start without one, so this is a Helm error rather
-than a Grafana pod in CrashLoopBackOff against a database it cannot authenticate to.
+Grafana is the only consumer of the BI reader password: the maintenance Job reads an empty value as
+"do not create the role", and Grafana's datasource initContainer refuses to start without one, so
+this is a Helm error rather than a CrashLoopBackOff.
 */}}
 {{- if and .Values.grafana.enabled (not .Values.secrets.biReaderPassword) -}}
 {{- $missing = append $missing "secrets.biReaderPassword (BI_READER_PASSWORD, required when grafana.enabled)" -}}
@@ -273,10 +258,9 @@ than a Grafana pod in CrashLoopBackOff against a database it cannot authenticate
 {{- $missing = append $missing "secrets.ingestWriterPassword (INGEST_WRITER_PASSWORD, required while ingestion.dbUser is ingest_writer -- the role does not exist without it, and the only other historian credential is the superuser)" -}}
 {{- end -}}
 {{/*
-  THE TWO MACHINE-PRINCIPAL KEYS. Their absence is the worst shape this helper prevents: `helm
-  install` REPORTS SUCCESS while the ingestion daemon halts itself -- it refuses to start its MQTT
-  loop without SUPABASE_INGESTION_KEY rather than run fail-open -- and the only symptom is
-  `0 of 1 updated replicas are available`. Unconditional: neither workload has an `enabled` flag.
+  The two machine-principal keys: without them helm install reports success while the ingestion
+  daemon halts itself rather than run fail-open, and the only symptom is 0 of 1 updated replicas
+  are available. Unconditional; neither workload has an enabled flag.
   */}}
 {{- if not .Values.secrets.ingestionKey -}}
 {{- $missing = append $missing "secrets.ingestionKey (SUPABASE_INGESTION_KEY, required -- the ingestion daemon halts rather than start its MQTT loop without it, so the stack installs and then never becomes ready)" -}}
@@ -288,30 +272,24 @@ than a Grafana pod in CrashLoopBackOff against a database it cannot authenticate
 {{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
 {{- end -}}
 {{/*
-THE CREDENTIAL SERVICE'S TOKEN. It exits 2 on anything shorter than 32 characters rather than
-running open, because it can issue a Mosquitto account for any edge node and the gateway role turns
-that into publishing Sparkplug telemetry AS that gateway. 32, not "not empty", is the length it
-checks.
-
-It is a SIDECAR IN THE BROKER'S POD, so its refusal is not contained: the pod never reaches Ready
-and everything waiting on the broker times out, with the rollout error naming i3x-service.
+The credential service exits 2 on anything shorter than 32 characters rather than running open,
+and it is a sidecar in the broker's pod, so the pod never reaches Ready and the rollout error
+names i3x-service.
 */}}
 {{- if and .Values.gatewayCredential.enabled (lt (len (.Values.secrets.mqttCredentialServiceToken | default "")) 32) -}}
 {{- $missing = append $missing "secrets.mqttCredentialServiceToken (MQTT_CREDENTIAL_SERVICE_TOKEN, 32+ characters, required when gatewayCredential.enabled)" -}}
 {{- end -}}
 {{/*
-THE PLUGIN'S ADMIN. The broker's initContainer writes this account into the Dynamic Security
-document on every start and exits 1 without a password, so the pod never starts and the symptom is
-the same rollout timeout as above. The credential service authenticates as it; nothing else does.
+The plugin's admin: the broker's initContainer exits 1 without it, the same rollout timeout as
+above. The credential service authenticates as it; nothing else does.
 */}}
 {{- if and .Values.mosquitto.enabled (not .Values.secrets.mqttDynsecAdminPassword) -}}
 {{- $missing = append $missing "secrets.mqttDynsecAdminPassword (MQTT_DYNSEC_ADMIN_PASSWORD, required -- the account the credential service administers the broker's Dynamic Security plugin as)" -}}
 {{- end -}}
 {{/*
-CONDITIONAL, like the token above, because playback is off by default. playback_worker.py refuses to
-start without the key, and the CrashLoopBackOff names an environment variable rather than the values
-key that fills it. `mqttPlaybackCredentials` is NOT required beside it: a worker with no broker
-credentials is correct for a stack that has issued no playback targets yet.
+Conditional, because playback is off by default: the worker refuses to start without the key and
+the CrashLoopBackOff names an env var. mqttPlaybackCredentials is not required beside it: no broker
+credential is correct for a stack that has issued no playback targets yet.
 */}}
 {{- if and .Values.playback.enabled (not .Values.secrets.playbackKey) -}}
 {{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
@@ -320,15 +298,10 @@ credentials is correct for a stack that has issued no playback targets yet.
 {{- fail (printf "\n\naber: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret and publishableKey and secretKey are the keys the gateway translates to them, so\nsupplying some and not others yields a stack that reports healthy and rejects every request\nat the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}
 {{/*
-THE DEMO SECRET IS REFUSED ON ANYTHING THAT IS NOT PLAINLY LOCAL.
-
-`values-dev.yaml` legitimately carries the published Supabase demo credentials and CI installs with
-it, so the value alone cannot be banned. What is banned is the combination with a public hostname
-somebody chose, which has no innocent reading: the published keys in this repository would
-authenticate at the edge, and nothing about the stack would look wrong.
-
-The local forms below are the ones the chart's docs and CI use. `node scripts/setup.mjs` mints a
-matching set in one command; `values-prod.yaml.example` documents where to put it.
+The demo secret is refused on anything that is not plainly local. values-dev.yaml carries the
+published Supabase demo credentials and CI installs with it, so the value alone cannot be banned;
+its combination with a public hostname has no innocent reading. node scripts/setup.mjs mints a
+matching set.
 */}}
 {{- $demoJwtSecret := "super-secret-jwt-token-with-at-least-32-characters" -}}
 {{- if eq (.Values.secrets.jwtSecret | default "") $demoJwtSecret -}}
@@ -342,11 +315,9 @@ matching set in one command; `values-prod.yaml.example` documents where to put i
 {{- end -}}
 
 {{/*
-Realtime's two keys have LENGTHS ENFORCED BY THE CONTAINER, which refuses to boot otherwise --
-dbEncKey exactly 16 characters, secretKeyBase at least 64. Asserted here so the failure is one
-Helm error instead of a restarting pod with an Elixir stacktrace.
-
-Only checked when realtime is enabled AND the chart owns the secret.
+Realtime's two keys have lengths enforced by the container (dbEncKey exactly 16, secretKeyBase at
+least 64), asserted here so the failure is one Helm error instead of a restarting pod with an
+Elixir stack trace. Only when realtime is enabled and the chart owns the secret.
 */}}
 {{- define "aber.validateRealtime" -}}
 {{- if and .Values.realtime.enabled (not .Values.secrets.existingSecret) -}}
@@ -359,9 +330,8 @@ Only checked when realtime is enabled AND the chart owns the secret.
 {{- fail (printf "\n\naber: secrets.realtimeSecretKeyBase must be AT LEAST 64 characters (got %d).\nsupabase/realtime refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n" (len $base)) -}}
 {{- end -}}
 {{/*
-  THE THIRD SECRET THAT MAKES REALTIME REFUSE TO BOOT. `METRICS_JWT_SECRET` is `System.fetch_env!`
-  as of v2.102.3, so the container aborts during boot and the only clue is an Elixir stack trace ten
-  frames deep. No length rule: unlike the two above it only has to exist and be secret.
+  The third secret realtime refuses to boot without: METRICS_JWT_SECRET is System.fetch_env! as of
+  v2.102.3, and the only clue is an Elixir stack trace. No length rule; it only has to exist.
   */}}
 {{- if not .Values.secrets.realtimeMetricsJwtSecret -}}
 {{- fail "\n\naber: secrets.realtimeMetricsJwtSecret is required (METRICS_JWT_SECRET).\nsupabase/realtime v2.102.3 refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n\nDeliberately NOT secrets.jwtSecret: it signs the bearer token realtime's /metrics endpoint\nrequires, and sharing the API signing key would let anyone holding it mint metrics tokens.\n" -}}
@@ -370,11 +340,9 @@ Only checked when realtime is enabled AND the chart owns the secret.
 {{- end -}}
 
 {{/*
-Realtime's Service name must have `realtime-dev` as its LEADING LABEL.
-
-Realtime reads the tenant id from the leading hostname label of the Host header, not from the JWT.
-The gateway rewrites the upstream Host to the Service name -- rename it and every WebSocket
-handshake fails with a bare 403 that names nothing.
+Realtime's Service name must lead with realtime-dev: it reads the tenant from the leading Host
+label, which the gateway rewrites to the Service name, so any other name fails every WebSocket
+handshake with a bare 403 that names nothing.
 */}}
 {{- define "aber.validateRealtimeServiceName" -}}
 {{- if .Values.realtime.enabled -}}
@@ -386,11 +354,10 @@ handshake fails with a bare 403 that names nothing.
 {{- end -}}
 
 {{/*
-A browser-facing URL that resolves to the empty string is worse than a missing one. GoTrue builds
-every user-facing redirect from GOTRUE_SITE_URL, so /oauth/authorize sends the browser to
-`/oauth/consent` with no origin and both SSO flows fail at the consent step with nothing naming the
-cause; the `redirect_uris` db-init registers would be empty too. Gated on supabaseAuth, because a
-data-tier-only install genuinely needs no domain.
+A browser-facing URL resolving to the empty string is worse than a missing one: GoTrue builds
+every user-facing redirect from GOTRUE_SITE_URL, so both SSO flows fail at the consent step with
+nothing naming the cause, and the registered redirect_uris would be empty too. Gated on
+supabaseAuth, because a data-tier-only install needs no domain.
 */}}
 {{- define "aber.validatePublicUrls" -}}
 {{- if .Values.supabaseAuth.enabled -}}
@@ -404,11 +371,9 @@ data-tier-only install genuinely needs no domain.
 {{- end -}}
 
 {{/*
-TLS ON THE INGRESS WITH `scheme: http` IS A CONTRADICTION THAT FAILS AS AN OAUTH ERROR. Every
-browser-facing URL is composed from `global.scheme`, and db-init registers those as the OAuth
-clients' `redirect_uris`: the browser arrives over https and presents an https redirect_uri while
-GoTrue holds the http one, answering `invalid redirect_uri`. Grafana's root_url would send users to
-http and lose the session cookie. Nothing crashes; only sign-in breaks.
+TLS on the ingress with scheme: http fails as an OAuth error: every browser-facing URL, and so
+every registered redirect_uri, is composed from global.scheme, so the browser presents https while
+GoTrue holds http. Nothing crashes; only sign-in breaks.
 */}}
 {{- define "aber.validateScheme" -}}
 {{- if and .Values.ingress.enabled .Values.ingress.tls.enabled (ne .Values.global.scheme "https") -}}
@@ -417,13 +382,9 @@ http and lose the session cookie. Nothing crashes; only sign-in breaks.
 {{- end -}}
 
 {{/*
-AN INGRESS WITH EMPTY `host:` FIELDS IS ACCEPTED BY THE API SERVER and then matches every request
-arriving at the controller, so unrelated traffic reaches the dashboard while no intended hostname
-routes.
-
-Checked here rather than in ingress.yaml because a `fail` inside a resource template pre-empts this
-chain: an install with no credentials at all was being told about hostnames. Validation belongs in
-one ordered place; ingress.yaml renders nothing when there is nothing to render.
+An Ingress with empty host: fields is accepted by the API server and then matches every request,
+so unrelated traffic reaches the dashboard while no intended hostname routes. Checked here rather
+than in ingress.yaml so validation runs in one ordered place.
 */}}
 {{- define "aber.validateIngress" -}}
 {{- if .Values.ingress.enabled -}}
@@ -438,17 +399,10 @@ one ordered place; ingress.yaml renders nothing when there is nothing to render.
 {{- end -}}
 
 {{/*
-The single-writer workloads, and why each one is.
-
-ONE LIST, READ RATHER THAN RESTATED: `aber.validateAutoscaling` below and CI's
-replica/strategy check both parse this block. A second copy is how it came to be wrong -- the
-guard's duplicate omitted `i3x-service`, whose in-memory state makes a second replica
-client-visible (issue #27).
-
-PARSED AS YAML, so the shape matters: `name: reason`, continuation lines indented. The KEY is the
-name `autoscaling.components` takes, which for the Supabase components is unprefixed -- `realtime`,
-not `supabase-realtime`. CI resolves both spellings against the rendered manifests and treats a
-name matching neither as an error, because a name nothing resolves to protects nothing.
+The single-writer workloads, and why each one is. ONE LIST, READ RATHER THAN RESTATED:
+aber.validateAutoscaling and CI's replica/strategy check both parse it (a duplicate once omitted
+i3x-service, issue #27). Parsed as YAML: name: reason, continuation lines indented. The key is the
+name autoscaling.components takes, unprefixed for the Supabase components.
 */}}
 {{- define "aber.singleWriterWorkloads" -}}
 ingestion: a plain paho subscribe with no shared-subscription group -- every replica consumes every
@@ -476,12 +430,9 @@ loki: single-binary mode with filesystem storage on a ReadWriteOnce PVC -- the i
 {{- end -}}
 
 {{/*
-The workloads that MAY autoscale, and why each is safe to run more than one of.
-
-Written out rather than derived as the complement of the block above: "not single-writer" also
-admits every name that does not exist -- a typo, a renamed component, one this chart never shipped
--- and those all used to pass (issue #31). An allow-list is the only shape where an unrecognised
-name is wrong by default.
+The workloads that MAY autoscale, and why each is safe to run more than one of. An allow-list
+rather than the complement of the block above, because "not single-writer" also admits every name
+that does not exist (issue #31).
 */}}
 {{- define "aber.autoscalableWorkloads" -}}
 supabase-rest: PostgREST is stateless and holds a connection pool per replica
@@ -491,19 +442,9 @@ frontend: NGINX serving static files
 {{- end -}}
 
 {{/*
-An HPA on a workload that must not have one. Two refusals:
-
-  1. A SINGLE-WRITER workload. Every one is one replica for a reason recorded in its own manifest,
-     and the damage from scaling it is SILENT -- duplicated telemetry, a split fleet, or two
-     processes racing on one volume -- which an autoscaler makes happen under load.
-
-  2. A name that is NEITHER allowed nor forbidden. `superbase-rest`, a typo, used to install
-     cleanly and simply never scale, with nothing logged to search for; it also meant the forbidden
-     list was a single-writer workload's only protection, so any name missing from it was unguarded
-     (issues #27 and #31).
-
-Forbidden is checked first, so a single-writer workload keeps its specific explanation rather than
-being reported as merely unrecognised.
+An HPA on a workload that must not have one: a single-writer workload, whose damage from scaling
+is silent, or a name in neither list, which used to install cleanly and never scale (issues #27
+and #31). Forbidden is checked first, so a single-writer workload keeps its own explanation.
 */}}
 {{- define "aber.validateAutoscaling" -}}
 {{- if .Values.autoscaling.enabled -}}
@@ -512,36 +453,30 @@ being reported as merely unrecognised.
 {{- $allowed := keys (include "aber.autoscalableWorkloads" . | fromYaml) -}}
 {{- if lt (len $allowed) 4 -}}
 {{/*
-  THE SAME PARSE TRAP AS BELOW, in the direction that fails CLOSED rather than open: an
-  unparseable allow-list would leave `$allowed` empty and refuse every component, including the
-  four that are correct. Loud either way, but worth naming so the message points at the block
-  rather than at the operator's values file.
+  The parse trap in the direction that fails closed: an unparseable allow-list would refuse every
+  component, the correct four included.
 */}}
 {{- fail (printf "\n\naber: the autoscalable workload list did not parse -- got %d entries: %v.\n\nThis guard derives its allow-list from `aber.autoscalableWorkloads` in _helpers.tpl, which\nis read as YAML. Check that block for a broken indent or a stray colon.\n" (len $allowed) $allowed) -}}
 {{- end -}}
 {{- if lt (len $forbidden) 9 -}}
 {{/*
-  A PARSE FAILURE MUST NOT READ AS "NOTHING IS FORBIDDEN". `fromYaml` answers a map carrying an
-  `Error` key rather than failing, so a typo in the block above would silently empty this guard.
-  Checked against a floor rather than an exact count, so adding a workload does not mean editing
-  two places -- which is the point of deriving the list.
+  A parse failure must not read as "nothing is forbidden": fromYaml answers a map carrying an Error
+  key rather than failing. A floor rather than an exact count, so adding a workload does not mean
+  editing two places.
   */}}
 {{- fail (printf "\n\naber: the single-writer workload list did not parse -- got %d entries: %v.\n\nThis guard derives its refusal set from `aber.singleWriterWorkloads` in _helpers.tpl, which\nis read as YAML. An unparseable block would leave the guard EMPTY and every single-writer\nworkload autoscalable, with no error, so it fails here instead. Check that block for a broken\nindent or a stray colon.\n" (len $forbidden) $forbidden) -}}
 {{- end -}}
 {{- range .Values.autoscaling.components -}}
 {{- if has . $forbidden -}}
 {{/*
-  THE COMPONENT'S OWN REASON IS PRINTED, not a representative one. The message used to explain
-  `ingestion` whatever had been asked for, so someone who set `grafana` read an answer about
-  duplicated telemetry rows and had to work out for themselves that theirs was a SQLite file on a
-  ReadWriteOnce volume. The reasons are already written per-component one define up.
+  The component's own reason is printed, not a representative one: the message used to explain
+  ingestion whatever had been asked for.
 */}}
 {{- fail (printf "\n\naber: autoscaling.components includes %q, which is a SINGLE-WRITER workload.\n\nWhy this one cannot be scaled:\n  %s\n\nRefused rather than warned about, because the damage is SILENT -- no error, no crash, just wrong\ndata or a split fleet. An autoscaler makes that happen under load, which is the worst moment to\ndiscover it.\n\nOnly these may autoscale: %s.\n" . (get $single .) (join ", " $allowed)) -}}
 {{- end -}}
 {{- if not (has . $allowed) -}}
 {{/*
-  ISSUE #31. Reached only when the name is in neither list, which is the case that used to render
-  nothing and say nothing.
+  Issue #31: the name is in neither list, the case that used to render nothing and say nothing.
 */}}
 {{- fail (printf "\n\naber: autoscaling.components includes %q, which is not a component this chart can scale.\n\nIt is neither in the allow-list nor among the single-writer workloads, so it would previously have\nrendered NO HPA AND NO ERROR -- indistinguishable from a correct value that happened to produce\nnothing. A typo such as `superbase-rest` installed cleanly and then never scaled, and the symptom\narrived months later under load with nothing logged at install time to search for.\n\nOnly these may autoscale: %s.\n\nIf %q is a real workload that SHOULD scale, add it to `aber.autoscalableWorkloads` in\n_helpers.tpl with the reason it is safe to run more than one of -- and to hpas.yaml's dispatch\ntable, which is checked against that same list.\n" . (join ", " $allowed) .) -}}
 {{- end -}}
@@ -550,22 +485,12 @@ being reported as merely unrecognised.
 {{- end -}}
 
 {{/*
-Broker TLS: the two ways of asking for a broker nobody can reach. Both are refused rather than
-rendered, because both produce a stack that reports entirely healthy.
-
-  1. `external.plaintext: false` with TLS OFF leaves the external Service with NO PORTS. The API
-     server rejects that, but as "spec.ports: Required value" on a Service, naming neither setting.
-     Wanting no external broker is `external.enabled: false`.
-
-  2. TLS on, external LoadBalancer, and a certificate carrying nothing a gateway could match -- no
-     IP SAN and no operator-supplied DNS SAN. In-cluster clients dial `mosquitto` and verify
-     perfectly; every gateway dials the IP and fails on a hostname mismatch the broker never logs.
-     The stack reports healthy, the simulator keeps producing, and the fleet is off.
-
-Refused rather than warned about: Helm has no non-fatal warning `helm template` would surface.
-`publicBaseDomain` alone does not satisfy it -- `mqtt.<domain>` is the WebSocket name, not the
-address a gateway dials -- and either an IP SAN or an explicit DNS SAN clears it, so a deployment
-behind plant DNS is not blocked.
+Broker TLS: the two ways of asking for a broker nobody can reach, refused because both produce a
+stack that reports healthy. (1) external.plaintext false with TLS off is a Service with no ports,
+which the API server refuses as spec.ports: Required value, naming neither setting. (2) TLS on
+with an external LoadBalancer and no IP or DNS SAN a gateway could match: in-cluster clients
+verify, every gateway fails on a hostname mismatch the broker never logs. publicBaseDomain alone
+does not satisfy it; an IP SAN or an explicit DNS SAN does.
 */}}
 {{- define "aber.validateBrokerTls" -}}
 {{- if .Values.mosquitto.enabled -}}
@@ -581,24 +506,11 @@ behind plant DNS is not blocked.
 {{- end -}}
 
 {{/*
-Single entry point, included once from NOTES.txt so every render runs every check.
-
-ORDER IS DELIBERATE, most fundamental first: a stack with no credentials should be told that, not
-told about the hostnames it also lacks.
-*/}}
-{{/*
-The two GATEWAY MQTT usernames must be well-formed sparkplug_ids, and the monitoring account must
-have a password.
-
-WHY THE RENDER AND NOT THE POD. A gateway account's role confines it to `spBv1.0/+/+/<username>/#`
-(mosquitto/dynsec-roles.json, and the per-gateway role the reconcile generates), and
-`verify_gateway_binding()` requires that same segment to be the gateway row's GENERATED
-`sparkplug_id`. A friendly username authenticates perfectly and then has every message it publishes
-silently dropped, with nothing logged at either end -- an edge node that connects and produces no
-telemetry, which reads as a broken simulator or a broken daemon.
-
-The broker's own probes authenticate as the monitoring account, so an empty password leaves the pod
-permanently NotReady and takes down every workload waiting on it. Skipped under `existingSecret`.
+The gateway MQTT usernames must be well-formed sparkplug_ids, and the monitoring account must have
+a password. A friendly username authenticates and then has every message silently dropped, since
+the role confines it to spBv1.0/+/+/<username>/# and verify_gateway_binding() requires the same
+segment; an empty monitor password leaves the broker permanently NotReady. Skipped under
+existingSecret.
 */}}
 {{- define "aber.validateMqttPrincipals" -}}
 {{- if not .Values.secrets.existingSecret -}}
@@ -615,16 +527,10 @@ permanently NotReady and takes down every workload waiting on it. Skipped under 
 {{- end -}}
 
 {{/*
-Publishing Studio requires the credentials that make it a door rather than a hole.
-
-`ingress.routes.studio` names the GATEWAY's studio listener, so the console is behind an OAuth flow
-and an `Administrator` check -- but only if that flow has a client to run. With the secrets unset
-the gateway substitutes credentials that cannot authenticate and 0081 registers no client, so the
-route publishes a hostname whose every request ends at a login nobody can complete.
-
-Fail-closed is the right RUNTIME behaviour and the wrong INSTALL behaviour for an operator who has
-just asked for the route by name: the redirect loop through GoTrue ending in `invalid client` reads
-as a broken proxy rather than as two empty values.
+Publishing Studio requires the credentials that make it a door rather than a hole. With the secrets
+unset the gateway substitutes credentials that cannot authenticate and no client is registered, so
+the route publishes a hostname whose every request ends at a login nobody can complete, which
+reads as a broken proxy rather than two empty values.
 */}}
 {{- define "aber.validateStudioRoute" -}}
 {{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) -}}
@@ -635,16 +541,10 @@ as a broken proxy rather than as two empty values.
 {{- end -}}
 
 {{/*
-A Secure-cookie login published over plain http on a host a browser will not keep the cookie for.
-
-The gateway's studio and gitea listeners sign in through Envoy's oauth2 filter, which writes every
-cookie it uses with the Secure attribute. A browser keeps those only on an https origin or on
-localhost / *.localhost, so on any other http host the authorization round trip returns to a
-callback holding no state and Envoy answers 401 `CSRF token validation failed`. The dashboard,
-Grafana and Node-RED are unaffected: their sessions are their own. Nothing crashes and no pod is
-unhealthy; the two doors never open.
-
-The URL is judged, not global.scheme: a publicUrls.* override carries its own scheme.
+A Secure-cookie login published over plain http on a host a browser will not keep the cookie for:
+Envoy's oauth2 filter sets every cookie Secure, which a browser keeps only on https or on
+localhost, so the callback arrives holding no state and answers 401 CSRF token validation failed.
+The URL is judged, not global.scheme, because a publicUrls.* override carries its own scheme.
 */}}
 {{- define "aber.validateSecureCookieRoutes" -}}
 {{- if .Values.ingress.enabled -}}
@@ -659,6 +559,11 @@ The URL is judged, not global.scheme: a publicUrls.* override carries its own sc
 {{- end -}}
 {{- end -}}
 
+{{/*
+Single entry point, included once from NOTES.txt so every render runs every check. Order is
+deliberate, most fundamental first: a stack with no credentials is told that, not about the
+hostnames it also lacks.
+*/}}
 {{- define "aber.validate" -}}
 {{- include "aber.validateSecrets" . -}}
 {{- include "aber.validateStudioRoute" . -}}
@@ -676,11 +581,8 @@ The URL is judged, not global.scheme: a publicUrls.* override carries its own sc
 
 {{/*
 Broker client transport, shared by the ingestion daemon, i3X, Node-RED, playback and the e2e
-validator.
-
-DEFINED ONCE because they must agree: all five read the same environment variable names against one
-deliberate contract, so a port set for one and not another is a class of mistake worth making
-unrepresentable. Same reasoning as the NetworkPolicy edge list.
+validator. Defined once because all five read the same variable names against one contract, so a
+port set for one and not another is unrepresentable.
 */}}
 {{- define "aber.brokerClientEnv" -}}
 {{- $tls := .Values.mosquitto.tls -}}
@@ -691,8 +593,9 @@ unrepresentable. Same reasoning as the NetworkPolicy edge list.
   value: "8883"
 - name: MQTT_TLS_ENABLED
   value: "true"
-{{- /* Projected from the broker's certificate Secret -- see aber.brokerClientCaVolume for
-       why only ca.crt is mounted and not the whole Secret. */}}
+{{- /*
+       Projected from the broker's certificate Secret; aber.brokerClientCaVolume says why only ca.crt.
+       */}}
 - name: MQTT_TLS_CA_FILE
   value: /etc/aber/broker-ca/ca.crt
 {{- else }}
@@ -702,13 +605,9 @@ unrepresentable. Same reasoning as the NetworkPolicy edge list.
 {{- end -}}
 
 {{/*
-The CA-only projection of the broker certificate Secret.
-
-ONLY `ca.crt` IS PROJECTED, AND THAT IS THE POINT. `mosquitto-tls` is a kubernetes.io/tls Secret, so
-it also holds `tls.key` -- THE BROKER'S PRIVATE KEY. Mounting the whole Secret into every client pod
-would hand each of them the key that lets anything impersonate the broker, when verifying a
-certificate needs only the public CA. `items` restricts the projection at the kubelet, so the key is
-never written into either pod's filesystem.
+The CA-only projection of the broker certificate Secret. Only ca.crt is projected: the
+kubernetes.io/tls Secret also holds tls.key, the broker's private key, and items restricts the
+projection at the kubelet so the key is never written into a client pod's filesystem.
 */}}
 {{- define "aber.brokerClientCaVolume" -}}
 - name: broker-ca
@@ -726,18 +625,13 @@ never written into either pod's filesystem.
   readOnly: true
 {{- end -}}
 
-{{/* ---------------------------------------------------------------------------------------- */}}
-{{/* 3. Connection strings                                                                      */}}
-{{/*                                                                                            */}}
-{{/* Built here rather than per service so the host, port and password are written once. Every   */}}
-{{/* one targets the IN-CLUSTER Service name and the STANDARD port -- never a published port.    */}}
-{{/* ---------------------------------------------------------------------------------------- */}}
-
+{{/* ======================================================================================== */}}
+{{/* 3. Connection strings. Written once; every one targets the in-cluster Service name and the standard port, never a published port. */}}
+{{/* ======================================================================================== */}}
 {{/*
-M2. TimescaleDB is reached at `timescaledb:5432`, NEVER the host-published 5433, which exists only
-to keep the dev loop's forwarded port off a developer's local PostgreSQL. A wrong port in
-0001_baseline_schema.sql's postgres_fdw foreign server fails as a relation-level error from
-PostgREST, so it reads as a schema fault; `helm test` (M6) queries the foreign table to pin it.
+M2. TimescaleDB is reached at timescaledb:5432, never the host-published 5433, which exists only
+to keep the dev loop's forwarded port off a developer's local PostgreSQL. A wrong port in the
+baseline schema's postgres_fdw server reads as a schema fault; helm test (M6) pins it.
 */}}
 {{- define "aber.timescale.host" -}}timescaledb{{- end -}}
 {{- define "aber.timescale.port" -}}5432{{- end -}}
@@ -745,25 +639,24 @@ PostgREST, so it reads as a schema fault; `helm test` (M6) queries the foreign t
 {{- define "aber.supabaseDb.host" -}}supabase-db{{- end -}}
 {{- define "aber.supabaseDb.port" -}}5432{{- end -}}
 
-{{/* The gateway, as reached from INSIDE the cluster. The browser-facing address is publicUrls.supabase. */}}
+{{/*
+The gateway as reached from inside the cluster. The browser-facing address is publicUrls.supabase.
+*/}}
 {{- define "aber.supabase.internalUrl" -}}http://supabase-kong:8000{{- end -}}
 
-{{/* ---------------------------------------------------------------------------------------- */}}
-{{/* TLS to the databases (`postgresTls`)                                                     */}}
-{{/*                                                                                            */}}
-{{/* Both databases are issued by the same issuer, so one CA verifies either. Clients project    */}}
-{{/* `ca.crt` alone from the Supabase database's Secret (the historian's when Supabase is off), */}}
-{{/* for the reason the broker's projection gives: the Secret also holds the server's key.       */}}
-{{/* ---------------------------------------------------------------------------------------- */}}
-
+{{/* ======================================================================================== */}}
+{{/* TLS to the databases (postgresTls). One issuer for both, so one CA verifies either; clients project ca.crt alone, since the Secret also holds the server's key. */}}
+{{/* ======================================================================================== */}}
 {{- define "aber.dbTlsSecretName" -}}{{ printf "%s-tls" . }}{{- end -}}
 {{- define "aber.dbCaSecretName" -}}
 {{- ternary "supabase-db-tls" "timescaledb-tls" .Values.supabaseDb.enabled -}}
 {{- end -}}
 {{- define "aber.dbCaPath" -}}/etc/aber/db-ca/ca.crt{{- end -}}
 
-{{/* Each of these renders nothing while TLS is off, so a caller adds them to an existing list
-     unconditionally and only wraps a list that would otherwise be empty. */}}
+{{/*
+Each of these renders nothing while TLS is off, so a caller adds them to an existing list
+unconditionally and only wraps a list that would otherwise be empty.
+*/}}
 {{- define "aber.dbClientCaVolume" -}}
 {{- if .Values.postgresTls.enabled }}
 - name: db-ca
@@ -784,8 +677,10 @@ PostgREST, so it reads as a schema fault; `helm test` (M6) queries the foreign t
 {{- end }}
 {{- end -}}
 
-{{/* libpq's own variables. psql, pg_dump, psycopg2 and PostgREST all read them, so no client
-     needs a flag of its own; absent, libpq negotiates nothing and the server offers nothing. */}}
+{{/*
+libpq's own variables, which psql, pg_dump, psycopg2 and PostgREST all read; absent, libpq
+negotiates nothing and the server offers nothing.
+*/}}
 {{- define "aber.dbClientTlsEnv" -}}
 {{- if .Values.postgresTls.enabled }}
 - name: PGSSLMODE
@@ -795,7 +690,9 @@ PostgREST, so it reads as a schema fault; `helm test` (M6) queries the foreign t
 {{- end }}
 {{- end -}}
 
-{{/* The DSN tail for the clients that spell the mode in their URL (GoTrue, PostgREST). */}}
+{{/*
+The DSN tail for the clients that spell the mode in their URL (GoTrue, PostgREST).
+*/}}
 {{- define "aber.dsnSslParams" -}}
 {{- if .Values.postgresTls.enabled -}}
 sslmode=verify-full&sslrootcert={{ include "aber.dbCaPath" . }}
@@ -804,8 +701,10 @@ sslmode=disable
 {{- end -}}
 {{- end -}}
 
-{{/* The CA as PEM in an environment variable, which is how storage-api and postgres-meta take
-     it. Public material, so the variable is fine. Usage: (dict "ctx" . "name" "DATABASE_SSL_ROOT_CERT") */}}
+{{/*
+The CA as PEM in an environment variable, which is how storage-api and postgres-meta take it.
+Usage: (dict "ctx" . "name" "DATABASE_SSL_ROOT_CERT")
+*/}}
 {{- define "aber.dbCaPemEnv" -}}
 {{- if .ctx.Values.postgresTls.enabled }}
 - name: {{ .name }}
@@ -818,8 +717,8 @@ sslmode=disable
 
 {{/*
 The certificate reload sidecar for a database pod. cert-manager renews the leaf in place and
-nothing restarts a StatefulSet for it; Postgres re-reads its certificate files on a reload, so
-this watches the mounted certificate and asks for one over loopback, which pg_hba trusts.
+nothing restarts a StatefulSet for it; Postgres re-reads its certificate on a reload, so this
+watches the mounted certificate and asks for one over loopback, which pg_hba trusts.
 Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "postgres" "db" "postgres")
 */}}
 {{- define "aber.dbCertificateReload" -}}
@@ -853,26 +752,13 @@ Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "po
 {{- end -}}
 
 {{/*
-The postgres_exporter sidecar, defined once and used by both database pods. `db` names the
-component (and so the `job` label Alloy writes), `database` the database it connects to.
-
-THE DSN CARRIES NO PASSWORD AND NO `sslmode`, and both halves are load-bearing.
-
-  No password, because `metrics_reader` has none and cannot be given one: the network is admitted
-  by `hostssl ... scram-sha-256`, so a role with no password CANNOT AUTHENTICATE FROM ANYWHERE BUT
-  LOOPBACK, which is the whole argument for granting it `pg_monitor`. The sidecar shares the pod's
-  network namespace, so 127.0.0.1 is the database beside it.
-
-  No `sslmode`, because libpq then defaults to `prefer`: measured on the dev stack, that negotiates
-  TLSv1.3 over loopback when `postgresTls` is on and falls back to plaintext when it is off, with
-  `trust` matching either way (a pg_hba `host` line matches SSL and non-SSL alike). One DSN, correct
-  under both settings, and no `sslmode=disable` for the TLS render check to find.
-
-NO READINESS PROBE, DELIBERATELY, and this is where it departs from the broker's exporter. A
-readinessProbe on ANY container gates the whole pod's Service endpoints: an exporter that could not
-reach its database would take the database itself out of `timescaledb:5432` and stop the stack. A
-metrics sidecar must never be able to do that. Whether the exporter is working is a question for
-the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
+The postgres_exporter sidecar for both database pods; db names the component (the job label),
+database the database it connects to. THE DSN CARRIES NO PASSWORD AND NO sslmode: metrics_reader
+has none and can authenticate only from loopback, which is the argument for its pg_monitor, and
+without sslmode libpq's prefer negotiates TLS when postgresTls is on and plaintext when off, so one
+DSN is correct under both. NO READINESS PROBE, deliberately: a readinessProbe on any container
+gates the whole pod's Service endpoints, and a metrics sidecar must never be able to take the
+database out of service. Whether it works is the scrape's question.
 */}}
 {{- define "aber.dbMetricsExporter" -}}
 {{- $m := .ctx.Values.databaseMetrics -}}
@@ -886,33 +772,25 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
     - --no-collector.stat_user_tables
     - --no-collector.statio_user_tables
     {{- if $m.statementStats }}
-    {{- /* OFF BY DEFAULT IN THE EXPORTER, because the extension may not be there. It is, on both:
-           supabase/postgres preloads it already and the historian's args now add it. Bounded at
-           the exporter's own top-100, and the label is `queryid`, not the statement text. */}}
+    {{- /*
+           Off by default in the exporter because the extension may not be there; it is, on both. Bounded
+           at the exporter's own top-100, and labelled by queryid, not the statement text.
+           */}}
     - --collector.stat_statements
     {{- end }}
     {{- /*
-      TWO COLLECTORS THE EXPORTER LEAVES OFF, each turned on for a specific reader.
-
-        database_wraparound  age(datfrozenxid) and mxid_age(datminmxid) per database -- the only
-                             warning of transaction-ID exhaustion, which stops writes cluster-wide.
-                             4 series.
-        stat_checkpointer    PG17 moved checkpoint counters out of pg_stat_bgwriter into
-                             pg_stat_checkpointer, and the exporter follows the server; without this
-                             there are no checkpoint series at all on 17. 11 series.
-
-      Measured together on the historian: 255 series to 272.
-
-      MIND THE NAME ON THE WRAPAROUND SERIES. `pg_database_wraparound_age_datfrozenxid_seconds` is
-      NOT seconds -- it is `age(datfrozenxid)`, a transaction count, and the suffix is an upstream
-      misnomer. Verified: the metric read 222470 against `age(datfrozenxid)` of 222470 on a server
-      that had been up 477 seconds. A threshold written as a duration is wrong by six orders of
-      magnitude, so the alert rule states this too.
+      Two collectors the exporter leaves off, each on for a specific reader: database_wraparound
+      (age(datfrozenxid), the only warning of transaction-ID exhaustion; 4 series) and
+      stat_checkpointer (PG17 moved the checkpoint counters out of pg_stat_bgwriter; 11 series). 255
+      series to 272 on the historian. The wraparound series' _seconds suffix is an upstream misnomer
+      for a transaction count, verified, and the alert rule says so too.
     */}}
     - --collector.database_wraparound
     - --collector.stat_checkpointer
-    {{- /* The custom queries. DEPRECATED UPSTREAM AND FUNCTIONAL: v0.20.1 reads the file and says
-           so at startup. files/database-exporter/common.yaml records the fallback. */}}
+    {{- /*
+           The custom queries: deprecated upstream and functional, v0.20.1 says so at startup;
+           files/database-exporter/common.yaml records the fallback.
+           */}}
     - --extend.query-path=/etc/postgres-exporter/queries.yaml
     {{- range $m.extraArgs }}
     - {{ . | quote }}
@@ -932,7 +810,9 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
     {{- toYaml $m.resources | nindent 4 }}
 {{- end -}}
 
-{{/* The server-side settings, as `-c` flags appended to each image's own command. */}}
+{{/*
+The server-side settings, as -c flags appended to each image's own command.
+*/}}
 {{- define "aber.dbTlsServerArgs" -}}
 - -c
 - ssl=on
@@ -944,9 +824,10 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
 - hba_file=/etc/aber/postgres/pg_hba.conf
 {{- end -}}
 
-{{/* The server-side mounts and volumes. `tls` is the cert-manager Secret, 0440 so the key is
-     group-readable by the database user (fsGroup) and world-readable by nobody; Postgres
-     accepts a root-owned key at that mode. `hba` is the chart's pg_hba.conf. */}}
+{{/*
+The server-side mounts and volumes. tls is the cert-manager Secret, 0440 so the key is
+group-readable by the database user and world-readable by nobody; hba is the chart's pg_hba.conf.
+*/}}
 {{- define "aber.dbTlsServerMounts" -}}
 - name: tls
   mountPath: /etc/aber/postgres/tls
@@ -968,27 +849,23 @@ the scrape -- `up` and `pg_scrape_collector_success` -- not for Kubernetes.
 {{- end -}}
 
 {{/*
-DSN builder. Usage:
+DSN builder. The password is urlquery-escaped: one containing @ or / silently truncates the DSN
+and the failure reads as a bad hostname.
   {{ include "aber.dsn" (dict "user" "authenticator" "password" $pw "host" "supabase-db" "port" 5432 "db" "postgres" "params" (include "aber.dsnSslParams" .)) }}
-The password is urlquery-escaped: a generated password containing @ or / silently truncates the
-DSN at the wrong character and the failure reads as a bad hostname.
 */}}
 {{- define "aber.dsn" -}}
 {{- $params := .params | default "" -}}
 {{- printf "postgres://%s:%s@%s:%v/%s%s" .user (urlquery .password) .host .port .db (ternary (printf "?%s" $params) "" (ne $params "")) -}}
 {{- end -}}
 
-{{/* ---------------------------------------------------------------------------------------- */}}
-{{/* 4. Environment blocks                                                                      */}}
-{{/* ---------------------------------------------------------------------------------------- */}}
-
+{{/* ======================================================================================== */}}
+{{/* 4. Environment blocks */}}
+{{/* ======================================================================================== */}}
 {{/*
-Browser-facing URLs. Each falls back to <sub>.<publicBaseDomain> so a deployment sets one value.
-
-THESE ARE NEVER THE IN-CLUSTER ADDRESS, the most repeated hazard in this stack: auth_url is followed
-by the BROWSER, token_url and userinfo are called by the CONTAINER, and using one for both fails in
-a way that names neither. In-cluster URLs are not configurable at all -- the Service names every
-in-cluster URL carries are constants.
+Browser-facing URLs, each falling back to <sub>.<publicBaseDomain> so a deployment sets one value.
+NEVER THE IN-CLUSTER ADDRESS: auth_url is followed by the browser, token_url and userinfo are
+called by the container, and using one for both fails in a way that names neither. In-cluster
+URLs are constants.
 */}}
 {{- define "aber.publicUrl" -}}
 {{- $explicit := index .ctx.Values.publicUrls .key -}}
@@ -1008,24 +885,11 @@ in-cluster URL carries are constants.
 {{- define "aber.mqttUrl" -}}{{ include "aber.publicUrl" (dict "ctx" . "key" "mqtt" "sub" "mqtt") }}{{- end -}}
 
 {{/*
-The browser origins the gateway echoes an Access-Control-Allow-Origin for -- a JSON array,
-substituted into `__CORS_ORIGINS__` in files/envoy/envoy.yaml.
-
-DERIVED, NOT CONFIGURED. It is the stack's ONLY statement of origin policy: the edge functions carry
-no Access-Control-Allow-Origin of their own on purpose (supabase/functions/_shared/cors.ts), since
-the gateway is the only layer that sees a request before deciding to route it, so an origin wrong
-here has nothing behind it to compensate. Deriving from the dashboard's and Swagger UI's own helpers
-makes it impossible for the list to name a host the chart does not serve or to miss one it does -- a
-four-origin localhost literal shipped here for as long as Kubernetes did, so on a real cluster the
-dashboard authenticated and then could not read a single response, and nothing caught it because
-`curl` sends no Origin and does not enforce the answer.
-
-`corsExtraOrigins` is for what the chart cannot know: a reverse proxy in front of the Ingress, a
-tunnel, a second hostname. Appended rather than replacing, so adding one cannot drop the dashboard's
-own origin.
-
-EMPTY IS REFUSED: rendering `origins: []` produces a gateway that starts and refuses every browser
-request -- this helper's own failure, arrived at by another route.
+The browser origins the gateway echoes, as a JSON array for __CORS_ORIGINS__. DERIVED, NOT
+CONFIGURED: this is the stack's only statement of origin policy (the edge functions carry none),
+built from the dashboard's and Swagger UI's own URL helpers so it cannot name a host the chart does
+not serve or miss one it does; corsExtraOrigins is appended for what the chart cannot know. Empty
+is refused: origins: [] is a gateway that starts and refuses every browser request.
 */}}
 {{- define "aber.corsOrigins" -}}
 {{- $origins := list -}}
@@ -1037,13 +901,9 @@ request -- this helper's own failure, arrived at by another route.
 {{- $origins = append $origins (. | trimSuffix "/") -}}
 {{- end -}}
 {{/*
-REFUSED ONLY WHEN THERE IS SOMETHING TO REFUSE FOR.
-
-An install with no public surface at all has no browser to serve and no origin to name, and is
-already refused, more specifically, by the `no browser-facing URL` and `no route resolved a
-hostname` guards. Failing here as well would MASK them: this helper is reached first, so a missing
-publicBaseDomain reported the CORS symptom instead of the cause. CI's chart guard-rail suite asserts
-each guard's own message.
+Refused only when there is something to refuse for: an install with no public surface is already
+refused, more specifically, by the URL and hostname guards, and failing here first would mask
+them. CI's guard-rail suite asserts each guard's own message.
 */}}
 {{- if and (not $origins) (include "aber.supabaseUrl" .) -}}
 {{- fail "\n\naber: the gateway would be given an EMPTY browser-origin list.\n\npublicUrls.supabase names a browser-facing API, but no origin could be derived for the\ndashboard or for Swagger UI -- so the gateway would start cleanly and then refuse every browser\nrequest to it, returning 200 with no Access-Control-Allow-Origin. That presents as a\ndashboard which signs in and then shows empty tables, with nothing failing anywhere you\nwould think to look.\n\nSet global.publicBaseDomain, or publicUrls.frontend / publicUrls.docs, or\nglobal.corsExtraOrigins if this deployment is reached only through a proxy whose hostname\nthe chart cannot derive.\n" -}}
@@ -1051,32 +911,20 @@ each guard's own message.
 {{- $origins | uniq | toJson -}}
 {{- end -}}
 {{/*
-The i3X server's browser-facing URL.
-
-Derived here like every other public URL rather than written as a literal, because it has more than
-one consumer: the Ingress rule, NOTES.txt, and -- for anyone pointing the CESMII conformance suite
-or the MCP server at this deployment -- the value of `I3X_BASE_URL`. One definition means an ingress
-hostname cannot disagree with what is documented as the endpoint.
+The i3X server's URL, derived like the others because it has several consumers: the Ingress rule,
+NOTES.txt, and I3X_BASE_URL for the conformance suite and the MCP server.
 */}}
 {{- define "aber.i3xUrl" -}}{{ include "aber.publicUrl" (dict "ctx" . "key" "i3x" "sub" "i3x") }}{{- end -}}
 
 {{/*
-The forge's browser-facing URL.
-
-Derived like every other public URL rather than written as a literal, and it has a consumer the
-others do not: Gitea's own `ROOT_URL`, which is what a repository page prints as the clone command.
-One definition means the address an engineer copies cannot disagree with the address the Ingress
-actually routes -- a mismatch there is discovered on an appliance, as a name that will not resolve.
+The forge's URL, derived like the others. Gitea's ROOT_URL prints it as the clone command, so the
+address an engineer copies cannot disagree with the address the Ingress routes.
 */}}
 {{- define "aber.giteaUrl" -}}{{ include "aber.publicUrl" (dict "ctx" . "key" "gitea" "sub" "git") }}{{- end -}}
 
 {{/*
-Host only, for an Ingress rule -- the scheme and any path stripped off.
-
-Ingress `host` is a DNS name and rejects a scheme; feeding it a URL produces a rule that matches
-nothing, and the Ingress is accepted, so it fails as a 404 from the controller's default backend
-rather than as a validation error. The URL helpers above are the single source, so the host and the
-URL a service is told to advertise can never disagree.
+Host only, for an Ingress rule. host is a DNS name and rejects a scheme; a URL there yields a rule
+matching nothing, accepted, failing as a 404 from the controller's default backend.
 */}}
 {{- define "aber.hostOf" -}}
 {{- $url := include (printf "aber.%sUrl" .name) .ctx -}}
@@ -1087,9 +935,7 @@ URL a service is told to advertise can never disagree.
 
 {{/*
 Every ingress route in one place: subdomain, backend Service, port, and whether it is deployed.
-
-Built here rather than in ingress.yaml so the ingress and anything else that needs to reason about
-the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
+Read by ingress.yaml, NOTES.txt and the NetworkPolicies, so the public surface has one definition.
 */}}
 {{- define "aber.ingressRoutes" -}}
 {{- $routes := list -}}
@@ -1105,13 +951,12 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 {{- if .Values.grafana.enabled -}}
 {{- $routes = append $routes (dict "name" "grafana" "host" (include "aber.hostOf" (dict "ctx" . "name" "grafana")) "service" "grafana" "port" 3000) -}}
 {{- end -}}
-{{/* STUDIO IS PUBLISHED THROUGH THE GATEWAY, NEVER DIRECTLY, and this line is the whole control.
-     `supabase-studio:3000` is a database console with no login, no roles and no session, running as
-     the database owner. The gateway's `studio` listener on 8001 is the same console behind an OAuth
-     flow and an `Administrator` check, so the route names the GATEWAY Service.
-
-     Gated on the gateway as well as on Studio: without it the route has no backend to name and is
-     correctly absent rather than pointed somewhere unauthenticated. */}}
+{{/*
+     Studio is published through the gateway, never directly, and this line is the whole control:
+     supabase-studio:3000 is a database console with no login running as the owner, and the gateway's
+     studio listener on 8001 is the same console behind an OAuth flow and an Administrator check.
+     Gated on the gateway too, so the route is absent rather than pointed somewhere unauthenticated.
+     */}}
 {{- if and .Values.supabaseStudio.enabled .Values.supabaseEnvoy.enabled -}}
 {{- $routes = append $routes (dict "name" "studio" "host" (include "aber.hostOf" (dict "ctx" . "name" "studio")) "service" .Values.supabaseEnvoy.serviceName "port" 8001) -}}
 {{- end -}}
@@ -1119,45 +964,38 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 {{- $routes = append $routes (dict "name" "docs" "host" (include "aber.hostOf" (dict "ctx" . "name" "docs")) "service" "swagger-ui" "port" 8080) -}}
 {{- end -}}
 {{- if .Values.i3xService.enabled -}}
-{{/* The i3X server is browser- and client-facing: the MCP server, the i3X Explorer and any
-     conformance run all reach it over HTTP from outside the cluster, so it needs a route of its
-     own. `GET /info` is unauthenticated by spec, so this hostname exposes a capabilities document
-     to anyone who can reach the ingress -- which is intended (it is the health check) and is why
-     nothing about the address space is in it. */}}
+{{/*
+     i3X is browser- and client-facing (the MCP server, the Explorer, conformance runs), so it needs a
+     route of its own. GET /info is unauthenticated by spec and exposes a capabilities document, which
+     is intended and is why nothing about the address space is in it.
+     */}}
 {{- $routes = append $routes (dict "name" "i3x" "host" (include "aber.hostOf" (dict "ctx" . "name" "i3x")) "service" "i3x-service" "port" 8090) -}}
 {{- end -}}
 {{- if and .Values.gitea.enabled .Values.supabaseEnvoy.enabled -}}
-{{/* THE WEB HALF OF THE FORGE ONLY, AND THROUGH THE GATEWAY, NEVER DIRECTLY. Git over SSH is TCP
-     and cannot ride an HTTP Ingress -- that is `gitea-external`'s job, as raw MQTT is
-     mosquitto-external's -- so naming this route does not make an appliance able to clone.
-
-     THE BACKEND IS THE GATEWAY'S `forge` LISTENER (8002) AND THIS LINE IS THE WHOLE CONTROL, as
-     Studio's is. Gitea runs with reverse-proxy authentication on, which signs in whoever the
-     X-WEBAUTH-USER header names, from any peer (measured). A route naming `gitea:3000` would put
-     that on a public hostname, where a request chooses its own identity. */}}
+{{/*
+     The web half of the forge only, through the gateway's forge listener (8002), and this line is the
+     whole control: Gitea signs in whoever X-WEBAUTH-USER names, from any peer (measured), so a route
+     naming gitea:3000 would let a request choose its own identity. Git over SSH is gitea-external's.
+     */}}
 {{- $routes = append $routes (dict "name" "gitea" "host" (include "aber.hostOf" (dict "ctx" . "name" "gitea")) "service" .Values.supabaseEnvoy.serviceName "port" 8002) -}}
 {{- end -}}
 {{- if .Values.mosquitto.enabled -}}
-{{/* MQTT over WEBSOCKETS only -- port 9001. Raw MQTT on 1883 is TCP and cannot ride an HTTP
-     Ingress at all; that is what the mosquitto-external LoadBalancer is for. */}}
+{{/*
+     MQTT over WebSockets only, port 9001. Raw MQTT is TCP and cannot ride an HTTP Ingress; that is
+     mosquitto-external.
+     */}}
 {{- $routes = append $routes (dict "name" "mqtt" "host" (include "aber.hostOf" (dict "ctx" . "name" "mqtt")) "service" "mosquitto" "port" 9001) -}}
 {{- end -}}
 {{- toYaml $routes -}}
 {{- end -}}
 
 {{/*
-Wait-for initContainer. Usage:
+Wait-for initContainer. Kubernetes has no depends_on, so these loops make ordering explicit and
+leave the pod in Init: with a legible reason; bounded, because an unbounded wait is Init: forever
+with nothing to alert on. command and describe are REQUIRED and the render fails without them:
+omitting them produced `until ; do`, valid YAML holding a shell syntax error that helm lint, helm
+template and kubeconform all passed.
   (dict "ctx" $ "name" "wait-for-db" "command" "<shell test>" "describe" "supabase-db")
-
-Kubernetes has no `depends_on`: a Deployment whose dependency is down starts, fails, and
-CrashLoopBackOffs with an error about the dependency rather than about the ordering. These loops
-make the ordering explicit and leave the pod in Init: with a legible reason. The loop is bounded --
-an unbounded wait is Init: forever with no failure to alert on.
-
-`command` AND `describe` ARE REQUIRED, and the render fails without them. A caller that omitted them
-produced `until ; do`: valid YAML holding a shell syntax error, so helm lint, helm template and
-kubeconform all passed and the only symptom was one Deployment in Init:CrashLoopBackOff. The chart's
-rule -- validate values and fail the render, never the pod -- applied to its own helpers.
 */}}
 {{- define "aber.waitFor" -}}
 {{- if not .command }}{{- fail (printf "aber.waitFor(%s): `command` is required. It is the shell test the until-loop runs; without it the container renders as `until ; do` and dies with a shell syntax error at runtime instead of failing here." (.name | default "<unnamed>")) }}{{- end }}
@@ -1165,9 +1003,10 @@ rule -- validate values and fail the render, never the pod -- applied to its own
 - name: {{ .name | required "aber.waitFor: `name` is required (it names the initContainer in kubectl output)." }}
   image: {{ .image | default "busybox:1.36" }}
   imagePullPolicy: IfNotPresent
-  {{- /* Optional `env`, for a probe that needs a credential -- a gated gateway route, say.
-         Passed as rendered YAML so the caller composes it with aber.secretEnv and no secret
-         value ever reaches a command line, where `kubectl describe` would show it. */ -}}
+  {{- /*
+         Optional env, for a probe that needs a credential, passed as rendered YAML so no secret value
+         reaches a command line where kubectl describe would show it.
+         */ -}}
   {{- with .env }}
   env:
     {{- . | nindent 4 }}
@@ -1189,16 +1028,10 @@ rule -- validate values and fail the render, never the pod -- applied to its own
 {{- end -}}
 
 {{/*
-Wait for a Postgres to accept a QUERY, not merely a connection.
-
-`pg_isready` is not enough against supabase/postgres: it answers during the image's own bootstrap
-while the server still refuses queries, so a migration Job gated on it starts too early and leaves a
-half-applied schema.
-
-OPTIONAL `query` WAITS FOR A SCHEMA RATHER THAN A SERVER. `psql -c` exits non-zero on a missing
-relation exactly as on a refused connection, so one probe covers "the database is down" and "the
-migrations have not run" without distinguishing them -- the answer to both is to keep waiting.
-Optional `describe` names what is being waited for in the log and the timeout message.
+Wait for a Postgres to accept a QUERY, not merely a connection: pg_isready answers during
+supabase/postgres's own bootstrap while queries are still refused. Optional query waits for a
+schema rather than a server, since psql -c exits non-zero on a missing relation exactly as on a
+refused connection; optional describe names what is waited for.
 */}}
 {{- define "aber.waitForPostgres" -}}
 - name: {{ .name }}
@@ -1226,7 +1059,9 @@ Optional `describe` names what is being waited for in the log and the timeout me
       echo "{{ .describe | default (printf "%s is accepting queries" .host) }} — ready"
 {{- end -}}
 
-{{/* Pull one key from the chart's Secret as an env var. */}}
+{{/*
+One key from the chart's Secret as an env var.
+*/}}
 {{- define "aber.secretEnv" -}}
 - name: {{ .name }}
   valueFrom:
@@ -1236,12 +1071,9 @@ Optional `describe` names what is being waited for in the log and the timeout me
 {{- end -}}
 
 {{/*
-The same, but `optional: true` -- for a key the Secret is allowed NOT to carry.
-
-A SECOND HELPER RATHER THAN A FLAG, so the default stays fail-closed. A required secretKeyRef stops
-the pod starting when the key is absent, which is right for every credential this chart passes: a
-container that boots without its credential fails later, further away, and reads as a broken
-upstream. Here absent means empty, and the consumer treats empty as "not configured".
+The same with optional: true, for a key the Secret may not carry. A second helper rather than a
+flag so the default stays fail-closed: a container that boots without its credential fails later,
+further away, and reads as a broken upstream.
 */}}
 {{- define "aber.optionalSecretEnv" -}}
 - name: {{ .name }}
@@ -1253,16 +1085,10 @@ upstream. Here absent means empty, and the consumer treats empty as "not configu
 {{- end -}}
 
 {{/*
-The MQTT principals the chart itself provisions, as env, for the broker's assemble-config
-initContainer, which writes them into the Dynamic Security document on every start. The set must
-match PLATFORM_PRINCIPALS in scripts/lib/mosquitto-dynsec.mjs, which reads these names.
-
-An EMPTY password skips that account rather than writing an empty one -- `mqttValidatorPassword` is
-the case that matters, since the validator is a fixture a production install leaves unset. Gateway
-accounts are not here: they are issued against an existing row through the credential service.
-
-Consumers take only THEIR OWN pair, so this is deliberately not used there: the point of the split
-is that no workload holds another's credential.
+The MQTT principals the chart provisions, as env for the broker's assemble-config initContainer;
+the set must match PLATFORM_PRINCIPALS in scripts/lib/mosquitto-dynsec.mjs. An empty password
+skips that account (the validator is a fixture a production install leaves unset). Consumers take
+only their own pair, so this is deliberately not used there.
 */}}
 {{- define "aber.mqttPrincipals" -}}
 INGESTION I3X VALIDATOR MONITOR
@@ -1277,14 +1103,10 @@ INGESTION I3X VALIDATOR MONITOR
 {{- end -}}
 
 {{/*
-Node-RED authentication environment -- one definition included in two places, and load-bearing for
-that reason.
-
-BOTH the node-red container AND its init container must receive this block, identically.
-node-red-init.mjs's settingsAreCorrect() EVALUATES the settings.js it wrote, and settings.js
-resolves every one of these from process.env at load time. A value present when the file was written
-and absent when it is read makes the settings look wrong on every boot and get rewritten forever,
-silently, because an unloadable settings.js is already handled as "replace it".
+Node-RED authentication environment, one definition included in two places and load-bearing for
+that: the container and its init container must receive it identically, because node-red-init.mjs
+evaluates the settings.js it wrote, which resolves every value from process.env, and a value absent
+when read makes the settings look wrong and get rewritten on every boot, silently.
 */}}
 {{- define "aber.noderedAuthEnv" -}}
 {{- $secretName := include "aber.secretName" . -}}
@@ -1298,32 +1120,28 @@ silently, because an unloadable settings.js is already handled as "replace it".
 {{ include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") }}
 - name: NODERED_OAUTH_CLIENT_ID
   value: {{ .Values.nodeRed.oauthClientId | default "c0ffee00-0000-4000-8000-000000000002" | quote }}
-{{/* auth_url is followed by the BROWSER, so it is the ingress address. token_url and userinfo are
-     called by the CONTAINER, so they are in-cluster. Using one for both is the classic way this
-     breaks -- a browser cannot resolve `supabase-kong`, and the container's 127.0.0.1 is itself. */}}
+{{/*
+     auth_url is followed by the browser, so it is the ingress address; token_url and userinfo are
+     called by the container, so they are in-cluster.
+     */}}
 - name: NODERED_OAUTH_AUTH_URL
   value: {{ printf "%s/auth/v1/oauth/authorize" $supabase | quote }}
 - name: NODERED_OAUTH_TOKEN_URL
   value: {{ printf "%s/auth/v1/oauth/token" (include "aber.supabase.internalUrl" .) | quote }}
 - name: NODERED_USERINFO_URL
   value: {{ printf "%s/functions/v1/nodered-userinfo" (include "aber.supabase.internalUrl" .) | quote }}
-{{/* Must match redirect_uris in auth.oauth_clients exactly, or /oauth/authorize answers
-     "invalid redirect_uri". Both are built from publicUrls.nodered so they cannot drift. */}}
+{{/*
+     Must match redirect_uris in auth.oauth_clients exactly; both are built from publicUrls.nodered so
+     they cannot drift.
+     */}}
 - name: NODERED_OAUTH_CALLBACK_URL
   value: {{ printf "%s/auth/strategy/callback" $nodered | quote }}
 {{- end -}}
 
 {{/*
-The COMPONENT LABEL of whichever gateway is deployed.
-
-NOT the Service name, and that distinction is why this exists. Promotion works by the Envoy Service
-ADOPTING the name `supabase-kong`, so every consumer's URL keeps resolving -- but NetworkPolicy and
-ServiceMonitor select POD LABELS, which the adopted name does not touch. Hard-coding
-`supabase-kong` there leaves the policy denying every flow to the gateway and the scrape selecting
-nothing, both presenting as the gateway being down.
-
-Returns `supabase-envoy` when Envoy is enabled, `supabase-kong` otherwise. Where both legitimately
-run side by side the NetworkPolicy follows Envoy, because that is the one being proven.
+The COMPONENT LABEL of whichever gateway is deployed, not the Service name: the Envoy Service
+adopts the name supabase-kong so every URL keeps resolving, but NetworkPolicy and ServiceMonitor
+select pod labels, which the adopted name does not touch.
 */}}
 {{- define "aber.gatewayComponent" -}}
 {{- if .Values.supabaseEnvoy.enabled -}}
@@ -1334,11 +1152,9 @@ supabase-kong
 {{- end -}}
 
 {{/*
-Kubernetes quantity parsers. Helm has none, and the capacity guard below compares numbers that
-arrive as strings from two unrelated places: `.Values` (written by hand, "100m", "256Mi") and the
-node's `status.allocatable` (written by the kubelet, "16" or "15890m", almost always "…Ki").
-
-Returned as integers -- millicores and bytes -- so the comparison never touches floating point.
+Kubernetes quantity parsers, which Helm lacks. The capacity guard compares strings from .Values
+("100m", "256Mi") and the kubelet's status.allocatable ("16", "15890m", "...Ki"); integers,
+millicores and bytes, so the comparison never touches floating point.
 */}}
 {{- define "aber.cpuMillis" -}}
 {{- $v := . | toString -}}
@@ -1365,19 +1181,11 @@ Returned as integers -- millicores and bytes -- so the comparison never touches 
 {{- end -}}
 
 {{/*
-The chart's own scheduling floor: the sum of the `requests` it will ask for, as
-"<millicores> <bytes>".
-
-DERIVED FROM .Values RATHER THAN WRITTEN DOWN, for the reason validateAutoscaling derives its
-allow-list: a floor edited in a second place will be wrong, and wrong HIGH here refuses an install
-that would have worked.
-
-Counted: every component that runs continuously and is enabled. NOT counted, deliberately --
-  * e2e, backup, coldArchive: Jobs and CronJobs, transient, so counting them would refuse a node
-    that can run the stack.
-  * init containers: a pod's effective request is max(init, sum(containers)), and each asks for
-    less than the containers it precedes.
-Each entry pairs `path.to.component` with its replica count, because the scheduler multiplies.
+The chart's scheduling floor: the sum of the requests it will ask for, as "<millicores> <bytes>".
+Derived from .Values rather than written down, since a floor edited in a second place is wrong,
+and wrong high refuses an install that would have worked. Counted: every continuously running,
+enabled component, times its replicas. Not counted: Jobs and CronJobs, and init containers, since
+a pod's effective request is max(init, sum(containers)).
 */}}
 {{- define "aber.requestFloor" -}}
 {{- $cpu := 0 -}}
@@ -1425,32 +1233,19 @@ Each entry pairs `path.to.component` with its replica count, because the schedul
 {{- end -}}
 
 {{/*
-Refuses an install onto a cluster that cannot schedule the stack.
-
-The failure it prevents is SILENT: when the requests do not fit, `helm install` reports success,
-every workload is created, and the pods sit Pending forever with nothing in any container log,
-because no container ever starts.
-
-FOUR THINGS IT DELIBERATELY DOES NOT DO, each erring towards allowing a tight install rather than
-refusing one that would have worked -- a false refusal cannot be told from a broken chart:
-
-  * Not on upgrade (`.Release.IsInstall`). A running stack has proved it fits; refusing its upgrade
-    because a node is drained would be a self-inflicted outage.
-  * Nothing when `lookup` returns nothing -- `helm template`, `--dry-run`, or a credential that may
-    not list nodes. `lookup` answers an empty map rather than failing, so this reads as no opinion.
-  * No exclusion of tainted nodes. supabaseDb and timescaledb accept `tolerations`, so a tainted
-    node may be exactly where they are meant to land.
-  * No multiplying the DaemonSet by the node count. On a multi-node cluster the allocatable being
-    summed grows faster than the floor does, so the single-node figure is the conservative one.
+Refuses an install onto a cluster that cannot schedule the stack; otherwise helm install reports
+success and the pods sit Pending forever with nothing in any container log. Four things it
+deliberately does not do, each erring towards allowing a tight install: not on upgrade (a running
+stack has proved it fits); nothing when lookup returns nothing (helm template, --dry-run, a
+credential that may not list nodes); no exclusion of tainted nodes (the databases accept
+tolerations); no multiplying the DaemonSet by the node count.
 */}}
 {{- define "aber.validateCapacity" -}}
 {{/*
-  `.Release.IsInstall` IS TESTED FIRST, AND `preflight` IS READ THROUGH A `default dict`, because
-  `helm upgrade --reuse-values` replays the values stored with the PREVIOUS revision -- which, for
-  every release installed before this guard existed, has no `preflight` key at all. Reading
-  `.Values.preflight.capacityCheck` directly there is a nil-pointer panic that fails the upgrade at
-  NOTES.txt with a message about interface{} and nothing about capacity. A new key in values.yaml
-  is not present in an old release's stored values, and a guard is the worst place to learn it.
+  .Release.IsInstall is tested first and preflight is read through default dict: helm upgrade
+  --reuse-values replays the previous revision's stored values, which for a release installed before
+  this guard exists has no preflight key, and reading it directly is a nil-pointer panic at
+  NOTES.txt naming interface{} and nothing about capacity.
 */}}
 {{- if .Release.IsInstall -}}
 {{- if (.Values.preflight | default dict).capacityCheck -}}
@@ -1485,15 +1280,13 @@ refusing one that would have worked -- a false refusal cannot be told from a bro
 {{- end -}}
 {{- end -}}
 
-{{/* The ingress rule for git over SSH on the Gitea pod, shared by the always-on forge policy and
-     the M4 layer's `-ingress-gitea-ssh` so the two cannot disagree about who may clone.
-
-     AT THE DEFAULT IT EMITS NO `from` AT ALL rather than `ipBlock: 0.0.0.0/0`. A rule with no peers
-     matches every source by definition, in every CNI; an ipBlock is matched against an address,
-     which a CNI resolving node traffic by identity need not do, and covers no IPv6. Appliance
-     traffic arrives SNAT'd by ServiceLB, so it is node-sourced. A list carrying 0.0.0.0/0 alongside
-     other entries is open regardless and takes the same path.
-     (deploy/k8s/README.md -> "NetworkPolicies (M4)") */}}
+{{/*
+The ingress rule for git over SSH on the Gitea pod, shared by the always-on forge policy and the M4
+layer so the two cannot disagree. At the default it emits no from at all rather than ipBlock
+0.0.0.0/0: a rule with no peers matches every source in every CNI, whereas an ipBlock is matched
+against an address, which a CNI resolving node traffic by identity need not do, and covers no
+IPv6; appliance traffic arrives SNAT'd by ServiceLB. (deploy/k8s/README.md, "NetworkPolicies (M4)")
+*/}}
 {{- define "aber.giteaSshIngressRule" -}}
 {{- $cidrs := .Values.networkPolicy.giteaSshAllowedCidrs | default list -}}
 {{- if or (empty $cidrs) (has "0.0.0.0/0" $cidrs) -}}
@@ -1513,21 +1306,19 @@ refusing one that would have worked -- a false refusal cannot be told from a bro
 {{- end -}}
 
 {{/*
-aber.timescaleRetainFor -- the historian's raw retention window, `timescaledb.retention.retainFor`.
-Values stored by an older chart may hold an empty string, which now means the 14-day default.
-Archiving is not consulted here: retention.sql's job protects unverified chunks while it is on.
+The historian's raw retention window, timescaledb.retention.retainFor; an empty value stored by an
+older chart means the 14-day default. Archiving is not consulted: retention.sql's job protects
+unverified chunks while it is on.
 */}}
 {{- define "aber.timescaleRetainFor" -}}
 {{- .Values.timescaledb.retention.retainFor | default "14 days" -}}
 {{- end -}}
 
 {{/*
-aber.timescaleChunkInterval -- the raw hypertable's chunk span, `timescaledb.retention.chunkInterval`
-or derived from `expectedRowsPerDay`: a quarter of the historian's memory limit at 367 bytes a
-row, in whole hours, clamped to 1 hour .. 7 days. Whole days are written as days.
-
-Values stored by an older chart have no expectedRowsPerDay (`helm upgrade --reuse-values`), and
-keep the 7 days they ran with.
+The raw hypertable's chunk span: timescaledb.retention.chunkInterval, or derived from
+expectedRowsPerDay as a quarter of the historian's memory limit at 367 bytes a row, in whole hours
+clamped to 1 hour .. 7 days, whole days written as days. Values stored by an older chart have no
+expectedRowsPerDay and keep the 7 days they ran with.
 */}}
 {{- define "aber.timescaleChunkInterval" -}}
 {{- $r := .Values.timescaledb.retention -}}
@@ -1557,7 +1348,9 @@ keep the 7 days they ran with.
 {{- end -}}
 {{- end -}}
 
-{{/* aber.timescaleCompressAfter -- `timescaledb.retention.compressAfter`, or one chunk interval. */}}
+{{/*
+timescaledb.retention.compressAfter, or one chunk interval.
+*/}}
 {{- define "aber.timescaleCompressAfter" -}}
 {{- .Values.timescaledb.retention.compressAfter | default (include "aber.timescaleChunkInterval" .) -}}
 {{- end -}}

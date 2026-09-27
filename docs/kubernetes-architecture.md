@@ -1315,3 +1315,307 @@ oversights.
   version — `rate-limiting` is bundled, and is unavailable only because `KONG_PLUGINS` replaces the
   bundled set rather than extending it. §7.1 covers the longer-term Gateway API question.
 - **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.
+
+## 12. What the shared helpers decide
+
+`templates/_helpers.tpl` holds the values several services must be handed identically, in four
+groups: names and labels, validation that fails the render, connection strings, and environment
+blocks. Each helper carries what a reader needs at the line; this section holds the argument and
+the measurements behind each decision, in the file's order, so a helper that looks wrong can be
+checked here before it is changed.
+
+### 12.1 Names and labels
+
+**Service names are not prefixed.** Every in-cluster URL the stack carries (`grafana.ini`,
+`settings.js`, the edge-function environment) resolves a component name: `supabase-kong:8000`,
+`timescaledb:5432`, `mosquitto:1883`. The release-qualified `aber.fullname` is for objects nothing
+addresses by name from inside the stack (Secrets, ConfigMaps, Jobs). Two releases in one namespace
+is therefore not a supported configuration; two namespaces is.
+
+**`aber.image` defaults an empty tag to `appVersion`, for the images this repository builds only.**
+Chart and images then ship from one release tag, and an explicit tag still wins so one component
+can be pulled at a different build without forking the chart. Third-party pins are never floated
+onto `appVersion`, because they carry couplings: realtime and storage-api migrate shared schemas on
+boot, Studio is Zod-coupled to a postgres-meta version, and Node-RED is what the generated
+`settings.js` depends on. A chart bump must not silently change which Postgres the databases run.
+
+**`aber.primaryHostId` is required with no default; `aber.sparkplugGroup` has one.** Every gateway
+on site is configured to watch `spBv1.0/STATE/<id>`, which makes the host id part of the contract
+with equipment this chart has never seen, so it is named once by the deployment and the render
+fails without it rather than the daemon refusing to start naming only an env var. The group id is
+the second segment of every topic and the enterprise segment of the Unified Namespace; it is fixed
+at install, seeded into the `sparkplug.group_id` setting on the first boot, and a later value that
+differs is refused because changing it re-addresses every gateway rather than changing a
+preference. Its default is `Aber`: a stack installed before 1.0 holds the platform's former name,
+and migration `0003` moves it on the first boot under this chart, so rendering the default for it
+is the rename, not a disagreement. Both are validated to one topic level, since a `/`, `+`, `#` or
+whitespace in either addresses a subtree nothing grants, and the broker drops the publish silently
+at QoS 0. The Directory prefix is derived from the group unless named, and the broker's ingestion
+role is granted `<prefix>/#` at reconcile time from the same value; the two could disagree when
+the prefix was a literal in `values.yaml` and another in the roles file.
+
+### 12.2 Validation
+
+Every check fails the render. Each of the misconfigurations below otherwise produces a stack that
+reports healthy and then refuses every request, or a CrashLoopBackOff whose logs name something
+other than the cause. `aber.validate` runs them in order from `NOTES.txt`, most fundamental first,
+so a stack with no credentials is told that and not about the hostnames it also lacks.
+
+**The Supabase credentials are a set.** `anonKey` and `serviceRoleKey` are JWTs signed by
+`jwtSecret`, and `publishableKey` and `secretKey` are what callers present for the gateway to
+translate; generating one without the others invalidates the rest, and every request then fails at
+the gateway against a stack that looks fine. The chart never generates them, and the check is
+skipped under `existingSecret`, when the values are not the chart's to see (§3.2). Beyond the set,
+each conditional requirement is stated with the failure it prevents: the BI reader password when
+Grafana is enabled (its datasource initContainer refuses to start without one); the two
+machine-principal keys unconditionally, because `helm install` reports success while the ingestion
+daemon halts itself rather than run fail-open and the only symptom is `0 of 1 updated replicas are
+available`; the credential service's token at 32 characters, because the service exits 2 on less
+rather than running open and, as a sidecar in the broker's pod, takes the pod's readiness with it
+while the rollout error names `i3x-service`; the plugin's admin password, without which the
+broker's initContainer exits 1; and the playback key when playback is on, whose absence is a
+CrashLoopBackOff naming an environment variable rather than the values key that fills it.
+
+**The demo secret is refused on anything not plainly local.** `values-dev.yaml` legitimately
+carries the published Supabase demo credentials and CI installs with it, so the value alone cannot
+be banned. What is banned is its combination with a public hostname somebody chose, which has no
+innocent reading: the published keys in this repository would authenticate at the edge, and
+nothing about the stack would look wrong. A `publicBaseDomain` under `127.0.0.1.nip.io`,
+`localhost`, `192.168.*`, `.local`, `.localhost` or `.internal` is accepted as is.
+
+**Realtime's secrets have shapes the container enforces.** `dbEncKey` must be exactly 16
+characters and `secretKeyBase` at least 64, or the container refuses to boot; asserting them here
+makes the failure one Helm error instead of a restarting pod with an Elixir stack trace. A third,
+`METRICS_JWT_SECRET`, is `System.fetch_env!` as of v2.102.3, so the container aborts during boot
+with the only clue ten frames deep; it is deliberately not `jwtSecret`, because it signs the bearer
+token the `/metrics` endpoint requires and sharing the API signing key would let anyone holding it
+mint metrics tokens. The Service name must lead with `realtime-dev` (§3.4): Realtime resolves the
+tenant from the leading label of the Host header, which the gateway rewrites to the Service name,
+so any other name fails every WebSocket handshake with a bare 403 that names nothing.
+
+**Browser-facing URLs, scheme and hosts.** A URL that resolves to the empty string is worse than a
+missing one: GoTrue builds every user-facing redirect from `GOTRUE_SITE_URL`, so `/oauth/authorize`
+sends the browser to `/oauth/consent` with no origin and both SSO flows fail at the consent step
+naming nothing, and the `redirect_uris` db-init registers would be empty too; gated on
+`supabaseAuth`, because a data-tier-only install needs no domain. TLS on the ingress with
+`scheme: http` fails as an OAuth error, since every redirect_uri is composed from `global.scheme`:
+the browser presents https while GoTrue holds http and answers `invalid redirect_uri`, and
+Grafana's `root_url` would lose the session cookie. An Ingress with empty `host:` fields is
+accepted by the API server and then matches every request arriving at the controller; that check
+lives here rather than in `ingress.yaml` because a `fail` inside a resource template pre-empts the
+ordered chain, and an install with no credentials at all was being told about hostnames.
+
+**Autoscaling reads two lists, and both are load-bearing** (issues #27 and #31). The single-writer
+workloads are one list with a reason per name, parsed as YAML by both `aber.validateAutoscaling`
+and CI's replica/strategy check, because a second copy is how the guard came to omit
+`i3x-service`, whose in-memory subscription state makes a second replica client-visible as an
+intermittent 404. The workloads that may scale are an allow-list written out rather than derived
+as the complement, because "not single-writer" also admits every name that does not exist: a typo
+such as `superbase-rest` used to install cleanly, render no HPA and no error, and simply never
+scale, with nothing logged to search for months later. Forbidden is checked first so a
+single-writer workload keeps its own explanation, and the explanation printed is the component's
+own rather than a representative one, since the message used to explain `ingestion` whatever had
+been asked for. Both parses are guarded against failing open: `fromYaml` answers a map carrying an
+`Error` key rather than failing, so an unparseable block would silently empty the refusal set, and
+the guard checks each list against a floor rather than an exact count so adding a workload does not
+mean editing two places.
+
+**Broker TLS refuses the two ways of asking for a broker nobody can reach.** `external.plaintext:
+false` with TLS off leaves the external Service with no ports, which the API server rejects as
+`spec.ports: Required value`, naming neither setting; wanting no external broker is
+`external.enabled: false`. TLS on with an external LoadBalancer and a certificate carrying nothing
+a gateway could match (no IP SAN, no operator-supplied DNS SAN) lets every in-cluster client verify
+perfectly while every gateway fails on a hostname mismatch the broker never logs: the stack reports
+healthy, the simulator keeps producing, and the fleet is off. Refused rather than warned about,
+because Helm has no non-fatal warning `helm template` would surface. `publicBaseDomain` alone does
+not satisfy it, since `mqtt.<domain>` is the WebSocket name and not the address a gateway dials;
+an IP SAN or an explicit DNS SAN does, so a deployment behind plant DNS is not blocked.
+
+**The gateway MQTT usernames must be real sparkplug ids.** A gateway account's role confines it to
+`spBv1.0/+/+/<username>/#` and `verify_gateway_binding()` requires that same segment to be the
+gateway row's generated id, so a friendly username authenticates perfectly and then has every
+message it publishes silently dropped, with nothing logged at either end: an edge node that
+connects and produces no telemetry, which reads as a broken simulator or a broken daemon. The
+monitoring account's password is required because the broker's own probes authenticate as it, and
+an empty one leaves the pod permanently NotReady, taking down every workload that waits on it with
+events that mention neither MQTT nor the setting.
+
+**Two doors need their credentials to be doors.** Publishing `ingress.routes.studio` names the
+gateway's studio listener, which is the console behind an OAuth flow and an `Administrator` check,
+but only if that flow has a client to run: with the secrets unset the gateway substitutes
+credentials that cannot authenticate and no client is registered, so the route publishes a
+hostname whose every request ends at a login nobody can complete. Fail-closed is the right runtime
+behaviour and the wrong install behaviour for an operator who has just asked for the route by name,
+because the redirect loop ending in `invalid client` reads as a broken proxy rather than as two
+empty values. Both login listeners sign in through Envoy's `oauth2` filter, which sets every
+cookie it uses with the Secure attribute, and a browser keeps those only on an https origin or on
+`localhost` and `*.localhost`; on any other http host the round trip returns to a callback holding
+no state and Envoy answers 401 `CSRF token validation failed`, with nothing crashing and no pod
+unhealthy. The URL is judged rather than `global.scheme`, because a `publicUrls.*` override carries
+its own scheme.
+
+**The capacity guard refuses an install the cluster cannot schedule.** When the requests do not
+fit, `helm install` reports success, every workload is created, and the pods sit Pending forever
+with nothing in any container log, because no container ever starts. The floor is derived from
+`.Values` rather than written down, for the same reason the autoscaling allow-list is: a floor
+edited in a second place will be wrong, and wrong high here refuses an install that would have
+worked. It counts every continuously running enabled component times its replicas, and
+deliberately not the Jobs and CronJobs (transient, and counting them would refuse a node that can
+run the stack) nor the init containers (a pod's effective request is `max(init, sum(containers))`,
+and each asks for less than the containers it precedes). Four further omissions each err towards
+allowing a tight install, because a false refusal cannot be told from a broken chart: it does not
+run on upgrade, since a running stack has proved it fits and a drained node would otherwise cause a
+self-inflicted outage; it does nothing when `lookup` returns nothing (`helm template`, `--dry-run`,
+or a credential that may not list nodes), because `lookup` answers an empty map rather than
+failing; it does not exclude tainted nodes, since the databases accept `tolerations` and a tainted
+node may be exactly where they are meant to land; and it does not multiply the DaemonSet by the
+node count, because on a multi-node cluster the allocatable being summed grows faster than the
+floor does. `.Release.IsInstall` is tested first and `preflight` is read through `default dict`,
+because `helm upgrade --reuse-values` replays the values stored with the previous revision, which
+for every release installed before the guard existed has no `preflight` key at all; reading it
+directly is a nil-pointer panic that fails the upgrade at `NOTES.txt` with a message about
+`interface{}` and nothing about capacity. The quantity parsers behind the comparison exist because
+Helm has none and the numbers arrive as strings from two unrelated places, `.Values` and the
+kubelet's `status.allocatable`; they return millicores and bytes as integers so the comparison
+never touches floating point.
+
+### 12.3 Connection strings and TLS to the databases
+
+**TimescaleDB is reached at `timescaledb:5432`, never the host-published 5433** (M2), which exists
+only to keep the dev loop's forwarded port off a developer's local PostgreSQL. A wrong port in the
+baseline schema's postgres_fdw foreign server fails as a relation-level error from PostgREST, so it
+reads as a schema fault; `helm test` (M6) queries the foreign table to pin it.
+
+**Clients project `ca.crt` alone.** The broker's `mosquitto-tls` and each database's Secret are
+`kubernetes.io/tls`, so they hold the server's private key beside the CA; mounting the whole
+Secret into every client pod would hand each of them the key that lets anything impersonate the
+server, when verifying a certificate needs only the public CA. `items` restricts the projection at
+the kubelet, so the key is never written into a client's filesystem. Both databases are issued by
+one issuer, so one CA verifies either, and the client-side helpers render nothing while TLS is off
+so a caller adds them unconditionally. libpq's own variables (`PGSSLMODE`, `PGSSLROOTCERT`) cover
+psql, `pg_dump`, psycopg2 and PostgREST without a flag of their own; GoTrue and PostgREST spell the
+mode in their URL instead, and the DSN builder urlquery-escapes the password because one containing
+`@` or `/` silently truncates the DSN at the wrong character and the failure reads as a bad
+hostname. The certificate reload sidecar exists because cert-manager renews the leaf in place and
+nothing restarts a StatefulSet for it: Postgres re-reads its certificate files on a reload, so the
+sidecar watches the mounted certificate and asks for one over loopback, which `pg_hba` trusts.
+
+**The exporter's DSN carries no password and no `sslmode`, and both halves are load-bearing.**
+`metrics_reader` has no password and cannot be given one: the network is admitted by `hostssl ...
+scram-sha-256`, so a role with no password cannot authenticate from anywhere but loopback, which is
+the whole argument for granting it `pg_monitor`, and the sidecar shares the pod's network
+namespace. With no `sslmode`, libpq defaults to `prefer`: measured on the dev stack, that
+negotiates TLSv1.3 over loopback when `postgresTls` is on and falls back to plaintext when it is
+off, with `trust` matching either way, since a `pg_hba` `host` line matches SSL and non-SSL alike.
+One DSN, correct under both settings, and no `sslmode=disable` for the TLS render check to find.
+
+**The exporter has no readiness probe, deliberately**, which is where it departs from the broker's
+exporter. A readinessProbe on any container gates the whole pod's Service endpoints, so an
+exporter that could not reach its database would take the database itself out of
+`timescaledb:5432` and stop the stack. A metrics sidecar must never be able to do that; whether it
+is working is a question for the scrape (`up` and `pg_scrape_collector_success`), not for
+Kubernetes. Two collectors the exporter leaves off are turned on for specific readers:
+`database_wraparound`, the only warning of transaction-ID exhaustion (4 series), and
+`stat_checkpointer`, because PG17 moved the checkpoint counters out of `pg_stat_bgwriter` and
+without it there are no checkpoint series at all on 17 (11 series); measured together on the
+historian, 255 series became 272. `stat_statements` is off by default in the exporter because the
+extension may not be there, and is on because it is on both databases, bounded at the exporter's
+own top-100 and labelled by `queryid` rather than statement text. The custom-queries file is
+deprecated upstream and functional; v0.20.1 reads it and says so at startup. And the wraparound
+series named `..._seconds` is `age(datfrozenxid)`, a transaction count with an upstream misnomer
+for a suffix: verified at 222470 against `age(datfrozenxid)` of 222470 on a server up 477 seconds,
+so a threshold written as a duration is wrong by six orders of magnitude, and the alert rule states
+this too.
+
+### 12.4 Environment blocks
+
+**Public URLs are never the in-cluster address**, the most repeated hazard in this stack: an
+`auth_url` is followed by the browser, while `token_url` and `userinfo` are called by the
+container, and using one for both fails in a way that names neither (§7.4). In-cluster URLs are
+not configurable at all; the Service names they carry are constants. The i3X and forge URLs are
+derived like the others rather than written as literals because each has a consumer the rest do
+not: `I3X_BASE_URL` for the conformance suite and the MCP server, and Gitea's `ROOT_URL`, which is
+what a repository page prints as the clone command, so a mismatch there is discovered on an
+appliance as a name that will not resolve. `aber.hostOf` strips the scheme because an Ingress
+`host` is a DNS name: fed a URL it produces a rule that matches nothing, the Ingress is accepted,
+and it fails as a 404 from the controller's default backend rather than as a validation error.
+
+**CORS origins are derived, not configured.** The list is the stack's only statement of origin
+policy: the edge functions carry no `Access-Control-Allow-Origin` of their own on purpose, since the
+gateway is the only layer that sees a request before deciding to route it, so an origin wrong here
+has nothing behind it to compensate. Deriving it from the dashboard's and Swagger UI's own URL
+helpers makes it impossible for the list to name a host the chart does not serve or miss one it
+does; a four-origin localhost literal shipped here for as long as Kubernetes did, so on a real
+cluster the dashboard authenticated and then could not read a single response, and nothing caught
+it because `curl` sends no Origin and does not enforce the answer. `corsExtraOrigins` is appended
+rather than replacing, so adding a proxy or a tunnel cannot drop the dashboard's own origin. An
+empty list is refused, since `origins: []` renders a gateway that starts and refuses every browser
+request; but only when there is something to refuse for, because an install with no public
+surface is already refused, more specifically, by the URL and hostname guards, and this helper is
+reached first, so failing here as well masked them. CI's chart guard-rail suite asserts each
+guard's own message.
+
+**Three routes are the whole control for what they publish.** Studio's route names the gateway's
+studio listener on 8001, never `supabase-studio:3000`, which is a database console with no login,
+no roles and no session, running as the database owner; it is gated on the gateway as well as on
+Studio, so without the gateway the route is absent rather than pointed somewhere unauthenticated.
+The forge's route names the gateway's forge listener on 8002 for the same reason: Gitea runs with
+reverse-proxy authentication on, which signs in whoever the `X-WEBAUTH-USER` header names, from any
+peer (measured), and a route naming `gitea:3000` would put that on a public hostname where a
+request chooses its own identity. Git over SSH is TCP and cannot ride an HTTP Ingress, so naming
+the route does not make an appliance able to clone; that is `gitea-external`'s job, as raw MQTT on
+1883 is `mosquitto-external`'s and the MQTT route carries WebSockets on 9001 only. The i3X route
+exists because the MCP server, the Explorer and any conformance run reach it over HTTP from
+outside; `GET /info` is unauthenticated by specification and exposes a capabilities document,
+which is intended (it is the health check) and is why nothing about the address space is in it.
+
+**`aber.waitFor` requires `command` and `describe`, and the render fails without them.** Kubernetes
+has no `depends_on`; a Deployment whose dependency is down starts, fails, and CrashLoopBackOffs
+with an error about the dependency rather than the ordering, so the wait loops make the ordering
+explicit and leave the pod in `Init:` with a legible reason, bounded because an unbounded wait is
+`Init:` forever with no failure to alert on. A caller that omitted the two arguments produced
+`until ; do`: valid YAML holding a shell syntax error, so `helm lint`, `helm template` and
+kubeconform all passed and the only symptom was one Deployment in `Init:CrashLoopBackOff`. The
+chart's rule, validate values and fail the render rather than the pod, applied to its own helpers.
+An optional `env` is passed as rendered YAML so a probe that needs a credential composes it with
+`aber.secretEnv` and no secret value reaches a command line where `kubectl describe` would show it.
+`aber.waitForPostgres` waits for a query rather than a connection because `pg_isready` answers
+during the supabase/postgres image's own bootstrap while the server still refuses queries, so a
+migration Job gated on it starts too early and leaves a half-applied schema; its optional `query`
+waits for a schema rather than a server, since `psql -c` exits non-zero on a missing relation
+exactly as on a refused connection, and the answer to both is to keep waiting.
+
+**Secrets fail closed by default.** `aber.optionalSecretEnv` is a second helper rather than a flag
+on the first, so a required `secretKeyRef` stays the default: it stops the pod starting when the key
+is absent, which is right for every credential the chart passes, because a container that boots
+without its credential fails later, further away, and reads as a broken upstream. The MQTT
+principals block is consumed only by the broker's assemble-config initContainer and must match
+`PLATFORM_PRINCIPALS` in `scripts/lib/mosquitto-dynsec.mjs`; an empty password skips the account
+rather than writing an empty one, which matters for the validator, a fixture a production install
+leaves unset, and consumers take only their own pair, since the point of the split is that no
+workload holds another's credential. Node-RED's authentication block is included in two places
+and is load-bearing for that: `node-red-init.mjs` evaluates the `settings.js` it wrote, which
+resolves every value from `process.env` at load time, so a value present when the file was
+written and absent when it is read makes the settings look wrong on every boot and get rewritten
+forever, silently, because an unloadable `settings.js` is already handled as "replace it".
+
+**The gateway's component label is not its Service name.** Promotion works by the Envoy Service
+adopting the name `supabase-kong`, so every consumer's URL keeps resolving, but NetworkPolicy and
+ServiceMonitor select pod labels, which the adopted name does not touch; hard-coding
+`supabase-kong` there left the policy denying every flow to the gateway and the scrape selecting
+nothing, both presenting as the gateway being down.
+
+**The SSH ingress rule emits no `from` at its default rather than `ipBlock: 0.0.0.0/0`.** A rule
+with no peers matches every source by definition, in every CNI; an ipBlock is matched against an
+address, which a CNI resolving node traffic by identity need not do, and covers no IPv6. Appliance
+traffic arrives SNAT'd by ServiceLB, so it is node-sourced. A list carrying `0.0.0.0/0` alongside
+other entries is open regardless and takes the same path. The rule is shared by the always-on forge
+policy and the M4 layer so the two cannot disagree about who may clone.
+
+**The historian's retention helpers tolerate values an older chart stored.** `retainFor` may hold
+an empty string, which now means the 14-day default, and archiving is not consulted because
+`retention.sql`'s job protects unverified chunks while it is on. The chunk interval is either set
+or derived from `expectedRowsPerDay` as a quarter of the historian's memory limit at 367 bytes a
+row, in whole hours clamped to one hour and seven days; values stored by an older chart have no
+`expectedRowsPerDay` (`helm upgrade --reuse-values`) and keep the seven days they ran with.
+`compressAfter` defaults to one chunk interval.
