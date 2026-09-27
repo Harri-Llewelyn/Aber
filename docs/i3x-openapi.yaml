@@ -416,7 +416,8 @@ paths:
                 maxDepth:
                   type: integer
                   default: 1
-                  description: '`1` is the object itself. `0` is unbounded; anything higher descends that many levels of `HasComponent` into `components`.'
+                  minimum: 0
+                  description: '`1` is the object itself. `0` is unbounded; anything higher descends that many levels of `HasComponent` into `components`. Anything but an integer of 0 or more is a 400.'
       responses:
         '200':
           description: Current value per requested id, in order.
@@ -435,7 +436,11 @@ paths:
                         Controller/EXECUTION: ACTIVE
                       quality: Good
                       timestamp: '2026-08-10T13:06:29.423Z'
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: '`elementIds` missing or not an array of strings, or `maxDepth` not an integer of 0 or more.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Values]
@@ -477,8 +482,12 @@ paths:
                   items: { type: string }
                 startTime: { type: string, format: date-time, description: RFC 3339. Required. }
                 endTime: { type: string, format: date-time, description: RFC 3339. Required. }
-                limit: { type: integer, default: 1000, maximum: 10000 }
-                maxDepth: { type: integer, default: 1 }
+                limit:
+                  type: integer
+                  default: 1000
+                  minimum: 1
+                  description: 'Samples per element. A value above 10000 is served as 10000.'
+                maxDepth: { type: integer, default: 1, minimum: 0 }
       responses:
         '200':
           description: Samples per requested id, newest first.
@@ -486,7 +495,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
         '400':
-          description: '`elementIds` missing, or `startTime`/`endTime` absent or not RFC 3339.'
+          description: '`elementIds` missing or not an array of strings, `startTime`/`endTime` absent or not RFC 3339, `limit` not a positive integer, or `maxDepth` not an integer of 0 or more.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }

@@ -663,7 +663,35 @@ def _require_element_ids(body: dict, required: bool = True) -> list:
         return []
     if not isinstance(wanted, list):
         raise Problem(400, "Bad Request", "elementIds array is required.")
-    return _cap_bulk(wanted, "elementIds")
+    _cap_bulk(wanted, "elementIds")
+    if not all(isinstance(eid, str) for eid in wanted):
+        # An object or array here is unhashable, and would be a 500 at the first lookup.
+        raise Problem(400, "Bad Request", "elementIds must be an array of strings.")
+    return wanted
+
+
+def _int_field(body: dict, name: str, default: int, minimum: int) -> int:
+    """
+    An integer body field of at least `minimum`, or `default` when absent or null. Anything else
+    is a 400: JSON `true` is refused although Python counts it as 1, and `2.0` is taken as 2.
+    """
+    value = body.get(name)
+    if value is None:
+        return default
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise Problem(
+            400,
+            "Bad Request",
+            f"{name} must be an integer of {minimum} or more; got {json.dumps(value)}.",
+        )
+    return value
+
+
+def _max_depth(body: dict) -> int:
+    """`maxDepth`: 1 (the default) is the object alone, 0 is unbounded, N descends N-1 levels."""
+    return _int_field(body, "maxDepth", 1, 0)
 
 
 def _cap_bulk(entries: list, field: str) -> list:
@@ -725,9 +753,12 @@ class Handler(BaseHTTPRequestHandler):
         if not getattr(self, "_raw_body", b""):
             return {}
         try:
-            return json.loads(self._raw_body.decode("utf-8") or "{}")
+            body = json.loads(self._raw_body.decode("utf-8") or "{}")
         except (ValueError, UnicodeDecodeError):
             raise Problem(400, "Bad Request", "Request body is not valid JSON.")
+        if not isinstance(body, dict):
+            raise Problem(400, "Bad Request", "Request body must be a JSON object.")
+        return body
 
     def _query(self) -> dict:
         from urllib.parse import parse_qs, urlparse
@@ -1064,7 +1095,7 @@ def h_objects_value(req: "Handler") -> None:
     """
     body = req._body()
     wanted = _require_element_ids(body)
-    max_depth = body.get("maxDepth", 1)
+    max_depth = _max_depth(body)
     space = _load_address_space(req._pg())
     objects = _build_objects(space)
 
@@ -1132,8 +1163,8 @@ def h_objects_history(req: "Handler") -> None:
         raise Problem(400, "Bad Request", "startTime and endTime are required.")
     if not RFC3339.match(str(start)) or not RFC3339.match(str(end)):
         raise Problem(400, "Bad Request", "startTime and endTime must be valid RFC 3339 timestamps.")
-    limit = min(int(body.get("limit") or 1000), 10000)
-    max_depth = body.get("maxDepth", 1)
+    limit = min(_int_field(body, "limit", 1000, 1), 10000)
+    max_depth = _max_depth(body)
 
     pg = req._pg()
     space = _load_address_space(pg)

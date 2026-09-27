@@ -887,6 +887,79 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
         self.assertEqual(vqt["value"]["lastHeartbeat"], vqt["timestamp"])
 
 
+class TestRequestValidation(unittest.TestCase):
+    """Invalid parameters on the Exploratory and Query endpoints are a 400, before any read."""
+
+    HISTORY = {"startTime": "2026-01-01T00:00:00Z", "endTime": "2026-01-02T00:00:00Z"}
+    NOT_A_DEPTH = ("abc", "2", -1, 1.5, True, False, [], {"n": 1}, float("inf"))
+
+    def setUp(self):
+        i3x_service._space_cache_clear()
+
+    def tearDown(self):
+        i3x_service._space_cache_clear()
+
+    def refused(self, handler, body):
+        with self.assertRaises(i3x_service.Problem) as caught:
+            handler(FakeRequest(body=body))
+        self.assertEqual(caught.exception.status, 400)
+        return caught.exception.detail
+
+    def test_max_depth_accepts_a_non_negative_integer(self):
+        for given, expected in ((0, 0), (1, 1), (7, 7), (2.0, 2), (None, 1)):
+            with self.subTest(given=given):
+                self.assertEqual(i3x_service._max_depth({"maxDepth": given}), expected)
+        self.assertEqual(i3x_service._max_depth({}), 1)
+
+    def test_anything_else_as_max_depth_is_a_400(self):
+        for handler, base in (
+            (i3x_service.h_objects_value, {}),
+            (i3x_service.h_objects_history, self.HISTORY),
+        ):
+            for bad in self.NOT_A_DEPTH:
+                with self.subTest(handler=handler.__name__, maxDepth=bad):
+                    detail = self.refused(handler, {**base, "elementIds": ["i3x:site"], "maxDepth": bad})
+                    self.assertIn("maxDepth", detail)
+
+    def test_limit_must_be_a_positive_integer(self):
+        for bad in ("100", 0, -5, 2.5, True, [10]):
+            with self.subTest(limit=bad):
+                detail = self.refused(
+                    i3x_service.h_objects_history,
+                    {**self.HISTORY, "elementIds": ["dev1"], "limit": bad},
+                )
+                self.assertIn("limit", detail)
+        self.assertEqual(i3x_service._int_field({"limit": 1}, "limit", 1000, 1), 1)
+
+    def test_element_ids_must_be_strings(self):
+        for handler in (
+            i3x_service.h_objects_list,
+            i3x_service.h_objects_related,
+            i3x_service.h_objects_value,
+        ):
+            with self.subTest(handler=handler.__name__):
+                self.refused(handler, {"elementIds": ["i3x:site", {"elementId": "x"}]})
+
+    def test_a_body_that_is_not_an_object_is_a_400(self):
+        for raw in (b"[1, 2]", b'"elementIds"', b"7"):
+            with self.subTest(raw=raw):
+                req = FakeRequest()
+                req._raw_body = raw
+                with self.assertRaises(i3x_service.Problem) as caught:
+                    i3x_service.Handler._body(req)
+                self.assertEqual(caught.exception.status, 400)
+
+    def test_max_depth_zero_still_reads_the_whole_composition(self):
+        rows = TestAddressSpaceReads().seeded()
+        req = FakeRequest(
+            body={"elementIds": [A.SITE_ELEMENT_ID], "maxDepth": 0},
+            pg=ColumnCheckingPostgrest(rows),
+        )
+        i3x_service.h_objects_value(req)
+        components = req.result[0]["result"]["components"]
+        self.assertIn("dev-explicit", components, "unbounded descends site -> cell -> device")
+
+
 class TestMirroredConstants(unittest.TestCase):
     """
     `i3x_service.py` mirrors a little of `ingestion.py` rather than importing it.

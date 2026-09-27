@@ -140,6 +140,10 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | POST | `/subscriptions/stream` | MAY. SSE, **one stream per subscription** |
 | PUT | `/objects/value`, `/objects/history` | **405** — see below |
 
+An invalid parameter is a 400 before anything is read: the body must be a JSON object, `elementIds`
+an array of strings, `maxDepth` an integer of 0 or more, and `limit` a positive integer.
+`_int_field()` is the one check for the integers.
+
 The full request and response reference is [`docs/i3x-openapi.yaml`](../docs/i3x-openapi.yaml),
 which swagger-ui serves in the same dropdown as the platform spec. It is a **separate document
 from `docs/openapi.yaml` on purpose**: this server is not behind the gateway, takes no `apikey`, and
