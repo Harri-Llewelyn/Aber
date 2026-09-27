@@ -329,6 +329,153 @@ describe('Restore Metric', () => {
   })
 })
 
+/**
+ * A metric's semantic id is an assertion about it, not part of what a device publishes, so an
+ * Administrator corrects it in place. The name and datatype are shown and not offered.
+ */
+describe('Edit Metric — correcting a semantic id', () => {
+  const EXECUTION_ID = 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/EXECUTION'
+  const IEC_CDD = '0112/2///61987#ABA565#009'
+  const MAPPED = CATALOG.map(m => (m.metric_uuid === 'm2'
+    ? { ...m, semantic_id: EXECUTION_ID, semantic_id_type: 'IRI' }
+    : m))
+  const modelling = (...names) => ({
+    schema_definition: { type: 'object', properties: Object.fromEntries(names.map(n => [n, { type: 'string' }])) }
+  })
+  const SCHEMAS = [
+    { schema_uuid: 's1', ...modelling('Controller/EXECUTION') },
+    { schema_uuid: 's2', ...modelling('Controller/EXECUTION', 'Axes/DISPLACEMENT') }
+  ]
+
+  const setup = async (hasPermission = () => true) => {
+    api.get.mockImplementation((path) => Promise.resolve(
+      path.startsWith('/api/v1/metric-catalog') ? MAPPED
+        : path.startsWith('/api/v1/schemas') ? SCHEMAS
+          : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    const showToast = vi.fn()
+    render(<MetricsTab showToast={showToast} hasPermission={hasPermission} />)
+    await waitForCatalog()
+    return showToast
+  }
+
+  const editButtonFor = (name) =>
+    within(within(catalogTable()).getByText(name).closest('tr')).getByRole('button', { name: /Edit/ })
+
+  const openEdit = (name) => {
+    fireEvent.click(editButtonFor(name))
+    return within(document.querySelector('.modal'))
+  }
+
+  it('offers Edit on every row, disabled for a Shopfloor Manager as Deprecate is', async () => {
+    await setup((p) => p !== PERMISSION_UUIDS.SCHEMA_MANAGE)
+
+    const edits = within(catalogTable()).getAllByRole('button', { name: /Edit/ })
+    expect(edits.length).toBe(within(catalogTable()).getAllByRole('button', { name: /Deprecate/ }).length)
+    for (const button of edits) {
+      expect(button.disabled).toBe(true)
+      expect(button.title).toBe('Requires Admin permissions')
+    }
+    fireEvent.click(edits[0])
+    expect(document.querySelector('.modal')).toBeNull()
+  })
+
+  it('offers Edit on a deprecated metric too, which still carries its id into schemas', async () => {
+    await setup()
+    const row = within(cardTable('Deprecated Metrics')).getByText('temperature').closest('tr')
+    expect(within(row).getByRole('button', { name: /Edit/ }).disabled).toBe(false)
+  })
+
+  it('shows the name and datatype as text, and the stored pair in the field', async () => {
+    await setup()
+    const modal = openEdit('Controller/EXECUTION')
+
+    expect(modal.getAllByText('Controller/EXECUTION').length).toBeGreaterThan(0)
+    expect(modal.getByText('String')).toBeTruthy()
+    // The semantic id is the only thing typed into: name and datatype have no control.
+    expect(modal.getAllByRole('textbox')).toHaveLength(1)
+    expect(modal.getByRole('textbox', { name: /Semantic ID/ }).value).toBe(EXECUTION_ID)
+    expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRI')
+  })
+
+  it('offers IRI and IRDI only', async () => {
+    await setup()
+    const modal = openEdit('Controller/EXECUTION')
+    const options = [...modal.getByRole('combobox', { name: 'Reference Type' }).querySelectorAll('option')]
+    expect(options.map(o => o.value)).toEqual(['', 'IRI', 'IRDI'])
+  })
+
+  it('says how many schemas model the metric, as Deprecate does', async () => {
+    await setup()
+    expect(openEdit('Controller/EXECUTION').getByText(/model this/).textContent).toMatch(/2\s+schemas\s+model this/)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(openEdit('Controller/FIRMWARE').getByText(/No schema models this metric/)).toBeTruthy()
+  })
+
+  it('has nothing to save until the pair changes', async () => {
+    await setup()
+    const modal = openEdit('Controller/EXECUTION')
+    expect(modal.getByRole('button', { name: 'Save Semantic ID' }).disabled).toBe(true)
+  })
+
+  it('sends only the semantic id and its type, and reloads the catalog', async () => {
+    api.put.mockResolvedValue({ id: 'm2' })
+    const showToast = await setup()
+    const modal = openEdit('Controller/EXECUTION')
+    const loads = api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/metric-catalog')).length
+
+    fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: IEC_CDD } })
+    expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRDI')
+    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog/m2', { semantic_id: IEC_CDD, semantic_id_type: 'IRDI' }
+    ))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Controller\/EXECUTION.*saved/), 'success'))
+    expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/metric-catalog')).length).toBeGreaterThan(loads)
+    expect(document.querySelector('.modal')).toBeNull()
+  })
+
+  it('clears the id and the type with it, which leaves the metric unmapped', async () => {
+    api.put.mockResolvedValue({ id: 'm2' })
+    const showToast = await setup()
+    const modal = openEdit('Controller/EXECUTION')
+
+    fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: '' } })
+    const type = modal.getByRole('combobox', { name: 'Reference Type' })
+    expect(type.value).toBe('')
+    expect(type.disabled).toBe(true)
+    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog/m2', { semantic_id: '', semantic_id_type: '' }
+    ))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/cleared/), 'success'))
+  })
+
+  it('reports a refused edit and leaves the dialog open', async () => {
+    api.put.mockRejectedValueOnce(new Error('Semantic id not changed — the metric may no longer exist, or you may not have permission to change the catalog.'))
+    const showToast = await setup()
+    const modal = openEdit('Controller/EXECUTION')
+
+    fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: IEC_CDD } })
+    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/^Semantic id not changed/), 'error'))
+    expect(document.querySelector('.modal')).toBeTruthy()
+  })
+
+  it('writes nothing when cancelled', async () => {
+    await setup()
+    const modal = openEdit('Controller/EXECUTION')
+    fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: IEC_CDD } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(document.querySelector('.modal')).toBeNull()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+})
+
 describe('Metric Catalog — search', () => {
   const search = () => screen.getByLabelText('Search the metric catalog')
 
@@ -705,6 +852,30 @@ describe('Metric builder — semantic id', () => {
     await openForm()
     fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
     expect(screen.getByRole('button', { name: 'Add' }).disabled).toBe(false)
+  })
+
+  it('offers IRI and IRDI only', async () => {
+    await openForm()
+    expect([...referenceTypeSelect().querySelectorAll('option')].map(o => o.value)).toEqual(['', 'IRI', 'IRDI'])
+  })
+
+  it('says an Administrator can correct the id later with Edit, not that anyone can', async () => {
+    await openForm()
+    expect(semanticIdInput().title).toMatch(/an Administrator can correct it later with Edit/)
+    fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
+    expect(namePreview().textContent).toMatch(/correctable later with Edit, unlike the name/)
+  })
+
+  it('retypes a prefilled IRI as an IRDI when an IRDI replaces it', async () => {
+    // The shown type was the guess for the old id, so it follows the new one rather than staying
+    // IRI beside an IRDI.
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
+    fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'AVAILABILITY' } })
+    expect(referenceTypeSelect().value).toBe('IRI')
+
+    fireEvent.change(semanticIdInput(), { target: { value: '0173-1#02-ABI218#003/0173-1#01-AGZ672#004' } })
+    expect(referenceTypeSelect().value).toBe('IRDI')
   })
 
   it('stays addable when the operator clears the derived id entirely', async () => {

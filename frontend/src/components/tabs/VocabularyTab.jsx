@@ -10,10 +10,10 @@ import { ashrae223VocabularyTab } from '../common/ASHRAE223VocabularyPanel'
 
 /**
  * The standard vocabularies as a page of their own: reference material that is only read, separate
- * from the Schemas page's registry and catalog, which are edited. Clicking Use on an entry still
- * starts a catalog entry: `onUseEntry` hands identifiers to the Schemas page, which holds the
- * vocabularies for its type picker and resolves the entry itself, so one place knows how a
- * vocabulary row becomes a metric.
+ * from the Metrics page's catalog, which is edited. Clicking Use on an entry opens the Add Metric
+ * form on the Metrics page: `onUseEntry` hands identifiers over, and MetricsTab, which holds the
+ * vocabularies for its type picker, resolves the entry itself, so one place knows how a vocabulary
+ * row becomes a metric.
  */
 export function VocabularyTab({ onUseEntry, hasPermission }) {
   const [vocabulary, setVocabulary] = useState([])
@@ -47,7 +47,7 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
     return () => { cancelled = true }
   }, [])
 
-  // The same permission the Schemas page gates its Add Metric form on -- Use lands on that form,
+  // The same permission the Metrics page gates its Add Metric form on -- Use lands on that form,
   // so offering it to someone who cannot submit it would be a dead end.
   const canUse = !!hasPermission?.(PERMISSION_UUIDS.SCHEMA_MANAGE)
 
