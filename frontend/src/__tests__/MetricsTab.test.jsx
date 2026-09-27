@@ -52,6 +52,26 @@ const OPCUA_VOCABULARY = [
   }
 ]
 
+// A slice of ashrae223_vocabulary: two classes under different superclasses and one relation, which
+// the Concept picker must leave out.
+const ASHRAE223_VOCABULARY = [
+  {
+    name: 'TemperatureSensor', concept_kind: 'Class', label: 'Temperature sensor', subclass_of: 'Sensor',
+    description: 'A `Sensor` that measures temperature.',
+    semantic_id: 'http://data.ashrae.org/standard223#TemperatureSensor'
+  },
+  {
+    name: 'Fan', concept_kind: 'Class', label: 'Fan', subclass_of: 'Equipment',
+    description: 'A piece of `Equipment` that causes a gas to flow.',
+    semantic_id: 'http://data.ashrae.org/standard223#Fan'
+  },
+  {
+    name: 'hasProperty', concept_kind: 'Relation', label: 'has property', subclass_of: null,
+    description: 'A `Relation` that associates a `Concept` with a `Property`.',
+    semantic_id: 'http://data.ashrae.org/standard223#hasProperty'
+  }
+]
+
 const routes = {
   '/api/v1/schemas': [],
   '/api/v1/metric-catalog': CATALOG,
@@ -59,11 +79,13 @@ const routes = {
     { group_uuid: 'g1', name: 'Axes', standard: 'MTConnect' },
     { group_uuid: 'g2', name: 'OEE', standard: 'ISO 22400' },
     { group_uuid: 'g3', name: 'Machine', standard: 'OPC UA' },
-    { group_uuid: 'g4', name: 'Hydraulic', standard: null }
+    { group_uuid: 'g4', name: 'Hydraulic', standard: null },
+    { group_uuid: 'g5', name: 'Building', standard: 'ASHRAE 223P' }
   ],
   '/api/v1/mtconnect-vocabulary': VOCABULARY,
   '/api/v1/iso22400-vocabulary': ISO_VOCABULARY,
   '/api/v1/opcua-vocabulary': OPCUA_VOCABULARY,
+  '/api/v1/ashrae223-vocabulary': ASHRAE223_VOCABULARY,
   '/api/v1/gateways': [],
   '/api/v1/devices': []
 }
@@ -302,11 +324,14 @@ describe('Metric Catalog — Add Metric toggle', () => {
   })
 })
 
-// Multi-standard metric builder (MTConnect / ISO 22400 / OPC UA) and semantic ids
+// Multi-standard metric builder (MTConnect / ISO 22400 / OPC UA / ASHRAE 223P) and semantic ids
 
 const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
 const semanticIdInput = () => screen.getByPlaceholderText(/opcfoundation\.org\/UA\/Robotics\/ActualPosition/)
 const referenceTypeSelect = () => screen.getByTitle(/Which kind of AAS Reference the semantic id is\./)
+const datatypeSelect = () => screen.getByTitle(/How the value is encoded on the wire/)
+const conceptSelect = () => screen.getByTitle(/The ASHRAE 223P concept this point is attached to/)
+const addMetricButton = () => screen.getByRole('button', { name: /^Add$/ })
 
 // The Units column header carries the same title text as the Units picker, so the query has to
 // say which element kind it wants.
@@ -427,6 +452,104 @@ describe('Metric builder — vocabulary prefill', () => {
 
     expect(semanticIdInput().value).toBe('http://opcfoundation.org/UA/Machinery/Manufacturer')
     expect(within(namePreview()).getByText('Machine/Manufacturer')).toBeTruthy()
+  })
+
+  it('leaves the datatype unset, not "Double", when a group change orphans the data point', async () => {
+    // The orphaning clears the whole prefill, datatype included. The select has to say so rather
+    // than display its first option over a value that is no longer there.
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'OPC UA' } })
+    fireEvent.change(
+      screen.getByTitle(/OPC UA companion specification data point/),
+      { target: { value: 'OPC 40010 Robotics::ActualPosition' } }
+    )
+    expect(datatypeSelect().value).toBe('10')
+
+    fireEvent.change(screen.getByTitle(/The category this metric belongs to/), { target: { value: 'Machine' } })
+
+    expect(datatypeSelect().value).toBe('')
+    expect(screen.getByText(/Choose a Sparkplug datatype/)).toBeTruthy()
+    expect(addMetricButton().disabled).toBe(true)
+  })
+})
+
+// 223P is the one vocabulary that names things rather than readings, so its prefill can say which
+// concept and which semantic id but not how the value is encoded. Before #455 that undefined
+// datatype was posted as-is (a NOT NULL violation the screen contradicted by showing "Double") and
+// the Standard selector offered 223P with no picker behind it.
+describe('Metric builder — ASHRAE 223P', () => {
+  it('swaps the picker to concepts, offering classes and not relations', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
+
+    expect(screen.getByText('Concept')).toBeTruthy()
+    expect(screen.queryByText('Data Item Type')).toBeNull()
+    expect(screen.queryByText('Sub Type')).toBeNull()
+
+    const offered = [...conceptSelect().querySelectorAll('option')].map(o => o.value)
+    expect(offered).toContain('TemperatureSensor')
+    expect(offered).toContain('Fan')
+    // `Building/hasProperty` would name nothing: a relation is a predicate, not a thing.
+    expect(offered).not.toContain('hasProperty')
+  })
+
+  it('sections the picker by superclass, as the Vocabulary page does', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
+
+    const groups = [...conceptSelect().querySelectorAll('optgroup')].map(g => g.label)
+    expect(groups).toContain('Sensor (1)')
+    expect(groups).toContain('Equipment (1)')
+  })
+
+  it('fills the group and semantic id from a concept and leaves the datatype to the operator', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
+    fireEvent.change(conceptSelect(), { target: { value: 'TemperatureSensor' } })
+
+    expect(semanticIdInput().value).toBe('http://data.ashrae.org/standard223#TemperatureSensor')
+    expect(referenceTypeSelect().value).toBe('IRI')
+    expect(within(namePreview()).getByText('Building/TemperatureSensor')).toBeTruthy()
+
+    // Nothing chosen, and the control says so rather than reading "Double".
+    expect(datatypeSelect().value).toBe('')
+    expect(screen.getByText(/Choose a Sparkplug datatype/)).toBeTruthy()
+    expect(addMetricButton().disabled).toBe(true)
+  })
+
+  it('becomes addable once a datatype is chosen, and posts that datatype', async () => {
+    await openForm()
+    api.post.mockResolvedValue({})
+    fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
+    fireEvent.change(conceptSelect(), { target: { value: 'TemperatureSensor' } })
+    fireEvent.change(datatypeSelect(), { target: { value: '10' } })
+
+    expect(screen.queryByText(/Choose a Sparkplug datatype/)).toBeNull()
+    expect(addMetricButton().disabled).toBe(false)
+    fireEvent.click(addMetricButton())
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog',
+      expect.objectContaining({
+        name: 'Building/TemperatureSensor',
+        datatype: 10,
+        standard: 'ASHRAE 223P',
+        semantic_id: 'http://data.ashrae.org/standard223#TemperatureSensor',
+        semantic_id_type: 'IRI'
+      })
+    ))
+    // The datatype travelled as a number, never as undefined or ''.
+    const body = api.post.mock.calls.find(([path]) => path === '/api/v1/metric-catalog')[1]
+    expect(Number.isInteger(body.datatype)).toBe(true)
+  })
+
+  it('offers the 223P group under its standard, not under Local', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
+
+    const groupSelect = screen.getByTitle(/The category this metric belongs to/)
+    const building = [...groupSelect.querySelectorAll('option')].find(o => o.value === 'Building')
+    expect(building.closest('optgroup').label).toBe('ASHRAE 223P (1)')
   })
 })
 
@@ -596,6 +719,21 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     await waitForCatalog()
 
     expect(standardSelect().value).toBe('MTConnect')
+  })
+
+  it('opens the form on a 223P concept and waits for a datatype before it can be added', async () => {
+    // The path #455 was found on: the form arrived filled, showed "Double", and posted no datatype.
+    renderWith({ standard: 'ASHRAE 223P', name: 'TemperatureSensor' })
+    await waitForCatalog()
+
+    expect(standardSelect().value).toBe('ASHRAE 223P')
+    expect(conceptSelect().value).toBe('TemperatureSensor')
+    expect(within(namePreview()).getByText('Building/TemperatureSensor')).toBeTruthy()
+    expect(datatypeSelect().value).toBe('')
+    expect(addMetricButton().disabled).toBe(true)
+
+    fireEvent.change(datatypeSelect(), { target: { value: '12' } })
+    expect(addMetricButton().disabled).toBe(false)
   })
 
   it('consumes the handover so returning here later does not reopen the form', async () => {

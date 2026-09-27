@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  concepts, conceptByName, ashrae223Sections, ashrae223Prefill, conceptTooltip, ASHRAE223_GROUP
+  concepts, conceptByName, ashrae223Sections, ashrae223Prefill, conceptTooltip, metricConcepts,
+  isMetricConcept, ASHRAE223_GROUP
 } from '../utils/ashrae223'
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName, deriveMetricGroup } from '../utils/metricGroup'
@@ -48,6 +49,32 @@ describe('conceptByName', () => {
   it('returns null rather than guessing', () => {
     expect(conceptByName(vocabulary, 'NotAConcept')).toBeNull()
     expect(conceptByName(vocabulary, '')).toBeNull()
+  })
+})
+
+describe('isMetricConcept', () => {
+  it('is the one rule the picker and the Use action share', () => {
+    expect(isMetricConcept(vocabulary[0])).toBe(true)            // Fan, a Class
+    expect(isMetricConcept(vocabulary[3])).toBe(false)           // connectsTo, a Relation
+    expect(isMetricConcept({ name: 'Concept', concept_kind: 'Concept' })).toBe(true)
+    expect(isMetricConcept({ name: 'X', concept_kind: 'AbstractClass' })).toBe(true)
+    expect(isMetricConcept(null)).toBe(false)
+  })
+})
+
+describe('metricConcepts', () => {
+  it('keeps the things and drops the relations', () => {
+    // `Building/connectsTo` would name nothing a point can be attached to.
+    expect(metricConcepts(vocabulary).map(c => c.name)).toEqual(['Fan', 'Pump', 'Equipment'])
+  })
+
+  it('sections cleanly, so the picker has no Root bucket of predicates', () => {
+    const sections = ashrae223Sections(metricConcepts(vocabulary))
+    expect(sections.find(s => s.title === 'Root').entries.map(e => e.name)).toEqual(['Equipment'])
+  })
+
+  it('tolerates an absent vocabulary', () => {
+    expect(metricConcepts(null)).toEqual([])
   })
 })
 
