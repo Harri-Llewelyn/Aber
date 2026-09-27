@@ -18,7 +18,9 @@ import {
 } from '../../utils/standards'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
-import { conceptByName, ashrae223Prefill } from '../../utils/ashrae223'
+import {
+  conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
+} from '../../utils/ashrae223'
 import CopyableId from '../common/CopyableId'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX
@@ -137,7 +139,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     return known ? { group: known, newGroup: '' } : { group: NEW_GROUP, newGroup: suggested }
   }
 
-  /** Apply a vocabulary prefill (utils/iso22400 or utils/opcua) to the form and open it. */
+  /**
+   * Apply a vocabulary prefill (utils/iso22400, utils/opcua or utils/ashrae223) to the form and
+   * open it. A prefill that leaves `datatype` undefined means the vocabulary does not say how the
+   * value is encoded -- a 223P concept names a thing, not a reading -- and the form then holds no
+   * datatype until the operator picks one. It is the one field that cannot be corrected afterwards,
+   * so it is left empty rather than defaulted to Double.
+   */
   const applyPrefill = (prefill) => {
     if (!prefill) return
     setNewMetric(m => ({
@@ -146,11 +154,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       standard: prefill.standard,
       type: prefill.type,
       customType: '',
-      // A KPI and an OPC UA data point are both whole concepts; neither has an MTConnect subType.
+      // A KPI, an OPC UA data point and a 223P concept are all whole concepts; none has an
+      // MTConnect subType.
       subType: '',
-      units: prefill.units,
+      units: prefill.units || '',
       datatype: prefill.datatype,
-      vocabCategory: prefill.category,
+      vocabCategory: prefill.category || '',
       semanticId: prefill.semanticId,
       semanticIdType: prefill.semanticId ? inferSemanticIdType(prefill.semanticId) : '',
       // The vocabulary's id is authoritative for these two standards, so it is not re-derived.
@@ -205,6 +214,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       const [spec, name] = String(value).split(OPCUA_KEY_SEP)
       const point = dataPointByName(opcuaVocabulary, spec, name)
       if (point) return applyPrefill(opcuaPrefill(point))
+    }
+    if (newMetric.standard === STANDARDS.ASHRAE223) {
+      const concept = conceptByName(s223Vocabulary, value)
+      if (concept) return applyPrefill(ashrae223Prefill(concept))
     }
     setNewMetric(m => ({ ...m, type: value }))
   }
@@ -347,7 +360,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const isMTConnect = newMetric.standard === STANDARDS.MTCONNECT
   const isIso = newMetric.standard === STANDARDS.ISO22400
   const isOpcua = newMetric.standard === STANDARDS.OPCUA
+  const isAshrae = newMetric.standard === STANDARDS.ASHRAE223
   const isCustomStandard = newMetric.standard === STANDARDS.CUSTOM
+
+  // Unset after a 223P prefill, or after a group change orphaned an OPC UA data point. The select
+  // cannot show "Double" for a value that is not there: `metric_catalog.datatype` is NOT NULL and
+  // immutable, so the insert would be refused while the screen said otherwise.
+  const datatypeChosen = Number.isInteger(newMetric.datatype)
 
   // Only MTConnect offers a not-in-the-vocabulary escape in the type picker, because it permits
   // extending its type list. The other two have the Custom standard for that.
@@ -387,6 +406,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         }))
         .filter(section => section.entries.length > 0)
     : opcuaSectionsAll
+  // The Concept picker's sections, by superclass as on the Vocabulary page. Relations are left
+  // out: they are predicates, not things a point can be attached to.
+  const ashraeSections = ashrae223Sections(metricConcepts(s223Vocabulary))
   // The MTConnect UnitEnum plus whatever the current selection prefilled: ISO 22400 uses HOUR and
   // OPC UA carries UNECE codes, which MTConnect need not list.
   const mtconnectUnits = unitNames(vocabulary)
@@ -424,6 +446,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const canAddMetric =
     effectiveType !== '' &&
     isValidMetricName(composedName) &&
+    datatypeChosen &&
     (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '') &&
     // A type without a value would export as an AAS Reference with no key. Rejected here rather
     // than nulled on the way out, so the operator sees the field they left half-filled.
@@ -541,7 +564,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 />
               </div>
 
-              {/* One slot, three vocabularies. The Standard selector decides which fills it, so the
+              {/* One slot, four vocabularies. The Standard selector decides which fills it, so the
                   label changes with it. */}
               {isMTConnect && (
                 <div className="form-group" style={{ margin: 0, flex: '1 1 200px' }}>
@@ -618,6 +641,29 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 </div>
               )}
 
+              {isAshrae && (
+                <div className="form-group" style={{ margin: 0, flex: '1 1 220px' }}>
+                  <label className="form-label">Concept</label>
+                  <select
+                    className="form-control"
+                    value={newMetric.type}
+                    onChange={e => handleTypeChange(e.target.value)}
+                    title="The ASHRAE 223P concept this point is attached to. Selecting one fills in the group and the semantic id; the datatype and units stay yours to choose, because a concept names a thing, not a reading."
+                  >
+                    <option value="">— Select a concept —</option>
+                    {ashraeSections.map(section => (
+                      <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
+                        {section.entries.map(c => (
+                          <option key={c.name} value={c.name} title={c.description || ''}>
+                            {c.label || c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {(usingCustomType || isCustomStandard) && (
                 <div className="form-group" style={{ margin: 0, flex: '1 1 170px' }}>
                   <label className="form-label">{isCustomStandard ? 'Metric Name' : 'Custom Type'}</label>
@@ -668,7 +714,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
               <div className="form-group" style={{ margin: 0, flex: '0 1 140px' }}>
                 <label className="form-label">Sparkplug Datatype</label>
-                <select className="form-control" value={newMetric.datatype} onChange={e => setNewMetric(m => ({ ...m, datatype: parseInt(e.target.value, 10) }))} title="How the value is encoded on the wire. MTConnect does not specify this, so it stays a local choice.">
+                <select
+                  className="form-control"
+                  value={datatypeChosen ? newMetric.datatype : ''}
+                  onChange={e => setNewMetric(m => ({ ...m, datatype: parseInt(e.target.value, 10) }))}
+                  title="How the value is encoded on the wire. No vocabulary here specifies this, so it stays a local choice."
+                >
+                  {/* Shown only while nothing is chosen: a select must not read "Double" while the
+                      form holds no datatype. */}
+                  {!datatypeChosen && <option value="">— Choose —</option>}
                   {SPARKPLUG_DATATYPES.map(d => <option key={d.code} value={d.code}>{d.label}</option>)}
                 </select>
               </div>
@@ -762,6 +816,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--danger-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <IconAlertTriangle size={12} />
                 <span>{nameError}</span>
+              </div>
+            )}
+
+            {!datatypeChosen && (
+              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <IconAlertTriangle size={12} />
+                <span>Choose a Sparkplug datatype. The vocabulary entry does not say how this value is encoded, and the datatype cannot be changed once the metric exists.</span>
               </div>
             )}
 
