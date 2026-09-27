@@ -103,6 +103,17 @@ Six mappings that are decisions rather than mechanics:
   `GoodNoData` with no value. A `quality` column on the hypertable would be a stored verdict that
   goes stale the moment the gateway does.
 
+A device's cell is `effective_cell_id` from the `device_locations` view, keyed by `device_id`,
+so an explicit cell and one inherited from the gateway resolve the way the Directory resolves
+them. `effective_area_id` is read with it and not yet projected.
+
+**A failed read is an error, never an empty answer.** Any read behind the address space that
+PostgREST refuses answers 502 naming the relation and carrying PostgREST's message. The one
+exception is a 401 or 403 on `device_locations`: the caller still sees every asset it may, under
+Unassigned. The location read once selected a column the view does not have, the 400 was taken
+for "no rows", and every device sat under Unassigned without an error anywhere (#492).
+`TestAddressSpaceReads` now holds every select list to the columns the migrations create.
+
 ## Endpoints
 
 All under `/v1`. `GET /info` is open; everything else requires `Authorization`.

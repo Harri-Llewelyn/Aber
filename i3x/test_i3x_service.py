@@ -24,6 +24,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,6 +35,7 @@ from subscriptions import SubscriptionError, SubscriptionRegistry  # noqa: E402
 MODELLED_METRICS_FIXTURE = (
     Path(__file__).resolve().parents[1] / "test-harness" / "fixtures" / "modelled-metrics.json"
 )
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "supabase" / "migrations"
 
 
 class FakeClock:
@@ -471,6 +473,286 @@ class TestAddressSpace(unittest.TestCase):
         device = {"sparkplug_id": "dev1", "is_quarantined": True}
         env = A.device_value(device, {"m": {"value": 1.0, "timestamp": "2026-01-01T00:00:00Z"}})
         self.assertEqual(env["quality"], "Uncertain")
+
+
+# -------------------------------------------------------------------------------------------------
+# The columns PostgREST would accept, replayed from the live migrations.
+# -------------------------------------------------------------------------------------------------
+_KEYWORD_ITEMS = re.compile(r"^(CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LIKE)\b", re.I)
+
+
+def _split_top_level(sql: str, start: int = 0, stop_at_from: bool = False):
+    """
+    Split at depth-0 commas from `start`, ending at the closing paren of the enclosing list, a
+    depth-0 `;`, or (for a SELECT list) a depth-0 FROM. Returns (items, end offset).
+    """
+    items, buf, depth, quote, i = [], [], 0, None, start
+    while i < len(sql):
+        ch = sql[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            buf.append(ch)
+        elif ch == "(":
+            depth += 1
+            buf.append(ch)
+        elif ch == ")":
+            if depth == 0:
+                break
+            depth -= 1
+            buf.append(ch)
+        elif depth == 0 and ch == ";":
+            break
+        elif depth == 0 and ch == ",":
+            items.append("".join(buf))
+            buf = []
+        elif (
+            stop_at_from and depth == 0 and sql[i:i + 4].upper() == "FROM"
+            and not (sql[i - 1:i].isalnum() or sql[i - 1:i] == "_")
+            and not (sql[i + 4:i + 5].isalnum() or sql[i + 4:i + 5] == "_")
+        ):
+            break
+        else:
+            buf.append(ch)
+        i += 1
+    items.append("".join(buf))
+    return [item.strip() for item in items if item.strip()], i
+
+
+def _select_output_name(item: str) -> str:
+    alias = re.search(r'\bAS\s+"?(\w+)"?\s*$', item, re.I)
+    if alias:
+        return alias.group(1)
+    return re.search(r'"?(\w+)"?\s*$', item).group(1)
+
+
+def _relation_columns() -> dict:
+    """
+    The columns of every `public` table and view, replaying the live migrations in filename order.
+
+    Tables take CREATE TABLE plus ALTER TABLE ADD / DROP / RENAME COLUMN; a view takes its last
+    CREATE [OR REPLACE] VIEW, and DROP VIEW removes it. Statements must start in column 0, which is
+    how pg_dump writes them; a DO block's dynamic SQL is not replayed.
+    """
+    columns: dict = {}
+    statement = re.compile(
+        r"^(?:CREATE TABLE (?:IF NOT EXISTS )?public\.(?P<table>\w+)\s*\("
+        r"|ALTER TABLE (?:IF EXISTS )?(?:ONLY )?public\.(?P<altered>\w+)\b"
+        r"|CREATE (?:OR REPLACE )?VIEW public\.(?P<view>\w+)(?:\s+WITH\s*\([^)]*\))?\s+AS\s+SELECT\b"
+        r"|DROP VIEW (?:IF EXISTS )?public\.(?P<dropped>\w+))",
+        re.M,
+    )
+    for path in sorted(MIGRATIONS_DIR.glob("[0-9]*.sql")):
+        sql = path.read_text(encoding="utf-8")
+        for m in statement.finditer(sql):
+            if m.group("table"):
+                items, _ = _split_top_level(sql, m.end())
+                columns[m.group("table")] = {
+                    item.split()[0].strip('"') for item in items if not _KEYWORD_ITEMS.match(item)
+                }
+            elif m.group("view"):
+                items, _ = _split_top_level(sql, m.end(), stop_at_from=True)
+                columns[m.group("view")] = {_select_output_name(item) for item in items}
+            elif m.group("dropped"):
+                columns.pop(m.group("dropped"), None)
+            else:
+                cols = columns.setdefault(m.group("altered"), set())
+                end = sql.find(";", m.end())
+                body = sql[m.end():end if end >= 0 else None]
+                for add in re.finditer(
+                    r"\bADD\s+COLUMN\s+(?:IF NOT EXISTS\s+)?\"?(\w+)", body, re.I
+                ):
+                    cols.add(add.group(1))
+                for drop in re.finditer(
+                    r"\bDROP\s+COLUMN\s+(?:IF EXISTS\s+)?\"?(\w+)", body, re.I
+                ):
+                    cols.discard(drop.group(1))
+                for rename in re.finditer(
+                    r"\bRENAME\s+(?:COLUMN\s+)?(?!TO\b)\"?(\w+)\"?\s+TO\s+\"?(\w+)", body, re.I
+                ):
+                    cols.discard(rename.group(1))
+                    cols.add(rename.group(2))
+    return columns
+
+
+_POSTGREST_RESERVED = {"select", "order", "limit", "offset", "and", "or", "on_conflict", "columns"}
+
+
+class ColumnCheckingPostgrest:
+    """
+    Answers like PostgREST over the migrated schema: a read naming a column the relation lacks
+    fails as `PostgrestClient.get` fails on PostgREST's 400, and rows come back projected onto
+    `select`. Seeded rows are held to the same columns, so a fixture cannot invent one either.
+    """
+
+    COLUMNS = None
+
+    def __init__(self, rows=None, bearer="Bearer test"):
+        if ColumnCheckingPostgrest.COLUMNS is None:
+            ColumnCheckingPostgrest.COLUMNS = _relation_columns()
+        self.bearer = bearer
+        self.rows = rows or {}
+        self.calls = []
+        for relation, seeded in self.rows.items():
+            for row in seeded:
+                unknown = set(row) - self.COLUMNS[relation]
+                assert not unknown, f"fixture row for {relation} names {sorted(unknown)}"
+
+    def _refuse(self, relation, column):
+        raise SubscriptionError(
+            502,
+            "Bad Gateway",
+            'Upstream read failed (400): {"code":"42703","message":"column %s.%s does not exist"}'
+            % (relation, column),
+        )
+
+    def get(self, relation, params=None):
+        params = dict(params or {})
+        self.calls.append((relation, params))
+        known = self.COLUMNS.get(relation)
+        if known is None:
+            raise SubscriptionError(502, "Bad Gateway", f"Upstream read failed (404): {relation}")
+        selected = params.get("select", "").split(",")
+        named = list(selected)
+        named += [k for k in params if k not in _POSTGREST_RESERVED]
+        named += [part.split(".")[0] for part in params.get("order", "").split(",") if part]
+        for key in ("and", "or"):
+            named += re.findall(r"[(,]\s*(\w+)\.", params.get(key, ""))
+        for column in named:
+            if column not in known:
+                self._refuse(relation, column)
+        return [{c: row.get(c) for c in selected} for row in self.rows.get(relation, [])]
+
+
+class _FakeResponse:
+    def __init__(self, status, body):
+        self.status_code = status
+        self.ok = status < 400
+        self.text = json.dumps(body)
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class TestAddressSpaceReads(unittest.TestCase):
+    """
+    The reads behind the address space, against the schema the migrations build.
+
+    Every device was once filed under Unassigned because the location read selected a column
+    the view does not have, PostgREST answered 400, and the failure was read as "no rows".
+    """
+
+    CELL = "11111111-1111-1111-1111-111111111111"
+    OTHER_CELL = "22222222-2222-2222-2222-222222222222"
+    AREA = "33333333-3333-3333-3333-333333333333"
+
+    def seeded(self):
+        gateway = {"id": "g1", "sparkplug_id": "gwy-1", "name": "Gateway", "cell_id": self.OTHER_CELL}
+        devices = [
+            {"id": "d-explicit", "sparkplug_id": "dev-explicit", "name": "Placed",
+             "gateway_id": "g1", "cell_id": self.CELL},
+            {"id": "d-inherits", "sparkplug_id": "dev-inherits", "name": "Inherits",
+             "gateway_id": "g1", "cell_id": None},
+            {"id": "d-nowhere", "sparkplug_id": "dev-nowhere", "name": "Nowhere",
+             "gateway_id": None, "cell_id": None},
+        ]
+        locations = [
+            {"device_id": "d-explicit", "effective_cell_id": self.CELL,
+             "effective_area_id": self.AREA},
+            {"device_id": "d-inherits", "effective_cell_id": self.OTHER_CELL,
+             "effective_area_id": self.AREA},
+            {"device_id": "d-nowhere", "effective_cell_id": None, "effective_area_id": None},
+        ]
+        return {
+            "cells": [
+                {"id": self.CELL, "name": "Cell A", "description": "Welding"},
+                {"id": self.OTHER_CELL, "name": "Cell B", "description": None},
+            ],
+            "gateways": [gateway],
+            "devices": devices,
+            "device_locations": locations,
+            "schemas": [],
+        }
+
+    def test_the_migrations_are_parsed(self):
+        # A parser that found nothing would make every other test here refuse everything; one
+        # that found the wrong thing would accept the column that started this.
+        columns = _relation_columns()
+        self.assertIn("sparkplug_id", columns["devices"])
+        self.assertIn("effective_area_id", columns["device_locations"])
+        self.assertIn("device_id", columns["device_locations"])
+        self.assertNotIn("id", columns["device_locations"])
+        self.assertIn("time", columns["telemetry"])
+
+    def test_every_address_space_read_names_real_columns(self):
+        pg = ColumnCheckingPostgrest()
+        i3x_service._read_address_space(pg)
+        self.assertEqual(
+            sorted(relation for relation, _ in pg.calls),
+            ["cells", "device_locations", "devices", "gateways", "schemas"],
+        )
+
+    def test_the_history_read_names_real_columns(self):
+        pg = ColumnCheckingPostgrest()
+        i3x_service._read_telemetry(pg, "dev1", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 10)
+        self.assertEqual([relation for relation, _ in pg.calls], ["telemetry"])
+
+    def test_a_device_is_filed_under_its_resolved_cell(self):
+        space = i3x_service._read_address_space(ColumnCheckingPostgrest(self.seeded()))
+        objects = i3x_service._build_objects(space)
+        self.assertEqual(objects["dev-explicit"]["parentId"], self.CELL)
+        self.assertEqual(objects["dev-inherits"]["parentId"], self.OTHER_CELL, "inherits its gateway's")
+        self.assertEqual(objects["dev-nowhere"]["parentId"], A.UNASSIGNED_ELEMENT_ID)
+        self.assertIn("dev-explicit", objects[self.CELL]["metadata"]["relationships"]["HasChildren"])
+        self.assertEqual(space["locations"]["d-explicit"]["effective_area_id"], self.AREA)
+
+    def _respond(self, failing, status, body):
+        def fake_get(url, **_kwargs):
+            if url.endswith("/" + failing):
+                return _FakeResponse(status, body)
+            return _FakeResponse(200, [])
+        return mock.patch.object(i3x_service.requests, "get", side_effect=fake_get)
+
+    def test_a_rejected_read_is_a_502_carrying_postgrests_message(self):
+        error = {"code": "42703", "message": "column device_locations.id does not exist"}
+        with self._respond("device_locations", 400, error):
+            with self.assertRaises(SubscriptionError) as caught:
+                i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+        self.assertEqual(caught.exception.status, 502)
+        self.assertIn("device_locations", caught.exception.detail)
+        self.assertIn("column device_locations.id does not exist", caught.exception.detail)
+
+    def test_a_server_error_on_any_read_is_a_502(self):
+        for relation in ("cells", "gateways", "devices", "device_locations", "schemas"):
+            with self.subTest(relation=relation), self._respond(relation, 503, {"message": "down"}):
+                with self.assertRaises(SubscriptionError) as caught:
+                    i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+                self.assertEqual(caught.exception.status, 502)
+
+    def test_an_unreachable_data_layer_is_not_an_empty_tree(self):
+        def refuse(url, **_kwargs):
+            if url.endswith("/device_locations"):
+                raise i3x_service.requests.ConnectionError("refused")
+            return _FakeResponse(200, [])
+        with mock.patch.object(i3x_service.requests, "get", side_effect=refuse):
+            with self.assertRaises(i3x_service.requests.RequestException):
+                i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+
+    def test_a_denied_location_read_is_empty(self):
+        with self._respond("device_locations", 403, {"code": "42501"}):
+            space = i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+        self.assertEqual(space["locations"], {})
+
+    def test_a_denied_primary_read_is_still_refused(self):
+        # A token PostgREST rejects must not read as an empty plant.
+        with self._respond("cells", 401, {"code": "PGRST301"}):
+            with self.assertRaises(SubscriptionError) as caught:
+                i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+        self.assertEqual(caught.exception.status, 401)
 
 
 class TestMirroredConstants(unittest.TestCase):

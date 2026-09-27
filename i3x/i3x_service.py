@@ -272,14 +272,21 @@ def _read_address_space(pg: PostgrestClient) -> dict:
 
     UNCACHED. Every caller should go through `_load_address_space()`; this is the cold read behind
     it, separated so the cache has something to call and so a test can measure the difference.
+
+    A failed read raises; it never becomes "no rows". Only a 401/403 on the location view reads as
+    empty, because a caller denied that view is still shown every asset it may see, under
+    Unassigned.
     """
     # ARCHIVED ROWS ARE EXCLUDED EVERYWHERE. A soft-deleted asset is not part of the live address
     # space -- it is restorable history, and the Archives tab is where it lives. Including it would
     # publish elementIds that resolve to nothing a client can subscribe to, and an archived device
     # publishes no values, so every one of them would read as GoodNoData forever.
     live = "eq.false"
-    cells = pg.get("cells", {"select": "id,name", "is_archived": live, "order": "name"})
-    gateways = pg.get(
+    cells = _read_relation(
+        pg, "cells", {"select": "id,name,description", "is_archived": live, "order": "name"}
+    )
+    gateways = _read_relation(
+        pg,
         "gateways",
         {
             "select": "id,sparkplug_id,name,cell_id,location_scope,sparkplug_group,status,"
@@ -287,7 +294,8 @@ def _read_address_space(pg: PostgrestClient) -> dict:
             "is_archived": live,
         },
     )
-    devices = pg.get(
+    devices = _read_relation(
+        pg,
         "devices",
         {
             "select": "id,sparkplug_id,name,gateway_id,is_quarantined,last_birth_metrics,"
@@ -295,13 +303,16 @@ def _read_address_space(pg: PostgrestClient) -> dict:
             "is_archived": live,
         },
     )
-    # The resolved cell per device -- COALESCE(device.cell_id, gateway.cell_id) -- which is a view
-    # precisely because that resolution must not be re-implemented per consumer.
-    try:
-        locations = pg.get("device_locations", {"select": "id,effective_cell_id"})
-    except SubscriptionError:
-        locations = []
-    schemas = pg.get(
+    # The resolved cell and area per device, keyed by `device_id`. A view because that resolution
+    # must not be re-implemented per consumer; `effective_area_id` is carried for the Area level.
+    locations = _read_relation(
+        pg,
+        "device_locations",
+        {"select": "device_id,effective_cell_id,effective_area_id"},
+        denied_is_empty=True,
+    )
+    schemas = _read_relation(
+        pg,
         "schemas",
         {"select": "id,schema_name,description,schema_definition,semantic_id,version,status,"
                    "change_description"},
@@ -310,9 +321,25 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         "cells": cells,
         "gateways": gateways,
         "devices": devices,
-        "locations": {row["id"]: row.get("effective_cell_id") for row in locations},
+        "locations": {row["device_id"]: row for row in locations},
         "schemas": schemas,
     }
+
+
+def _read_relation(pg: PostgrestClient, relation: str, params: dict,
+                   denied_is_empty: bool = False) -> List[dict]:
+    """
+    One address-space read. A 401/403 raises unless `denied_is_empty`; any other failure is a 502
+    naming the relation and carrying PostgREST's message, so a bad column cannot pass as no rows.
+    """
+    try:
+        return pg.get(relation, params)
+    except SubscriptionError as exc:
+        if exc.status in (401, 403):
+            if denied_is_empty:
+                return []
+            raise
+        raise SubscriptionError(502, "Bad Gateway", f"Reading {relation}: {exc.detail}") from exc
 
 
 def _modelled_metrics(schema_definition) -> set:
@@ -365,7 +392,7 @@ def _build_objects(space: dict) -> Dict[str, dict]:
             device.get("last_birth_metrics") or [],
             _modelled_metrics(schema.get("schema_definition")) if schema else set(),
         )
-        cell_id = space["locations"].get(device["id"])
+        cell_id = (space["locations"].get(device["id"]) or {}).get("effective_cell_id")
         obj = A.device_object(device, cell_id, device.get("schema_id"))
         objects[obj["elementId"]] = obj
         if cell_id:
@@ -1064,6 +1091,21 @@ def h_objects_value(req: "Handler") -> None:
 RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}")
 
 
+def _read_telemetry(pg: PostgrestClient, element_id: str, start, end, limit: int) -> List[dict]:
+    """One device's raw samples in [start, end], newest first."""
+    return pg.get(
+        "telemetry",
+        {
+            "select": "time,metric_name,val_double,val_string,val_bool",
+            "asset_id": "eq." + element_id,
+            "time": "gte." + str(start),
+            "and": "(time.lte." + str(end) + ")",
+            "order": "time.desc",
+            "limit": str(limit),
+        },
+    )
+
+
 def h_objects_history(req: "Handler") -> None:
     """
     History comes from TimescaleDB through PostgREST, never from the value cache.
@@ -1093,17 +1135,7 @@ def h_objects_history(req: "Handler") -> None:
         # honest answer -- inventing an aggregate would assert a measurement nobody took.
         if eid not in device_sids:
             return []
-        rows = pg.get(
-            "telemetry",
-            {
-                "select": "time,metric_name,val_double,val_string,val_bool",
-                "asset_id": "eq." + eid,
-                "time": "gte." + str(start),
-                "and": "(time.lte." + str(end) + ")",
-                "order": "time.desc",
-                "limit": str(limit),
-            },
-        )
+        rows = _read_telemetry(pg, eid, start, end, limit)
         out = []
         for row in rows:
             value = row.get("val_double")
