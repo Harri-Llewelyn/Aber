@@ -133,6 +133,10 @@ _values: Dict[str, Dict[str, dict]] = {}
 _values_lock = threading.RLock()
 _alias_map: Dict[tuple, Dict[int, str]] = {}
 _alias_lock = threading.RLock()
+# The datatypes the same births declare, under the same lock: (group, node) -> {alias: datatype},
+# and -> {device_id or "": {name: datatype}}. A signed integer cannot be read without one.
+_alias_datatypes: Dict[tuple, Dict[int, int]] = {}
+_name_datatypes: Dict[tuple, Dict[str, Dict[str, int]]] = {}
 
 registry = SubscriptionRegistry(
     queue_limit=SUBSCRIPTION_QUEUE_LIMIT,
@@ -483,17 +487,19 @@ def alias_key(group_id, edge_node_id):
     return (group_id or DEFAULT_SPARKPLUG_GROUP, edge_node_id or "")
 
 
-def register_birth_aliases(group_id, edge_node_id, metrics, reset=False) -> None:
+def register_birth_aliases(group_id, edge_node_id, metrics, reset=False, device_id=None) -> None:
     """
-    Record alias -> name from a BIRTH.
+    Record alias -> name from a BIRTH, and the datatypes it declares by alias and by name.
 
-    NBIRTH resets the node's table; DBIRTH merges into it. A DDATA metric carries only its alias, so
-    without this the value cannot be named at all -- and the failure is silent data loss, not an
-    error. The cap exists because the table is keyed by data the broker accepts from anyone.
+    NBIRTH resets the node's tables; DBIRTH merges aliases and replaces the datatypes it declares by
+    name for `device_id`. A DDATA metric carries only its alias, so without this the value cannot be
+    named at all -- and the failure is silent data loss, not an error. The cap exists because the
+    table is keyed by data the broker accepts from anyone.
     """
     key = alias_key(group_id, edge_node_id)
     with _alias_lock:
         table = {} if reset else _alias_map.get(key, {})
+        alias_types = {} if reset else _alias_datatypes.get(key, {})
         for metric in metrics:
             alias = metric.get("alias")
             name = metric.get("name")
@@ -507,7 +513,27 @@ def register_birth_aliases(group_id, edge_node_id, metrics, reset=False) -> None
                 )
                 break
             table[int(alias)] = name
+            if metric.get("datatype"):
+                alias_types[int(alias)] = metric["datatype"]
+            else:
+                alias_types.pop(int(alias), None)
         _alias_map[key] = table
+        _alias_datatypes[key] = alias_types
+
+        # Capped like the alias table, across the node's devices: the device segment of a topic is
+        # publisher-chosen.
+        names = {} if reset else _name_datatypes.get(key, {})
+        device = device_id or ""
+        typed = {m["name"]: m["datatype"] for m in metrics if m.get("name") and m.get("datatype")}
+        room = MAX_ALIASES_PER_NODE - sum(len(t) for d, t in names.items() if d != device)
+        if len(typed) > room:
+            logger.warning("datatype table for %s is at its %d-entry cap", key, MAX_ALIASES_PER_NODE)
+            typed = dict(list(typed.items())[: max(room, 0)])
+        if typed:
+            names[device] = typed
+        else:
+            names.pop(device, None)
+        _name_datatypes[key] = names
 
 
 def resolve_metric_name(group_id, edge_node_id, metric) -> Optional[str]:
@@ -518,6 +544,68 @@ def resolve_metric_name(group_id, edge_node_id, metric) -> Optional[str]:
         return None
     with _alias_lock:
         return _alias_map.get(alias_key(group_id, edge_node_id), {}).get(int(alias))
+
+
+def resolve_metric_datatype(group_id, edge_node_id, metric, device_id=None, name=None):
+    """Its own datatype, else a birth's for its alias, else for `name` on the device, then the node."""
+    if metric.get("datatype"):
+        return metric["datatype"]
+    key = alias_key(group_id, edge_node_id)
+    with _alias_lock:
+        alias = metric.get("alias")
+        if alias is not None and _alias_datatypes.get(key, {}).get(int(alias)):
+            return _alias_datatypes[key][int(alias)]
+        if not name:
+            return None
+        names = _name_datatypes.get(key, {})
+        return names.get(device_id or "", {}).get(name) or names.get("", {}).get(name)
+
+
+# MIRRORED FROM ingestion.py -- `test_i3x_service.py` asserts both copies agree. The signed
+# datatypes (Int8, Int16, Int32, Int64) and their width in bits.
+SPARKPLUG_SIGNED_INT_BITS = {1: 8, 2: 16, 3: 32, 4: 64}
+
+
+def sparkplug_integer_value(datatype, raw):
+    """
+    An `int_value` or `long_value` read as `datatype`: a signed type is sign-extended from its own
+    width and anything else is returned unchanged. Masking to the width first accepts both
+    encodings of a narrow type (0xFB and 0xFFFFFFFB are an Int8 of -5) and an already-signed value.
+    """
+    bits = SPARKPLUG_SIGNED_INT_BITS.get(datatype)
+    if bits is None:
+        return raw
+    raw &= (1 << bits) - 1
+    return raw - (1 << bits) if raw >> (bits - 1) else raw
+
+
+# Value fields this server cannot serve as a JSON value; the historian drops them too.
+UNSERVED_VALUE_FIELDS = ("bytes_value", "dataset_value", "template_value", "extension_value")
+UNDECLARED_INTEGER_WARN_INTERVAL_SECONDS = 300
+_undeclared_integer_warned_at = 0.0
+
+
+def metric_value(group_id, edge_node_id, device_id, name, metric):
+    """
+    The value to serve: an integer read through its declared datatype. One whose datatype no birth
+    since startup declared is served as it arrived, unsigned, as ingestion stores it.
+    """
+    global _undeclared_integer_warned_at
+    value = metric["value"]
+    if metric.get("field") not in ("int_value", "long_value"):
+        return value
+    if not isinstance(value, int) or isinstance(value, bool):
+        return value
+    datatype = resolve_metric_datatype(group_id, edge_node_id, metric, device_id, name)
+    now = time.time()
+    if datatype is None and now - _undeclared_integer_warned_at > UNDECLARED_INTEGER_WARN_INTERVAL_SECONDS:
+        _undeclared_integer_warned_at = now
+        logger.warning(
+            "integer metric %r on %s/%s has no declared datatype; serving it unsigned until the "
+            "node births again (further cases are not logged for %ds)",
+            name, edge_node_id, device_id, UNDECLARED_INTEGER_WARN_INTERVAL_SECONDS,
+        )
+    return sparkplug_integer_value(datatype, value)
 
 
 def _stage_and_push(sparkplug_id: str, metrics: Dict[str, dict]) -> None:
@@ -1778,7 +1866,9 @@ def decode_metrics(raw: bytes) -> Optional[List[dict]]:
                 {
                     "name": metric.name or None,
                     "alias": metric.alias if metric.HasField("alias") else None,
-                    "value": getattr(metric, which) if which else None,
+                    "datatype": metric.datatype or None,
+                    "field": which,
+                    "value": getattr(metric, which) if which and which not in UNSERVED_VALUE_FIELDS else None,
                     "timestamp": _ms_to_iso(metric.timestamp),
                 }
             )
@@ -1795,15 +1885,23 @@ def decode_metrics(raw: bytes) -> Optional[List[dict]]:
     payload_ts = data.get("timestamp")
     out = []
     for m in data.get("metrics") or []:
-        value = None
+        value, field = None, None
         for key in ("double_value", "int_value", "string_value", "boolean_value", "value"):
             if m.get(key) is not None:
-                value = m[key]
+                value, field = m[key], key
                 break
+        datatype = m.get("datatype")
+        if not isinstance(datatype, int) or isinstance(datatype, bool):
+            datatype = None
+        # Marked Int32 as ingestion's JSON arm marks it, so an undeclared negative reads as itself.
+        if field == "int_value" and datatype is None and isinstance(value, int) and -(2**31) <= value < 0:
+            datatype = 3
         out.append(
             {
                 "name": m.get("name") or None,
                 "alias": m.get("alias"),
+                "datatype": datatype,
+                "field": field,
                 "value": value,
                 "timestamp": _ms_to_iso(m.get("timestamp") or payload_ts),
             }
@@ -1828,7 +1926,7 @@ def on_message(client, userdata, msg):  # noqa: ARG001
             register_birth_aliases(group_id, edge_node_id, metrics, reset=True)
             return
         if msg_type == "DBIRTH":
-            register_birth_aliases(group_id, edge_node_id, metrics)
+            register_birth_aliases(group_id, edge_node_id, metrics, device_id=device_id)
         if msg_type not in ("DBIRTH", "DDATA") or not device_id:
             return
 
@@ -1840,8 +1938,11 @@ def on_message(client, userdata, msg):  # noqa: ARG001
                 # excludes them from `last_birth_metrics`. Including them here would make every
                 # conformant device report two values no schema models.
                 continue
-            record_value(device_id, name, metric["value"], metric["timestamp"])
-            named[name] = {"value": metric["value"], "timestamp": metric["timestamp"]}
+            if metric.get("field") in UNSERVED_VALUE_FIELDS:
+                continue
+            value = metric_value(group_id, edge_node_id, device_id, name, metric)
+            record_value(device_id, name, value, metric["timestamp"])
+            named[name] = {"value": value, "timestamp": metric["timestamp"]}
         if named and device_id in registry.monitored_element_ids():
             _stage_and_push(device_id, metrics_for(device_id))
     except Exception:  # noqa: BLE001

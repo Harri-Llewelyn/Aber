@@ -186,9 +186,22 @@ def dict_to_payload(data):
         if m.get("boolean_value") is not None:
             metric.boolean_value = bool(m["boolean_value"])
         if m.get("int_value") is not None:
-            metric.int_value = int(m["int_value"])
+            value = int(m["int_value"])
+            # A negative one as parse_sparkplug_payload()'s JSON arm stores it: 32-bit two's
+            # complement, marked Int32 when no datatype is declared, so it reads back signed.
+            if -2 ** 31 <= value < 0:
+                value &= 0xFFFFFFFF
+                if m.get("datatype") is None:
+                    metric.datatype = 3
+            metric.int_value = value
         if m.get("long_value") is not None:
-            metric.long_value = int(m["long_value"])
+            value = int(m["long_value"])
+            # The same rule at 64 bits, for a hand-edited file; the daemon's JSON arm reads no long_value.
+            if -2 ** 63 <= value < 0:
+                value &= 0xFFFFFFFFFFFFFFFF
+                if m.get("datatype") is None:
+                    metric.datatype = 4
+            metric.long_value = value
         if m.get("float_value") is not None:
             metric.float_value = float(m["float_value"])
     return payload

@@ -186,6 +186,31 @@ class PayloadRoundTripTests(unittest.TestCase):
         self.assertFalse(restored.metrics[0].HasField("name"))
         self.assertEqual(restored.metrics[0].alias, 3)
 
+    def test_a_signed_integer_is_recorded_as_its_wire_pattern(self):
+        # The file holds what the wire carried, datatype included, so playback reproduces the
+        # bytes and the daemon reads the value back signed.
+        payload = sparkplug_b_pb2.Payload()
+        m = payload.metrics.add()
+        m.name = "Offset"
+        m.datatype = 3  # Int32
+        m.int_value = (-5) & 0xFFFFFFFF
+        data, restored = self._round_trip(payload)
+        self.assertEqual(data["metrics"][0], {"name": "Offset", "datatype": 3, "int_value": 4294967291})
+        self.assertEqual(restored.SerializeToString(), payload.SerializeToString())
+
+    def test_a_negative_integer_in_the_file_is_encoded_as_twos_complement(self):
+        # A JSON message or a hand edit carries the number itself; protobuf's unsigned fields
+        # refuse it, so it is written as the pattern a signed encoder would have sent.
+        restored = capture.dict_to_payload({"metrics": [
+            {"name": "a", "int_value": -5},
+            {"name": "b", "datatype": 2, "int_value": -5},
+            {"name": "c", "long_value": -7},
+        ]})
+        a, b, c = restored.metrics
+        self.assertEqual((a.int_value, a.datatype), (4294967291, 3))
+        self.assertEqual((b.int_value, b.datatype), (4294967291, 2))
+        self.assertEqual((c.long_value, c.datatype), (2 ** 64 - 7, 4))
+
 
 class IdentityRewriteTests(unittest.TestCase):
 

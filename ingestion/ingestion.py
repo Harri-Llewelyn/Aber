@@ -520,6 +520,12 @@ STATUS_REJECT_WARN_INTERVAL_SECONDS = 300
 _alias_map = {}
 _alias_lock = threading.Lock()
 
+# The datatypes the same births declare, under the same lock and reset the same way:
+# (group_id, edge_node_id) -> {alias: datatype}, and -> {device_id or "": {name: datatype}}.
+# A DATA message may omit `datatype`, and a signed integer cannot be read without it.
+_alias_datatypes = {}
+_name_datatypes = {}
+
 # Throttle for rebirth requests, keyed "<group>/<node>".
 _rebirth_requested = {}
 REBIRTH_METRIC_NAME = "Node Control/Rebirth"
@@ -619,29 +625,44 @@ def alias_key(group_id, edge_node_id):
     """The alias table key. Normalised so a missing group and an empty one are the same node."""
     return (group_id or "", edge_node_id or "")
 
-def register_birth_aliases(group_id, edge_node_id, payload, reset=False):
-    """
-    Record the alias -> name bindings a birth certificate declares. Returns the number stored.
+def _declared_datatype(metric):
+    """The metric's own `datatype`, or None when absent or 0 (Sparkplug's Unknown)."""
+    if metric.HasField("datatype") and metric.datatype:
+        return metric.datatype
+    return None
 
-    `reset` clears the node's table first and is used for NBIRTH only: an NBIRTH invalidates all
-    prior state for the node and its devices. A DBIRTH merges.
+def register_birth_aliases(group_id, edge_node_id, payload, reset=False, device_id=None):
+    """
+    Record the alias -> name bindings a birth certificate declares, and the datatypes it declares
+    by alias and by name. Returns the number of aliases stored.
+
+    `reset` clears the node's tables first and is used for NBIRTH only: an NBIRTH invalidates all
+    prior state for the node and its devices. A DBIRTH merges aliases and replaces the datatypes
+    it declares by name for `device_id` (None for the node's own metrics).
     """
     key = alias_key(group_id, edge_node_id)
     declared = {}
+    typed = {}
     for metric in getattr(payload, "metrics", []):
         if not metric.name:
             continue
+        datatype = _declared_datatype(metric)
+        if datatype:
+            typed[metric.name] = datatype
         if not metric.HasField("alias"):
             continue
-        declared[metric.alias] = metric.name
+        declared[metric.alias] = (metric.name, datatype)
 
     with _alias_lock:
         if reset:
             _alias_map[key] = {}
+            _alias_datatypes[key] = {}
+            _name_datatypes[key] = {}
         table = _alias_map.setdefault(key, {})
+        alias_types = _alias_datatypes.setdefault(key, {})
 
         stored = 0
-        for alias, name in declared.items():
+        for alias, (name, datatype) in declared.items():
             # Overwriting an existing alias is free; only a NEW one can grow the table, so the
             # cap is checked against additions rather than against the declaration size.
             if alias not in table and len(table) >= MAX_ALIASES_PER_NODE:
@@ -652,7 +673,27 @@ def register_birth_aliases(group_id, edge_node_id, payload, reset=False):
                 )
                 break
             table[alias] = name
+            if datatype:
+                alias_types[alias] = datatype
+            else:
+                alias_types.pop(alias, None)
             stored += 1
+
+        # Capped like the alias table, across all of the node's devices: the device segment of a
+        # topic is not pinned by the broker ACL, so the device ids are publisher-chosen.
+        names = _name_datatypes.setdefault(key, {})
+        device = device_id or ""
+        room = MAX_ALIASES_PER_NODE - sum(len(t) for d, t in names.items() if d != device)
+        if len(typed) > room:
+            logger.warning(
+                "Datatype table for edge node '%s' is at its %d-entry cap; ignoring further "
+                "declarations. Their integers are read unsigned.", edge_node_id, MAX_ALIASES_PER_NODE
+            )
+            typed = dict(list(typed.items())[:max(room, 0)])
+        if typed:
+            names[device] = typed
+        else:
+            names.pop(device, None)
 
     if stored:
         logger.info(
@@ -674,6 +715,50 @@ def resolve_metric_name(group_id, edge_node_id, metric):
         return None
     with _alias_lock:
         return _alias_map.get(alias_key(group_id, edge_node_id), {}).get(metric.alias)
+
+def resolve_metric_datatype(group_id, edge_node_id, metric, device_id=None, name=None):
+    """
+    The metric's Sparkplug datatype: its own, else what a birth declared for its alias, else for
+    `name` on `device_id` and then on the node. None when no birth seen since startup declared one.
+    """
+    datatype = _declared_datatype(metric)
+    if datatype:
+        return datatype
+    key = alias_key(group_id, edge_node_id)
+    with _alias_lock:
+        if metric.HasField("alias"):
+            datatype = _alias_datatypes.get(key, {}).get(metric.alias)
+            if datatype:
+                return datatype
+        if not name:
+            return None
+        names = _name_datatypes.get(key, {})
+        return names.get(device_id or "", {}).get(name) or names.get("", {}).get(name)
+
+# -----------------------------------------------------------------------------
+# Sparkplug B integer values
+# -----------------------------------------------------------------------------
+# MIRRORED in i3x/i3x_service.py; test_i3x_service.py asserts the two copies agree. The signed
+# datatypes (Int8, Int16, Int32, Int64) and their width in bits.
+SPARKPLUG_SIGNED_INT_BITS = {1: 8, 2: 16, 3: 32, 4: 64}
+
+def sparkplug_integer_value(datatype, raw):
+    """
+    An `int_value` or `long_value` read as `datatype`: a signed type is sign-extended from its own
+    width and anything else is returned unchanged. Masking to the width first accepts both
+    encodings of a narrow type (0xFB and 0xFFFFFFFB are an Int8 of -5) and an already-signed value.
+    """
+    bits = SPARKPLUG_SIGNED_INT_BITS.get(datatype)
+    if bits is None:
+        return raw
+    raw &= (1 << bits) - 1
+    return raw - (1 << bits) if raw >> (bits - 1) else raw
+
+def _integer_value(datatype, raw):
+    """sparkplug_integer_value(), counting an integer whose datatype nothing declared."""
+    if datatype is None:
+        count("metrics_integer_datatype_unknown")
+    return sparkplug_integer_value(datatype, raw)
 
 # -----------------------------------------------------------------------------
 # NCMD Rebirth Requests
@@ -1311,9 +1396,9 @@ def store_birth_parameters(sparkplug_id: str, payload):
         }
 
         if metric.HasField("int_value"):
-            row["val_double"] = float(metric.int_value)
+            row["val_double"] = float(_integer_value(_declared_datatype(metric), metric.int_value))
         elif metric.HasField("long_value"):
-            row["val_double"] = float(metric.long_value)
+            row["val_double"] = float(_integer_value(_declared_datatype(metric), metric.long_value))
         elif metric.HasField("float_value"):
             row["val_double"] = float(metric.float_value)
         elif metric.HasField("double_value"):
@@ -1471,7 +1556,7 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
     # Before the registration check, deliberately. The alias table is in-memory and keyed by edge
     # node, so recording it costs nothing and must not depend on whether this device is registered
     # -- a quarantined device's later DDATA still has to be *decodable* to be reported on.
-    register_birth_aliases(group_id, gateway_wire_id, payload)
+    register_birth_aliases(group_id, gateway_wire_id, payload, device_id=wire_id)
 
     if not supabase_client:
         logger.warning("Supabase client unavailable. Skipping Supabase DBIRTH check for '%s'", wire_id)
@@ -1727,9 +1812,13 @@ CERT_EPOCH_MS_MAX = 7258118400000
 _health_rejected_warned = {}
 HEALTH_REJECT_WARN_INTERVAL_SECONDS = 300
 
-def _numeric_metric_value(metric):
+def _numeric_metric_value(group_id, edge_node_id, metric, name):
     """The metric's numeric value whichever Sparkplug field carries it, or None."""
-    for field in ("int_value", "long_value", "float_value", "double_value"):
+    for field in ("int_value", "long_value"):
+        if metric.HasField(field):
+            datatype = resolve_metric_datatype(group_id, edge_node_id, metric, name=name)
+            return _integer_value(datatype, getattr(metric, field))
+    for field in ("float_value", "double_value"):
         if metric.HasField(field):
             return getattr(metric, field)
     return None
@@ -1767,7 +1856,7 @@ def extract_gateway_health(group_id, edge_node_id, payload):
             health[column] = candidate
             continue
 
-        raw = _numeric_metric_value(metric)
+        raw = _numeric_metric_value(group_id, edge_node_id, metric, name)
         if raw is None:
             _reject_health(edge_node_id, name, "carries no numeric value")
             continue
@@ -2536,11 +2625,11 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # conformance check reads this rather than re-inspecting the protobuf.
         value_kind = None
 
-        if metric.HasField("int_value"):
-            val_double = float(metric.int_value)
-            value_kind = "double"
-        elif metric.HasField("long_value"):
-            val_double = float(metric.long_value)
+        if metric.HasField("int_value") or metric.HasField("long_value"):
+            raw = metric.int_value if metric.HasField("int_value") else metric.long_value
+            datatype = resolve_metric_datatype(
+                group_id, gateway_wire_id, metric, device_id=wire_id, name=metric_name)
+            val_double = float(_integer_value(datatype, raw))
             value_kind = "double"
         elif metric.HasField("float_value"):
             val_double = float(metric.float_value)
@@ -2775,7 +2864,15 @@ def parse_sparkplug_payload(msg):
                 if 'boolean_value' in m and m['boolean_value'] is not None:
                     metric.boolean_value = bool(m['boolean_value'])
                 if 'int_value' in m and m['int_value'] is not None:
-                    metric.int_value = int(m['int_value'])
+                    value = int(m['int_value'])
+                    # A negative JSON number is stored as the protobuf wire carries it, 32-bit two's
+                    # complement, and marked Int32 when it declares no datatype so it reads back
+                    # signed. capture.dict_to_payload() does the same.
+                    if -2 ** 31 <= value < 0:
+                        value &= 0xFFFFFFFF
+                        if m.get('datatype') is None:
+                            metric.datatype = 3
+                    metric.int_value = value
                 if 'datatype' in m and m['datatype'] is not None:
                     metric.datatype = int(m['datatype'])
                 # The metric's own reading time, which the protobuf path already honours: a
@@ -2795,9 +2892,9 @@ def extract_claimed_asset_id(payload):
             if metric.HasField('string_value'):
                 return metric.string_value
             if metric.HasField('int_value'):
-                return str(metric.int_value)
+                return str(sparkplug_integer_value(_declared_datatype(metric), metric.int_value))
             if metric.HasField('long_value'):
-                return str(metric.long_value)
+                return str(sparkplug_integer_value(_declared_datatype(metric), metric.long_value))
             return None
     return None
 
