@@ -208,6 +208,20 @@ function ensureCluster () {
   console.log(`  context k3d-${CLUSTER}, API on 127.0.0.1:${port}`)
 }
 
+// The runbook's Traefik setting, applied the same way, so the dev loop measures the client address
+// a site gets. k3s's helm controller redeploys Traefik with it; the Service changing is the signal.
+async function ensureTraefikConfig () {
+  step('Traefik keeps the client address')
+  const policy = () => capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik',
+    '-o', 'jsonpath={.spec.externalTrafficPolicy}']).out
+  must('kubectl', ['apply', '-f', 'deploy/k8s/traefik-config.yaml'], 'the Traefik HelmChartConfig did not apply')
+  for (let i = 0; i < 60; i++) {
+    if (policy() === 'Local') { console.log('  externalTrafficPolicy Local'); return }
+    await sleep(3000)
+  }
+  die(`Traefik's Service is on externalTrafficPolicy ${policy() || '(none)'} after 3 minutes, not Local`)
+}
+
 function lbPublishes (port) {
   return capture('docker', ['port', `k3d-${CLUSTER}-serverlb`]).out.split('\n').some(l => l.startsWith(`${port}/tcp`))
 }
@@ -694,6 +708,7 @@ async function up () {
     if (unknown.length) die(`--only names no image: ${unknown.join(', ')}. Known: ${IMAGES.map(i => i.name).join(', ')}`)
   }
   ensureCluster()
+  await ensureTraefikConfig()
   if (tls) ensureCertManager()
   if (flag('no-build')) {
     assertImagesPresent(version)

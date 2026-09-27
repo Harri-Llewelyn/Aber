@@ -1317,10 +1317,11 @@ oversights.
 - **Object storage stays on the `file` backend by default.** `supabaseStorage.backend: s3` is a
   supported switch (§4.4). With the durability gap closed (§10.5), what remains is a *scaling*
   question — the `file` backend is what pins that Deployment to one replica — not a data-loss one.
-- **Nothing rate-limits anything.** The gateway is now Kong 3.9.3 (§2.3), so the unmaintained-image
-  half of this entry is closed; the missing rate limiting is not, and does not depend on the
-  version — `rate-limiting` is bundled, and is unavailable only because `KONG_PLUGINS` replaces the
-  bundled set rather than extending it. §7.1 covers the longer-term Gateway API question.
+- **Only sign-in is rate-limited.** GoTrue limits sign-in, token refresh, OTP, verify and MFA per
+  client address (`supabaseAuth.rateLimitHeader`), which Traefik has to preserve
+  (`deploy/k8s/traefik-config.yaml`; `docs/gateway.md`, *The client's address*). The gateway limits
+  nothing: no overall request ceiling and no per-route limit (#442). §7.1 covers the longer-term
+  Gateway API question.
 - **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.
 
 ## 12. What the shared helpers decide

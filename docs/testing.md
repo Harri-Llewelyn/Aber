@@ -73,6 +73,10 @@ python ingestion/test_structured_logging.py
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
 # the log store exists to keep is actually being kept.
 python test-harness/test_log_pipeline.py
+# Sign-in is limited per client, through Traefik and the gateway. Needs the stack up. A probe pod
+# spends its limit and the host must still sign in: it fails if GoTrue limits nothing, and if
+# Traefik forwards one address for every client (deploy/k8s/traefik-config.yaml not applied).
+python supabase/test_auth_rate_limit.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction

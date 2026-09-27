@@ -96,6 +96,9 @@ spec:
               value: "true"
             - name: GOTRUE_DISABLE_SIGNUP
               value: {{ .Values.supabaseAuth.disableSignup | quote }}
+            # Per-client rate limits key on this header's first address; empty skips every one.
+            - name: GOTRUE_RATE_LIMIT_HEADER
+              value: {{ .Values.supabaseAuth.rateLimitHeader | quote }}
             # Password reset (frontend/src/pages/ResetPassword.jsx). The link's target must be on
             # the allow list, or GoTrue sends the browser to GOTRUE_SITE_URL and the dashboard opens
             # instead of the reset form. SMTP is optional: with no host a reset request fails and

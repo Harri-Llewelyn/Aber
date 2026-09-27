@@ -2645,6 +2645,25 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 25. The runbook's inline Traefik manifest is deploy/k8s/traefik-config.yaml, which the dev loop
+// applies: an install from the registry has no checkout, so the runbook carries a copy.
+// -------------------------------------------------------------------------------------------------
+{
+  const manifest = (text) => text.split('\n').filter((l) => l.trim() && !l.trimStart().startsWith('#')).join('\n');
+  const file = manifest(read('deploy/k8s/traefik-config.yaml'));
+  const block = read('deploy/k8s/README.md').match(/kubectl apply -f - <<'EOF'\n([\s\S]*?)\nEOF\n/);
+  if (!block) {
+    fail("deploy/k8s/README.md no longer carries the Traefik HelmChartConfig as a `kubectl apply -f - <<'EOF'` block");
+  } else if (manifest(block[1]) !== file) {
+    fail('the Traefik HelmChartConfig in deploy/k8s/README.md differs from deploy/k8s/traefik-config.yaml, which the dev loop applies');
+  } else if (!read('scripts/dev-cluster.mjs').includes("'deploy/k8s/traefik-config.yaml'")) {
+    fail('scripts/dev-cluster.mjs no longer applies deploy/k8s/traefik-config.yaml, so the dev loop measures a different Traefik');
+  } else {
+    pass('the runbook and the dev loop apply the same Traefik HelmChartConfig');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');
