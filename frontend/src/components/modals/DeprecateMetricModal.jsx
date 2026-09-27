@@ -29,8 +29,9 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
             <>It is currently referenced by <strong>{usageCount}</strong> existing schema{usageCount === 1 ? '' : 's'}, which will be left unchanged and keep working exactly as before.</>
           ) : (
             <>It is not currently referenced by any schema.</>
-          )} The metric's name and datatype can never be edited — deprecating and adding a new
-          catalog entry is the only way to change what it means.
+          )} The metric's name and datatype can never be edited, because devices publish them —
+          deprecating and adding a new catalog entry is the only way to change either. A wrong
+          semantic id is corrected with Edit instead.
         </p>
 
         <div className="form-group">
