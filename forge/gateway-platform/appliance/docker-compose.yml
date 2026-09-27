@@ -1,5 +1,5 @@
 # =============================================================================================
-# ACS-Cymru Remote gateway appliance.
+# Aber Remote gateway appliance.
 #
 #   docker compose up -d
 #
@@ -16,7 +16,7 @@
 services:
   bootstrap:
     build: .
-    container_name: acs-gateway-bootstrap
+    container_name: aber-gateway-bootstrap
     # One-shot. `restart: no`: the enrolment token is single-use, so a restart loop would retry
     # forever against a token the platform has already consumed. bootstrap.mjs does its own bounded
     # retrying.
@@ -41,7 +41,7 @@ services:
 
   node-red:
     build: .
-    container_name: acs-gateway-node-red
+    container_name: aber-gateway-node-red
     restart: unless-stopped
     ports:
       # The editor, on the appliance's own network. Not the data path -- telemetry leaves over
@@ -79,7 +79,7 @@ services:
   # ===============================================================================================
   flow-sync:
     build: .
-    container_name: acs-gateway-flow-sync
+    container_name: aber-gateway-flow-sync
     restart: unless-stopped
     user: "1000"
     env_file: .env
@@ -116,7 +116,7 @@ services:
   # caches the last poll.
   # ===============================================================================================
   node-exporter:
-    container_name: acs-gateway-node-exporter
+    container_name: aber-gateway-node-exporter
     image: prom/node-exporter:v1.12.1
     restart: unless-stopped
     command:

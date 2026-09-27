@@ -5,6 +5,8 @@
 The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
+The one exception is [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20), which
+keeps its own licence.
 
 It does **not** cover the third-party software this configuration deploys. Those images are pulled
 from their own registries at deploy time under their own licences. **This repository redistributes
@@ -15,6 +17,17 @@ Licences do not propagate across a process boundary. Every component below runs 
 container and is reached over a network protocol — the Postgres wire protocol, MQTT, HTTP. Nothing
 here is linked into, statically or dynamically, and nothing here is a derivative work of, any of
 them. The MIT grant over this repository's own contents is unaffected by anything in this file.
+
+## `sparkplug_b.proto` — Eclipse Public License 2.0
+
+The one third-party file in this repository. It is Eclipse Tahu's Sparkplug B payload definition,
+copyright Cirrus Link Solutions and others, under EPL-2.0, and its licence header is kept intact.
+The MIT licence above does not cover it. It differs from the current Tahu file only in its
+compile-instructions comment, which adds the Python command.
+
+The ingestion and i3X images compile it with `protoc` at build time, so both carry code generated
+from it; this file, in this repository, is its source. Upstream:
+[`github.com/eclipse-tahu/tahu`](https://github.com/eclipse-tahu/tahu), `sparkplug_b/sparkplug_b.proto`.
 
 ## TimescaleDB — Timescale License
 
@@ -96,22 +109,22 @@ project's own repository.
 
 | Component | Project |
 | :--- | :--- |
-| `supabase/postgres:17.6.1.160` | PostgreSQL and its extensions, packaged by Supabase |
+| `supabase/postgres:17.6.1.175` | PostgreSQL and its extensions, packaged by Supabase |
 | `postgrest/postgrest:v14.12` | PostgREST |
 | `supabase/gotrue:v2.189.0` | Supabase Auth |
 | `supabase/realtime:v2.102.3` | Supabase Realtime |
 | `supabase/storage-api:v1.60.4` | Supabase Storage |
-| `supabase/edge-runtime:v1.74.2` | Supabase Edge Runtime |
+| `supabase/edge-runtime:v1.77.0` | Supabase Edge Runtime |
 | `supabase/postgres-meta:v0.96.6` | Supabase postgres-meta |
 | `supabase/studio:2026.07.07-sha-a6a04f2` | Supabase Studio |
 | `envoyproxy/envoy:v1.39.1` | Envoy Proxy |
-| `swaggerapi/swagger-ui:v5.32.14` | Swagger UI |
+| `swaggerapi/swagger-ui:v5.33.0` | Swagger UI |
 | `node:24-alpine`, `alpine:3.24` | Node.js, Alpine Linux and their packages |
 
 ## Standards and vocabularies
 
 Adopting a standard's vocabulary is not a compliance claim. Locally-minted semantic ids live under
-`https://acs-cymru.local/semantics/…` precisely so that no identifier asserts an interoperability
+`https://aber.local/semantics/…` precisely so that no identifier asserts an interoperability
 that has not been certified. The MTConnect Implementer License, and the equivalent programmes for
 the other bodies, are separate from anything granted here. See
 [`docs/vocabularies.md`](docs/vocabularies.md).

@@ -45,8 +45,8 @@ from test_enroll_gateway import (  # noqa: E402
 WEBHOOK_SECRET = os.getenv("GITEA_WEBHOOK_SECRET", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
 FORGE_SSH = os.getenv("GITEA_TEST_SSH", "")
-MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "acs_platform")
-MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "acs-platform-machine-account")
+MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "aber_platform")
+MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "aber-platform-machine-account")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
 
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
@@ -96,10 +96,10 @@ def push(sparkplug_id, ref="refs/heads/main", sha="a" * 40, owner=ORGANISATION, 
             "id": sha,
             "message": message,
             "timestamp": "2026-09-10T12:00:00Z",
-            "committer": {"name": "Some Body", "email": "somebody@acs-cymru.local"},
+            "committer": {"name": "Some Body", "email": "somebody@aber.local"},
         },
         "commits": [],
-        "pusher": {"login": "a0000000-0000-0000-0000-000000000001", "email": "admin@acs-cymru.local"},
+        "pusher": {"login": "a0000000-0000-0000-0000-000000000001", "email": "admin@aber.local"},
     }
 
 
@@ -193,7 +193,7 @@ class TestWhatIsRecorded(ForgeEventsBase):
         row = self.head()
         self.assertEqual(row["forge_head_sha"], sha)
         self.assertEqual(row["forge_head_message"], "Tighten the OPC UA poll", "not the first line of the message")
-        self.assertEqual(row["forge_head_by"], "admin@acs-cymru.local")
+        self.assertEqual(row["forge_head_by"], "admin@aber.local")
         self.assertTrue(row["forge_head_at"].startswith("2026-09-10T12:00:00"), row["forge_head_at"])
         # No such repository in the forge, so no flows.json to hash: "not known", never "unchanged".
         self.assertIsNone(row["forge_head_flow_sha256"])
@@ -288,7 +288,7 @@ class TestTheForgeItself(ForgeEventsBase):
             forge_as_machine(f"/api/v1/repos/{owner}/{cls.repo}", method="DELETE")
 
     def test_a_delivery_from_the_forge_records_the_real_head(self):
-        key_dir = tempfile.mkdtemp(prefix="acs-forge-events-")
+        key_dir = tempfile.mkdtemp(prefix="aber-forge-events-")
         try:
             key_path = os.path.join(key_dir, "id_ed25519")
             subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", key_path], check=True, capture_output=True)
@@ -393,7 +393,7 @@ class TestAProposal(ForgeEventsBase):
         return ours[0] if ours else None
 
     def test_a_well_formed_flow_is_marked_successful(self):
-        sha, body = self.propose("tighten-poll", '[{"id":"acs-broker","type":"mqtt-broker"}]')
+        sha, body = self.propose("tighten-poll", '[{"id":"aber-broker","type":"mqtt-broker"}]')
         self.assertEqual(body["checked"]["state"], "success", body)
         self.assertEqual(body["checked"]["context"], "acs/flow-shape", body)
         state = self.flow_shape(sha)
@@ -411,7 +411,7 @@ class TestAProposal(ForgeEventsBase):
         """
         # The file as Node-RED writes it is a MAP of node id to ciphertext, so it fails the first
         # check: a flow export is an array and this is not one.
-        sha, body = self.propose("paste-the-wrong-file", '{"acs-broker":{"user":"x","password":"y"}}')
+        sha, body = self.propose("paste-the-wrong-file", '{"aber-broker":{"user":"x","password":"y"}}')
         self.assertEqual(body["checked"]["state"], "failure", body)
         state = self.flow_shape(sha)
         self.assertIsNotNone(state, "no acs/flow-shape status reached the forge")
@@ -471,7 +471,7 @@ class TestTheApplianceItself(ForgeEventsBase):
             skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
         cls.delete_repo()
-        cls.work = tempfile.mkdtemp(prefix="acs-appliance-")
+        cls.work = tempfile.mkdtemp(prefix="aber-appliance-")
 
     @classmethod
     def tearDownClass(cls):
@@ -496,7 +496,7 @@ class TestTheApplianceItself(ForgeEventsBase):
         return result.returncode, (result.stdout + result.stderr).strip()
 
     def commit(self, message, cwd=None):
-        code, out = self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@acs-cymru.invalid",
+        code, out = self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@aber.invalid",
                              "commit", "--quiet", "-m", message, cwd=cwd)
         self.assertEqual(code, 0, out)
 
@@ -548,12 +548,12 @@ class TestTheApplianceItself(ForgeEventsBase):
         # As flow-sync.mjs does: the report branch from the root commit, the allowlist, a push.
         root = self.git("rev-list", "--max-parents=0", "HEAD")[1].splitlines()[0]
         self.assertEqual(self.git("checkout", "--quiet", "-B", "appliance", root)[0], 0)
-        flow = '[{"id":"acs-broker","type":"mqtt-broker"}]\n'
+        flow = '[{"id":"aber-broker","type":"mqtt-broker"}]\n'
         with open(os.path.join(self.clone, "flows.json"), "w", encoding="utf-8") as handle:
             handle.write(flow)
         with open(os.path.join(self.clone, "deployed.json"), "w", encoding="utf-8") as handle:
             handle.write('{"revision":null,"source":"enrolment"}\n')
-        # The third file on the allowlist (0106): what acs-gateway-converge recorded,
+        # The third file on the allowlist (0106): what aber-gateway-converge recorded,
         # including a custom.yml that FAILED, which is the state the Custom row exists for.
         converged = {
             "outcome": "converged", "tag": "v9.9.9", "detail": "ansible-pull succeeded",
@@ -627,7 +627,7 @@ class TestTheApplianceItself(ForgeEventsBase):
 
         # A rewritten appliance branch: append-only means a force-push is refused.
         self.assertEqual(self.git("checkout", "--quiet", "appliance")[0], 0)
-        self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@acs-cymru.invalid",
+        self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@aber.invalid",
                  "commit", "--quiet", "--amend", "-m", "Rewritten")
         code, out = self.git("push", "--quiet", "--force", "origin", "appliance:appliance")
         self.assertNotEqual(code, 0, "the appliance branch took a force-push")

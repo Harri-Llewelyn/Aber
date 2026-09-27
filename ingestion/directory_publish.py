@@ -108,8 +108,14 @@ DIRECTORY_MQTT_ENABLED = os.getenv("DIRECTORY_MQTT_ENABLED", "").strip().lower()
 # inside it by pattern; a Directory document is not a Sparkplug message and must not arrive looking
 # like one. A separate root also means the broker's default-deny covers this subtree until a rule
 # is written for it, rather than the per-gateway pattern accidentally granting something.
+#
+# Derived from the site's group when the chart leaves the prefix empty, which is what makes the
+# broker grant and this publisher one value: the reconcile grants `<prefix>/#` from the same
+# rendered string.
+# With neither set there is no prefix, and start() refuses rather than invent one.
 DIRECTORY_MQTT_TOPIC_PREFIX = os.getenv(
-    "DIRECTORY_MQTT_TOPIC_PREFIX", "ACS-Cymru/Directory/v1"
+    "DIRECTORY_MQTT_TOPIC_PREFIX",
+    "%s/Directory/v1" % os.getenv("SPARKPLUG_GROUP", "") if os.getenv("SPARKPLUG_GROUP") else "",
 ).strip().rstrip("/")
 
 DIRECTORY_MQTT_INTERVAL_SECONDS = int(os.getenv("DIRECTORY_MQTT_INTERVAL_SECONDS", "60"))
@@ -311,6 +317,14 @@ def start(client, supabase):
         logger.error(
             "Directory MQTT publishing was enabled but there is no Supabase client, so there is "
             "nothing to derive the Directory FROM. Refusing to start the publisher."
+        )
+        return False
+
+    if not DIRECTORY_MQTT_TOPIC_PREFIX:
+        logger.error(
+            "Directory MQTT publishing was enabled but neither DIRECTORY_MQTT_TOPIC_PREFIX nor "
+            "SPARKPLUG_GROUP is set, so there is no topic to publish under. Refusing to start the "
+            "publisher; the chart sets both."
         )
         return False
 

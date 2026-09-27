@@ -219,7 +219,7 @@ class DeliveryPath(unittest.TestCase):
         """
         self.assertEqual(
             playback_worker.PLAYBACK_CREDENTIAL_FILE,
-            "/var/lib/acs-cymru/playback/credentials.json",
+            "/var/lib/aber/playback/credentials.json",
         )
 
 

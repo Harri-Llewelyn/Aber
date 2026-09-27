@@ -231,6 +231,13 @@ export const SUITES = {
       'a drop self-healed; under RBE, lose the DDATA that said INTERRUPTED and every consumer ' +
       'holds ACTIVE forever.',
   },
+  'ingestion/test_json_payload.py': {
+    lanes: ['unit'],
+    why:
+      'The JSON Sparkplug encoding the appliance template publishes. A metric\x27s own timestamp ' +
+      'must survive parse_sparkplug_payload() as it does on the protobuf path, or a report-by-' +
+      'exception refresh and a batched reading are filed at the time the message was built.',
+  },
   'ingestion/test_telemetry_batching.py': {
     lanes: ['unit'],
     why:
@@ -356,17 +363,18 @@ export const SUITES = {
     // THE ONE SUITE IN THE TREE THAT IS NOT A unittest SCRIPT, and it has to be spawned
     // differently or it asserts NOTHING. It is written in pytest's bare-function style with no
     // `if __name__ == "__main__"` block, so `python ingestion/test_cold_archive.py` imports the
-    // module, defines eight functions, calls none of them and exits 0 -- a green step over zero
-    // assertions, which is the exact failure this manifest exists to prevent, hiding inside the
-    // fix for it. Under pytest the same file runs seven checks (the eighth needs pyarrow and
-    // skips without it).
+    // module, defines every test function, calls none of them and exits 0 -- a green step over
+    // zero assertions, which is the exact failure this manifest exists to prevent, hiding inside
+    // the fix for it. Under pytest the same file runs them; the Parquet round trip needs pyarrow
+    // and skips without it.
     runner: 'pytest',
     why:
-      'Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Deliberately ' +
-      'narrow: the safety properties are asserted in SQL where they live. What is left for a unit ' +
-      'test is the part that is a DECISION rather than a mechanism -- the `year=YYYY/month=MM/` ' +
-      'key is baked into every object the moment one is written, and changing it later means ' +
-      'rewriting the archive or teaching every reader two schemes.',
+      'Cold telemetry archival -- the object LAYOUT, the destination guard and the Parquet round ' +
+      'trip. Deliberately narrow: the safety properties are asserted in SQL where they live. What ' +
+      'is left for a unit test is the part that is a DECISION rather than a mechanism -- the ' +
+      '`site=<key>/dataset=telemetry/v=1/year=YYYY/month=MM/` key is baked into every object the ' +
+      'moment one is written, and changing it later means rewriting the archive or teaching every ' +
+      'reader two schemes.',
   },
   'i3x/test_i3x_service.py': {
     lanes: ['unit'],
@@ -451,6 +459,48 @@ export const SUITES = {
       'the current state of a live alert -- the pill disappears while Grafana still has it ' +
       'firing. The suite also runs the naive predicate against the same fixture and asserts it ' +
       'DOES destroy the row, so the other cases cannot pass vacuously.',
+  },
+  'supabase/migrations/test_cold_archive_destination.py': {
+    lanes: ['db'],
+    why:
+      "0134's `sensitive` clause, asserted from both sides. system_settings is readable by every " +
+      'signed-in user ON PURPOSE -- a setting shapes what a page renders for every role -- so the ' +
+      "five rows naming where a plant's history is written, and under which access key, are " +
+      'protected by one clause on one policy and nothing else. Lose it and nothing breaks: the ' +
+      'page works, the exporter exports, and the only symptom is a disclosure nobody is looking ' +
+      'for. Also that the two functions reaching past RLS admit only who they are meant to, and ' +
+      'that the credential is write-only -- it is never asserted by value because nothing returns ' +
+      'it, which is the property rather than a gap.',
+  },
+  'supabase/migrations/test_cold_archive_backlog.py': {
+    lanes: ['db'],
+    why:
+      "0133's backlog figure, and chiefly the one property the rest of the platform's alerting " +
+      'rests on: `platform_health_rows()` is a single UNION and postgres_fdw raises on CONNECT, ' +
+      'so an arm reading the historian takes gateway staleness, stuck enrolments, the quarantine ' +
+      'queue and expected publishers down with it whenever that database is unreachable -- which ' +
+      'is exactly when somebody is reading them. The db lane HAS no historian, so it is the lane ' +
+      'that exercises that path on every run. Also that "cannot be computed" is reported as an ' +
+      'absent row rather than a reassuring zero, and that the ungated arithmetic is not callable ' +
+      'from PostgREST.',
+  },
+  'supabase/migrations/test_sparkplug_group_setting.py': {
+    lanes: ['db'],
+    why:
+      "0131's site group, and the two halves that make it fixed rather than merely displayed " +
+      'as fixed. An Administrator holds GRANT UPDATE (value) on system_settings, so a direct ' +
+      'PostgREST write is admitted by RLS and only the trigger refuses it -- a read-only control ' +
+      'in the browser alone would be a suggestion. And the column default now reads the setting ' +
+      'rather than the old literal, so a default that silently reverted would address every ' +
+      "gateway created afterwards in the vendor's namespace while every page looked correct.",
+  },
+  'supabase/migrations/test_directory_images.py': {
+    lanes: ['db'],
+    why:
+      "0007's Directory versions. Every chart-managed row is reached by the component map, a " +
+      'component the chart stops deploying is cleared rather than left showing the last release, a ' +
+      'row the chart does not manage is left alone, and no API role can call the writer -- so the ' +
+      'versions on the page are the ones db-init recorded and nobody else.',
   },
   'supabase/migrations/test_system_settings_rls.py': {
     lanes: ['db'],
@@ -754,12 +804,9 @@ export const SUITES = {
       'enrolment then redeems. Skips without a stack.',
   },
   'gateway-credential/test_gateway_credential.py': {
-    // BRIEFLY `manual`, AND THE REASON STOPPED BEING TRUE. It skipped all thirteen checks in e2e
-    // because the demonstration credentials once left MQTT_CREDENTIAL_SERVICE_TOKEN
-    // empty -- so it was declared manual rather than left as a green
-    // step over nothing. Then test_enroll_gateway.py turned out to need the SAME token, which made
-    // provisioning it in e2e necessary anyway rather than a change to avoid. The suite asserts
-    // properly once it is set (13/13 against a provisioned stack), so it comes back.
+    // NEEDS MQTT_CREDENTIAL_SERVICE_TOKEN PROVISIONED, and skips all thirteen checks without it --
+    // a green step over nothing. test_enroll_gateway.py needs the same token, so a stack lane that
+    // runs either has to provide it; 13/13 against a provisioned stack.
     lanes: ['stack'],
     why:
       "Broker credential issuance -- needs the stack up AND the service's own bearer token, which " +
@@ -799,6 +846,23 @@ export const SUITES = {
       'which is what makes the identity rewrite checkable against a live historian. Needs ' +
       '`playback.enabled`, which values-dev.yaml sets.',
   },
+  'test-harness/test_load_generator.py': {
+    // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be
+    // repeated cheaply: by the time anyone reads a load figure the stack has changed, so the
+    // reduction from counters to a verdict has to be right before the run, not after it.
+    lanes: ['unit'],
+    why:
+      'The load generator\'s arithmetic, which decides what a run REPORTS. Two conclusions here ' +
+      'are wrong in a believable direction if the code is: a write-latency quantile taken over ' +
+      'Prometheus\'s CUMULATIVE buckets answers for every write since the daemon started, so a ' +
+      'long ramp reports a healthy p95 for the step that was not healthy; and a saturated stack ' +
+      'and a generator that cannot push hard enough BOTH show as a shortfall against target, so ' +
+      'reading the queue is the only thing that tells them apart -- and getting it backwards ' +
+      'inverts the finding from "the stack broke here" to "we could not push it that hard". Also ' +
+      'holds the per-device millisecond rule: telemetry is keyed (time, asset_id, metric_name) ' +
+      'ON CONFLICT DO NOTHING, so a repeated stamp loses its rows while the write path still ' +
+      'counts them.',
+  },
   'test-harness/test_log_pipeline.py': {
     // STACK ONLY, AND IT CANNOT BE ANYTHING ELSE. Every assertion here is about four processes
     // and two independent stores agreeing at run time -- broker, daemon, collector, store. The
@@ -808,7 +872,7 @@ export const SUITES = {
     why:
       'THE ONLY CHECK THAT A DROP IS COUNTABLE AND READABLE AT THE SAME TIME. It publishes a ' +
       'DDATA for a randomly generated unregistered device, then asserts BOTH that ' +
-      'acs_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"} increased AND ' +
+      'aber_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"} increased AND ' +
       'that a line carrying that same reason and THAT device id arrived in Loki. Prometheus ' +
       'cannot name the device -- its endpoint is unauthenticated and carries no device data by ' +
       'design -- so this is the assertion that the other half of the instrument exists at all. ' +

@@ -3,7 +3,7 @@ A device cannot be posted onto the replay lane by hand (0083, issue #144).
 
     python supabase/migrations/test_shadow_lane_is_not_assignable.py
 
-Requires the Supabase database (54322 by default) and migration 0083 applied.
+Requires the Supabase database (54322 by default) and the schema the baseline declares.
 
 ---------------------------------------------------------------------------------------------
 WHAT THE BUG WAS. The dashboard offered the Playback gateway in its device gateway pickers. Picking
@@ -78,7 +78,7 @@ class ReplayLaneBase(unittest.TestCase):
     def setUp(self):
         self.conn = get_connection()
         self.cur = self.conn.cursor()
-        self.shadow_gateway = self._gateway(is_virtual=True, is_simulated=True, is_shadow=True)
+        self.shadow_gateway = self._gateway(deployment="host", is_simulated=True, is_shadow=True)
         self.real_gateway = self._gateway()
 
     def tearDown(self):
@@ -101,13 +101,13 @@ class ReplayLaneBase(unittest.TestCase):
             "id": gid,
             "name": f"Test_Lane_GW_{gid[:8]}",
             "location_scope": "cell",
-            "is_virtual": flags.get("is_virtual", False),
+            "deployment": flags.get("deployment", "remote"),
             "is_simulated": flags.get("is_simulated", False),
             "is_shadow": flags.get("is_shadow", False),
         }
         self.cur.execute(
-            "INSERT INTO public.gateways (id, name, location_scope, is_virtual, is_simulated, "
-            "is_shadow) VALUES (%(id)s, %(name)s, %(location_scope)s, %(is_virtual)s, "
+            "INSERT INTO public.gateways (id, name, location_scope, deployment, is_simulated, "
+            "is_shadow) VALUES (%(id)s, %(name)s, %(location_scope)s, %(deployment)s, "
             "%(is_simulated)s, %(is_shadow)s);",
             cols,
         )
@@ -253,7 +253,7 @@ class TheGateFindsTheGatewayByItsFlag(ReplayLaneBase):
         works without it being edited. A gate pinned to 0060's seeded uuid would pass every other
         test here and be open on that second gateway.
         """
-        second = self._gateway(is_virtual=True, is_simulated=True, is_shadow=True)
+        second = self._gateway(deployment="host", is_simulated=True, is_shadow=True)
         with self.assertRaises(psycopg2.errors.CheckViolation) as ctx:
             self._device(gateway_id=second)
         self.assertRefused(ctx)

@@ -1,0 +1,98 @@
+{{- if and .Values.initJobs.enabled .Values.supabaseStorage.enabled }}
+{{- $component := "storage-policies" -}}
+{{- $fullname := include "aber.fullname" . -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-storage-policies" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "16"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+{{- range $path, $bytes := .Files.Glob "files/storage-policies/storage-policies.sql" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-storage-policies" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    {{/*
+      WEIGHT 18 -- BETWEEN db-init (10) and storage-init (20), and both bounds matter.
+
+      THE ORDERING IS WHY THIS JOB EXISTS. These policies were section 6 of 0001_baseline_schema.sql
+      and ran with the migrations, which worked only because `supabase/postgres:15.6.1.143` shipped
+      a STUB storage schema containing `objects`. 17.6.1.160 ships that schema EMPTY, so the
+      migration aborted on `relation "storage.objects" does not exist` and took the boot with it.
+
+      Reordering inside db-init cannot fix it: storage-api creates `storage.objects` in its own
+      migrations when it boots, and it waits on db-init COMPLETING, so the table cannot exist while
+      migrations run.
+
+      AND IT MUST PRECEDE storage-init (20). storage-init creates the bucket through the Storage
+      REST API, which storage-api serves by assuming service_role -- a role holding no privileges on
+      the storage tables until this Job grants them. Run it after and bucket creation fails with
+      `400 new row violates row-level security policy`, whose real cause is a 42501 privilege error
+      nested several levels inside the payload.
+    */}}
+    "helm.sh/hook-weight": "18"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.initJobs.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.initJobs.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          Waits on storage-api, not on the database. The database has been up since db-init; what
+          this Job needs is the TABLE, and only storage-api creates that.
+        */}}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it creates storage.objects in its own migrations)") | nindent 8 }}
+      containers:
+        - name: storage-policies
+          # The supabase/postgres image, for its psql -- the same reason db-roles-init uses it.
+          image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
+          env:
+            {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" (include "aber.secretName" .) "key" "POSTGRES_PASSWORD") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              echo 'Applying storage policies and grants...'
+              # AS supabase_admin, NOT postgres -- the same role db-roles-init uses. The storage
+              # tables are owned by supabase_storage_admin (storage-api created them), and
+              # `postgres` is neither a superuser nor a member of that role in this image, so
+              # ALTER TABLE ... ENABLE ROW LEVEL SECURITY fails with "must be owner of table
+              # objects". Verified against 17.6.1.175.
+              psql -v ON_ERROR_STOP=1 -h supabase-db -U supabase_admin -d postgres -f /sql/storage-policies.sql
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: sql
+          configMap:
+            name: {{ printf "%s-storage-policies" $fullname }}
+{{- end }}

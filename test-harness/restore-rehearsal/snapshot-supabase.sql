@@ -17,7 +17,11 @@
 SELECT 'cells='          || count(*) FROM public.cells;
 SELECT 'gateways='       || count(*) FROM public.gateways;
 SELECT 'devices='        || count(*) FROM public.devices;
-SELECT 'digital_thread=' || count(*) FROM public.digital_thread;
+-- Minus the backup's own rows: the backup is an audited act (0101), so the request lands in the
+-- thread before the dump is taken and the service's reconcile of the job the dump carries as
+-- RUNNING lands after the restore. Neither is data the restore was asked to bring back.
+SELECT 'digital_thread=' || count(*) FROM public.digital_thread
+ WHERE entity_type NOT IN ('backup_jobs', 'backups');
 SELECT 'digital_thread_default=' || count(*) FROM public.digital_thread_default;
 SELECT 'digital_thread_partitions=' || count(*)
   FROM pg_inherits WHERE inhparent = 'public.digital_thread'::regclass;

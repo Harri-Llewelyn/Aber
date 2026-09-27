@@ -244,3 +244,56 @@ describe('the page', () => {
     await waitFor(() => expect(screen.getByText(/arrive by migration/i)).toBeInTheDocument())
   })
 })
+
+describe('a setting that is fixed at install', () => {
+  /* The Sparkplug group (0131). It is displayed because an operator needs to know what their
+     topics look like, and not editable because changing it re-addresses every gateway -- the
+     database refuses the write, so a control that appeared to work would be a lie. */
+  const READ_ONLY = [
+    {
+      id: '9', key: 'sparkplug.group_id', value: 'Plant-7', value_type: 'string',
+      category: 'Site', label: 'Sparkplug group',
+      description: 'The group every gateway on this site publishes under.',
+      fallback_source: 'values.yaml ingestion.sparkplugGroup',
+      read_only: true,
+      updated_at: '2026-09-20T10:00:00Z', updated_by: null
+    }
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue(READ_ONLY)
+    api.patchSetting.mockResolvedValue({ key: 'x', value: 1 })
+  })
+
+  const show = async () => {
+    render(<SettingsTab showToast={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Sparkplug group')).toBeInTheDocument())
+  }
+
+  it('shows the value', async () => {
+    await show()
+    expect(screen.getByLabelText('Sparkplug group')).toHaveValue('Plant-7')
+  })
+
+  it('does not offer an editable control', async () => {
+    await show()
+    expect(screen.getByLabelText('Sparkplug group')).toBeDisabled()
+  })
+
+  it('offers no Save, even after a change is attempted', async () => {
+    await show()
+    const input = screen.getByLabelText('Sparkplug group')
+    fireEvent.change(input, { target: { value: 'Somewhere-Else' } })
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument()
+    expect(api.patchSetting).not.toHaveBeenCalled()
+  })
+
+  it('says where the value is set rather than calling it a fallback', async () => {
+    /* "falls back to" means "what applies if you never change this", which is wrong here: the
+       chart value IS the value, and it is the only place it can be changed. */
+    await show()
+    expect(screen.getByText(/set by/i)).toBeInTheDocument()
+    expect(screen.queryByText(/falls back to/i)).not.toBeInTheDocument()
+  })
+})

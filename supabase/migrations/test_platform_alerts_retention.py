@@ -42,12 +42,11 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 # silently invalidate every fixture below -- the ages here are expressed as multiples of whatever
 # it actually is.
 #
-# READ FROM THE SETTING, NOT FROM THE FUNCTION SIGNATURE. This used to call
-# `pg_get_function_arg_default(p.oid, 1)`, because 0030 carried the window in
-# `prune_platform_alerts(p_retain interval DEFAULT interval '7 days')`. 0032 moved it into
-# `alerts.retention_days` and made that default NULL, so the old query returned NULL and the suite
-# died on `float(None)` -- which is the RIGHT failure: a fixture keyed to a source of truth that
-# moved should break loudly rather than quietly test a window nothing uses.
+# READ FROM THE SETTING (`alerts.retention_days`), NOT FROM `prune_platform_alerts`'s argument
+# default, which 0032 made NULL when it moved the window into the setting. A fixture keyed to the
+# signature reads NULL and dies on `float(None)` -- which is the RIGHT failure: a fixture keyed to
+# a source of truth that has moved should break loudly rather than quietly test a window nothing
+# uses.
 RETAIN_SQL = """
     SELECT (value #>> '{}')::numeric * 86400
       FROM public.system_settings

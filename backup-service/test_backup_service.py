@@ -3,10 +3,11 @@ The backup service (0101), against the live stack.
 
 WHAT IS UNDER TEST, in order of what would be worst to get wrong: nobody but an Administrator can
 queue a backup, and no PostgREST role can call the service's gates; a backup an Administrator asks
-for is taken -- both dumps, the storage objects and the forge, each with the digest the row
-records, and a manifest restore-databases.sh can read; the thread records who asked and that the
-service wrote it; a request nobody has claimed is refused a twin, can be cancelled, and says why;
-and a pinned backup is released once.
+for is taken -- both dumps, the storage objects, the forge, the broker's document and, with TLS
+on, the internal CA, each with the digest the row records, and a manifest restore-databases.sh
+can read; the thread records who asked and that the service wrote it; a request nobody has
+claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; and
+a RUNNING job no service is running is failed, so a restored database does not refuse backups.
 
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
 cancel test stops the service container for a few seconds. Skips without the keys.
@@ -23,10 +24,10 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "supabase", "functions", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
-from test_enroll_gateway import ADMIN_PASSWORD, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, rest, sign_in  # noqa: E402
+from test_enroll_gateway import ADMIN_PASSWORD, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, rest, sign_in  # noqa: E402
 import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
-OPERATOR_EMAIL = os.getenv("ACS_OPERATOR_EMAIL", "operator@acs-cymru.local")
+OPERATOR_EMAIL = os.getenv("ABER_OPERATOR_EMAIL", "operator@aber.local")
 NOTE = "test_backup_service.py"
 # A backup of a developer stack takes well under a minute; a poll of fifteen seconds precedes it.
 BACKUP_TIMEOUT_SECONDS = int(os.getenv("BACKUP_TIMEOUT_SECONDS", "300"))
@@ -136,7 +137,10 @@ class BackupServiceTests(unittest.TestCase):
         self.assertTrue(backup["pinned"], "a requested backup is born pinned")
         self.assertEqual(backup["note"], NOTE)
         names = {c["name"] for c in backup["components"]}
-        self.assertEqual(names, {"supabase-db", "timescaledb", "storage-objects", "forge"})
+        # The CA is present when the stack was installed with TLS (backup.ca.secretName), absent
+        # otherwise; everything else the dev cluster mounts.
+        self.assertLessEqual({"supabase-db", "timescaledb", "vault-key", "storage-objects", "forge", "broker"}, names, names)
+        self.assertLessEqual(names, {"supabase-db", "timescaledb", "vault-key", "storage-objects", "forge", "broker", "ca"}, names)
         self.assertEqual(backup["size_bytes"], sum(c["size_bytes"] for c in backup["components"]))
 
         # The files are where the row says, as big as it says, with the digest it says.
@@ -164,6 +168,27 @@ class BackupServiceTests(unittest.TestCase):
         members = service("tar", "-tzf", f"{backup['location']}/{forge['file']}")
         self.assertIn("gitea/gitea.db", members)
         self.assertIn("./ssh/", members, "the host keys appliances pin are in the archive")
+
+        # pgsodium's root key, as the file on the data volume holds it: Vault is ciphertext under it.
+        self.assertIn("vault_key=vault-key-", manifest)
+        vault_key = next(c for c in backup["components"] if c["name"] == "vault-key")
+        self.assertRegex(service("cat", f"{backup['location']}/{vault_key['file']}").strip(), r"^[0-9a-f]{64}$")
+
+        # The broker archive is the data volume: the document is every issued gateway account.
+        self.assertIn("broker=broker-", manifest)
+        broker = next(c for c in backup["components"] if c["name"] == "broker")
+        members = service("tar", "-tzf", f"{backup['location']}/{broker['file']}")
+        self.assertIn("./dynamic-security.json", members)
+
+        # The CA, when the stack names one: the key pair under ca/, read from the Secret the row names.
+        ca = next((c for c in backup["components"] if c["name"] == "ca"), None)
+        if ca is not None:
+            self.assertIn("ca=ca-", manifest)
+            self.assertRegex(ca.get("secret", ""), r"^[a-z0-9-]+/[a-z0-9.-]+$")
+            self.assertLessEqual({"tls.crt", "tls.key"}, set(ca.get("keys", [])))
+            members = service("tar", "-tzf", f"{backup['location']}/{ca['file']}")
+            self.assertIn("./ca/tls.key", members)
+            self.assertIn("./ca/tls.crt", members)
 
         # And the service witnessed it.
         self.assertEqual(psql(
@@ -210,6 +235,46 @@ class BackupServiceTests(unittest.TestCase):
             f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backups' "
             f"AND entity_id = '{backup_id}' AND action = 'BACKUP_RELEASED'"
         ), "1")
+
+    def test_06_a_running_job_no_service_is_running_is_failed(self):
+        # The shape a restore leaves behind: the dump was taken while a job was RUNNING, so the
+        # restored database carries that row, and request_backup() refuses while it stands. The
+        # service fails it before its next claim, without a restart.
+        self.wait_for_idle()
+        # With the service stopped, so the refusal is observed before the reconcile runs.
+        stack_exec.stop("backup-service")
+        try:
+            # Through a CTE, so psql prints the id alone and not the INSERT's command tag with it.
+            job_id = psql(
+                "WITH j AS (INSERT INTO public.backup_jobs (origin, status, started_at) "
+                "VALUES ('scheduled', 'RUNNING', now() - interval '1 hour') RETURNING id) "
+                "SELECT id FROM j"
+            )
+            status, body = rpc("request_backup", {"p_note": NOTE}, self.admin)
+            self.assertIn(status, (400, 409), body)
+            self.assertIn("is running", json.dumps(body))
+        finally:
+            stack_exec.start("backup-service")
+
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            if psql(f"SELECT status FROM public.backup_jobs WHERE id = '{job_id}'") == "FAILED":
+                break
+            time.sleep(3)
+        row = query(f"/backup_jobs?id=eq.{job_id}&select=status,error", self.admin)[0]
+        self.assertEqual(row["status"], "FAILED", row)
+        self.assertIn("no backup service was running this job", row["error"])
+        self.assertEqual(psql(
+            f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backup_jobs' "
+            f"AND entity_id = '{job_id}' AND action = 'BACKUP_FAILED' AND actor_source = 'service'"
+        ), "1")
+
+        # And the way is clear again.
+        status, new_job = rpc("request_backup", {"p_note": NOTE}, self.admin)
+        self.assertEqual(status, 200, new_job)
+        status, cancelled = rpc("cancel_backup_job", {"p_job_id": new_job}, self.admin)
+        if status != 200 or not cancelled:
+            self.wait_for_idle()
 
 
 if __name__ == "__main__":

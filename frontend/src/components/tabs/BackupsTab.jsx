@@ -99,7 +99,7 @@ export function BackupsTab({ showToast }) {
               Backups
               <HelpTip
                 label="About backups"
-                text="Both databases, the 3D model objects and the forge, taken by the backup service onto its own volume. A backup you ask for is kept until you release it; scheduled ones are pruned by the retention window. Nothing here downloads a backup: restoring is a runbook run from a shell."
+                text="Both databases, the 3D models and the forge, on the backup service's own volume. A requested backup is kept until released; scheduled ones follow the retention window. Restoring is a runbook run from a shell."
               />
             </h3>
             {/* The primary action in the header, where every card keeps its. Disabled rather than
@@ -267,8 +267,11 @@ function RecentFailures({ jobs }) {
 const COMPONENT_LABELS = {
   'supabase-db': 'platform database',
   'timescaledb': 'historian',
+  'vault-key': 'Vault root key',
   'storage-objects': '3D models',
-  'forge': 'forge'
+  'forge': 'forge',
+  'broker': 'broker accounts',
+  'ca': 'internal CA'
 }
 
 function componentSummary(components) {

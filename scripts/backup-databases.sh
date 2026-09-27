@@ -35,8 +35,9 @@ BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 
 # plain -> .sql.gz, restorable with psql and greppable.
-# custom -> .dump (pg_dump -Fc), restorable SELECTIVELY with pg_restore. This is what the
-#           Kubernetes CronJob writes, so use it when both targets must produce one artefact.
+# custom -> .dump (pg_dump -Fc), restorable SELECTIVELY with pg_restore. This is what the chart's
+#           CronJob and the backup service write, so use it when a by-hand backup has to be
+#           restorable by the same runbook.
 BACKUP_FORMAT="${BACKUP_FORMAT:-plain}"
 
 SUPABASE_SERVICE="${SUPABASE_SERVICE:-supabase-db}"

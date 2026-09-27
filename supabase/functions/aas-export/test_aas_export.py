@@ -49,17 +49,16 @@ ID_SHORT_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
-DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
+DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
+DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
 # The machining cell's first CNC on the `Simulated Shopfloor` flow, seeded by 0002 and given its
 # schema and nameplate by 0020 -- so it exists wherever the migrations run, not only where
 # provision-gateways.mjs has been run. It replaced `Simulated_CNC_01`, which 0020 deletes.
 # THE SUITE PROVISIONS ITS OWN SUBJECT, and this is the point of it rather than a detail.
 #
-# It used to be `Sim_CNC_Mill_01`, seeded by 0002 as part of the demonstration shopfloor -- so a
-# CONFORMANCE suite depended on DEMO DATA the seed no longer creates. That coupling has already bitten
-# once: 0020 exists partly because the previous subject, `Simulated_CNC_01`, quietly stopped receiving
-# a DBIRTH while this suite went on naming it and reporting success.
+# A CONFORMANCE SUITE MUST NOT DEPEND ON SEEDED DEMONSTRATION DATA. A subject the seed stops
+# creating, or stops sending a DBIRTH for, leaves the suite naming a device that is not there and
+# reporting success anyway -- which is part of why 0020 exists.
 #
 # `AAS_TEST_DEVICE` still overrides it, and then NOTHING IS PROVISIONED -- the escape hatch for
 # pointing the suite at a real asset is deliberately not also a way to half-create a fixture.
@@ -886,6 +885,36 @@ class TestVisualRepresentation(unittest.TestCase):
     def test_the_model_uploaded(self):
         self.assertIn(self.upload_status, (200, 201), "could not place the test model in Storage")
 
+    def _list_device_folder(self, token=None):
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/storage/v1/object/list/{MODEL_BUCKET}",
+            data=json.dumps({"prefix": DEVICE_ID, "limit": 100}).encode(), method="POST",
+        )
+        req.add_header("apikey", PUBLISHABLE_KEY)
+        req.add_header("Content-Type", "application/json")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as res:
+                return [o.get("name") for o in json.loads(res.read())]
+        except urllib.error.HTTPError:
+            return []
+
+    def test_the_model_is_readable_with_no_session_and_no_key(self):
+        # The AAS contract: an exported File URL resolves for a viewer holding nothing.
+        url = f"{SUPABASE_URL}/storage/v1/object/public/{MODEL_BUCKET}/{self.path}"
+        with urllib.request.urlopen(url, timeout=20) as res:
+            self.assertEqual(res.read(), self.MODEL_BYTES)
+
+    def test_an_anonymous_caller_cannot_list_the_bucket(self):
+        # Keys are <device_uuid>/<file>, so a public listing is a public device inventory
+        # (storage-policies.sql, asset_3d_models_select_privileged).
+        self.assertEqual(self._list_device_folder(), [])
+
+    def test_the_uploader_can_list_the_bucket(self):
+        # The control for the test above: the endpoint answers, so an empty list is the policy.
+        self.assertIn(self.MODEL_NAME, self._list_device_folder(TOKEN))
+
     def test_emits_a_visual_representation_submodel(self):
         shorts = [s["idShort"] for s in self.body["aas"]["submodels"]]
         self.assertIn("VisualRepresentation", shorts)
@@ -1183,10 +1212,10 @@ console.log(JSON.stringify({
     # -- buildBundleManifest ----------------------------------------------------------------------
     def test_manifest_names_its_schema_and_every_part_under_the_supplement_directory(self):
         m = self.out["manifest"]
-        self.assertEqual(m["schema"], "acs-cymru/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/1")
         self.assertEqual(m["schema"], self.out["schema"])
         for name, path in self.out["parts"].items():
-            self.assertTrue(path.startswith("aasx/files/acs-cymru/"), f"{name}: {path}")
+            self.assertTrue(path.startswith("aasx/files/aber/"), f"{name}: {path}")
         self.assertEqual(m["parts"]["environment"], "aasx/aasenv-root.json")
         self.assertEqual(m["parts"]["digital_thread"], self.out["parts"]["thread"])
         self.assertEqual(m["parts"]["telemetry_raw"], self.out["parts"]["raw"])
@@ -1279,7 +1308,7 @@ class TestAssetBundle(unittest.TestCase):
             return json.loads(res.read())
 
     def manifest(self) -> dict:
-        return json.loads(self.zip.read("aasx/files/acs-cymru/manifest.json"))
+        return json.loads(self.zip.read("aasx/files/aber/manifest.json"))
 
     def test_is_still_an_aasx_with_a_bundle_filename(self):
         self.assertEqual(self.status, 200)
@@ -1293,30 +1322,30 @@ class TestAssetBundle(unittest.TestCase):
     def test_carries_the_four_supplementary_parts(self):
         names = self.zip.namelist()
         for part in (
-            "aasx/files/acs-cymru/manifest.json",
-            "aasx/files/acs-cymru/digital-thread.json",
-            "aasx/files/acs-cymru/telemetry-raw.csv",
-            "aasx/files/acs-cymru/telemetry-1h.csv",
+            "aasx/files/aber/manifest.json",
+            "aasx/files/aber/digital-thread.json",
+            "aasx/files/aber/telemetry-raw.csv",
+            "aasx/files/aber/telemetry-1h.csv",
         ):
             self.assertIn(part, names)
 
     def test_manifest_describes_this_device_and_agrees_with_the_parts(self):
         m = self.manifest()
-        self.assertEqual(m["schema"], "acs-cymru/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/1")
         self.assertEqual(m["device"]["id"], DEVICE_ID)
         self.assertEqual(m["telemetry"]["asset_id"], m["device"]["sparkplug_id"])
-        thread = json.loads(self.zip.read("aasx/files/acs-cymru/digital-thread.json"))
+        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
         self.assertIsInstance(thread, list)
         self.assertEqual(m["digital_thread"]["rows"], len(thread))
         # A CSV part's rows are its lines less the header; both parts are oldest-first.
-        raw_lines = self.zip.read("aasx/files/acs-cymru/telemetry-raw.csv").decode().split("\r\n")
+        raw_lines = self.zip.read("aasx/files/aber/telemetry-raw.csv").decode().split("\r\n")
         self.assertEqual(raw_lines[0], "time,metric_name,val_double,val_string,val_bool")
-        self.assertEqual(m["telemetry"]["raw"]["rows"], len([l for l in raw_lines[1:] if l]))
+        self.assertEqual(m["telemetry"]["raw"]["rows"], len([line for line in raw_lines[1:] if line]))
         # The hourly header is the rollup's own columns: the first live run of this class found a
         # column the view does not have, and PostgREST fails the whole request for one.
-        hourly_lines = self.zip.read("aasx/files/acs-cymru/telemetry-1h.csv").decode().split("\r\n")
+        hourly_lines = self.zip.read("aasx/files/aber/telemetry-1h.csv").decode().split("\r\n")
         self.assertEqual(hourly_lines[0], "bucket,metric_name,avg_double,min_double,max_double,last_double,last_string,last_bool,n_double,n_rows")
-        self.assertEqual(m["telemetry"]["hourly"]["rows"], len([l for l in hourly_lines[1:] if l]))
+        self.assertEqual(m["telemetry"]["hourly"]["rows"], len([line for line in hourly_lines[1:] if line]))
         # The fixture just arrived: nothing has been read from it, so the fixture also proves the
         # two standing exclusions are stated on an otherwise empty bundle.
         self.assertTrue(any("never read back" in s for s in m["not_included"]))
@@ -1324,7 +1353,7 @@ class TestAssetBundle(unittest.TestCase):
     def test_the_thread_part_holds_the_fixture_s_own_creation(self):
         # The fixture INSERTed the device through PostgREST, which the audit trigger recorded, so
         # the part is never empty for a device that exists at all.
-        thread = json.loads(self.zip.read("aasx/files/acs-cymru/digital-thread.json"))
+        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
         self.assertTrue(any(row.get("entity_id") == DEVICE_ID for row in thread), thread[:3])
 
     def test_reports_the_stored_copy_in_the_stats_header(self):
@@ -1360,9 +1389,12 @@ if __name__ == "__main__":
         print("[test_aas_export] jsonschema not installed: official-schema validation skipped")
     # Teardown AFTER the report, so a failing run still leaves its console output intact -- and
     # only when this run created the subject, or the AAS_TEST_DEVICE escape hatch would delete
-    # somebody's real asset.
+    # somebody's real asset. `exit=False` keeps the teardown reachable, so the exit status is
+    # set here from the result; the runner reads nothing else.
+    result = None
     try:
-        unittest.main(verbosity=2, exit=False)
+        result = unittest.main(verbosity=2, exit=False).result
     finally:
         if LIVE and PROVISION_FIXTURE:
             aas_fixture.teardown(SUPABASE_URL, TOKEN, PUBLISHABLE_KEY)
+    sys.exit(0 if result is not None and result.wasSuccessful() else 1)

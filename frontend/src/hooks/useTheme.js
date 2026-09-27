@@ -4,11 +4,11 @@ import { useState, useEffect, useCallback } from 'react'
  * Custom hook to manage application light/dark UI theme and localStorage persistence.
  */
 export function useTheme() {
-  const [theme, setTheme] = useState(() => localStorage.getItem('acs_cymru_theme') || 'dark')
+  const [theme, setTheme] = useState(() => localStorage.getItem('aber_theme') || 'dark')
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('acs_cymru_theme', theme)
+    localStorage.setItem('aber_theme', theme)
   }, [theme])
 
   const toggleTheme = useCallback(() => {

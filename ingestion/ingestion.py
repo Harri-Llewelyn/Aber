@@ -18,10 +18,11 @@ from metrics import start_metrics_server
 import registry
 from registry import (
     count, count_labelled, counter_snapshot, observe_uns_seconds, observe_write_seconds,
-    WRITE_SECONDS_BUCKETS,
+    WRITE_SECONDS_BUCKETS,  # noqa: F401 -- re-exported; test_metrics_endpoint reads it from here
 )
 from conformance import (
-    MetricConstraint, ModelledSchema, constraint_violations, enforceable_violation,
+    MetricConstraint, ModelledSchema,  # noqa: F401 -- re-exported; test_payload_conformance reads them
+    constraint_violations, enforceable_violation,
     modelled_constraints, payload_violations, violation_signature,
 )
 # capture.py owns the capture file format, so the daemon and the CLI cannot diverge.
@@ -88,8 +89,12 @@ REBIRTH_REQUEST_INTERVAL_SECONDS = int(os.getenv("REBIRTH_REQUEST_INTERVAL_SECON
 # looping births with fresh aliases would otherwise grow it without limit.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 
-# Capacity bound on each entity cache. The keys are ids seen on the wire, so a TTL alone is not a
-# bound: expiry is only checked on read. 1000 is above any plausible fleet.
+# Headroom on each entity cache for ids the directory does not hold: negative entries, and ids
+# seen on the wire before the refresher's next pass. The keys come from the wire, so a TTL alone
+# is not a bound: expiry is only checked on read. The directory refresher sizes each cache to the
+# directory PLUS this, so the fleet always fits; with the refresher off this is the whole
+# capacity. A fixed 1000 was measured failing at 1,200 devices: every entry was evicted within
+# its TTL and every message cost a PostgREST round trip (test-harness/README.md, #395).
 MAX_ENTITIES_PER_CACHE = int(os.getenv("MAX_ENTITIES_PER_CACHE", "1000"))
 
 # Negative entries share the TTL. The write sites in process_dbirth() set or pop the entry, so a
@@ -150,7 +155,7 @@ SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
 # -----------------------------------------------------------------------------
 supabase_client = None
 try:
-    from supabase import create_client, Client
+    from supabase import create_client
     if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
         # Names the daemon as the actor behind its writes; log_digital_thread_event() reads it from
         # the `request.headers` GUC and accepts only 'ingestion' / 'service' / 'migration'.
@@ -161,7 +166,7 @@ try:
             # token on every request, so a header set by hand is silently replaced by the gateway key.
             # The apikey stays the gateway key; the bearer is what resolves auth.uid() to Service_Ingestor.
             supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)
-            supabase_client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "ingestion"
+            supabase_client.postgrest.session.headers["X-Aber-Actor"] = "ingestion"
         except Exception as header_err:
             # Losing the label is not worth losing ingestion over: without it the trigger falls
             # back to 'service', which is still attributed, just less specific.
@@ -362,9 +367,11 @@ IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 # for logging only: the topic is still what identifies the asset.
 FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 
-# Default Sparkplug Group ID, matching gateways.sparkplug_group's column default (migration
-# 0008). Used only to describe the fallback in a log line; resolution never assumes it.
-DEFAULT_SPARKPLUG_GROUP = "ACS-Cymru"
+# The site's Sparkplug Group ID, named by the chart and held by `sparkplug.group_id` (0131), which
+# is also what gateways.sparkplug_group defaults to. Used only to describe the fallback in a log
+# line; resolution never assumes it -- a gateway is resolved on the (group, node) pair its own row
+# carries.
+DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "")
 
 class DirectoryUnavailable(Exception):
     """
@@ -455,6 +462,17 @@ class TTLCache:
                 self._data.popitem(last=False)
                 self.evictions += 1
             self._data[key] = (value, time.time())
+
+    def resize(self, maxsize):
+        """Change the capacity; shrinking evicts the oldest. Returns True if it changed."""
+        with self._lock:
+            if maxsize == self.maxsize:
+                return False
+            self.maxsize = maxsize
+            while len(self._data) > self.maxsize:
+                self._data.popitem(last=False)
+                self.evictions += 1
+            return True
 
     def pop(self, key, default=None):
         with self._lock:
@@ -763,9 +781,9 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
     # The message is still processed; only the counters are added. Both counters, because one gap
     # of 200 and 200 gaps of 1 are different faults. The 255 -> 0 wrap and the first message after
     # a restart never reach here (asserted in test_sequence_gap_metrics.py).
-    count_labelled("acs_ingestion_sequence_gaps_total", {"edge_node": edge_node_id})
+    count_labelled("aber_ingestion_sequence_gaps_total", {"edge_node": edge_node_id})
     count_labelled(
-        "acs_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
+        "aber_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
     )
 
     # Expected once after a start: the first message seen carries a seq far ahead of the 0
@@ -1146,6 +1164,14 @@ def refresh_directory_caches():
     since the pass began is superseded by the directory's copy, which already carries that write.
     """
     devices = _directory_rows("devices", _DEVICE_COLUMNS)
+    # Sized before it is filled, so the pass never evicts what it is about to write. A device
+    # takes a key for each identity it has; the schema cache is keyed by the device's uuid.
+    device_keys = sum(1 for row in devices for column in ("reported_identity", "sparkplug_id")
+                      if row.get(column))
+    if _device_cache.resize(device_keys + MAX_ENTITIES_PER_CACHE):
+        logger.info("Device cache sized to %d: %d directory keys and %d of headroom.",
+                    _device_cache.maxsize, device_keys, MAX_ENTITIES_PER_CACHE)
+    _schema_cache.resize(len(devices) + MAX_ENTITIES_PER_CACHE)
     # reported_identity first so that a wire id that is one device's sparkplug_id and another's
     # reported_identity resolves as resolve_device() resolves it: sparkplug_id wins.
     for column, source in (("reported_identity", SOURCE_REPORTED_IDENTITY),
@@ -1159,6 +1185,7 @@ def refresh_directory_caches():
             _device_cache.set(key, cached)
 
     gateways = _directory_rows("gateways", _GATEWAY_COLUMNS)
+    _gateway_cache.resize(len(gateways) + MAX_ENTITIES_PER_CACHE)
     for row in gateways:
         key = row.get("sparkplug_id")
         if not key:
@@ -1169,13 +1196,6 @@ def refresh_directory_caches():
         # other than its registered one still takes the per-entity path, which warns about it.
         _gateway_cache.set((row.get("sparkplug_group") or "", key), cached)
 
-    if len(_device_cache) >= _device_cache.maxsize:
-        logger.warning(
-            "The directory holds more device ids (%d) than MAX_ENTITIES_PER_CACHE (%d): the "
-            "cache cannot hold the fleet and resolution falls back to per-entity lookups for "
-            "whatever it evicts. Raise MAX_ENTITIES_PER_CACHE.",
-            len(_device_cache), _device_cache.maxsize,
-        )
     return len(devices), len(gateways)
 
 def start_directory_refresher():
@@ -1785,13 +1805,13 @@ def extract_gateway_health(group_id, edge_node_id, payload):
 # Four of the seven: `agent_version`, `flow_hash` and `cert_expires_at` stay in the database
 # because the metrics endpoint is unauthenticated (see metrics.py).
 GATEWAY_HEALTH_GAUGES = {
-    "uptime_seconds":      "acs_ingestion_gateway_uptime_seconds",
-    "load_1m":             "acs_ingestion_gateway_load1",
-    "mem_available_bytes": "acs_ingestion_gateway_mem_available_bytes",
-    "disk_free_bytes":     "acs_ingestion_gateway_disk_free_bytes",
+    "uptime_seconds":      "aber_ingestion_gateway_uptime_seconds",
+    "load_1m":             "aber_ingestion_gateway_load1",
+    "mem_available_bytes": "aber_ingestion_gateway_mem_available_bytes",
+    "disk_free_bytes":     "aber_ingestion_gateway_disk_free_bytes",
 }
 
-HEALTH_REPORTED_GAUGE = "acs_ingestion_gateway_health_reported_timestamp_seconds"
+HEALTH_REPORTED_GAUGE = "aber_ingestion_gateway_health_reported_timestamp_seconds"
 
 # Last-seen values per edge node. Written only after resolve_gateway() matched a registered
 # gateway, so a forged edge node id cannot add an entry. An archived gateway's series lingers
@@ -1828,8 +1848,8 @@ def gateway_health_gauge_snapshot() -> dict:
 # counts it. Positive means the appliance is ahead of this server, the direction that corrupts
 # soonest. Nothing is rejected as implausible: an appliance reporting 1970 is a board with no
 # RTC after a power cut, the most likely instance of this fault.
-GATEWAY_CLOCK_OFFSET_GAUGE = "acs_ingestion_gateway_clock_offset_seconds"
-GATEWAY_CLOCK_MEASURED_GAUGE = "acs_ingestion_gateway_clock_measured_timestamp_seconds"
+GATEWAY_CLOCK_OFFSET_GAUGE = "aber_ingestion_gateway_clock_offset_seconds"
+GATEWAY_CLOCK_MEASURED_GAUGE = "aber_ingestion_gateway_clock_measured_timestamp_seconds"
 
 # Below TELEMETRY_MAX_FUTURE_SECONDS, so the warning arrives while telemetry is still accepted.
 GATEWAY_CLOCK_OFFSET_WARN_SECONDS = 60
@@ -2236,7 +2256,7 @@ class TelemetryWriter:
             drop(
                 "write_queue_full",
                 "Historian writer queue has held %d messages for %.0fs; dropping DDATA for '%s'. "
-                "The writer is slower than the fleet: read acs_ingestion_write_seconds.",
+                "The writer is slower than the fleet: read aber_ingestion_write_seconds.",
                 TELEMETRY_QUEUE_MAX_MESSAGES, TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS, pending.wire_id,
                 device=pending.wire_id,
             )
@@ -2599,7 +2619,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # that flat name in the STATS line, summed from this series rather than exported twice
     # (metrics.py, EXPORTED_LABELLED_INSTEAD).
     count_labelled(
-        "acs_ingestion_timestamps_rejected_total",
+        "aber_ingestion_timestamps_rejected_total",
         {"edge_node": gateway_wire_id}, rejected_timestamps
     )
     count("metrics_unresolved_alias", unresolved_aliases)
@@ -2641,7 +2661,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         group_id=group_id or DEFAULT_SPARKPLUG_GROUP, client=client,
     ))
 
-# Whether the daemon is subscribed. `acs_ingestion_db_connected` answers the same question for
+# Whether the daemon is subscribed. `aber_ingestion_db_connected` answers the same question for
 # PostgreSQL; "the process is running" and "the daemon is receiving messages" are different
 # states, and CI waits on this one. Set after `subscribe()` returns, not after `connect()`.
 # See docs/incidents.md -> "CI waited for a message count on a stack with no publisher".
@@ -2758,6 +2778,11 @@ def parse_sparkplug_payload(msg):
                     metric.int_value = int(m['int_value'])
                 if 'datatype' in m and m['datatype'] is not None:
                     metric.datatype = int(m['datatype'])
+                # The metric's own reading time, which the protobuf path already honours: a
+                # report-by-exception refresh or a batched reading is filed when it was taken.
+                ts = m.get('timestamp')
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
+                    metric.timestamp = int(ts)
             return payload
         except Exception:
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)
@@ -3130,7 +3155,7 @@ def _heal_pass(state, supabase=None):
                 count("db_heals")
                 logger.info(
                     "Historian connection recovered by the startup recovery loop; "
-                    "acs_ingestion_db_connected now reads 1."
+                    "aber_ingestion_db_connected now reads 1."
                 )
         if redundant is not None:
             redundant.close()
@@ -3166,7 +3191,7 @@ def start_startup_healer(supabase=None, check_privileges=False, reconcile_captur
 
     A node coming back brings pods up in the kubelet's order, not the dependency graph's. Two
     startup steps depend on a database being up, with different
-    dependencies: the historian connection (which `acs_ingestion_db_connected` reads) and
+    dependencies: the historian connection (which `aber_ingestion_db_connected` reads) and
     capture_worker.reconcile() (Supabase). Each is retried until it succeeds.
 
     The thread stays resident afterwards so the gauge answers "can this daemon reach the
@@ -3193,22 +3218,22 @@ def scrape_time_series():
     STATES, NOT EVENTS, which is the whole reason they are read here rather than incremented at a
     site. `db_connected` is the clearest case: `_ts_conn.closed` cannot see a server-side drop, so
     this answers "did the daemon believe it had a connection", and
-    `acs_ingestion_db_connect_failures_total` rising while it reads 1 is exactly that drop.
+    `aber_ingestion_db_connect_failures_total` rising while it reads 1 is exactly that drop.
     """
     series = {
-        ("acs_ingestion_up", ()): 1,
-        ("acs_ingestion_db_connected", ()):
+        ("aber_ingestion_up", ()): 1,
+        ("aber_ingestion_db_connected", ()):
             1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
         # The subscription, not the connection. See the note above on_connect().
-        ("acs_ingestion_mqtt_connected", ()): 1 if _mqtt_subscribed else 0,
-        ("acs_ingestion_write_queue_depth", ()): _writer.depth(),
+        ("aber_ingestion_mqtt_connected", ()): 1 if _mqtt_subscribed else 0,
+        ("aber_ingestion_write_queue_depth", ()): _writer.depth(),
     }
 
     # Cache occupancy. The evictions counter is the one worth an alert: non-zero means
     # MAX_ENTITIES_PER_CACHE is being reached.
     for cache in (_device_cache, _gateway_cache, _schema_cache):
-        series[("acs_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
-        series[("acs_ingestion_cache_evictions_total", (("cache", cache.name),))] = cache.evictions
+        series[("aber_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
+        series[("aber_ingestion_cache_evictions_total", (("cache", cache.name),))] = cache.evictions
 
     # Appliance health. The reported-at timestamp says how old the readings are; a gauge holds its
     # last value indefinitely.
@@ -3263,7 +3288,7 @@ def main():
 
     if _startup_conn is not None:
         _assert_historian_is_least_privilege(_startup_conn)
-        # Kept, not closed: `acs_ingestion_db_connected` reads `_ts_conn`, and on a quiet stack
+        # Kept, not closed: `aber_ingestion_db_connected` reads `_ts_conn`, and on a quiet stack
         # nothing else opens it, so a discarded startup connection left the gauge at 0 and fired
         # `Historian Unreachable From Ingestion` against a reachable historian. Same single writer,
         # opened earlier. This covers only the boot where the connect succeeds; start_startup_healer()
@@ -3324,7 +3349,7 @@ def main():
     # directory refresher likewise, so the first messages resolve against a warm cache.
     _writer.start()
     start_directory_refresher()
-    # A daemon stuck retrying the broker must still be scrapeable: `acs_ingestion_up` at 1 with
+    # A daemon stuck retrying the broker must still be scrapeable: `aber_ingestion_up` at 1 with
     # flat counters is what "connected to nothing" looks like, and is distinguishable from a dead
     # target.
     start_metrics_endpoint()

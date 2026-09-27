@@ -1,11 +1,19 @@
-FROM python:3.10-slim
+# 3.13-slim, and the minor version is load-bearing: the 3.10 image bundles `setuptools` and
+# `wheel` into site-packages, where a scanner reads them as runtime dependencies of this service.
+# They are neither -- nothing here builds a package. 3.12 onwards ships `pip` alone, so the bump
+# removes them rather than pinning them forward. Kept in step with i3x/Dockerfile.
+FROM python:3.13-slim
 
 # protobuf-compiler, to generate sparkplug_b_pb2.py from the .proto at build time.
 #
 # DELIBERATELY WHATEVER apt HAS (libprotoc 3.21.12 on this base), which is two majors behind the
 # protobuf runtime in requirements.txt. That is fine and is explained there: the 5.x runtime loads
-# 3.21 gencode, and Debian has no newer compiler to offer anyway.
-RUN apt-get update && apt-get install -y \
+# 3.21 gencode, and Debian has no newer compiler to offer anyway. Trixie offers the same 3.21.12
+# bookworm did, so the bump above does not move it.
+#
+# --no-install-recommends, which i3x/Dockerfile has always passed. Without it apt pulls in
+# linux-libc-dev -- kernel headers nothing here compiles against, and 66 reported CVEs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
@@ -14,7 +22,12 @@ WORKDIR /app
 
 # Copy and install Python requirements
 COPY ingestion/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pip is removed once it has done its one job. Nothing in this image installs a package at run
+# time, and with the base at 3.13 pip's own vendored tree is the last thing in here a scanner
+# reports -- `msgpack` and `setuptools`, neither of which this service imports. test-harness/
+# Dockerfile extends this image and restores pip with `ensurepip` for its own install.
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -m pip uninstall -y pip
 
 # Copy sources into the container
 COPY sparkplug_b.proto .
@@ -40,8 +53,8 @@ COPY ingestion/capture.py .
 # A SECOND IMAGE IS NOT NEEDED. What playback requires that is genuinely new is a separate
 # PROCESS with a separate Supabase principal and its own broker credentials --
 # none of which an image boundary provides. It publishes using capture.py's own `plan_playback()`,
-# which is already here, so a second image would be this one minus two files plus a second build,
-# a second tag to keep in step, and a second entry in check-image-tag-parity.mjs.
+# which is already here, so a second image would be this one minus two files plus a second build
+# and a second tag to keep in step.
 COPY ingestion/playback_worker.py .
 
 # The Directory's MQTT half. SAME RULE AS metrics.py AND capture_worker.py ABOVE, and this file is

@@ -13,7 +13,7 @@ import {
   GATEWAY_TYPES, SELECTABLE_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone,
 } from '../../utils/gatewayType'
-import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
@@ -50,7 +50,7 @@ import { HelpTip } from '../common/HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, onBugReport, activeAlerts = [] }) {
+export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [gateways, setGateways] = useState([])
@@ -381,9 +381,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <span>
             <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
             {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
-            the deployment rather than here: on Compose, <span className="mono">npm run setup</span> asks
-            for the host on a fresh .env, or set both and restart (docs/remote-gateways.md, section 7).
-            Host-run and simulated gateways are unaffected.
+            the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
+            in the chart&rsquo;s values and restart the functions service (docs/remote-gateways.md,
+            section 7). Host-run and simulated gateways are unaffected.
           </span>
         </div>
       )}
@@ -396,7 +396,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             Gateways
             <HelpTip
               label="About gateways"
-              text="A gateway is an edge node: the thing that publishes to the broker, and the identity every topic beneath it is pinned to. Its devices reach the platform through it, so status here is derived from the last heartbeat rather than from anything the gateway asserts about itself."
+              text="An edge node: what publishes to the broker, and the identity every topic beneath it is pinned to. Status is derived from its last heartbeat, not from anything the gateway asserts about itself."
             />
           </h3>
           <button
@@ -465,7 +465,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <button
             className={`btn btn-sm ${showShadowGateways ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadowGateways(v => !v)}
-            title="The Playback gateway (archived migration 0060). It publishes recorded captures as shadow devices and is not a connector to any machine, so it is hidden by default — but it stays reachable, because minting its broker credential is the one act an operator must perform on it."
+            title="The Playback gateway publishes recorded captures as shadow devices and connects to no machine, so it is hidden by default. It stays reachable so its broker credential can be minted."
           >
             <IconRadio size={13} /> Show playback gateway
           </button>
@@ -643,9 +643,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 (utils/gatewayType.js). It comes before the cell zone because it governs it. */}
             <div className="form-group">
               <label className="form-label" htmlFor="gateway-type">Type</label>
+              <Withheld field="deployment" />
               <select
                 id="gateway-type"
                 className="form-control"
+                disabled={proposeMode}
                 value={formType}
                 onChange={e => setForm(f => ({
                   ...f,
@@ -657,7 +659,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                     ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
                     : {})
                 }))}
-                title="Where this gateway's connector runs, and whether its readings are real"
+                title={proposeMode ? withheldFields.deployment : "Where this gateway's connector runs, and whether its readings are real"}
               >
                 {SELECTABLE_TYPES.map(t => (
                   <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
@@ -974,7 +976,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               title: 'The platform playbook tag this appliance last converged to, and how that run '
                 + 'ended. It converges hourly and after boot. "failed" means ansible-pull did not '
                 + 'complete and the timer will try again; the appliance\'s own journal '
-                + '(journalctl -u acs-gateway-converge) says why. The tag is changed by a pull '
+                + '(journalctl -u aber-gateway-converge) says why. The tag is changed by a pull '
                 + 'request on platform.yml in this gateway\'s repository, so a fleet mid-rollout '
                 + 'shows different tags here. Empty on an appliance that runs the bundle alone.'
             },

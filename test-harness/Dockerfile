@@ -30,15 +30,15 @@
 # aas-export. They are copied from there now; their parity contract with the frontend is unchanged.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT:
-#   docker build -f test-harness/Dockerfile -t ghcr.io/harri-llewelyn/acs-cymru/test-runner:<tag> .
+#   docker build -f test-harness/Dockerfile -t ghcr.io/harri-llewelyn/aber/test-runner:<tag> .
 #
 # The default below is a convenience for a bare `docker build` and nothing more -- both CI and
 # release.yml pass INGESTION_IMAGE explicitly, because at release time the base is the ingestion
 # image built minutes earlier under the version being released, which no committed default can
-# name. Its tag is asserted equal to the chart's appVersion by scripts/check-image-tag-parity.mjs:
-# left to drift, a bare build here would silently extend a DIFFERENT ingestion image than the one
-# the chart deploys, and the suite would then be testing a stack it is not running beside.
-ARG INGESTION_IMAGE=ghcr.io/harri-llewelyn/acs-cymru/ingestion:0.1.0
+# name. The default is the last released tag rather than a floating one: left to drift, a bare
+# build here would silently extend a DIFFERENT ingestion image than the one the chart deploys, and
+# the suite would then be testing a stack it is not running beside.
+ARG INGESTION_IMAGE=ghcr.io/harri-llewelyn/aber/ingestion:0.1.0
 FROM ${INGESTION_IMAGE}
 
 # The ingestion image's WORKDIR is /app and it holds ingestion.py, validate.py and
@@ -48,7 +48,18 @@ WORKDIR /app
 
 # Draft 2019-09 is what the IDTA schema declares; the version is pinned so a resolver change cannot
 # quietly turn a conformance failure into a pass.
-RUN pip install --no-cache-dir jsonschema==4.23.0
+#
+# The ingestion image removes pip after its own install, so this restores it, uses it and removes
+# it again. `ensurepip` ships inside CPython and carries its own pip wheel, so this reaches no
+# index for pip itself.
+RUN python -m ensurepip \
+    && python -m pip install --no-cache-dir jsonschema==4.23.0 \
+    && python -m pip uninstall -y pip
+
+# The load generator, at the TOP LEVEL beside validate.py rather than under test-harness/: it
+# imports `sparkplug_b_pb2`, which the ingestion image puts at /app, and a script run from a
+# subdirectory puts that subdirectory on sys.path instead.
+COPY test-harness/load_generator.py /app/load_generator.py
 
 # parents[3] of /app/supabase/functions/aas-export/test_aas_export.py is /app -- so these paths, and
 # only these paths, make the suites' lookups resolve.
@@ -78,4 +89,4 @@ COPY frontend/src/utils/sparkplugDatatype.js \
 
 # Overrides the ingestion daemon's CMD. Each Job names the suite it wants explicitly; this default
 # exists so a bare `docker run` of this image does something legible rather than starting a daemon.
-CMD ["python", "-c", "print('acs-cymru test-runner: pass a suite, e.g. python validate.py or python supabase/functions/aas-export/test_aas_export.py')"]
+CMD ["python", "-c", "print('aber test-runner: pass a suite, e.g. python validate.py or python supabase/functions/aas-export/test_aas_export.py')"]

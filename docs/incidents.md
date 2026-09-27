@@ -343,3 +343,195 @@ this; the fault needs a row of the newer lane to exist.
 after, it counted 14 and aborted. `npm run test:db` builds a database from nothing, so 0069 always runs before
 0086 grants and always counts 13; only a second boot reproduces it, which is why it shipped green. A self-check
 asserts the claim its migration makes, which stays true whatever is granted later.
+
+## The horizons view was created before the rollups it reads
+
+**Where the fix lives:** `timescaledb/aggregates.sql`, section 2b, which now follows the rollups
+it selects from.
+**Symptom:** a fresh install failed at the `timescaledb-maintenance` post-install hook with
+`relation "telemetry_1m" does not exist`. Every upgrade of an existing stack passed.
+
+`telemetry_horizons` reads the three rollups. It was added on 2026-09-16 (`28e6694`) as section
+1b, beside `telemetry_latest`, because both are views evaluated on the historian for
+postgres_fdw's sake and the grouping read naturally. The file runs top to bottom on every boot,
+and on a historian that has never booted the rollups are created by section 2, after it.
+
+Every stack the change was tested on already had them: `dev:up` upgrades a cluster whose
+historian volume persists, and the CI job that installs from nothing had been failing in four
+seconds since 2026-09-08 for want of Actions minutes. Five days of commits landed on a chart that
+could not be installed fresh, and the restore rehearsal, whose second install is always fresh,
+was the first thing to run that path.
+
+The order of statements in a file replayed on every boot is a dependency, not a reading order.
+The weekly rehearsal now installs from nothing twice a run, so the fresh path is exercised even
+while the per-commit job is not.
+
+## The restore path never met a partitioned table
+
+**Where the fix lives:** `scripts/restore-databases.sh`, preflight 0b, which drops every partition
+of every partitioned table before the dump is replayed.
+**Symptom:** every restore into a freshly installed stack failed part-way through the Supabase
+dump with `cannot drop inherited constraint "messages_2026_09_24_pkey"`, and with that table
+cleared, with `cannot drop inherited constraint "digital_thread_default_pkey"`.
+
+The script's header had said, since the hand rehearsal of 2026-08-15, that a *second* restore over
+the first fails this way and that the answer is to drop the volume. The first restore fails the
+same way, and the volume is not the reason. A partition's primary key is inherited from its parent
+and cannot be dropped on its own, `--clean` reaches that `ALTER TABLE ... DROP CONSTRAINT` before
+any `DROP TABLE`, and a fresh stack always has partitions with the dump's names: the Realtime
+container creates its daily `realtime.messages_*` on every start, and `0001` creates
+`digital_thread`'s monthly partitions and its DEFAULT on every boot. The hand rehearsal had
+restored into a database that had not booted the stack, which is the one shape the runbook says
+not to use.
+
+Nobody had seen it because nobody had run it: the weekly rehearsal's first run failed at the backup
+step (`scripts/backup-databases.sh` had never had its executable bit), and every run after it fell
+to the exhausted Actions allowance. The restore step first executed on 2026-09-21, locally, and
+found both on its first two attempts. Dropping the partitions loses nothing the restore was going
+to keep: the dump recreates each with its rows, and Realtime creates the next day's.
+
+## The restored schema was more permissive than the dumped one
+
+**Where the fix lives:** `scripts/restore-databases.sh`, preflight 0c, which revokes every default
+privilege for every grantee but its owner and PUBLIC before the dump is replayed, and
+`test-harness/restore-rehearsal/assert-supabase.sql`, section 9, which checks a function the
+migrations revoked from every PostgREST role.
+**Symptom:** after a restore, `service_role` could UPDATE and DELETE `digital_thread`, and anon
+could execute `backup_claim_job()`; the dump granted neither.
+
+The supabase/postgres image declares default privileges: every table, sequence and function that
+`supabase_admin` or `postgres` creates in `public` is granted ALL to anon, authenticated and
+service_role at the moment of creation. `pg_dump` writes each object's GRANT and REVOKE statements
+as a difference from PostgreSQL's built-in default, not from those declarations, so a replay
+creates the object with the surplus and grants what the source had on top of it. The dump does
+carry the default privileges themselves, as `ALTER DEFAULT PRIVILEGES` statements, but writes them
+after every object and grant, which is what makes suspending them for the replay correct: the
+dump puts them back.
+
+The migration chain would have corrected the tables it names, since every file states its own
+REVOKEs and the chain replays on every boot; it would not have run, because a restore does not
+boot the stack. The row counts matched either side of the restore, the sign-in worked, and the
+foreign wrapper answered. Only the assertion on a grant caught it, which is the case for having
+that kind of assertion.
+
+## The rehearsal reported a user it had never created
+
+**Where the fix lives:** `scripts/rehearse-restore.sh`, `seed`, which creates the rehearsal user
+through GoTrue's admin API as the service role and signs in as it before returning.
+**Symptom:** the seed logged `already present (re-run)` on a cluster created minutes earlier, and
+the first backup step to run after it could not sign in.
+
+Self-service signup is closed on this stack (`GOTRUE_DISABLE_SIGNUP`), so `/signup` answers 422
+whether or not the user exists. The seed had been written to read 422 as "already registered",
+which is what GoTrue answers a duplicate with when signup is open, and it never checked that the
+user it reported could sign in. The 6 September CI run carries the same line on a fresh cluster.
+Every assertion that rested on that user, the post-restore sign-in above all, was going to fail
+with a message blaming the restore.
+
+A fixture that reports success it did not verify is the same fault as a guard that does
+(`check-mirror-drift.mjs`, above). The seed now proves the user signs in, so a sign-in failure
+after the restore is the restore's.
+
+## A restored Vault decrypted nothing
+
+**Where the fix lives:** `scripts/backup-service.mjs`, which archives pgsodium's root key as the
+`vault-key` component through the dump's own superuser session (`pg_read_file` against the data
+directory); `scripts/rehearse-restore.sh`, which puts it on the fresh volume and restarts the
+server before the dump; `scripts/restore-databases.sh`, step 5, which reads
+`vault.decrypted_secrets` and names the missing step when it cannot.
+**Symptom:** after a restore into a fresh stack, every Vault row was present and
+`pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext` answered any read of it.
+
+The root key is on the database's data volume, where an earlier incident moved it from the
+container. A pg_dump carries the ciphertext and not the key, a fresh server mints a key of its own
+on first start, and the two never meet: the rows restore, and nothing can read them. Most of
+Vault's rows are re-seeded from the chart's values by the migration chain on the next boot; the
+cold archive's S3 secret, typed on the page, is not, and a restore that loses it loses the
+archive.
+
+The rehearsal found it on its first pass through the assertions, with every count identical
+either side of the restore, because it decrypts a canary it wrote before the backup rather than
+counting the rows that hold it. The key was never going to be in a dump; it had to be made a
+component of the backup.
+
+## A worker that logged nothing looked like one nobody had asked for
+
+**Where the fix lives:** `ingestion/capture_worker.py` and `ingestion/playback_worker.py`, which
+take their logger from `logging_config.get_logger()` rather than `logging.getLogger(__name__)`.
+**Symptom:** the capture worker started, ran and said nothing at all.
+
+The daemon configures **named** loggers and sets `propagate = False` on them. A module logger made
+the standard-library way is not one of those names, so it has no handler, propagates to a root that
+has none either, and its INFO and DEBUG lines are discarded. Only WARNING and above escape, through
+Python's `lastResort` handler, unformatted and on stderr.
+
+That is the failure the feature exists to avoid arriving in the feature itself: a stack where
+captures were quietly failing looked exactly like a stack where nobody had asked for a capture.
+Both workers log under the `ingestion` name rather than one of their own, so a capture or playback
+line appears in the same stream, with the same format, as the ingestion happening alongside it.
+
+## A storage client that quietly read as `anon`
+
+**Where the fix lives:** `ingestion/capture_worker.py` and `ingestion/playback_worker.py`, which
+build a second Supabase client for storage with the worker's key rather than reusing the shared one.
+**Symptom:** a refusal naming row-level security, on a bucket whose policy was correct.
+
+`client.storage` keeps the key the client was **constructed** with. Calling `.auth()` on the
+PostgREST sub-client re-authenticates that sub-client and nothing else, so a worker that signed in
+correctly still reached storage as `anon` — and said nothing about it. The policy was right, the
+identity was wrong, and the error named the policy.
+
+The same shape is why `.auth()` is called on the PostgREST sub-client rather than by setting a
+session header: `ingestion.py` records at length that setting the header instead silently sends the
+gateway key.
+
+## An empty credential file is the normal state, and reading it as malformed logged forever
+
+**Where the fix lives:** `ingestion/playback_worker.py`, whose credential reader treats an empty
+file exactly as it treats a missing one.
+**Symptom:** `ERROR` every three seconds, forever, on any stack that had never issued a playback
+credential.
+
+The reader handled a missing file as the ordinary "nothing delivered yet" case and reasoned about
+it at length. On a cluster the file is never missing: the chart creates `playback_credentials.json`
+as a key of the broker's credential Secret on every install, and the projection mounts it whether or
+not anything has been delivered. So the state a fresh stack actually presents is **present and
+empty**, which fell through to the malformed arm and logged an error on every poll.
+
+Absent has two forms and both are normal. Unreadable or malformed is still an error, because that
+is a delivery that happened and did not arrive — but training an operator to ignore this log would
+have cost them the real refusals carried in the same stream.
+
+## A playback published an entire capture into a closed socket and reported success
+
+**Where the fix lives:** `ingestion/playback_worker.py`, which captures the CONNACK return code on
+paho's network thread and waits for it before a single message counts as sent.
+**Symptom:** a job that ran to completion, reported the full `messages_sent`, and moved nothing.
+
+`client.connect()` returns once the TCP handshake is done; the CONNACK arrives later, on the network
+loop. A **wrong** password therefore gets past a check for a missing one, connects at the socket
+level, is refused with `rc=5` — and every QoS 0 publish after that is dropped locally, with no error
+anywhere to catch.
+
+The credential check that precedes it cannot see this case and its own comment says so: it refuses a
+password it does not hold, and a stale password is not a missing one. That is the ordinary state
+after a credential is re-minted and the worker is not restarted, which is the ordinary way of
+rotating one, and how this was found. `rc` 4 and 5 are named separately from the rest because they
+are the two an operator fixes by rotating the credential and restarting, rather than by looking at
+the broker.
+
+## A recorder that understood one encoding reported the fleet as idle
+
+**Where the fix lives:** `ingestion/capture.py`, whose recorder keeps whatever arrived and whose
+`play` re-encodes each message into the encoding it was recorded in.
+**Symptom:** a capture of a busy stack came back empty, and the tool reported the fleet as idle.
+
+The first version understood protobuf only. Both encodings are live traffic here — the Node-RED
+simulator flow publishes JSON, Remote gateways publish protobuf — and they enter the daemon down
+different branches of `parse_sparkplug_payload()`. The recorder skipped every message the seeded
+fleet published and said nothing was there.
+
+That both were in use was not obvious and was found by recording. It is also why playback re-encodes
+rather than normalising: replaying a JSON fleet as protobuf would mean a fault reproduced through
+this tool could be one the playback introduced, or one it silently repaired. The encoding is part of
+what was observed, so it is part of what is replayed.

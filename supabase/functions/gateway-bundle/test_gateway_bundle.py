@@ -37,12 +37,12 @@ REMOTE_GW = "2c000000-0000-4000-8000-000000000001"
 HOST_GW = "2b000000-0000-4000-8000-000000000001"
 
 ACCOUNTS = {
-    "Administrator": "admin@acs-cymru.local",
-    "Shopfloor_Manager": "manager@acs-cymru.local",
-    "Operator": "operator@acs-cymru.local",
-    "Auditor": "auditor@acs-cymru.local",
+    "Administrator": "admin@aber.local",
+    "Shopfloor_Manager": "manager@aber.local",
+    "Operator": "operator@aber.local",
+    "Auditor": "auditor@aber.local",
 }
-PASSWORD = os.getenv("ACS_DEMO_PASSWORD", "acscymru123")
+PASSWORD = os.getenv("ABER_DEMO_PASSWORD", "aber123")
 
 
 def rest(path, method="GET", body=None, bearer=None, prefer=None):
@@ -54,7 +54,7 @@ def rest(path, method="GET", body=None, bearer=None, prefer=None):
             "apikey": PUBLISHABLE_KEY,
             "Authorization": f"Bearer {bearer or SERVICE_ROLE_KEY}",
             "Content-Type": "application/json",
-            "X-ACS-Cymru-Actor": "service",
+            "X-Aber-Actor": "service",
             **({"Prefer": prefer} if prefer else {}),
         },
     )
@@ -212,7 +212,7 @@ class TestReadiness(BundleBase):
     def test_the_probe_answers_promptly_and_says_why_when_it_withholds(self):
         """
         THE READINESS ANSWER REACHES THE PAGE ON LOAD, so it must not be able to hang. It now
-        fetches ACS_CA_URL the way stage 0 does -- with redirects disabled, because `curl -fsSL`
+        fetches ABER_CA_URL the way stage 0 does -- with redirects disabled, because `curl -fsSL`
         follows none, and a deployment that redirects HTTP to HTTPS on the dashboard's host would
         otherwise mint a command that stops on its first clause, on the appliance, saying only that
         a certificate could not be installed.
@@ -299,12 +299,12 @@ class TestArchiveIntegrity(BundleBase):
     def test_binary_response_headers(self):
         self.assertEqual(self.headers["content-type"], "application/zip")
         self.assertIn("attachment; filename=", self.headers["content-disposition"])
-        self.assertRegex(self.headers["content-disposition"], r'filename="acs-gateway-[\w.-]+\.zip"')
+        self.assertRegex(self.headers["content-disposition"], r'filename="aber-gateway-[\w.-]+\.zip"')
         # A bundle carries a live claim; nothing may keep a copy.
         self.assertIn("no-store", self.headers["cache-control"])
         # The expiry rides in a header because a binary body has nowhere to carry it.
-        self.assertIn("x-acs-token-expires-at", self.headers)
-        self.assertIn("x-acs-bundle-version", self.headers)
+        self.assertIn("x-aber-token-expires-at", self.headers)
+        self.assertIn("x-aber-bundle-version", self.headers)
 
     def test_is_a_valid_zip(self):
         # The literal PK signature, then a real structural check. A text-decoded archive is the
@@ -317,7 +317,7 @@ class TestArchiveIntegrity(BundleBase):
         archive = zipfile.ZipFile(io.BytesIO(self.body))
         names = archive.namelist()
         folder = names[0].split("/")[0]
-        self.assertTrue(folder.startswith("acs-gateway-"))
+        self.assertTrue(folder.startswith("aber-gateway-"))
 
         for required in (".env", "docker-compose.yml", "Dockerfile",
                          "bootstrap.mjs", "flows.template.json", "README.md"):
@@ -360,26 +360,26 @@ class TestTokenEmbedding(BundleBase):
         _, body, headers = download(REMOTE_GW, self.tokens["Administrator"])
         env = self.env_of(body)
 
-        token = re.search(r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", env, re.M)
+        token = re.search(r"^ABER_ENROLLMENT_TOKEN=([0-9a-f]{64})$", env, re.M)
         self.assertIsNotNone(token, "the bundle carries no enrolment token")
 
         # THE BUNDLE CONTAINS A CLAIM, NOT A CREDENTIAL. There must be no broker password in it:
         # the appliance obtains one for itself at first boot, which is the entire reason a
         # short-lived single-use token is used instead.
         self.assertNotRegex(env, r"(?i)mqtt_password")
-        self.assertNotRegex(env, r"(?i)^ACS_MQTT_PASS")
+        self.assertNotRegex(env, r"(?i)^ABER_MQTT_PASS")
 
-        self.assertIn("ACS_SUPABASE_PUBLISHABLE_KEY=", env)
+        self.assertIn("ABER_SUPABASE_PUBLISHABLE_KEY=", env)
         self.assertIn("NODERED_CREDENTIAL_SECRET=", env)
         # The address the APPLIANCE dials -- never the in-stack one, which resolves nowhere useful.
-        url = re.search(r"^ACS_SUPABASE_URL=(.+)$", env, re.M).group(1)
+        url = re.search(r"^ABER_SUPABASE_URL=(.+)$", env, re.M).group(1)
         self.assertNotIn("supabase-kong", url)
         self.assertNotIn("127.0.0.1", url)
 
     def test_the_embedded_token_matches_the_stored_hash(self):
         """The token in the file is the one the database will accept -- not merely well-formed."""
         _, body, _ = download(REMOTE_GW, self.tokens["Administrator"])
-        token = re.search(r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(body), re.M).group(1)
+        token = re.search(r"^ABER_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(body), re.M).group(1)
 
         _, rows = rest(
             "/rpc/consume_gateway_enrollment_token", method="POST", body={"p_token": token},
@@ -409,11 +409,11 @@ class TestTokenEmbedding(BundleBase):
         """
         _, first, _ = download(REMOTE_GW, self.tokens["Administrator"])
         first_token = re.search(
-            r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(first), re.M).group(1)
+            r"^ABER_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(first), re.M).group(1)
 
         _, second, _ = download(REMOTE_GW, self.tokens["Administrator"])
         second_token = re.search(
-            r"^ACS_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(second), re.M).group(1)
+            r"^ABER_ENROLLMENT_TOKEN=([0-9a-f]{64})$", self.env_of(second), re.M).group(1)
 
         self.assertNotEqual(first_token, second_token)
 

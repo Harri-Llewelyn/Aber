@@ -4,9 +4,14 @@
 # server's version, and this is the image the server runs. It is also why the historian's major
 # is capped by whatever supabase/postgres ships (see the chart's backup CronJob).
 #
-# THE TAG MUST MATCH docker-compose.yml AND THE CHART. scripts/check-image-tag-parity.mjs couples
-# this FROM to the supabase-db image Compose runs, the same way it does supabase/db-init.
-FROM supabase/postgres:17.6.1.160
+# THE TAG MUST MATCH THE CHART'S supabase-db PIN. check-docs-drift.mjs couples this FROM to
+# `supabaseDb.image.tag` in values.yaml, the same way it does supabase/db-init.
+FROM supabase/postgres:17.6.1.175
+
+# gosu is the base entrypoint's tool for starting postgres as root and dropping to the postgres user.
+# This image never starts postgres -- the chart's command is node -- and the binary carried the
+# image's only fixable findings, a stale Go toolchain (#347). Removed rather than carried.
+RUN rm /usr/local/bin/gosu
 
 # Alpine. node runs the service; sqlite3 takes the consistent copy of the forge's database; GNU
 # tar (the package named `tar`) replaces busybox's for --exclude and a second -C.
@@ -17,5 +22,5 @@ RUN apk add --no-cache nodejs sqlite tar
 # pg_dump needs them; the image boundary and the absence of a published port are what confine it.
 USER root
 
-# No CMD: both targets supply `node /scripts/backup-service.mjs`, keeping the script bind-mounted
-# (Compose) or ConfigMap-mounted (Kubernetes), as gateway-credential does.
+# No CMD: the chart supplies `node /scripts/backup-service.mjs` and mounts the script from a
+# ConfigMap, as gateway-credential does, so it is editable without a rebuild.

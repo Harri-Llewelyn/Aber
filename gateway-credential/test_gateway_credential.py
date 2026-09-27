@@ -27,7 +27,7 @@ regresses:
     pin or a stale certificate here reaches every converging appliance as a bundle it refuses --
     or, worse, one it accepts and then cannot connect through.
 
-Requires the stack up (Compose, or a cluster with ACS_STACK=k8s) and MQTT_CREDENTIAL_SERVICE_TOKEN:
+Requires the stack up on a cluster, and MQTT_CREDENTIAL_SERVICE_TOKEN:
 
     MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 """
@@ -48,7 +48,7 @@ except ImportError:  # the pin assertion skips; every other assertion here stand
     serialization = None
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
-import stack_exec  # noqa: E402  -- docker exec on Compose, kubectl exec on Kubernetes (ACS_STACK)
+import stack_exec  # noqa: E402  -- kubectl exec against the workload that holds the container
 
 TOKEN = os.getenv("MQTT_CREDENTIAL_SERVICE_TOKEN", "")
 
@@ -146,7 +146,7 @@ def publish_as(username, password):
         "broker", "mosquitto_pub",
         "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
         "-u", username, "-P", password,
-        "-t", f"spBv1.0/ACS-Cymru/DBIRTH/{username}/probe", "-m", "x",
+        "-t", f"spBv1.0/Aber/DBIRTH/{username}/probe", "-m", "x",
     )
 
 

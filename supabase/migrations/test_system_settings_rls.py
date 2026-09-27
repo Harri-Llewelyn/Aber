@@ -35,7 +35,7 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 
 # SELF-SEEDED, NOT THE DEMO PERSONAS, and that is not a stylistic choice. CI's RLS job applies the
 # migrations and deliberately NOT seed.sql -- the base image's legacy `auth.users` lacks columns
-# the seed writes -- so `admin@acs-cymru.local` does not exist there. A suite depending on it
+# the seed writes -- so `admin@aber.local` does not exist there. A suite depending on it
 # passes locally against a seeded stack and fails in CI, which is the worst available direction:
 # the failure looks like the policy and is actually the fixture. Same approach as
 # test_user_roles_rls.py, which seeds its own rows for the same reason.

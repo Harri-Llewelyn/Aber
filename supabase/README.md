@@ -16,25 +16,17 @@ foreign-data-wrapper view.
 
 ## Migration Baseline
 
-Squashed **twice**. The pre-beta chain became `0001`/`0002` for the public beta; the 72-file chain
-that grew on top of it was squashed back into the same two files, leaving a short corrective tail.
+Squashed **three times**. The pre-beta chain became `0001`/`0002` for the public beta; the 72-file
+chain that grew on top of it was squashed back into the same two files with a tail of nine; and the
+70 files that grew on top of *that* were squashed back into the same two again, with a tail of one.
 
 | File | Contents |
 | :--- | :--- |
+| `0000_a_database_from_before_the_fold.sql` | The whole corrective tail: every subtraction the baseline cannot express, plus the one conversion it cannot describe |
 | `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants, the FDW, the Realtime publication |
 | `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalogue, settings, secrets, cron, the Playback gateway |
-| `0004_drop_gateway_ip_address.sql` | Removes a column nothing read |
-| `0005_digital_thread_signal_and_attribution.sql` | Purges audit rows that record no change |
-| `0016_directory_service_cleanup.sql` | Removes and renames seeded directory entries |
-| `0020_cleanup_legacy_simulator_seed.sql` | Deletes the single-device simulator's assets |
-| `0028_platform_alerts_migration.sql` | Drops `device_alerts` after moving its rows |
-| `0040_retire_demonstration_seed.sql` | The one-shot purge of the four-cell demonstration floor |
-| `0049_documents_become_links.sql` | Drops `documents` after the rename to `links` |
-| `0053_one_shot_ledger_is_not_writable.sql` | Withdraws write access to the one-shot ledger |
-| `0069_the_two_roles_stop_being_the_same.sql` | Removes the permissions that made two roles one |
-| `0073_the_shopfloor_ships_empty.sql` | Retires the last demonstration schemas |
 
-### Why those nine survived the squash, and nothing else did
+### Why the tail is one file, and why it sorts before the baseline
 
 **A squash can only fold what a fresh install would do anyway.** The baseline states the shape a
 new database is built into, so anything ADDITIVE — a table, a column, a function, a seeded row —
@@ -42,19 +34,33 @@ folds into it and the old file is redundant. What cannot fold is a SUBTRACTION: 
 NOT EXISTS` does not remove a column that already exists, and a baseline that simply never mentions
 `gateways.ip_address` leaves the column sitting on every database that already has one.
 
-So every file above either drops something, deletes rows, or withdraws a privilege. Each is a
-no-op on a fresh install and the repair on an existing one. `0053` is the subtle member: `0040`
-creates the one-shot ledger and grants `service_role` full rights on it, and `0053` is what takes
-them away — fold `0053` and the grant comes back on every boot.
+The second squash kept nine files applied for that reason, and it could, because each of those nine
+was a small file whose *only* content was its subtraction. **The third could not.** Its
+subtractions live inside large feature migrations, and a feature migration replayed after the
+baseline **reverts** it: `0108` declares `may_decide_proposal()` as it stood at `0108`, the baseline
+declares it as it stands now, and the chain runs the baseline first. Kept as they were, the seven
+candidate files left nine functions, two comments and a lane list at their older definitions —
+which is exactly what the equivalence check reported the first time it was run against the fold.
 
-### The four rules the next fold carries in
+So the subtractions were lifted out into `0000`, which holds nothing else. It sorts **before**
+`0001` rather than after, and has to: it converts `digital_thread` from an ordinary table into a
+partitioned one, and the baseline describes it already partitioned — `CREATE TABLE … PARTITION OF`
+fails against a database that has not been converted. Once the first block has to run early they
+all may as well, and running early is what makes the `archive.bucket` block correct: it decides by
+asking whether `system_settings.sensitive` exists yet, which is precisely "has the new schema
+arrived", and only `0000` can still ask it.
 
-Three more were found the hard way after the second squash, and a fold that ignores any of them
-rebuilds the thing it was run to remove. The tail already holds two examples: `0088` drops and
-re-adds `change_proposals_entity_type_known` with three lanes and `0090` widens it to seven two
-files later, so on a database holding a cells proposal the re-add scans the rows, fails, and aborts
-db-init with every file after it; and `0097` re-adds the integer `cells.floor` on every boot while
-`0098` drops it again.
+`0000` is not a precedent for a second pre-baseline file. It is a tail like any other, meant to be
+folded away by the next squash.
+
+### The five rules the next fold carries in
+
+Four were found the hard way across the second and third squashes, and a fold that ignores any of
+them rebuilds the thing it was run to remove. The second squash's tail held two examples: `0088`
+dropped and re-added `change_proposals_entity_type_known` with three lanes and `0090` widened it to
+seven two files later, so on a database holding a cells proposal the re-add scanned the rows,
+failed, and aborted db-init with every file after it; and `0097` re-added the integer `cells.floor`
+on every boot while `0098` dropped it again.
 
 1. **An additive change folds; a subtractive one waits.** A new table, column, function or seeded
    row goes in a new numbered migration and folds into the baseline at the next squash, because a
@@ -69,6 +75,13 @@ db-init with every file after it; and `0097` re-adds the integer `cells.floor` o
 4. **No file re-asserts an absolute set that a later file widens.** A `CHECK` naming every legal
    value, or a self-check counting every expected permission, is correct on the boot it is written
    and wrong on the first boot after something is added.
+5. **A tail file carries its subtraction and nothing else.** Anything additive left in it is
+   replayed *after* the baseline and silently reverts whatever the baseline had brought forward.
+   The corollary is where the tail earns its keep: a fold that NARROWS a view or a function
+   signature cannot be reached by the baseline at all, because `CREATE OR REPLACE VIEW` will not
+   drop a column and `CREATE OR REPLACE FUNCTION` will not change a return type. The tail drops;
+   the baseline rebuilds.
+
 
 ### The baseline is generated, and the equivalence is checked
 
@@ -77,9 +90,27 @@ into idempotent form. That is what makes every function appear **exactly once, i
 — `log_digital_thread_event()` was declared five times across the chain, so four of the five bodies
 a reader could find were dead, with nothing in the file to say which.
 
-`scripts/verify-schema-equivalence.mjs` is the acceptance test: it builds a database from each of
-two chains and asserts they arrive at the same schema and the same seed rows. The squash was landed
-on its verdict — 72 files and 11 build the identical schema `623d6f6059e2`.
+`scripts/generate-baseline-section.mjs` performs the rewrite, and exists because the first two
+squashes did it by hand and left nothing behind — so the form had to be re-derived from the
+previous baseline each time, and the traps below had to be rediscovered with it.
+`supabase/migrations/archive/README.md` has the procedure and the eight faults only the acceptance
+test caught.
+
+`scripts/verify-schema-equivalence.mjs` is that acceptance test: it builds a database from each of
+two chains and asserts they arrive at the same schema and the same seed rows. Each squash was
+landed on its verdict — 72 files and 11 built the identical schema `623d6f6059e2`; 73 and 3 build
+`f2b23af251f4`, over 19 non-empty seed tables. The 73rd is `gateways.is_virtual` being retired,
+which this fold performs and the chain it replaces did not, so the oracle carries it too.
+
+**And a database UPGRADED through the fold reaches the same digest**, which is new: a floor-era
+database given `0000`/`0001`/`0002` dumps identically to a fresh install of them. Neither earlier
+squash could have done that, and the rehearsal that proves it is what found out why — see
+`supabase/migrations/archive/README.md`, "What an upgrade needs that a dump does not contain".
+
+**One table is deliberately not compared.** `one_shot_migrations` records which one-shot migrations
+have *run*, not what the schema declares; a one-shot folded into the baseline has no claim left to
+make, and seeding a row on its behalf would forge a claim for a file that is not in the chain. The
+counts are printed under their own heading rather than passed over in silence.
 
 **Five things a dump cannot express**, all of them hand-carried into `0001` and each found by a
 failing run rather than by inspection:
@@ -106,6 +137,26 @@ recorded 2, because its ordering meant most seeding happened before the triggers
 They are written **once, on first boot** — every statement is `ON CONFLICT`, so a replay matches no
 rows and adds nothing, and the count holds across restarts. Treat them as a receipt that the seed
 ran and what it inserted, not as a per-boot health signal.
+
+#### A setting is declared once
+
+`seed_setting()` is the one seed whose `ON CONFLICT` is `DO UPDATE` rather than `DO NOTHING`: an
+operator's `value` has to survive a replay, but the label and the prose beside it have to be
+correctable from a migration. The `UPDATE` is guarded on all five metadata columns, so a
+declaration that changes nothing writes nothing — no row version, no stamp trigger, no audit row.
+
+That guard does not make a **second declaration** safe, and nothing can. Two files declaring the
+same key with different prose both write a real change, in file order, on every boot: the later
+sentence lands, the next boot puts the earlier one back, and `digital_thread` — append-only and
+partitioned by month because it only grows — accumulates two edits a boot to a setting nobody
+touched. `archive.enabled` did this between `0002` and `0132` until the sentence was folded back
+into `0002` (#356). Correct a setting's prose **where it is declared**; a second `seed_setting()`
+for a key already declared is the defect, not the fix.
+
+Two guards report it. `scripts/check-docs-drift.mjs` reads the declarations out of the chain and
+fails on a key declared twice, which is the one that runs at pull-request time and needs no cluster;
+`scripts/check-migration-idempotency.mjs` catches it as rows appended to `digital_thread` across a
+replay, which is later but does not depend on the declaration being recognisable to a regex.
 
 ### Prefixes must be unique, and the order is the filename
 
@@ -139,7 +190,7 @@ shrinks and base64 adds a third on top of each: 464 KB of a 1,213,920-byte relea
 1,048,576 limit, and `helm install` failing with
 
 ```
-Secret "sh.helm.release.v1.acs-cymru.v1" is invalid: data: Too long
+Secret "sh.helm.release.v1.aber.v1" is invalid: data: Too long
 ```
 
 which names the Secret and nothing about migrations. Un-gzipping is worse in both directions at
@@ -186,7 +237,7 @@ flaky quarantine bugs**, because on a runner where db-init won the race the whol
 - **The clear matters as much as the stamp.** A row left complete by the previous boot would
   satisfy the gate instantly while a `helm upgrade` replayed the chain — the identical race, one
   deployment later.
-- **`SELECT 1/count(*) …` is deliberate.** `acs-cymru.waitForPostgres` reads the **exit code**, and
+- **`SELECT 1/count(*) …` is deliberate.** `aber.waitForPostgres` reads the **exit code**, and
   a query matching no rows still exits 0 — which is why the old probe could not have expressed "and
   the chain has finished" whichever table it named. The division makes an empty result an error.
 
@@ -372,7 +423,7 @@ i3X `sourceTypeId`.
 **One inconsistency this surfaced and deliberately did not fix.** `0002`'s rows mint semantic ids
 *path-shaped* (`…/mtconnect/v2.0/Axes/C/ANGLE`) where `mtconnect_vocabulary` mints them
 *type-shaped* (`…/mtconnect/v2.0/DataItemType/ANGLE`). Both are under the locally-minted
-`acs-cymru.local` namespace, so neither asserts a false interoperability and neither is wrong —
+`aber.local` namespace, so neither asserts a false interoperability and neither is wrong —
 they are two conventions for the same thing, and `0002`'s predates the vocabulary tables.
 Reconciling them is deprecate-and-supersede with its own reasoning to write.
 `test_metric_catalog_seed.py` scopes its provenance assertions to the rows `0018` owns for exactly
@@ -431,6 +482,55 @@ from one group to a request from another — precisely the collision this closes
 > **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
 > `0001` no longer carries a second, explicit-column copy of the view — see below.
 
+### The group belongs to the site, and is fixed at install (`0131`)
+
+`gateways.sparkplug_group` defaulted to the literal `ACS-Cymru` — the platform vendor's name — so
+every site published its own machine data under it. The group is the first segment of the namespace
+a plant's data lives in, and it belongs to the plant.
+
+It is now `ingestion.sparkplugGroup` in the chart, and it has **no default**: the render refuses
+until the site names one, as it does for `ingestion.primaryHostId`. `0131` seeds it into the
+`sparkplug.group_id` setting on the first boot, and the column defaults to
+`sparkplug_group_default()`, which reads that row and raises if it is absent.
+
+**The setting is read-only and a mismatch raises**, which are two halves of the same decision.
+Changing the group at runtime splits the topic tree at that instant: everything published before is
+under the old group and everything after under the new one, with in-flight gateways still on the
+old one until each is reconfigured. That is a migration, not a preference. So `system_settings`
+gained a `read_only` column with a trigger that refuses a value change, and a boot whose chart value
+differs from the stored one **aborts db-init** rather than quietly re-pointing the column.
+
+Passing no `sparkplug_group` is not a mismatch: the migration falls back to the same default the
+chart ships, which is what leaves the throwaway database and the CI lanes unaffected.
+
+**The default moved with the platform's name at 1.0 (`0003`).** A stack installed before then holds
+`ACS-Cymru` in the setting and in every gateway row that took the default. That one pair — stored
+`ACS-Cymru`, chart `Aber` — is the rename rather than a disagreement, so `0002`'s check lets it
+through and `0003` moves the setting and those rows on the same boot, and only those: a site that
+pinned `ingestion.sparkplugGroup: ACS-Cymru` keeps it, and a gateway on some other group keeps that.
+The physical gateways are re-pointed by hand, as the last move (archived `0015`) required, and the
+order of operations is in [`docs/upgrades.md`](../docs/upgrades.md).
+
+#### Changing it deliberately
+
+There is no supported in-place change, and the procedure below is a fleet reconfiguration rather
+than an edit. In order:
+
+1. Stop the ingestion daemon, so nothing is resolving against a moving target.
+2. `UPDATE public.system_settings SET read_only = false WHERE key = 'sparkplug.group_id';` then set
+   the value, then set `read_only` back. Both statements run as `postgres`; the guard is a trigger,
+   not a policy, so `service_role` does not bypass it.
+3. Set `ingestion.sparkplugGroup` to the same value and `helm upgrade`. The broker's Directory grant
+   and the daemon's topic prefix are both derived from it, so they move together.
+4. `UPDATE public.gateways SET sparkplug_group = ...` for every gateway that should move. The column
+   is per-row on purpose: a gateway can stay in the old group while the rest move.
+5. Re-issue a bundle for every Remote appliance. The flow template carries the group as a literal,
+   substituted at bundle time, so a running appliance goes on publishing under the old one.
+
+**History is not rewritten and cannot be.** `resolve_gateway()` resolves on `(group, node)`, so rows
+written before the change stay addressed by the old pair. That is the cost the fixed-at-install rule
+exists to make visible before it is paid.
+
 ### The Directory reports liveness it observed (`0054`)
 
 `directory_services.status` and `.last_heartbeat` were **never written by anything**. The only
@@ -474,6 +574,26 @@ rather than keeping the last `ACTIVE` it was given — which would be a fabricat
 timestamp, the most convincing kind. `scripts/check-docs-drift.mjs` asserts every mapped job still
 exists in `prometheus.yml`; the issue that requested this named `kong`, which had already become
 `envoy` by the time it was built.
+
+### The Directory names the image each service runs (`0007_the_directory_names_the_image_each_service_runs.sql`)
+
+`directory_services.image` is the image reference the release deploys for a row's workload, and
+the Directory's Version column shows its tag. It comes from the chart, not from the cluster:
+
+- `aber.directoryImages` in `_helpers.tpl` renders a JSON map, component to image, using the same
+  expression each workload's own `image:` uses. A component the chart does not deploy is left out.
+- db-init passes it to every migration as `directory_images`. `0007` calls
+  `record_directory_images()` with it, which writes the sixteen chart-managed rows and clears any
+  whose component is absent. Rows registered by anything else are not touched.
+- A runner that passes no map (`npm run test:db`, `verify-schema-equivalence.mjs`) records nothing.
+
+So the column is the release's pin, recorded at each install and upgrade. It does not see a
+container that failed to roll out, or a mutable tag that now points at a different image.
+Host Metrics Exporter carries Alloy's image, because node_exporter's collectors run inside Alloy.
+
+The component list is written twice, as the `served_by` rows in `0007` and the helper's lists, and
+`check-docs-drift.mjs` holds the two equal and checks that each component is one the chart
+renders. Adding a row the chart deploys means adding it to both.
 
 ### Migrations that must run once, and the ledger that decides (`0040`, `0053`)
 
@@ -540,7 +660,8 @@ target gateway**, so the database says what it may do and the broker ACL says wh
 See [Machine identities](#machine-identities) for why the two never collapse into one credential.
 
 **`gateway_has_broker_credential()` exists because `gateway_holds_a_credential()` (`0038`) answers
-the opposite question.** The older predicate is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` —
+the opposite question.** The older predicate was `NOT g.is_virtual AND g.enrolled_at IS NOT NULL`, since translated to
+`deployment = 'remote'` —
 "a Remote gateway that completed enrolment" — which refuses every host-run gateway and admits
 only real hardware. For a playback target that is inverted twice over: the target is normally
 host-run, and real hardware is exactly what a playback must never publish as. `0041` had already
@@ -658,7 +779,7 @@ function that could turn a job the worker had already reported as sent into a fa
 second opinion about an event that is over. `0107`'s three arms are unchanged, and a self-check
 fails if either its `stop_requested` arm or the new column goes missing from the body.
 
-**Held and current are different facts (`0129`, [#217](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/217)).**
+**Held and current are different facts (`0129`, [#217](https://github.com/Harri-Llewelyn/Aber/issues/217)).**
 The broker keeps one password per gateway, so every mint after the first *replaces* one — and
 `playback_report_credentials()` carried edge-node ids and nothing else, which do not change on a
 rotation. The worker went on reporting a target it could no longer authenticate as, the dialog
@@ -689,7 +810,7 @@ the rollout that delivers the fix. `p_rotated` defaults for the same reason.
 
 `playback_report_credentials()` DROPs every existing declaration before creating, the way `0118`
 does: the baseline recreates the one-argument form on every boot, and two declarations make a call
-by name choose neither — which is what [#236](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/236)
+by name choose neither — which is what [#236](https://github.com/Harri-Llewelyn/Aber/issues/236)
 recorded for `playback_finish`. `start_playback_job()` keeps its signature, so its grants survive
 and no sweep is needed.
 
@@ -702,14 +823,14 @@ was correct until `0060` seeded a gateway that is *never* expected to heartbeat.
 
 **Nothing publishes as the `Playback` gateway until a playback runs**, which is deliberate — it is
 why `start_playback_job()` gates on credential possession rather than on `status = 'ONLINE'`. So it
-was permanently stale, permanently in the view, and `acs-gateway-stale` fired five minutes after
+was permanently stale, permanently in the view, and `aber-gateway-stale` fired five minutes after
 every boot and never cleared. `0061` adds `AND NOT g.is_shadow`, for exactly the reason `0029`
 already gives for archived appliances: *"alerting on it would train an operator to ignore the
 rule."*
 
 **`is_shadow`, and not one of the other three flags.** `is_simulated` is carried by every simulator
-gateway, and those do heartbeat — their silence is a real fault. `is_virtual` answers whether an
-appliance exists at all, not whether anything publishes as it. `is_archived` would mean
+gateway, and those do heartbeat — their silence is a real fault. `deployment` answers where the connector runs, not
+whether anything publishes as it. `is_archived` would mean
 archiving the gateway, which `0060`'s trigger forbids: it requires exactly one live shadow gateway
 to exist.
 
@@ -838,7 +959,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Multi-factor authentication ([#184](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/184)) and the audit-domain work both depended on this split — the MFA reset is gated on
+deploys flows. The repair is to make that person an `Administrator`. Multi-factor authentication ([#184](https://github.com/Harri-Llewelyn/Aber/issues/184)) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
 
@@ -965,7 +1086,7 @@ revoke last would destroy precisely those grants with nothing left to re-apply t
 **`PUBLIC` is deliberately absent from that list.** The image's recorded default for functions is
 `{postgres=X,anon=X,authenticated=X,service_role=X}` — `PUBLIC` is not in it — so revoking `PUBLIC`
 removes something never recorded and changes nothing, while PostgreSQL still applies its hardwired
-`EXECUTE`-to-`PUBLIC` to every new function. Verified against `supabase/postgres:17.6.1.160`: a
+`EXECUTE`-to-`PUBLIC` to every new function. Verified against `supabase/postgres:17.6.1.175`: a
 function created *after* such a revoke still comes out holding `=X/postgres`. What removes it is
 `0071`'s end-of-chain sweep, on the first boot as much as any later one — the two fixes are
 complementary, not alternatives.
@@ -1116,7 +1237,7 @@ guarantee and matches no rows on a settled database.
 carries no `sub` — so **every privileged write used to be logged anonymously** (58 of 65 rows on
 the audited database had `changed_by IS NULL`).
 
-`log_digital_thread_event()` now falls back to a session-local GUC, `acs_cymru.actor_id`, which
+`log_digital_thread_event()` now falls back to a session-local GUC, `aber.actor_id`, which
 `approve_quarantined_device()` sets with `SET LOCAL`. `auth.uid()` still wins when present — a
 direct PostgREST write by a signed-in user is already correctly attributed, and the GUC must not be
 able to override it.
@@ -1130,7 +1251,7 @@ action, silently, with no sign but a `changed_by` uuid belonging to nobody who w
 
 `is_machine_principal()` decides it, reusing `0042`'s predicate unchanged — no email, no password,
 no `auth.identities` row — because a second definition of "is this a service account" would be worse
-than the bug. A machine falls through to the `X-ACS-Cymru-Actor` header path and is recorded as what
+than the bug. A machine falls through to the `X-Aber-Actor` header path and is recorded as what
 it is, while `changed_by` still receives the principal. The row improved as well as being corrected:
 an ingestion write records `'ingestion'` **and** names the identity, where it used to record
 `'ingestion'` and `NULL`.
@@ -1408,6 +1529,36 @@ precedent `mutation_id` already set for `digital_thread.id`, and each tooltip na
 an id can be carried into a query without guessing.
 
 
+### The drawer knows how many rows a transaction wrote (`0006`)
+
+`digital_thread_page()` returns `transaction_rows` with each event: how many rows share its
+`causation_id`, counted over the whole table rather than the page, and `NULL` where there is no
+causation. `idx_digital_thread_causation` covers the lookup, so it is one index probe per row on
+the page.
+
+**Why the page could not work it out.** The drawer's "Same transaction" list is drawn from the
+loaded, filtered events. A transaction whose other rows are outside the entity or action filter, or
+on a page not yet fetched, looks identical to a single-row act, so the section hedged and offered
+"Show whole transaction" to every event, including the ones where it reloads the same single row.
+With the count known the three states are plain: one row, and nothing to offer; every row loaded,
+and the list is complete; rows missing, how many, and the control that loads them. The count chip
+is the transaction's size minus one, whatever is loaded. A server without the field gets the hedge
+back, because a bare sibling list is a lower bound again.
+
+**Counted under the caller's own policies.** The function is `SECURITY INVOKER`, so the subquery
+sees what `digital_thread_select_asset` and `digital_thread_select_security` admit. A
+Shopfloor_Manager's count omits the security lane, which is the number of rows "Show whole
+transaction" could load for them.
+
+**Deleted entities are counted, and the control now reveals them.** A delete's own row is about an
+entity no live table holds, so the default view hides it. The count includes it, and "Show whole
+transaction" turns the deleted-entities toggle on along with clearing the entity and action filters;
+otherwise a reader would be told a row is missing and shown no way to reach it.
+
+The CSV export carries the number as `transaction_rows` beside `transaction_id`.
+`test_digital_thread_paging.py` covers the field; `digitalThreadCausation.test.jsx` the drawer.
+
+
 ### The lane a Manager was offered and denied (`0120`)
 
 **`audit_domain_for()` classifies every audit row into `asset` or `security`**, and
@@ -1494,8 +1645,8 @@ not have failed at write time but at `CREATE TRIGGER` time. That is the same sha
 `log_role_assignment()` a separate function for `user_roles`, whose key is `(user_id, role_id)`.
 
 **A third copy of the attribution ladder was the obvious move and the wrong one.** That ladder is
-eighty lines deciding who a caller is — `auth.uid()`, then `acs_cymru.actor_id`, then the
-`X-ACS-Cymru-Actor` header, then the effective role — and the copy that already exists carries a
+eighty lines deciding who a caller is — `auth.uid()`, then `aber.actor_id`, then the
+`X-Aber-Actor` header, then the effective role — and the copy that already exists carries a
 deliberately reduced version that has to be kept in step by hand. `0122` makes the key column a
 trigger argument instead, defaulting to `id`, so the seven triggers already attached are untouched
 and a table keyed differently needs a trigger rather than a function.
@@ -1927,9 +2078,9 @@ out of the Capture page's subject tables. Starting a playback is unaffected — 
 
 ### Cold telemetry archival (`0068`)
 
-Raw telemetry used to leave one way: `timescaledb/retention.sql` adds a TimescaleDB retention
-policy that **drops** chunks past `TIMESCALE_RETAIN_FOR`, on a timer, recording nothing. Cold
-archival turns that delete into a move.
+Raw telemetry leaves the historian one of two ways: the raw window (`timescaledb.retention.retainFor`)
+**drops** chunks past it, or cold archival **moves** them. The window never drops a chunk archiving
+is waiting on; see *Raw telemetry is kept for a stated window*.
 
 **The ordering is the whole feature**, and it is enforced in three independent places rather than
 by a careful sequence in one file:
@@ -1963,19 +2114,247 @@ true"* — and the exporter runs as that role. `cold_tier_drop_verified()` is `S
 the daemon may *ask* for a drop the manifest has already cleared while holding no privilege to
 remove a row of its own choosing.
 
-**Its settings arrive with their reader**, which is `0031`'s rule and the reason there are three
-keys rather than six: `archive.enabled` (off by default), `archive.tier_after_days` and
-`archive.bucket`, all read by `ingestion/cold_archive.py`. There is no S3 endpoint key because this
-implementation writes to the platform's own object storage through the client
-`capture_worker.py` already uses; those keys belong to the migration that teaches it to use an
-external endpoint. **No credential key will ever be added** — every authenticated user can read
-`system_settings`, so secrets go to Vault through Studio.
+**Its settings arrive with their reader**, which is `0031`'s rule: `archive.enabled` (off by
+default), `archive.tier_after_days` and `archive.site_key`, all read by
+`ingestion/cold_archive.py`. **No credential key will ever be added** — every authenticated user
+can read `system_settings`, so no credential key is declared there and the endpoint and bucket are
+chart values rather than settings. The S3 secret itself lives in the Vault: `0134` seeds it once
+from `secrets.archiveS3SecretAccessKey` and never again, because an Administrator may have set it
+since through `set_archive_credential()` from the Cold Storage page, and `cold_archive.py` reads it
+back through `cold_archive_destination()`. #353 is where the rule that admits that writer is being
+settled. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
 
-**Enabling it means standing retention down.** Both mechanisms drop chunks, and the timer wins the
-race for anything the archiver has not reached: set `TIMESCALE_RETAIN_FOR=never` and let
-`python -m cold_archive --drop` remove chunks once their export is verified. `retention.sql` warns
-when it sees a manifest with rows and a drop policy being added, because that combination silently
-deletes what the archiver has not got to yet.
+#### The destination is somewhere else, and only somewhere else (`0132`)
+
+An archived object is **not a backup**: the raw chunk was dropped *because* this object was
+verified, so it is the only remaining copy of that span of history. Until `0132` it landed in the
+`telemetry-archive` bucket on the storage PVC — one local volume to another local volume, usually
+on the same node as the database the rows were rescued from, with the original deleted. A site
+loss took both.
+
+There is now no filesystem path, no local bucket and no fallback. "Remote" is not a property the
+code can check, and an optional remote destination is one nobody tests: it gets chosen at install
+by whoever wants fewest questions, and its worthlessness is discovered on the day it matters. One
+destination type means one code path, exercised at every site.
+
+#### Configuring it, which is a page and not a values file (`0134`)
+
+**Settings → Cold Storage**, as an Administrator: the S3 endpoint, region, bucket and access key
+ID. The **secret access key** is set on the Cold Storage page itself, because it is not a setting —
+it goes into the vault, and nothing reads it back.
+
+Those five rows are flagged `sensitive`, which is a column `0134` adds to `system_settings` and one
+clause on its SELECT policy: `USING (NOT sensitive OR has_role(ARRAY['Administrator']))`. Every
+other setting is unflagged, so an Operator's Settings page is unchanged; these five are invisible to
+them. That mechanism is the answer to a question `0132` got wrong — it put the whole destination in
+`values.yaml` because *one* of its fields is a secret, when an endpoint, a region, a bucket and a
+path style are not credentials and an access key *id* is an identifier (issue #351).
+
+**The chart values are a seed, not the source.** A new install can still be configured from
+`values.yaml`, and `0134` writes each field into its settings row *only while that row is empty* —
+so a chart value configures a fresh stack and never overwrites what an Administrator later set from
+the page:
+
+```yaml
+coldArchive:
+  s3:
+    siteKey: "broughton-7f3a9c21"          # frozen at the first boot that sets it; NOT editable
+    endpoint: "https://s3.eu-west-2.amazonaws.com"
+    region: "eu-west-2"
+    bucket: "plant-history"
+    accessKeyId: "AKIA..."
+    pathStyle: false                       # true for MinIO and most self-hosted gateways
+secrets:
+  archiveS3SecretAccessKey: "..."          # seeded into the vault on the first boot only
+```
+
+The **site key** is the exception and stays install-time: it is the IAM prefix every object is
+already addressed under, so it is frozen read-only by `0132` and changing it is a procedure rather
+than an edit.
+
+**Re-pointing a destination that has been written to is refused.** Change the bucket while `--drop`
+is on and the next run writes into an empty bucket while still deleting originals; `cold_archive
+audit` then reports every earlier object missing, and those objects are the only copies. So
+`archive_destination_guard()` refuses a change to the endpoint or bucket once the manifest holds
+anything. Setting one for the first time is not a change. If the historian cannot be reached the
+change is allowed with a warning rather than refused — an unrelated outage must not block
+first-time configuration.
+
+**The page reports the state it is in.** With archiving switched on and the destination incomplete,
+the Cold Storage page says so and lists what is missing, in the same words the exporter's own
+refusal uses. That combination — on, and unable to run — is otherwise a CronJob that fails nightly
+and deletes its own pod.
+
+"S3" names a protocol, not a vendor — AWS, Cloudflare R2, Backblaze B2, Wasabi and a MinIO in
+another building all serve it, and the code never knows which. Leave any of it unset and nothing is
+exported: the exporter names every missing variable and stops.
+
+**One requirement of the endpoint beyond the core API:** it must accept `x-amz-checksum-sha256` on
+`PutObject`, which is how the store is made to validate the payload rather than merely receive it.
+AWS, R2, B2 and MinIO releases from 2022 onward all do. An endpoint that rejects the header fails
+every upload with the chunk still in the hypertable — loudly, and losing nothing.
+
+**Under `networkPolicy.enabled` this needs an egress rule.** The chart cannot express a peer
+outside the cluster, so add the endpoint to `networkPolicy.extraEgress`. Without it every export
+fails at connect time, on a schedule, at 03:15.
+
+#### The object key, and why each segment is there
+
+```
+site=broughton-7f3a9c21/dataset=telemetry/v=1/year=2026/month=03/20260302T000000Z-20260309T000000Z.parquet
+```
+
+`key=value` directory names are read as columns by DuckDB, Spark and Arrow, so a reader skips whole
+prefixes without opening a file.
+
+- **`site=` is leftmost, and that is load-bearing.** An IAM policy scopes on a left-anchored
+  prefix, so anything to its left makes a per-site credential impossible to write. It is also what
+  makes one bucket safe for two sites: chunk numbering is per database, both fresh installs begin
+  at `_hyper_1_1_chunk`, and the upload overwrites without complaint.
+- **`dataset=`** leaves room for a rollup or a second hypertable without renaming what is written.
+- **`v=`** is the escape hatch: an incompatible change writes `v=2` and every existing reader keeps
+  working against `v=1`. Nothing is ever rewritten.
+- **The leaf is the time range, not the chunk.** `_hyper_1_42_chunk` says nothing to a human and
+  does not survive a restore into a fresh database. A range sorts lexically, describes itself, and
+  makes a retry produce the same key — which is what keeps overwrite-on-retry correct rather than
+  dangerous.
+
+**The month-boundary rule.** `year=`/`month=` come from `range_start`, and a chunk can span up to
+seven days, so a chunk can straddle a month: one beginning 29 March holds April
+readings under `month=03`. The manifest is the authoritative index; the partitions are a
+convenience for a reader that does not have it, and such a reader must widen by one partition on
+each side.
+
+#### The site key is frozen, and changing it is a procedure
+
+`archive.site_key` is seeded read-only by `0132` from `coldArchive.s3.siteKey` on the first boot
+that supplies one, and a later boot whose chart value differs **raises** rather than re-pointing
+the archive — objects already written live under the old prefix, renaming does not move them, and a
+new key would orphan every one of them while the manifest still pointed at the old.
+
+To change it deliberately, in this order, with the CronJob suspended:
+
+1. Copy every object under the old prefix to the new one at the provider, and widen the bucket
+   policy to admit both prefixes.
+2. On **the historian**, repoint the catalogue —
+   `UPDATE public.telemetry_archive_manifest SET object_key = replace(object_key, 'site=old/', 'site=new/')`.
+   Not through the `timescale.` foreign table: `fdw_reader` is read-only, by design.
+3. On the platform database, as `postgres` in Studio's SQL editor — not from the Settings page,
+   which has no control for a read-only row and no rights to the `read_only` column:
+
+   ```sql
+   UPDATE public.system_settings SET read_only = false WHERE key = 'archive.site_key';
+   UPDATE public.system_settings SET value = to_jsonb('new'::text) WHERE key = 'archive.site_key';
+   UPDATE public.system_settings SET read_only = true WHERE key = 'archive.site_key';
+   ```
+
+4. Set `coldArchive.s3.siteKey` to the new value and upgrade, or the next boot raises on the
+   disagreement — which is the check working.
+5. `python -m cold_archive audit` is what says it worked, and only then narrow the bucket policy
+   and remove the old prefix.
+
+#### The credential is a foreign one, and it cannot delete
+
+We cannot mint, rotate or revoke a key at another provider, so it sits with the SMTP relay password
+rather than with the principals this stack issues. Scope it to `PutObject` and `GetObject` on this
+site's prefix, with **no `DeleteObject`**:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["s3:PutObject", "s3:GetObject"],
+    "Resource": "arn:aws:s3:::plant-history/site=broughton-7f3a9c21/*"
+  }]
+}
+```
+
+That turns "the exporter writes and never deletes" from a comment into something the gateway is
+unable to break. With bucket versioning and Object Lock on top, a compromised gateway cannot
+destroy history at all — which is more than the PVC could ever offer, where root on the node was
+the end of the story.
+
+**Verification got cheaper and stricter at the same time.** The upload sends `ChecksumSHA256`, so
+the store validates the payload server-side and rejects a corrupt write before it becomes an
+object; `verified_at` is then set from a `HEAD` plus one ranged read of the Parquet footer —
+measured at **64 KiB to verify a 15.2 MiB object**, against the whole object coming back on the old
+path, and checking one thing more than that read-back could.
+`telemetry_archive_manifest.object_etag` has existed since the table did and is finally populated.
+
+#### What happened to the old bucket
+
+Nothing deletes a bucket, and this does not either. `telemetry-archive` is dropped from
+`scripts/storage-init.mjs` so no new install creates it, and `supabase/storage-policies.sql` drops
+its four policies explicitly — a policy the file no longer mentions is one nothing maintains, and
+it would otherwise survive every boot guarding a bucket nothing writes to. On an existing install
+the bucket is left with whatever it holds, for an Administrator to check against the remote
+endpoint and then empty from Studio.
+
+**AAS export bundles did not follow it.** They were stored under `assets/` in the same bucket while
+both were local, and they now have their own: `asset-exports`, with its own policies. They are not
+the same kind of object — a bundle is a copy somebody asked for, derived from rows still in the
+database, and it belongs on local storage where the browser can sign a URL for it. An existing
+install's bundles stay where they were written; `asset_exports.object_bucket` is per row, which is
+what makes that safe to say.
+
+#### Raw telemetry is kept for a stated window, with or without an archive
+
+**Raw telemetry is kept for 14 days; older readings are in the 1-minute, 5-minute and 1-hour
+rollups, and on cold storage while archiving is on.** That is the sentence the Cold Storage page
+states, read from the historian rather than restated here.
+
+The window is `timescaledb.retention.retainFor` (`14 days`; `never` keeps raw indefinitely). It is
+enforced by one job on the historian, `telemetry_raw_retention()` in
+[`timescaledb/retention.sql`](../timescaledb/retention.sql), not by TimescaleDB's retention policy,
+which drops on a timer with no knowledge of the archive. Each daily run drops the oldest chunks
+that ended more than the window ago, and stops at the first it may not drop:
+
+| Chunk | Archiving off | Archiving on |
+| :--- | :--- | :--- |
+| no manifest row | dropped | **kept**: not exported yet |
+| exported, not verified | **kept**: export in flight | **kept** |
+| verified | dropped, and stamped in the manifest | dropped, and stamped in the manifest |
+
+So an archive outage grows the historian's volume, which the Archive Backlog alert below reports,
+instead of the window deleting telemetry nothing exported.
+
+**"Archiving on" is what the archiver last reported**, because `archive.enabled` lives in this
+database and the historian cannot read it. `python -m cold_archive` reports it on every run
+(`cold_archive_report_armed()`), and only when it actually read the setting: an unreadable setting
+falls back to off, and reporting that would switch the protection off. Between switching archiving
+on and the archiver's next run (03:15 by default) the window still drops unexported chunks; the
+Cold Storage page says so while it lasts.
+
+Before 1.0 the window was derived from the chart's destination fields: `never` with a destination,
+90 days without. Since `0134` the destination is set on the page, so a stack configured there got
+the 90-day timer racing the archiver. **An upgrade from that chart drops raw telemetry older than
+14 days on the job's first run**; set `retainFor: "90 days"` before upgrading to keep it. A new
+install seeds `archive.tier_after_days` at 14 to match; an existing one keeps its value, which is
+safe either way, since a threshold longer than the window keeps raw longer rather than losing it.
+
+#### How far behind the archive is
+
+`cold_archive_backlog()` answers it, from the newest `range_end` this site has **verified**:
+everything after that point is telemetry no object is yet known to hold. Before the first export
+there is no frontier, so the answer is the oldest raw data there is
+(`storage_footprint.oldest_data`), and an archiver that has never reached its endpoint is reported
+rather than read as a healthy zero.
+
+It surfaces in two places, from one function so they cannot disagree:
+
+- **The Cold Storage page**, as *Unexported since* — the date the unexported span begins, with the
+  overdue figure and the threshold in its tooltip. Shown only while `archive.enabled` is on.
+- **The Archive Backlog alert** (`aber-archive-backlog`), through the `archive_backlog` condition on
+  `platform_health`, firing above **14 days past the threshold**, held level with the page's
+  tolerance by `check-docs-drift.mjs`.
+
+**Up to one chunk interval of backlog is normal**, and the threshold is chosen around that. Chunks
+are at most seven days (`timescaledb.retention.chunkInterval`'s ceiling) and
+`cold_tier_candidates()` bounds on `range_end`, so a chunk is not eligible until its whole span has
+passed the threshold: a healthy site sits between zero and seven days overdue. Fourteen is two of those — beyond anything the ordinary cadence produces, and still two
+weeks before a historian with retention off is short of disk. Alerting on any backlog at all would
+fire on every install, every week, correctly, and be switched off.
 
 ```bash
 python -m cold_archive --dry-run   # what would be exported
@@ -2042,15 +2421,27 @@ has `--csv`.
 
 ### Running it, and the switch that used to mean nothing
 
-The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_INTERVAL_SECONDS`
-(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It
-stays inert until the switch is turned on — which is what makes the switch a control rather than a
-note about a command somebody has to remember.
+**The chart runs the archiver as a CronJob** — `coldArchive`, on by default with `--drop` on: the
+ingestion image under `python -m cold_archive`, at `coldArchive.schedule` (03:15 daily). It re-reads
+`archive.enabled` every pass and does nothing while it is off, so it stays inert until the switch is
+turned on — which is what makes the switch a control rather than a note about a command somebody has
+to remember.
 
-> **The chart runs the archiver as a CronJob** (`coldArchive`, on by default, `--drop` on): the
-> ingestion image under `python -m cold_archive`, daily. `cold_archive.sql` is mirrored into the
-> chart and applied by the `timescaledb-maintenance` Job, between `storage.sql` and `roles.sql`, so
-> the manifest exists before the first run and `0068`'s self-check passes for the right reason.
+`cold_archive.sql` is mirrored into the chart and applied by the `timescaledb-maintenance` Job,
+between `storage.sql` and `roles.sql`, so the manifest exists before the first run and `0068`'s
+self-check passes for the right reason.
+
+To see what is eligible, or to force a pass:
+
+```bash
+kubectl exec deploy/ingestion -- python -m cold_archive --dry-run
+kubectl create job --from=cronjob/aber-cold-archive archive-now
+```
+
+> This paragraph described a `cold-archiver` Compose service running `--loop` on
+> `COLD_ARCHIVE_INTERVAL_SECONDS`. Both outlived Compose: no such container exists and that variable
+> is read nowhere in the tree. The Cold Storage page carried the same instruction and has been
+> corrected with it.
 
 It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
 replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.
@@ -2090,14 +2481,14 @@ between verification and the drop: data in **both** places, `verified_at` still 
 special case, it is the safest state in the flow, so `--drop` will remove the chunk again with no
 further work. The round trip closes rather than being one-way.
 
-### `deployment`, and the word it is replacing (`0064`)
+### `deployment`, and the word it replaced (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this
 row"* (`0025`, provisioning), *"this connector runs on the app host"* (`GatewaysTab.jsx`), and
 *"(Cloud / Server-Simulated)"* (the checkbox, which contradicts the second) — while **every**
 behaviour branching on it is about a fourth thing: whether there is a machine out on the plant
 network. That was a roadmap item, retired into
-[`deployment`, and the word it is replacing](#deployment-and-the-word-it-is-replacing-0064) below;
+[`deployment`, and the word it replaced](#deployment-and-the-word-it-replaced-0064) below;
 the bill arrived separately, as
 `gateway_holds_a_credential()` being the wrong predicate three times in `0056`, `0062` and `0063`.
 
@@ -2107,23 +2498,31 @@ runs, and a remote one is not something it can provision or reason about. Two co
 three-way enum, so the fourth combination stays *sayable*: folding them together would make a
 simulator on a separate load-generation box inexpressible.
 
-**The rename is not in that migration**, deliberately — 126 references across 47 files, and §15's
-own rule is that a rename beside a feature is a rename nobody reviews. Until it completes,
-`sync_gateway_deployment()` keeps the two columns in agreement in both directions, so every writer
-that still names `is_virtual` keeps working and gets the new column filled correctly.
+**The rename was not in that migration**, deliberately — 126 references across 47 files, and §15's
+own rule is that a rename beside a feature is a rename nobody reviews. For the releases it took to
+complete, `sync_gateway_deployment()` kept the two columns in agreement in both directions, so
+every writer that still named `is_virtual` went on working and got the new column filled
+correctly.
 
-**`0066` finishes it**: `gateway_health_rows()` moves last, because `is_virtual` was in its
+**`0000` finished it, at the third baseline squash**, which is where `0064` said the column would
+go: it survived that long only because two archived migrations named it in a function signature and
+replayed on every boot. `gateway_health_rows()` moves last, because `is_virtual` was in its
 `RETURNS TABLE` signature and a return type cannot be replaced in place — the function and the view
-built on it are dropped and recreated together. Then the transitional trigger goes, and the column
-with it. `gateway_status` has to be dropped first and rebuilt after: it is `SELECT g.*`, which
-PostgreSQL freezes into an explicit column list, and that frozen list is a hard dependency. The same
-fact that makes `ensure_gateway_status_view()` necessary when a column is *added* is what blocks a
-drop.
+built on it are dropped and recreated together, and the tail has to do the dropping because a
+generated baseline only ever declares. Then the transitional trigger goes, and the column with it.
+`gateway_status` has to be dropped first and rebuilt after: it is `SELECT g.*`, which PostgreSQL
+freezes into an explicit column list, and that frozen list is a hard dependency. The same fact that
+makes `ensure_gateway_status_view()` necessary when a column is *added* is what blocks a drop.
+
+One thing the drop had to carry with it: `deployment` is `NOT NULL` and had **no default**, because
+the trigger derived it from `is_virtual` on every INSERT. Removing the trigger without giving the
+column `DEFAULT 'remote'` — exactly what the trigger produced from `is_virtual`'s own default —
+breaks every writer that names neither, which is most of the test estate and `relocate_devices()`.
 
 Two things keep the old word: migration filenames (the chain is immutable) and every
 `CREDENTIAL_ISSUED` row written before `0065`. The third was
 `authorize_virtual_gateway_credential()`, held back because an RPC name is client-visible and
-renaming it is its own change. [`0130`](migrations/0130_the_gateway_types_keep_their_names.sql) is
+renaming it is its own change. [`0130`](migrations/archive/0130_the_gateway_types_keep_their_names.sql) is
 that change.
 
 ### The credential gate is named after the type it accepts (`0130`)
@@ -2164,12 +2563,14 @@ Two things `0065` records that are easy to miss:
   used to read `is_virtual`. A check that cannot tell a mention from a use forces documentation to
   be thinned to keep it quiet.
 
-**On UPDATE there is no conflict to resolve, and that is arithmetic rather than policy.** Both
-columns are two-valued and every row starts in agreement, so an update changing both necessarily
-flips both, which agrees again; a caller restating one column at its current value is
+**On UPDATE there was no conflict to resolve, and that was arithmetic rather than policy.** Both
+columns were two-valued and every row started in agreement, so an update changing both necessarily
+flipped both, which agreed again; a caller restating one column at its current value was
 indistinguishable from one that never mentioned it. The first version of the trigger guarded
-against a disagreement that cannot occur. On INSERT the rule is real, because `is_virtual` has a
-default: a row naming only `deployment` arrives with both set, and the one the caller chose wins.
+against a disagreement that could not occur. On INSERT the rule was real, because `is_virtual` had
+a default: a row naming only `deployment` arrived with both set, and the one the caller chose won.
+Recorded because the reasoning outlives the trigger — the same shape recurs whenever two columns
+are kept in step through a rename.
 
 ### Revocation reads that record, which is why it never worked (`0063`)
 
@@ -2256,7 +2657,7 @@ the wild with no record of it.
 
 The middle row used to read *10 years*, alongside a note that a short expiry would take the stack
 off the air "on a date nobody wrote down, and there is no refresh path". Half of that was right and
-the other half was the defect ([#101](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/101)):
+the other half was the defect ([#101](https://github.com/Harri-Llewelyn/Aber/issues/101)):
 
 * **There is a refresh path**, and building it was cheap because these keys are signed with
   `SUPABASE_JWT_SECRET` and **re-signing them does not rotate that secret**. A new token with a
@@ -2329,7 +2730,7 @@ that matters (the relations the i3X address space is assembled from are
 every RLS policy in the schema. **The fourth design is PostgREST's `db-pre-request`** — a function
 run in the caller's role before every request, which can `RAISE` and abort it, and which touches no
 policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
-`revoke_service_token()`; `PGRST_DB_PRE_REQUEST` names the hook on both targets.
+`revoke_service_token()`; `PGRST_DB_PRE_REQUEST` names the hook.
 
 **The key it needs had been recorded since `0043`.** Both host scripts stamp a `jti` and hand it to
 `record_service_token_issued()`, for an inventory that could not act on it.
@@ -2343,7 +2744,7 @@ expiry is still the only bound that reaches every service, which is why the 90-d
 **`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
 `SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
 the database". The extension is installed; the premise is not true — `SUPABASE_JWT_SECRET` is not in
-this database, and `vault` holds four secrets, none of them that one. Putting it there would let any
+this database, and nothing in `vault` is that one. Putting it there would let any
 path to SQL execution mint a `service_role` token, which is valid at the four services above and
 which `0074` cannot revoke. So the signing lives in
 [`mint-service-token`](functions/mint-service-token/index.ts), which already holds `JWT_SECRET`, and
@@ -2603,7 +3004,7 @@ that warning.
 
 Because each worker is isolated, shared code **cannot** be imported from a sibling directory — a
 worker only reads files beneath its own service path. That is why `resolveUserRole` and
-`sparkplugToXsd` are duplicated rather than extracted ([issue #9](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/9)).
+`sparkplugToXsd` are duplicated rather than extracted ([issue #9](https://github.com/Harri-Llewelyn/Aber/issues/9)).
 
 ### `approve_quarantined_device()`
 
@@ -2657,7 +3058,7 @@ control".
 **`status` is not writable through PostgREST at all.** An UPDATE policy can say who may write a
 row; it cannot say which columns, and a proposer who could set `applied` would hold the asset write
 the design exists to withhold. So the transition functions declare themselves with a session flag —
-the same mechanism `acs_cymru.actor_id` uses — and a trigger refuses every other path. A proposer
+the same mechanism `aber.actor_id` uses — and a trigger refuses every other path. A proposer
 may edit the `patch` and `rationale` of their own open row, which the caps make necessary rather
 than convenient: told "you already have an open proposal on this device", they have to be able to
 open it and add to it.
@@ -2700,7 +3101,7 @@ default applies only when the column is omitted, so a client that *sends* `propo
 keep its own value — and this table takes a direct PostgREST INSERT from any `Operator` by design.
 The trigger overwrites unconditionally, which is what `system_settings_stamp()` does to `updated_by`
 for the same reason. Measured on the shipped stack: a client sending `ceo@example.com` alongside a
-token for `stamp.probe@acs-cymru.test` stores the second. `0089`'s self-check fails if a `DEFAULT`
+token for `stamp.probe@aber.test` stores the second. `0089`'s self-check fails if a `DEFAULT`
 is ever added, because that would quietly turn the column back into a form field.
 
 **It is a label, not an identity.** Nothing authorises on it, `proposed_by` remains the key, and an
@@ -2801,7 +3202,7 @@ device lanes keep their role pair, because `device:manage` is held by exactly th
 rewriting them would be a no-op with a migration's blast radius.
 
 **What a gateway proposal may not name** is the security half, restated for a new table: not
-`deployment`, `is_virtual`, `is_simulated`, `is_shadow` or `sparkplug_group` — those describe what
+`deployment`, `is_simulated`, `is_shadow` or `sparkplug_group` — those describe what
 the gateway *is* and what it publishes under, and moving one re-points a broker topic namespace —
 and not `status`, `last_heartbeat`, `agent_version`, `cert_expires_at` or any health column, which
 are what the platform **observed**. A proposal able to edit those would let somebody assert a
@@ -2864,7 +3265,7 @@ entirely, so its own check is the only one there is.
 
 ### An archived schema stops taking new devices (`0093`)
 
-[Issue #167](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/167). Publishing v2 archives v1 and
+[Issue #167](https://github.com/Harri-Llewelyn/Aber/issues/167). Publishing v2 archives v1 and
 repoints every attached device in one transaction, so no machine is judged against a contract the
 platform has moved past. The Edit Details dropdown then offered v1 back — one device at a time, with
 nothing that would ever sweep it forward again. On a device set to `enforce`, being judged against
@@ -3009,6 +3410,40 @@ routing and authentication surface against a reviewed inventory, because `valida
 root by convention; the appliance's files reach the functions as a generated module under
 `_shared/`), so a rollback rolls the functions back with it.
 
+### What the file relies on that Envoy does not say
+
+The template's own comments state each route and filter; the semantics they depend on are these,
+because each one produces a stack that looks fine and is not when it is forgotten.
+
+- **Route order is first-match.** `/storage/v1/object/public/` precedes `/storage/v1/`, and the
+  userinfo paths precede `/functions/v1/`, so an exemption is a route placed before the gate.
+- **Realtime keeps its key and rewrites its Host.** The Realtime client puts the key in the
+  WebSocket URL's query string, so a header-only check leaves Realtime permanently 401; it also
+  parses the key, so the gateway replaces it with the JWT it stands for rather than stripping it.
+  Realtime reads its tenant from the leading Host label, so `host_rewrite_literal` is required.
+- **Credential hiding is per route.** Every other route strips the key from both the header and
+  the query string, because a query-string `apikey` reaching PostgREST is parsed as a column filter
+  (`PGRST100`).
+- **The Directory routes keep their path.** `main/index.ts` reads the first segment to pick a
+  worker, so the rewrite carries `/fplus-directory/` in front of the original path.
+- **SDS takes one secret per file.** A path config source carrying two resources is accepted at
+  boot and rejected at runtime, so each login listener reads its client secret and its HMAC secret
+  from separate files.
+- **The session cap is per door.** `default_refresh_token_expires_in: 3600s` matches
+  `GOTRUE_JWT_EXP` and re-derives who is at the keyboard hourly; it is set on the two login
+  listeners rather than stack-wide, which would also expire the wall-mounted dashboards.
+- **Cookies are scoped by host, not port.** The forge listener renames every cookie the `oauth2`
+  filter sets, because on `localhost` its door and Studio's would otherwise sign each other out.
+- **`%REQ_WITHOUT_QUERY%` is an extension.** The login listeners log the path without its query
+  because `/oauth2/callback` carries the authorization code there, and the formatter has to be
+  registered in the access log or Envoy refuses the whole configuration.
+- **The placement filter fails open on a 5xx.** `forge-membership` runs as `ext_authz` with
+  `failure_mode_allow`: a function that cannot answer lets the request through, because the role
+  in the token was already admitted by RBAC; a 403 and a 302 (a dead session, to
+  `/oauth2/signout`) are honoured, and only the `Authorization` header travels to it.
+- **Clusters are `STRICT_DNS`.** Envoy re-resolves on its refresh interval, and a recreated
+  container changes address.
+
 ### The second listener, which is Studio's login (`0081`)
 
 **The gateway carries a second listener on `8001`, and everything above describes the first.** They
@@ -3067,7 +3502,7 @@ password** while `pg_hba.conf` trusts `127.0.0.1` and requires `scram-sha-256` f
 network. Read-only mode was not too powerful; it did not work.
 
 That also inverts what the fix is. Setting `POSTGRES_USER_READ_ONLY` explicitly changes no
-behaviour — it names the value the image already defaults to, and is set on both targets so the
+behaviour — it names the value the image already defaults to, and is set explicitly so the
 dependency is visible rather than inherited. **What makes the difference is the password**, and it
 is issued in the roles-init step rather than here: `supabase_read_only_user` is a RESERVED role
 (`only superusers can modify it`), and `db-init` connects as `postgres`, which is not a superuser on
@@ -3286,7 +3721,7 @@ gateway's key, and the archive mark below.
 ### Archiving a gateway reaches the forge (`0114`)
 
 **Archiving a gateway archives its repository, which is the fourth thing it loses**
-([#197](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/197)). The key stops the appliance
+([#197](https://github.com/Harri-Llewelyn/Aber/issues/197)). The key stops the appliance
 reaching the repository and does nothing about the repository itself, which went on reading in the
 forge's own listing exactly like one in service — and the forge is where a gateway's flow and a
 plant's notes about it live, so it was the one place the archive was invisible. The sweep now sets
@@ -3326,7 +3761,7 @@ it: a sweep that could not reach the forge must not read as *the repository is g
 range older than the raw retention window returned nothing and reported *"No telemetry in that range
 for the selected metrics"* — a sentence describing a device that published nothing, when what
 happened is that the chunks were dropped and the data is still held in a rollup
-([#160](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/160)). To offer that rollup the dialog has
+([#160](https://github.com/Harri-Llewelyn/Aber/issues/160)). To offer that rollup the dialog has
 to know what each resolution still covers, and **the retention settings cannot answer it**: they say
 what will eventually be dropped, not what is there. A stack installed three weeks ago holds three
 weeks of raw however `retainFor` is set, and widening a policy does not restore deleted chunks.
@@ -3392,9 +3827,9 @@ card is *Archived* and the second *Retired*, and no column was added to say so.
 
 **An asset can be taken away before it is taken out of service.** `aas-export?format=bundle`
 returns the same AASX as `format=aasx`, the same Environment and OPC chain, with supplementary
-parts under `aasx/files/acs-cymru/`: the device's digital thread as JSON, the readings still in
+parts under `aasx/files/aber/`: the device's digital thread as JSON, the readings still in
 the live historian at raw and hourly resolution as CSV, and a manifest
-(`acs-cymru/asset-bundle/1`) that says what each part holds, where it was cut, and which cold-tier
+(`aber/asset-bundle/1`) that says what each part holds, where it was cut, and which cold-tier
 objects hold what the live historian no longer does. **The bundle states rather than reaches for.**
 Cold telemetry keeps its no-read-back rule, so the manifest names the objects whose range overlaps
 the device's life and fetches none of them; both telemetry parts are capped, newest first
@@ -3495,9 +3930,9 @@ stale.
 [`_shared/forge.ts`](functions/_shared/forge.ts) creates the organisation, a `readers` team with
 read on every repository in it (both dashboard teams are seated there by `forge-membership` at the
 door and by the sweep), and the repository with `main` admitting pushes from the machine account
-and nobody else, deploy keys not whitelisted. It reads `.acs/manifest.json` at `main`; when the
+and nobody else, deploy keys not whitelisted. It reads `.aber/manifest.json` at `main`; when the
 digest there is not this build's it reads the tree and makes one commit through the contents API
-that creates, updates and deletes whatever differs. The tag comes from `ACS_PLATFORM_VERSION`,
+that creates, updates and deletes whatever differs. The tag comes from `ABER_PLATFORM_VERSION`,
 which the chart sets to its `appVersion`, so the playbook an appliance converges to and the images
 it reports to ship from one tag. **A tag is created once and never moved:** a tag found at other
 content than this build ships is reported in the sweep's `warnings` and left where it is, because a
@@ -3516,7 +3951,7 @@ modes; measured), and the enrolment response carries `platform_ssh_url` and `pla
 `bootstrap.mjs` records in `repository.json` for the converge script on the host. The sweep keeps
 both links per gateway and removes the platform one when the gateway is archived or gone.
 
-**What the appliance does with it** is the converge role's: `acs-gateway-converge`, on an hourly
+**What the appliance does with it** is the converge role's: `aber-gateway-converge`, on an hourly
 timer, reads the tag from the puller's checkout of the gateway's `main`, runs `ansible-pull`
 against the platform repository at that tag with the deploy key and the pinned host key, and
 records the outcome in `/data/gitops/converged.json`, which the puller adds to the `appliance`
@@ -3557,7 +3992,7 @@ off the air, and keeping an expired one costs nothing.
 `rotationPolicy: Never`, so a re-issue keeps the same public key and changes only the certificate —
 the case the fleet most needs to be given, and the one a set comparison would miss.
 
-**The appliance refuses a bundle that would cut it off.** `acs-gateway-converge` offers each root
+**The appliance refuses a bundle that would cut it off.** `aber-gateway-converge` offers each root
 to the live broker with `openssl s_client -verify_return_error` and installs nothing unless one
 verifies; then it writes `/data/certs/ca.crt` and `ca.json` and restarts Node-RED once, only if the
 bytes changed. The flow reads `ca.json` every minute through a file-in node — the `deployed.json`
@@ -3634,7 +4069,7 @@ Four things were measured against `gitea/gitea:1.27.3`: the machine account may 
 a repository it owns (`PATCH /repos/{owner}/{name}`); `POST /repos/{owner}/{name}/generate` into
 the `gateways` organisation answers 201; a generated repository is **not** itself a template and
 carries **no** branch protection, so enrolment's is the first; and generation copies the whole
-tree, `.acs/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
+tree, `.aber/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
 file in the same window it commits the incident template — the one moment the machine account may
 still write `main` — since a manifest stating the digest and date of the *example* is a file
 about the wrong repository. It is not fatal if the removal fails: a stray file reads badly and
@@ -3645,7 +4080,7 @@ template would be deployed over the one enrolment installed, taking the gateway'
 it; and `seedPlatformPointer()` keeps a pointer that already exists, so a copied `platform.yml`
 would pin every gateway seeded from it to whatever tag was current when the example was written.
 
-**What the operator sees.** `acs-gateway-converge` records both outcomes in `converged.json`,
+**What the operator sees.** `aber-gateway-converge` records both outcomes in `converged.json`,
 which the puller already pushes to the `appliance` branch under the allowlist it never widens. On
 that push `forge-events` reads the file at the pushed commit the way it reads `flows.json`'s
 digest, and `0106` records five columns: the platform tag and outcome, when the appliance recorded
@@ -3685,12 +4120,12 @@ leaves the token live and refuses what redemption refuses.
 **The pin.** [`_shared/caPin.ts`](functions/_shared/caPin.ts) walks the root's DER to its
 SubjectPublicKeyInfo and hashes it, which is what `openssl x509 -pubkey | openssl pkey -outform
 DER | openssl dgst -sha256` prints on the appliance (measured equal on the dev cluster's root).
-The root reaches the functions as `ACS_CA_PEM`, read at start by the image's entrypoint from the
+The root reaches the functions as `ABER_CA_PEM`, read at start by the image's entrypoint from the
 ingress TLS Secret's `ca.crt`, which the chart mounts as one projected key when ingress TLS is on:
 that is the root that signs the API's own certificate, the one an appliance must trust to reach
 the installer, and not the broker's, which is allowed to differ. The same key is served over plain
-HTTP by the frontend at `/.well-known/acs-cymru/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
-where stage 0 fetches it; the chart hands the functions that address as `ACS_CA_URL`. The mount is
+HTTP by the frontend at `/.well-known/aber/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
+where stage 0 fetches it; the chart hands the functions that address as `ABER_CA_URL`. The mount is
 optional so the pods start before cert-manager has issued; a functions pod that started before
 the issue offers no command until it is restarted, and the readiness answer says so.
 
@@ -3785,7 +4220,7 @@ apply to those rows, which is what the page could already do on its own.
 depends on which machine the *reader* is at — a fact that differs per viewer rather than per service.
 `viewerIsOnDeploymentHost` reads it off the dashboard's own hostname: a page served from `localhost`
 is being read on the host, so its sibling `localhost` addresses resolve; one served from
-`acs-server.factory.local` is not. The case this gets wrong is a reader who tunnelled the dashboard
+`aber-server.factory.local` is not. The case this gets wrong is a reader who tunnelled the dashboard
 alone, and it is the right trade — the alternative withholds a working link from everyone developing
 on the host to protect a reader who already knows what a tunnel is.
 
@@ -3834,7 +4269,7 @@ This is what surfaces the chart's port-free hostnames on the page.
 
 ## The Directory names the gateway that runs (`0096`)
 
-Both targets run Envoy, and the seeded directory row still read *Supabase API Gateway (Kong)*.
+The stack runs Envoy, and the seeded directory row still read *Supabase API Gateway (Kong)*.
 The name is display text and also the key `directory_liveness_job_map()` joins the `envoy` scrape
 job to, so the two change together: `0001` maps `envoy` to *Supabase API Gateway (Envoy)* and is
 replayed every boot, `0002` seeds the new name, and `0096` renames the row on a database that
@@ -3914,7 +4349,7 @@ Administrator-only `SELECT` would break that page for everyone else in a way tha
 
 **Secrets belong in Supabase Vault, managed through Supabase Studio.** The mechanism is already in
 use here — `0002` and `0006` store the Node-RED admin token and webhook secret through
-`vault.create_secret()` — and Studio ships a Vault UI on both deployment targets. Building a second
+`vault.create_secret()` — and Studio ships a Vault UI. Building a second
 secrets interface would duplicate a maintained upstream component and put a security-sensitive
 surface into this codebase to own. **Note the trust boundary:** Studio is not gated by this
 schema's RLS or `user_roles`. It is protected by network placement and grants database-level
@@ -3969,11 +4404,11 @@ port-forwards (`npm run dev:forward`), and the passwords come from `POSTGRES_PAS
 Without a port-forward, `kubectl exec` directly:
 
 ```bash
-kubectl -n acs-cymru exec statefulset/supabase-db -- \
+kubectl -n aber exec statefulset/supabase-db -- \
   pg_dump -Fp -Z6 -U supabase_admin -d postgres > supabase-db.sql.gz
 ```
 
-Four things about these dumps are not obvious and each has bitten someone:
+Eight things about these dumps are not obvious and each has bitten someone:
 
 - **Ownership and privileges stay in the dump, and nine roles must already exist.** A dump contains
   **no `CREATE ROLE`** at all, yet objects are owned by roles and RLS policies reference them **by
@@ -3996,11 +4431,21 @@ Four things about these dumps are not obvious and each has bitten someone:
   first of them with `must be owner of event trigger pgrst_drop_watch`. Both scripts default to
   `supabase_admin` for this reason.
 
-- **Restore into a freshly initialised database, not over a previously restored one.** The plain
-  format carries `--clean --if-exists`, which is what lets it replace the `auth` and `storage`
-  schemas the image ships. It cannot, however, drop an *inherited* constraint on Realtime's
-  daily `realtime.messages_*` partitions — a second restore over the first fails with
-  `cannot drop inherited constraint`. Drop the volume, or the database, first.
+- **Restore into a freshly initialised database.** The plain format carries `--clean --if-exists`,
+  which is what lets it replace the `auth` and `storage` schemas the image ships. It cannot,
+  however, drop a partition's *inherited* primary key, and a fresh stack always has partitions:
+  Realtime creates its daily `realtime.messages_*` on every start, and `0001` creates
+  `digital_thread`'s monthly ones and its DEFAULT. So `restore-databases.sh` drops every partition
+  of every partitioned table first, and the dump recreates each with its rows. The first rehearsal
+  to reach the restore step found that; before it, the runbook failed on every fresh stack with
+  `cannot drop inherited constraint`.
+- **The image's default privileges are suspended for the replay.** They grant ALL on every new
+  object in `public` to anon, authenticated and service_role, and a dump's grants are a diff from
+  PostgreSQL's built-in default, not from those — so a plain replay creates every table and
+  function with the surplus and grants the source's rights on top: `service_role` could write the
+  audit trail, and anon could call the backup service's gates. `restore-databases.sh` revokes the
+  defaults first; the dump re-declares them last, after every object and grant, so the restored
+  ACLs are exactly the dumped ones. The rehearsal asserts it on `backup_claim_job()`.
 
 - **The historian's password travels inside the dump.** `public.telemetry`'s user mapping carries
   the credential `0001` registered. Restore into a historian whose password differs and the
@@ -4035,11 +4480,13 @@ those lines that matters beyond the incident is already kept as a row and alread
 records that are captured properly, plus a great deal of noise the retention window exists to
 expire.
 
-So `docker volume rm <project>_loki_data` costs up to thirty days of logs and nothing else — the
-stack returns with an empty store and works. That is worth stating next to `mosquitto_certs`, where
-the same command is a fleet-wide re-enrolment: the two sit in the same volume list and are not the
-same kind of thing. A tier 2 snapshot does capture `loki_data`, because it captures the machine,
-but that is a side effect rather than a promise and no retention story should be built on it.
+So deleting Loki's PVC costs up to thirty days of logs and nothing else — the stack returns with an
+empty store and works. That is worth stating next to the broker's volume and the internal CA's
+Secret, where the same deletion is a fleet-wide re-enrolment: they sit in the same list of things
+on disk and are not the same kind of thing, which is why those two are in tier 1
+(`backup.includeBroker`, `backup.ca`) and the log store is not. A tier 2 snapshot does capture the
+log store, because it captures the machine, but that is a side effect rather than a promise and no
+retention story should be built on it.
 
 ### Backups from the dashboard (0101)
 
@@ -4050,25 +4497,47 @@ backup and records a `backups` row.
 The shape is the Capture page's: the job is the act, the row is the artefact, and the page reads
 both and writes neither.
 
+**What a backup of the historian covers.** Raw telemetry for the raw window (14 days by default)
+and the rollups beyond it. Raw readings older than the window are only on cold storage, which no
+backup includes; see *Raw telemetry is kept for a stated window*.
+
 **What the service takes.** Both databases as their superusers (`supabase_admin`, for the reason
-above), the storage objects, and the forge, into one directory per backup on its own volume
-(the backup PVC), named by the UTC stamp:
+above), the storage objects, the forge, the broker's volume and the internal CA, into one
+directory per backup on its own volume (the backup PVC), named by the UTC stamp:
 
 ```
 /backups/20260911T143000Z/
-  supabase-db-20260911T143000Z.sql.gz       # or .dump, with BACKUP_FORMAT=custom
-  timescaledb-20260911T143000Z.sql.gz
+  supabase-db-20260911T143000Z.dump         # or .sql.gz, with backupService.format=plain
+  timescaledb-20260911T143000Z.dump
+  vault-key-20260911T143000Z.txt            # pgsodium's root key, read through the dump's session
   storage-objects-20260911T143000Z.tar.gz   # absent when no storage volume is mounted
   forge-20260911T143000Z.tar.gz             # absent when no forge volume is mounted
+  broker-20260911T143000Z.tar.gz            # absent when no broker volume is mounted
+  ca-20260911T143000Z.tar.gz                # absent when backup.ca names no Secret
   manifest-20260911T143000Z.txt             # what restore-databases.sh reads
   manifest.json                             # sizes and SHA-256 digests, as the row records them
 ```
 
-The forge archive is `gitea_data` minus its logs, with `gitea.db` replaced by a copy taken through
-sqlite3's online backup (consistent while Gitea writes), or, when the read-only mount refuses that,
-a raw copy of the database with its WAL folded in and an integrity check passed. `manifest.json`
-says which. The SSH host keys are in it: a forge recreated without them is a fleet-wide
-re-enrolment, because every appliance pins them.
+The forge archive is the forge's volume minus its logs, with `gitea.db` replaced by a copy taken
+through sqlite3's online backup (consistent while Gitea writes), or, when the read-only mount
+refuses that, a raw copy of the database with its WAL folded in and an integrity check passed.
+`manifest.json` says which. The SSH host keys are in it: a forge recreated without them is a
+fleet-wide re-enrolment, because every appliance pins them.
+
+The Vault key is pgsodium's root key, read through the same superuser session as the dump
+(`pg_read_file` against the data directory, where the chart's getkey script keeps it). Every
+Vault secret is ciphertext under it and nothing else, a fresh server mints its own, and a dump
+carries the ciphertext only: the first rehearsal to reach the assertions restored every Vault row
+and could decrypt none of them. The cold archive's S3 secret, typed on the page, is one of those
+rows and no chart value can re-seed it.
+
+The broker archive is the broker's data volume (`backup.includeBroker`): the Dynamic Security
+document, which is every issued gateway account and the only copy of it. The CA archive
+(`backup.ca`) is the key pair behind the broker's and the databases' certificates, read from its
+Secret in the ClusterIssuer's namespace through the API with a Role granting `get` on that one
+name, and staged under `ca/` as cert-manager keeps it (`tls.crt`, `tls.key`, `ca.crt`). Both are
+in tier 1 for the same reason as the host keys: every appliance pins the CA, so losing it is a
+fleet-wide re-enrolment; losing the document is every gateway re-issued.
 
 **How the service talks to the database.** Through `psql`, as `supabase_admin`, the session
 `pg_dump` needs anyway. The gates it calls (`backup_claim_job()`, `backup_finalise()`,
@@ -4110,40 +4579,79 @@ where an act on the whole database belongs.
   chart deploys, and is a separate piece of work. This is the floor, not the ceiling, as the
   CronJob's header says.
 
-**Restoring from a service-made backup** is the tier 1 runbook with two differences: the files are
-in a directory on the volume, and there is a forge archive.
+**Restoring from a service-made backup** is the tier 1 runbook with three differences: the files
+are in a directory on the volume, there are volume archives beside the dumps, and the dump was
+taken while a backup job was RUNNING, so the restored database carries that row. The service
+fails it on its next poll (`BACKUP_POLL_SECONDS`, 15 s), as it fails any RUNNING job no process
+is running; until then `request_backup()` refuses, naming it. This is the runbook
+`scripts/rehearse-restore.sh` runs, step for step.
 
 ```bash
-# Copy the directory off the backup PVC, then restore as above (.dump files by default,
-# backupService.format, so the restore is pg_restore as the cluster runbook shows).
-POD=$(kubectl -n acs-cymru get pod -l app.kubernetes.io/component=backup-service -o jsonpath='{.items[0].metadata.name}')
-kubectl -n acs-cymru cp "$POD:/backups/<stamp>" ./backups/<stamp>
+# The directory, off the backup PVC as a streamed tar (a directory `kubectl cp` may land the
+# directory or its contents, and the two restore differently). Then the two databases as above:
+# .dump files by default (backupService.format), so restore-databases.sh runs pg_restore.
+POD=$(kubectl -n aber get pod -l app.kubernetes.io/component=backup-service -o jsonpath='{.items[0].metadata.name}')
+kubectl -n aber exec "$POD" -- tar -czf - -C /backups <stamp> | tar -xzf - -C ./backups
+
+# pgsodium's root key FIRST, onto the fresh database's volume, and a restart so the server reads
+# it: Vault's rows are ciphertext under this key, and the fresh server minted its own.
+# restore-databases.sh verifies Vault decrypts and names this step if it does not.
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- \
+  sh -c 'umask 077; cat > /var/lib/postgresql/data/pgsodium_root.key' < ./backups/<stamp>/vault-key-<stamp>.txt
+kubectl -n aber delete pod supabase-db-0 --wait
+kubectl -n aber rollout status statefulset/supabase-db
+
 BACKUP_DIR=./backups/<stamp> BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 
-# The forge: scale Gitea to zero, replace the volume's contents through a helper pod that holds
-# the same claim, scale it back. Restoring the archive restores the host keys, so appliances
-# keep cloning.
-kubectl -n acs-cymru scale deploy/gitea --replicas=0
-kubectl -n acs-cymru apply -f - <<'EOF'
+# The storage objects, into the storage pod's volume.
+POD=$(kubectl -n aber get pod -l app.kubernetes.io/component=supabase-storage -o jsonpath='{.items[0].metadata.name}')
+kubectl -n aber exec -i "$POD" -- tar -xzf - -C /var/lib/storage < ./backups/<stamp>/storage-objects-<stamp>.tar.gz
+
+# A volume the workload holds open (the forge, then the broker): scale it to zero, replace the
+# volume's contents through a helper pod holding the same claim, scale it back. The forge archive
+# restores the host keys, so appliances keep cloning; the broker archive restores the document,
+# and the boot reconcile keeps every account it holds.
+restore_volume() {   # <deployment> <archive>; the claim is the deployment's "data" volume
+  CLAIM=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')
+  IMAGE=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.containers[0].image}')
+  kubectl -n aber scale "deploy/$1" --replicas=0
+  kubectl -n aber wait --for=delete pod -l "app.kubernetes.io/component=$1" --timeout=5m
+  kubectl -n aber apply -f - <<EOF
 apiVersion: v1
 kind: Pod
-metadata: { name: forge-restore }
+metadata: { name: volume-restore-$1 }
 spec:
   restartPolicy: Never
-  containers: [{ name: sh, image: alpine, command: [sleep, "3600"], volumeMounts: [{ name: data, mountPath: /data }] }]
-  volumes: [{ name: data, persistentVolumeClaim: { claimName: acs-cymru-gitea } }]
+  securityContext: { runAsUser: 0 }
+  containers: [{ name: restore, image: "$IMAGE", command: [sleep, "3600"], volumeMounts: [{ name: data, mountPath: /volume }] }]
+  volumes: [{ name: data, persistentVolumeClaim: { claimName: $CLAIM } }]
 EOF
-kubectl -n acs-cymru wait --for=condition=Ready pod/forge-restore
-kubectl -n acs-cymru cp ./backups/<stamp>/forge-<stamp>.tar.gz forge-restore:/tmp/forge.tar.gz
-kubectl -n acs-cymru exec forge-restore -- sh -c 'rm -rf /data/* && tar -xzf /tmp/forge.tar.gz -C /data'
-kubectl -n acs-cymru delete pod forge-restore
-kubectl -n acs-cymru scale deploy/gitea --replicas=1
+  kubectl -n aber wait --for=condition=Ready "pod/volume-restore-$1" --timeout=5m
+  kubectl -n aber exec -i "volume-restore-$1" -- sh -c 'rm -rf /volume/* /volume/.[!.]*; tar -xzf - -C /volume' < "$2"
+  kubectl -n aber delete pod "volume-restore-$1"
+  kubectl -n aber scale "deploy/$1" --replicas=1
+  kubectl -n aber rollout status "deploy/$1"
+}
+restore_volume gitea     ./backups/<stamp>/forge-<stamp>.tar.gz
+restore_volume mosquitto ./backups/<stamp>/broker-<stamp>.tar.gz
+
+# The CA, on a NEW cluster, before deploy/k8s/internal-ca.yaml is applied: cert-manager then finds
+# a key pair matching the Certificate and issues nothing new, so every leaf certificate is issued
+# from the CA the appliances already pin. Applied after cert-manager has minted a fresh CA, the
+# broker and both databases have to be re-issued and every appliance re-enrolled anyway.
+tar -xzf ./backups/<stamp>/ca-<stamp>.tar.gz
+kubectl -n cert-manager create secret generic aber-ca-key-pair \
+  --from-file=tls.crt=ca/tls.crt --from-file=tls.key=ca/tls.key --from-file=ca.crt=ca/ca.crt
+kubectl apply -f deploy/k8s/internal-ca.yaml
 ```
 
-**Not yet rehearsed.** The service's backups have been taken and their digests checked; no restore
-has yet run from one, and the weekly CI rehearsal still restores the CronJob's files. That is the
-roadmap entry *A restore is rehearsed from a backup the service took*, and until it lands the line
-at the end of this section applies to these backups as much as to any.
+**Rehearsed weekly, from a backup the service took.** `.github/workflows/restore-rehearsal.yml`
+asks for its backup the way the Backups page does, restores both databases and the three volumes
+into a fresh install, asserts what a count cannot catch, and asks for a second backup, so a green
+run also says the restored stack can back itself up
+([`deploy/k8s/README.md`](../deploy/k8s/README.md#rehearsing-the-restore-weekly-and-by-hand)
+lists the assertions). The CA is the one component it does not rehearse: the rehearsal installs
+no cert-manager.
 
 ### Tier 2: infrastructure snapshots
 
@@ -4170,20 +4678,93 @@ not a capability.
 
 ---
 
+### How the service takes a backup
+
+**Why a service.** `request_backup()` (archived migration 0101) is a row, and nothing else in the
+stack can turn a row into a backup: `pg_dump` against both databases, a tar of the storage
+objects and a consistent copy of the forge's volume need a process beside the volumes holding a
+superuser credential, which is neither an edge function nor a browser. `scripts/backup-service.mjs`
+is that process and does that one thing. It serves nothing but `/healthz` and hands no bytes to
+anybody: a dump holds `auth.users`, every OAuth secret's hash, the whole `digital_thread` and the
+historian's password, and "any Administrator session" is a wider audience than "a shell on the
+host". Restore is the runbook above, run from that shell against the volume. The chart projects
+the script through a ConfigMap over an image built from the database's own
+(`backup-service/Dockerfile`), so `pg_dump` is at least the server's version.
+
+**It talks to the database through psql, as `supabase_admin`**, the session `pg_dump` needs
+anyway: the event triggers are its, and a dump taken as `postgres` restores as nobody. Values are
+passed as psql variables and interpolated as quoted literals, on stdin because psql substitutes
+variables in a script it reads and not in a `-c` command, so nothing concatenates a value into
+SQL. The gates it calls refuse every PostgREST role and any session that is not a superuser's, so
+holding this credential is the whole of the authority and there is no second one to keep in step.
+Both database passwords are required: a service that could reach one of them would record a
+backup of half the stack as a backup.
+
+**The schedule is this process's.** At start it registers `enqueue_scheduled_backup()` with
+pg_cron on `BACKUP_SCHEDULE`, or removes the job when the schedule is empty, so a stack with no
+service queues nothing nobody will take. Retention is applied after every run: a scheduled backup
+older than `BACKUP_RETENTION_DAYS` is deleted and forgotten, the row only after the files are
+gone, and a prune can never remove a path outside the backup directory; a requested backup is
+pinned until an Administrator releases it. A `RUNNING` job that no process is running is failed
+before each claim, not only at start: the service is one replica, so such a row is a previous
+process's, or it came back in a restore from a backup taken while that job ran, and left standing
+it would refuse every new backup.
+
+**The files.** One directory per backup, named by the UTC stamp, holding what
+`backup-databases.sh` writes plus the keys and the volumes: `supabase-db-<stamp>.sql.gz`,
+`timescaledb-<stamp>.sql.gz`, `vault-key-<stamp>.txt`, `storage-objects-<stamp>.tar.gz`,
+`forge-<stamp>.tar.gz`, `broker-<stamp>.tar.gz` (the broker's data volume, which is the Dynamic
+Security document), `ca-<stamp>.tar.gz` (the internal CA's key pair, read from its Secret through
+the API), `manifest-<stamp>.txt` (the text manifest `restore-databases.sh` reads) and
+`manifest.json` (digests). Written under `.partial-<stamp>` and renamed on success, so a directory
+named by a stamp is a complete backup or absent, and a `.partial-*` directory found at start is a
+backup the previous process did not finish. A dump smaller than `MIN_DUMP_BYTES` is a failure,
+not a backup: an empty database, a wrong `-d` or a server that died mid-write all produce a
+well-formed short file. `--clean --if-exists` on the plain format is what lets a restore replace
+the auth and storage schemas the image ships; the custom format carries the same as a flag at
+restore time. A component whose directory is not mounted is absent from the backup and the
+manifest says so; an empty path variable disables one deliberately.
+
+**The forge's SQLite database** is copied with sqlite3's online backup, which is consistent while
+Gitea writes, from a staging directory so that tar's second `-C` lands it at `gitea/gitea.db`
+inside the archive where a restore expects it. On a read-only volume SQLite cannot open the WAL
+database for reading, so the raw `db`, `-wal` and `-shm` files are copied together, the WAL
+folded into the copy with a checkpoint, and the copy integrity-checked; the method used is in
+`manifest.json`. GNU tar exits 1 for "file changed as we read it", which an upload landing
+mid-run produces and which is acceptable for immutable blobs, so that status is a warning and
+every other non-zero status is a failure.
+
+**The two keys.** pgsodium's root key is read through the same superuser session the dump uses,
+since `pg_read_file` resolves a relative path against the data directory; a dump without it
+restores a Vault that nothing can decrypt, because a fresh server mints its own key, and the file
+is written as read with no newline so a restore can put it back byte for byte. The CA's key pair
+is read from its Secret as cert-manager keeps it (`tls.crt`, `tls.key`, `ca.crt`), staged at
+0600 and archived; a named CA that cannot be read fails the backup rather than going absent,
+because the values named it and a backup without it is a fleet-wide re-enrolment. The
+ServiceAccount token is read on every API call because projected tokens are short-lived and
+rotated in place.
+
 ## Storage buckets and why they differ
 
 Four buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
 first two are opposites in the one setting that matters, and the reasoning belongs together rather
-than split across comment blocks in the policy file. `telemetry-archive` is described with cold
-storage; `floor-plans` is the odd one out below.
+than split across comment blocks in the policy file. `floor-plans` is the odd one out below.
 
-| | `asset-3d-models` | `broker-captures` | `floor-plans` |
-| :--- | :--- | :--- | :--- |
-| Public read | **yes** | **no** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix |
-| Read | anyone, including `anon` | those two plus **Auditor** | every signed-in role |
-| Operator | read | nothing | read |
-| Reached by | a plain public URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
+There is no bucket for cold telemetry: it leaves the cluster entirely, for a configured S3
+endpoint. See "Cold telemetry archival" above.
+
+| | `asset-3d-models` | `broker-captures` | `floor-plans` | `asset-exports` |
+| :--- | :--- | :--- | :--- | :--- |
+| Public read | **yes** | **no** | **no** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` |
+| Read | anyone, including `anon` | those two plus **Auditor** | every signed-in role | Administrator, Shopfloor_Manager, Auditor |
+| Operator | read | nothing | read | nothing |
+| Reached by | a plain public URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check |
+
+`asset-exports` has no write policy at all, and that is the point: an object in it is evidence of
+an export that an `asset_exports` row records, so a hand-uploaded file would be a bundle with no
+provenance sitting beside ones that have it. Deletes are Administrator-only because the row's
+tombstone points at the object — removing one is a decision about the record, not about disk.
 
 `floor-plans` is readable by every signed-in role because the Site Map is the page an Operator
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
@@ -4191,9 +4772,84 @@ bucket admits `image/svg+xml` only, and the dashboard never inlines it. The name
 retirement of floors as a modelled level: one plan belongs to one area, and the drawing is still
 a floor plan.
 
+### How `storage-init.mjs` creates them
+
+**Not a SQL migration.** `storage.buckets` is owned by storage-api, which runs its own migrations
+against that schema when it boots. The supabase/postgres image ships only a stub of it (`id`,
+`name`, `owner`, timestamps, and none of `public`, `file_size_limit` or `allowed_mime_types`), and
+db-init replays our migrations long before storage-api starts. On a fresh stack a migration
+inserting into `storage.buckets` would hit the stub: it could create the row but could not mark it
+public, so the bucket would come up private on first boot and correct itself only on the second.
+Creating it through the Storage REST API instead runs after storage-api is healthy and is
+indifferent to which columns this version's schema has. The two files must agree on the bucket
+names: a bucket created with no policies is invisible to every browser-facing role, and a policy
+naming a bucket that was never created is dead text. Neither errors, which is why
+`check-docs-drift.mjs` holds the script, `storage-policies.sql` and the table above together.
+
+**Idempotent by inspection, and reconciled on every boot.** The hook Job runs on every upgrade.
+The script asks whether each bucket exists before deciding to create it, rather than creating it
+and treating the failure as success, because storage-api v1.11 answers a duplicate create with
+HTTP 400 "The resource already exists" rather than 409, and answers a missing bucket with 400 as
+well, so a conflict, an absence and a malformed request are indistinguishable by status and only
+the payload tells them apart (verified against the running service; the obvious reading of 404
+and 409 is wrong for both). The settings are then reconciled either way, on the create path too,
+so a bucket created by an older revision of the script or by hand in Studio is brought up to the
+current settings, a changed size limit takes effect on the next boot rather than needing the bucket
+dropped, and for the private buckets `public: false` is re-asserted. The buckets are created
+sequentially, not with `Promise.all`, so a failure part-way through names the bucket that failed.
+
+**The buckets are a list in code, not parameters.** They differ in the setting that matters most,
+whether they are public, and expressing that as an environment variable would leave "is this
+bucket public?" answerable only by reading a `.env` file. `asset-exports` and `floor-plans` are fixed names rather
+than environment variables because `storage-policies.sql` and `frontend/src/api.js` name them
+too; a name that can be changed in one place is a bucket with no policies.
+
+**Two size variables, two jobs.** `STORAGE_FILE_SIZE_LIMIT` is storage-api's global ceiling for
+every bucket, and storage-api refuses to create a bucket whose limit exceeds it, so the ceiling has
+to be at least the largest bucket (`broker-captures`, 100 MiB). `STORAGE_MODEL_FILE_SIZE_LIMIT`
+is the 3D-model bucket's own limit; reading the ceiling for it would mean raising the ceiling for
+one bucket silently raised this one too.
+
+**The capture limit is sized from the traffic and read together with the job caps.** The fleet's
+measured rate is 0.95 msg/s and a message is a few hundred bytes of JSON, so an hour of a real
+shift is single-digit megabytes and a full working day fits in 100 MiB; what the limit refuses is
+a capture taken at the ingestion ceiling and left running for far longer than anybody needs.
+Archived migration 0055 raised it from 25 MiB because `capture_jobs` caps a recording at 50 MiB,
+and that cap is useless unless the bucket can hold what it allows: the failure of getting it
+backwards is the worst possible ordering, a capture that reached its size cap terminating
+successfully, being uploaded, and being refused, by which time the recording exists only in a
+buffer about to be freed. The three job caps are mutually consistent so that the message cap binds
+first (100,000 messages at a few hundred bytes is roughly 40 MB), leaving headroom above the size
+cap. Anything raising the job cap in `capture_jobs_caps_are_bounded` has to raise the bucket limit
+too. The export bucket's 256 MiB is likewise above the largest bundle the row caps in
+`supabase/functions/_shared/aas/bundle.ts` admit (200,000 telemetry rows and 20,000 thread rows);
+the row caps are the real limit, and the bucket limit is what stops a bug from becoming a disk.
+
+**The MIME lists are the control, and two of them are deliberately loose.** The client-side
+accept filter is a convenience. `model/*` is the registered tree for 3D formats (RFC 9245 registers
+`model/gltf+json` and `model/gltf-binary`), but browsers are inconsistent about what they put in
+`File.type`: `.obj` and `.stl` frequently arrive as `application/octet-stream` or an empty string
+because the OS has no mapping for them, so rejecting those would make uploads fail on some
+machines and not others. The octet-stream fallback is deliberate rather than lax, and the
+extension allow-list in the 3D-model migration's CHECK is what actually constrains what a shell can
+reference. Captures admit `text/plain` and `application/octet-stream` for the same reason and not
+because anything but JSON is allowed; the uploader checks that the payload carries
+`aber_capture_version` and a `messages` array before it is sent, so the list is the coarse outer
+bound rather than the check. `.aasx` is a ZIP by construction and browsers disagree about what to
+call one, so both the generic and the ZIP types are admitted; the function sets the type itself
+and uploads as `service_role`, and the list is what keeps a hand-uploaded file from arriving as
+something a viewer would execute. Floor plans admit `image/svg+xml` exactly, with no fallback:
+every browser reports it, and the dashboard sets the type itself.
+
+**`asset-exports` is its own bucket, not the cold archive's.** They are not the same kind of
+object: a bundle is a copy somebody asked for, derived from rows still in the database, so it
+belongs on local storage where the browser can sign a URL for it. A cold telemetry object is the
+only remaining copy of that history and goes to a remote endpoint the browser never touches
+(archived migration 0132). One retention decision cannot serve both.
+
 ### `asset-3d-models` is public-read, and that is not laziness
 
-An exported AAS `File` element's URL has to be dereferenceable by a viewer holding no Factory+
+An exported AAS `File` element's URL has to be dereferenceable by a viewer holding no Aber
 session — that is what makes the shell a document rather than a pointer into this stack. A signed
 URL would expire, which turns every shell already handed out into a time bomb.
 
@@ -4264,6 +4920,57 @@ capture that completed cannot then fail to upload.
 
 ---
 
+### How the policies are applied
+
+`storage-policies.sql` runs on every boot as the storage-policies Job, after `supabase-storage`
+is healthy and before `storage-init`. The order is the whole of the ordering argument:
+storage-api creates `storage.objects` by its own migrations and the PG17 image ships the
+`storage` schema empty, which is why the policies are not in the baseline migration; and
+`storage-init` creates the buckets through the Storage REST API as `service_role`, which needs the
+grants this file makes or fails with a misleading `400 new row violates row-level security
+policy`. The script checks that the table exists before anything else and fails with the reason
+rather than a bare "relation does not exist", because reaching it too early is an ordering fault
+in the service graph and a different problem from a wrong policy. Between storage-api creating
+the table and this file running, RLS is enabled with no policies, so `anon` and `authenticated`
+are denied and `service_role`, which bypasses RLS, is unaffected: a brief loss of function, never
+of control. RLS is enabled here again rather than assumed, because this file is the access control
+for the table and must not depend on storage-api's migrations having done it.
+
+**The grants are enumerated.** On the PG17 image storage-api creates its tables with no grants to
+the API roles, so each privilege is stated and only what each role needs. `service_role` gets the
+admin surface because storage-api assumes it to serve the REST API, and since it bypasses RLS the
+grants are the only limit that applies to it, which is why it is enumerated rather than given
+`ALL`.
+
+**Public reads never consult a SELECT policy.** `/object/public/...` is served by the bucket's
+`public` flag. SELECT governs listing, and storage-api's writes read the row back, so on the
+3D-model bucket it takes the same authority as writing: the geometry is public, the inventory of
+which devices have a model is not.
+
+**`storage.objects.name` is qualified in every policy, and must be.** `public.gateways` has a
+`name` column of its own, and an unqualified reference inside a policy binds to the gateway's
+display label, which refuses every upload and would accept any prefix if a gateway were ever named
+something path-shaped.
+
+**Every bucket's block ends in a self-check.** The failure these guard against is silent in the
+direction that matters least and loudest in the direction that matters most: a missing policy
+denies, so the viewer simply shows nothing and nobody reads a log. The checks assert the set is
+complete by name rather than by count, so a policy another chart version left behind is reported
+without failing the boot; the capture bucket's check also asserts that Auditor never writes, that
+the ingestion daemon appears in exactly SELECT, INSERT and UPDATE with every arm confined to the
+object of its running job, that it never deletes, and that the playback worker appears in SELECT
+alone. Each exception says what the missing arm looks like from outside, which is a job that
+failed for no stated reason.
+
+**Retired policies are dropped explicitly.** Cold telemetry once had a bucket here and now goes
+to a configured S3 endpoint, somewhere a site loss does not reach. Deleting the block would not
+remove the policies: this file drops each policy it is about to create, so a policy it no longer
+mentions survives every boot on a database that already has it, guarding a bucket nothing writes
+to. The four `telemetry_archive_*` policies are therefore dropped by name and asserted gone. The
+bucket itself is deleted by nobody: it is left with whatever it holds, for an Administrator to
+empty and remove from Studio once satisfied the objects in it are also at the remote endpoint,
+which `cold_archive audit` answers for the manifest's rows.
+
 ## Adding a vocabulary
 
 A **vocabulary** is reference data describing what a standard *defines*. It is deliberately separate
@@ -4291,6 +4998,47 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
    string the migration writes.
 
 ---
+
+## The development seed
+
+[`seed.sql`](seed.sql) creates the four demo personas and nothing else. It is local development
+data, never for a production database, and db-init replays it on every start against a
+persistent volume, so every statement in it has to be repeatable on a database that already holds
+these rows.
+
+**GoTrue's columns.** Every varchar token column on `auth.users` must be set to the empty string
+rather than NULL: GoTrue maps them to Go `string` fields, and a NULL aborts the row scan with
+`converting NULL to string is unsupported`, which the login reports as a 500. `email_change` in
+particular is nullable with no default, so omitting it from the INSERT is enough to break
+authentication entirely. `aud` must be `authenticated` and match `GOTRUE_JWT_AUD` in the chart's
+auth environment, or GoTrue looks users up under a different audience and finds nothing;
+`raw_app_meta_data` must carry the `role` key, and `identity_data` on `auth.identities` must carry
+`sub` and `email`.
+
+**`ON CONFLICT DO UPDATE`, not `DO NOTHING`.** With `DO NOTHING` a persona row written by an
+older, broken version of the seed could never be repaired; the seed would silently report
+`INSERT 0 0` forever.
+
+**Only the role mappings that are wrong are removed.** `user_roles` is audited and append-only
+(archived migration 0070), and the unconditional DELETE this replaced removed all four rows and
+the INSERT put them straight back, so every boot appended four `ROLE_REVOKED` and four
+`ROLE_GRANTED` rows to a table that cannot be pruned. `check-migration-idempotency.mjs` reported
+it, and the audit trail would have read as though somebody re-granted every persona's role
+nightly. The `NOT IN` keeps the guarantee, that any mapping for these four that is not the
+intended pair is removed, while a settled database matches no rows. Each persona holds exactly one
+role because `usePermissions.js` reads `data[0]` and `custom_access_token_hook()` uses `LIMIT 1`,
+so a persona holding two would resolve non-deterministically.
+
+**The causation demonstration is gone, with the floor it demonstrated on.** The seed used to end
+by re-describing one gateway and three of its devices inside a single transaction, so the audit
+rows shared one `txid_current()` and the drawer's "Same transaction" control had something to
+render on a fresh stack. Its subject was addressed by pinned ids a provisioning script issued, and
+that script, those ids and the four-cell floor were retired together, so the UPDATEs could match
+no row on any stack and the NOTICE they fell through to named a command that no longer existed.
+What was lost is the demonstration, not the feature: `causation_id` is written on every
+transaction, so the control works the moment one act touches several rows, and commissioning a
+gateway alongside its devices through the UI is exactly that act. The tutorial walks a reader
+through doing it for real.
 
 ## Testing
 

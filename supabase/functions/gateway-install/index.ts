@@ -23,7 +23,7 @@ import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts"
  * enrolment changes nothing.
  *
  * HTTPS or nothing. The token and the credential secret cross this route, so a deployment whose
- * public URL is plain HTTP is refused, unless ACS_INSTALLER_ALLOW_HTTP says otherwise, which the
+ * public URL is plain HTTP is refused, unless ABER_INSTALLER_ALLOW_HTTP says otherwise, which the
  * development values do and nothing else should.
  */
 
@@ -65,7 +65,7 @@ export default async function handler(req: Request): Promise<Response> {
   const token = (req.headers.get("X-Enrolment-Token") ?? "").trim();
   if (!/^[0-9a-f]{64}$/.test(token)) return json(401, REJECTION);
 
-  const admin = serviceRoleClient(supabaseUrl, serviceRoleKey, { "X-ACS-Cymru-Actor": "service" });
+  const admin = serviceRoleClient(supabaseUrl, serviceRoleKey, { "X-Aber-Actor": "service" });
   const { data, error } = await admin.rpc("peek_gateway_enrollment_token", { p_token: token });
   if (error) {
     console.error(`gateway-install: the token check failed: ${error.message}`);

@@ -41,8 +41,8 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off.
-const SETTINGS_VERSION = 5;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off.
+const SETTINGS_VERSION = 6;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -284,7 +284,7 @@ function settingsAreCorrect() {
     return (
       loaded?.credentialSecret === credentialSecret &&
       loaded?.flowFile === FLOW_FILE &&
-      loaded?.acsCymruSettingsVersion === SETTINGS_VERSION &&
+      loaded?.aberSettingsVersion === SETTINGS_VERSION &&
       loaded?.adminAuth?.type === 'strategy' &&
       typeof loaded?.adminAuth?.tokens === 'function' &&
       typeof loaded?.adminAuth?.authenticate === 'function' &&
@@ -375,7 +375,7 @@ async function userinfo(accessToken) {
       // apikey or bearer was rejected at the gateway; 404 means the function is not registered in
       // supabase/functions/main/index.ts.
       console.warn(
-        '[acs-cymru] userinfo ' + env.NODERED_USERINFO_URL + ' -> HTTP ' + res.status +
+        '[aber] userinfo ' + env.NODERED_USERINFO_URL + ' -> HTTP ' + res.status +
         '; refusing the sign-in.'
       );
       return null;
@@ -383,7 +383,7 @@ async function userinfo(accessToken) {
     return await res.json();
   } catch (err) {
     // A userinfo endpoint that cannot be reached is not evidence of a role. Fail closed.
-    console.warn('[acs-cymru] userinfo lookup failed: ' + err.message);
+    console.warn('[aber] userinfo lookup failed: ' + err.message);
     return null;
   }
 }
@@ -414,7 +414,7 @@ try {
   // Absent on first boot, and unreadable is no worse than absent: the fallback in \`users\`
   // keeps existing sessions working, they just render read-only until the next sign-in.
   if (err.code !== 'ENOENT') {
-    console.warn('[acs-cymru] could not read ' + EDITOR_USERS_FILE + ': ' + err.message);
+    console.warn('[aber] could not read ' + EDITOR_USERS_FILE + ': ' + err.message);
   }
 }
 
@@ -429,7 +429,7 @@ function rememberEditorUser(username, permissions) {
   } catch (err) {
     // Non-fatal: the sign-in itself has already succeeded and the in-memory map still serves
     // this process. Only the next restart would notice.
-    console.warn('[acs-cymru] could not persist ' + EDITOR_USERS_FILE + ': ' + err.message);
+    console.warn('[aber] could not persist ' + EDITOR_USERS_FILE + ': ' + err.message);
   }
 }
 
@@ -451,7 +451,7 @@ function cachePut(token, user) {
 }
 
 module.exports = {
-  acsCymruSettingsVersion: ${SETTINGS_VERSION},
+  aberSettingsVersion: ${SETTINGS_VERSION},
 
   flowFile: ${JSON.stringify(FLOW_FILE)},
   credentialSecret: ${JSON.stringify(credentialSecret)},
@@ -464,6 +464,15 @@ module.exports = {
     tours: false
   },
 
+  // OFF. Node-RED's update notifications work by sending a daily anonymised ping to
+  // telemetry.nodered.org, and while the choice is unset the editor opens on a dialog asking
+  // every Administrator and Manager to make it. Declaring it here answers that dialog for the
+  // site. An administrator can still opt in from User Settings; the runtime keeps that choice.
+  telemetry: {
+    enabled: false,
+    updateNotification: false
+  },
+
   adminAuth: {
     type: 'strategy',
 
@@ -473,7 +482,7 @@ module.exports = {
 
     strategy: {
       name: 'oauth2',
-      label: 'Sign in with ACS-Cymru',
+      label: 'Sign in with Aber',
       icon: 'fa-cube',
       strategy: OAuth2Strategy,
       options: {
@@ -510,7 +519,7 @@ module.exports = {
             if (!info || !info.permissions) {
               if (info) {
                 console.warn(
-                  '[acs-cymru] sign-in refused for ' + (info.email || info.sub) +
+                  '[aber] sign-in refused for ' + (info.email || info.sub) +
                   ': supabase_role=' + info.supabase_role + ' maps to no Node-RED permissions. ' +
                   'Add a public.user_roles row for this user.'
                 );
@@ -518,7 +527,7 @@ module.exports = {
               return done(null, false);
             }
             console.log(
-              '[acs-cymru] sign-in: ' + info.email + ' (' + info.supabase_role +
+              '[aber] sign-in: ' + info.email + ' (' + info.supabase_role +
               ') -> permissions=' + info.permissions
             );
             return done(null, {
@@ -570,7 +579,7 @@ module.exports = {
       // SSO is down with them. Same reasoning as disable_login_form = false in grafana/grafana.ini.
       // secretEquals() refuses an unset token, so there is one answer to "is this the token".
       if (secretEquals(token, env.NODERED_ADMIN_TOKEN)) {
-        return { username: 'acs-cymru-break-glass', permissions: '*' };
+        return { username: 'aber-break-glass', permissions: '*' };
       }
 
       // Signature, expiry and audience first, so an unverified token never reaches the network.
@@ -617,7 +626,7 @@ module.exports = {
       jwt.verify(token, env.NODERED_WEBHOOK_JWT_SECRET, {
         algorithms: ['HS256'],
         audience: 'node-red-hooks',
-        issuer: 'acs-cymru-supabase'
+        issuer: 'aber-supabase'
       });
       return next();
     } catch (err) {
@@ -699,7 +708,7 @@ function brokerCredentialFor(node) {
           `this volume's flow carries the legacy '${BROKER_NODE_ID}' node, but MQTT_PASSWORD is not set.
   That node predates the per-cell consolidation and reads MQTT_USER / MQTT_PASSWORD
   which are empty by default because the account they
-  name was retired by migration 0020.
+  name was retired by archived migration 0020.
 
   Either set MQTT_SIMULATOR_PASSWORD and re-provision that account, or reseed the flow
   with NODE_RED_FORCE_SEED=true to drop the legacy node entirely.`

@@ -28,7 +28,7 @@ from metrics import COUNTER_MAP, EXPORTED_LABELLED_INSTEAD, HELP, TYPES
 # NO `_created` SERIES. prometheus_client emits a `<name>_created` gauge beside every counter and
 # histogram by default, carrying the unix time the series was first observed. Nothing in this stack
 # reads one: no dashboard, no alert rule, and the daemon's own restart time is already
-# `acs_ingestion_up`. They would roughly double the line count of the exposition for a fleet's worth
+# `aber_ingestion_up`. They would roughly double the line count of the exposition for a fleet's worth
 # of `edge_node` label values, on an endpoint whose whole content is a deliberate decision.
 prometheus_client.disable_created_metrics()
 
@@ -45,14 +45,14 @@ WRITE_SECONDS_BUCKETS = (
 )
 
 HISTOGRAMS = {
-    "acs_ingestion_write_seconds": "One historian transaction, committed.",
-    "acs_ingestion_uns_publish_seconds": "One UNS republish pass for a message.",
+    "aber_ingestion_write_seconds": "One historian transaction, committed.",
+    "aber_ingestion_uns_publish_seconds": "One UNS republish pass for a message.",
 }
 
 # The catch-all for a flat name with no mapping. NAMED, NOT DISCARDED: a counter added to
 # ingestion.py without a line in COUNTER_MAP would otherwise vanish from monitoring with nothing to
 # indicate it ever existed.
-UNMAPPED = "acs_ingestion_unmapped_counter_total"
+UNMAPPED = "aber_ingestion_unmapped_counter_total"
 
 # Everything below is rebuilt by reset(); the module-level names are bound there so the daemon and
 # the suites take the same path.
@@ -137,8 +137,8 @@ def reset():
     # dimension costs nothing at the call site -- it is derived from a convention that was there
     # first. Declared here rather than in COUNTER_MAP because the label VALUES are open: a new
     # Sparkplug message type needs no table entry.
-    _by_metric["acs_ingestion_messages_total"] = Counter(
-        "acs_ingestion_messages_total", _help("acs_ingestion_messages_total"), ["msg_type"],
+    _by_metric["aber_ingestion_messages_total"] = Counter(
+        "aber_ingestion_messages_total", _help("aber_ingestion_messages_total"), ["msg_type"],
         registry=REGISTRY)
 
     _by_metric[UNMAPPED] = Counter(UNMAPPED, _help(UNMAPPED), ["counter"], registry=REGISTRY)
@@ -163,7 +163,7 @@ def count(name: str, n: int = 1):
 
     THE ORDER OF THE BRANCHES BELOW IS LOAD-BEARING. `messages_total` is both a `messages_` name and
     an EXPORTED_LABELLED_INSTEAD one; tested the other way round it would publish as
-    acs_ingestion_messages_total{msg_type="total"}, which double-counts every message against the
+    aber_ingestion_messages_total{msg_type="total"}, which double-counts every message against the
     per-type series it is the sum of.
     """
     if n <= 0:
@@ -173,7 +173,7 @@ def count(name: str, n: int = 1):
         # here as well would give a scraper two ways to count one event.
         return
     if name.startswith("messages_"):
-        _by_metric["acs_ingestion_messages_total"].labels(
+        _by_metric["aber_ingestion_messages_total"].labels(
             msg_type=name[len("messages_"):]).inc(n)
         return
     mapped = COUNTER_MAP.get(name)
@@ -216,7 +216,7 @@ def observe_write_seconds(seconds: float):
     Only committed writes are observed; a failed write has its own counter and its duration
     describes the failure, not capacity.
     """
-    _histograms["acs_ingestion_write_seconds"].observe(seconds)
+    _histograms["aber_ingestion_write_seconds"].observe(seconds)
 
 
 def observe_uns_seconds(seconds: float):
@@ -226,7 +226,7 @@ def observe_uns_seconds(seconds: float):
     It runs on the same writer thread after the commit, so its cost is part of the single-writer
     ceiling and belongs beside the write's.
     """
-    _histograms["acs_ingestion_uns_publish_seconds"].observe(seconds)
+    _histograms["aber_ingestion_uns_publish_seconds"].observe(seconds)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -303,7 +303,7 @@ def counter_snapshot() -> dict:
     out = {}
     for metric, family in list(_by_metric.items()):
         for sample in _samples(family):
-            if metric == "acs_ingestion_messages_total":
+            if metric == "aber_ingestion_messages_total":
                 out[f"messages_{sample.labels['msg_type']}"] = int(sample.value)
             elif metric == UNMAPPED:
                 out[sample.labels["counter"]] = int(sample.value)

@@ -45,11 +45,11 @@ After this gateway's `platform.yml` variables, and therefore winning over them:
 
 | Variable | What it is |
 | :--- | :--- |
-| `acs_repo_dir` | this checkout on the appliance |
-| `acs_compose_dir` | the platform's own compose project |
-| `acs_data_dir` | the appliance's `/data`, as the containers see it |
-| `acs_state_dir` | everything the platform put on the box |
-| `acs_platform_tag` | the platform tag this appliance converged to |
+| `aber_repo_dir` | this checkout on the appliance |
+| `aber_compose_dir` | the platform's own compose project |
+| `aber_data_dir` | the appliance's `/data`, as the containers see it |
+| `aber_state_dir` | everything the platform put on the box |
+| `aber_platform_tag` | the platform tag this appliance converged to |
 
 `custom.yml` states no path of its own, which is what lets the platform move one.
 
@@ -70,9 +70,9 @@ pre-registered, and the adapter calls no REST API to create anything.
 appliance:
 
 ```bash
-cd /var/lib/acs-gateway/data/gitops/repo/custom
-ACS_APPLIANCE_NETWORK=acs-gateway_default docker compose up -d --build
+cd /var/lib/aber-gateway/data/gitops/repo/custom
+ABER_APPLIANCE_NETWORK=aber-gateway_default docker compose up -d --build
 docker compose logs -f adapter
 ```
 
-`sudo acs-gateway-converge` does the same through the platform, which is what the timer runs.
+`sudo aber-gateway-converge` does the same through the platform, which is what the timer runs.

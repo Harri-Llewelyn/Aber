@@ -1,0 +1,176 @@
+{{- if and .Values.initJobs.enabled .Values.supabaseDb.enabled }}
+{{- $component := "db-roles-init" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-db-roles-init" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # POST-install/upgrade, never pre-. A pre-upgrade hook runs before the new workloads exist,
+    # which inverts the dependency this Job is part of.
+    "helm.sh/hook": post-install,post-upgrade
+    # WEIGHT 0 -- FIRST. Everything downstream needs these passwords:
+    #   * supabase_auth_admin   GoTrue's connection
+    #   * authenticator         PostgREST's connection
+    #   * supabase_storage_admin storage-api's connection
+    # This one is the quietest to get wrong. Without it storage-api crash-loops on 28P01
+    # ("password authentication failed") and NOTHING ELSE REPORTS A PROBLEM -- the database is
+    # healthy, the Deployment exists, and only that one pod is restarting.
+    "helm.sh/hook-weight": "0"
+    # Replace the previous Job rather than colliding on the name at the next upgrade.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.initJobs.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.initJobs.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-supabase-db" "host" (include "aber.supabaseDb.host" .) "port" (include "aber.supabaseDb.port" .) "user" "postgres" "db" "postgres" "passwordKey" "POSTGRES_PASSWORD") | nindent 8 }}
+      containers:
+        - name: db-roles-init
+          image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
+          env:
+            {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" (include "aber.secretName" .) "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "ROLE_PASSWORD" "secretName" (include "aber.secretName" .) "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              # Connects as supabase_admin, not postgres: ALTER USER on these roles needs an
+              # owner or superuser, and supabase_admin is the image's own superuser.
+              #
+              # Idempotent by construction -- ALTER ... WITH PASSWORD sets, it does not append, so
+              # replaying on every upgrade re-asserts the current secret. That is the point: a
+              # rotated password in values has to reach an existing database.
+              echo 'Setting passwords for scoped Supabase roles...'
+
+              # PREFLIGHT. secrets.postgresPassword is applied by the postgres image AT INITDB
+              # ONLY -- on a first boot against an empty PVC. Rotate it against an existing volume
+              # and the database keeps the OLD password, so this connection is the first thing to
+              # fail and the raw psql error names neither the cause nor the fix.
+              if ! psql -h {{ include "aber.supabaseDb.host" . }} -p {{ include "aber.supabaseDb.port" . }} \
+                        -U supabase_admin -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
+                echo '' >&2
+                echo 'ERROR: cannot authenticate to supabase-db as supabase_admin.' >&2
+                echo '' >&2
+                echo 'secrets.postgresPassword does not match what this PVC was initialised with.' >&2
+                echo 'The postgres image applies it at initdb only, so rotating it against an' >&2
+                echo 'existing volume never reaches the database. Either restore the previous' >&2
+                echo 'value and ALTER USER supabase_admin by hand, or delete the PVC and let the' >&2
+                echo 'stack rebuild (destroys all data -- restore from a backup afterwards).' >&2
+                echo '' >&2
+                exit 1
+              fi
+
+              # :'pw' rather than interpolating into the SQL text -- psql quotes it correctly, so a
+              # generated password containing a quote cannot break the statement.
+              #
+              # READ FROM A FILE, NOT PASSED VIA -c. psql expands :variables only in input it
+              # READS. A -c string goes to the server unexpanded, so it receives the literal
+              # `:'pw'` and answers `syntax error at or near ":"`.
+              echo "ALTER USER :\"role\" WITH PASSWORD :'pw';" > /tmp/set-role-password.sql
+
+              # `supabase_read_only_user` IS THE ODD ONE, and it is here because of who may write
+              # it. It is a RESERVED role in supabase/postgres -- `only superusers can modify it` --
+              # so the migrations cannot: db-init connects as `postgres`, which is not a superuser
+              # on this image. This Job is the superuser step, which is why the ALTER lives here
+              # and its assertions live in 0082.
+              #
+              # It ships with NO PASSWORD and pg_hba requires scram from every pod network, so
+              # pointing POSTGRES_USER_READ_ONLY at it without this BREAKS Studio's read-only paths
+              # rather than narrowing them. Same password as the rest by necessity: Studio
+              # substitutes one password into both branches of its connection string.
+              for role in supabase_auth_admin authenticator supabase_storage_admin supabase_read_only_user; do
+                psql -v ON_ERROR_STOP=1 -h {{ include "aber.supabaseDb.host" . }} -p {{ include "aber.supabaseDb.port" . }} \
+                     -U supabase_admin -d postgres \
+                     -v pw="$ROLE_PASSWORD" -v role="$role" -f /tmp/set-role-password.sql
+              done
+              echo 'Scoped role passwords set successfully.'
+{{- if .Values.databaseMetrics.enabled }}
+
+              # metrics_reader, for the postgres_exporter sidecar in the database pod. Created
+              # here rather than by a migration because CREATE ROLE and GRANT pg_monitor need a
+              # superuser, and db-init connects as `postgres`, which is not one on this image --
+              # the same reason supabase_read_only_user is ALTERed here. The historian's copy is
+              # in timescaledb/roles.sql, which carries the full argument for the shape.
+              #
+              # NO PASSWORD, EVER. pg_hba admits the network with scram, so a role without one
+              # cannot authenticate off loopback -- which is what makes pg_monitor proportionate.
+              # PASSWORD NULL is re-asserted on every upgrade rather than only at creation.
+              #
+              # `WITH INHERIT TRUE` IS NOT OPTIONAL. PostgreSQL fixes inheritance on the GRANT from
+              # the member's rolinherit at grant time, and a later ALTER ROLE does not revise it.
+              # Without it the exporter starts, reports no scrape error, and serves no WAL series.
+              #
+              # THE HEREDOC DELIMITER IS QUOTED so the shell leaves `$do$` alone; unquoted, `$$`
+              # would expand to this shell's PID and psql would receive a syntax error.
+              echo 'Creating metrics_reader for the exporter sidecar...'
+              psql -v ON_ERROR_STOP=1 -h {{ include "aber.supabaseDb.host" . }} -p {{ include "aber.supabaseDb.port" . }}                    -U supabase_admin -d postgres <<'SQL'
+              DO $do$
+              BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metrics_reader') THEN
+                  CREATE ROLE metrics_reader LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT;
+                END IF;
+              END
+              $do$;
+              ALTER ROLE metrics_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT
+                                             PASSWORD NULL;
+              GRANT CONNECT ON DATABASE postgres TO metrics_reader;
+              GRANT pg_monitor TO metrics_reader WITH INHERIT TRUE;
+{{- if .Values.databaseMetrics.statementStats }}
+
+              -- pg_stat_statements LIVES IN THE `extensions` SCHEMA ON THIS IMAGE, not in public,
+              -- and pg_monitor grants nothing on a schema. The exporter's collector queries the
+              -- view UNQUALIFIED, so both of these are needed: USAGE to reach the schema at all,
+              -- and the search_path so the unqualified name resolves. With either missing the
+              -- collector fails with `permission denied for schema extensions` and only
+              -- pg_scrape_collector_success reports it.
+              GRANT USAGE ON SCHEMA extensions TO metrics_reader;
+              ALTER ROLE metrics_reader SET search_path = public, extensions;
+{{- end }}
+
+              -- The same self-check the historian's roles.sql makes, for the same reason: a
+              -- membership held without inheritance is invisible everywhere downstream.
+              DO $do$
+              BEGIN
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_auth_members m
+                    JOIN pg_roles g ON g.oid = m.roleid
+                    JOIN pg_roles r ON r.oid = m.member
+                   WHERE g.rolname = 'pg_monitor' AND r.rolname = 'metrics_reader'
+                     AND m.inherit_option
+                ) THEN
+                  RAISE EXCEPTION 'metrics_reader holds pg_monitor without INHERIT; re-issue the grant WITH INHERIT TRUE';
+                END IF;
+                IF EXISTS (SELECT 1 FROM pg_authid WHERE rolname = 'metrics_reader' AND rolpassword IS NOT NULL) THEN
+                  RAISE EXCEPTION 'metrics_reader has a password, so it can authenticate over the network';
+                END IF;
+              END
+              $do$;
+              SQL
+              echo 'metrics_reader ready.'
+{{- end }}
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          {{- if .Values.postgresTls.enabled }}
+          volumeMounts:
+            {{- include "aber.dbClientCaMount" . | nindent 12 }}
+          {{- end }}
+      {{- if .Values.postgresTls.enabled }}
+      volumes:
+        {{- include "aber.dbClientCaVolume" . | nindent 8 }}
+      {{- end }}
+{{- end }}

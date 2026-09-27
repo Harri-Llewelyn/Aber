@@ -19,7 +19,21 @@
 #     (users.js init() + strategies.js authenticateUserToken())
 #   - httpNodeAuth may be Express middleware rather than {user, pass} (red.js:426)
 # node-red-init.mjs carries the same kind of pin for the credentials runtime.
-FROM nodered/node-red:5.0.2
+FROM nodered/node-red:5.0.7
+
+# WHAT THE BASE CARRIES THAT THIS IMAGE DOES NOT RUN, removed before anything is added (#347).
+#
+# The global npm at /usr/local/lib/node_modules/npm is the Node image's, and nothing resolves it:
+# entrypoint.sh starts red.js with node directly, and PATH puts /usr/src/node-red/node_modules/.bin
+# first, so the npm that runs -- the install below, the palette manager at run time -- is the copy
+# Node-RED bundles. The global copy carried this image's only fixable npm findings.
+#
+# `apk upgrade` takes the base's Alpine packages to the distribution's current fixes, so a fix
+# Alpine ships between two base cuts reaches the release rather than waiting for the next base.
+USER root
+RUN apk upgrade --no-cache \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+USER node-red
 
 # passport itself, passport-strategy, passport-http-bearer and oauth2orize already ship with
 # the image; only the OAuth2 strategy and the JWT verifier are missing.
@@ -38,4 +52,4 @@ RUN npm install --no-audit --no-fund --no-update-notifier --save \
 # caller, and Helm stores the chart archive and the rendered manifest in one release Secret under a
 # 1 MiB cap. The chart runs it as the initContainer's command; an edit to it therefore needs this
 # image rebuilt, which the dev loop does on `up`.
-COPY node-red-init.mjs /opt/acs-cymru/node-red-init.mjs
+COPY node-red-init.mjs /opt/aber/node-red-init.mjs

@@ -45,7 +45,7 @@ LOKI = os.getenv("LOKI_TEST_URL", "http://127.0.0.1:3100")
 PROM = os.getenv("PROMETHEUS_TEST_URL", "http://127.0.0.1:9090")
 MQTT_HOST = os.getenv("MQTT_TEST_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_TEST_PORT", "1883"))
-GROUP = "ACS-Cymru"
+GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
 
 # The reason this suite drives. One of the ten in ingestion.py, chosen because it is reachable
 # with a single publish and needs no fixture: an unregistered device is refused by definition.
@@ -234,7 +234,7 @@ class DropPairTestCase(unittest.TestCase):
         cls.device = "dev" + secrets.token_hex(11)[:21]
 
         cls.before = prom_scalar(
-            f'sum(acs_ingestion_messages_dropped_total{{reason="{REASON}"}})')
+            f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
 
         client = mqtt.Client(protocol=mqtt.MQTTv5)
         client.username_pw_set(user or "", password)
@@ -261,7 +261,7 @@ class DropPairTestCase(unittest.TestCase):
         after = self.before
         while time.time() < deadline:
             after = prom_scalar(
-                f'sum(acs_ingestion_messages_dropped_total{{reason="{REASON}"}})')
+                f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
             if after > self.before:
                 return
             time.sleep(5)
@@ -320,18 +320,17 @@ class DropPairTestCase(unittest.TestCase):
         """
         labels = {
             r["metric"]["reason"]
-            for r in prom_query("acs_ingestion_messages_dropped_total")
+            for r in prom_query("aber_ingestion_messages_dropped_total")
             if "reason" in r["metric"]
         }
         self.assertIn(REASON, labels,
                       f"Prometheus exports no reason={REASON}; exported: {sorted(labels)}")
 
-        # POLLED, FOR THE REASON THE SIBLING ABOVE IS. This used to query once, and it runs
-        # BEFORE the polling test alphabetically -- so on a stack where the drop had happened but
-        # the line had not yet travelled daemon -> Docker -> Alloy -> Loki, this failed with "no
-        # logged drop reasons", which reads as a broken drill-down contract rather than as a race.
-        # Observed doing exactly that: the line was in the store, correct, seconds later.
-        expr = f'{{service="ingestion"}} | json | reason != ""'
+        # POLLED, FOR THE REASON THE SIBLING ABOVE IS. A single query runs BEFORE the polling test
+        # alphabetically, so on a stack where the drop has happened but the line has not yet
+        # travelled daemon -> Docker -> Alloy -> Loki it fails with "no logged drop reasons" --
+        # which reads as a broken drill-down contract rather than as the race it is.
+        expr = '{service="ingestion"} | json | reason != ""'
         deadline = time.time() + PROPAGATION_TIMEOUT
         fields = set()
         while time.time() < deadline:
@@ -395,7 +394,7 @@ class MultilineTestCase(unittest.TestCase):
             return "Traceback (most recent call last)" in payload and 'File "' in payload
 
         self.assertTrue(
-            any(whole(l) for l in lines),
+            any(whole(line) for line in lines),
             "no collected traceback carries both its header and a stack frame in ONE entry, so "
             "the exception is arriving split across records -- stage.multiline is not rejoining "
             "it. Note the stage is confined to ingestion|playback by a stage.match in "
@@ -426,7 +425,7 @@ class MultilineTestCase(unittest.TestCase):
         format instead of the format.
 
         THE SHAPE IS A CRASH, WHICH IS NOT THE `exc_info=True` CASE. Under `LOG_FORMAT=json` --
-        what both targets set -- a HANDLED exception is not multi-line at all: `JSONFormatter` puts
+        what the chart sets -- a HANDLED exception is not multi-line at all: `JSONFormatter` puts
         it in the `exc` field and `json.dumps` escapes the newlines. The stage earns its place on
         the UNHANDLED case, where Python writes a raw traceback straight to stderr with no
         formatter in the path. That is a daemon dying, which is when the log is worth most, and it
@@ -448,7 +447,7 @@ class MultilineTestCase(unittest.TestCase):
         # so a per-run name would mint a new Loki stream on every run -- the unbounded cardinality
         # the collector config refuses for `device`, arriving through the back door of a test. One
         # name means one stream however often this runs; the token separates the runs inside it.
-        name = "acs-cymru_multiline_probe"
+        name = "aber_multiline_probe"
 
         # THE SLEEP IS DISCOVERY, NOT PADDING. Pod discovery refreshes every 15s, so a
         # pod that starts and dies inside one interval is never seen and collects nothing.

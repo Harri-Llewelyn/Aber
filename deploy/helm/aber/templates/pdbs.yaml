@@ -1,0 +1,52 @@
+{{- if .Values.podDisruptionBudgets.enabled }}
+{{- $fullname := include "aber.fullname" . -}}
+{{/*
+=================================================================================================
+PodDisruptionBudgets, for the multi-replica workloads ONLY.
+
+A PDB ON A SINGLE-REPLICA WORKLOAD IS ACTIVELY HARMFUL, which is why this file enumerates rather
+than loops: `minAvailable: 1` against one pod can never be satisfied by an eviction, so
+`kubectl drain` blocks forever and NODE MAINTENANCE SILENTLY STOPS WORKING. The operator finds out
+while patching a kernel, and the message names the pod rather than the mistake.
+
+Every single-writer component here is deliberately one replica and gets no PDB; what protects them
+is `Recreate` plus backups, not an eviction budget.
+
+`maxUnavailable` rather than `minAvailable`, so the budget stays correct if replicas change --
+`minAvailable: 2` on a Deployment scaled down to 2 is the same trap in a different shape.
+
+REQUIRES THE REPLICA COUNT TO ACTUALLY BE > 1. Each entry is guarded on that, so enabling PDBs on a
+stack where `frontend.replicas: 1` produces no PDB for it rather than an undrainable node.
+=================================================================================================
+*/}}
+{{- $candidates := list
+  (dict "component" "frontend"           "replicas" .Values.frontend.replicas          "enabled" .Values.frontend.enabled)
+  (dict "component" "supabase-rest"      "replicas" .Values.supabaseRest.replicas      "enabled" .Values.supabaseRest.enabled)
+  (dict "component" "supabase-functions" "replicas" .Values.supabaseFunctions.replicas "enabled" .Values.supabaseFunctions.enabled)
+-}}
+{{- $any := false -}}
+{{- range $candidates }}
+{{- if and .enabled (gt (int .replicas) 1) }}
+{{- $any = true }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ printf "%s-%s" $fullname .component }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" $ "component" .component) | nindent 4 }}
+spec:
+  maxUnavailable: {{ $.Values.podDisruptionBudgets.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" $ "component" .component) | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- if not $any }}
+{{- /*
+     Not a failure. `podDisruptionBudgets.enabled` with everything at one replica is a coherent
+     configuration -- a single-node k3s, for instance, where there is nothing to spread across. It
+     renders nothing rather than rendering budgets that would make the node undrainable.
+*/ -}}
+{{- end }}
+{{- end }}

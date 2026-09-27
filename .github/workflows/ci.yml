@@ -284,7 +284,7 @@ jobs:
       #
       # In a container, so the second run meets the state the first left. `--skip-tags docker`
       # because Docker's engine does not install under one; the OS assert needs an Ubuntu image;
-      # and the service and timer tasks gate themselves on `acs_systemd`, which is false where PID
+      # and the service and timer tasks gate themselves on `aber_systemd`, which is false where PID
       # 1 is a shell. Gated on the playbook having changed (the `changes` job): roughly three
       # minutes, nearly all of it apt, on a directory that changes rarely.
       - name: Verify The Platform Playbook Converges Twice To The Same State
@@ -314,7 +314,7 @@ jobs:
       - name: Build Production Bundle
         env:
           VITE_SUPABASE_URL: http://127.0.0.1:54321
-          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_acscymru_dev_0000000000000000
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_aber_dev_00000000000000000000
         run: |
           cd frontend
           npm run build
@@ -334,19 +334,19 @@ jobs:
           version: v3.16.3
 
       # Helm cannot read files outside its chart directory, so sources are mirrored into
-      # deploy/helm/acs-cymru/files/ and committed. A stale copy provisions a different stack.
+      # deploy/helm/aber/files/ and committed. A stale copy provisions a different stack.
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
       # Chart lint and render run before the satellite checks: a job stops at its first failing step,
       # and this job is named for the chart.
       - name: Lint Chart
-        run: helm lint deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml
+        run: helm lint deploy/helm/aber -f deploy/helm/aber/values-dev.yaml
 
       - name: Render Chart
         run: |
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml > /tmp/rendered.yaml
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml > /tmp/rendered.yaml
           echo "Rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects."
 
       # kubeconform, not `kubectl apply --dry-run=client`: kubectl performs API discovery before it
@@ -376,8 +376,8 @@ jobs:
       # target and the dashboards are empty.
       - name: Verify Every ServiceMonitor Port Resolves On Its Service
         run: |
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml \
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml \
             --set telemetry.serviceMonitor.enabled=true \
             --set supabaseEnvoy.metrics.enabled=true \
             --set mosquitto.metrics.enabled=true > /tmp/sm.yaml
@@ -431,7 +431,7 @@ jobs:
           fail=0
           expect_failure() {
             local desc="$1"; local pattern="$2"; shift 2
-            if out=$(helm template acs-cymru deploy/helm/acs-cymru "$@" 2>&1); then
+            if out=$(helm template aber deploy/helm/aber "$@" 2>&1); then
               echo "::error::chart rendered successfully but should have refused: $desc"
               fail=1
             elif ! printf '%s' "$out" | grep -q "$pattern"; then
@@ -443,12 +443,14 @@ jobs:
             fi
           }
 
-          DEV=deploy/helm/acs-cymru/values-dev.yaml
+          DEV=deploy/helm/aber/values-dev.yaml
 
           # The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by
           # jwtSecret, and publishableKey and secretKey are what the gateway translates to them,
-          # so a partial set yields a stack that 401s at the gateway while looking fine.
-          expect_failure "no credentials at all" "required credentials are not set"
+          # so a partial set yields a stack that 401s at the gateway while looking fine. The primary
+          # host id is set because its own refusal fires first and would mask this one.
+          expect_failure "no credentials at all" "required credentials are not set" \
+            --set ingestion.primaryHostId=ci-render-check --set ingestion.sparkplugGroup=ci-render-check
           expect_failure "jwtSecret set but anonKey empty" "secrets.anonKey" \
             -f "$DEV" --set secrets.anonKey=
           expect_failure "publishableKey empty" "secrets.publishableKey" \
@@ -492,11 +494,11 @@ jobs:
 
           # An HPA on a single-writer workload duplicates every telemetry row and audit row silently.
           # The names come from the chart's `singleWriterWorkloads` block, not a list retyped here.
-          SW=$(sed -n '/define "acs-cymru.singleWriterWorkloads"/,/{{- end -}}/p' \
-                 deploy/helm/acs-cymru/templates/_helpers.tpl \
+          SW=$(sed -n '/define "aber.singleWriterWorkloads"/,/{{- end -}}/p' \
+                 deploy/helm/aber/templates/_helpers.tpl \
                | grep -E '^[a-z0-9-]+:' | cut -d: -f1)
           if [ "$(echo $SW | wc -w)" -lt 9 ]; then
-            echo "::error::parsed only [$SW] from acs-cymru.singleWriterWorkloads. The guard"
+            echo "::error::parsed only [$SW] from aber.singleWriterWorkloads. The guard"
             echo "::error::this loop tests derives its refusal set from that same block, so a"
             echo "::error::parse this thin means the guard is near-empty too."
             exit 1
@@ -525,7 +527,7 @@ jobs:
           # THE ALLOW-LIST MUST STILL LET THE FOUR THROUGH, asserted here because every case above
           # is a refusal -- a guard that refused EVERYTHING would satisfy all of them and break the
           # feature completely. Rendered in one go, expecting exactly four HPAs.
-          HPAS=$(helm template acs-cymru deploy/helm/acs-cymru -f "$DEV" \
+          HPAS=$(helm template aber deploy/helm/aber -f "$DEV" \
                    --set autoscaling.enabled=true \
                    --set autoscaling.components[0]=supabase-rest \
                    --set autoscaling.components[1]=supabase-envoy \
@@ -539,6 +541,19 @@ jobs:
             exit 1
           fi
           echo "  ok: the four deployed components render an HPA each"
+
+          # Every gateway on site watches spBv1.0/STATE/<id>, so the id has no default, and one that is
+          # not a single topic level publishes where the broker grants nothing.
+          expect_failure "no primary host id" "ingestion.primaryHostId is not set" \
+            -f "$DEV" --set ingestion.primaryHostId=
+          expect_failure "primary host id spanning topic levels" "which is not one topic level" \
+            -f "$DEV" --set ingestion.primaryHostId=site/a
+
+          # The group is in every topic and fixed at the first boot, so it has no default either.
+          expect_failure "no sparkplug group" "ingestion.sparkplugGroup is not set" \
+            -f "$DEV" --set ingestion.sparkplugGroup=
+          expect_failure "sparkplug group spanning topic levels" "which is not one topic level" \
+            -f "$DEV" --set ingestion.sparkplugGroup=plant/a
 
           # A nightly backup that writes nowhere is worse than none, because it looks like one.
           expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
@@ -566,16 +581,19 @@ jobs:
       # place several settings appear, so a rename applied to values.yaml misses it. It carries no
       # credentials by design, so `existingSecret` is set rather than underlaying values-dev.yaml:
       # the example pins the credential keys to empty strings, and an explicit empty string overrides
-      # an underlaid value.
+      # an underlaid value. The primary host id is left empty for the operator to fill, so it is set
+      # here too.
       - name: Render The Production Values Example
         run: |
           set -euo pipefail
-          PROD=deploy/helm/acs-cymru/values-prod.yaml.example
+          PROD=deploy/helm/aber/values-prod.yaml.example
 
           # Rendered to a file; every check below reads the file. `printf | grep -q` under pipefail
           # fails exactly when the string is present (grep closes the pipe, printf gets SIGPIPE).
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f "$PROD" --set secrets.existingSecret=ci-render-check > /tmp/prod-render.yaml
+          helm template aber deploy/helm/aber \
+            -f "$PROD" --set secrets.existingSecret=ci-render-check \
+            --set ingestion.primaryHostId=ci-render-check \
+            --set ingestion.sparkplugGroup=ci-render-check > /tmp/prod-render.yaml
 
           # A render that succeeds and emits nothing would satisfy a bare exit-code check.
           COUNT=$(grep -c '^kind:' /tmp/prod-render.yaml || true)
@@ -627,8 +645,8 @@ jobs:
       # packets at the destination and logs nothing.
       - name: Verify NetworkPolicies Are Symmetric And Cover The Load-Bearing Flows
         run: |
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml \
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml \
             --set networkPolicy.enabled=true --set backup.enabled=true --set e2e.enabled=true \
             > /tmp/netpol.yaml
           python3 - <<'PY'
@@ -711,13 +729,13 @@ jobs:
       # property can be checked, and the default is precisely where it would be lost unnoticed.
       - name: Verify The Forge Is Protected With NetworkPolicies Off
         run: |
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml > /tmp/netpol-off.yaml
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml > /tmp/netpol-off.yaml
           # A SECOND RENDER WITH THE SSH LIST NARROWED. At the default that rule carries no peers at
           # all, so the default render alone cannot distinguish a correct reading of a peer list from
           # one that drops peers on the floor -- and a peer list is the thing this step exists to pin.
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml \
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml \
             --set 'networkPolicy.giteaSshAllowedCidrs={10.0.0.0/8}' > /tmp/netpol-off-narrowed.yaml
           python3 - <<'PY'
           import sys, yaml
@@ -797,12 +815,13 @@ jobs:
 
       # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
       # client to 8883 and must move their edges too. A second render because the port is a
-      # render-time choice.
+      # render-time choice. e2e is on because e2e-validate is one of the clients asserted, and its
+      # edges render only with the Job.
       - name: Verify NetworkPolicies Follow The Broker Onto TLS
         run: |
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml \
-            --set networkPolicy.enabled=true \
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml \
+            --set networkPolicy.enabled=true --set e2e.enabled=true \
             --set mosquitto.tls.enabled=true --set mosquitto.tls.internalClients=true \
             --set 'mosquitto.tls.extraIpSans={10.0.0.9}' \
             > /tmp/netpol-tls.yaml
@@ -856,8 +875,8 @@ jobs:
       # binds to loopback and the in-cluster Service and the container stop declaring the port.
       - name: Verify Plaintext 1883 Withdraws To Loopback
         run: |
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml \
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml \
             --set networkPolicy.enabled=true \
             --set mosquitto.tls.enabled=true \
             --set 'mosquitto.tls.extraIpSans={10.0.0.9}' \
@@ -894,16 +913,16 @@ jobs:
       # way or another, and no `sslmode=disable` survives the render.
       - name: Verify TLS To The Databases Renders Closed
         run: |
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml \
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml \
             --set postgresTls.enabled=true \
             --set e2e.enabled=true --set coldArchive.enabled=true \
             --set backup.enabled=true --set backupService.enabled=true \
             > /tmp/db-tls.yaml
           # The nightly CronJob renders only when the backup service does not, so it gets a
           # render of its own; the clients check reads both.
-          helm template acs-cymru deploy/helm/acs-cymru \
-            -f deploy/helm/acs-cymru/values-dev.yaml \
+          helm template aber deploy/helm/aber \
+            -f deploy/helm/aber/values-dev.yaml \
             --set postgresTls.enabled=true \
             --set backup.enabled=true --set backupService.enabled=false \
             > /tmp/db-tls-cron.yaml
@@ -913,12 +932,12 @@ jobs:
           cron = [d for d in yaml.safe_load_all(open('/tmp/db-tls-cron.yaml', encoding='utf-8')) if d and d['kind'] == 'CronJob']
           errors = []
           certs = {d['metadata']['name'] for d in docs if d['kind'] == 'Certificate'}
-          for want in ('acs-cymru-supabase-db-tls', 'acs-cymru-timescaledb-tls'):
+          for want in ('aber-supabase-db-tls', 'aber-timescaledb-tls'):
               if want not in certs:
                   errors.append(f"no Certificate {want}; the render has {sorted(certs)}")
-          cm = next((d for d in docs if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'acs-cymru-postgres-tls'), None)
+          cm = next((d for d in docs if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'aber-postgres-tls'), None)
           if cm is None:
-              errors.append("no acs-cymru-postgres-tls ConfigMap (the pg_hba files)")
+              errors.append("no aber-postgres-tls ConfigMap (the pg_hba files)")
           else:
               for key, hba in cm['data'].items():
                   rules = [l.split() for l in hba.splitlines() if l.strip() and not l.lstrip().startswith('#')]
@@ -936,7 +955,7 @@ jobs:
               spec = sts['spec']['template']['spec']
               main = next(c for c in spec['containers'] if c['name'] == db)
               args = main.get('args') or []
-              for flag in ('ssl=on', 'hba_file=/etc/acs-cymru/postgres/pg_hba.conf'):
+              for flag in ('ssl=on', 'hba_file=/etc/aber/postgres/pg_hba.conf'):
                   if flag not in args:
                       errors.append(f"{db} does not start with -c {flag}")
               if not any(c['name'] == 'certificate-reload' for c in spec['containers']):
@@ -947,15 +966,15 @@ jobs:
           sb = next(d for d in docs if d['kind'] == 'StatefulSet' and d['metadata']['name'] == 'supabase-db')
           sb_args = next(c for c in sb['spec']['template']['spec']['containers'] if c['name'] == 'supabase-db').get('args') or []
           for guc in ('pgsodium.getkey_script', 'vault.getkey_script'):
-              if f'{guc}=/etc/acs-cymru/postgres/pgsodium_getkey.sh' not in sb_args:
+              if f'{guc}=/etc/aber/postgres/pgsodium_getkey.sh' not in sb_args:
                   errors.append(f"supabase-db does not point {guc} at the chart's key script; a recreated pod would mint a new root key")
           # Every workload that opens a database connection carries the CA one way or another.
           MARKERS = ('PGSSLROOTCERT', 'DATABASE_SSL_ROOT_CERT', 'PG_META_DB_SSL_ROOT_CERT', 'DB_SSL_CA_CERT', 'sslrootcert=',
                      'db-ca/ca.crt')  # Grafana: the datasource file names the mounted CA
           CLIENTS = ('supabase-auth', 'supabase-rest', 'supabase-storage', 'supabase-meta', 'supabase-realtime',
-                     'grafana', 'ingestion', 'backup-service', 'acs-cymru-db-init', 'acs-cymru-db-roles-init',
-                     'acs-cymru-timescaledb-maintenance', 'acs-cymru-cold-archive', 'acs-cymru-backup',
-                     'acs-cymru-e2e-validate', 'acs-cymru-test-fdw', 'acs-cymru-test-db-tls')
+                     'grafana', 'ingestion', 'backup-service', 'aber-db-init', 'aber-db-roles-init',
+                     'aber-timescaledb-maintenance', 'aber-cold-archive', 'aber-backup',
+                     'aber-e2e-validate', 'aber-test-fdw', 'aber-test-db-tls')
           def pod_spec(d):
               k = d['kind']
               if k in ('Deployment', 'StatefulSet', 'Job'): return d['spec']['template']['spec']
@@ -1003,7 +1022,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import base64, fnmatch, gzip, json, os, sys, yaml
-          chart = 'deploy/helm/acs-cymru'
+          chart = 'deploy/helm/aber'
           rules = [l.strip() for l in open(os.path.join(chart, '.helmignore'), encoding='utf-8')
                    if l.strip() and not l.startswith('#')]
           # NOT STORED AS ARCHIVE FILES. Helm keeps Chart.yaml as `chart.metadata` and values.yaml
@@ -1155,14 +1174,14 @@ jobs:
           python3 - <<'PY'
           import re, sys, io
 
-          # The chart's own list, parsed out of the block that `acs-cymru.validateAutoscaling`
+          # The chart's own list, parsed out of the block that `aber.validateAutoscaling`
           # derives its refusal set from. One source, so "which workloads must never be scaled" has
           # one answer -- see the header on that define in _helpers.tpl.
-          tpl = io.open('deploy/helm/acs-cymru/templates/_helpers.tpl', encoding='utf-8').read()
+          tpl = io.open('deploy/helm/aber/templates/_helpers.tpl', encoding='utf-8').read()
           block = re.search(
-              r'define "acs-cymru[.]singleWriterWorkloads" -}}(.*?){{- end -}}', tpl, re.S)
+              r'define "aber[.]singleWriterWorkloads" -}}(.*?){{- end -}}', tpl, re.S)
           if not block:
-              print('::error::could not find acs-cymru.singleWriterWorkloads in _helpers.tpl')
+              print('::error::could not find aber.singleWriterWorkloads in _helpers.tpl')
               sys.exit(1)
           SINGLE = dict(re.findall(r'^([a-z0-9-]+): (.+)$', block.group(1), re.M))
           if len(SINGLE) < 9:
@@ -1217,7 +1236,7 @@ jobs:
       #
       #   docker run --rm --entrypoint sh <image>:<pinned-tag> -c 'getent passwd <user>'
       #
-      # timescale/timescaledb is Alpine (70); supabase/postgres 17.6.1.160 is Alpine with postgres at
+      # timescale/timescaledb is Alpine (70); supabase/postgres 17.6.1.175 is Alpine with postgres at
       # 100:101. Both entrypoints run as root and chown, so fsGroup only matters once `runAsUser` is set.
       # See docs/incidents.md -> "fsGroup restated in the checker rather than measured".
       - name: Verify fsGroup Is Set On Every Workload With A Volume
@@ -1321,7 +1340,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: supabase/postgres:17.6.1.160
+        image: supabase/postgres:17.6.1.175
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -1339,7 +1358,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
+          python-version: '3.13'
 
       # From the requirements files, not a hand-picked list. jsonschema and pytest are the two not
       # declared by either package: jsonschema validates the AAS export against the IDTA schema, and
@@ -1351,7 +1370,7 @@ jobs:
           pip install jsonschema pytest
 
       # `ingestion/*_pb2.py` is gitignored and built from sparkplug_b.proto at image build, so a fresh
-      # checkout has none. Same two steps as e2e-validation.
+      # checkout has none.
       - name: Generate Sparkplug B Protobuf Module
         run: |
           sudo apt-get update
@@ -1398,7 +1417,8 @@ jobs:
         run: node scripts/run-python-suites.mjs --lane db
 
       # The `unit` lane: no database, no broker, no stack. A suite that skips itself without a stack
-      # reports `OK (skipped=N)` and exits 0, so those are in the `stack` lane in e2e-validation.
+      # reports `OK (skipped=N)` and exits 0, so those are in the `stack` lane, which runs against
+      # a live cluster (`npm run dev:test`) rather than here.
       - name: Run Python Unit Suites
         run: node scripts/run-python-suites.mjs --lane unit
 
@@ -1411,9 +1431,9 @@ jobs:
         run: npm run test:lib
 
   # =============================================================================================
-  # The in-cluster half of the two-target guarantee. Runs alongside e2e-validation, never instead
-  # of it: validate.py is the conformance check for either target. k3d, not kind, so Traefik,
-  # ServiceLB and local-path behave as they will on the target.
+  # validate.py is the conformance check for a deployed stack, and this is where CI runs it against
+  # a real one. k3d, not kind, so Traefik, ServiceLB and local-path behave as they will on the
+  # target.
   # =============================================================================================
   k8s-validation:
     # Gated on the diff: most of this workflow's minutes are this job, and a documentation change
@@ -1428,8 +1448,8 @@ jobs:
     env:
       # Every object below is named "<RELEASE>-<thing>" by the chart's fullname helper, which
       # collapses the "<release>-<chart>" prefix when the release already contains the chart name.
-      RELEASE: acs-cymru
-      NS: acs-cymru
+      RELEASE: aber
+      NS: aber
       # A commit SHA: the `1.0.0` tag predates the conformance suite, and an unpinned branch would let
       # someone else's commit decide whether this pipeline is green. Read the suite's CHANGELOG before
       # bumping: a new MUST test is a real finding about this server.
@@ -1446,7 +1466,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
+          python-version: '3.13'
 
       # The host-side half of the stack lane: validate.py and the suites run on the runner, through
       # port-forwards, exactly as `npm run dev:test` runs them on a laptop.
@@ -1506,7 +1526,7 @@ jobs:
       # reclaim before the suites run.
       - name: Reclaim The Host Image Copies
         run: |
-          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr.io/harri-llewelyn/acs-cymru/' \
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr.io/harri-llewelyn/aber/' \
             | xargs -r docker image rm -f || true
           docker builder prune -af || true
           docker image prune -af || true
@@ -1623,9 +1643,9 @@ jobs:
           # The ingestion endpoint must be serving REAL counters, not just answering 200. validate.py
           # has just published a run's worth of Sparkplug traffic through the daemon.
           VALUE=$(curl -sf --get "$PROM/api/v1/query" \
-                    --data-urlencode 'query=sum(acs_ingestion_messages_total)' \
+                    --data-urlencode 'query=sum(aber_ingestion_messages_total)' \
                   | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "0")')
-          echo "  acs_ingestion_messages_total = $VALUE"
+          echo "  aber_ingestion_messages_total = $VALUE"
           python3 -c "import sys; sys.exit(0 if float('$VALUE') > 0 else 1)" || {
             echo "::error::Prometheus scraped the ingestion daemon but recorded no messages."
             echo "::error::The target is up and the counters are empty, which means the endpoint"
@@ -1653,7 +1673,7 @@ jobs:
           KEY=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
           TOKEN=$(curl -s -X POST "http://127.0.0.1:18080/auth/v1/token?grant_type=password" \
             -H "apikey: $KEY" -H "Content-Type: application/json" \
-            -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
+            -d '{"email":"admin@aber.local","password":"aber123"}' \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
           test -n "$TOKEN"
 
@@ -1750,4 +1770,4 @@ jobs:
 
       - name: Tear Down
         if: always()
-        run: k3d cluster delete acs-cymru || true
+        run: k3d cluster delete aber || true

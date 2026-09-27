@@ -309,9 +309,11 @@ class TestRfc3339(unittest.TestCase):
         """
         THE ACTUAL CI FAILURE. PostgREST strips trailing zeros from `timestamptz`, so a microsecond
         value ending in 0 arrives with FIVE fractional digits. Python 3.10's `fromisoformat` accepts
-        exactly 3 or 6 and raises on anything else; 3.11 relaxed it. On the container this fell into
-        the unparseable branch and shipped `+00:00` -- the conformance suite's QRY-01 failure --
-        while every local run on 3.12 parsed it and passed.
+        exactly 3 or 6 and raises on anything else; 3.11 relaxed it. On the container, 3.10 at the
+        time, this fell into the unparseable branch and shipped `+00:00` -- the conformance suite's
+        QRY-01 failure -- while every local run on 3.12 parsed it and passed. The container and CI
+        both run 3.13 now, so that particular skew is gone and the parser is still ours to get
+        right: the sweep below is what proves it, on any version.
 
         Swept across every length, because "5 digits" was only the width that happened to occur.
         """
@@ -491,8 +493,8 @@ class TestMirroredConstants(unittest.TestCase):
             if not m:
                 continue
             # The LAST quoted string on the line, not the first. Both files may write the constant
-            # either as a bare literal (`= "ACS-Cymru"`) or as an override with a default
-            # (`= os.getenv("DEFAULT_SPARKPLUG_GROUP", "ACS-Cymru")`), and in the second form the
+            # either as a bare literal (`= "Aber"`) or as an override with a default
+            # (`= os.getenv("DEFAULT_SPARKPLUG_GROUP", "Aber")`), and in the second form the
             # first quoted string is the environment variable's NAME -- comparing that against the
             # other file's value fails on a pair that agrees perfectly.
             quoted = re.findall(r'"([^"]*)"', m.group(1))

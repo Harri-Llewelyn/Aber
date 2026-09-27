@@ -53,13 +53,11 @@ sys.path.insert(0, INGESTION_DIR)
 # generated protobuf module registers its descriptors a second time and raises.
 # =============================================================================================
 #
-# DROPPING THE STUB IS NOT ENOUGH, AND THE REASON IS THE IMPORT GRAPH. `capture` used to be
-# reachable only from this file, so deleting `sparkplug_b_pb2` and importing it fresh was the whole
-# dance. ingestion.py now imports `capture_worker`, which imports `capture` -- so by the time this
-# file runs, a sibling that imported the daemon has ALREADY loaded `capture` bound to the stub, and
-# `import capture` below would hand back that cached module. Every encoding test then fails with
-# "'object' object has no attribute 'timestamp'", exactly as before, from a cause one import
-# further away.
+# DROPPING THE STUB IS NOT ENOUGH, AND THE REASON IS THE IMPORT GRAPH. ingestion.py imports
+# `capture_worker`, which imports `capture`, so by the time this file runs a sibling that imported
+# the daemon has ALREADY loaded `capture` bound to the stub, and `import capture` below would hand
+# back that cached module. Every encoding test then fails with "'object' object has no attribute
+# 'timestamp'", from a cause one import away.
 #
 # Neither module registers protobuf descriptors of its own, so re-importing them is free -- unlike
 # the generated module, which is why only a STUB of that is ever displaced.
@@ -88,7 +86,7 @@ NOW = 1_800_000_000_000    # playback's
 
 
 def message(offset_ms, msg_type, device=CAPTURED_DEV, metrics=None, **payload):
-    topic = "spBv1.0/ACS-Cymru/%s/%s" % (msg_type, CAPTURED_GW)
+    topic = "spBv1.0/Aber/%s/%s" % (msg_type, CAPTURED_GW)
     if device:
         topic += "/" + device
     body = {"timestamp": EPOCH + offset_ms, "metrics": metrics or []}
@@ -99,7 +97,7 @@ def message(offset_ms, msg_type, device=CAPTURED_DEV, metrics=None, **payload):
 def capture_file(messages=None):
     messages = messages if messages is not None else [message(0, "DDATA")]
     return {
-        "acs_capture_version": capture.CAPTURE_VERSION,
+        "aber_capture_version": capture.CAPTURE_VERSION,
         "recorded_at": "2026-08-27T12:00:00+00:00",
         "capture_epoch_ms": EPOCH,
         "duration_ms": messages[-1]["offset_ms"],
@@ -194,23 +192,23 @@ class IdentityRewriteTests(unittest.TestCase):
     def test_the_edge_node_segment_becomes_the_playback_gateway(self):
         # FAILURE 1. Without this the broker discards every publish and says nothing.
         topic, _ = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             {"metrics": []}, GW, DEFAULT_MAP,
         )
-        self.assertEqual(topic, "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (GW, DEV_A))
+        self.assertEqual(topic, "spBv1.0/Aber/DDATA/%s/%s" % (GW, DEV_A))
 
     def test_a_node_topic_keeps_its_four_segments(self):
         # NBIRTH/NDATA/NDEATH carry no device. Appending one would make process_node_message()
         # unreachable for the capture's gateway heartbeats.
         topic, _ = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/NBIRTH/%s" % CAPTURED_GW, {"metrics": []}, GW, {},
+            "spBv1.0/Aber/NBIRTH/%s" % CAPTURED_GW, {"metrics": []}, GW, {},
         )
-        self.assertEqual(topic, "spBv1.0/ACS-Cymru/NBIRTH/%s" % GW)
+        self.assertEqual(topic, "spBv1.0/Aber/NBIRTH/%s" % GW)
 
     def test_the_asset_id_claim_is_rewritten_with_the_topic(self):
         # FAILURE 2. A topic and a claim that disagree is the definition of a faulty identity.
         _, payload = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             {"metrics": [{"name": "Asset_ID", "string_value": CAPTURED_DEV}]},
             GW, DEFAULT_MAP,
         )
@@ -220,7 +218,7 @@ class IdentityRewriteTests(unittest.TestCase):
         # An optimised gateway does not repeat identity on every message; the topic is the only
         # identity available. Adding one would make playback unrepresentative of real traffic.
         _, payload = capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             {"metrics": [{"alias": 3, "double_value": 20.0}]}, GW, DEFAULT_MAP,
         )
         self.assertEqual(len(payload["metrics"]), 1)
@@ -231,7 +229,7 @@ class IdentityRewriteTests(unittest.TestCase):
         # by the broker, silently. Refusing names the device that needs a --map.
         with self.assertRaises(capture.CaptureError) as ctx:
             capture.rewrite_identity(
-                "spBv1.0/ACS-Cymru/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                "spBv1.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
                 {"metrics": []}, GW, {},
             )
         self.assertIn(CAPTURED_DEV, str(ctx.exception))
@@ -240,7 +238,7 @@ class IdentityRewriteTests(unittest.TestCase):
         # Replaying one capture at two speeds must not have the first run edit the second's source.
         source = {"metrics": [{"name": "Asset_ID", "string_value": CAPTURED_DEV}]}
         capture.rewrite_identity(
-            "spBv1.0/ACS-Cymru/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+            "spBv1.0/Aber/DBIRTH/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             source, GW, DEFAULT_MAP,
         )
         self.assertEqual(source["metrics"][0]["string_value"], CAPTURED_DEV)
@@ -328,10 +326,17 @@ class PlanTests(unittest.TestCase):
 
     def test_an_unknown_capture_version_is_refused(self):
         bad = capture_file()
-        bad["acs_capture_version"] = 99
+        bad["aber_capture_version"] = 99
         with self.assertRaises(capture.CaptureError) as ctx:
             self._plan(capture=bad)
         self.assertIn("99", str(ctx.exception))
+
+    def test_a_capture_recorded_before_the_rename_is_still_read(self):
+        # The key carried the platform's former name until 1.0; the format did not change, so a
+        # file a site recorded before then plays under either key.
+        old = capture_file()
+        old["acs_capture_version"] = old.pop("aber_capture_version")
+        self.assertTrue(self._plan(capture=old))
 
     def test_a_gateway_id_of_the_wrong_shape_is_refused(self):
         # sparkplug_id is a GENERATED column, so a friendly name cannot be one -- and passing it
@@ -625,9 +630,9 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         ])
 
     def test_a_playback_that_would_write_nothing_is_refused(self):
-        # THE BUG. Every message out of window is a total no-op, and the worker used to publish it
-        # and report success. Refused before the broker is contacted, so `sent` is zero and the
-        # error is what the Capture page shows.
+        # A playback whose every message is out of window can write nothing, so it is refused
+        # BEFORE the broker is contacted: `sent` is zero and the error is what the Capture page
+        # shows, rather than a run that reports success and moves nothing.
         sent, out_of_window, error = self._run(self._stale(1_000, count=3))
         self.assertEqual(sent, 0)
         self.assertEqual(out_of_window, 3)

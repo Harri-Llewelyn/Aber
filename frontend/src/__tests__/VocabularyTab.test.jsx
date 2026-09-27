@@ -31,12 +31,12 @@ const ISO_VOCABULARY = [
   {
     name: 'AVAILABILITY', kpi_id: 'A', category: 'OEE', unit: 'PERCENT',
     formula: 'A = APT / PBT', description: 'Availability ratio',
-    semantic_id: 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY'
+    semantic_id: 'https://aber.local/semantics/iso22400/AVAILABILITY'
   },
   {
     name: 'MTBF', kpi_id: 'MTBF', category: 'Maintenance', unit: 'HOUR',
     formula: 'MTBF = APT / number of failures', description: 'Mean operating time between failures',
-    semantic_id: 'https://acs-cymru.local/semantics/iso22400/MTBF'
+    semantic_id: 'https://aber.local/semantics/iso22400/MTBF'
   }
 ]
 
@@ -55,11 +55,26 @@ const OPCUA_VOCABULARY = [
   }
 ]
 
+// One class and one relation, so the tab can show that only the class carries a Use action.
+const ASHRAE223_VOCABULARY = [
+  {
+    name: 'TemperatureSensor', concept_kind: 'Class', label: 'Temperature sensor', subclass_of: 'Sensor',
+    description: 'A `Sensor` that measures temperature.',
+    semantic_id: 'http://data.ashrae.org/standard223#TemperatureSensor'
+  },
+  {
+    name: 'hasProperty', concept_kind: 'Relation', label: 'has property', subclass_of: null,
+    description: 'A `Relation` that associates a `Concept` with a `Property`.',
+    semantic_id: 'http://data.ashrae.org/standard223#hasProperty'
+  }
+]
+
 const routes = {
   '/api/v1/metric-catalog': CATALOG,
   '/api/v1/mtconnect-vocabulary': VOCABULARY,
   '/api/v1/iso22400-vocabulary': ISO_VOCABULARY,
-  '/api/v1/opcua-vocabulary': OPCUA_VOCABULARY
+  '/api/v1/opcua-vocabulary': OPCUA_VOCABULARY,
+  '/api/v1/ashrae223-vocabulary': ASHRAE223_VOCABULARY
 }
 
 beforeEach(() => {
@@ -188,6 +203,27 @@ describe('Vocabulary page — Use hands off to the Schemas page', () => {
     const chip = card().getByTitle(/^AVAILABILITY \(A\)/)
     expect(chip.getAttribute('role')).toBeNull()
     fireEvent.click(chip)
+    expect(onUseEntry).not.toHaveBeenCalled()
+  })
+
+  it('identifies a 223P class by name, and offers no Use on a relation', async () => {
+    // The Metrics page's Concept picker leaves relations out; if Use still handed one over, the
+    // form would compose `Building/hasProperty`, a metric named after a predicate. Same rule, both
+    // doors: isMetricConcept().
+    const onUseEntry = vi.fn()
+    renderTab({ onUseEntry })
+    await ready()
+
+    fireEvent.click(standardTab(/ASHRAE 223P/))
+    fireEvent.click(card().getByRole('button', { name: /Sensor/ }))
+    fireEvent.click(card().getByTitle(/^Temperature sensor —/))
+    expect(onUseEntry).toHaveBeenCalledWith({ standard: 'ASHRAE 223P', name: 'TemperatureSensor' })
+
+    onUseEntry.mockClear()
+    fireEvent.click(card().getByRole('button', { name: /Root/ }))
+    const relation = card().getByTitle(/^has property —/)
+    expect(relation.getAttribute('role')).toBeNull()
+    fireEvent.click(relation)
     expect(onUseEntry).not.toHaveBeenCalled()
   })
 })

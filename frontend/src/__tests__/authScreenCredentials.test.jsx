@@ -67,7 +67,7 @@ describe('the sign-in form ships no credentials', () => {
   it('carries no seeded account address in App.jsx', () => {
     // An email is not a credential, but pre-filling the administrator's address is half of the
     // same convenience and names the account worth attacking.
-    expect(APP_JSX).not.toContain('admin@acs-cymru.local')
+    expect(APP_JSX).not.toContain('admin@aber.local')
   })
 
   it('annotates both fields for a password manager', () => {

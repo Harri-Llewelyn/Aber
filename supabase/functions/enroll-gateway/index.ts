@@ -123,7 +123,7 @@ export default async function handler(req: Request): Promise<Response> {
   const admin = serviceRoleClient(supabaseUrl, serviceRoleKey, {
     // Names this function in the audit trail rather than leaving it as the generic 'service'.
     // The digital_thread trigger accepts only ingestion/service/migration from this header.
-    "X-ACS-Cymru-Actor": "service",
+    "X-Aber-Actor": "service",
   });
 
   // 1. Claim. One winner, decided by the database.

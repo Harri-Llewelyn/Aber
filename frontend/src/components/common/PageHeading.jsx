@@ -17,8 +17,11 @@ import React from 'react'
  *
  * @param {React.ReactNode} children The description. One or two sentences: what this page is, and
  * whatever about it is surprising enough to say before the first row.
+ *
+ * @param {React.ReactNode} [note] A fact about the stack's current state, stated after the
+ * description in the body colour: a setting's effect, not more description.
  */
-export function PageHeading({ icon, title, children }) {
+export function PageHeading({ icon, title, children, note }) {
   return (
     <div className="page-heading">
       <h2 className="section-title">
@@ -26,6 +29,7 @@ export function PageHeading({ icon, title, children }) {
         {title}
       </h2>
       {children && <p>{children}</p>}
+      {note && <p className="page-heading-note">{note}</p>}
     </div>
   )
 }

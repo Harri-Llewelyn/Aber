@@ -4,8 +4,8 @@ The startup recovery loop: the work a dependency that was not up yet prevented, 
 WHY THIS IS WORTH A SUITE. The fault it guards is one this stack reached, and both of its
 consequences were silent in opposite directions.
 
-    acs-cymru_ingestion    started 20:08:52.370   restarts=0   policy=always
-    acs-cymru_timescaledb  started 20:08:52.823   restarts=0   policy=always
+    aber_ingestion    started 20:08:52.370   restarts=0   policy=always
+    aber_timescaledb  started 20:08:52.823   restarts=0   policy=always
 
 Nothing orders a whole-host restart, so when the stack came back it started ingestion 453ms
 before the historian and the dependency graph had no say.
@@ -13,7 +13,7 @@ The daemon then entered its MQTT loop having done none of the startup work that 
 and NOTHING RETRIED ANY OF IT:
 
   1. `_ts_conn` was never set, and only a WRITE sets it -- so on a stack with nothing publishing it
-     stayed None, `acs_ingestion_db_connected` read 0 for ever, and `Historian Unreachable From
+     stayed None, `aber_ingestion_db_connected` read 0 for ever, and `Historian Unreachable From
      Ingestion` fired against a historian that was reachable throughout and dropping nothing,
      because there was nothing to drop. A false alarm that never clears is worse than no alarm: it
      is the one an operator learns to close.
@@ -107,7 +107,7 @@ class HealerTestCase(unittest.TestCase):
 
 
 class ConnectionRecovery(HealerTestCase):
-    """The half that makes acs_ingestion_db_connected tell the truth."""
+    """The half that makes aber_ingestion_db_connected tell the truth."""
 
     def test_opens_the_connection_the_daemon_should_already_have_held(self):
         fresh = FakeConn()
@@ -219,7 +219,7 @@ class TheRaceWithTheCallbackThread(HealerTestCase):
 
 class WhatAFailedAttemptCounts(HealerTestCase):
     """
-    THE COUNTER SEPARATION IS LOAD-BEARING. `acs_ingestion_db_connect_failures_total` means a
+    THE COUNTER SEPARATION IS LOAD-BEARING. `aber_ingestion_db_connect_failures_total` means a
     message needed the historian and did not get it -- telemetry dropped -- and the alert rules
     read it that way. A healer attempt drops nothing: it is a daemon with no traffic waiting for a
     database. Counting them together would make an idle stack indistinguishable from a lossy one.

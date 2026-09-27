@@ -11,7 +11,7 @@
  *
  * No YAML dependency: this runs in CI before any `npm install`, and the shapes it reads are narrow.
  */
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, normalize, posix } from 'node:path';
 
@@ -66,7 +66,7 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 // 2. README's component table pins the same image tags the chart does. The chart's values are
 // parsed by shape: a `repository:` line followed by its `tag:` line, comments between allowed.
 // -------------------------------------------------------------------------------------------------
-const CHART_VALUES = read('deploy/helm/acs-cymru/values.yaml');
+const CHART_VALUES = read('deploy/helm/aber/values.yaml');
 const chartPins = new Map();
 {
   let repo = null;
@@ -117,7 +117,7 @@ const chartPins = new Map();
       }
     }
   };
-  walk(join(REPO, 'deploy/helm/acs-cymru/templates'));
+  walk(join(REPO, 'deploy/helm/aber/templates'));
 
   const readme = read('README.md');
   const section = readme.slice(readme.indexOf('## Components'));
@@ -164,12 +164,12 @@ const chartPins = new Map();
       if (e.isDirectory()) walk(f);
       else if (e.name.endsWith('.yaml')) {
         const text = readFileSync(f, 'utf8');
-        if (!text.includes('acs-cymru.scrapeAnnotations')) continue;
+        if (!text.includes('aber.scrapeAnnotations')) continue;
         for (const m of text.matchAll(/\$component\s*:=\s*"([a-z0-9-]+)"/g)) jobs.add(m[1]);
       }
     }
   };
-  walk(join(REPO, 'deploy/helm/acs-cymru/templates'));
+  walk(join(REPO, 'deploy/helm/aber/templates'));
 
   // The map is declared by 0001 and redeclared by 0103; the LAST declaration in the chain wins.
   const mapped = [];
@@ -212,7 +212,7 @@ const chartPins = new Map();
 // it or not.
 // -------------------------------------------------------------------------------------------------
 {
-  const CHART = read('deploy/helm/acs-cymru/Chart.yaml');
+  const CHART = read('deploy/helm/aber/Chart.yaml');
   const known = new Set(chartPins.values());
   for (const key of ['version', 'appVersion']) {
     const m = CHART.match(new RegExp(`^${key}:\\s*["']?([^"'\\s]+)`, 'm'));
@@ -235,7 +235,7 @@ const chartPins = new Map();
   // Mirrors are checked through their sources; the archive and the incident log are records of
   // what was true, not claims about what is. So is a document that opens by declaring itself
   // historical -- the version it names is the one that motivated the work it records.
-  const RECORD = /^(?:docs\/incidents\.md$|supabase\/migrations\/archive\/|frontend\/dist\/|deploy\/helm\/acs-cymru\/files\/)/;
+  const RECORD = /^(?:docs\/incidents\.md$|supabase\/migrations\/archive\/|frontend\/dist\/|deploy\/helm\/aber\/files\/)/;
   const declaresItselfHistorical = (body) => /^>\s*\*\*Historical/m.test(body.split('\n').slice(0, 10).join('\n'));
 
   /** Every claim on one line, judged. `[]` when the line makes none. */
@@ -260,7 +260,7 @@ const chartPins = new Map();
   // The pattern's own positive and negative controls. Without these the check passes silently once
   // the last claim is corrected, and a later edit that breaks the regex looks identical to a clean
   // tree -- the failure this repository keeps meeting in other forms.
-  const mustCatch = 'this stack pins 9.9.9, see deploy/helm/acs-cymru/values.yaml';
+  const mustCatch = 'this stack pins 9.9.9, see deploy/helm/aber/values.yaml';
   // Copied from scripts/generate-mtconnect-vocabulary.mjs: a real sentence this must not flag.
   const mustPass = 'The namespace pins `v2.0`, the major line -- deliberately NOT SCHEMA_VERSION';
   if (!judge(mustCatch).some(Boolean)) {
@@ -330,6 +330,53 @@ const chartPins = new Map();
     if (n !== ciJobs) fail(`the docs claim "${claimed[1]}" CI jobs; ci.yml defines ${ciJobs}`);
   }
   if (!anyMissing) pass(`the docs name all ${allJobs} workflow jobs`);
+}
+
+// -------------------------------------------------------------------------------------------------
+// 3b. The restore rehearsal's failure issue names steps the workflow has. The table it files is
+// the reader's map from a red step to a cause, and a renamed step silently orphans its row.
+// -------------------------------------------------------------------------------------------------
+{
+  const wf = read('.github/workflows/restore-rehearsal.yml');
+  const steps = new Set([...wf.matchAll(/^ {6}- name: (.+?)\s*$/gm)].map((m) => m[1].trim()));
+  const rows = [...wf.matchAll(/^\s*'\| ([^|]+?) \| /gm)].map((m) => m[1].trim())
+    .filter((r) => r !== 'Step' && !/^:?-+:?$/.test(r));
+  const missing = rows.filter((r) => !steps.has(r));
+  if (!rows.length) fail('restore-rehearsal.yml: the failure issue carries no step table');
+  else if (missing.length) fail(`restore-rehearsal.yml: the failure issue names step(s) the workflow does not have: ${missing.join('; ')}`);
+  else pass(`the restore rehearsal's failure table names ${rows.length} step(s) the workflow has`);
+}
+
+// -------------------------------------------------------------------------------------------------
+// 3c. A migration self-check appends its complaint with an explicitly typed literal.
+//
+// `v_problems text[]` accumulates the problems a self-check found, and `v_problems || 'message'`
+// looks like an append. It is not: with an untyped literal on the right, PostgreSQL resolves `||`
+// to array_cat rather than array_append and tries to read the message AS an array, so the check
+// dies with `malformed array literal` instead of reporting. `::text` picks array_append.
+//
+// NOTHING ELSE CAN CATCH THIS. Every one of these lines sits in a branch that runs only when the
+// self-check has already found a fault, so a healthy database never executes one -- the whole
+// diagnostic layer of ten migrations was broken for as long as it was never needed. It is a
+// static check because the alternative is provoking each fault in turn.
+// -------------------------------------------------------------------------------------------------
+{
+  const offenders = [];
+  for (const f of allFiles.filter((x) => /^supabase\/migrations\/[0-9].*\.sql$/.test(x))) {
+    const sql = read(f);
+    // The right-hand side runs to the statement's `;`. A bare literal starts with a quote; an
+    // expression (`format(...)`, a text variable) is already typed and resolves correctly.
+    for (const m of sql.matchAll(/:=\s*v_problems\s*\|\|\s*('(?:[^']|'')*'(?:\s*'(?:[^']|'')*')*)\s*(;|::)/g)) {
+      if (m[2] !== '::') offenders.push(`${f.replace('supabase/migrations/', '')}`);
+    }
+  }
+  const unique = [...new Set(offenders)];
+  if (unique.length) {
+    fail(`migration self-check(s) append an untyped literal to v_problems, which raises `
+       + `"malformed array literal" instead of the message -- add ::text in: ${unique.join(', ')}`);
+  } else {
+    pass('every migration self-check appends its complaint as ::text, so a failure reports itself');
+  }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -480,7 +527,7 @@ function edgeFunctionNames() {
 // chart resolves from Chart.AppVersion.
 // -------------------------------------------------------------------------------------------------
 {
-  const values = read('deploy/helm/acs-cymru/values.yaml');
+  const values = read('deploy/helm/aber/values.yaml');
   const built = [
     ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
   ].map((m) => m[1]);
@@ -510,15 +557,9 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 8b. image-scan.yml excludes this repository's own images because release.yml scans them, and this
-// is what makes that sentence true. It was false for as long as it was written: the monthly job
-// pointed at a release workflow with no scanner in it, so ten images reached GHCR with no
-// vulnerability gate anywhere while a reader auditing the supply chain followed the pointer and
-// reasonably stopped (issue #304).
-//
-// Checked textually rather than through a YAML parser: this runs in CI before any `npm install`.
-// Both halves matter -- the scan must exist in each build job, and it must run BEFORE the push, or
-// it reports on an artefact the world can already pull.
+// 8b. image-scan.yml excludes this repository's own images because release.yml scans them; this
+// holds each build job to a scan on the same policy, placed BEFORE its push, or the scan reports on
+// an artefact the world can already pull. Textual, not a YAML parse: it runs before `npm install`.
 // -------------------------------------------------------------------------------------------------
 {
   const scan = read('.github/workflows/image-scan.yml');
@@ -560,8 +601,9 @@ function edgeFunctionNames() {
           problems8b.push(`${job}'s scan omits \`${flag}\`, which image-scan.yml applies`);
         }
       }
-      // `push: true` is the action's form, `docker push` the plain one; this workflow uses both.
-      const pushes = [body.indexOf('push: true'), body.indexOf('docker push')].filter((i) => i >= 0);
+      // build-push-action's `push:` (a literal or an expression), bake's `--push`, or `docker push`.
+      const pushes = [/^\s+push: (true|\$\{\{)/m, /\s--push\b/, /\bdocker push\b/]
+        .map((re) => body.search(re)).filter((i) => i >= 0);
       if (pushes.length === 0) {
         problems8b.push(`${job} has a scan and no push; this check has drifted from the workflow`);
       } else if (Math.min(...pushes) < scanAt) {
@@ -638,7 +680,7 @@ function edgeFunctionNames() {
     (f) =>
       /\.(js|jsx|ts|mjs|py|sql|md|ya?ml)$/.test(f) &&
       !f.startsWith('supabase/migrations/archive/') &&
-      !f.startsWith('deploy/helm/acs-cymru/files/') &&
+      !f.startsWith('deploy/helm/aber/files/') &&
       f !== 'supabase/functions/_shared/gatewayPlatform.generated.ts' &&
       !f.startsWith('.claude/') &&
       !f.startsWith('frontend/dist/')
@@ -660,9 +702,9 @@ function edgeFunctionNames() {
     if (dangling.length > 12) fail(`...and ${dangling.length - 12} more dangling migration citation(s)`);
     fail(
       'A citation must name an APPLIED migration, or say "archived migration NNNN" for one in\n' +
-        '      supabase/migrations/archive/ -- which never executes and whose files are named\n' +
-        '      20260101000NNN_*.sql. A bare number that is not applied points a reader at nothing,\n' +
-        '      and will point them at the WRONG file once that number is issued for real.'
+        '      supabase/migrations/archive/, which never executes. A bare number that is not\n' +
+        '      applied points a reader at nothing, and will point them at the WRONG file once\n' +
+        '      that number is issued for real -- the archive already holds two different 0074s.'
     );
   } else {
     pass(`every inline migration citation across ${scanned.length} files names an applied migration or is marked archived`);
@@ -687,72 +729,16 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
-    // 0075 adds a fifth argument, `p_actor_id`, and DROPs the four-argument form first so a
-    // four-argument call is not ambiguous.
-    'public.record_service_token_issued': '0075 adds p_actor_id; the baseline holds the pre-0075 form',
-    // 0125 takes the name and purpose the Access Control page records, and DROPs 0080's
-    // two-argument form first: an overload whose extra arguments default makes every RPC call
-    // ambiguous at PostgREST.
-    'public.create_machine_principal': '0125 adds p_name and p_purpose and writes machine_principals; 0080 holds the permissions-and-note form',
-    // 0129 adds p_rotated, which is what makes a RE-ISSUE reportable (#217), and DROPs every
-    // existing declaration first: the baseline recreates the one-argument form on every boot, so
-    // without the sweep a call by name could choose neither. The argument defaults, so a worker
-    // from the previous release still resolves to it during a rollout.
-    'public.playback_report_credentials': '0129 adds p_rotated so a re-issue moves the row; the baseline holds the ids-only form',
-    // 0129 adds the staleness gate to the credential tier. Same signature, so the grants survive
-    // and no sweep is needed; the body is carried whole because plpgsql cannot be patched.
-    'public.start_playback_job': '0129 refuses a target whose credential the worker has not picked up yet; the baseline holds the pre-#217 form',
-    // 0103 names the gateway's scrape job as the chart's collector labels it (supabase-envoy);
-    // the baseline holds the Compose-era `envoy`.
-    'public.directory_liveness_job_map': '0103 renames the gateway job to supabase-envoy; the baseline holds envoy',
-    // 0074 creates it with the token denylist arm; 0076 rewrites it to add the principal arm, whose
-    // check runs first so its message wins once a principal revocation has cascaded to its tokens.
-    'public.auth_pre_request': '0076 adds the principal arm; 0074 holds the token-only form',
-    // Each adds defaulted arguments and DROPs EVERY existing declaration first, because CREATE OR
-    // REPLACE cannot change an argument list and a file that names one list stops owning the
-    // function as soon as another adds an argument after it -- see supabase/README.md, "A migration
-    // that adds an argument breaks the one before it".
-    'public.digital_thread_page':
-      '0121 makes a bare-integer search match the row id and the causation id; 0118 adds the backup-job disjunct and the origin field; 0117 admits schemas and device nameplates to the purged rule; 0115 returns total_matching, adds p_search and admits areas; 0077 adds the keyset cursor; the baseline holds the unpaged form',
-    // 0086 adds `device_nameplate` and `change_proposals` to the ASSET lane, which would otherwise
-    // take the fail-closed 'security' branch. Rewritten in full because the classifier is one CASE.
-    'public.platform_health_rows': '0092 narrows expected_publishers to devices behind a gateway that has reported at least once; 0001 holds the bound-to-a-gateway form that alerted on edge nodes nobody had deployed',
-    'public.audit_domain_for': '0120 adds schemas to the asset lane, the one entity whose own table is readable by every authenticated user; 0086 adds device_nameplate and change_proposals; 0090 adds the three *_links lanes; 0097 adds areas; 0098 holds the form without area_floors, which 0113 retires',
-    // 0087 narrows both gates from has_role(Administrator, Shopfloor_Manager) to
-    // has_authority(schema:manage); the bodies are otherwise the baseline's.
-    'public.fork_schema': '0087 narrows the gate to schema:manage; the baseline holds the pair',
-    // 0100 subtracts every column a heartbeat writes (audit_telemetry_columns()) before deciding
-    // whether an UPDATE is an event; the baseline subtracts last_heartbeat alone, which recorded
-    // every health-carrying heartbeat as an event.
-    'public.log_digital_thread_event': '0100 subtracts audit_telemetry_columns() where the baseline subtracts last_heartbeat alone; 0122 reads the entity id from the column a trigger argument names, defaulting to id',
-    // 0100 records a changed flow hash as a FLOW_DEPLOYED row, since the trigger no longer sees
-    // that column; the writes to the seven health columns are the baseline's.
-    'public.ingest_record_gateway_health': '0100 adds the FLOW_DEPLOYED row on a changed flow hash; the baseline holds the health writes alone',
-    'public.publish_schema_version': '0087 narrows the gate to schema:manage; the baseline holds the pair',
-    // 0107 reads `stop_requested` so a playback the operator interrupted is CANCELLED rather than
-    // COMPLETED; the baseline decides on the error alone and cannot tell the two apart. 0109 then
-    // drops that three-argument form outright and redeclares it with the out-of-window count --
-    // an overload would make every three-argument call ambiguous, so this is the one declaration
-    // that has to REPLACE 0107's rather than layer on it.
-    'public.playback_finish': '0109 drops the three-argument form and adds p_messages_out_of_window, keeping 0107\'s three arms; 0107 read stop_requested; the baseline holds the error-only form',
-    // 0108 withdraws the three *_links proposal lanes 0090 opened: no page ever filed one, and a
-    // link is attached directly through link:manage. Each of these is the prior body with the link
-    // arms removed, so the last declaration wins and the lanes stay shut.
-    'public.proposal_is_already_true': '0108 drops the link branch; every remaining lane is an UPDATE, so containment is the whole test again',
-    // 0088 adds the queue's second lane and the functions that admit it in the same file; 0090
-    // replaces the withdrawn schema lane with the asset and link lanes.
-    'public.may_decide_proposal': '0090 replaces the withdrawn schema lane with cells, gateways and the three *_links lanes, all resolving authority rather than role names; 0088 holds the form that introduced it',
-    'public.proposable_columns': '0108 holds the form 0113 leaves, with plan_x and plan_y and no floor_id; 0098 replaces floor with the place on cells; 0097 admits area_id on devices and gateways and area_id and floor on cells; 0090 adds cells, gateways and the three *_links lanes and empties the schema lane to withdraw it; 0088 added that lane; 0086 holds the asset-only form',
-    'public.validate_change_proposal': '0124 tests is_archived on the areas arm, which 0123 could not because the column did not exist; 0123 adds the areas arm; 0090 resolves the target table per lane and adds the create-shaped link checks; 0088 branched it by lane; 0086 holds the device-only form',
-    'public.reject_proposal': '0090 widens the outer gate to the lanes that replaced schemas; 0088 gates on may_decide_proposal(); 0086 holds the single-gate form',
-    'public.approve_proposal': '0108 holds the form 0113 leaves, assigning the place on cells and no floor; 0098 assigns the place; 0097 assigns the area and floor columns the lanes now admit; 0090 adds the cell, gateway and link branches, drops the withdrawn publish branch and refuses a proposal already in place; 0088 added the per-lane gate and 0089 the author stamp; 0086 holds the asset-only form',
-    // 0097 adds the area_wide scope and its area_id to a move; the baseline holds the two-scope form.
-    'public.relocate_devices': '0097 adds area_wide and area_id to a move; the baseline holds the cell-or-site_wide form',
-    'public.approve_quarantined_device': '0097 drops the baseline signature and redeclares it with p_area_id and p_set_area for area_wide; the baseline holds the cell-or-site_wide form',
-    // 0089 adds proposed_by_email to the columns a proposer may NOT move. The guard names every
-    // immutable column explicitly, so a new one has to join the list or an UPDATE could
-    // re-attribute a proposal an approver is already reading.
-    'public.guard_change_proposal_transition': '0089 makes the author stamp immutable too; 0086 holds the pre-stamp form',
+    // Empty just after a squash: the baseline is generated from a dump of the finished database,
+    // so every function appears in it exactly once, in its final form. Entries return as soon as
+    // a migration added after the fold redeclares something the baseline holds, and each one
+    // records WHY that replacement is meant. See README.md, "There is no 0017", for the case
+    // where an unrecorded one would have regressed audit attribution.
+
+    // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
+    // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
+    // the pre-0006 form and folds forward at the next squash.
+    'public.digital_thread_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -994,6 +980,9 @@ function edgeFunctionNames() {
     'VITE_GITEA_URL',        // an endpoint, public -- the forge's door; a link and a sign-out beacon
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_APP_VERSION',      // a git describe string, shown in the UI on purpose
+    // A BuildKit switch, not a value: opts the build stage into the release's SBOM scan. Not
+    // VITE_-prefixed, so Vite never inlines it.
+    'BUILDKIT_SBOM_SCAN_STAGE',
   ]);
 
   const df = read('frontend/Dockerfile');
@@ -1145,7 +1134,7 @@ function edgeFunctionNames() {
 
 // -------------------------------------------------------------------------------------------------
 // 10e. The CA-expiry warning window is one decision, declared twice: Grafana's
-// `acs-gateway-ca-expiring` rule and the Gateways page's CERT_EXPIRY_WARN_DAYS. A UI that warns
+// `aber-gateway-ca-expiring` rule and the Gateways page's CERT_EXPIRY_WARN_DAYS. A UI that warns
 // at a different day count than the rule fires sends an operator looking for an alert that has
 // not been raised, or trains them to ignore the colour.
 // -------------------------------------------------------------------------------------------------
@@ -1155,13 +1144,13 @@ function edgeFunctionNames() {
 
   // The threshold node of the CA rule, found by walking forward from its uid so a `params: [30]`
   // belonging to some other rule cannot answer for it.
-  const ruleAt = rules.indexOf('uid: acs-gateway-ca-expiring');
+  const ruleAt = rules.indexOf('uid: aber-gateway-ca-expiring');
   const ruleBody = ruleAt === -1 ? '' : rules.slice(ruleAt, ruleAt + 4000);
   const ruleDays = ruleBody.match(/type:\s*lt\s*\n\s*params:\s*\[(\d+)\]/);
   const uiDays = util.match(/CERT_EXPIRY_WARN_DAYS\s*=\s*(\d+)/);
 
   if (ruleAt === -1) {
-    fail('grafana alert rule `acs-gateway-ca-expiring` is gone. It is the only warning that a '
+    fail('grafana alert rule `aber-gateway-ca-expiring` is gone. It is the only warning that a '
       + 'gateway\'s\n      hand-distributed CA is about to expire, which takes the whole fleet '
       + 'offline at once.');
   } else if (!ruleDays || !uiDays) {
@@ -1203,7 +1192,7 @@ function edgeFunctionNames() {
     /ALTER TABLE (?:ONLY )?public\.([a-z0-9_]+)\s+ADD COLUMN (?:IF NOT EXISTS )?([a-z][a-z0-9_]*)/gi;
 
   const columns = new Map();
-  for (const [file, sql] of migSrc) {
+  for (const [, sql] of migSrc) {
     for (const m of sql.matchAll(CREATE_TABLE)) {
       for (const line of m[2].split('\n')) {
         // Four-space indent is how this schema writes a column; a constraint continuation or a
@@ -1383,24 +1372,25 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists, on both targets.
+// 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists.
 //
 // Measured against postgrest/postgrest:v14.12: a hook naming a missing function boots, answers
 // 200 on /live and /ready, and fails every data request with 404 42883. A typo here is a total
-// API outage that every health check calls healthy, so it is caught statically in the two
-// places the name is written.
+// API outage that every health check calls healthy, so it is caught statically: the chart sets
+// the name, and a migration has to declare it.
 // -------------------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------------------
 // 11c-ter. The playback credential delivery path is the same string in all four places.
 //
-// The credential is written at one path and read at another, and neither end complains when
-// they differ. The two ends cannot share a constant (JavaScript beside the broker, Python in the
-// ingestion image) and the two mounts are in a third and fourth language.
+// The credential is written at one path and read at another, and neither end complains when they
+// differ. The two ends cannot share a constant -- JavaScript beside the broker, Python in the
+// ingestion image -- and the chart states the same path twice more, as the mount and as the
+// Secret key projected into it.
 // -------------------------------------------------------------------------------------------------
 {
   const lib = read('scripts/lib/mosquitto-credentials.mjs');
   const worker = read('ingestion/playback_worker.py');
-  const chartSrc = read('deploy/helm/acs-cymru/templates/apps/playback.yaml');
+  const chartSrc = read('deploy/helm/aber/templates/apps/playback.yaml');
 
   const libPath = lib.match(/PLAYBACK_CREDENTIAL_FILE\s*=\s*'([^']+)'/)?.[1];
   const workerPath = worker.match(/"PLAYBACK_CREDENTIAL_FILE",\s*"([^"]+)"/)?.[1];
@@ -1439,7 +1429,7 @@ function edgeFunctionNames() {
 }
 
 {
-  const chart = read('deploy/helm/acs-cymru/templates/supabase/rest.yaml');
+  const chart = read('deploy/helm/aber/templates/supabase/rest.yaml');
 
   const chartName = chart.match(/name:\s*PGRST_DB_PRE_REQUEST\s*\n\s*value:\s*([A-Za-z0-9_.]+)/)?.[1];
 
@@ -1467,6 +1457,64 @@ function edgeFunctionNames() {
     } else {
       pass(`PGRST_DB_PRE_REQUEST names ${chartName}, and a migration declares it`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Every variable a function declares is set on the functions Deployment
+//
+// main/index.ts forwards a worker nothing but the names its registry entry lists, and a name the
+// Deployment never sets is skipped silently, so the function reads `undefined` and refuses or
+// degrades on every call while the pod stays Ready. GRAFANA_ALERT_WEBHOOK_SECRET shipped that way
+// from the Compose removal: Grafana held the secret, the functions Deployment did not, and no alert
+// reached the dashboard on any Kubernetes install while every rule reported healthy.
+{
+  const registry = read('supabase/functions/main/index.ts');
+  const chart = read('deploy/helm/aber/templates/supabase/functions.yaml');
+
+  const from = registry.indexOf('const COMMON_ENV');
+  const to = registry.indexOf('function envForFunction');
+  const declared = new Set(
+    [...registry.slice(from, to).matchAll(/"([A-Z][A-Z0-9_]+)"/g)].map((m) => m[1])
+  );
+
+  // Set by something other than the Deployment's env list, each with what sets it.
+  const elsewhere = {
+    ABER_CA_PEM: 'the image entrypoint reads it from the mounted platform root',
+    ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+    ASSET_EXPORT_MAX_THREAD_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+  };
+
+  const set = new Set([
+    ...[...chart.matchAll(/^\s*-\s*name:\s*([A-Z][A-Z0-9_]+)\s*$/gm)].map((m) => m[1]),
+    ...[...chart.matchAll(/"aber\.(?:optional)?[sS]ecretEnv"\s*\(dict\s+"name"\s+"([A-Z][A-Z0-9_]+)"/g)]
+      .map((m) => m[1]),
+  ]);
+
+  const missing = [...declared].filter((n) => !set.has(n) && !(n in elsewhere));
+  const stale = Object.keys(elsewhere).filter((n) => !declared.has(n));
+
+  if (!declared.size || !set.size) {
+    fail(
+      'the function registry or the functions Deployment could not be read ' +
+        `(${declared.size} declared, ${set.size} set); one of them has moved.`
+    );
+  } else if (missing.length) {
+    fail(
+      `${missing.length} variable(s) the function registry declares are set nowhere on ` +
+        'supabase-functions, so the worker never receives them and the function fails on every ' +
+        `call while the pod stays Ready: ${missing.join(', ')}`
+    );
+  } else if (stale.length) {
+    fail(
+      `${stale.join(', ')} is listed here as set elsewhere but no function declares it any more; ` +
+        'remove it from the list.'
+    );
+  } else {
+    pass(
+      `all ${declared.size} variable(s) the function registry declares are set on ` +
+        `supabase-functions (${Object.keys(elsewhere).length} by something other than its env list)`
+    );
   }
 }
 
@@ -1712,7 +1760,7 @@ function edgeFunctionNames() {
       'the [auth.generic_oauth] `name` is the literal text on the Grafana login button',
     'frontend/src/pages/OAuthConsent.jsx':
       'the OAuth consent screen, which names the identity a user is being asked to share',
-    'deploy/helm/acs-cymru/values.yaml':
+    'deploy/helm/aber/values.yaml':
       'supabaseStudio.organizationName is displayed in Studio',
     // Swagger UI renders info.title as the page heading. Whole-file, because every other Factory+
     // reference in this repository is to the framework and belongs in docs/openapi.yaml, which is
@@ -1747,12 +1795,12 @@ function edgeFunctionNames() {
   // the consent screen puts in its heading. DO UPDATE on client_name means the literal here IS the
   // live value on every boot, so checking the literal checks what a user sees.
   const seed = read('supabase/seed.sql') + read('supabase/migrations/0002_seed_data.sql');
-  const clientNames = [...seed.matchAll(/'((?:Factory\+|ACS-Cymru)[^']*)'/g)].map((m) => m[1]);
+  const clientNames = [...seed.matchAll(/'((?:Factory\+|Aber)[^']*)'/g)].map((m) => m[1]);
   const misnamed = clientNames.filter((n) => n.startsWith('Factory+'));
   if (misnamed.length) {
     branded.push(
       `an OAuth client is registered as ${misnamed.map((n) => `"${n}"`).join(', ')} -- that string ` +
-        'is the heading on the consent screen. Node-RED\'s client is already "ACS-Cymru Node-RED".'
+        'is the heading on the consent screen. Node-RED\'s client is already "Aber Node-RED".'
     );
   }
 
@@ -1767,7 +1815,7 @@ function edgeFunctionNames() {
   } else {
     pass(
       `all ${Object.keys(BRANDED_SURFACES).length} user-facing branded surfaces name the product ` +
-        'ACS-Cymru, with framework references left intact'
+        'Aber, with framework references left intact'
     );
   }
 }
@@ -1980,6 +2028,680 @@ function edgeFunctionNames() {
 
     if (!unhelped.length && !orphaned.length && !offences.length) {
       pass(`all ${pages.length} navigable page(s) have help in ${HELP_DIR}, in the supported subset`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// The exporter and the page call the destination's fields the same thing
+//
+// `unconfigured()` in cold_archive.py names what is missing into a CronJob log; the Cold Storage
+// page names the same gaps on screen. An operator reading a failed job and then opening the page is
+// matching one list against the other, so the words have to be identical -- and they live in two
+// languages, which is exactly the kind of pair that drifts silently and is only noticed by somebody
+// already having a bad day.
+{
+  const py = read('ingestion/cold_archive.py');
+  const js = read('frontend/src/utils/coldStorage.js');
+
+  // The tuple pairs inside unconfigured(): ("endpoint", "S3 endpoint"), ...
+  const block = py.slice(py.indexOf('def unconfigured('), py.indexOf('def _s3_client('));
+  const fromPy = [...block.matchAll(/\("[a-z_]+",\s*"([^"]+)"\)/g)].map((m) => m[1]);
+
+  const fromJs = [...js.matchAll(/\{\s*key:\s*'archive\.[a-z_]+',\s*label:\s*'([^']+)'\s*\}/g)]
+    .map((m) => m[1]);
+
+  // The page's list covers the four settings; the exporter's adds the credential, which is not a
+  // setting and has no row of its own.
+  const pyFields = fromPy.filter((l) => l.startsWith('S3 '));
+
+  if (!pyFields.length || !fromJs.length) {
+    fail(
+      `the destination field labels could not be read from both sides (exporter: ${pyFields.length}, ` +
+        `page: ${fromJs.length}). One of the lists has been renamed or restructured, and the other ` +
+        'is now the only place the operator-facing wording is defined.'
+    );
+  } else if (pyFields.join('|') !== fromJs.join('|')) {
+    fail(
+      'the exporter and the Cold Storage page name the destination fields differently:\n' +
+        `        cold_archive.py: ${pyFields.join(', ')}\n` +
+        `        coldStorage.js:  ${fromJs.join(', ')}\n` +
+        '      An operator matching a failed job against the page has to translate between them.'
+    );
+  } else {
+    pass(`the exporter and the page name all ${pyFields.length} destination fields identically`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// The Cold Storage page and the Archive Backlog alert agree about what "behind" means
+//
+// The page colours a backlog and the alert fires on one, from the same number in two files. A page
+// calling a backlog fine while the alert was firing would be the more convincing of the two,
+// because it is the one somebody looks at after being paged.
+{
+  const util = read('frontend/src/utils/coldStorage.js');
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+
+  const page = util.match(/ARCHIVE_BACKLOG_TOLERANCE_DAYS\s*=\s*(\d+)/)?.[1];
+  // The evaluator inside the aber-archive-backlog rule, which is the last `params: [n]` before the
+  // next rule begins.
+  const ruleBlock = rules.slice(rules.indexOf('uid: aber-archive-backlog'));
+  const alert = ruleBlock.match(/type:\s*gt\s*\n\s*params:\s*\[(\d+)\]/)?.[1];
+
+  if (!page || !alert) {
+    fail(
+      `the archive backlog tolerance could not be read from both sides (page: ${page || 'MISSING'}, ` +
+        `alert: ${alert || 'MISSING'}). One of them has been renamed or removed, and the other is ` +
+        'now the only definition of a threshold two surfaces are meant to share.'
+    );
+  } else if (page !== alert) {
+    fail(
+      `the Cold Storage page tolerates ${page} days of archive backlog and the Archive Backlog ` +
+        `alert fires above ${alert}. Between those numbers one surface calls the archive healthy ` +
+        'while the other pages somebody.'
+    );
+  } else {
+    pass(`the archive backlog tolerance is ${page} days on the Cold Storage page and in its alert rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Every humanize call in an alert summary is given a float
+//
+// `$values.B` is a struct (Labels, Value) with a String() method, so `{{ $values.B }}` prints and
+// `printf "%.0f" $values.B.Value` formats -- but `humanizePercentage $values.B` fails the whole
+// template with `can't convert template.Value to float`, and Grafana then delivers the summary as
+// its raw template text. Six rules shipped that way; the error appears only in Grafana's own log.
+{
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+  const offences = [];
+  let calls = 0;
+  for (const [i, line] of rules.split('\n').entries()) {
+    for (const m of line.matchAll(/\{\{\s*humanize\w*\s+(\$values\.[A-Z]\w*)((?:\.\w+)?)\s*\}\}/g)) {
+      calls += 1;
+      if (m[2] !== '.Value') offences.push(`line ${i + 1}: ${m[0]}`);
+    }
+  }
+  if (offences.length) {
+    fail(
+      `${offences.length} humanize call(s) in the alert summaries are given the whole $values ` +
+        'struct rather than its .Value; Grafana fails to expand the template and delivers the ' +
+        'summary as raw template text:\n  ' + offences.join('\n  ')
+    );
+  } else {
+    pass(`all ${calls} humanize call(s) in the alert summaries pass a float`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// The buckets agree in all three places that decide whether one works
+//
+// A bucket created with no policies is invisible to every browser role; a policy naming a bucket
+// nothing creates is dead text; and the README's table is where an operator learns which is which.
+// The three drift apart one at a time and none of them reports it.
+//
+// THE CASE THIS WAS WRITTEN FOR. `telemetry-archive` was created for cold telemetry and quietly
+// acquired a second writer -- the AAS export function stored bundles under `assets/` in it -- so
+// retiring the bucket with the feature that made it would have taken the export path with it,
+// found at runtime by whoever next pressed Export. Nothing in the tree connected the two.
+{
+  const init = read('scripts/storage-init.mjs');
+  const policies = read('supabase/storage-policies.sql');
+  const readme = read('supabase/README.md');
+
+  const bucketsBlock = init.slice(init.indexOf('const BUCKETS = ['));
+  const created = [...bucketsBlock.matchAll(
+    /^\s*id:\s*(?:process\.env\.\w+\s*\|\|\s*)?'([^']+)'/gm
+  )].map((m) => m[1]);
+
+  const policed = new Set(
+    [...policies.matchAll(/bucket_id\s*=\s*'([^']+)'/g)].map((m) => m[1])
+  );
+
+  // The header row of the table under the section heading: `| | \`a\` | \`b\` | ... |`
+  const section = readme.slice(readme.indexOf('## Storage buckets and why they differ'));
+  const headerRow = section.split('\n').find((l) => l.startsWith('| |'));
+  const documented = new Set(
+    [...(headerRow || '').matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1])
+  );
+
+  const offences = [];
+  for (const id of created) {
+    if (!policed.has(id)) {
+      offences.push(
+        `storage-init.mjs creates \`${id}\`, which no policy in storage-policies.sql names. ` +
+          'RLS is on with no policy for it, so every browser role is denied and service_role is ' +
+          'not -- the bucket works from a function and is invisible in the dashboard.'
+      );
+    }
+    if (!documented.has(id)) {
+      offences.push(
+        `storage-init.mjs creates \`${id}\`, which the README's bucket table does not have a ` +
+          'column for.'
+      );
+    }
+  }
+  for (const id of policed) {
+    if (!created.includes(id)) {
+      offences.push(
+        `storage-policies.sql has a policy on \`${id}\`, which storage-init.mjs does not create. ` +
+          'Either the bucket was retired and its policies were left behind, or the policy names a ' +
+          'bucket that has never existed; both read as working.'
+      );
+    }
+  }
+  for (const id of documented) {
+    if (!created.includes(id)) {
+      offences.push(
+        `the README's bucket table has a column for \`${id}\`, which storage-init.mjs does not ` +
+          'create.'
+      );
+    }
+  }
+
+  if (offences.length) {
+    fail(
+      'the storage buckets disagree across the three places that define one:\n' +
+        offences.map((o) => `        ${o}`).join('\n')
+    );
+  } else {
+    pass(
+      `all ${created.length} storage bucket(s) are created, policed and documented: ` +
+        created.join(', ')
+    );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 17. Every script path named anywhere in the tree names a script that exists.
+//
+// A comment citing a deleted script is the shape #339 went looking for: internally coherent,
+// naming a real-looking path, and false. A reader auditing a coupling follows the pointer, finds
+// nothing, and cannot tell whether the guard moved or was dropped. Seven live files named
+// `scripts/check-image-tag-parity.mjs` when this check was written; it had gone with the second
+// deployment target, and four of the seven were the only statement of a coupling that still
+// mattered.
+//
+// A DELIBERATE MENTION OF A DEAD SCRIPT IS ALLOWED, and has to say so on its own line: a line
+// carrying "deleted", "retired", "removed", "replaced" or "gone" is history rather than a
+// pointer. That is the whole exemption, so a stale citation cannot hide behind a file's reputation.
+// The two records that are history by definition are exempt wholesale -- `docs/incidents.md`,
+// where naming the script an incident happened to is the point, and `supabase/migrations/archive/`,
+// which is never executed. `backups/` is gitignored and holds artefacts, not prose.
+//
+// A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `./` or `../` against the
+// citing file's own directory; anything else against the repository root and then against each
+// directory above the citing file, because a path can be written relative to a root that is not
+// this repository's -- a Helm template names `files/scripts/...` relative to the chart.
+// -------------------------------------------------------------------------------------------------
+{
+  const PAST = /\b(deleted|retired|removed|replaced|gone|superseded)\b/i;
+  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md'];
+  const scanned = allFiles.filter(
+    (f) =>
+      !EXEMPT.includes(f) &&
+      !f.startsWith('supabase/migrations/archive/') &&
+      !f.startsWith('frontend/dist/') &&
+      !f.startsWith('.claude/') &&
+      !f.startsWith('backups/') &&
+      !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
+  );
+
+  const dead = [];
+  let citations = 0;
+  for (const file of scanned) {
+    let text;
+    try { text = read(file); } catch { continue; }
+    if (text.includes('\0')) continue;
+    const here = posix.dirname(file);
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      for (const m of lines[i].matchAll(/((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g)) {
+        const cited = m[1];
+        citations += 1;
+        const candidates = [];
+        if (/^\.{1,2}\//.test(cited)) {
+          candidates.push(posix.normalize(posix.join(here, cited)));
+        } else {
+          candidates.push(cited);
+          for (let d = here; d !== '.' && d !== '/'; d = posix.dirname(d)) {
+            candidates.push(posix.normalize(posix.join(d, cited)));
+          }
+        }
+        if (candidates.some((c) => existsSync(join(REPO, c)))) continue;
+        if (PAST.test(lines[i])) continue;
+        dead.push(`${file}:${i + 1} cites ${cited}, which does not exist`);
+      }
+    }
+  }
+
+  if (dead.length) {
+    fail(
+      'a comment or document cites a script that is not in the tree:\n' +
+        [...new Set(dead)].map((d) => `        ${d}`).join('\n') +
+        '\n        (if the script is deliberately gone, say so on the same line)'
+    );
+  } else {
+    pass(`all ${citations} script citation(s) name a script that exists`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 18. A Dockerfile built FROM an image the chart also runs is pinned to the chart's tag.
+//
+// THE COUPLING IS REAL AND SILENT WHEN BROKEN. `backup-service` and `db-init` are built FROM
+// `supabase/postgres` for their `pg_dump` and their `psql`: a client older than the server
+// mis-handles what it is given, and a backup taken by an older `pg_dump` restores wrong rather
+// than failing. `gateway-credential` is built FROM `eclipse-mosquitto` for `mosquitto_passwd` and
+// `mosquitto_rr`, whose hash format and control protocol are the broker's own.
+//
+// This is what `check-image-tag-parity.mjs` held against the retired Compose file. The chart is
+// the only remaining declaration of these versions, so the check belongs here (#339).
+// -------------------------------------------------------------------------------------------------
+{
+  const dockerfiles = allFiles.filter((f) => f.endsWith('Dockerfile') && !f.startsWith('frontend/dist/'));
+  const offences = [];
+  let coupled = 0;
+  for (const file of dockerfiles) {
+    for (const m of read(file).matchAll(/^FROM\s+(\S+)/gm)) {
+      const ref = m[1];
+      if (ref.includes('${')) continue;           // a build arg, resolved by the caller
+      const at = ref.indexOf('@');                // a digest pin carries its own guarantee
+      const bare = at === -1 ? ref : ref.slice(0, at);
+      const colon = bare.lastIndexOf(':');
+      if (colon === -1) continue;
+      const repo = bare.slice(0, colon);
+      const tag = bare.slice(colon + 1);
+      if (!chartPins.has(repo)) continue;
+      coupled += 1;
+      if (chartPins.get(repo) !== tag) {
+        offences.push(
+          `${file} is FROM ${repo}:${tag}, but the chart runs ${repo}:${chartPins.get(repo)}`
+        );
+      }
+    }
+  }
+  if (offences.length) {
+    fail(
+      'an image is built FROM a different version than the chart runs:\n' +
+        offences.map((o) => `        ${o}`).join('\n')
+    );
+  } else if (coupled === 0) {
+    fail(
+      'no Dockerfile is built FROM an image the chart pins. Either a base moved off a pinned ' +
+        'image or this check has stopped finding them; both remove a guard silently.'
+    );
+  } else {
+    pass(`all ${coupled} image base(s) shared with the chart agree with its pins`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 19. Nothing outside the historical record describes a second deployment target.
+//
+// Docker Compose was the second target and was removed in September 2026. The prose describing it
+// outlived it by a year in thirty-odd files, and the failure is not cosmetic: the strings reached
+// operators. The Gateways page told them to run `npm run setup` against a `.env` that does not
+// exist, and the bundle function's 503 named the same file.
+//
+// IN SCOPE IS THE CLAIM, NOT THE WORD. The gateway appliance genuinely runs Docker Compose, and
+// `docker compose up` in the remote-gateway runbook is correct. What cannot be true is a SECOND
+// target for the platform, so the phrases below are the ones that assert one.
+//
+// The four documents that carry the comparison as history are exempt, each opening with a note
+// saying so, and this file is exempt because it has to name the phrases to look for them.
+// -------------------------------------------------------------------------------------------------
+{
+  const HISTORY = [
+    'docs/incidents.md',
+    'docs/roadmap.md',
+    'docs/kubernetes-architecture.md',
+    'docs/postgres-17-migration-plan.md',
+    'scripts/check-docs-drift.mjs',
+  ];
+  // AN INTERVENING WORD IS THE HOLE THE FIRST PASS LEFT. "both deployment targets" and "one of
+  // two targets" say exactly what "both targets" says and matched none of these until they were
+  // written to allow it, so the optional group is load-bearing rather than tidy.
+  const PHRASES = [
+    /\bboth (?:deployment )?targets\b/i,
+    /\bneither (?:deployment )?target\b/i,
+    /\beither (?:deployment )?target\b/i,
+    // NOT a bare "two targets": a playback job has targets, and test_playback_credentials.py
+    // says "Two targets, one configured each way" about two gateways. Only the phrasings that
+    // can only mean a deployment are listed.
+    /\btwo deployment targets\b/i,
+    /\bone of two targets\b/i,
+    /\bon Compose\b/,
+    /\bsecond (?:deployment )?target\b/i,
+  ];
+  const scanned = allFiles.filter(
+    (f) =>
+      !HISTORY.includes(f) &&
+      !f.startsWith('supabase/migrations/archive/') &&
+      !f.startsWith('frontend/dist/') &&
+      !f.startsWith('.claude/') &&
+      !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
+  );
+
+  const offences = [];
+  for (const file of scanned) {
+    let text;
+    try { text = read(file); } catch { continue; }
+    if (text.includes('\0')) continue;
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      for (const p of PHRASES) {
+        if (p.test(lines[i])) {
+          offences.push(`${file}:${i + 1} ${lines[i].trim().slice(0, 90)}`);
+          break;
+        }
+      }
+    }
+  }
+  if (offences.length) {
+    fail(
+      'prose describes a second deployment target, which the platform has not had since ' +
+        'September 2026:\n' +
+        offences.map((o) => `        ${o}`).join('\n') +
+        '\n        (the appliance does run Compose; the platform does not)'
+    );
+  } else {
+    pass(`no live file describes a second deployment target (${scanned.length} scanned)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 20. The release workflow names every image the chart resolves from `appVersion`, and no other.
+//
+// The chart marks an image it builds here with an empty tag and resolves it to `Chart.AppVersion`
+// (check 8). An image added to the chart but not to the release's lists publishes nothing and
+// installs into an ImagePullBackOff at the version it claims to ship; one removed from the chart
+// and left in the lists fails the release's own verification step. Both lists are spelled out in
+// `release.yml` because a shell loop cannot read the chart, so they are what drifts.
+// -------------------------------------------------------------------------------------------------
+{
+  const RELEASE = '.github/workflows/release.yml';
+  const release = read(RELEASE);
+  const built = new Set(
+    [...CHART_VALUES.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm)]
+      .map((m) => m[1].split('/').pop())
+  );
+  const lists = [...release.matchAll(/for img in ([a-z0-9 -]+); do/g)].map((m) => m[1].trim().split(/\s+/));
+
+  if (!lists.length) {
+    fail(`${RELEASE} has no \`for img in …\` list; check 20 can no longer see what is published`);
+  } else {
+    const offences = [];
+    lists.forEach((list, n) => {
+      for (const img of list) {
+        if (!built.has(img)) offences.push(`list ${n + 1} names ${img}, which the chart does not resolve from appVersion`);
+      }
+      for (const img of built) {
+        if (!list.includes(img)) offences.push(`list ${n + 1} omits ${img}, which the chart resolves from appVersion`);
+      }
+    });
+    if (offences.length) {
+      fail(
+        'the release workflow and the chart disagree about which images ship:\n' +
+          [...new Set(offences)].map((o) => `        ${o}`).join('\n')
+      );
+    } else {
+      pass(`the release workflow publishes all ${built.size} image(s) the chart builds here`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 21. A sentence that counts the list under it agrees with the list.
+//
+// "Four things about these dumps are not obvious" stood over eight bullets, two of which this
+// repository added itself while rehearsing a restore (#338) and left the count behind. That is the
+// drift this whole file exists for: a number a reader cannot tell is stale and will act on -- here,
+// by reading four and stopping.
+//
+// IN SCOPE IS A CLAIM THAT POINTS FORWARD at a list it introduces. A sentence naming a list
+// "tabulated above" is excluded because the list below it is a different one, and a claim with no
+// list within two lines is not introducing one at all. Items are counted at the first item's
+// indent, so a nested table, a sub-list or a continuation paragraph belongs to its bullet rather
+// than ending the list.
+// -------------------------------------------------------------------------------------------------
+{
+  const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  const itemAt = (line) => {
+    const m = line.match(/^(\s*)(?:\d+\.|[-*])\s/);
+    return m ? m[1].length : null;
+  };
+
+  let claims = 0;
+  const offences = [];
+  for (const file of MARKDOWN) {
+    if (file.startsWith('frontend/dist/')) continue;
+    const lines = read(file).split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = lines[i].match(/^\s*(?:\*\*)?([A-Z][a-z]+|\d+)\s+(?:rules?|reasons?|things?|steps?|ways?)\b/);
+      if (!m) continue;
+      const n = WORDS[m[1].toLowerCase()] ?? Number(m[1]);
+      if (!n || n > 10) continue;
+      if (/\babove\b|\bearlier\b|\bpreviously\b/.test(lines[i])) continue;
+
+      let j = i + 1;
+      while (j < lines.length && j <= i + 2 && /^\s*$/.test(lines[j])) j += 1;
+      const base = j < lines.length ? itemAt(lines[j]) : null;
+      if (base === null) continue;
+
+      let items = 0;
+      for (; j < lines.length; j += 1) {
+        const line = lines[j];
+        if (/^\s*$/.test(line)) continue;
+        const at = itemAt(line);
+        if (at === base) { items += 1; continue; }
+        if (line.match(/^(\s*)/)[1].length > base) continue;
+        break;
+      }
+      claims += 1;
+      if (items !== n) {
+        offences.push(`${file}:${i + 1} says ${n}, the list under it has ${items}: ${lines[i].trim().slice(0, 70)}`);
+      }
+    }
+  }
+
+  if (offences.length) {
+    fail(
+      'a sentence counts a list and the list disagrees:\n' +
+        offences.map((o) => `        ${o}`).join('\n')
+    );
+  } else {
+    pass(`all ${claims} counted list claim(s) match the list under them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 22. Every setting is declared in exactly one migration.
+//
+// `seed_setting()` preserves an operator's value on a replay and refreshes only the metadata, which
+// makes a second declaration of the same key look harmless. It is not. Both run on every boot, in
+// file order: the later sentence lands, the next boot puts the earlier one back, and the trigger on
+// `system_settings` records each flip as an edit by `migration`. `digital_thread` is append-only to
+// every application role and partitioned by month because it only grows, so what accumulates is a
+// setting nobody touched, edited twice a day, forever. `archive.enabled` was declared by both
+// `0002` and `0132` and did exactly that until the sentence was folded back into `0002` (#356).
+//
+// THE GUARD ON THE UPSERT DOES NOT CLOSE THIS, and neither does the trigger's own WHEN clause.
+// Both suppress a write that changes nothing; two declarations differ, which is the entire reason
+// the second one was written. Only declaring the key once does.
+//
+// `check-migration-idempotency.mjs` also catches it, as rows appended across a replay -- but it
+// needs a cluster that has already booted twice, which is after the merge. This is the same
+// failure, at the time the file is written.
+//
+// TWO CALL FORMS ARE READ, because the chain uses both: the key as a literal first argument, and a
+// `VALUES` list of `(key, value_type, ...)` tuples driving a loop that PERFORMs the function with a
+// record field (`0134`). The tuple form is read only in a file that makes such a call, so a VALUES
+// list anywhere else cannot be mistaken for a declaration, and the `value_type` in the second
+// position is what separates one from `WHERE key IN ('a', 'b')`.
+// -------------------------------------------------------------------------------------------------
+{
+  // Not recursive, deliberately: `archive/` is documentation with a `.sql` extension and executes
+  // nowhere, so a key named there is a record of what a retired file did, not a declaration.
+  const MIGRATIONS = 'supabase/migrations';
+  const files = readdirSync(join(REPO, MIGRATIONS))
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+
+  // A CALL, not a mention: `0001` declares the function, comments it and grants on it.
+  const CALLS = /(?:PERFORM|SELECT)\s+(?:public\.)?seed_setting\s*\(/;
+  const CALLS_WITH_AN_EXPRESSION = /seed_setting\s*\(\s*[A-Za-z_]/;
+  const LITERAL_KEY = /seed_setting\s*\(\s*'([^']+)'/g;
+  const TUPLE_KEY = /\(\s*'([^']+)'\s*,\s*'(?:string|boolean|number|integer|json|jsonb)'/g;
+
+  const declaredIn = new Map();
+  const unreadable = [];
+
+  for (const file of files) {
+    const sql = read(posix.join(MIGRATIONS, file));
+    if (!CALLS.test(sql)) continue;
+
+    const keys = [...sql.matchAll(LITERAL_KEY)].map((m) => m[1]);
+    if (CALLS_WITH_AN_EXPRESSION.test(sql)) {
+      keys.push(...[...sql.matchAll(TUPLE_KEY)].map((m) => m[1]));
+    }
+
+    // A caller yielding no key means the extraction has stopped matching the call form, not that
+    // the file declares nothing. Without this the check passes vacuously on a shortening list.
+    if (!keys.length) unreadable.push(file);
+
+    for (const key of keys) {
+      if (!declaredIn.has(key)) declaredIn.set(key, []);
+      declaredIn.get(key).push(file);
+    }
+  }
+
+  for (const file of unreadable) {
+    fail(
+      `${MIGRATIONS}/${file} calls seed_setting() and no key could be read out of it. The ` +
+        'extraction here no longer matches the call form, so every other setting in this check ' +
+        'is being compared against a list that is now short.'
+    );
+  }
+
+  const twice = [...declaredIn].filter(([, where]) => where.length > 1);
+  for (const [key, where] of twice) {
+    fail(
+      `${key} is declared ${where.length} times, in ${[...new Set(where)].join(' and ')}. Both ` +
+        'run on every boot, so the later declaration lands and the next boot puts the earlier one ' +
+        'back -- two digital_thread rows a boot recording a change nobody made. Correct a ' +
+        "setting's metadata where it is declared, rather than declaring it again."
+    );
+  }
+
+  if (!twice.length && !unreadable.length) {
+    pass(
+      `all ${declaredIn.size} setting(s) are declared in exactly one migration ` +
+        `(${new Set([...declaredIn.values()].flat()).size} files declare one)`
+    );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 23. Nothing in the stack reports usage or checks for updates by itself.
+//
+// Each service below does one or the other by default, and each switch is one line that an upgrade
+// or a regenerated config file can drop without anything failing. deploy/k8s/README.md,
+// "Outbound connections", lists them. Grafana's are also refused as GF_* variables in its
+// template, because an environment variable overrides grafana.ini silently.
+// -------------------------------------------------------------------------------------------------
+{
+  const GRAFANA_INI = 'grafana/grafana.ini';
+  const ini = {};
+  let section = '';
+  for (const line of read(GRAFANA_INI).split(/\r?\n/)) {
+    const header = line.match(/^\[([^\]]+)\]\s*$/);
+    if (header) { section = header[1]; continue; }
+    const kv = line.match(/^([a-z_]+)\s*=\s*(.*?)\s*$/);
+    if (kv) ini[`${section}.${kv[1]}`] = kv[2];
+  }
+  const GRAFANA_OFF = {
+    'analytics.reporting_enabled': 'false',
+    'analytics.check_for_updates': 'false',
+    'analytics.check_for_plugin_updates': 'false',
+    'news.news_feed_enabled': 'false',
+    'security.disable_gravatar': 'true',
+    'plugins.preinstall_auto_update': 'false',
+    'plugins.public_key_retrieval_disabled': 'true',
+  };
+  const grafanaTemplate = read('deploy/helm/aber/templates/obs/grafana.yaml');
+
+  const SWITCHES = [
+    ['deploy/helm/aber/templates/obs/alloy.yaml', /^\s*- --disable-reporting\s*$/m, 'Alloy runs with --disable-reporting'],
+    ['loki/loki.yaml', /^analytics:\s*\n\s+reporting_enabled:\s*false\s*$/m, 'Loki analytics.reporting_enabled is false'],
+    ['node-red/node-red-init.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the stack's Node-RED declares telemetry off"],
+    ['forge/gateway-platform/appliance/bootstrap.mjs', /telemetry:\s*\{\s*enabled:\s*false,\s*updateNotification:\s*false\s*\}/, "the appliance's Node-RED declares telemetry off"],
+    ['deploy/helm/aber/values.yaml', /^\s+telemetryLevel:\s*"off"\s*$/m, 'TimescaleDB telemetryLevel is "off"'],
+    ['deploy/helm/aber/templates/apps/gitea.yaml', /GITEA__cron\.update_checker__ENABLED\s*\n\s*value:\s*"false"/, "Gitea's update checker is disabled"],
+    ['deploy/helm/aber/templates/obs/swagger-ui.yaml', /name: VALIDATOR_URL\s*\n\s*value:\s*none\s*$/m, "Swagger UI's online validator is disabled"],
+  ];
+
+  const offences = [];
+  for (const [key, want] of Object.entries(GRAFANA_OFF)) {
+    if (ini[key] !== want) offences.push(`${GRAFANA_INI}: [${key.replace('.', '] ')} is ${ini[key] ?? 'unset'}, want ${want}`);
+    const env = `GF_${key.replace('.', '_').toUpperCase()}`;
+    if (grafanaTemplate.includes(env)) offences.push(`templates/obs/grafana.yaml sets ${env}, which overrides grafana.ini`);
+  }
+  for (const [file, pattern, what] of SWITCHES) {
+    if (!pattern.test(read(file))) offences.push(`${file}: expected ${what}`);
+  }
+
+  if (offences.length) {
+    fail('a service would report usage or check for updates:\n' + offences.map((o) => `        ${o}`).join('\n'));
+  } else {
+    pass(`all ${Object.keys(GRAFANA_OFF).length + SWITCHES.length} usage-report and update-check switches are off`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 24. The Directory's image map names the same components in the migration and the chart.
+//
+// `0007`'s `served_by` rows say which component serves each chart-managed Directory row, and the
+// chart's `aber.directoryImages` says which image each component runs. A component named on one
+// side only leaves its row reading "not recorded", with nothing failing. Each must also be a
+// component some template declares, or a rename in the chart has the same effect.
+// -------------------------------------------------------------------------------------------------
+{
+  const MIGRATION = 'supabase/migrations/0007_the_directory_names_the_image_each_service_runs.sql';
+  const HELPERS = 'deploy/helm/aber/templates/_helpers.tpl';
+  const sql = read(MIGRATION);
+  const tpl = read(HELPERS);
+
+  const servedBy = new Set(
+    [...sql.matchAll(/\('f1111111-[0-9a-f-]+'::uuid,\s*'([a-z0-9-]+)'\)/g)].map((m) => m[1])
+  );
+  const start = tpl.indexOf('define "aber.directoryImages"');
+  const body = start === -1 ? '' : tpl.slice(start, tpl.indexOf('toJson $out', start));
+  const mapped = new Set([...body.matchAll(/\(list "([a-z0-9-]+)" /g)].map((m) => m[1]));
+  const declared = new Set(
+    allFiles
+      .filter((f) => f.startsWith('deploy/helm/aber/templates/') && f.endsWith('.yaml'))
+      .flatMap((f) => [...read(f).matchAll(/\$component := "([a-z0-9-]+)"/g)].map((m) => m[1]))
+  );
+
+  if (!servedBy.size || !mapped.size) {
+    fail(
+      `check 24 read ${servedBy.size} component(s) from ${MIGRATION} and ${mapped.size} from ` +
+        `${HELPERS}'s aber.directoryImages; the extraction no longer matches one of them`
+    );
+  } else {
+    const offences = [
+      ...[...servedBy].filter((c) => !mapped.has(c)).map((c) => `${c} serves a row in 0007 and has no image in aber.directoryImages`),
+      ...[...mapped].filter((c) => !servedBy.has(c)).map((c) => `${c} has an image in aber.directoryImages and serves no row in 0007`),
+      ...[...mapped].filter((c) => !declared.has(c)).map((c) => `${c} is not a component any template declares`),
+    ];
+    if (offences.length) {
+      fail(
+        'the Directory image map disagrees with itself:\n' + offences.map((o) => `        ${o}`).join('\n')
+      );
+    } else {
+      pass(`the Directory image map names the same ${mapped.size} chart component(s) in 0007 and the chart`);
     }
   }
 }

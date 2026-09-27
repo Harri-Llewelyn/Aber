@@ -1,0 +1,240 @@
+{{- /*
+Telemetry lifecycle reconciliation: compression and retention on the raw hypertable, plus the
+1m/5m/1h rollups, their policies, and the telemetry_latest view.
+
+WHY A HOOK JOB AND NOT AN initdb SCRIPT. The postgres entrypoint runs /docker-entrypoint-initdb.d
+ONLY on an empty data directory, and on Kubernetes recreating the volume means deleting the PVC --
+`helm upgrade` will not, and neither will deleting the pod, because the StatefulSet reattaches the
+same claim. A retention interval choosable only before the first telemetry row is not a setting.
+This runs on every install and upgrade, so `timescaledb.retention.*` and `timescaledb.rollups.*`
+are authoritative in both directions.
+
+WHY post-upgrade AND post-install: changing an interval is an upgrade, which is the case this
+exists to serve. `before-hook-creation` deletes the previous Job, so a repeat upgrade is not
+refused by the immutability of a completed Job's pod template.
+*/ -}}
+{{- if and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled }}
+{{- $component := "timescaledb-maintenance" -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $secretName := include "aber.secretName" . -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-timescaledb-maintenance" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+{{- $found := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/timescaledb-maintenance/*.sql" }}
+{{- $found = add1 $found }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $found 0 }}
+{{- fail "\n\naber: files/timescaledb-retention/retention.sql is missing.\n\nMirror it from ./timescaledb with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. An empty ConfigMap would mount cleanly and the Job would report\nsuccess having applied NO policy at all -- so a stack configured to drop telemetry after 90 days\nwould silently keep it forever, and one configured to keep it forever would be indistinguishable.\n" }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-timescaledb-maintenance" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # WEIGHT 5 -- after db-roles-init (0) and BEFORE db-init (10), and the order is load-bearing.
+    # archived migration 0010 maps the rollups and telemetry_latest as foreign tables and then READS each
+    # one to prove the mapping resolves; postgres_fdw is lazy, so mapping objects that do not exist
+    # yet succeeds and fails later in the dashboard instead. This Job is what creates them.
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.initJobs.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.initJobs.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          Waits for the HYPERTABLE, not for the server. Readiness means the port answers; the
+          bootstrap scripts that create `telemetry` run separately, so "server up" and "schema
+          present" are genuinely different states here. Without this the Job fails on a first
+          install with a relation error that reads as a chart fault.
+        */}}
+        - name: wait-for-telemetry-table
+          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
+          env:
+            {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              deadline=$(( $(date +%s) + {{ .Values.initJobs.waitTimeout }} ))
+              until psql -h {{ include "aber.timescale.host" . }} -p {{ include "aber.timescale.port" . }} \
+                        -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }} -tAc \
+                        "SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'telemetry'" \
+                    2>/dev/null | grep -q 1; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "timed out waiting for the telemetry hypertable (created by timescaledb/init on an EMPTY data directory)" >&2
+                  exit 1
+                fi
+                echo "waiting for the telemetry hypertable ..."
+                sleep 3
+              done
+              echo "telemetry hypertable exists"
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          {{- if .Values.postgresTls.enabled }}
+          volumeMounts:
+            {{- include "aber.dbClientCaMount" . | nindent 12 }}
+          {{- end }}
+      containers:
+        - name: maintenance
+          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
+          env:
+            {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
+            {{- /*
+              From the Secret, not interpolated into the command at render time: a password in the
+              rendered manifest is readable by anyone who can `helm get manifest`, and it would
+              also land in the Job spec stored in the cluster.
+            */}}
+            {{- include "aber.secretEnv" (dict "name" "BI_READER_PASSWORD" "secretName" $secretName "key" "BI_READER_PASSWORD") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "INGEST_WRITER_PASSWORD" "secretName" $secretName "key" "INGEST_WRITER_PASSWORD") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "FDW_READER_PASSWORD" "secretName" $secretName "key" "FDW_READER_PASSWORD") | nindent 12 }}
+          {{- /*
+            Values are passed as psql VARIABLES rather than substituted into the SQL at render
+            time, so the chart's copies stay byte-identical to the repository's, with the sync
+            check behind them.
+          */}}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "aber.timescale.host" . }} -p {{ include "aber.timescale.port" . }} -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }}"
+
+              {{/*
+                FIRST, AND IN ITS OWN psql SESSION. `ALTER EXTENSION timescaledb UPDATE` is refused
+                once a connection has loaded the old version's library, and every file below uses
+                the API surface it updates -- see extension.sql, which also asserts the update took
+                rather than leaving the image and the database to disagree in silence.
+
+                Outside the rollups `if`, because the extension version is not a rollup setting.
+              */}}
+              echo 'Updating the timescaledb extension to the version the image ships...'
+              $PSQL -f /sql/extension.sql
+{{- if and .Values.databaseMetrics.enabled .Values.databaseMetrics.statementStats }}
+
+              {{/*
+                AFTER extension.sql, with nothing depending on it either way -- it creates an
+                extension of its own and touches no TimescaleDB surface. Placed here so it is
+                applied before anything that might want to read the view.
+
+                GATED ON THE SAME FLAG AS THE PRELOAD ARGUMENT, because the two halves are one
+                decision: the library on the server's command line and the extension in the
+                database. With the flag off the StatefulSet drops the library, and creating the
+                extension would leave a view that raises on every read.
+              */}}
+              echo 'Reconciling statement statistics...'
+              $PSQL -f /sql/statistics.sql
+{{- end }}
+
+              echo 'Reconciling compression and retention policies...'
+              {{/* chunkInterval, compressAfter and retainFor are DERIVED when empty; see
+                   aber.timescaleChunkInterval, aber.timescaleCompressAfter, aber.timescaleRetainFor. */}}
+              $PSQL -v chunk_interval={{ include "aber.timescaleChunkInterval" . | quote }} -v compress_after={{ include "aber.timescaleCompressAfter" . | quote }} -v retain_after={{ include "aber.timescaleRetainFor" . | quote }} -f /sql/retention.sql
+              {{- if .Values.timescaledb.rollups.enabled }}
+
+              echo 'Reconciling telemetry rollups...'
+              $PSQL -v rollup_1m_retain={{ .Values.timescaledb.rollups.oneMinuteRetainFor | quote }} -v rollup_5m_retain={{ .Values.timescaledb.rollups.fiveMinuteRetainFor | quote }} -v rollup_1h_retain={{ .Values.timescaledb.rollups.oneHourRetainFor | quote }} -f /sql/aggregates.sql
+
+              {{/*
+                AFTER aggregates.sql, necessarily: roles.sql grants on the rollup views that file
+                creates. Run first, it fails with "relation telemetry_1h does not exist" -- and
+                only on a fresh volume, which is the worst kind of ordering bug because every
+                stack that already has the rollups passes.
+
+                An empty password makes roles.sql skip the role rather than create one with a
+                blank secret, so this needs no `if` around it.
+              */}}
+              {{/*
+                BETWEEN aggregates.sql AND roles.sql, and both halves of that are load-bearing.
+                It reports on the rollups, so they must exist; roles.sql grants SELECT on the view
+                it creates, so it must precede that. Run out of order the failure is an empty
+                data-lifecycle panel on a fresh volume only -- which is why roles.sql asserts the
+                view exists rather than leaving it to be noticed.
+              */}}
+              echo 'Reconciling the storage footprint view...'
+              $PSQL -f /sql/storage.sql
+
+              {{/*
+                BETWEEN storage.sql AND roles.sql. roles.sql grants SELECT on
+                `telemetry_archive_manifest` guarded on the table existing, so running
+                cold_archive.sql after it would push that grant to the SECOND run.
+
+                IT TAKES NO PSQL VARIABLES. Every threshold cold archival reads lives in
+                `system_settings` in the PLATFORM database and is re-read on each pass, which is
+                what makes `archive.enabled` a control rather than a deploy-time decision.
+
+                NOT INSIDE THE ROLLUPS CONDITIONAL, unlike the two lines around it. Cold archival
+                is about raw chunks and does not touch a rollup view; tying it to
+                `rollups.enabled=false` would leave 0068's self-check facing a reachable historian
+                with no manifest, which it correctly treats as a mismatch and fails db-init on.
+              */}}
+              echo 'Reconciling the cold archive manifest...'
+              $PSQL -f /sql/cold_archive.sql
+
+              echo 'Reconciling read-only BI role...'
+              $PSQL -v bi_reader_password="$BI_READER_PASSWORD" \
+                    -v ingest_writer_password="$INGEST_WRITER_PASSWORD" \
+                    -v fdw_reader_password="$FDW_READER_PASSWORD" -f /sql/roles.sql
+              {{- else }}
+
+              echo 'Rollups disabled (timescaledb.rollups.enabled=false); skipping aggregates.sql.'
+              {{/*
+                roles.sql is skipped with them, not run alone. Every grant it makes is on a rollup
+                view, so with the rollups disabled it would have nothing to grant on -- and would
+                fail on the first GRANT rather than no-op.
+              */}}
+              echo 'Rollups disabled; skipping roles.sql (it grants only on the rollup views).'
+
+              {{/*
+                cold_archive.sql is NOT skipped with them. It creates the manifest table 0068's
+                self-check reads over the FDW, and that check runs in the platform database
+                regardless of whether this stack keeps rollups -- so skipping it here would fail
+                db-init on any deployment that turned rollups off.
+              */}}
+              echo 'Reconciling the cold archive manifest...'
+              $PSQL -f /sql/cold_archive.sql
+              {{- end }}
+          volumeMounts:
+            {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
+        - name: sql
+          configMap:
+            name: {{ printf "%s-timescaledb-maintenance" $fullname }}
+{{- end }}

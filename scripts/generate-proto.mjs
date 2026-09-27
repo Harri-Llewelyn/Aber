@@ -19,7 +19,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -66,12 +66,12 @@ if (!quiet('docker', ['info'])) {
 
 // The image under the name the chart pulls it by, at the chart's appVersion, so `npm run dev:up`
 // and this script build the same thing and neither has to guess a project-prefixed name.
-const chart = readFileSync(join(REPO, 'deploy', 'helm', 'acs-cymru', 'Chart.yaml'), 'utf8');
+const chart = readFileSync(join(ROOT, 'deploy', 'helm', 'aber', 'Chart.yaml'), 'utf8');
 const version = chart.match(/^appVersion:\s*"?([^"\s]+)"?/m)?.[1] || 'dev';
-const image = `ghcr.io/harri-llewelyn/acs-cymru/ingestion:${version}`;
+const image = `ghcr.io/harri-llewelyn/aber/ingestion:${version}`;
 if (!quiet('docker', ['image', 'inspect', image])) {
   console.log(`${image} is not built yet; building it (this is a one-off).`);
-  run('docker', ['build', '-f', 'ingestion/Dockerfile', '-t', image, '.'], { stdio: 'inherit', cwd: REPO });
+  run('docker', ['build', '-f', 'ingestion/Dockerfile', '-t', image, '.'], { stdio: 'inherit', cwd: ROOT });
 }
 
 // A stopped container is enough to copy a file out of; it is never started.

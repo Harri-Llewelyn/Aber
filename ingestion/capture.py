@@ -2,77 +2,39 @@
 """
 Broker capture and playback -- record live Sparkplug B traffic, and publish it back.
 
-WHAT THIS IS FOR. Three things this stack could not do before: verify a dashboard against a
-machine that was on site for two hours, reproduce a fault by editing a value by hand, and load
-test at a chosen multiple of real time against a fleet whose measured rate is 0.95 msg/s.
-
   record   subscribe to the broker and write what arrives to a capture file
   play     publish a capture file back, rebased onto now
   inspect  describe a capture file without a broker
 
-=================================================================================================
-THE ONE THING THAT DECIDES THE WHOLE DESIGN: A CAPTURE CANNOT BE PLAYED BACK AS ITSELF.
-=================================================================================================
+A CAPTURE CANNOT BE PLAYED BACK AS ITSELF, and that decides the whole design. The broker's roles
+confine every gateway to `spBv1.0/+/+/<sparkplug_id>/#`: the fourth topic segment must equal the
+connecting username, and there is no wildcard-write principal to fall back on (mosquitto/README.md).
+So `play` publishes as ONE gateway, under ONE credential provisioned the ordinary way, and REWRITES
+the identity in every topic onto assets that gateway owns.
 
-The broker's roles confine every gateway to `spBv1.0/+/+/<sparkplug_id>/#` -- the fourth topic segment must equal
-the connecting username. mosquitto/README.md states the rule this rests on: "THERE IS NO WILDCARD-WRITE
-PRINCIPAL", and that was not an oversight to work around. It replaced a shared account that could
-forge DBIRTH and DDATA for every machine on site, which `verify_gateway_binding()` could not
-detect, "since a forged message under a CORRECTLY BOUND device passes that check by construction".
+IT REFUSES UP FRONT WHEN THE TARGET IS NOT THE CREDENTIAL IT HOLDS, because the failure mode is
+silence: a refused publish is dropped with no PUBACK at QoS 0 under MQTT 3.1.1 and 5 alike, so the
+publisher learns nothing from the broker by construction, and the run reports success and moves
+nothing.
 
-A playback tool that published captured topics verbatim would be that account, reintroduced --
-and would need write access to every edge node that ever appears in any capture. So it does not.
-`play` publishes as ONE gateway, under ONE credential provisioned the ordinary way, and REWRITES
-the identity in every topic onto assets that gateway owns. Playback is a gateway like any other.
+TIMESTAMPS ARE REBASED, AND BOTH PLACES THAT CARRY ONE MUST MOVE. `_timestamp_is_sane()` rejects a
+metric more than 24 hours behind now, and `telemetry`'s primary key is `(time, asset_id,
+metric_name)`, so a verbatim run is both out of window and a row-for-row collision. Every timestamp
+moves by one offset, preserving the intervals; dividing that offset by a speed factor is the same
+operation, which is why there is one mechanism and not two. `payload.timestamp` is the message
+clock, but process_ddata() reads `metric.timestamp` per metric and falls back to the payload's only
+when the metric has none -- rebase the payload alone and the sanity window drops the lot.
 
-AND THE FAILURE MODE FOR GETTING THIS WRONG IS SILENCE, which is why it is refused up front rather
-than discovered. mosquitto/README.md records that a refused publish is dropped with no PUBACK at QoS 0,
-under MQTT 3.1.1 and 5 alike, so "the publisher learns nothing from the broker by construction".
-validate.py has already been bitten by exactly this: a mismatch there "shows up as every publish
-being silently dropped", producing "a full run in which every publish went nowhere". `play`
-therefore refuses to start when the target gateway is not the credential it holds, because the
-alternative is a playback that reports success and moves nothing.
+THE FILE IS ALWAYS JSON; THE WIRE IS WHATEVER WAS RECORDED. Editing a captured value by hand is half
+the point, so the file holds the readable form whatever arrived, in the shape
+parse_sparkplug_payload() already accepts as its fallback. Playback re-encodes into the encoding
+each message arrived in: both are live traffic here, they enter the daemon down different branches,
+and replaying a JSON fleet as protobuf would mean a fault reproduced through this tool could be one
+the playback introduced. (docs/incidents.md -- "A recorder that understood one encoding reported
+the fleet as idle")
 
-=================================================================================================
-WHY TIMESTAMPS ARE REBASED, AND WHY THAT IS ALSO THE SPEED CONTROL
-=================================================================================================
-
-`_timestamp_is_sane()` rejects any metric more than 24 hours behind now, because such a row "lands
-outside the retention policy, or inside an already-compressed chunk that rejects the write". A
-capture published at its original timestamps is therefore worthless the day after it was recorded.
-
-It also could not be written even if it were fresh: `telemetry`'s primary key is
-`(time, asset_id, metric_name)`, so a verbatim second run collides with the first row for row.
-
-So playback rebases: every timestamp moves by the same offset, preserving the intervals between
-them. Dividing that offset by a speed factor is the same operation, which is why there is one
-mechanism here and not two.
-
-TWO PLACES CARRY A TIMESTAMP AND BOTH MUST MOVE. `payload.timestamp` is the message clock, but
-process_ddata() reads `metric.timestamp` per metric and only falls back to the payload's when the
-metric has none. Rebasing the payload alone leaves every metric on its original clock, and the
-sanity window then drops the lot -- a playback that connects, publishes, reports success, and
-writes nothing.
-
-=================================================================================================
-THE FILE IS ALWAYS JSON. THE WIRE IS WHATEVER WAS RECORDED.
-=================================================================================================
-
-Editing a captured value by hand is half the point of the feature, so the file holds the readable
-form regardless of what arrived. The shape it uses is deliberately the one
-parse_sparkplug_payload() already accepts as its fallback, so a hand-edit that is valid here is
-valid to the daemon too.
-
-BUT PLAYBACK RE-ENCODES INTO THE ENCODING EACH MESSAGE ARRIVED IN, and that is not a detail. Both
-encodings are live traffic on this stack -- the Node-RED simulator flow publishes JSON, Remote
-gateways publish protobuf -- and they enter the daemon down different branches of
-parse_sparkplug_payload(). Replaying a JSON fleet as protobuf would mean a fault reproduced
-through this tool could be one the playback introduced, or one it silently repaired. The encoding
-is part of what was observed, so it is part of what is replayed.
-
-That both encodings are in use here was not obvious and was found by recording: the first version
-of this tool understood protobuf only, skipped every message the seeded fleet published, and then
-reported the fleet as idle.
+Related: README.md -> "Broker Capture and Playback" (what the feature is for, the three caps, and
+         the sections this summarises).
 """
 
 import argparse
@@ -423,7 +385,9 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     with no broker and no clock, so the tests can assert it and `play --dry-run` can show it.
     Publishing is then a loop that cannot make a new decision.
     """
-    version = capture.get("acs_capture_version")
+    # A capture recorded before 1.0 carries the key under the platform's former name; the format
+    # is the same, so it is read under either.
+    version = capture.get("aber_capture_version", capture.get("acs_capture_version"))
     if version != CAPTURE_VERSION:
         raise CaptureError(
             "capture file is version %r, this tool reads version %d. Refusing to guess at the "
@@ -615,7 +579,7 @@ def cmd_record(args):
         if args.verbose:
             print("  %6dms  %s" % (now_ms - started_ms, msg.topic))
 
-    client = _connect(RECORD_USER, RECORD_PASSWORD, "acs-capture-record")
+    client = _connect(RECORD_USER, RECORD_PASSWORD, "aber-capture-record")
     client.on_message = on_message
     client.subscribe(args.topic, qos=0)
     client.loop_start()
@@ -658,7 +622,7 @@ def cmd_record(args):
 
     edge_nodes, devices = capture_identities(messages)
     capture = {
-        "acs_capture_version": CAPTURE_VERSION,
+        "aber_capture_version": CAPTURE_VERSION,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "recorded_from": {"broker": "%s:%d" % (MQTT_HOST, MQTT_PORT), "topic": args.topic},
         "capture_epoch_ms": capture_epoch_ms,
@@ -758,7 +722,7 @@ def cmd_play(args):
     if not PLAY_PASSWORD:
         raise CaptureError("MQTT_PLAYBACK_PASSWORD is not set; the broker runs allow_anonymous false")
 
-    client = _connect(PLAY_USER, PLAY_PASSWORD, "acs-capture-play")
+    client = _connect(PLAY_USER, PLAY_PASSWORD, "aber-capture-play")
     client.loop_start()
 
     print("Playing %d messages as %s at %.3fx..." % (len(plan), args.as_gateway, args.speed))
@@ -796,7 +760,7 @@ def cmd_inspect(args):
     with open(args.capture, encoding="utf-8") as fh:
         capture = json.load(fh)
     print("%s (version %s, recorded %s)"
-          % (args.capture, capture.get("acs_capture_version"), capture.get("recorded_at")))
+          % (args.capture, capture.get("aber_capture_version"), capture.get("recorded_at")))
     _print_summary(capture)
     return 0
 

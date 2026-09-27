@@ -117,7 +117,7 @@ beforeEach(() => {
 
 const TARGET = {
   id: 'gw-sim', name: 'Playback Target', sparkplug_id: 'gwy130000000000400080000',
-  sparkplug_group: 'ACS-Cymru', is_archived: false, gateway_has_broker_credential: true,
+  sparkplug_group: 'Aber', is_archived: false, gateway_has_broker_credential: true,
   devices: [
     { id: 'tdev-1', name: 'Sim Spindle', sparkplug_id: 'dev310000000000400080000', is_archived: false }
   ]
@@ -238,7 +238,7 @@ describe('the playback lane', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     const doc = {
-      acs_capture_version: 1,
+      aber_capture_version: 1,
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
@@ -455,7 +455,7 @@ describe('a failed job', () => {
     api.recentCaptureJobs.mockResolvedValue([{
       id: 'job-9', status: 'FAILED', subject_sparkplug_id: 'gwy120000000000400080000',
       gateways: { name: 'Line 1 Gateway' },
-      error: 'recorded no messages from ACS-Cymru/gwy120000000000400080000'
+      error: 'recorded no messages from Aber/gwy120000000000400080000'
     }])
     renderTab()
     expect(await screen.findByText(/recorded no messages/)).toBeInTheDocument()
@@ -1229,7 +1229,7 @@ describe('the playback card', () => {
     await screen.findByText('Line 1 Gateway')
 
     const doc = {
-      acs_capture_version: 1,
+      aber_capture_version: 1,
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
@@ -1254,7 +1254,7 @@ describe('the playback card', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     const doc = {
-      acs_capture_version: 1,
+      aber_capture_version: 1,
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', payload: {} }],
       identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
     }

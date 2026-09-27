@@ -25,14 +25,14 @@
  * believing either answer: node scripts/dev-cluster.mjs up --only=db-init
  *
  * Usage: node scripts/check-migration-idempotency.mjs, against the cluster the kube context points
- * at. Environment: ACS_CYMRU_NAMESPACE (default acs-cymru), ACS_CYMRU_RELEASE (acs-cymru),
+ * at. Environment: ABER_NAMESPACE (default aber), ABER_RELEASE (aber),
  * DB_USER_NAME (postgres), DB_NAME (postgres).
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
-const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru';
-const RELEASE = process.env.ACS_CYMRU_RELEASE || 'acs-cymru';
+const NAMESPACE = process.env.ABER_NAMESPACE || 'aber';
+const RELEASE = process.env.ABER_RELEASE || 'aber';
 const DB_USER_NAME = process.env.DB_USER_NAME || 'postgres';
 const DB_NAME = process.env.DB_NAME || 'postgres';
 const DB_INIT_JOB = `${RELEASE}-db-init`;
@@ -121,7 +121,7 @@ function replayChain(job) {
   const clone = {
     apiVersion: 'batch/v1',
     kind: 'Job',
-    metadata: { name: REPLAY_JOB, namespace: NAMESPACE, labels: { 'acs-cymru.io/replay-of': DB_INIT_JOB } },
+    metadata: { name: REPLAY_JOB, namespace: NAMESPACE, labels: { 'aber.io/replay-of': DB_INIT_JOB } },
     spec: { backoffLimit: job.spec.backoffLimit ?? 0, ttlSecondsAfterFinished: 600, template: job.spec.template },
   };
   const created = kubectl(['create', '-f', '-'], { input: JSON.stringify(clone) });

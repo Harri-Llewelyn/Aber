@@ -76,7 +76,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
       const url = URL.createObjectURL(result.blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = result.filename || `acs-gateway-${gateway.sparkplug_id || 'bundle'}.zip`
+      link.download = result.filename || `aber-gateway-${gateway.sparkplug_id || 'bundle'}.zip`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -107,7 +107,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   const sparkplugId = bundle?.sparkplugId || gateway.sparkplug_id
   const folder = bundle?.filename
     ? bundle.filename.replace(/\.zip$/, '')
-    : `acs-gateway-${sparkplugId || 'bundle'}`
+    : `aber-gateway-${sparkplugId || 'bundle'}`
   const isCommand = bundle?.kind === 'command'
 
   // ONE SOURCE for the block and the button. Two literals would drift, and the failure is an

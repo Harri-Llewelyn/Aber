@@ -60,11 +60,15 @@ Anything a running site would notice as a break. Concretely, any of:
 - **A values key removed or renamed** without a default that keeps the old spelling working.
 - **A change to an identifier a site already holds.** These are the expensive ones because they
   reach outside this repository: the `sparkplug_id` derivation, the site's Sparkplug group, the
-  `acs-cymru.local` semantic namespace that AAS exports and i3X type ids are minted into, a
-  `metric_catalog` name, or the `acs_ingestion_*` Prometheus metric prefix that every dashboard and
+  `aber.local` semantic namespace that AAS exports and i3X type ids are minted into, a
+  `metric_catalog` name, or the `aber_ingestion_*` Prometheus metric prefix that every dashboard and
   alert rule queries.
 - **A change to the shape of a topic** the platform publishes or consumes.
 - **Dropping support for a Kubernetes version** the previous release supported.
+- **A change `helm upgrade` cannot carry**, which moves [the floor](upgrades.md#the-floor-100): a
+  renamed chart (its name is in every workload's immutable selector), a PostgreSQL major version,
+  or a schema older than the migration chain is verified to converge. The release says so under
+  *Action required before upgrading* and moves the floor in `upgrades.md` in the same change.
 
 Anything not on that list is not a major change, whatever it looks like in the diff.
 
@@ -78,6 +82,10 @@ made on top of it: `db-init` replays **every** migration in filename order on ev
 applied-migrations ledger, so arriving from `1.0.0` and arriving from `1.3.2` run exactly the same
 files. [`upgrades.md`](upgrades.md#2-the-database-upgrades-itself-forwards-on-every-boot) has the
 mechanism.
+
+**Nothing below 1.0.0 upgrades to it.** 0.1.0 and any install from a checkout before 1.0 reach it
+by reinstalling, with their data or without it; [`upgrades.md`](upgrades.md#the-floor-100) says
+which.
 
 **Skipping minors is supported. Rolling back is not.** The images can be rolled back and the schema
 cannot — there are no down-migrations. Take a backup before upgrading if a rollback is a real
@@ -115,7 +123,10 @@ anything?" — is answered by the first section or by its absence:
 | **Added** | New capability, and the values key that turns it on |
 | **Images and chart** | The published tags, so a pull can be checked against the release |
 
-[`.github/RELEASE_TEMPLATE.md`](../.github/RELEASE_TEMPLATE.md) is that skeleton.
+[`.github/RELEASE_TEMPLATE.md`](../.github/RELEASE_TEMPLATE.md) is that skeleton. The release
+workflow opens the release as a draft from it, with `aber-<version>-sbom.tar.gz` attached: every
+image's SBOM and provenance, and the digests the signatures are over. The notes are then written by
+hand; nothing here is generated from commits.
 
 **Watch the repository's releases** to be told. On GitHub: *Watch → Custom → Releases*. There is no
 mailing list and no announcement channel; adding one nobody reads would be worse than saying so.
@@ -127,11 +138,17 @@ mailing list and no announcement channel; adding one nobody reads would be worse
 [`SECURITY.md`](../SECURITY.md) is the reporting route. Its supported-version window is this
 document's — the latest minor — and the two are deliberately not invented separately.
 
+**Every release is signed and carries a bill of materials.** Each image and the chart is signed
+keyless by the release workflow, bound to `release.yml` at the tag; each image carries an SPDX SBOM
+and SLSA provenance in its registry index. That is what lets a site ask, of a release built before
+an advisory existed, whether the advisory applies — without pulling the image. What each is and how
+to verify it is in [`SECURITY.md`](../SECURITY.md#what-a-release-carries-and-how-to-check-it).
+
 ---
 
 ## Related
 
-- [`upgrades.md`](upgrades.md) — what survives an upgrade, and the three places that is not the
+- [`upgrades.md`](upgrades.md) — what survives an upgrade, and the four places that is not the
   whole truth
 - [`testing.md`](testing.md#releases) — what the release workflow builds and checks
 - [`../deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release) — publishing one

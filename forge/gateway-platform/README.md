@@ -13,8 +13,8 @@ site.yml            the playbook: hosts localhost, four roles, in this order
 install.sh          the one-liner's installer, served by the platform to a fresh appliance
 roles/base          packages, unattended-upgrades without reboot, chrony
 roles/docker        Ubuntu's docker.io and the Compose plugin, held out of unattended upgrades
-roles/appliance     the compose project under /opt/acs-gateway, from appliance/ (the bundle template)
-roles/converge      the acs-gateway-converge script and its systemd timer
+roles/appliance     the compose project under /opt/aber-gateway, from appliance/ (the bundle template)
+roles/converge      the aber-gateway-converge script and its systemd timer
 appliance/          the compose project the appliance runs; also what the ZIP bundle ships
 platform.yml.example  what a gateway repository's platform.yml looks like
 ```
@@ -33,8 +33,8 @@ reviewed lane is the one `main` already has: a pull request an administrator app
 
 **What it is run with.** From the puller's checkout of the gateway's `main`, so `roles/`, `files/`
 and `templates/` beside it resolve; as root; with the `vars` from that gateway's `platform.yml`,
-and then the paths the platform owns — `acs_state_dir`, `acs_data_dir`, `acs_compose_dir`,
-`acs_repo_dir` and `acs_platform_tag`. The paths are passed last, so a custom playbook can read
+and then the paths the platform owns — `aber_state_dir`, `aber_data_dir`, `aber_compose_dir`,
+`aber_repo_dir` and `aber_platform_tag`. The paths are passed last, so a custom playbook can read
 where the platform put things and cannot move them.
 
 **What it cannot do to the platform.** It is not attempted when the platform run failed, because
@@ -57,17 +57,17 @@ enrolment. The runbook is in `docs/remote-gateways.md`.
 
 ## How an appliance runs it
 
-`acs-gateway-converge` (installed by the `converge` role, run by its timer hourly and at boot):
+`aber-gateway-converge` (installed by the `converge` role, run by its timer hourly and at boot):
 
 1. reads `platform.yml` from the appliance's checkout of its own repository's `main`
-   (`/var/lib/acs-gateway/data/gitops/repo/platform.yml`), which `flow-sync` keeps current;
+   (`/var/lib/aber-gateway/data/gitops/repo/platform.yml`), which `flow-sync` keeps current;
 2. runs `ansible-pull` against this repository at that tag, over SSH with the appliance's own
    deploy key and the forge's pinned host key, the same identity and the same verification the
    puller uses; the key is read-only here and read-write on the gateway's own repository;
 3. installs the roots published in `trust/` on **this repository's `main`**, if any root in the
    bundle verifies the broker this appliance actually dials;
 4. runs `custom.yml` from that same checkout, when the repository carries one;
-5. records what it did in `/var/lib/acs-gateway/data/gitops/converged.json`, which the puller
+5. records what it did in `/var/lib/aber-gateway/data/gitops/converged.json`, which the puller
    pushes to the gateway's `appliance` branch, so the forge shows which tag each appliance ran,
    which root it holds, and what its own playbook did:
 
@@ -122,7 +122,7 @@ is what was approved either way.
   recommendation for single-board appliances and not a requirement: without one the clock starts
   in the past, TLS fails visibly, and chrony's `makestep` recovers it once a source is reachable.
   `docs/remote-gateways.md` §8 carries the reasoning.
-- **The compose volume is a bind mount** under `/var/lib/acs-gateway/data`, so the host's
+- **The compose volume is a bind mount** under `/var/lib/aber-gateway/data`, so the host's
   converge script can reach the deploy key, the host key and the repository checkout that
   `bootstrap.mjs` wrote inside the container.
 - **The broker's root follows a bundle on `main`; the operating system's trust store does not.**

@@ -621,9 +621,9 @@ const apiMethods = {
     return {
       blob: await res.blob(),
       filename: filenameFromDisposition(res.headers.get('Content-Disposition')),
-      expiresAt: res.headers.get('X-ACS-Token-Expires-At'),
-      bundleVersion: res.headers.get('X-ACS-Bundle-Version'),
-      sparkplugId: res.headers.get('X-ACS-Sparkplug-Id')
+      expiresAt: res.headers.get('X-Aber-Token-Expires-At'),
+      bundleVersion: res.headers.get('X-Aber-Bundle-Version'),
+      sparkplugId: res.headers.get('X-Aber-Sparkplug-Id')
     };
   },
 
@@ -740,6 +740,61 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('cold_storage_rows');
     if (error) throw new Error(error.message || 'Could not read the cold storage catalogue');
     return data || [];
+  },
+
+  /**
+   * How far the cold archive has fallen behind (`0133`): when the unexported span begins, and how
+   * far past `archive.tier_after_days` that has run.
+   *
+   * ONE ROW, ALWAYS, so a null return means the call failed rather than that nothing is behind.
+   * The catalogue above cannot answer this: it lists what HAS been exported, and a stalled
+   * archiver's symptom is the absence of rows nobody notices.
+   */
+  coldArchiveBacklog: async () => {
+    const { data, error } = await supabase.rpc('cold_archive_backlog');
+    if (error) throw new Error(error.message || 'Could not read the cold archive backlog');
+    return Array.isArray(data) ? (data[0] || null) : (data || null);
+  },
+
+  /**
+   * How long raw telemetry is kept, and whether the archiver last reported archiving on (0005).
+   * Null when the historian could not be read, which is not the same as "kept indefinitely".
+   */
+  rawTelemetryWindow: async () => {
+    const { data, error } = await supabase.rpc('raw_telemetry_window');
+    if (error) throw new Error(error.message || 'Could not read the raw telemetry window');
+    return Array.isArray(data) ? (data[0] || null) : (data || null);
+  },
+
+  /**
+   * Whether an S3 credential is in the vault (`0134`). Never what it is — nothing reads it back to
+   * a browser, so this is the only question a page can ask about it.
+   *
+   * False for a caller who is not an Administrator, which reads as "not configured" and is correct
+   * for somebody who cannot configure it.
+   */
+  archiveCredentialIsSet: async () => {
+    const { data, error } = await supabase.rpc('archive_credential_is_set');
+    if (error) throw new Error(error.message || 'Could not check the cold archive credential');
+    return data === true;
+  },
+
+  /**
+   * Put the S3 secret key in the vault. Administrator only, enforced in the function rather than
+   * here: a check in the browser is a suggestion.
+   *
+   * WRITE-ONLY. There is no counterpart that reads it back, which is why the page shows "set" or
+   * "not set" and never a masked value it would have to have fetched to mask.
+   */
+  setArchiveCredential: async (secret) => {
+    const { error } = await supabase.rpc('set_archive_credential', { p_secret: secret });
+    if (error) {
+      // PostgREST maps the function's insufficient_privilege to 403; anything else is a fault.
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can set the archive credential'
+        : (error.message || 'Could not set the archive credential'));
+    }
+    return true;
   },
 
   /**
@@ -1181,17 +1236,19 @@ const apiMethods = {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('A capture is a JSON object. This file is not one.');
     }
-    if (parsed.acs_capture_version === undefined) {
+    // A capture recorded before 1.0 carries the key under the platform's former name.
+    const version = parsed.aber_capture_version ?? parsed.acs_capture_version;
+    if (version === undefined) {
       // The likeliest wrong file in this dialog by a distance, since both are JSON and both are
       // things an engineer downloads from this same application.
       if (Array.isArray(parsed)) {
         throw new Error('That looks like a Node-RED flow export, not a capture.');
       }
-      throw new Error('That file carries no acs_capture_version, so it is not a broker capture.');
+      throw new Error('That file carries no aber_capture_version, so it is not a broker capture.');
     }
-    if (parsed.acs_capture_version !== CAPTURE_VERSION) {
+    if (version !== CAPTURE_VERSION) {
       throw new Error(
-        `That capture is version ${parsed.acs_capture_version} and this stack reads version ${CAPTURE_VERSION}. ` +
+        `That capture is version ${version} and this stack reads version ${CAPTURE_VERSION}. ` +
         'capture.py refuses a version it does not know rather than guessing at the difference.'
       );
     }
@@ -1419,7 +1476,7 @@ const apiMethods = {
     }
   },
 
-  get: async (path, options = {}) => {
+  get: async (path, _options = {}) => {
     const entityDigitalThreadMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/digital-thread/);
     if (entityDigitalThreadMatch) {
       const rawEntityType = entityDigitalThreadMatch[1];
@@ -2005,7 +2062,7 @@ const apiMethods = {
     if (path.startsWith('/api/v1/settings')) {
       const { data, error } = await supabase
         .from('system_settings')
-        .select('id,key,value,value_type,category,label,description,fallback_source,min_value,max_value,updated_at,updated_by')
+        .select('id,key,value,value_type,category,label,description,fallback_source,min_value,max_value,read_only,updated_at,updated_by')
         .order('category', { ascending: true })
         .order('label', { ascending: true });
       if (error) throw error;
@@ -2024,6 +2081,8 @@ const apiMethods = {
         // a row that predates the column reads UNKNOWN, and the Directory page says so in words
         // instead of guessing on its behalf.
         exposure: s.exposure,
+        // The image the release deploys for the service (0007); null when nothing recorded one.
+        image: s.image ?? null,
         status: s.status,
         last_heartbeat: s.last_heartbeat
       }));
@@ -2044,7 +2103,7 @@ const apiMethods = {
     // Site Map, which only needs current state -- not the full history the
     // export dialog pages through.
     // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side
-    // (migration 0111) -- the retention SETTINGS cannot answer this, because a young stack holds
+    // (archived migration 0111) -- the retention SETTINGS cannot answer this, because a young stack holds
     // less than its policy allows and a widened policy does not restore dropped chunks.
     if (path.startsWith('/api/v1/telemetry/horizons')) {
       return queryTelemetryHorizons();
@@ -2168,7 +2227,7 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  post: async (path, body, options = {}) => {
+  post: async (path, body, _options = {}) => {
     /**
      * File a proposal. A plain INSERT: `Operator` holds an INSERT policy on this one table, and
      * routing it through an RPC would put the grant somewhere the RLS policy is not. The errors are
@@ -2549,7 +2608,7 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  put: async (path, body, options = {}) => {
+  put: async (path, body, _options = {}) => {
     /**
      * Edit an open proposal: the patch and the rationale, the only two columns the transition
      * guard lets a proposer move. This is what makes the per-asset cap livable: told there is
@@ -2669,8 +2728,8 @@ const apiMethods = {
         access_url: body.access_url
       };
       if ('deployment' in body) patch.deployment = body.deployment === 'host' ? 'host' : 'remote';
-      // Separate from deployment and not derived from it: a remote appliance replaying a capture is
-      // remote and simulated at once.
+      // Sent separately from deployment, but not independent of it: the table holds a simulated
+      // gateway to 'host' (gateways_simulated_is_host), so pairing it with 'remote' is refused.
       if ('is_simulated' in body) patch.is_simulated = !!body.is_simulated;
       // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
       if ('description' in body) patch.description = emptyToNull(body.description);
@@ -2908,7 +2967,7 @@ const apiMethods = {
     });
   },
 
-  delete: async (path, options = {}) => {
+  delete: async (path, _options = {}) => {
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
       const { error } = await supabase.from('links').delete().eq('id', id);

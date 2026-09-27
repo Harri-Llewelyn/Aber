@@ -58,6 +58,19 @@ def get_connection():
     return conn
 
 
+def become(cur, user_id, role_name):
+    """Grant `role_name` to `user_id`, then become them the way PostgREST does: claims only."""
+    cur.execute("SELECT id FROM public.roles WHERE name = %s;", (role_name,))
+    role_id = cur.fetchone()[0]
+    cur.execute(
+        "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s)"
+        " ON CONFLICT (user_id, role_id) DO NOTHING;",
+        (user_id, role_id),
+    )
+    cur.execute("SET LOCAL ROLE authenticated;")
+    cur.execute('SET LOCAL "request.jwt.claims" = %s;', ('{"sub": "%s"}' % user_id,))
+
+
 class DigitalThreadPaging(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -627,22 +640,13 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     # Self-seeded and never committed: the grant, the job and the backup all go in on the owner's
     # connection and roll back with everything else, so this asserts the matcher's ANSWERS without
     # leaving a role assignment behind in an append-only table. CI's RLS job applies the migrations
-    # and not seed.sql, so a suite leaning on `admin@acs-cymru.local` would fail there with a
+    # and not seed.sql, so a suite leaning on `admin@aber.local` would fail there with a
     # failure that looks like the gate and is really the fixture.
     ADMIN_ID = "a0d17070-0000-4000-8000-0000000d7318"
     AUDITOR_ID = "a0d17070-0000-4000-8000-0000000d7418"
 
     def _become(self, user_id, role_name):
-        """Grant `role_name` to `user_id`, then become them the way PostgREST does: claims only."""
-        self.cur.execute("SELECT id FROM public.roles WHERE name = %s;", (role_name,))
-        role_id = self.cur.fetchone()[0]
-        self.cur.execute(
-            "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s)"
-            " ON CONFLICT (user_id, role_id) DO NOTHING;",
-            (user_id, role_id),
-        )
-        self.cur.execute("SET LOCAL ROLE authenticated;")
-        self.cur.execute('SET LOCAL "request.jwt.claims" = %s;', ('{"sub": "%s"}' % user_id,))
+        become(self.cur, user_id, role_name)
 
     def test_an_administrator_finds_a_job_by_the_note_they_typed(self):
         """
@@ -867,6 +871,123 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
         # `t.raw ~ '^[0-9]{1,18}$'` anchors both ends. Unanchored, ' 12 ' or 'v12' would cast.
         for term in ("12a", "a12", "1.2", "-12", "1 2"):
             self.assertIsInstance(self.total(term), int, term)
+
+
+class HowManyRowsATransactionWrote(unittest.TestCase):
+    """
+    0006. Each event carries `transaction_rows`: how many rows share its causation_id, counted over
+    the whole table rather than the page. The drawer's "Same transaction" section is drawn from the
+    loaded, filtered set, so without this a single-row act and a group whose other rows the filters
+    hide were indistinguishable, and it hedged and offered "Show whole transaction" to both.
+
+    The count is under the caller's own policies, like the rows: the function is SECURITY INVOKER,
+    and the number is what "Show whole transaction" could load for that reader. It ignores the
+    purged rule, because the control reveals deleted entities.
+    """
+
+    CAUSATION = 880431
+    MANAGER_ID = "a0d17070-0000-4000-8000-0000000d7431"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = get_connection()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def _insert(self, entity_type, payload, causation_id):
+        self.cur.execute(
+            """
+            INSERT INTO public.digital_thread
+                   (entity_type, entity_id, action, new_data, recorded_at, actor_source,
+                    causation_id)
+            VALUES (%s, gen_random_uuid(), 'INSERT', %s::jsonb,
+                    timestamptz '2026-01-01 00:00:00+00', 'migration', %s)
+            RETURNING entity_id
+            """,
+            (entity_type, json.dumps(payload), causation_id),
+        )
+        return self.cur.fetchone()[0]
+
+    def setUp(self):
+        self.cur = self.conn.cursor()
+        # One act of three rows across two lanes: two devices (the asset lane; purged, since no
+        # live table holds them) and a role assignment (the security lane; never called deleted,
+        # because user_roles has no readable table to be absent from). Plus a single-row act, and
+        # a row from before causation existed.
+        self.group = [
+            self._insert("devices", {"name": "Txn Member 0 0006"}, self.CAUSATION),
+            self._insert("devices", {"name": "Txn Member 1 0006"}, self.CAUSATION),
+            self._insert("user_roles", {"role": "Ghost_Role_0006"}, self.CAUSATION),
+        ]
+        self.lone = self._insert("devices", {"name": "Lone Act 0006"}, self.CAUSATION + 1)
+        self.legacy = self._insert("devices", {"name": "Legacy Row 0006"}, None)
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.cur.close()
+
+    def events(self, ids, include_purged=True, entity_type=None):
+        self.cur.execute(
+            """
+            SELECT public.digital_thread_page(
+                p_limit => 1000, p_include_purged => %s, p_entity_type => %s,
+                p_entity_ids => %s::uuid[]
+            ) -> 'events'
+            """,
+            (include_purged, entity_type, ids),
+        )
+        return self.cur.fetchone()[0]
+
+    def test_a_single_row_act_reports_one(self):
+        events = self.events([self.lone])
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["transaction_rows"], 1)
+
+    def test_every_member_reports_the_size_of_the_group(self):
+        events = self.events(self.group)
+        self.assertEqual(len(events), 3)
+        self.assertEqual([e["transaction_rows"] for e in events], [3, 3, 3])
+
+    def test_the_count_ignores_the_entity_type_filter(self):
+        """
+        The case the drawer's control was added for: an act that crosses entity types, seen under
+        a filter that admits one of them. The page holds one row and the count still says three.
+        """
+        events = self.events(self.group, entity_type="user_roles")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["transaction_rows"], 3)
+
+    def test_the_count_ignores_the_purged_rule(self):
+        """
+        Both devices are purged (no live table holds them) and hidden by default; the role row is
+        never called deleted. The one visible row counts all three, because the control that loads
+        the rest reveals deleted entities.
+        """
+        events = self.events(self.group, include_purged=False)
+        self.assertEqual(len(events), 1, "the fixture did not land: expected one unpurged row")
+        self.assertEqual(events[0]["entity_type"], "user_roles")
+        self.assertEqual(events[0]["transaction_rows"], 3)
+
+    def test_a_row_without_a_transaction_reports_null(self):
+        # Present and null, not absent: NULL is not a group, and a count over it would make every
+        # legacy row one act.
+        events = self.events([self.legacy])
+        self.assertEqual(len(events), 1)
+        self.assertIn("transaction_rows", events[0])
+        self.assertIsNone(events[0]["transaction_rows"])
+
+    def test_the_count_is_under_the_callers_own_policies(self):
+        """
+        A Shopfloor_Manager reads the asset lane only. Their count omits the role row they cannot
+        read, and is exactly the number of rows "Show whole transaction" could load for them; a
+        count that saw past the policy would promise a row the search then never delivers.
+        """
+        become(self.cur, self.MANAGER_ID, "Shopfloor_Manager")
+        events = self.events(self.group)
+        self.assertEqual(len(events), 2, "a Manager should see the two asset-lane rows")
+        self.assertEqual([e["transaction_rows"] for e in events], [2, 2])
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ asserting the shape of a WHERE clause.
 
 SELF-SEEDED, NOT THE DEMO PERSONAS. CI's RLS job applies the migrations and deliberately NOT
 seed.sql -- the base image's legacy `auth.users` lacks columns the seed writes -- so
-`admin@acs-cymru.local` does not exist there. A suite depending on it passes locally and fails in
+`admin@aber.local` does not exist there. A suite depending on it passes locally and fails in
 CI, where the failure looks like the gate and is actually the fixture. Same approach, and the same
 reason, as test_system_settings_rls.py and test_user_roles_rls.py.
 """

@@ -1,0 +1,281 @@
+{{- if .Values.supabaseDb.enabled }}
+{{- $component := "supabase-db" -}}
+{{- $secretName := include "aber.secretName" . -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-db-headless
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+{{/*
+THE NAME IS `supabase-db`: GoTrue, PostgREST, Realtime, Storage, postgres-meta and Studio all
+address it by that name in their existing configuration.
+
+PORT 5432. The dev loop forwards it to 54322 on a laptop to avoid colliding with a local
+PostgreSQL; that number has no meaning inside a cluster. validate.py's SUPABASE_DB_PORT carries
+the same distinction: its default is conditional on where it runs.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-db
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+    {{- if .Values.databaseMetrics.enabled }}
+    {{- /* FOR THE ServiceMonitor PATH ONLY -- see the note on the historian's Service. */}}
+    - name: metrics
+      port: {{ .Values.databaseMetrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
+---
+{{/*
+The root key script, in place of the image's, for pgsodium and for Vault (each has its own
+setting naming it). The image's reads and, when absent, mints
+`/etc/postgresql-custom/pgsodium_root.key` in the container's own filesystem, so every recreated
+pod started with a new key and every Vault row written under the old one stopped decrypting
+until db-init re-seeded it. This one keeps the key on the data volume beside the cluster it
+protects. Runs as the server's user, which owns that directory.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-supabase-db-scripts" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  pgsodium_getkey.sh: |
+    #!/bin/sh
+    set -eu
+    KEY_FILE=/var/lib/postgresql/data/pgsodium_root.key
+    if [ ! -s "$KEY_FILE" ]; then
+      head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n' > "$KEY_FILE"
+      chmod 0600 "$KEY_FILE"
+    fi
+    cat "$KEY_FILE"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: supabase-db
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  serviceName: supabase-db-headless
+  # ONE REPLICA, AND NOT A TUNABLE -- see the note on timescaledb. Additionally: Realtime holds a
+  # LOGICAL REPLICATION SLOT against this database, and slots are per-instance state. A second
+  # server would not carry it.
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      {{- if or .Values.postgresTls.enabled .Values.databaseMetrics.enabled }}
+      annotations:
+        {{- if .Values.postgresTls.enabled }}
+        # pg_hba and the TLS flags are read at start, so a change to either rolls the pod.
+        checksum/tls: {{ include (print $.Template.BasePath "/data/postgres-tls.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if .Values.databaseMetrics.enabled }}
+        # The exporter reads its query file once, at startup, so an edit has to roll the pod or it
+        # sits in the ConfigMap unread.
+        checksum/exporter-queries: {{ include (print $.Template.BasePath "/data/database-exporter-configmap.yaml") . | sha256sum }}
+        {{- include "aber.scrapeAnnotations" (dict "port" .Values.databaseMetrics.port "path" "/metrics") | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # M5. Same reasoning and the same uid as TimescaleDB -- both are Debian postgres images.
+      securityContext:
+        {{- toYaml .Values.supabaseDb.podSecurityContext | nindent 8 }}
+      containers:
+        - name: supabase-db
+          image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
+          # The image's own command, plus the settings its files get wrong for a pod: the root key
+          # script (the image's keeps the key in the container, so a recreated pod cannot decrypt
+          # Vault; docs/incidents.md) and, with TLS on, ssl=on and the hba_file. `-c` overrides
+          # each without displacing the file. Vault reads its own setting, not pgsodium's: both
+          # name the script, or Vault keeps the image's key and pgsodium the volume's.
+          args:
+            - postgres
+            - -D
+            - /etc/postgresql
+            - -c
+            - pgsodium.getkey_script=/etc/aber/postgres/pgsodium_getkey.sh
+            - -c
+            - vault.getkey_script=/etc/aber/postgres/pgsodium_getkey.sh
+            {{- if .Values.postgresTls.enabled }}
+            {{- include "aber.dbTlsServerArgs" . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: postgres
+            {{- include "aber.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            # The supabase/postgres image reads these at first boot to provision the scoped roles
+            # and the auth schema helpers. They must be the SAME values every other service is
+            # given -- see the note on `secrets` in values.yaml for why the three are a set.
+            {{- include "aber.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{/*
+            NO `PGDATA` OVERRIDE, and setting one takes the database down on a fresh volume.
+
+            Pointing PGDATA at a SUBDIRECTORY of the mount is the habit from stock `postgres`, where
+            it keeps initdb away from a `lost+found`. It cannot work here: `supabase/postgres` ships
+            `/etc/postgresql/postgresql.conf` with
+
+                data_directory = '/var/lib/postgresql/data'
+
+            hardcoded, and launches the server with that config file. PGDATA then steers only the
+            entrypoint -- initdb populates `.../data/pgdata` and chowns THAT, the server reads the
+            config and opens `.../data`, still root-owned because fsGroup sets the group and never
+            the owner -- giving
+
+                FATAL:  data directory "/var/lib/postgresql/data" has wrong ownership
+
+            on a volume the entrypoint has just reported initialising successfully.
+
+            TIMESCALEDB KEEPS ITS PGDATA OVERRIDE, and that is not an inconsistency to tidy away:
+            `timescale/timescaledb` ships no `/etc/postgresql` and runs the server with
+            `-D "$PGDATA"`, so there the override is honoured end to end. The two images locate the
+            data directory differently, which is why timescaledb came up healthy in the same
+            cluster where supabase-db crash-looped.
+            */}}
+          # pg_isready AND `psql -c 'SELECT 1'`, because this image
+          # answers pg_isready during its own bootstrap while still refusing connections. Both are
+          # kept: readiness gates the init Jobs, and a database that accepts a connection
+          # but not a query would let the migrations start and fail.
+          #
+          # AND BOTH GATING PROBES ASK OVER TCP (-h 127.0.0.1): the temporary server initdb runs
+          # listens on the UNIX SOCKET ONLY,
+          # so a socket-only probe reports Ready in the middle of the bootstrap and lets the init
+          # Jobs connect as roles that do not exist yet. Liveness below is deliberately left on the
+          # socket -- it asks whether the process is lost, long after any of this.
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'
+            periodSeconds: 10
+            timeoutSeconds: 10
+            # 5 minutes. This image does substantially more first-boot work than stock postgres.
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 3
+          # Slacker than readiness, deliberately -- see the note on timescaledb's liveness probe.
+          # pg_isready only here: the SELECT adds a connection slot and a query per check, and
+          # liveness is about "is the process lost", not "is it answering well".
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "postgres"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.supabaseDb.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: scripts
+              mountPath: /etc/aber/postgres/pgsodium_getkey.sh
+              subPath: pgsodium_getkey.sh
+              readOnly: true
+            {{- if .Values.postgresTls.enabled }}
+            {{- include "aber.dbTlsServerMounts" (dict "db" "supabase-db") | nindent 12 }}
+            {{- end }}
+        {{- if .Values.postgresTls.enabled }}
+        {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (printf "%s:%s" .Values.supabaseDb.image.repository .Values.supabaseDb.image.tag) "pullPolicy" .Values.supabaseDb.image.pullPolicy "user" "postgres" "db" "postgres") | nindent 8 }}
+        {{- end }}
+        {{- if .Values.databaseMetrics.enabled }}
+        {{- include "aber.dbMetricsExporter" (dict "ctx" . "db" $component "database" "postgres") | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ printf "%s-supabase-db-scripts" (include "aber.fullname" .) }}
+            defaultMode: 0755
+        {{- if .Values.databaseMetrics.enabled }}
+        - name: exporter-queries
+          configMap:
+            name: {{ printf "%s-supabase-db-exporter" (include "aber.fullname" .) }}
+        {{- end }}
+        {{- if .Values.postgresTls.enabled }}
+        {{- include "aber.dbTlsServerVolumes" (dict "ctx" . "db" "supabase-db") | nindent 8 }}
+        {{- end }}
+      {{- with .Values.supabaseDb.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.supabaseDb.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.supabaseDb.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.supabaseDb.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ .Values.supabaseDb.persistence.accessMode }}
+        {{- include "aber.storageClass" (dict "ctx" . "component" .Values.supabaseDb.persistence) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ .Values.supabaseDb.persistence.size }}
+  {{- end }}
+{{- end }}
+{{- /*
+NO /docker-entrypoint-initdb.d MOUNT HERE, unlike timescaledb, and that is not an omission.
+
+Supabase's schema arrives through supabase-db-init replaying supabase/migrations/*.sql on every
+boot -- an init Job. Putting the migrations in an initdb mount would run them exactly once, on
+an empty volume, which is the opposite of the idempotent-replay contract 0001/0002 are built
+around and would make every later migration unreachable on an existing database.
+*/ -}}

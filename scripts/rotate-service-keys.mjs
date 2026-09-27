@@ -48,7 +48,7 @@
 //
 // --apply rewrites the Secret the pods read. A release installed from a values file must carry the
 // new keys there too (--values=<file> rewrites secrets.ingestionKey and .playbackKey in it, and
-// deploy/helm/acs-cymru/values-local.yaml is rewritten when it exists), or the next `helm upgrade`
+// deploy/helm/aber/values-local.yaml is rewritten when it exists), or the next `helm upgrade`
 // puts the old ones back; an externally managed Secret is updated where it lives.
 // =================================================================================================
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -92,7 +92,7 @@ const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
 const apply = args.includes('--apply');
 const valuesArg = args.find((a) => a.startsWith('--values='));
-const valuesPath = valuesArg ? valuesArg.slice('--values='.length) : join(REPO, 'deploy', 'helm', 'acs-cymru', 'values-local.yaml');
+const valuesPath = valuesArg ? valuesArg.slice('--values='.length) : join(REPO, 'deploy', 'helm', 'aber', 'values-local.yaml');
 const daysArg = args.indexOf('--days');
 const days = daysArg >= 0 ? Number(args[daysArg + 1]) : SERVICE_KEY_DEFAULT_DAYS;
 

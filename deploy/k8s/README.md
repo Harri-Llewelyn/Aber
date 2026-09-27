@@ -1,6 +1,6 @@
 # Kubernetes deployment — runbook
 
-The chart is `deploy/helm/acs-cymru`. The design and its reasoning are in
+The chart is `deploy/helm/aber`. The design and its reasoning are in
 [`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md); this file is the
 operational half.
 
@@ -41,7 +41,7 @@ indefinitely with no error in any container log — `kubectl describe pod` names
 does. This is also why a 2 vCPU node cannot run the stack at all, however much memory it has.
 
 `helm install` refuses that cluster rather than letting you find it later
-(`acs-cymru.validateCapacity`). The floor it compares against is summed from the
+(`aber.validateCapacity`). The floor it compares against is summed from the
 `resources.requests` in your own values, so lowering them or turning components off lowers it
 too — the refusal names both numbers. It runs on install only, never on upgrade, and says nothing
 when it cannot list nodes, so `helm template`, `--dry-run` and a restricted credential are
@@ -57,13 +57,87 @@ Expect the install itself to saturate four cores — it is the most CPU-hungry m
 finishes rather than fails. Steady-state CPU on an idle stack is under half a core.
 
 These figures are an **idle stack with no gateways connected**. Ingestion throughput moves CPU,
-and the two databases, Prometheus and Loki grow against their retention settings — `observability`
-keeps 30 days or 8 GB of metrics, whichever comes first. Size for the retention you configure.
+and the volumes below grow against their own bounds. Size the disk from them, not from the idle
+figure.
+
+#### The disk under the historian
+
+**The historian's ingest ceiling is the latency of an fsync on the disk under its WAL.** The
+daemon writes telemetry on one thread, one transaction per batch, and every commit waits for its
+WAL to reach the disk. At low rates the mean write in the scale envelope was about 4 ms, almost all
+of it that fsync. The single writer's duty cycle is fsync latency times transactions a second
+([`test-harness/README.md`](../../test-harness/README.md), *Results*), so the ceiling moves with
+the disk, not with CPU. The envelope was measured on a Docker Desktop virtual disk: local NVMe can
+be several times faster, a network volume several times slower.
+
+- **Put the historian on local NVMe or SSD.** On k3s, `local-path` places the volume on whatever
+  the node has. `timescaledb.persistence.storageClass` chooses the class.
+- **Put the WAL on its own volume where the platform allows it.** Commits then do not queue
+  behind the data files' writes.
+- **`timescaledb.walCompression` is `lz4` by default.** It compresses the full-page images in the
+  WAL: 0.5 to 4.7 % fewer WAL bytes when measured, more as checkpoints come closer together, at no
+  measurable cost. It does not reduce the number of fsyncs, so it does not move the ceiling.
+- **`commit_delay` does nothing here.** Group commit shares one fsync between concurrent
+  committers, and the writer is one thread.
+
+#### What grows, and what bounds it
+
+Disk is returned only when a chunk or partition is dropped (#393); deleting rows frees nothing.
+Each row below grows until its own bound. The per-row figures were measured on
+`timescale/timescaledb:2.29.2-pg17` with synthetic telemetry shaped like the stack's (24-character
+asset ids, ten metric names): raw **309 bytes a row, 72 % of it index**; a rollup row **179 to 185
+bytes**. Compressed raw was **8.4 bytes a row**, but that is 37× on smooth synthetic values; real
+signals compress less, so plan on 10×.
+
+The two example fleets are **S**, 100 devices × 10 metrics every 30 s (2.9 M rows a day, 1,000
+series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,000 series).
+
+| What | Bound | S | F |
+| :--- | :--- | ---: | ---: |
+| Raw telemetry, open chunk + `compressAfter` (uncompressed) | `timescaledb.retention.chunkInterval` × 2 | ~0.9 GB | ~22 GB |
+| Raw telemetry, the rest of the window (compressed) | `retainFor`, 14 days | ~1 GB | ~375 GB |
+| `telemetry_1m` (not compressed) | `oneMinuteRetainFor`, 180 days | ~46 GB | ~464 GB |
+| `telemetry_5m` (not compressed) | `fiveMinuteRetainFor`, 1 year | ~19 GB | ~188 GB |
+| `telemetry_1h` (not compressed) | `oneHourRetainFor`, 5 years | ~8 GB | ~81 GB |
+| WAL, each database | `max_wal_size`, 1 GB by default | 1 GB | 1 GB |
+| `digital_thread` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
+| Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
+| Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
+| Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
+| Storage (models, captures, floor plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
+| Backups | `backup.retentionDays` (14), on a 20 Gi volume | each backup includes the historian | see #403 |
+
+**The rollups dominate, and they are not compressed.** At S the 1-minute rollup alone reaches
+about 46 GB, more than the historian's default 20 Gi volume; at S's rate that volume fills in
+roughly two months. Rollup rows are written for each bucket with data, so a report-by-exception
+fleet (#400) that refreshes every 120 s writes about half as many 1-minute rows. Compressing the
+rollups (measured at about 5×) is #415. Until then, size the historian from the rollup rows and
+their retention, or shorten `oneMinuteRetainFor`.
+
+**What the stack does under load is a separate question, and it is measured separately.**
+[`test-harness/README.md`](../../test-harness/README.md), *The scale envelope*, carries the method,
+the full tables and what was not measured. The headline, measured 2026-09-23 with the historian
+at its stock tuning in a 1 GiB container, on a 16 vCPU development node and again on a node
+capped to the minimum above, which agree:
+
+| | Measured | Where it breaks first |
+| :--- | :--- | :--- |
+| **Sustained** | **1,000 msg/s** (10,000 rows/s) held for 20 minutes on both | — |
+| **Knee** | 1,250 msg/s: held 90 s on both; a 20-minute soak failed on one and held on the other | the historian writer's single thread reaches a 0.98 duty cycle, with 15 of 16 vCPU idle on the large node |
+| **Beyond it** | 1,500 msg/s and up: queue grows to its 10,000 cap | the broker sheds QoS 0 telemetry the daemon never sees and no counter in the stack records |
+| **Disk** | 367 bytes per row, 74 % of it index | 295 GiB/day per 1,000 devices at 1 msg/s × 10 metrics, before compression |
+
+The knee is architectural — one writer, one transaction per batch, a commit that waits on fsync —
+so a bigger node does not move it, the minimum does not lower it, and a faster disk does (*The
+disk under the historian*). Size the historian's disk from *What grows* and the fleet's rate from
+the first row. Fewer metrics a message raise the knee in messages and lower it in rows: at 2, the
+report-by-exception shape, the minimum node held 2,000 msg/s (4,000 rows/s) for 20 minutes and
+failed a soak at 2,500, its CPU at the cap.
 
 ### Local cluster with k3d
 
 ```bash
-k3d cluster create acs-cymru \
+k3d cluster create aber \
   --agents 0 \
   --port "80:80@loadbalancer" \
   --port "1883:1883@loadbalancer" \
@@ -74,7 +148,7 @@ k3d cluster create acs-cymru \
 `--port 80:80@loadbalancer` is what makes Traefik reachable from the host, so the ingress can be
 exercised through its real path rather than by port-forwarding straight to a Service.
 
-Teardown is `k3d cluster delete acs-cymru` — it takes the PVCs with it, which is exactly what you
+Teardown is `k3d cluster delete aber` — it takes the PVCs with it, which is exactly what you
 want for a throwaway cluster and never what you want on k3s.
 
 `--port 1883:1883@loadbalancer` does the same for the `mosquitto-external` LoadBalancer, so a gateway
@@ -83,10 +157,10 @@ on the LAN, or a simulator on the host, reaches the broker at the host address.
 On Windows, k3d may write the API endpoint into the kubeconfig as `host.docker.internal:<port>`,
 which some adapters resolve to an unreachable address; `kubectl` then times out against a healthy
 cluster. Point the context at loopback instead, with the port `docker ps` shows for the
-`k3d-acs-cymru-serverlb` container:
+`k3d-aber-serverlb` container:
 
 ```bash
-kubectl config set-cluster k3d-acs-cymru --server=https://127.0.0.1:<port>
+kubectl config set-cluster k3d-aber --server=https://127.0.0.1:<port>
 ```
 
 ### The development loop
@@ -120,9 +194,9 @@ adds the in-cluster conformance Jobs.
 The port-forwards carry the port numbers every host-side script and suite defaults to (`5433` for the historian,
 `54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
 tool keeps its defaults. `test` builds the suites' environment from `.env.example` for the
-non-secret settings and from the release's own Secret for every credential, and sets
-`ACS_STACK=k8s`, which tells the suites that reach into a container (`test-harness/stack_exec.py`)
-to use `kubectl exec` against the workload rather than `docker exec` against a container name.
+non-secret settings and from the release's own Secret for every credential. The suites that reach
+into a container (`test-harness/stack_exec.py`) run `kubectl exec` against the workload, choosing
+the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 
 ## Install
 
@@ -136,17 +210,19 @@ speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
 # What versions exist?
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.1.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.1.0
 
-helm install acs-cymru oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru \
+# my-values.yaml must name ingestion.primaryHostId and ingestion.sparkplugGroup: both are fixed
+# for the life of the site, neither has a default, and the render refuses without them.
+helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --version 0.1.0 \
-  --namespace acs-cymru --create-namespace \
+  --namespace aber --create-namespace \
   --values my-values.yaml \
   --timeout 15m
 
 # `helm install` returns once the init hooks have finished. Readiness is a separate question:
-for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
-  kubectl -n acs-cymru rollout status "$w" --timeout=10m
+for w in $(kubectl -n aber get statefulset,deploy -o name); do
+  kubectl -n aber rollout status "$w" --timeout=10m
 done
 ```
 
@@ -171,15 +247,72 @@ install. Pin it, in the command and in whatever runs the command.
 
 **There is no `-f values-dev.yaml` on this path** — that file is in the repository, not in your
 hands. But the chart *refuses to render* without credentials rather than generating them (see
-`acs-cymru.validateSecrets`), so an install with no values fails with a message naming the four
+`aber.validateSecrets`), so an install with no values fails with a message naming the four
 it needs. Either write a `my-values.yaml` from
-[`values-prod.yaml.example`](../helm/acs-cymru/values-prod.yaml.example) — which travels **inside
+[`values-prod.yaml.example`](../helm/aber/values-prod.yaml.example) — which travels **inside
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
 
-The nine built images resolve automatically to the chart's `appVersion`, which the release stamps
+The ten built images resolve automatically to the chart's `appVersion`, which the release stamps
 equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
 hand and no `latest` tag to drift onto.
+
+#### Verify what you are about to install
+
+The chart and every image are signed by the release workflow, keyless, so the signature is bound
+to an identity you can name rather than a key you have to fetch: this repository's
+`release.yml`, at the tag it released from. Each image also carries an SBOM and SLSA provenance
+in its registry index; [`SECURITY.md`](../../SECURITY.md#what-a-release-carries-and-how-to-check-it)
+says what each is and how to read it.
+
+```bash
+V=0.1.0
+ID="https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v$V"
+ISSUER=https://token.actions.githubusercontent.com
+
+# The chart you are about to install, then every image it will pull.
+cosign verify ghcr.io/harri-llewelyn/aber/aber:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service db-init swagger-ui test-runner; do
+  cosign verify ghcr.io/harri-llewelyn/aber/$i:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
+done
+```
+
+Needs cosign 3. A refusal names the identity it found, so a release published from a branch by
+hand (Actions → Release → *Run workflow*, `dry_run` unticked) verifies only against
+`@refs/heads/<branch>`, which is the point: the identity says how the artefact was made.
+
+To have the cluster refuse anything else, a policy controller admits by the same two claims.
+With [Kyverno](https://kyverno.io/):
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: aber-images-are-signed
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: released-by-this-repository
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [aber]
+      verifyImages:
+        - imageReferences: ["ghcr.io/harri-llewelyn/aber/*"]
+          attestors:
+            - entries:
+                - keyless:
+                    subjectRegex: "^https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v.*$"
+                    issuer: https://token.actions.githubusercontent.com
+                    rekor:
+                      url: https://rekor.sigstore.dev
+```
+
+That admits only images released from a tag and rewrites each pod's image to the verified digest.
+The third-party images the chart also runs (`supabase/*`, `eclipse-mosquitto` and the rest) are
+signed by their own projects or not at all, and are outside this rule.
 
 > **linux/amd64 only.** These images are not built for arm64, so a Pi, Jetson or Graviton node
 > cannot run them — the pods land and fail with `exec format error`. On arm64, build locally
@@ -191,15 +324,15 @@ hand and no `latest` tag to drift onto.
 # Mirror repository-owned config files into the chart (see "Chart files" below).
 node scripts/sync-helm-chart-files.mjs
 
-kubectl create namespace acs-cymru
+kubectl create namespace aber
 
-helm install acs-cymru deploy/helm/acs-cymru \
-  --namespace acs-cymru \
-  --values deploy/helm/acs-cymru/values-dev.yaml \
+helm install aber deploy/helm/aber \
+  --namespace aber \
+  --values deploy/helm/aber/values-dev.yaml \
   --timeout 10m
 
-for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
-  kubectl -n acs-cymru rollout status "$w" --timeout=10m
+for w in $(kubectl -n aber get statefulset,deploy -o name); do
+  kubectl -n aber rollout status "$w" --timeout=10m
 done
 ```
 
@@ -223,7 +356,7 @@ the `appVersion` default:
 ```yaml
 ingestion:
   image:
-    repository: registry.internal/acs-cymru/ingestion
+    repository: registry.internal/aber/ingestion
     tag: "0.1.0-hotfix.2"
 ```
 
@@ -234,28 +367,28 @@ them are the asymmetric kind that surface days later on whichever component was 
 ## Verify
 
 ```bash
-kubectl -n acs-cymru get pods
-kubectl -n acs-cymru rollout status statefulset/timescaledb
-kubectl -n acs-cymru rollout status statefulset/supabase-db
+kubectl -n aber get pods
+kubectl -n aber rollout status statefulset/timescaledb
+kubectl -n aber rollout status statefulset/supabase-db
 ```
 
 **The init hooks run *after* the workloads are created**, so `helm install` can return before the
 migrations have finished. Check them explicitly:
 
 ```bash
-kubectl -n acs-cymru logs job/acs-cymru-db-roles-init   # scoped role passwords
-kubectl -n acs-cymru logs job/acs-cymru-db-init         # migrations + seed
-kubectl -n acs-cymru logs job/acs-cymru-storage-init    # the asset-3d-models bucket
+kubectl -n aber logs job/aber-db-roles-init   # scoped role passwords
+kubectl -n aber logs job/aber-db-init         # migrations + seed
+kubectl -n aber logs job/aber-storage-init    # the asset-3d-models bucket
 
 # Schema actually applied?
-kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
+kubectl -n aber exec -it statefulset/supabase-db -- \
   psql -U postgres -d postgres -c '\dt public.*'
 ```
 
 The historian's bootstrap must also have run — this should list `assets` and `telemetry`:
 
 ```bash
-kubectl -n acs-cymru exec -it statefulset/timescaledb -- \
+kubectl -n aber exec -it statefulset/timescaledb -- \
   psql -U postgres -d postgres -c '\dt'
 ```
 
@@ -264,8 +397,8 @@ repairable in place**. The postgres entrypoint runs `/docker-entrypoint-initdb.d
 an *empty* data directory, so:
 
 ```bash
-helm uninstall acs-cymru -n acs-cymru
-kubectl -n acs-cymru delete pvc data-timescaledb-0
+helm uninstall aber -n aber
+kubectl -n aber delete pvc data-timescaledb-0
 # then reinstall
 ```
 
@@ -296,7 +429,7 @@ render refuses those two routes unless `ingress.tls` terminates TLS. Traefik lis
 
 ```bash
 curl -H 'Host: app.localhost' http://127.0.0.1/
-kubectl -n acs-cymru get ingress
+kubectl -n aber get ingress
 ```
 
 Remove a route without disabling the service — `docs` is the usual candidate, since it is not meant
@@ -354,11 +487,11 @@ as a broken manifest rather than a race.
 
 ```bash
 kubectl apply -f deploy/k8s/internal-ca.yaml
-kubectl -n cert-manager wait --for=condition=Ready certificate/acs-cymru-ca --timeout=120s
-kubectl get clusterissuer acs-cymru-ca     # must reach Ready=True, "Signing CA verified"
+kubectl -n cert-manager wait --for=condition=Ready certificate/aber-ca --timeout=120s
+kubectl get clusterissuer aber-ca     # must reach Ready=True, "Signing CA verified"
 ```
 
-The `ClusterIssuer` reports `Ready=False, secret "acs-cymru-ca-key-pair" not found` for a few
+The `ClusterIssuer` reports `Ready=False, secret "aber-ca-key-pair" not found` for a few
 seconds while the root is being signed. That is normal; if it *persists*, the root Certificate is in
 the wrong namespace — a `ClusterIssuer` resolves its keypair in cert-manager's own namespace
 (`--cluster-resource-namespace`, default `cert-manager`), never in the application's.
@@ -380,9 +513,9 @@ It is also cluster-scoped and shared, and a 10-year artefact against a chart upg
 helm upgrade ... \
   --set global.scheme=https \
   --set ingress.tls.enabled=true \
-  --set ingress.tls.certManager.clusterIssuer=acs-cymru-ca \
+  --set ingress.tls.certManager.clusterIssuer=aber-ca \
   --set mosquitto.tls.enabled=true \
-  --set mosquitto.tls.clusterIssuer=acs-cymru-ca \
+  --set mosquitto.tls.clusterIssuer=aber-ca \
   --set 'mosquitto.tls.extraIpSans={10.20.0.50}'      # the broker's external address
 ```
 
@@ -398,8 +531,8 @@ means seven certificates renewing independently.
 This is the real cost of an internal CA, and skipping it is worse than it looks.
 
 ```bash
-kubectl -n cert-manager get secret acs-cymru-ca-key-pair \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d > acs-cymru-ca.crt
+kubectl -n cert-manager get secret aber-ca-key-pair \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > aber-ca.crt
 ```
 
 Install it in the trust store of every browser, operator laptop and gateway — GPO on Windows, MDM
@@ -446,7 +579,7 @@ The chart refuses to render a LoadBalancer deployment whose certificate has no e
 all. Get the address and put it in the SANs:
 
 ```bash
-kubectl -n acs-cymru get svc mosquitto-external \
+kubectl -n aber get svc mosquitto-external \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
@@ -534,8 +667,8 @@ Two levels, and the distinction matters: one is safe to run against anything, th
 ### `helm test` — the cheap gate, mutates nothing
 
 ```bash
-helm test acs-cymru -n acs-cymru
-kubectl -n acs-cymru logs acs-cymru-test-fdw
+helm test aber -n aber
+kubectl -n aber logs aber-test-fdw
 ```
 
 Takes about a second and proves the **`postgres_fdw` link** end to end: the foreign server exists and
@@ -554,12 +687,12 @@ layers away from the cause.
 Off by default, because they seed and delete fixtures, drive real MQTT traffic and take minutes:
 
 ```bash
-helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru \
-  -f deploy/helm/acs-cymru/values-dev.yaml --set e2e.enabled=true
+helm upgrade aber deploy/helm/aber -n aber \
+  -f deploy/helm/aber/values-dev.yaml --set e2e.enabled=true
 
-kubectl -n acs-cymru wait --for=condition=complete \
-  job/acs-cymru-e2e-validate --timeout=20m
-kubectl -n acs-cymru logs job/acs-cymru-e2e-validate
+kubectl -n aber wait --for=condition=complete \
+  job/aber-e2e-validate --timeout=20m
+kubectl -n aber logs job/aber-e2e-validate
 ```
 
 - **`validate.py`** — the same 20 checks `npm run dev:test` runs from the host. In-cluster it needs
@@ -572,14 +705,14 @@ kubectl -n acs-cymru logs job/acs-cymru-e2e-validate
   Note its live checks **skip themselves and report success** when the device is absent, which is
   why CI asserts on the absence of the skip line rather than on the Job's exit status.
 
-Both need the **`acs-cymru/test-runner`** image (`test-harness/Dockerfile`). It extends the ingestion image
+Both need the **`aber/test-runner`** image (`test-harness/Dockerfile`). It extends the ingestion image
 with `jsonschema` and the AAS suite; jsonschema is deliberately *not* in the production ingestion
 image, and without it the schema-conformance tests — the ones that caught three real IDTA metamodel
 violations — skip themselves while the suite still reports success.
 
 Object names come from the chart's `fullname` helper, which **collapses the usual
 `<release>-<chart>` prefix when the release name already contains the chart name**. With release
-`acs-cymru` the Jobs are `acs-cymru-e2e-validate`, with the chart name appearing once.
+`aber` the Jobs are `aber-e2e-validate`, with the chart name appearing once.
 
 ### Running `validate.py` from the host instead
 
@@ -589,11 +722,11 @@ Object names come from the chart's `fullname` helper, which **collapses the usua
 ## Upgrade / uninstall
 
 ```bash
-helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru -f <values> --wait
+helm upgrade aber deploy/helm/aber -n aber -f <values> --wait
 
-helm uninstall acs-cymru -n acs-cymru
+helm uninstall aber -n aber
 # PVCs SURVIVE uninstall, by design — volumeClaimTemplates are not garbage collected.
-kubectl -n acs-cymru get pvc          # delete deliberately, never as cleanup habit
+kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 ```
 
 ---
@@ -619,20 +752,20 @@ kubectl -n acs-cymru get pvc          # delete deliberately, never as cleanup ha
 ### Images you must build
 
 Ten images are built from this repository rather than pulled from a vendor. **They are published**
-to `ghcr.io/harri-llewelyn/acs-cymru/`, so an ordinary install needs none of this — the chart pulls
+to `ghcr.io/harri-llewelyn/aber/`, so an ordinary install needs none of this — the chart pulls
 them at its own `appVersion`.
 
 Build them yourself when you are **changing** one, when you are on **arm64** (the published images
 are amd64 only), or when the cluster **cannot reach GHCR**.
 
 **Tag them exactly as the chart names them**, or the build is ignored: the pods ask for
-`ghcr.io/harri-llewelyn/acs-cymru/<name>:<appVersion>`, and anything else means Kubernetes falls
+`ghcr.io/harri-llewelyn/aber/<name>:<appVersion>`, and anything else means Kubernetes falls
 through to pulling the published image and your change silently does not run. `NS` and `V` below
 exist to make that hard to get wrong.
 
 ```bash
-NS=ghcr.io/harri-llewelyn/acs-cymru
-V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml | head -1 \
+NS=ghcr.io/harri-llewelyn/aber
+V=$(grep -E '^appVersion:' deploy/helm/aber/Chart.yaml | head -1 \
     | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
 # Edge functions — context is the REPOSITORY ROOT by convention (the image copies only supabase/functions/)
@@ -711,35 +844,68 @@ then the chart, to GHCR over OCI, on a `v*` tag.
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-That tag is the only place the version is written. It stamps the nine image tags, the chart
+That tag is the only place the version is written. It stamps the ten image tags, the chart
 `version` and the chart `appVersion` in one run — **nothing is bumped in a commit first**, which is
 the usual way a chart ends up published under a version naming a different build. `Chart.yaml`'s
 committed values are for the untagged path only (a checkout, `helm lint`, `helm template`).
 
 **Rehearse it first.** Actions → Release → *Run workflow*, with `dry_run` left ticked: everything
-builds, the chart packages, every check runs, and nothing is pushed.
+builds, the chart packages, every check runs, and nothing is pushed. The ingestion chain's
+attestations are checked on a dry run too, from the OCI archives it builds into; the other eight
+produce theirs only when pushing.
 
 **Images publish before the chart, and the chart job `needs` them.** A chart published ahead of its
-images does not fail — `helm install` succeeds, the databases and broker come up healthy, and nine
+images does not fail — `helm install` succeeds, the databases and broker come up healthy, and ten
 workloads sit in `ImagePullBackOff` with no failed release to point at.
+
+**Then the GitHub Release.** The workflow opens it as a draft from
+[`RELEASE_TEMPLATE.md`](../../.github/RELEASE_TEMPLATE.md) with `aber-<version>-sbom.tar.gz`
+attached — every image's SBOM and provenance, and a `DIGESTS` file naming what was signed. Write the
+notes and publish it:
+
+```bash
+gh release edit v0.2.0 --draft=false --notes-file notes.md
+```
+
+### What the release signs and attests
+
+Every image is built with `sbom: true` and `provenance: mode=max` — an SPDX SBOM and SLSA
+provenance in the image index — and every image and the chart is then signed with cosign,
+**keyless**: the job's `id-token: write` permission lets cosign exchange the run's OIDC token for a
+certificate naming `release.yml@refs/tags/v<version>`, and the certificate is recorded in Sigstore's
+public transparency log. Nothing is stored, rotated or leakable. The same job then verifies each
+signature against that identity and reads the SBOM and provenance back out of the registry, so a
+release cannot report green with an artefact nothing signed; [`sign-and-verify.sh`](../../.github/scripts/sign-and-verify.sh)
+is that check, and *Verify what you are about to install* under **Install** is the consumer's half.
+
+Three consequences worth knowing before the first signed release:
+
+- **The transparency log is public and names this repository and this file**, whatever the
+  repository's visibility. A release signed while the repository is private publishes that it exists.
+- **The GHCR package page shows an `unknown/unknown` platform** beside `linux/amd64`. That is the
+  attestation manifest in the index, not a broken build.
+- **`ingestion` and `test-runner` are one `docker buildx bake` of [`docker-bake.hcl`](../../docker-bake.hcl)**:
+  the second is `FROM` the first, and Bake's `target:` context hands one build's result to the other
+  without a registry round-trip, on the driver the attestations need.
 
 ### One-time: make the packages public
 
 **GHCR creates every new package private, whatever the repository's visibility**, and
 `GITHUB_TOKEN` cannot change it — package visibility is an account-level setting, not a repository
-one. So the first release publishes nine packages that nobody else can pull, and the symptom on a
-consumer's machine is an authentication error on a repository that is public.
+one. So the first release publishes eleven packages that nobody else can pull, and the symptom on a
+consumer's machine is an authentication error on a repository that is public. The signatures and
+attestations live inside each image's package, so the flip covers them too.
 
 After the first successful release, once per package:
 
 ```bash
-for p in acs-cymru edge-runtime ingestion node-red frontend test-runner; do
+for p in aber edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
   gh api --method PATCH -H "Accept: application/vnd.github+json" \
-    "/user/packages/container/acs-cymru%2F$p" -f visibility=public
+    "/user/packages/container/aber%2F$p" -f visibility=public
 done
 ```
 
-The `%2F` is required — the package name is `acs-cymru/edge-runtime` and the slash must be encoded
+The `%2F` is required — the package name is `aber/edge-runtime` and the slash must be encoded
 or the path resolves to a different endpoint. This needs a `gh auth login` with the `write:packages`
 scope; `gh auth refresh -s write:packages` adds it to an existing login. The same thing is four
 clicks per package under *Profile → Packages → <package> → Package settings → Change visibility*.
@@ -747,7 +913,7 @@ clicks per package under *Profile → Packages → <package> → Package setting
 Verify from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.2.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.2.0
 ```
 
 ### What the release does not do
@@ -756,9 +922,8 @@ helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.2.0
   `appVersion` precisely so a chart release can only run the images built beside it; a floating tag
   invites exactly the mixed-version stack that design prevents.
 - **No arm64.** See the note under *Install*.
-- **No signing or provenance attestation.** Consumers cannot verify these artefacts came from this
-  pipeline. Adding cosign keyless signing is a contained change and worth doing before anyone
-  outside depends on the chart.
+- **No signature on the release asset.** `aber-<version>-sbom.tar.gz` is a convenience copy; the
+  signed SBOM is the one in the registry, under the image's own signature.
 - **It does not re-run the E2E or in-cluster suites.** Those ran on the commit the tag points at.
   What it does repeat are the checks whose failure would be *baked into the artefact* rather than
   caught on the next commit — above all `sync-helm-chart-files.mjs --check`, because Helm cannot
@@ -812,12 +977,12 @@ editing.
 Debugging a suspected policy drop:
 
 ```bash
-kubectl -n acs-cymru get networkpolicy
-kubectl -n acs-cymru describe networkpolicy acs-cymru-egress-supabase-db
+kubectl -n aber get networkpolicy
+kubectl -n aber describe networkpolicy aber-egress-supabase-db
 # Prove it from inside the source pod, which distinguishes DNS from connectivity:
-kubectl -n acs-cymru exec deploy/ingestion -- getent hosts mosquitto
+kubectl -n aber exec deploy/ingestion -- getent hosts mosquitto
 # python, not `sh -c 'echo > /dev/tcp/...'`: the image's sh is dash, which has no /dev/tcp
-kubectl -n acs-cymru exec deploy/ingestion -- python -c "import socket; socket.create_connection(('mosquitto', 8883), 5)" && echo reachable
+kubectl -n aber exec deploy/ingestion -- python -c "import socket; socket.create_connection(('mosquitto', 8883), 5)" && echo reachable
 ```
 
 **If everything goes unready the moment you enable it**, your CNI does not exempt kubelet probes from
@@ -826,15 +991,15 @@ from the node CIDR via `networkPolicy.extraEgress`.
 
 **Two rules are load-bearing and easy to miss:** DNS egress on **both** UDP and TCP 53 (a response
 over 512 bytes falls back to TCP, so a UDP-only rule fails *intermittently*), and
-`supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through Kong, and
+`supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through the
+gateway, and
 pg_net has no retries or DLQ, so blocking it drops every notification silently.
 
 **The forge's login depends on a policy, so it gets one whether or not you enable this layer.** Gitea
 runs with reverse-proxy authentication and signs in whoever the `X-WEBAUTH-USER` header names, from
 any peer (`REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For` only). Access to `gitea:3000` is
-therefore not exposure control but *authentication* control — and on Compose that boundary exists
-without anyone opting in, because the `forge` Docker network is joined only by the gateway and the
-edge runtime.
+therefore not exposure control but *authentication* control, and nothing else confines the pod by
+default.
 
 So `gitea.enabled: true` renders **one** NetworkPolicy even with `networkPolicy.enabled: false`
 (#172): ingress-only on the Gitea pod, port 3000 from the gateway and `supabase-functions`, port 22
@@ -857,7 +1022,7 @@ peers from it, so the two cannot disagree about who may clone — which also mea
 in the usual way: a gateway that cannot reach `gitea:22` does not converge, and nothing in the stack
 reports it as a policy decision.
 
-**At the default the rule names no peer at all, deliberately.** `acs-cymru.giteaSshIngressRule`
+**At the default the rule names no peer at all, deliberately.** `aber.giteaSshIngressRule`
 renders `- ports: [22]` with no `from` when the list is empty or contains `0.0.0.0/0`, and an
 `ipBlock` list only when it has been narrowed. The two are not the same object even though both read
 as "anything":
@@ -875,6 +1040,39 @@ reasoning is from Cilium's documented semantics (#235).
 
 `mqttAllowedCidrs` has the same shape and the same SNAT, and has **not** been changed: that rule is
 opt-in, and the broker's exposure is a posture an operator chooses per site.
+
+### Outbound connections
+
+Nothing in the stack reports usage or checks for updates by itself. These are the upstream defaults
+that would, and where each is switched off:
+
+| Service | What its default does | Switched off in |
+| :--- | :--- | :--- |
+| Grafana | usage reports to Grafana Labs; Grafana and plugin update checks every 10 minutes; the news feed; gravatar lookups; plugin signing keys and plugin upgrades from grafana.com | `grafana/grafana.ini` |
+| Alloy | reports its enabled components to Grafana Labs | `--disable-reporting`, `templates/obs/alloy.yaml` |
+| Loki | usage reports to Grafana Labs | `analytics.reporting_enabled`, `loki/loki.yaml` |
+| Node-RED, on the stack and on each appliance | a daily ping to telemetry.nodered.org for update notifications, and an editor dialog asking to enable it | `telemetry` in `node-red/node-red-init.mjs` and the appliance's `bootstrap.mjs` |
+| TimescaleDB | a daily telemetry report | `timescaledb.telemetryLevel: "off"` |
+| Gitea | a release check | `GITEA__cron.update_checker__ENABLED`, `templates/apps/gitea.yaml` |
+| Swagger UI | a validator badge loaded from validator.swagger.io, carrying the spec's URL | `VALIDATOR_URL: none`, `templates/obs/swagger-ui.yaml` |
+
+`scripts/check-docs-drift.mjs` fails if any of these is switched back on.
+
+**What still leaves the stack**, each because something a person uses depends on it:
+
+- Grafana installs any preinstalled plugin it lacks, once, at first boot. Logs Drilldown is one. A
+  site with no route to grafana.com runs without them; the Prometheus, Loki and PostgreSQL
+  datasources are bundled in the image. The `drop-shadowed-plugins` init container removes a
+  downloaded copy of any plugin the image bundles, so the image's version is the one that runs.
+  The plugin catalogue page queries grafana.com when an administrator opens it.
+- Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
+  palette manager's Install tab and its update badges read it.
+- The dashboard's fonts come from Google Fonts (#438).
+- The edge functions fetch their dependencies from esm.sh and deno.land on first load (#437).
+- Destinations a site configures itself, such as a remote cold archive or backup target.
+
+An administrator can opt Node-RED into update notifications from its User Settings. The runtime
+keeps that choice over `settings.js`.
 
 ### PDBs and HPAs
 
@@ -906,8 +1104,8 @@ logical dump cannot rebuild a dead node. The reasoning behind the tier 1 dumps i
 
 ```bash
 helm upgrade ... --set backup.enabled=true --set backup.persistence.size=100Gi
-kubectl -n acs-cymru get cronjob acs-cymru-backup
-kubectl -n acs-cymru create job --from=cronjob/acs-cymru-backup backup-now   # run one now
+kubectl -n aber get cronjob aber-backup
+kubectl -n aber create job --from=cronjob/aber-backup backup-now   # run one now
 ```
 
 `pg_dump -Fc` of both databases, nightly, onto a PVC that **survives `helm uninstall`** — deleting the
@@ -916,20 +1114,22 @@ release is exactly when the backups are most wanted.
 **Or the backup service, from the dashboard.** With `backupService.enabled=true` (and the
 `backup-service` image built, above) the CronJob yields to a Deployment that takes the same backup
 when an Administrator asks on the **Backups** page, and on `backup.schedule` through pg_cron, one
-directory per backup on the same PVC, with the storage objects (`backup.includeStorage`) and the
-forge's volume (`backup.includeForge`) beside the two dumps. Retention (`backup.retentionDays`)
-applies to scheduled backups; a requested one is pinned until released on the page. Both
-`include*` flags mount a ReadWriteOnce PVC, so each pins the pod to that pod's node — on a cluster
-where the storage and forge pods sit on different nodes, enable one or the other. The mechanism,
-the tables and the restore runbook are in
+directory per backup on the same PVC, with pgsodium's root key (without which every Vault row
+restores as unreadable ciphertext), the storage objects (`backup.includeStorage`), the forge's
+volume (`backup.includeForge`), the broker's document (`backup.includeBroker`) and the internal
+CA's key pair (`backup.ca`, read from its Secret in cert-manager's namespace) beside the two
+dumps. Retention (`backup.retentionDays`) applies to scheduled backups; a requested one is
+pinned until released on the page. Each `include*` flag mounts a ReadWriteOnce PVC, so each pins
+the pod to that pod's node — on a cluster where those pods sit on different nodes, enable the
+ones that share one. The mechanism, the tables and the restore runbook are in
 [`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-0101).
 
 Ad hoc, without waiting for the schedule:
 
 ```bash
-kubectl -n acs-cymru exec -i statefulset/supabase-db -- \
+kubectl -n aber exec -i statefulset/supabase-db -- \
   env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > supabase-db.dump
-kubectl -n acs-cymru exec -i statefulset/timescaledb -- \
+kubectl -n aber exec -i statefulset/timescaledb -- \
   env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > timescaledb.dump
 ```
 
@@ -940,7 +1140,7 @@ not have to infer which files belong together.
 Restore:
 
 ```bash
-kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
+kubectl -n aber exec -it statefulset/supabase-db -- \
   pg_restore -U supabase_admin -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
 ```
 
@@ -973,9 +1173,9 @@ kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
 > Wrap it:
 >
 > ```bash
-> kubectl -n acs-cymru exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_pre_restore()'
+> kubectl -n aber exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_pre_restore()'
 > # ... pg_restore ...
-> kubectl -n acs-cymru exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_post_restore()'
+> kubectl -n aber exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_post_restore()'
 > ```
 >
 > Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this and
@@ -984,8 +1184,9 @@ kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
 #### Rehearsing the restore, weekly and by hand
 
 **`.github/workflows/restore-rehearsal.yml` performs a full cycle every Sunday** against a
-disposable k3d cluster: seed known data → back up → **destroy the namespace and its volumes** →
-reinstall → restore → assert. It also runs on `workflow_dispatch`, which is what to use before a
+disposable k3d cluster: seed known data → back up **through the backup service**, as the seeded
+Administrator through PostgREST → **destroy the namespace and its volumes** → reinstall → restore
+→ assert → back up again. It also runs on `workflow_dispatch`, which is what to use before a
 migration you are nervous about.
 
 **Destroying the volumes is the point.** A restore into a namespace that still has its PVCs proves
@@ -997,7 +1198,7 @@ take is caught as its own failure rather than as a suspiciously successful resto
 The same code runs by hand against any cluster:
 
 ```bash
-export NS=acs-cymru POSTGRES_PASSWORD=... DB_PASSWORD=...
+export NS=aber POSTGRES_PASSWORD=... DB_PASSWORD=...
 scripts/rehearse-restore.sh seed
 scripts/rehearse-restore.sh snapshot before.txt
 scripts/rehearse-restore.sh backup ./rehearsal
@@ -1025,6 +1226,10 @@ because every one of these can be missing while the counts agree:
 | Retention and refresh jobs registered **and scheduled** | present in every catalogue view, never running |
 | A user seeded before the backup can still sign in | GoTrue's schema or the JWT secret did not survive |
 | The storage object round-trips byte for byte | `devices.model_3d_path` pointing at objects that are gone |
+| The seeded gateway repository is back with its commit, and `main` is still closed to pushes behind its status check | a fleet whose flows are gone, or whose rules are open |
+| The forge's published SSH host key has the same digest as before the backup | every appliance refuses to clone: a host-key mismatch, which reads as an attack |
+| The seeded broker account is in the restored document and the plugin answers for it | every gateway re-issued |
+| The job the dump carried as RUNNING is FAILED, and a second backup completes | a restored stack that refuses every new backup |
 
 **A failure files itself.** A weekly job nobody watches is the same as no job, so a scheduled failure
 opens an issue labelled `restore-rehearsal` — or comments on the existing one rather than opening a
@@ -1032,12 +1237,15 @@ second, since a restore path broken for six weeks is one fact, not six. The dump
 is attached to it for seven days, so the next person diagnoses from the actual artefact instead of
 re-running and hoping it fails the same way.
 
-**What it does not rehearse.** The rehearsal installs the data layer and switches off the
-application layer — frontend, Node-RED, i3X, ingestion, edge functions, Grafana, Studio, Swagger and
-the broker (`.github/rehearsal-values.yaml` lists each with its reason). None of them holds state a
-dump carries. `supabase-realtime` stays **on** despite holding none, because it creates
-`supabase_realtime_admin` on first start and the restore refuses without it. Read a green run as
-"the data came back", not as "the whole stack came back".
+**What it does not rehearse.** The rehearsal installs the data layer — the two databases, the
+backup service, the forge and the broker — and switches off the application layer: frontend,
+Node-RED, i3X, ingestion, playback, the cold archive, edge functions, Grafana, Studio, Swagger,
+Prometheus, Loki, Alloy and the credential sidecar (`.github/rehearsal-values.yaml` lists each
+with its reason). None of them holds state a tier 1 backup carries. `supabase-realtime` stays
+**on** despite holding none, because it creates `supabase_realtime_admin` on first start and the
+restore refuses without it. The internal CA (`backup.ca`) is not rehearsed either: the rehearsal
+installs no cert-manager. Read a green run as "the data came back", not as "the whole stack came
+back".
 
 #### Tier 2: infrastructure and disaster recovery
 
@@ -1077,7 +1285,7 @@ Two need more:
 
 ```bash
 # The gateway's API keys are substituted by an initContainer:
-kubectl -n acs-cymru rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-kong
 # The OAuth client secrets are HASHED INTO auth.oauth_clients by db-init:
 helm upgrade ...   # re-runs the post-upgrade hook
 ```
@@ -1330,7 +1538,7 @@ not even be able to see (`existingSecret`). After rotating `SUPABASE_ANON_KEY` o
 `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```bash
-kubectl -n acs-cymru rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-kong
 ```
 
 ### The init hooks are safe to re-run, and that is load-bearing
@@ -1355,7 +1563,7 @@ listening on 1883 on that machine** (a local broker, a leftover container) leave
 `mosquitto-external` at `<pending>` with no obvious cause.
 
 ```bash
-kubectl -n acs-cymru get svc mosquitto-external
+kubectl -n aber get svc mosquitto-external
 ```
 
 With `mosquitto.tls.enabled` the same applies to **8883**, and to `tlsNodePort` if you are on
@@ -1368,8 +1576,7 @@ global section above the first `listener` line**. Do not move them under a liste
 it looks: a `plugin` line under a listener is refused outright without `per_listener_settings`, and
 a duplicated security option is fatal on 2.0.x and accepted on 2.1.x. That second trap has bitten:
 when the config still declared `password_file`, it was declared twice, and the pin from `latest` to
-`2.0.20` broke the broker on both targets with a stack of unrelated-looking health timeouts as the
-only symptom.
+`2.0.20` broke the broker with a stack of unrelated-looking health timeouts as the only symptom.
 
 Declaring them once is also what *guarantees* all three listeners are authorised identically —
 nothing above the first `listener` can be listener-specific, so no listener can come up anonymous.
@@ -1437,7 +1644,7 @@ The two browser-facing URLs are set with `GF_*` environment variables rather tha
 `GF_SERVER_ROOT_URL` and `GF_AUTH_GENERIC_OAUTH_AUTH_URL`. `token_url` and `api_url` inside the
 file are in-cluster (`http://supabase-kong:8000`) and are correct untouched.
 
-Its datasource is rendered by an initContainer, same as Kong's config and for the same reason — with
+Its datasource is rendered by an initContainer, same as the gateway's config and for the same reason — with
 `existingSecret` the chart cannot see the password, and Helm would substitute an empty string. That
 so Grafana runs its stock `/run.sh`.
 
@@ -1471,7 +1678,7 @@ survives a restart, what does not, what causes one and how often to expect it �
 customer-facing [`docs/i3x-openapi.yaml`](../../docs/i3x-openapi.yaml), because a client integrating
 against this endpoint has to build the re-create-on-404 path that the i3X lifecycle already requires.
 
-**All nine single-writer workloads are enumerated once**, in `acs-cymru.singleWriterWorkloads` in
+**All nine single-writer workloads are enumerated once**, in `aber.singleWriterWorkloads` in
 `_helpers.tpl`. The autoscaling guard derives its refusal set from that block and CI parses the same
 block for its replica/strategy check, so neither keeps a copy that can fall behind it.
 
@@ -1493,7 +1700,7 @@ forever.
 
 Helm cannot read outside its own chart directory, but several files the chart needs are the same
 ones the suites and scripts read from the working tree. `scripts/sync-helm-chart-files.mjs` mirrors them into
-`deploy/helm/acs-cymru/files/`, the copies are committed (a packaged chart must install with no
+`deploy/helm/aber/files/`, the copies are committed (a packaged chart must install with no
 build step), and CI runs the script with `--check` to prove they are current.
 
 ```bash

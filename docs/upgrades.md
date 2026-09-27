@@ -7,7 +7,8 @@ has been yes — and an upgrade that costs a site visit per appliance is an upgr
 which is how a fleet ends up years behind on a platform whose whole point is interoperability.
 
 The short answer here is **no, and it is structural rather than a promise**. What follows is why,
-and — in §4 — the three places where that is not the whole truth.
+and — in §4 — the four places where that is not the whole truth. It holds from 1.0.0 onwards;
+[the floor](#the-floor-100) is what lies below that and what to do about it.
 
 ---
 
@@ -18,12 +19,13 @@ and — in §4 — the three places where that is not the whole truth.
 
 V=<the version you are upgrading to>
 
-# Does it exist? This reads GHCR anonymously and needs no credentials.
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version "$V"
+# Does it exist? This reads GHCR anonymously and needs no credentials. A version that is not
+# published reports `not found`; `403 denied` means the package itself is missing or still private.
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version "$V"
 
-helm upgrade acs-cymru oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru \
+helm upgrade aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --version "$V" \
-  --namespace acs-cymru \
+  --namespace aber \
   --values my-values.yaml \
   --wait --timeout 15m
 ```
@@ -40,6 +42,77 @@ Three things about that command:
 - **`--wait` is safe here and is not safe on the first install.** The install deadlocks on it — the
   bootstrap hooks set the database roles the workloads wait for — and `deploy/k8s/README.md` gives
   that failure in full. On an upgrade the roles already have their passwords, so there is no cycle.
+
+### The floor: 1.0.0
+
+**This contract holds from 1.0.0, the first release published as `aber`.** Everything in this
+document is about moving from a release at or above it to a later one, which is also what
+[`releases.md`](releases.md#upgrading-between-releases) promises in version terms. Anything below it
+is a reinstall, not an upgrade, and two kinds of install are below it.
+
+**0.1.0**, released 2026-08-07 and the only release before 1.0. It is no longer published. For a
+site already running it, three things separate it from 1.0, and each is enough on its own:
+
+- **The chart name.** It is `factoryplus`, and the chart name is in every workload's
+  `spec.selector.matchLabels`, which Kubernetes refuses to change in place (`field is immutable`).
+- **PostgreSQL 15.** 1.0 runs 17, and a 17 server does not start on a 15 data directory. The move
+  was made deliberately while the only installation held no operator data;
+  [`postgres-17-migration-plan.md`](postgres-17-migration-plan.md) has the reasoning.
+- **Its schema.** It is older than the oldest schema the migration chain is verified to bring level
+  with a fresh install (below).
+
+**No route is rehearsed for a 0.1.0 database's contents, so a 0.1.0 site installs 1.0 fresh.**
+
+**An install from a checkout before 1.0**, under any chart name. The first of those reasons applies
+here too: the chart was `acs-cymru` until the rename to `aber`. The database can come across:
+
+1. Take a backup, and `helm uninstall` the old release (the claims survive by policy).
+2. Install 1.0 into a new namespace and restore the backup into it, by the runbook in
+   [`supabase/README.md`](../supabase/README.md) §*Backup and Recovery*.
+3. `helm upgrade` that release with the same chart version and values. The restore brings back the
+   schema the backup was taken from, and db-init only brings it forward when it runs again, which
+   is a `post-upgrade` hook.
+
+That holds **only if the database has booted a migration chain from `223b49d^` (2026-09-03) or
+later**. That is the oldest schema `0000` and `0001` are verified against: a database built from
+that chain and then given 1.0's dumps identically to a fresh install, and
+`scripts/verify-schema-equivalence.mjs` checks it. An older database is a fresh install too. The two
+halves are each measured (the restore by the rehearsal at a single version, the schema by that
+check), but nothing has run them end to end across versions.
+
+**A release that moves the floor says so** under *Action required before upgrading*, and this
+section moves with it. [`releases.md`](releases.md#major--1x--200) lists what moves it.
+
+### What 1.0 renames, and what each rename asks of a site
+
+1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/Aber/issues/335)).
+Tiers 1 and 2 were prose and the chart; this is the third tier, the identifiers that exist outside
+the repository. Each row is a value a site already holds somewhere, and the right-hand column is
+what the site does about it. Nothing here is undone by `helm upgrade`, because no install below 1.0
+reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its data comes
+by backup, reinstall and restore, and the restored database is what the rows below meet.
+
+| Was | Is | What a site does |
+| :--- | :--- | :--- |
+| Sparkplug group `ACS-Cymru` (the chart default, the seeded `sparkplug.group_id` setting, every gateway row that took the default) | `Aber` | Nothing in the database: `0003` moves the setting and those rows on the first boot, and only where the old default still stands. A site that pinned `ingestion.sparkplugGroup: ACS-Cymru` keeps it. **Each physical gateway must be re-pointed**, because the group is chosen by whatever publishes: its messages quarantine (never discard) until it publishes on the new group. Re-point first, or approve afterwards, as the archived `0015` says of the last move. |
+| Custom-settings prefix `acs_cymru.*` (`acs_cymru.actor_id`, `.proposal_transition`, the psql-fed secrets) | `aber.*` | Nothing. It is session state inside the migrations and the maintenance scripts; nothing persists it. A direct SQL caller that set `acs_cymru.actor_id` itself sets `aber.actor_id`. |
+| Request header `X-ACS-Cymru-Actor` | `X-Aber-Actor` | Nothing for the stack's own callers; they ship together. A script of your own that declared itself with the header sends the new name, or its writes are attributed as `service`. |
+| Response headers `X-ACS-Bundle-Version`, `X-ACS-Sparkplug-Id`, `X-ACS-Token-Expires-At` | `X-Aber-…` | Nothing; only the dashboard reads them. |
+| JWT issuer `acs-cymru-supabase` (the quarantine webhook token) and the Node-RED break-glass user `acs-cymru-break-glass` | `aber-supabase`, `aber-break-glass` | Nothing. The token is minted per call and verified by the Node-RED the same release ships. |
+| Semantic-id authority `https://acs-cymru.local/semantics/…` (every locally-minted id in `metric_catalog`, `mtconnect_vocabulary` and `iso22400_vocabulary`; the i3X namespaces) | `https://aber.local/semantics/…` | Nothing in the database: `0004` rewrites every id under the old authority on the first boot, keeping the path after it byte for byte, and leaves an id under any other namespace alone. **A consumer that keyed on a semantic id** (an AAS importer, an i3X client caching type ids) sees new ids for the same concepts. History is not rewritten. |
+| AAS identifier base `https://acs-cymru.local/ids/asset/` (`supabaseFunctions.aas.baseIri`, the `AAS_BASE_IRI` default) | `https://aber.local/ids/asset/` | Identifiers are derived at request time, so every exported shell and submodel id changes with the release. A site that had set `aas.baseIri` to its own authority is unaffected. |
+| Prometheus metric families `acs_ingestion_*`, `acs_historian_*`, `acs_postgres_*` (59 names: the daemon's exporter, the two database exporters' query files) | `aber_ingestion_*`, `aber_historian_*`, `aber_postgres_*` | The shipped dashboards, alert rules, ServiceMonitor and readiness gates move with them. **Series recorded before the upgrade stay under the old names**: Prometheus does not rename history, so every panel starts again at the upgrade and a query of your own that named an old metric returns nothing until it is edited. Keep the old names in a recording rule if you need the join. |
+| Grafana dashboard uids `acs-cymru-platform`, `-cluster`, `-databases`, `-gateway-health`, the provider `acs-cymru-platform`, the contact-point uid `acs-cymru-webhook`, and the alert-rule uids `acs-*` (`acs-gateway-stale`, `acs-archive-backlog`, …) | `aber-…` | On a Grafana that keeps its database across the upgrade, provisioning creates the dashboards, the contact point and the rules afresh under the new uids; the old ones linger and can be deleted by hand, and a bookmarked `/d/acs-cymru-…` or `/alerting/grafana/acs-…` URL no longer resolves. A fresh Grafana sees nothing of this. |
+| Internal CA `ClusterIssuer/acs-cymru-ca`, `Certificate/acs-cymru-ca`, Secret `acs-cymru-ca-key-pair` (`deploy/k8s/internal-ca.yaml`), and the bundle files `acs-cymru-ca.pem` / `acs-cymru.crt` | `aber-ca`, `aber-ca-key-pair`, `aber-ca.pem`, `aber.crt` | Apply the new `internal-ca.yaml`. To keep the same CA (so every appliance's pinned digest stays valid), copy the old Secret's `tls.crt` and `tls.key` into `aber-ca-key-pair` before the ClusterIssuer is created; otherwise a new CA is minted and every gateway bundle is re-issued. The chart's `clusterIssuer` values and the backup's `ca.secretName` name the new objects. |
+| The CA download path `/.well-known/acs-cymru/ca.pem` | `/.well-known/aber/ca.pem` | Nothing for an appliance that already holds the CA; the installer the dashboard hands out names the new path. |
+| The gateway appliance's layout: `/etc/acs-cymru`, the `acs_*` playbook variables, `acs-gateway-converge`, the `acs-gateway-*` Compose services, the `ACS_*` installer variables, the `acs-*` flow node ids | `aber…` | **An appliance installed before 1.0 is reinstalled, not converged.** The platform playbook it pulls at the 1.0 tag lays the new tree next to the old one and does not move state between them. Re-enrol it from the dashboard; the identity in the platform is unchanged, so its rows and history stay. |
+| The sweep's manifest `.acs/manifest.json` in the platform repository and in every gateway repository seeded from the template | `.aber/manifest.json` | Nothing. The sweep reads the manifest at the new path, finds none, republishes the platform in one commit and removes the old file with it; a gateway repository's copied manifest is removed the way it always was. The version tag is never moved, so `main` carries the new path while an already-published tag keeps the old one: that is the tag being immutable for the appliances that pin it, and the 1.0 tag is created fresh. |
+| The forge machine account `acs_platform` (`gitea.machineUser`) and every gateway repository under it | `aber_platform` | A forge restored from a 0.1.0 backup still holds `acs_platform` and its repositories. Either set `gitea.machineUser: acs_platform` to keep them as they are, or rename the account in Gitea's site administration before the first boot under the new chart (Gitea keeps a redirect from the old name). Left to the default, `gitea-init` creates `aber_platform` empty beside it. |
+| The runtime-config global `window.__ACS_CYMRU_CONFIG__`, the browser storage keys `acs_cymru_theme`, `acs_cymru_sidebar_mode` and `acs-cymru.capture.dismissed-failures` | `__ABER_CONFIG__`, `aber_…` | Nothing. Each user's theme and sidebar preference reset once. |
+| The capture-file key `acs_capture_version` | `aber_capture_version` | Nothing: a capture recorded before 1.0 is read under either key, by the daemon and by the upload dialog. New captures carry the new key. |
+| The AAS bundle paths `aasx/files/acs-cymru/…` and the manifest schema id `acs-cymru/asset-bundle/1` | `aasx/files/aber/…`, `aber/asset-bundle/1` | A consumer that unpacks the bundle by path reads the new one. Bundles exported before 1.0 are unchanged. |
+| Environment variables read by the scripts and the edge functions: `ACS_CYMRU_NAMESPACE`, `ACS_CYMRU_RELEASE`, `ACS_DEV_*`, `ACS_CA_URL`, `ACS_CA_PEM`, `ACS_PLATFORM_VERSION`, `ACS_INSTALLER_ALLOW_HTTP`, and the pods' mount paths under `/etc/acs-cymru`, `/var/lib/acs-cymru`, `/opt/acs-cymru` | `ABER_…`, `/etc/aber`, … | Nothing inside the cluster; the chart sets them. A shell profile that exported one of the names for the dev loop exports the new one. |
+| The dev cluster `k3d-acs-cymru` and the development credentials in `values-dev.yaml` (`sb_publishable_acscymru_dev_…`, `acscymru-ingest-writer`, `acscymrusecret`, …) | `k3d-aber`, `…aber…` | Development only. `k3d cluster delete acs-cymru`, then `npm run dev:up` creates `aber`. The Node-RED credential secret changed, so a dev cluster that keeps its volume needs `npm run dev:reset`. |
 
 Everything below is what that one command does and does not disturb.
 
@@ -66,6 +139,16 @@ was fixed when the row was created. An upgrade has nothing to change it *with*.
 
 The consequence worth stating to an operator: **an appliance that was publishing before an upgrade
 is publishing after it, having done nothing.** It does not re-enrol, re-register, or re-announce.
+
+**The other half of the address is fixed too, by a different mechanism.** `spBv1.0/<group>/…` takes
+its group from `ingestion.sparkplugGroup`, which `0131` seeds into a read-only setting on the first
+boot and holds there: a later boot whose chart value differs aborts `db-init` rather than
+re-addressing the fleet quietly. **Since 1.0 the key has no default**, so a site whose values
+never named it (it took the chart's `Aber`) adds `ingestion.sparkplugGroup: Aber`, or whatever the
+Settings page shows under *Site*, before upgrading; the render refuses otherwise. So an upgrade
+cannot move a site's topics, and changing the group
+deliberately is a stated procedure in [`supabase/README.md`](../supabase/README.md#changing-it-deliberately)
+rather than an edit.
 
 ---
 
@@ -107,6 +190,19 @@ nothing to update, and it **fails the step** if the two versions still disagree 
 than letting the stack carry on — which is the whole difference between this and what it replaced.
 
 An operator does nothing: as above, upgrading is still `helm upgrade`.
+
+The same step sets the raw hypertable's chunk interval, derived from
+`timescaledb.retention.expectedRowsPerDay` and the historian's memory limit unless
+`chunkInterval` is set. It applies to chunks created after the upgrade: the open chunk keeps the
+7 days it was made with, so the smaller floor arrives once that chunk closes. `compressAfter`,
+when left empty, follows it; a site that set `compressAfter` explicitly keeps its value.
+
+**The raw window becomes 14 days, and the upgrade applies it.** A chart that left
+`timescaledb.retention.retainFor` empty ran 90 days (or `never`, with a destination in the chart's
+values). The same step now installs the 14-day retention job, and its first daily run drops raw
+telemetry older than 14 days that no archive holds. The rollups keep their own windows. **To keep
+the old window, set `retainFor` before upgrading.** See `supabase/README.md`, *Raw telemetry is
+kept for a stated window*.
 
 ### Migrations are forward-only
 
@@ -253,9 +349,9 @@ checks are ones to run while the upgrade is still fresh.
 
 | Check | Where |
 | :--- | :--- |
-| Every migration applied cleanly | `kubectl -n acs-cymru logs job/acs-cymru-db-init` — it exits non-zero on any failure |
-| The historian's extension matches its image | `kubectl -n acs-cymru logs job/acs-cymru-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
-| Policy jobs are getting workers | `kubectl -n acs-cymru logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
+| Every migration applied cleanly | `kubectl -n aber logs job/aber-db-init` — it exits non-zero on any failure |
+| The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
+| Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
 | Telemetry still landing | Grafana → *Stack & Ingestion Health* → rows ingested per second |
 | The daemon is not dropping anything new | `curl localhost:9108/metrics \| grep dropped` — every reason is a separate series |

@@ -1,10 +1,10 @@
 openapi: 3.0.3
 
 info:
-  title: ACS-Cymru Asset Tracking Platform API
+  title: Aber API
   version: "2.0.0"
   description: |
-    The HTTP surface of the ACS-Cymru Asset Tracking Platform. Every request goes through
+    The HTTP surface of Aber, the shopfloor data platform. Every request goes through
     the **Envoy API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
 
     | Prefix | Upstream | `apikey` required? |
@@ -28,7 +28,7 @@ info:
     because an OAuth client presents client credentials and has no way to add a Supabase
     header. Both still validate the bearer token themselves.
 
-    Sign in first with `admin@acs-cymru.local` / `acscymru123` (local dev seed).
+    Sign in first with `admin@aber.local` / `aber123` (local dev seed).
 
     > ⚠️ **"Example Value" is documentation, not data.** Swagger UI synthesises samples from
     > this spec's schemas whether or not those rows exist. Press **Execute** and read the
@@ -102,8 +102,8 @@ info:
     back under A. Read `device_locations` and merge by `device_id`.
 
   contact:
-    name: ACS-Cymru Asset Tracking Platform
-    url: https://github.com/Harri-Llewelyn/ACS-Cymru
+    name: Aber
+    url: https://github.com/Harri-Llewelyn/Aber
 
 servers:
   - url: http://127.0.0.1:54321
@@ -168,8 +168,8 @@ paths:
             schema:
               type: object
               properties:
-                email: { type: string, format: email, example: admin@acs-cymru.local }
-                password: { type: string, format: password, example: acscymru123 }
+                email: { type: string, format: email, example: admin@aber.local }
+                password: { type: string, format: password, example: aber123 }
                 refresh_token:
                   type: string
                   description: Send this instead of email/password when `grant_type=refresh_token`.
@@ -2263,18 +2263,18 @@ paths:
                   description: The Remote gateway to generate a bundle for.
       responses:
         '200':
-          description: The bundle. `X-ACS-Token-Expires-At` carries the enrolment deadline.
+          description: The bundle. `X-Aber-Token-Expires-At` carries the enrolment deadline.
           headers:
             Content-Disposition:
               schema: { type: string }
-              description: 'attachment; filename="acs-gateway-<name>.zip"'
-            X-ACS-Token-Expires-At:
+              description: 'attachment; filename="aber-gateway-<name>.zip"'
+            X-Aber-Token-Expires-At:
               schema: { type: string, format: date-time }
               description: When the embedded enrolment token stops working.
-            X-ACS-Bundle-Version:
+            X-Aber-Bundle-Version:
               schema: { type: string }
               description: Template version, recorded on the gateway when the appliance enrols.
-            X-ACS-Sparkplug-Id:
+            X-Aber-Sparkplug-Id:
               schema: { type: string, pattern: '^gwy[0-9a-f]{21}$' }
               description: >-
                 The edge node this bundle enrols. Also the MQTT username the appliance will be
@@ -2652,7 +2652,7 @@ paths:
                     type: string
                     pattern: '^gwy[0-9a-f]{21}$'
                     description: The immutable edge-node id. Also the MQTT username; it cannot be anything else.
-                  sparkplug_group: { type: string, example: ACS-Cymru }
+                  sparkplug_group: { type: string, example: Aber }
                   mqtt_host: { type: string, example: broker.plant.example }
                   mqtt_tls_port: { type: integer, example: 8883 }
                   mqtt_username: { type: string, description: Equal to `sparkplug_id`. }
@@ -2721,11 +2721,11 @@ paths:
             text/x-shellscript:
               schema:
                 type: string
-              example: "#!/bin/bash\n# ACS-Cymru gateway appliance installer.\n..."
+              example: "#!/bin/bash\n# Aber gateway appliance installer.\n..."
             text/plain:
               schema:
                 type: string
-              example: "ACS_SUPABASE_URL=https://api.plant.example\nACS_ENROLLMENT_TOKEN=...\n"
+              example: "ABER_SUPABASE_URL=https://api.plant.example\nACS_ENROLLMENT_TOKEN=...\n"
             application/zip:
               schema:
                 type: string
@@ -2761,9 +2761,9 @@ paths:
 
         `?format=bundle` returns the same AASX with the device's history inside, for taking an
         asset away before it is taken out of service: supplementary parts under
-        `aasx/files/acs-cymru/` hold the digital thread (JSON), the readings still in the live
+        `aasx/files/aber/` hold the digital thread (JSON), the readings still in the live
         historian at raw and hourly resolution (CSV, oldest first, capped newest-first), and a
-        manifest (`acs-cymru/asset-bundle/1`) that says what each part holds, where it was cut,
+        manifest (`aber/asset-bundle/1`) that says what each part holds, where it was cut,
         and which cold-tier objects hold the rest — named, never read back. A copy is stored in the
         cold tier's bucket under `assets/<sparkplug_id>/<stamp>.aasx` and recorded in
         `asset_exports`; `X-AAS-Stats.bundle` says whether that copy was stored, and the file is
@@ -3240,7 +3240,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - { name: group_id, in: path, required: true, schema: { type: string }, description: 'e.g. `ACS-Cymru`' }
+        - { name: group_id, in: path, required: true, schema: { type: string }, description: 'e.g. `Aber`' }
         - { name: node_id, in: path, required: true, schema: { type: string }, description: 'The gateway `sparkplug_id`.' }
       responses:
         '200':
@@ -3372,7 +3372,7 @@ paths:
       tags: [Edge Functions]
       summary: Receive a Grafana alert notification
       description: |
-        The delivery target of Grafana's `ACS-Cymru Webhook` contact point. Accepts an
+        The delivery target of Grafana's `Aber Webhook` contact point. Accepts an
         Alertmanager-shaped payload and records each instance as an occurrence in
         `public.platform_alerts`, which the dashboard then receives over Realtime.
 
@@ -3446,7 +3446,7 @@ paths:
       tags: [Edge Functions]
       summary: Gitea's push webhook; records the head of main on the gateway's row
       description: |
-        Registered on each gateway repository at enrolment (migration 0095). Gitea delivers every push
+        Registered on each gateway repository at enrolment (archived migration 0095). Gitea delivers every push
         to `main` here, signed: `X-Gitea-Signature` is the hex HMAC-SHA256 of the raw body under
         `GITEA_WEBHOOK_SECRET`, and the signature is the whole of the authentication -- Envoy's key-auth
         proves only that the caller holds the publishable key. On a verified push the gateway named by the
@@ -3488,7 +3488,7 @@ paths:
       summary: Place the caller in the forge team their role warrants (the forge listener's ext_authz step)
       description: |
         Called by the gateway's `forge` listener on every non-static request through the forge's door,
-        carrying the verified access token (migration 0094). Resolves the caller's role from
+        carrying the verified access token (archived migration 0094). Resolves the caller's role from
         `user_roles` and ensures they are in exactly the team of the `gateways` organisation that role
         maps to -- `administrators` or `managers` -- through the machine account that owns it. A role
         that has been removed since the token was signed is refused and taken out of both teams on the
@@ -3809,7 +3809,7 @@ components:
         cell_id: { type: string, format: uuid, nullable: true }
         sparkplug_group:
           type: string
-          default: ACS-Cymru
+          default: Aber
           description: >-
             Sparkplug B Group ID -- the second topic segment. With `sparkplug_id` it forms the edge
             node address Factory+ resolves as (group, node), which is what `/v1/address/…` reads.
@@ -4112,6 +4112,15 @@ components:
             recorded. The two can disagree and both are needed — Studio is `NETWORK` while its
             `endpoint_url` is still the loopback default, and a loopback *address* cannot be used
             from a remote browser however broadly the *port* is published.
+        image:
+          type: string
+          nullable: true
+          example: 'grafana/grafana:13.2.0'
+          description: >-
+            The image reference (`repository:tag`) the release deploys for the service, recorded by
+            db-init from the chart on every install and upgrade (`0007`). It is the release's pin,
+            not an observation of the running container. `null` when the chart does not deploy the
+            service, or when something other than the chart registered it.
         status: { type: string, example: ACTIVE }
         last_heartbeat: { type: string, format: date-time, nullable: true }
         registered_schema_id: { type: string, format: uuid, nullable: true }
@@ -4165,7 +4174,7 @@ components:
         description: { type: string, nullable: true }
         deprecated: { type: boolean, default: false }
         superseded_by: { type: string, format: uuid, nullable: true, description: 'Changing a metric is deprecate-and-supersede, never a rename.' }
-        semantic_id: { type: string, nullable: true, description: 'Locally-minted ids sit under `https://acs-cymru.local/semantics/…` — the namespace is the honesty mechanism. Mutable, unlike the name.' }
+        semantic_id: { type: string, nullable: true, description: 'Locally-minted ids sit under `https://aber.local/semantics/…` — the namespace is the honesty mechanism. Mutable, unlike the name.' }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
         created_at: { type: string, format: date-time, readOnly: true }
 
@@ -4365,7 +4374,7 @@ components:
         subject_kind: { type: string, enum: [gateway, device] }
         gateway_id: { type: string, format: uuid, nullable: true }
         device_id: { type: string, format: uuid, nullable: true }
-        sparkplug_group: { type: string, example: ACS-Cymru }
+        sparkplug_group: { type: string, example: Aber }
         edge_node_id:
           type: string
           description: 'The gateway the daemon matches topics against — for a device capture too.'
@@ -4458,7 +4467,7 @@ components:
           type: string
           description: 'The gateway`s sparkplug_id — the NCMD is addressed to it.'
           example: gwy120000000000400080000
-        sparkplug_group: { type: string, example: ACS-Cymru }
+        sparkplug_group: { type: string, example: Aber }
         status: { type: string, enum: [PENDING, SENT, FAILED] }
         throttled:
           type: boolean
@@ -4515,7 +4524,7 @@ components:
             generates a role per gateway granting `spBv1.0/+/+/<that id>/#`, and a client holding
             it can publish nowhere else.
           example: gwy130000000000400080000
-        sparkplug_group: { type: string, example: ACS-Cymru }
+        sparkplug_group: { type: string, example: Aber }
         device_map:
           type: object
           additionalProperties: { type: string }
@@ -4537,7 +4546,7 @@ components:
             published and lost; a job that would lose EVERY reading is refused by the worker and
             arrives FAILED. Counted per message, while that refusal is decided per metric: the
             daemon judges each metric on its own timestamp and falls back to the payload's only
-            when it has none, so a job can carry a count on every message and still have written. Zero on every job written before migration 0109, which means
+            when it has none, so a job can carry a count on every message and still have written. Zero on every job written before archived migration 0109, which means
             "nobody counted" rather than "none were discarded".
         elapsed_seconds: { type: integer }
         stop_requested:
@@ -4604,7 +4613,7 @@ components:
       type: object
       description: A Sparkplug B address. `(group_id, node_id)` names the edge node; `device_id` is its device.
       properties:
-        group_id: { type: string, example: ACS-Cymru, description: 'Empty when the device is bound to no gateway.' }
+        group_id: { type: string, example: Aber, description: 'Empty when the device is bound to no gateway.' }
         node_id: { type: string, example: gwy120000000000400080000 }
         device_id: { type: string, example: dev220000000000400080000 }
 

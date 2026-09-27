@@ -1,11 +1,11 @@
 ---
-# The platform playbook. Run on the appliance against itself by acs-gateway-converge (ansible-pull),
+# The platform playbook. Run on the appliance against itself by aber-gateway-converge (ansible-pull),
 # at the tag the gateway's own platform.yml names. Idempotent: every task states a state.
 #
 # Order matters once: `appliance` needs Docker, and `converge` installs the timer that will run
 # this again, so a first run that fails before it leaves no timer behind to retry with. The
 # installer retries the first run itself.
-- name: ACS-Cymru gateway appliance
+- name: Aber gateway appliance
   hosts: localhost
   connection: local
   become: true
@@ -14,9 +14,9 @@
   vars:
     # Where the appliance keeps everything the platform gave it. The compose project's volume is a
     # bind mount under here, so the host's converge script can reach what bootstrap.mjs wrote.
-    acs_state_dir: /var/lib/acs-gateway
-    acs_data_dir: /var/lib/acs-gateway/data
-    acs_compose_dir: /opt/acs-gateway
+    aber_state_dir: /var/lib/aber-gateway
+    aber_data_dir: /var/lib/aber-gateway/data
+    aber_compose_dir: /opt/aber-gateway
     # What platform.yml may override, per gateway, through the reviewed lane.
     chrony_servers:
       - "pool ntp.ubuntu.com iburst maxsources 4"
@@ -27,11 +27,11 @@
   pre_tasks:
     - name: What PID 1 is
       ansible.builtin.command: cat /proc/1/comm
-      register: acs_init
+      register: aber_init
       changed_when: false
     - name: Whether systemd is running
       ansible.builtin.set_fact:
-        acs_systemd: "{{ ansible_facts['service_mgr'] == 'systemd' and (acs_init.stdout | trim) == 'systemd' }}"
+        aber_systemd: "{{ ansible_facts['service_mgr'] == 'systemd' and (aber_init.stdout | trim) == 'systemd' }}"
 
   # Tagged by role so a run can skip one: CI runs this in a container with `--skip-tags docker`.
   roles:

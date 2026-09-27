@@ -162,7 +162,7 @@ const RECONCILE_INTERVAL_MS = 60000;
  */
 export const GITHUB_REPO_URL = readSetting(
   'VITE_GITHUB_REPO_URL',
-  'https://github.com/Harri-Llewelyn/ACS-Cymru'
+  'https://github.com/Harri-Llewelyn/Aber'
 ).replace(/\/+$/, '');
 
 /**

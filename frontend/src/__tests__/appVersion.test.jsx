@@ -13,7 +13,7 @@ import path from 'node:path'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@acs-cymru.local',
+    email: 'admin@aber.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -52,7 +52,7 @@ const RELEASE_WF = fs.readFileSync(path.resolve(__dirname, '../../../.github/wor
 
 const openMenu = async () => {
   render(<App />)
-  await waitFor(() => expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText('Aber')).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: /open account menu/i }))
   return within(document.querySelector('.user-popover'))
 }

@@ -1,9 +1,9 @@
 ---
-# This gateway's own playbook. Run by acs-gateway-converge on the appliance, from the checkout of
+# This gateway's own playbook. Run by aber-gateway-converge on the appliance, from the checkout of
 # this repository's main, straight after the platform playbook and never instead of it.
 #
-# The platform hands over where it put things -- acs_state_dir, acs_data_dir, acs_compose_dir,
-# acs_repo_dir, acs_platform_tag -- after this gateway's own platform.yml vars, so nothing here
+# The platform hands over where it put things -- aber_state_dir, aber_data_dir, aber_compose_dir,
+# aber_repo_dir, aber_platform_tag -- after this gateway's own platform.yml vars, so nothing here
 # states a path of its own. Everything below is Docker and this repository; the platform's
 # directories are read, never written.
 - name: A custom adapter for this gateway
@@ -16,11 +16,11 @@
     # The compose project under custom/ in this repository, built and run on the appliance from the
     # commit that was merged. The platform's own project keeps its directory; this one has its own,
     # so `docker compose down` on either leaves the other alone.
-    adapter_dir: "{{ acs_repo_dir }}/custom"
+    adapter_dir: "{{ aber_repo_dir }}/custom"
     # The appliance's compose network, so the adapter can reach Node-RED by service name. Compose
     # names the default network "<project>_default", and the project is the directory the platform
     # deployed to (measured against Docker Compose v2).
-    appliance_network: "{{ acs_compose_dir | basename }}_default"
+    appliance_network: "{{ aber_compose_dir | basename }}_default"
 
   tasks:
     - name: The adapter image, built on this appliance from this commit
@@ -32,7 +32,7 @@
         cmd: docker compose build
         chdir: "{{ adapter_dir }}"
       environment:
-        ACS_APPLIANCE_NETWORK: "{{ appliance_network }}"
+        ABER_APPLIANCE_NETWORK: "{{ appliance_network }}"
       register: adapter_build
       changed_when: true
 
@@ -41,7 +41,7 @@
         cmd: docker compose up -d
         chdir: "{{ adapter_dir }}"
       environment:
-        ACS_APPLIANCE_NETWORK: "{{ appliance_network }}"
+        ABER_APPLIANCE_NETWORK: "{{ appliance_network }}"
       changed_when: true
 
     # THE PLAY FAILS WHEN THE ADAPTER IS NOT RUNNING, which is the point of running this hourly.
@@ -52,7 +52,7 @@
         cmd: docker compose ps --status running --quiet
         chdir: "{{ adapter_dir }}"
       environment:
-        ACS_APPLIANCE_NETWORK: "{{ appliance_network }}"
+        ABER_APPLIANCE_NETWORK: "{{ appliance_network }}"
       register: adapter_running
       changed_when: false
 

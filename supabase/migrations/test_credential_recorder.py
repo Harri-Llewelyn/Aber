@@ -8,9 +8,9 @@ Requires the Supabase database (54322 by default) and archived migration 0062 ap
 ---------------------------------------------------------------------------------------------
 WHAT THIS SUITE IS FOR.
 
-`scripts/provision-gateways.mjs` issued broker credentials that nothing recorded, because 0041's
-recorder gates on `has_role()` and the script authenticates with the service-role key, for which
-`auth.uid()` is NULL. Measured before the fix: five live gateways, two `CREDENTIAL_ISSUED` rows.
+A service-role caller issued broker credentials that nothing recorded, because 0041's recorder
+gates on `has_role()` and a service-role key has no `auth.uid()`. Measured before the fix: five
+live gateways, two `CREDENTIAL_ISSUED` rows.
 The Access Control page then reported `No platform record` for three gateways whose accounts were
 at the broker and publishing.
 

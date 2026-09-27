@@ -41,7 +41,7 @@ DEVICE_ROWS = [
         "status": "ONLINE",
         "is_quarantined": False,
         "gateway_id": "gggggggg-0000-4000-8000-000000000001",
-        "gateways": {"sparkplug_id": "gwygggggggg000040008000", "sparkplug_group": "ACS-Cymru"},
+        "gateways": {"sparkplug_id": "gwygggggggg000040008000", "sparkplug_group": "Aber"},
     },
     {
         # Unbound AND quarantined: the two shapes the projection has an opinion about.
@@ -208,7 +208,7 @@ class TheProjection(unittest.TestCase):
     def test_a_bound_device_reports_its_full_address(self):
         entry = documents()["device"]["devices"][0]
         self.assertEqual(entry["address"], {
-            "group_id": "ACS-Cymru",
+            "group_id": "Aber",
             "node_id": "gwygggggggg000040008000",
             "device_id": "devdddddddd000040008000",
         })
@@ -308,19 +308,24 @@ class TheDefault(unittest.TestCase):
     the broker ACL is the only thing standing in front of it once it is on.
     """
 
-    def _reload_with(self, value):
-        previous = os.environ.get("DIRECTORY_MQTT_ENABLED")
-        if value is None:
-            os.environ.pop("DIRECTORY_MQTT_ENABLED", None)
-        else:
-            os.environ["DIRECTORY_MQTT_ENABLED"] = value
+    def _reload_with(self, value, group="Aber"):
+        """Reload with DIRECTORY_MQTT_ENABLED and SPARKPLUG_GROUP set, None meaning unset."""
+        names = {"DIRECTORY_MQTT_ENABLED": value, "SPARKPLUG_GROUP": group,
+                 "DIRECTORY_MQTT_TOPIC_PREFIX": None}
+        previous = {name: os.environ.get(name) for name in names}
+        for name, wanted in names.items():
+            if wanted is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = wanted
         try:
             return importlib.reload(directory_publish)
         finally:
-            if previous is None:
-                os.environ.pop("DIRECTORY_MQTT_ENABLED", None)
-            else:
-                os.environ["DIRECTORY_MQTT_ENABLED"] = previous
+            for name, was in previous.items():
+                if was is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = was
 
     def tearDown(self):
         importlib.reload(directory_publish)
@@ -332,6 +337,19 @@ class TheDefault(unittest.TestCase):
     def test_it_starts_when_asked(self):
         module = self._reload_with("true")
         self.assertTrue(module.start(FakeClient(), FakeSupabase()))
+
+    def test_the_prefix_is_derived_from_the_group(self):
+        self.assertEqual(self._reload_with("true", group="Broughton").DIRECTORY_MQTT_TOPIC_PREFIX,
+                         "Broughton/Directory/v1")
+
+    def test_it_refuses_to_start_with_no_group_to_publish_under(self):
+        """
+        The group has no default (ingestion.sparkplugGroup is required), so with neither it nor a
+        prefix there is no topic; inventing one would publish where the broker grants nothing.
+        """
+        module = self._reload_with("true", group=None)
+        self.assertEqual(module.DIRECTORY_MQTT_TOPIC_PREFIX, "")
+        self.assertFalse(module.start(FakeClient(), FakeSupabase()))
 
     def test_it_refuses_to_start_with_nothing_to_derive_from(self):
         """

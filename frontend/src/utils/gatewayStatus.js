@@ -90,7 +90,7 @@ export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
  */
 
 /**
- * The window the CA-expiry alert fires in. Mirrors `acs-gateway-ca-expiring` in
+ * The window the CA-expiry alert fires in. Mirrors `aber-gateway-ca-expiring` in
  * grafana/provisioning/alerting/alert-rules.yaml (`lt 30`); scripts/check-docs-drift.mjs asserts
  * the two agree.
  */

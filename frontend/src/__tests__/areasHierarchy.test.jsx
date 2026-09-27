@@ -27,7 +27,7 @@ const areaA = { area_id: 'area-a', area_name: 'Building A', description: null, i
 const areaB = { area_id: 'area-b', area_name: 'Building B', description: 'The annexe', icon: 'Warehouse', cells: [], cell_count: 0, plan_path: null, plan_aspect: null }
 
 const gateway = {
-  gateway_id: 'gw-1', gateway_name: 'Line_Gateway', cell_id: 'cell-1', location_scope: 'cell', sparkplug_group: 'ACS-Cymru',
+  gateway_id: 'gw-1', gateway_name: 'Line_Gateway', cell_id: 'cell-1', location_scope: 'cell', sparkplug_group: 'Aber',
   status: 'ONLINE', deployment: 'remote', is_archived: false,
   last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 1, devices: []
 }
@@ -94,13 +94,26 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
   it('names the enterprise and the site in the Site Map card, and says when the site is not set', async () => {
     await renderSiteMap()
     const hierarchy = screen.getByRole('group', { name: 'Hierarchy' })
-    expect(within(hierarchy).getByText('ACS-Cymru')).toBeInTheDocument()
+    expect(within(hierarchy).getByText('Aber')).toBeInTheDocument()
     expect(within(hierarchy).getByText(/Not set — name it on the Settings page/)).toBeInTheDocument()
     // One card, the Site Map: the ladder, the lanes and the plans share it.
     const titles = [...document.querySelectorAll('.shopfloor-title')].map(t => t.textContent)
     expect(titles).toEqual([expect.stringMatching(/^Site Map/)])
     expect(screen.getByRole('button', { name: 'About the site map' })).toBeInTheDocument()
     expect(document.querySelectorAll('.shopfloor-map-card')).toHaveLength(1)
+  })
+
+  it('names the enterprise from the group the site was installed with, before any gateway enrols', async () => {
+    // The group is named at install (ingestion.sparkplugGroup), so a fresh stack knows it; a
+    // gateway enrolled under another group does not replace it.
+    api.get.mockImplementation(routeGet({
+      settings: [{ key: 'sparkplug.group_id', value: 'Broughton-Plant' }],
+      gateways: [{ ...gateway, sparkplug_group: 'Elsewhere' }],
+    }))
+    await renderSiteMap()
+    const hierarchy = screen.getByRole('group', { name: 'Hierarchy' })
+    await waitFor(() => expect(within(hierarchy).getByText('Broughton-Plant')).toBeInTheDocument())
+    expect(within(hierarchy).queryByText(/Elsewhere/)).toBeNull()
   })
 
   it('names the site once the setting holds a name', async () => {
@@ -194,7 +207,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
   it('files an Area-Wide gateway under its area and keeps it out of the Unassigned queue', async () => {
     const areaWideGw = {
       gateway_id: 'gw-aw', gateway_name: 'Test_Remote', cell_id: null, area_id: 'area-a',
-      location_scope: 'area_wide', sparkplug_group: 'ACS-Cymru', status: 'ONLINE',
+      location_scope: 'area_wide', sparkplug_group: 'Aber', status: 'ONLINE',
       deployment: 'remote', is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(),
       device_count: 0, devices: []
     }
@@ -211,7 +224,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
   it('still queues a gateway that is scoped to a cell and has none', async () => {
     const looseGw = {
       gateway_id: 'gw-loose', gateway_name: 'Loose_Gateway', cell_id: null, area_id: null,
-      location_scope: 'cell', sparkplug_group: 'ACS-Cymru', status: 'ONLINE', deployment: 'remote',
+      location_scope: 'cell', sparkplug_group: 'Aber', status: 'ONLINE', deployment: 'remote',
       is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 0, devices: []
     }
     api.get.mockImplementation(routeGet({ gateways: [looseGw], cells: [], devices: [] }))
@@ -267,7 +280,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     }
     const looseGw = {
       gateway_id: 'gw-loose', gateway_name: 'Loose_Gateway', cell_id: null, area_id: null,
-      location_scope: 'cell', sparkplug_group: 'ACS-Cymru', status: 'ONLINE', deployment: 'remote',
+      location_scope: 'cell', sparkplug_group: 'Aber', status: 'ONLINE', deployment: 'remote',
       is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 0, devices: []
     }
     api.get.mockImplementation(routeGet({ devices: [looseDevice], gateways: [gateway, looseGw] }))

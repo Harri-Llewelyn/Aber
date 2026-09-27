@@ -1,0 +1,199 @@
+{{- if .Values.telemetry.serviceMonitor.enabled }}
+{{- $fullname := include "aber.fullname" . -}}
+{{/*
+=================================================================================================
+ServiceMonitors -- ONLY for endpoints that actually serve Prometheus metrics.
+
+THE POINT OF THIS FILE IS WHAT IT REFUSES TO CREATE. A ServiceMonitor naming a port that serves
+nothing does not fail: Prometheus lists the target DOWN, or scrapes an endpoint that answers 200
+with no metrics, and the dashboards built on it render empty panels. Someone then concludes the
+component is idle -- a monitoring stack lying about the thing it was installed to observe.
+
+So each entry was verified against the pinned image before it was written:
+
+  grafana         NATIVE, on its normal HTTP port at /metrics, unauthenticated.
+                  (grafana 13.2.0: 499 metric families.) Nothing to enable.
+
+  supabase-envoy  ON ITS ADMIN LISTENER at /stats/prometheus, the port that also answers the
+                  readiness probe. The `envoy_http_downstream_rq_xx` family covers the HTTP tier
+                  for every REST, Auth, Storage, Realtime and edge-function request.
+
+  mosquitto       HAS NO HTTP METRICS SURFACE AT ALL and cannot be given one; it publishes to
+                  `$SYS/broker/#` MQTT topics. `mosquitto.metrics.enabled` runs an exporter
+                  sidecar that subscribes and re-serves them.
+                  (sapcc/mosquitto-exporter 0.8.0: 48 series, prefixed `broker_`, not
+                  `mosquitto_` -- alerts written against the latter match nothing, silently.)
+
+  supabase-rest   ON THE ADMIN SERVER at /metrics, as of v14.12; 12.2.0 served /ready and /live
+                  there and nothing else, so read this off a running server rather than off a
+                  changelog. `pgrst_db_pool_max`, `pgrst_db_pool_waiting`,
+                  `pgrst_schema_cache_loads_total`, `pgrst_schema_cache_query_time_seconds` and
+                  the three `pgrst_jwt_cache_*_total` counters.
+
+                  THESE ARE WHAT THE GATEWAY CANNOT SEE. Every PostgREST request arrives through
+                  it, so its request and latency series cover the HTTP tier -- but a gateway-side
+                  200 says nothing about a schema cache reload or a pool with requests queued
+                  behind it. The admin listener is a ClusterIP port, absent from the Ingress and
+                  unrouted by the gateway, because IT HAS NO AUTHENTICATION and its readiness
+                  endpoints describe the database connection.
+
+  ingestion       the daemon's own counter registry, rendered by ingestion/metrics.py on a fourth
+                  background thread beside the watchdog, heartbeat and stats reporter. Not a
+                  re-instrumentation: the counters already existed (issues #22, #24).
+
+  supabase-db /   postgres_exporter AS A SIDECAR IN EACH DATABASE POD (`databaseMetrics`), which
+  timescaledb     is why the credentials question the absence note used to raise went away: the
+                  sidecar shares the pod's network namespace, both pg_hba files trust loopback,
+                  and so the role it connects as has NO PASSWORD AT ALL and cannot authenticate
+                  from anywhere else.
+                  (postgres-exporter v0.20.1, with `settings`, `stat_user_tables` and
+                  `statio_user_tables` switched off: ~265 series on the historian and ~309 on
+                  supabase-db, against 2,505 and 3,489 with the defaults. values.yaml has the
+                  measurements.)
+
+                  WATCH `pg_scrape_collector_success`, NOT ONLY `up`. A collector that fails --
+                  a missing extension, a privilege the role turns out not to hold -- is reported
+                  ONLY by that gauge: the exporter keeps serving, the scrape succeeds and
+                  `pg_exporter_last_scrape_error` stays 0, so the affected series are just absent.
+                  Both were observed while this was built.
+
+
+REQUIRES THE PROMETHEUS OPERATOR CRDs. ServiceMonitor is not a core type; without
+kube-prometheus-stack (or at least its CRDs), `helm install` fails with `no matches for kind
+"ServiceMonitor"`. Hence opt-in, and hence the note in values.yaml.
+
+NETWORK POLICY. Under `networkPolicy.enabled` every scrape is dropped by the default-deny rule:
+the generated edges describe flows between components of this chart, and Prometheus is not one.
+`networkPolicy.extraIngress` is the seam, and values-prod.yaml.example carries a working rule.
+Without it the targets are simply DOWN, which reads as the pods being unreachable.
+=================================================================================================
+*/}}
+{{- $targets := list -}}
+{{- if .Values.grafana.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "grafana"
+      "component" "grafana"
+      "service" "grafana"
+      "port" "http"
+      "path" "/metrics"
+      "why" "native, unauthenticated, on the normal HTTP port") -}}
+{{- end -}}
+{{/*
+  `component` comes from the same helper NetworkPolicy uses, because a ServiceMonitor selects POD
+  LABELS and the promoted Service name does not change them.
+*/}}
+{{- if and .Values.supabaseEnvoy.enabled .Values.supabaseEnvoy.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "supabase-envoy"
+      "component" (include "aber.gatewayComponent" .)
+      "service" .Values.supabaseEnvoy.serviceName
+      "port" "metrics"
+      "path" "/stats/prometheus"
+      "why" "Envoy's admin listener, which serves the scrape and the readiness probe") -}}
+{{- end -}}
+{{/*
+  THE ONLY TARGET ON THE CRITICAL DATA PATH. Everything else here observes a request tier; this one
+  says whether telemetry is being recorded at all.
+
+  It scrapes `ingestion-metrics`, the headless Service in apps/ingestion.yaml, which exists solely
+  because a ServiceMonitor selects Services rather than Pods.
+
+  `aber_ingestion_messages_dropped_total` is the series worth a panel: any non-zero value is
+  telemetry that was NOT written, and under report-by-exception nothing ever restates it.
+*/}}
+{{- if and .Values.ingestion.enabled .Values.ingestion.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "supabase-rest"
+      "component" "supabase-rest"
+      "service" "supabase-rest"
+      "port" "admin"
+      "path" "/metrics"
+      "why" "PostgREST's admin server, which serves metrics from v14.12 and did not before") -}}
+{{- $targets = append $targets (dict
+      "name" "ingestion"
+      "component" "ingestion"
+      "service" "ingestion-metrics"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the daemon's own counter registry, rendered by ingestion/metrics.py") -}}
+{{- end -}}
+{{- if and .Values.mosquitto.enabled .Values.mosquitto.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "mosquitto"
+      "component" "mosquitto"
+      "service" "mosquitto"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the exporter sidecar; metrics are prefixed broker_") -}}
+{{- end -}}
+{{/*
+  THE TWO DATABASES. Each selects the database's own ClusterIP Service, which carries a `metrics`
+  port FOR THIS FILE ALONE -- Alloy finds the sidecar by the pod annotation and never reads the
+  Service, so under the chart's own observability stack these objects are not what makes the
+  scrape work. They exist for an external Prometheus Operator, which selects Services.
+*/}}
+{{- if .Values.databaseMetrics.enabled -}}
+{{- if .Values.supabaseDb.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "supabase-db"
+      "component" "supabase-db"
+      "service" "supabase-db"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the postgres_exporter sidecar, connecting over loopback as a role with no password") -}}
+{{- end -}}
+{{- if .Values.timescaledb.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "timescaledb"
+      "component" "timescaledb"
+      "service" "timescaledb"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the postgres_exporter sidecar; the historian's chunk and policy-job series ride here too") -}}
+{{- end -}}
+{{- end -}}
+{{- range $t := $targets }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ printf "%s-%s" $fullname $t.name }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" $ "component" $t.component) | nindent 4 }}
+    {{- /* Prometheus Operator only adopts ServiceMonitors matching its own serviceMonitorSelector,
+           which kube-prometheus-stack sets to `release: <its release>` by default. A ServiceMonitor
+           with no matching label is created successfully, is visible to kubectl, and is IGNORED --
+           no target appears and nothing reports why. That is the single most common way this fails,
+           which is why the value exists rather than being assumed. */}}
+    {{- with $.Values.telemetry.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ $.Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" $ "component" $t.component) | nindent 6 }}
+  endpoints:
+    # {{ $t.why }}
+    - port: {{ $t.port }}
+      {{- /* BY NAME, not by number: the Service and this file would otherwise carry the same port
+             in two places and drift. The operator resolves the name against the Service. */}}
+      path: {{ $t.path }}
+      interval: {{ $.Values.telemetry.serviceMonitor.interval }}
+      scrapeTimeout: {{ $.Values.telemetry.serviceMonitor.scrapeTimeout }}
+      scheme: http
+{{- end }}
+{{- if not $targets }}
+{{/*
+Nothing to scrape: serviceMonitor.enabled is on but every metrics source is off.
+
+Rendered as a comment rather than failing, because this is a reachable and legitimate intermediate
+state -- turning the master switch on before the per-component ones, or running with grafana
+disabled. Saying so in the output beats an empty file, which reads as a broken template.
+
+To get targets: supabaseEnvoy.metrics.enabled, mosquitto.metrics.enabled, or grafana.enabled.
+*/}}
+{{- end }}
+{{- end }}

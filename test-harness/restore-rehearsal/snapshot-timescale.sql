@@ -15,6 +15,6 @@ SELECT 'chunks='     || count(*) FROM timescaledb_information.chunks
 SELECT 'continuous_aggregates=' || count(*) FROM timescaledb_information.continuous_aggregates;
 SELECT 'telemetry_1m=' || count(*) FROM public.telemetry_1m;
 SELECT 'jobs_retention=' || count(*) FROM timescaledb_information.jobs
- WHERE proc_name = 'policy_retention';
+ WHERE proc_name = 'telemetry_raw_retention';
 SELECT 'jobs_refresh='   || count(*) FROM timescaledb_information.jobs
  WHERE proc_name = 'policy_refresh_continuous_aggregate';

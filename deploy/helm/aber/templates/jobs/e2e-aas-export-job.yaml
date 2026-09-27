@@ -1,0 +1,172 @@
+{{- if .Values.e2e.enabled }}
+{{- $component := "e2e-aas-export" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{/*
+=================================================================================================
+`supabase/functions/aas-export/test_aas_export.py`, run in-cluster.
+
+ITS SUBJECT IS PROVISIONED BY THE SUITE, not seeded and not produced by another Job. It creates a
+gateway, a device, a schema, a nameplate and its birth parameters at pinned ids through
+test-harness/aas_fixture.py, asserts against the document the exporter composes, and tears them
+down -- so the live checks need no broker, no simulator publishing a DBIRTH, no operator approval
+and no demo data.
+
+IT USED TO TARGET A DEMONSTRATION DEVICE, which made a CONFORMANCE Job depend on seed data. That
+coupling had already bitten once, when a previous subject quietly stopped receiving a DBIRTH while
+the suite went on naming it and reporting success. Seeding its own nameplate is what makes this
+suite independent of whatever the shipped Node-RED flow publishes.
+
+The initContainer below is kept for the narrower reason it gives itself: do not run a conformance
+suite against a stack whose conformance run did not pass. A SUITE THAT SKIPS ITS OWN SUBJECT AND
+REPORTS SUCCESS is the failure to avoid, and it is silent -- which is why CI asserts on the absence
+of the skip line rather than on this Job's exit status.
+
+WHAT IT COVERS THAT NOTHING ELSE DOES:
+  * conformance against the REAL vendored IDTA schema (test-harness/schemas), which caught three
+    metamodel violations the hand-written structural tests passed -- all the same shape: the
+    metamodel expresses "absent" by OMITTING a field, never by a placeholder;
+  * the AASX container's discovery chain, every link of which is load-bearing;
+  * that the packaged Environment is byte-identical to the JSON export;
+  * the sparkplugToXsd / model3dContentType duplication between the edge worker and the frontend,
+    which is why they may be duplicated at all.
+=================================================================================================
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-e2e-aas-export" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # No retries -- see the note in e2e-validate-job.yaml.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ .Values.e2e.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # Reading a Job's completion status needs RBAC; the ServiceAccount below grants exactly that
+      # and nothing else.
+      serviceAccountName: {{ printf "%s-e2e" $fullname }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-validate
+          # `bitnami/kubectl:1.31.1` UNTIL BITNAMI WITHDREW ITS TAGGED DOCKER HUB CATALOGUE. That
+          # repository publishes only `latest` and digests now, so every semver tag 404s and the pin
+          # stopped resolving without anything here changing. `bitnamilegacy` is where the archived
+          # builds went -- byte-for-byte the same image, same shell, same uid 1001, same kubectl.
+          #
+          # A STOPGAP, and the namespace name says so: frozen, and not rebuilt for CVEs. The right
+          # fix is to drop the dependency rather than re-pin it -- this initContainer only polls one
+          # Job's status, which `curlimages/curl` (already pinned here, has a shell) can do against
+          # the API server with the token this pod already carries.
+          #
+          # The alternatives: `rancher/kubectl` is distroless with no /bin/sh, which the wait loop
+          # needs; `alpine/k8s` has one but is 1.19 GB against 432 MB, pulled on every e2e run.
+          image: bitnamilegacy/kubectl:1.31.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # `kubectl wait --for=condition=complete` returns immediately if the Job has ALREADY
+              # FAILED, so failure is checked first and explicitly -- otherwise this would hang for
+              # the full timeout waiting for a condition that can never arrive, and the resulting
+              # timeout message would blame this Job rather than the one that actually failed.
+              JOB={{ printf "%s-e2e-validate" $fullname }}
+              deadline=$(( $(date +%s) + {{ .Values.e2e.waitTimeout }} ))
+              while :; do
+                if kubectl get job "$JOB" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null | grep -q True; then
+                  echo "$JOB FAILED -- not running the AAS suite against a stack whose conformance run did not pass." >&2
+                  echo "  kubectl logs job/$JOB" >&2
+                  exit 1
+                fi
+                if kubectl get job "$JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q 1; then
+                  echo "$JOB completed; the stack passed its conformance run."
+                  break
+                fi
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "timed out after {{ .Values.e2e.waitTimeout }}s waiting for $JOB" >&2
+                  exit 1
+                fi
+                echo "waiting for $JOB (its verdict gates this suite) ..."
+                sleep 5
+              done
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      containers:
+        - name: aas-export
+          image: {{ include "aber.image" (dict "image" .Values.e2e.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.e2e.image.pullPolicy }}
+          # The repo-shaped path is required: the suite resolves the IDTA schema and the four
+          # mapper files relative to parents[3] of its own location. See test-harness/Dockerfile.
+          command: ["python", "supabase/functions/aas-export/test_aas_export.py"]
+          env:
+            - name: SUPABASE_URL
+              value: {{ include "aber.supabase.internalUrl" . | quote }}
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            # It signs in as a real persona rather than using the service-role key, because the
+            # export's authorization ladder is part of what is under test: Administrator and
+            # Shopfloor_Manager may export, and so may the read-scoped Operator and Auditor -- unlike
+            # approve-quarantine, because an export is a read.
+            - name: AAS_TEST_EMAIL
+              value: admin@aber.local
+            - name: AAS_TEST_PASSWORD
+              value: aber123
+            - name: STORAGE_MODEL_BUCKET
+              value: {{ .Values.supabaseStorage.bucket | quote }}
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            {{- toYaml .Values.e2e.resources | nindent 12 }}
+---
+{{/*
+RBAC for the wait-for-validate initContainer: read Job status in this namespace, nothing else.
+
+Namespace-scoped Role rather than a ClusterRole, and `get`/`list`/`watch` on `jobs` only -- the
+initContainer needs to read one Job's `.status`, so anything more would be authority granted for
+convenience.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ printf "%s-e2e" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-e2e" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-e2e" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-e2e" $fullname }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ printf "%s-e2e" $fullname }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

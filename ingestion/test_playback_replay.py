@@ -45,8 +45,8 @@ REPO = Path(__file__).resolve().parent.parent
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@acs-cymru.local")
-ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "acscymru123")
+ADMIN_EMAIL = os.getenv("ABER_ADMIN_EMAIL", "admin@aber.local")
+ADMIN_PASSWORD = os.getenv("ABER_ADMIN_PASSWORD", "aber123")
 
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 
@@ -169,7 +169,7 @@ def sign_in():
     if status != 200 or not data.get("access_token"):
         raise AssertionError(
             f"could not sign in as {ADMIN_EMAIL} ({status}). The stack lane expects the seeded "
-            f"Administrator; override with ACS_ADMIN_EMAIL / ACS_ADMIN_PASSWORD."
+            f"Administrator; override with ABER_ADMIN_EMAIL / ABER_ADMIN_PASSWORD."
         )
     return data["access_token"]
 
@@ -265,17 +265,17 @@ def build_capture(recorded_gateway, recorded_device, metric, epoch_ms):
 
     messages = [
         {"offset_ms": 0, "encoding": "json",
-         "topic": f"spBv1.0/ACS-Cymru/DBIRTH/{recorded_gateway}/{recorded_device}",
+         "topic": f"spBv1.0/Aber/DBIRTH/{recorded_gateway}/{recorded_device}",
          "payload": payload(0, 1.0, True)},
         {"offset_ms": 200, "encoding": "json",
-         "topic": f"spBv1.0/ACS-Cymru/DDATA/{recorded_gateway}/{recorded_device}",
+         "topic": f"spBv1.0/Aber/DDATA/{recorded_gateway}/{recorded_device}",
          "payload": payload(200, 2.0, False)},
         {"offset_ms": 400, "encoding": "json",
-         "topic": f"spBv1.0/ACS-Cymru/DDATA/{recorded_gateway}/{recorded_device}",
+         "topic": f"spBv1.0/Aber/DDATA/{recorded_gateway}/{recorded_device}",
          "payload": payload(400, 3.0, False)},
     ]
     return {
-        "acs_capture_version": capture_version(),
+        "aber_capture_version": capture_version(),
         "recorded_at": "2026-09-14T00:00:00+00:00",
         "recorded_from": {"broker": "fixture", "topic": "spBv1.0/#"},
         "capture_epoch_ms": epoch_ms,

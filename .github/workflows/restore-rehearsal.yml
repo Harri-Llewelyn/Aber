@@ -21,29 +21,42 @@
 # the answer before a migration somebody is nervous about.
 #
 # =================================================================================================
+# THE BACKUP IS THE SERVICE'S. The rehearsal asks for it the way the Backups page does, as the
+# seeded Administrator through PostgREST, waits for the `backups` row, copies the directory it
+# names off the backup volume, and restores from that: both dumps in the chart's default format,
+# the storage objects, the forge's volume and the broker's document. A second backup after the
+# restore proves the restored stack can back itself up.
+#
+# =================================================================================================
 # WHAT THIS INSTALLS, AND WHAT IT THEREFORE DOES NOT REHEARSE
 #
-# Most of the stack is switched off: frontend, Node-RED, i3X, ingestion, edge functions, Grafana,
-# Studio, Swagger, the broker and the gateway-credential sidecar. None of them holds state that a
-# dump carries, and building their images would roughly triple the runtime for no assertion.
+# Most of the stack is switched off: frontend, Node-RED, i3X, ingestion, playback, the cold
+# archive, edge functions, Grafana, Studio, Swagger, Prometheus, Loki, Alloy and the
+# gateway-credential sidecar. None of them holds state a tier 1 backup carries, and building their
+# images would roughly triple the runtime for no assertion.
 #
-# WHAT IS DELIBERATELY KEPT, because the restore depends on it:
+# WHAT IS DELIBERATELY KEPT, because the backup carries it or the restore depends on it:
 #
 #   supabase-db, timescaledb   the two databases, which are the subject
+#   backup-service             takes the backup; one of the three images built here
+#   gitea                      the forge's volume: every gateway repository and the SSH host keys
+#   mosquitto                  the broker's volume: the Dynamic Security document, every issued
+#                              gateway account; its initContainer runs the gateway-credential
+#                              image, the third build
 #   supabase-realtime          creates `supabase_realtime_admin` ON FIRST START -- no migration
 #                              does, and restore-databases.sh refuses without it. Switching this
 #                              off would make the rehearsal fail in a way that says nothing about
 #                              backups.
 #   supabase-auth              so the rehearsal can prove a password set before the backup still
 #                              works after it, which is GoTrue's schema AND the JWT secret
-#   supabase-storage           the 3D model objects live on its volume, and they are the artefact
-#                              the nightly dump is documented as missing
-#   supabase-rest, envoy       the gateway the storage and auth paths sit behind
-#   db-init                    the migration chain, which is the only image built here
+#   supabase-storage           the 3D model objects live on its volume
+#   supabase-rest, envoy       the gateway the storage, auth and backup-request paths sit behind
+#   db-init                    the migration chain
 #
 # So this rehearses the DATA layer completely and the application layer not at all. That is the
 # right split -- a frontend cannot fail to be restored -- but it is stated rather than implied,
-# because "the rehearsal passed" should not be read as "the whole stack came back".
+# because "the rehearsal passed" should not be read as "the whole stack came back". The internal
+# CA (backup.ca) is not rehearsed either: the rehearsal installs no cert-manager.
 # =================================================================================================
 name: Backup and Restore Rehearsal
 
@@ -74,14 +87,14 @@ jobs:
     # wait burning an hour, not the expectation.
     timeout-minutes: 45
     env:
-      RELEASE: acs-cymru
-      NS: acs-cymru
+      RELEASE: aber
+      NS: aber
       BACKUP_DIR: ${{ github.workspace }}/rehearsal-backups
       # values-dev.yaml's credentials, which is what this installs with. Named here so the script's
       # psql calls and the chart cannot disagree about them.
       POSTGRES_PASSWORD: postgres
       DB_PASSWORD: postgres
-      SUPABASE_PUBLISHABLE_KEY: sb_publishable_acscymru_dev_0000000000000000
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_aber_dev_00000000000000000000
 
     steps:
       - name: Checkout Code
@@ -112,7 +125,7 @@ jobs:
 
       - name: Create k3d Cluster
         run: |
-          k3d cluster create acs-cymru \
+          k3d cluster create aber \
             --agents 0 \
             --k3s-arg "--disable=metrics-server@server:0" \
             --k3s-arg "--disable=traefik@server:0" \
@@ -126,24 +139,29 @@ jobs:
         id: appversion
         run: |
           set -eu
-          V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml \
+          V=$(grep -E '^appVersion:' deploy/helm/aber/Chart.yaml \
               | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
           test -n "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      # ONE IMAGE, not eight. Everything else this install runs is a pinned upstream image, which
+      # THREE IMAGES, not ten. Everything else this install runs is a pinned upstream image, which
       # is what keeps the rehearsal inside its time budget -- see the header for what is switched
-      # off and why that is the right split.
-      - name: Build And Import db-init
+      # off and why that is the right split. Presence is verified in the node, since `k3d image
+      # import` can report success it did not achieve (docs/incidents.md).
+      - name: Build And Import db-init, backup-service And gateway-credential
         env:
-          IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
+          IMG_NS: ghcr.io/harri-llewelyn/aber
           V: ${{ steps.appversion.outputs.version }}
         run: |
           set -eu
           docker build -f supabase/db-init/Dockerfile -t "$IMG_NS/db-init:$V" supabase
-          k3d image import -c acs-cymru "$IMG_NS/db-init:$V"
-          docker exec k3d-acs-cymru-server-0 ctr -n k8s.io images ls -q \
-            | grep -q "db-init:$V" || { echo "::error::db-init was not imported into the node"; exit 1; }
+          docker build -f backup-service/Dockerfile -t "$IMG_NS/backup-service:$V" backup-service
+          docker build -f gateway-credential/Dockerfile -t "$IMG_NS/gateway-credential:$V" gateway-credential
+          k3d image import -c aber "$IMG_NS/db-init:$V" "$IMG_NS/backup-service:$V" "$IMG_NS/gateway-credential:$V"
+          for img in db-init backup-service gateway-credential; do
+            docker exec k3d-aber-server-0 ctr -n k8s.io images ls -q \
+              | grep -q "$img:$V" || { echo "::error::$img was not imported into the node"; exit 1; }
+          done
 
       - name: Mirror Repository Config Into The Chart
         run: node scripts/sync-helm-chart-files.mjs --check
@@ -158,9 +176,9 @@ jobs:
         run: |
           set -eu
           kubectl create namespace "$NS"
-          helm install "$RELEASE" deploy/helm/acs-cymru \
+          helm install "$RELEASE" deploy/helm/aber \
             --namespace "$NS" \
-            --values deploy/helm/acs-cymru/values-dev.yaml \
+            --values deploy/helm/aber/values-dev.yaml \
             --values .github/rehearsal-values.yaml \
             --timeout 15m
 
@@ -176,23 +194,35 @@ jobs:
       - name: Snapshot The Counts Before
         run: bash scripts/rehearse-restore.sh snapshot "$RUNNER_TEMP/before.txt"
 
+      # Through the service: request_backup() as the seeded Administrator, the `backups` row, the
+      # directory copied off the backup volume, every digest checked against the manifest.
       - name: Take The Backup
         run: bash scripts/rehearse-restore.sh backup "$BACKUP_DIR"
 
       # A backup that produced nothing must fail HERE, while the cluster that could have been
-      # re-dumped is still standing -- not two steps later as a restore with no input.
+      # re-dumped is still standing -- not two steps later as a restore with no input. The digests
+      # are the script's; this is that every component is present and none is a short file.
       - name: Assert The Backup Is Real
         id: backup
         run: |
           set -eu
-          STAMP=$(ls -1 "$BACKUP_DIR" | sed -n 's/^manifest-\(.*\)\.txt$/\1/p' | tail -1)
-          [ -n "$STAMP" ] || { echo "::error::no manifest in $BACKUP_DIR -- the backup produced nothing"; exit 1; }
+          STAMP=$(ls -1 "$BACKUP_DIR" | grep -E '^[0-9]{8}T[0-9]{6}Z$' | tail -1)
+          [ -n "$STAMP" ] || { echo "::error::no backup directory in $BACKUP_DIR -- the service produced nothing"; exit 1; }
           echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
-          for f in "supabase-db-$STAMP.sql.gz" "timescaledb-$STAMP.sql.gz" "storage-objects-$STAMP.tar.gz"; do
-            [ -f "$BACKUP_DIR/$f" ] || { echo "::error::$f is missing from the backup"; exit 1; }
-            SZ=$(wc -c < "$BACKUP_DIR/$f")
-            [ "$SZ" -ge 2048 ] || { echo "::error::$f is only $SZ bytes"; exit 1; }
-            echo "  ok $f ($SZ bytes)"
+          DIR="$BACKUP_DIR/$STAMP"
+          grep -q '^format=custom$' "$DIR/manifest-$STAMP.txt" \
+            || { echo "::error::the backup is not in the chart's default format (custom)"; exit 1; }
+          for name in supabase-db timescaledb vault-key storage-objects forge broker; do
+            FILE=$(jq -r --arg n "$name" '.components[] | select(.name == $n) | .file' "$DIR/manifest.json")
+            [ -n "$FILE" ] || { echo "::error::the backup has no $name component"; exit 1; }
+            SZ=$(wc -c < "$DIR/$FILE")
+            case "$name" in
+              supabase-db|timescaledb) MIN=2048 ;;
+              vault-key) MIN=64 ;;
+              *) MIN=100 ;;
+            esac
+            [ "$SZ" -ge "$MIN" ] || { echo "::error::$FILE is only $SZ bytes"; exit 1; }
+            echo "  ok $name: $FILE ($SZ bytes)"
           done
 
       # --------------------------------------------------------------------------------------
@@ -238,9 +268,9 @@ jobs:
         run: |
           set -eu
           kubectl create namespace "$NS"
-          helm install "$RELEASE" deploy/helm/acs-cymru \
+          helm install "$RELEASE" deploy/helm/aber \
             --namespace "$NS" \
-            --values deploy/helm/acs-cymru/values-dev.yaml \
+            --values deploy/helm/aber/values-dev.yaml \
             --values .github/rehearsal-values.yaml \
             --timeout 15m
 
@@ -294,7 +324,7 @@ jobs:
           kubectl -n "$NS" get pods -o wide || true
           kubectl -n "$NS" get pvc || true
           kubectl -n "$NS" describe pods | tail -120 || true
-          for c in supabase-db timescaledb supabase-storage supabase-auth supabase-realtime; do
+          for c in supabase-db timescaledb supabase-storage supabase-auth supabase-realtime backup-service gitea mosquitto; do
             echo "--- logs: $c"
             kubectl -n "$NS" logs "deploy/$c" --tail 60 2>/dev/null \
               || kubectl -n "$NS" logs "statefulset/$c" --tail 60 2>/dev/null || true
@@ -314,7 +344,7 @@ jobs:
 
       - name: Delete The Cluster
         if: always()
-        run: k3d cluster delete acs-cymru || true
+        run: k3d cluster delete aber || true
 
       # A WEEKLY JOB NOBODY WATCHES IS THE SAME AS NO JOB. The badge on a scheduled workflow is not
       # on anybody's route, so a failure files itself. Updated rather than duplicated: a restore
@@ -340,12 +370,15 @@ jobs:
               '',
               '| Step | What it means |',
               '| :--- | :--- |',
-              '| Assert The Backup Is Real | the backup produced nothing usable — look at `backup-databases.sh` |',
-              '| Destroy The Namespace | volumes outlived the namespace, so nothing downstream was meaningful |',
+              '| Seed Known Data | the forge or the broker refused the seed — the request_backup() path was never reached |',
+              '| Take The Backup | the service failed or never claimed the job, or a digest did not match — the service logs are under Cluster State On Failure |',
+              '| Assert The Backup Is Real | a component is missing or short — look at `backup-service.mjs` and the chart values the rehearsal installs with |',
+              '| Destroy The Namespace And Its Volumes | volumes outlived the namespace, so nothing downstream was meaningful |',
               '| Assert The Fresh Stack Is Empty | the same, caught one step later |',
-              '| Compare The Counts | rows did not come back — the diff names which table |',
-              '| Assert What A Count Cannot Catch | rows came back without a trigger, a policy, a grant, the partitioning or the pgsodium key |',
-              '| Helm Test — postgres_fdw | the two databases were restored to inconsistent points |',
+              '| Restore The Backup | `restore-databases.sh` refused or failed, or a volume did not take its archive — the log names which |',
+              '| Compare The Counts | rows, repositories or accounts did not come back, or the forge\'s host key changed — the diff names which |',
+              '| Assert What A Count Cannot Catch | data came back without a trigger, a policy, a grant, the partitioning, the pgsodium key, the branch protection or the broker account; or the restored stack could not take a backup |',
+              '| Helm Test — postgres_fdw Cross-Database Check | the two databases were restored to inconsistent points |',
             ].join('\n');
 
             const existing = await github.rest.issues.listForRepo({

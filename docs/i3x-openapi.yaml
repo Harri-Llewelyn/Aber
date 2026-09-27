@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: ACS-Cymru i3X 1.0 Server
+  title: Aber i3X 1.0 Server
   version: "0.1.0"
   description: |
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
@@ -86,7 +86,7 @@ info:
     worse than one that admits it is new.
 
     Expect roughly one restart per platform release, plus cluster-operational events. See
-    [`i3x/README.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/i3x/README.md#availability).
+    [`i3x/README.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/i3x/README.md#availability).
 
     > ⚠️ **"Try it out" will not work from this page.** The i3X server sends no CORS headers
     > and answers `OPTIONS` with `501`, so a browser cannot call it cross-origin from Swagger
@@ -95,8 +95,8 @@ info:
     > server. This document is a reference, not a live console.
 
   contact:
-    name: ACS-Cymru Asset Tracking Platform
-    url: https://github.com/Harri-Llewelyn/ACS-Cymru
+    name: Aber
+    url: https://github.com/Harri-Llewelyn/Aber
 
 servers:
   - url: http://localhost:8090/v1
@@ -827,7 +827,7 @@ components:
       properties:
         specVersion: { type: string, example: '1.0' }
         serverVersion: { type: string, example: 0.1.0 }
-        serverName: { type: string, example: acs-cymru-i3x }
+        serverName: { type: string, example: aber-i3x }
         capabilities:
           type: object
           properties:

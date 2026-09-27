@@ -158,7 +158,7 @@ export const PLATFORM_READERS_TEAM = "readers";
 /** The file in a gateway's repository naming the tag its appliance converges to. */
 export const PLATFORM_POINTER_PATH = "platform.yml";
 /** The digest of what the published repository holds, so a sweep compares in one read. */
-const PLATFORM_MANIFEST_PATH = ".acs/manifest.json";
+const PLATFORM_MANIFEST_PATH = ".aber/manifest.json";
 /**
  * The roots an appliance should trust, on `main` of the platform repository and nowhere else.
  *
@@ -174,12 +174,12 @@ export const TRUST_BUNDLE_PATH = `${TRUST_PREFIX}ca-bundle.pem`;
 export const TRUST_MANIFEST_PATH = `${TRUST_PREFIX}manifest.json`;
 
 /**
- * The platform's version, from ACS_PLATFORM_VERSION (the chart's appVersion), or null when unset
+ * The platform's version, from ABER_PLATFORM_VERSION (the chart's appVersion), or null when unset
  * or not a version. The tag is `v<version>`, the same form the release workflow tags this
  * repository with.
  */
 export function platformVersion(): string | null {
-  const raw = (Deno.env.get("ACS_PLATFORM_VERSION") ?? "").trim().replace(/^v/, "");
+  const raw = (Deno.env.get("ABER_PLATFORM_VERSION") ?? "").trim().replace(/^v/, "");
   return /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(raw) ? raw : null;
 }
 
@@ -241,7 +241,7 @@ export async function ensureOrganisation(
     const created = await forgeApi(cfg, "POST", "/orgs", {
       username: FORGE_ORGANISATION,
       full_name: "Gateways",
-      description: "One repository per gateway. Managed by ACS-Cymru.",
+      description: "One repository per gateway. Managed by Aber.",
       visibility: "private",
       repo_admin_change_team_access: false,
     });
@@ -270,7 +270,7 @@ export async function ensureOrganisation(
     }
     const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/teams`, {
       name,
-      description: `${role.replace("_", " ")}s of the ACS-Cymru dashboard, placed here by forge-membership.`,
+      description: `${role.replace("_", " ")}s of the Aber dashboard, placed here by forge-membership.`,
       permission: "write",
       includes_all_repositories: true,
       can_create_org_repo: true,
@@ -321,7 +321,7 @@ async function ensureRepository(
 
   const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/repos`, {
     name,
-    description: `Node-RED flow for gateway '${gatewayName}'. Managed by ACS-Cymru.`,
+    description: `Node-RED flow for gateway '${gatewayName}'. Managed by Aber.`,
     // Belt and braces: the forge sets FORCE_PRIVATE, but the intent is stated in the request too.
     private: true,
     auto_init: true,
@@ -396,7 +396,7 @@ async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> 
 }
 
 /**
- * Remove `.acs/manifest.json` from a gateway's repository, in the same window as the template
+ * Remove `.aber/manifest.json` from a gateway's repository, in the same window as the template
  * above. A repository generated from `platform/gateway-custom-example` carries a copy of it
  * (measured against gitea/gitea:1.27.3: `POST /generate` copies the whole tree), and that file
  * states the digest and publication date of the *example*, about a repository that is now one
@@ -687,7 +687,7 @@ export async function ensurePlatformOrganisation(cfg: ForgeConfig): Promise<numb
     const created = await forgeApi(cfg, "POST", "/orgs", {
       username: PLATFORM_ORGANISATION,
       full_name: "Platform",
-      description: "The playbook every appliance converges to. Published by ACS-Cymru; changed in its repository, never here.",
+      description: "The playbook every appliance converges to. Published by Aber; changed in its repository, never here.",
       visibility: "private",
       repo_admin_change_team_access: false,
     });
@@ -785,7 +785,7 @@ export async function ensurePlatformRepository(cfg: ForgeConfig): Promise<ForgeR
   return await ensurePublishedRepository(
     cfg,
     PLATFORM_REPOSITORY,
-    "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by ACS-Cymru.",
+    "The playbook every gateway appliance converges to, at the tag its own platform.yml names. Published by Aber.",
   );
 }
 
@@ -1261,7 +1261,7 @@ export async function provisionGatewayRepository(
       await ensureDeployKey(cfg, { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY }, sparkplugId, publicKey, true);
       platform = { ssh_url: platformRepo.ssh_url, tag: platformTag(version) };
     } else {
-      console.warn(`forge: ACS_PLATFORM_VERSION is unset, so ${sparkplugId} gets no platform repository to converge to`);
+      console.warn(`forge: ABER_PLATFORM_VERSION is unset, so ${sparkplugId} gets no platform repository to converge to`);
     }
     // After the key, and not on the path to `return null`: a wiki the forge could not seed costs a
     // log line, never the repository the appliance is about to clone.

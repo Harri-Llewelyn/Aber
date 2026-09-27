@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * First-boot provisioning for an ACS-Cymru Remote gateway appliance. Once: redeems the single-use
+ * First-boot provisioning for an Aber Remote gateway appliance. Once: redeems the single-use
  * enrolment token in .env against enroll-gateway, writes the broker CA, writes /data/flows.json
  * from flows.template.json with this gateway's identity substituted, writes /data/flows_cred.json
  * encrypted through Node-RED's own credential runtime, writes /data/settings.js with a generated
@@ -39,10 +39,10 @@ const GATEWAY_ENV = join(DATA_DIR, 'gateway.env');
 const CA_PATH = join(DATA_DIR, 'certs', 'ca.crt');
 /**
  * What this appliance knows about the root beside it, read by the flow and reported on the
- * heartbeat. Written here for the enrolment root and replaced by acs-gateway-converge whenever the
+ * heartbeat. Written here for the enrolment root and replaced by aber-gateway-converge whenever the
  * platform publishes a different bundle, which is why it is a file and not an environment
  * variable: a reload does not re-source gateway.env, so a value put there would be the enrolment
- * root's date for the life of the container. Must agree with acs-gateway-converge.
+ * root's date for the life of the container. Must agree with aber-gateway-converge.
  */
 const CA_JSON = join(DATA_DIR, 'certs', 'ca.json');
 // The GitOps identity: this appliance's own SSH keypair, and where the platform told it to pull
@@ -70,12 +70,12 @@ const die = (message, hint) => {
 };
 
 // Configuration, from .env via compose's env_file
-const SUPABASE_URL = (process.env.ACS_SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_URL = (process.env.ABER_SUPABASE_URL || '').replace(/\/+$/, '');
 // The publishable key, sent as `apikey` and as the bearer: the gateway translates it.
-const GATEWAY_KEY = process.env.ACS_SUPABASE_PUBLISHABLE_KEY || '';
-const TOKEN = (process.env.ACS_ENROLLMENT_TOKEN || '').trim();
-const GATEWAY_NAME = process.env.ACS_GATEWAY_NAME || 'gateway';
-const AGENT_VERSION = process.env.ACS_AGENT_VERSION || 'unknown';
+const GATEWAY_KEY = process.env.ABER_SUPABASE_PUBLISHABLE_KEY || '';
+const TOKEN = (process.env.ABER_ENROLLMENT_TOKEN || '').trim();
+const GATEWAY_NAME = process.env.ABER_GATEWAY_NAME || 'gateway';
+const AGENT_VERSION = process.env.ABER_AGENT_VERSION || 'unknown';
 const CREDENTIAL_SECRET = process.env.NODERED_CREDENTIAL_SECRET || '';
 
 /**
@@ -135,7 +135,7 @@ function writeSyncCredential(username, password) {
 }
 
 /** The username flow-sync.mjs authenticates as. Not `admin`, so the two are told apart in the log. */
-const SYNC_USER = 'acs-flow-sync';
+const SYNC_USER = 'aber-flow-sync';
 
 function settingsJs(adminHash, credentialSecret, syncHash) {
   return `/**
@@ -175,9 +175,12 @@ module.exports = {
     // HTTP endpoints, and adding one should be a deliberate act with its own auth decision.
     functionGlobalContext: {},
     logging: { console: { level: 'info', metrics: false, audit: false } },
+    // OFF. Update notifications send a daily ping to telemetry.nodered.org, and while the choice
+    // is unset the editor opens on a dialog asking for it. The admin can opt in from User Settings.
+    telemetry: { enabled: false, updateNotification: false },
     editorTheme: {
-        page: { title: 'ACS-Cymru Gateway' },
-        header: { title: ${JSON.stringify(`ACS-Cymru — ${GATEWAY_NAME}`)} }
+        page: { title: 'Aber Gateway' },
+        header: { title: ${JSON.stringify(`Aber — ${GATEWAY_NAME}`)} }
     }
 };
 `;
@@ -325,9 +328,9 @@ if (existsSync(MARKER) && !force) {
 }
 
 const missing = [
-  !SUPABASE_URL && 'ACS_SUPABASE_URL',
-  !GATEWAY_KEY && 'ACS_SUPABASE_PUBLISHABLE_KEY',
-  !TOKEN && 'ACS_ENROLLMENT_TOKEN',
+  !SUPABASE_URL && 'ABER_SUPABASE_URL',
+  !GATEWAY_KEY && 'ABER_SUPABASE_PUBLISHABLE_KEY',
+  !TOKEN && 'ABER_ENROLLMENT_TOKEN',
   !CREDENTIAL_SECRET && 'NODERED_CREDENTIAL_SECRET',
 ].filter(Boolean);
 
@@ -341,7 +344,7 @@ if (missing.length) {
 
 if (!/^[0-9a-f]{64}$/.test(TOKEN)) {
   die(
-    'ACS_ENROLLMENT_TOKEN is not a valid token.',
+    'ABER_ENROLLMENT_TOKEN is not a valid token.',
     'It should be 64 hexadecimal characters, exactly as generated. A truncated value here is\n'
     + 'usually a copy-paste that lost the end of the line.'
   );
@@ -362,7 +365,7 @@ function generateDeployKey() {
       execFileSync('ssh-keygen', [
         '-t', 'ed25519',
         '-N', '',
-        '-C', `acs-cymru gateway ${GATEWAY_NAME}`,
+        '-C', `aber gateway ${GATEWAY_NAME}`,
         '-f', DEPLOY_KEY,
       ], { stdio: 'pipe' });
       log(`generated a deploy key at ${DEPLOY_KEY}`);
@@ -393,7 +396,7 @@ log(`wrote the broker CA to ${CA_PATH} (${createHash('sha256').update(enrolment.
 
 // 2. The flow. Placeholder substitution, not environment variables inside the flow, so the file on
 // disk is the file that runs and an unresolved value fails here rather than at connect time.
-const BROKER_NODE_ID = 'acs-broker';
+const BROKER_NODE_ID = 'aber-broker';
 const template = readFileSync(join(BUNDLE_DIR, 'flows.template.json'), 'utf8');
 const flow = template
   .replaceAll('__MQTT_HOST__', enrolment.mqtt_host)
@@ -409,7 +412,7 @@ const flow = template
   // Read every minute by the flow's `read deployed.json` branch; see the record written below.
   .replaceAll('__DEPLOYED_FILE__', DEPLOYED)
   // Read every minute by the flow's `read ca.json` branch. Written below for the enrolment root
-  // and rewritten by acs-gateway-converge when the platform publishes a different one.
+  // and rewritten by aber-gateway-converge when the platform publishes a different one.
   .replaceAll('__CA_JSON_FILE__', CA_JSON);
 
 if (flow.includes('__')) {
@@ -452,19 +455,19 @@ log(`wrote ${DEPLOYED} for the enrolment flow`);
 // is what an environment variable can express; the root beside it is not, and goes to a file.
 
 /**
- * `ACS_AGENT_VERSION` comes from the operator's .env and is about to enter a shell file:
+ * `ABER_AGENT_VERSION` comes from the operator's .env and is about to enter a shell file:
  * gateway.env is written as `export NAME='value'` and sourced, so a single quote would close the
  * string. Restricted to a safe character set rather than escaped, and capped at 64 to match the
  * daemon's column.
  */
 const SAFE_AGENT_VERSION = AGENT_VERSION.replace(/[^A-Za-z0-9._+-]/g, '').slice(0, 64) || 'unknown';
 if (SAFE_AGENT_VERSION !== AGENT_VERSION) {
-  log(`ACS_AGENT_VERSION contained characters that cannot go in gateway.env; reporting `
+  log(`ABER_AGENT_VERSION contained characters that cannot go in gateway.env; reporting `
     + `'${SAFE_AGENT_VERSION}'`);
 }
 
 /**
- * What this appliance knows about the root it was given, in the shape acs-gateway-converge
+ * What this appliance knows about the root it was given, in the shape aber-gateway-converge
  * rewrites when the platform publishes a new bundle. The heartbeat reports `not_after_ms` as
  * `Cert_Expires_At`, so an operator sees who is still holding a root that is about to expire and,
  * after a re-issue, who has not yet been given the new one.
@@ -553,7 +556,7 @@ if (enrolment.repository && enrolment.repository.ssh_url) {
         deploy_key: DEPLOY_KEY,
         known_hosts: knownHosts ? KNOWN_HOSTS : null,
         // The platform repository the same key reads, and the tag current at enrolment. Read by
-        // acs-gateway-converge on the host, which the platform playbook installs; the tag is the
+        // aber-gateway-converge on the host, which the platform playbook installs; the tag is the
         // fallback until the puller has fetched this gateway's own platform.yml.
         platform_ssh_url: enrolment.repository.platform_ssh_url || null,
         platform_tag: enrolment.repository.platform_tag || null,

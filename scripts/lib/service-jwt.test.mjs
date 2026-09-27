@@ -29,13 +29,11 @@ test('the ceiling mirrors service_token_max_days() in the migration that owns it
   // languages are exactly the pair that drifts -- and drifting UPWARD here re-creates #101, while
   // drifting downward makes every key this repo mints unrecordable.
   //
-  // FOUND BY WHAT IT DECLARES, NOT BY WHAT IT IS CALLED. This used to look for a file whose NAME
-  // contained `record_service_token_issued`, which was 0043 -- and the squash folded 0043 into
-  // `0001_baseline_schema.sql`, so the search matched nothing and the test failed on a premise
-  // rather than on its subject. Naming the baseline instead would only move the problem to the
-  // next squash. Reading every migration and taking the one that declares the function is stable
-  // across any renumbering, and asserts something worth asserting on its own: that the chain
-  // declares this function exactly once.
+  // FOUND BY WHAT IT DECLARES, NOT BY WHAT IT IS CALLED. Searching for a file NAMED after the
+  // function breaks on the next squash, and naming the baseline instead only moves the problem to
+  // the one after it. Reading every migration and taking the one that declares the function is
+  // stable across any renumbering, and asserts something worth asserting on its own: that the
+  // chain declares this function exactly once.
   const dir = join(REPO, 'supabase', 'migrations');
   const DECLARATION =
     /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+public\.service_token_max_days\(\)[\s\S]*?AS\s*\$\$\s*SELECT\s+(\d+)\s*\$\$/i;

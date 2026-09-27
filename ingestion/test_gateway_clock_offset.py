@@ -68,7 +68,7 @@ import ingestion  # noqa: E402  (must follow the stubs above)
 import metrics  # noqa: E402
 import registry  # noqa: E402
 
-GROUP = "ACS-Cymru"
+GROUP = "Aber"
 NODE = "gwy110000000000400080000"
 
 # The receipt time every measurement below is taken against. Fixed rather than `now`, so an
@@ -263,15 +263,15 @@ class ClockGaugeExpositionTests(unittest.TestCase):
             (ingestion.GATEWAY_CLOCK_MEASURED_GAUGE, (("edge_node", NODE),)): 1757332800.0,
         })
         self.assertIn(
-            'acs_ingestion_gateway_clock_offset_seconds{edge_node="%s"} -12.5' % NODE, body)
+            'aber_ingestion_gateway_clock_offset_seconds{edge_node="%s"} -12.5' % NODE, body)
         self.assertIn(
-            'acs_ingestion_gateway_clock_measured_timestamp_seconds{edge_node="%s"}' % NODE, body)
+            'aber_ingestion_gateway_clock_measured_timestamp_seconds{edge_node="%s"}' % NODE, body)
 
     def test_they_are_typed_as_gauges(self):
         # A counter by default. Typed wrongly, `rate()` on a clock being corrected would produce
         # a number, and it would be meaningless rather than absent.
         body = self.render({(ingestion.GATEWAY_CLOCK_OFFSET_GAUGE, (("edge_node", NODE),)): 1.0})
-        self.assertIn("# TYPE acs_ingestion_gateway_clock_offset_seconds gauge", body)
+        self.assertIn("# TYPE aber_ingestion_gateway_clock_offset_seconds gauge", body)
 
     def test_both_gauges_are_documented(self):
         for metric in (ingestion.GATEWAY_CLOCK_OFFSET_GAUGE, ingestion.GATEWAY_CLOCK_MEASURED_GAUGE):
@@ -300,18 +300,18 @@ class TimestampRejectionLabelTests(unittest.TestCase):
         # the same increment. Exporting both would give a scraper two ways to count one rejection.
         registry.count("metrics_rejected_timestamp", 7)
         registry.count_labelled(
-            "acs_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
+            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
         samples = self.samples(registry.render())
-        self.assertNotIn("acs_ingestion_timestamps_rejected_total 7.0", samples)
+        self.assertNotIn("aber_ingestion_timestamps_rejected_total 7.0", samples)
         self.assertIn(
-            'acs_ingestion_timestamps_rejected_total{edge_node="%s"} 7.0' % NODE, samples)
+            'aber_ingestion_timestamps_rejected_total{edge_node="%s"} 7.0' % NODE, samples)
 
     def test_it_is_not_reported_as_an_unmapped_counter(self):
         # The catch-all means "metrics.py has fallen behind ingestion.py". Letting this fall into
         # it would say the exact opposite of what its absence from COUNTER_MAP is there to say.
         registry.count("metrics_rejected_timestamp", 7)
         for line in self.samples(registry.render()):
-            self.assertFalse(line.startswith("acs_ingestion_unmapped_counter_total"), line)
+            self.assertFalse(line.startswith("aber_ingestion_unmapped_counter_total"), line)
 
     def test_it_still_reads_back_under_its_flat_name(self):
         # The other half of the omission: the STATS log line reports by flat name, so a counter
@@ -319,7 +319,7 @@ class TimestampRejectionLabelTests(unittest.TestCase):
         # it. Dropping that is how the omission would quietly become a loss.
         registry.count("metrics_rejected_timestamp", 7)
         registry.count_labelled(
-            "acs_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
+            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
         self.assertEqual(7, registry.counter_snapshot()["metrics_rejected_timestamp"])
 
     def test_the_reason_for_the_omission_is_recorded_beside_the_name(self):
@@ -327,9 +327,9 @@ class TimestampRejectionLabelTests(unittest.TestCase):
 
     def test_the_labelled_series_names_the_edge_node(self):
         registry.count_labelled(
-            "acs_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 3)
+            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 3)
         self.assertIn(
-            'acs_ingestion_timestamps_rejected_total{edge_node="%s"} 3.0' % NODE,
+            'aber_ingestion_timestamps_rejected_total{edge_node="%s"} 3.0' % NODE,
             self.samples(registry.render()))
 
     def test_the_message_total_omission_still_holds(self):
@@ -338,8 +338,8 @@ class TimestampRejectionLabelTests(unittest.TestCase):
         registry.count("messages_total", 42)
         registry.count("messages_DDATA", 42)
         samples = self.samples(registry.render())
-        self.assertNotIn("acs_ingestion_messages_total 42.0", samples)
-        self.assertIn('acs_ingestion_messages_total{msg_type="DDATA"} 42.0', samples)
+        self.assertNotIn("aber_ingestion_messages_total 42.0", samples)
+        self.assertIn('aber_ingestion_messages_total{msg_type="DDATA"} 42.0', samples)
         self.assertEqual(42, registry.counter_snapshot()["messages_total"])
 
 

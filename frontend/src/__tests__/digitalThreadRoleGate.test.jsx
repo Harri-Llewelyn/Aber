@@ -106,15 +106,15 @@ describe('naming the person a role assignment is about', () => {
   }
 
   it('labels the lane with the person, not with the role they were granted', async () => {
-    renderWith([{ user_id: USER, email: 'manager@acs-cymru.local' }])
-    expect(await screen.findByText('manager@acs-cymru.local')).toBeInTheDocument()
+    renderWith([{ user_id: USER, email: 'manager@aber.local' }])
+    expect(await screen.findByText('manager@aber.local')).toBeInTheDocument()
     // The role is what HAPPENED to them; it is in the drawer, not in the lane's name.
     expect(screen.queryByText(/^Administrator$/)).toBeNull()
   })
 
   it('does not call the person deleted merely because the lane was named from a lookup', async () => {
-    renderWith([{ user_id: USER, email: 'manager@acs-cymru.local' }])
-    const lane = (await screen.findByText('manager@acs-cymru.local')).closest('.dt-lane')
+    renderWith([{ user_id: USER, email: 'manager@aber.local' }])
+    const lane = (await screen.findByText('manager@aber.local')).closest('.dt-lane')
     expect(within(lane).queryByText('deleted')).toBeNull()
   })
 

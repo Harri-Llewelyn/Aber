@@ -4,16 +4,16 @@
 # Apply this ONCE per cluster, before installing the chart:
 #
 #   kubectl apply -f deploy/k8s/internal-ca.yaml
-#   kubectl -n cert-manager wait --for=condition=Ready certificate/acs-cymru-ca --timeout=120s
+#   kubectl -n cert-manager wait --for=condition=Ready certificate/aber-ca --timeout=120s
 #
 # Then point both TLS consumers at it:
 #
-#   helm upgrade --install acs-cymru deploy/helm/acs-cymru \
+#   helm upgrade --install aber deploy/helm/aber \
 #     --set global.scheme=https \
 #     --set ingress.tls.enabled=true \
-#     --set ingress.tls.certManager.clusterIssuer=acs-cymru-ca \
+#     --set ingress.tls.certManager.clusterIssuer=aber-ca \
 #     --set mosquitto.tls.enabled=true \
-#     --set mosquitto.tls.clusterIssuer=acs-cymru-ca
+#     --set mosquitto.tls.clusterIssuer=aber-ca
 #
 # -----------------------------------------------------------------------------------------------------
 # WHY THIS IS NOT IN THE HELM CHART, AND MUST NOT BE MOVED INTO IT
@@ -48,9 +48,9 @@
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: acs-cymru-selfsigned
+  name: aber-selfsigned
   labels:
-    app.kubernetes.io/part-of: acs-cymru
+    app.kubernetes.io/part-of: aber
 spec:
   # Bootstrap only. This issuer's ONE job is to sign the root below; nothing else should reference
   # it. A self-signed LEAF certificate would be verifiable by nobody, which is why the chain is
@@ -60,7 +60,7 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: acs-cymru-ca
+  name: aber-ca
   # ---------------------------------------------------------------------------------------------
   # THE NAMESPACE IS LOAD-BEARING AND IS NOT THE APPLICATION'S.
   #
@@ -68,8 +68,8 @@ metadata:
   # (--cluster-resource-namespace, `cert-manager` by default) -- NOT in the namespace of the
   # Certificate that references it, and not in the namespace this file is applied to.
   #
-  # Put this in `acs-cymru` instead and the root is issued perfectly, the Secret appears, and the
-  # ClusterIssuer below reports `Ready: False, secret "acs-cymru-ca-key-pair" not found` while the
+  # Put this in `aber` instead and the root is issued perfectly, the Secret appears, and the
+  # ClusterIssuer below reports `Ready: False, secret "aber-ca-key-pair" not found` while the
   # Secret is plainly visible in the other namespace. Every Certificate then sits Pending with no
   # events of its own, so the broker comes up with no cert and the Ingress serves the ingress
   # controller's default self-signed one -- which looks like a chart bug and is a namespace mismatch.
@@ -78,7 +78,7 @@ metadata:
   # ---------------------------------------------------------------------------------------------
   namespace: cert-manager
   labels:
-    app.kubernetes.io/part-of: acs-cymru
+    app.kubernetes.io/part-of: aber
 spec:
   isCA: true
   commonName: Factory+ Internal CA
@@ -89,7 +89,7 @@ spec:
       - Factory+
     organizationalUnits:
       - Asset Tracking Platform
-  secretName: acs-cymru-ca-key-pair
+  secretName: aber-ca-key-pair
   # Ten years. A root is redistributed by hand to browsers, gateways and operator laptops, so its
   # renewal is an organisational event, not an automated one -- the point of a long life is that the
   # automated part (the leaves below) is the only part that turns over.
@@ -109,17 +109,17 @@ spec:
     encoding: PKCS1
     rotationPolicy: Never
   issuerRef:
-    name: acs-cymru-selfsigned
+    name: aber-selfsigned
     kind: ClusterIssuer
     group: cert-manager.io
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: acs-cymru-ca
+  name: aber-ca
   labels:
-    app.kubernetes.io/part-of: acs-cymru
+    app.kubernetes.io/part-of: aber
 spec:
   ca:
     # Resolved in cert-manager's cluster resource namespace -- see the Certificate above.
-    secretName: acs-cymru-ca-key-pair
+    secretName: aber-ca-key-pair

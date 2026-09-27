@@ -8,6 +8,13 @@
 
 # Stage 1: Build Vite application
 FROM node:24-alpine AS builder
+# Opt this stage into the release's SBOM scan (release.yml builds with `sbom: true`). The shipped
+# image is nginx plus a minified bundle that carries no manifest of what was compiled into it, so
+# the final filesystem's SBOM would list Alpine and nginx and none of the npm tree the bundle IS.
+# BuildKit scans a build stage only when the stage itself declares this ARG; it changes nothing in
+# either stage's filesystem. The stage's document lists devDependencies too, which overstates
+# rather than omits. Not a VITE_ variable, so it reaches no bundle.
+ARG BUILDKIT_SBOM_SCAN_STAGE=true
 WORKDIR /app
 
 COPY package*.json ./
@@ -17,12 +24,12 @@ COPY . .
 
 # TWO WAYS TO CONFIGURE THIS IMAGE, and the build arg below picks between them.
 #
-#   1. BAKED (the default, and what Docker Compose uses). The values below are inlined into the
-#      bundle by Vite. Simple, and correct when the image is built against the stack it serves.
+#   1. BAKED (the default for a bare build). The values below are inlined into the bundle by
+#      Vite. Simple, and correct when the image is built against the stack it serves.
 #
-#   2. RUNTIME (VITE_RUNTIME_CONFIG=true, and what Kubernetes uses). Nothing is baked; the
+#   2. RUNTIME (VITE_RUNTIME_CONFIG=true, and what the chart uses). Nothing is baked; the
 #      deployment mounts a ConfigMap over /usr/share/nginx/html/config.js and src/config.js reads
-#      it from window.__ACS_CYMRU_CONFIG__ at load. This is what allows ONE image to serve any
+#      it from window.__ABER_CONFIG__ at load. This is what allows ONE image to serve any
 #      environment, which a baked bundle cannot do.
 #
 # Both paths run the same code -- src/config.js prefers the runtime value and falls through to the
@@ -66,12 +73,14 @@ ARG VITE_GITHUB_REPO_URL
 ARG VITE_GRAFANA_URL
 # Supabase Studio's door, used ONLY to end Studio's own session when the user signs out -- the
 # gateway holds that session, not this bundle, so nothing else here ends it. Unset is survivable:
-# constants.js falls back to 127.0.0.1:54323, which is right on Compose and simply unreachable
-# anywhere else. The HOST must match STUDIO_PUBLIC_URL's, not merely the port -- see constants.js.
+# constants.js falls back to 127.0.0.1:54323, the port `npm run dev:forward` publishes and
+# unreachable anywhere else. The HOST must match STUDIO_PUBLIC_URL's, not merely the port -- see
+# constants.js.
 ARG VITE_STUDIO_URL
 # The forge's door -- the gateway drawer links to a gateway's repository under it, and sign-out ends
 # the session the gateway holds there. Unset is survivable: constants.js falls back to
-# localhost:3003, which is right on Compose and nowhere else. HOST must match GITEA_ROOT_URL's.
+# localhost:3003, the port `npm run dev:forward` publishes and nowhere else. HOST must match
+# GITEA_ROOT_URL's.
 ARG VITE_GITEA_URL
 # Storage bucket names, matching STORAGE_BUCKET / CAPTURE_BUCKET in scripts/storage-init.mjs. Unset
 # is the ordinary case: src/api.js defaults to the same names those default to. They are build args
@@ -90,6 +99,10 @@ RUN npm run build
 
 # Stage 2: Serve static production assets using NGINX
 FROM nginx:alpine
+
+# Alpine packages from the base, taken to the current fixes the distribution ships: a fix Alpine ships
+# between two base cuts reaches the release rather than waiting for the next base (#347).
+RUN apk upgrade --no-cache
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 

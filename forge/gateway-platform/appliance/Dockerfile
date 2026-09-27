@@ -1,4 +1,4 @@
-# Node-RED for an ACS-Cymru REMOTE gateway appliance.
+# Node-RED for an Aber REMOTE gateway appliance.
 #
 # RECONSTRUCTED. The original of this file was overwritten during Phase 4 and was never committed,
 # so this is a rebuild from what bootstrap.mjs and README.md state rather than the original text.
@@ -53,7 +53,7 @@
 # Node-RED contracts internal enough to move between releases (see node-red/Dockerfile for the three
 # of them), and an appliance is the worst place to discover a contract change: it is the hardest
 # thing in the deployment to get a shell on.
-FROM nodered/node-red:5.0.2
+FROM nodered/node-red:5.0.7
 
 # ASSERTED AT BUILD TIME, not discovered at first login.
 #

@@ -11,7 +11,7 @@
  * and asserting that on a route which hides credentials the header and query forms are
  * indistinguishable upstream. Both modes share EXPECTED so two inventories cannot drift.
  *
- * Usage: node scripts/check-gateway-surface.mjs [--verbose] | --runtime [baseUrl] | --runtime
+ * Usage: node scripts/check-gateway-surface.mjs | --runtime [baseUrl] | --runtime
  * --authenticated [baseUrl] (needs SUPABASE_PUBLISHABLE_KEY). The base URL is the first non-flag
  * argument, or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the
  * runtime modes use `node:http`; see probeOnce.
@@ -23,9 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const verbose = process.argv.includes('--verbose');
 const read = (p) => readFileSync(join(REPO, p), 'utf8');
-const log = (m) => verbose && console.log(`       ${m}`);
 
 const problems = [];
 const ok = [];
@@ -258,7 +256,7 @@ if (RUNTIME) {
     if (!anonKey) {
       console.error(
         '\n--authenticated needs SUPABASE_PUBLISHABLE_KEY to present a valid credential.\n'
-        + 'Export it: kubectl -n acs-cymru get secret acs-cymru-secrets -o jsonpath={.data.SUPABASE_PUBLISHABLE_KEY} | base64 -d\n'
+        + 'Export it: kubectl -n aber get secret aber-secrets -o jsonpath={.data.SUPABASE_PUBLISHABLE_KEY} | base64 -d\n'
         + 'Refusing rather than skipping: a pass that\n'
         + 'silently checked nothing is the failure this whole mode exists to prevent.\n'
       );
@@ -381,7 +379,7 @@ if (RUNTIME) {
 // boot failure). The route surface is asserted by `--runtime`.
 
 const ENVOY_TEMPLATE = 'supabase/envoy.yaml';
-const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
+const CHART_ENVOY = 'deploy/helm/aber/templates/supabase/envoy.yaml';
 
 /** Substituted by the chart's initContainer. */
 const TEMPLATE_PLACEHOLDERS = [

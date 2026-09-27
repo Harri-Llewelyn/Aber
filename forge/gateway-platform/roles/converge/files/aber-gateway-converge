@@ -1,0 +1,331 @@
+#!/bin/bash
+# Converge this appliance to the platform tag its own repository names.
+#
+# Reads platform.yml from the puller's checkout of the gateway's main, runs ansible-pull against
+# the platform repository at that tag with the appliance's own deploy key and the forge's pinned
+# host key, installs the roots published on that repository's main, then runs this gateway's own
+# custom.yml if its repository carries one, and records all three results where the puller will
+# push them to the appliance branch. Every path here is what bootstrap.mjs wrote under /data,
+# reached through the bind mount the appliance role sets up. Outbound only, verified, no inventory.
+#
+# The custom playbook runs from the puller's checkout, which is at the head of the tracked branch
+# whatever the puller decided about the flow: a flow refused for its shape does not hold the
+# checkout back, because what is on main is what was approved either way.
+set -u
+
+STATE_DIR=${ABER_STATE_DIR:-/var/lib/aber-gateway}
+DATA_DIR=${ABER_DATA_DIR:-$STATE_DIR/data}
+COMPOSE_DIR=${ABER_COMPOSE_DIR:-/opt/aber-gateway}
+GITOPS="$DATA_DIR/gitops"
+KEY="$GITOPS/id_ed25519"
+KNOWN_HOSTS="$GITOPS/known_hosts"
+REPOSITORY="$GITOPS/repository.json"
+REPO_DIR="$GITOPS/repo"
+POINTER="$REPO_DIR/platform.yml"
+CUSTOM="$REPO_DIR/custom.yml"
+CONVERGED="$GITOPS/converged.json"
+CHECKOUT="$STATE_DIR/platform"
+# The broker's root, as Node-RED's tls-config node reads it, and what this appliance knows about
+# it. bootstrap.mjs writes both at enrolment; this script replaces both when the platform
+# publishes a new bundle.
+CERTS="$DATA_DIR/certs"
+CA_FILE="$CERTS/ca.crt"
+CA_JSON="$CERTS/ca.json"
+ENV_FILE="$DATA_DIR/gateway.env"
+# On main of the platform repository, not in the tagged tree: see install_trust().
+TRUST_PATH="trust/ca-bundle.pem"
+
+# What this gateway's own playbook did, as a JSON value. `null` means it has not run: either the
+# repository carries none, or the platform run failed before it could.
+CUSTOM_RECORD=null
+# What happened to the published roots this pass. `null` means the platform run failed first.
+TRUST_RECORD=null
+
+log() { echo "[aber-gateway-converge] $*"; }
+
+record() {
+  # $1 outcome, $2 tag, $3 detail. Read by nothing on this box; pushed by flow-sync.mjs.
+  jq -n --arg outcome "$1" --arg tag "$2" --arg detail "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson custom "$CUSTOM_RECORD" --argjson trust "$TRUST_RECORD" \
+    '{outcome: $outcome, tag: $tag, detail: $detail, converged_at: $at, custom: $custom, trust: $trust}' > "$CONVERGED.tmp" \
+    && mv "$CONVERGED.tmp" "$CONVERGED"
+}
+
+custom_record() {
+  # $1 outcome, $2 revision, $3 detail. Kept separate from the platform's outcome above, so a
+  # gateway's own broken playbook is never read as the platform failing to converge.
+  jq -n --arg outcome "$1" --arg revision "$2" --arg detail "$3" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{outcome: $outcome, revision: $revision, detail: $detail, ran_at: $at}'
+}
+
+trust_record() {
+  # $1 outcome, $2 pin, $3 notAfter, $4 whether the installed file changed, $5 detail.
+  jq -c -n --arg outcome "$1" --arg spki "$2" --arg after "$3" --argjson changed "$4" --arg detail "$5" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{outcome: $outcome, spki_sha256: $spki, not_after: $after, changed: $changed, detail: $detail, checked_at: $at}'
+}
+
+# One value out of /data/gateway.env, which is a file of `export NAME='value'` lines.
+#
+# READ RATHER THAN SOURCED. Sourcing it would put NODERED_CREDENTIAL_SECRET into this script's
+# environment and therefore into the environment of every ansible-playbook it runs, including a
+# gateway's own custom.yml. Two addresses are wanted here; nothing else in that file is.
+gateway_env() {
+  sed -n "s/^export $1='\(.*\)'\$/\1/p" "$ENV_FILE" 2>/dev/null | tail -n 1
+}
+
+# The roots this appliance trusts, from `trust/ca-bundle.pem` on MAIN of the platform repository.
+#
+# WHY MAIN AND NOT THE TAG. Everything else this appliance reads from that repository is a tag, so
+# a fleet spread across three platform versions reads three different trees. A re-issued root has
+# to reach all of them, including the appliances nobody is upgrading, so it is published on the one
+# ref every appliance can read whatever it is pinned to. forge-sweep writes it from the root the
+# broker is actually presenting, and the published tree neither ships nor deletes it.
+#
+# THE GUARD IS A CONNECTION, NOT A PARSE. A bundle that verifies nothing takes this appliance off
+# the air at the next Node-RED restart, with no path back that does not involve a visit. So each
+# root in the bundle is tried against the live broker before anything is installed, and the one
+# that verifies is the one whose expiry is recorded. Nothing is installed if none of them does.
+# Hostname verification is deliberately not part of the guard: the bundle changes the root, the
+# SAN belongs to the leaf, and an appliance dialling an IP would fail a name check that Node-RED
+# passes against the certificate's IP entry.
+#
+# NEVER THE EXIT STATUS. Every outcome here leaves this appliance working exactly as it was: it
+# keeps the root it already holds and the session it already has. The unit's status is about the
+# platform converging and this gateway's own code running; a refused bundle is recorded, logged,
+# and read on the appliance branch in the forge.
+install_trust() {
+  local tmp bundle verified spki not_after not_after_ms mqtt_host mqtt_port new_json changed
+  local root tool count
+
+  for tool in openssl git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      TRUST_RECORD=$(trust_record failed "" "" false "$tool is not installed")
+      log "cannot check the published roots: $tool is not installed"
+      return 0
+    fi
+  done
+
+  mqtt_host=$(gateway_env GATEWAY_MQTT_HOST)
+  mqtt_port=$(gateway_env GATEWAY_MQTT_TLS_PORT)
+  if [ -z "$mqtt_host" ] || [ -z "$mqtt_port" ]; then
+    TRUST_RECORD=$(trust_record failed "" "" false "$ENV_FILE names no broker address")
+    log "cannot check the published roots: $ENV_FILE names no broker address"
+    return 0
+  fi
+
+  tmp=$(mktemp -d) || {
+    TRUST_RECORD=$(trust_record failed "" "" false "could not make a working directory")
+    return 0
+  }
+  bundle="$tmp/bundle.pem"
+
+  # Bare, shallow, one branch: the roots and nothing else. Discarded at the end of the pass rather
+  # than kept, so there is no checkout on this box that can fall behind or be edited.
+  if ! git clone --quiet --bare --depth 1 --single-branch --branch main "$PLATFORM_URL" "$tmp/repo" 2>/dev/null; then
+    TRUST_RECORD=$(trust_record failed "" "" false "could not read main of the platform repository")
+    log "could not read main of the platform repository; keeping the root this appliance holds"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  if ! git --git-dir="$tmp/repo" show "main:$TRUST_PATH" > "$bundle" 2>/dev/null; then
+    # Every platform published before this mechanism existed. Not a failure: the root enrolment
+    # installed is still the root the broker presents.
+    TRUST_RECORD=$(trust_record absent "" "" false "main carries no $TRUST_PATH")
+    log "the platform repository publishes no $TRUST_PATH; keeping the root this appliance holds"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  # One file per certificate, so each can be offered to the broker on its own.
+  awk -v dir="$tmp" '/BEGIN CERTIFICATE/ { n += 1 } n > 0 { print > sprintf("%s/root-%02d.pem", dir, n) }' "$bundle"
+  if ! ls "$tmp"/root-*.pem >/dev/null 2>&1; then
+    TRUST_RECORD=$(trust_record refused "" "" false "$TRUST_PATH carries no certificate")
+    log "REFUSING the published bundle: it carries no certificate"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  count=$(ls "$tmp"/root-*.pem | wc -l | tr -d ' ')
+  for root in "$tmp"/root-*.pem; do
+    if ! openssl x509 -noout -in "$root" >/dev/null 2>&1; then
+      TRUST_RECORD=$(trust_record refused "" "" false "$TRUST_PATH carries a block that is not a certificate")
+      log "REFUSING the published bundle: $(basename "$root") is not a certificate"
+      rm -rf "$tmp"
+      return 0
+    fi
+  done
+
+  verified=""
+  for root in "$tmp"/root-*.pem; do
+    if openssl s_client -connect "$mqtt_host:$mqtt_port" -servername "$mqtt_host" \
+        -CAfile "$root" -verify_return_error </dev/null >/dev/null 2>&1; then
+      verified="$root"
+      break
+    fi
+  done
+  if [ -z "$verified" ]; then
+    TRUST_RECORD=$(trust_record refused "" "" false "no root in $TRUST_PATH verifies $mqtt_host:$mqtt_port")
+    log "REFUSING the published bundle: no root in it verifies $mqtt_host:$mqtt_port"
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  # RFC 7469's form, which is what the one-liner's stage 0 and the platform's own caPin.ts compute.
+  spki=$(openssl x509 -in "$verified" -pubkey -noout \
+    | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64 | tr -d '\n')
+  not_after=$(openssl x509 -in "$verified" -noout -enddate | cut -d= -f2-)
+  not_after_ms=$(( $(date -u -d "$not_after" +%s 2>/dev/null || echo 0) * 1000 ))
+
+  changed=false
+  if ! cmp -s "$bundle" "$CA_FILE"; then
+    # Atomically, and on the same filesystem: Node-RED reads this path at every start, and a
+    # half-written file there is an appliance that cannot connect.
+    mkdir -p "$CERTS"
+    if ! { cp "$bundle" "$CA_FILE.tmp" && chmod 0644 "$CA_FILE.tmp" && mv "$CA_FILE.tmp" "$CA_FILE"; }; then
+      rm -f "$CA_FILE.tmp"
+      TRUST_RECORD=$(trust_record failed "$spki" "$not_after" false "could not write $CA_FILE")
+      log "could not write $CA_FILE; the root this appliance holds is unchanged"
+      rm -rf "$tmp"
+      return 0
+    fi
+    changed=true
+    log "installed $count published root(s) into $CA_FILE"
+  fi
+
+  # What the heartbeat reports, read by the flow every minute through a file-in node. Written
+  # whenever anything but the timestamp differs, so a bundle whose bytes did not change still
+  # repairs a ca.json somebody removed.
+  for root in "$tmp"/root-*.pem; do
+    openssl x509 -in "$root" -pubkey -noout \
+      | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64 | tr -d '\n'
+    echo
+  done > "$tmp/pins"
+  new_json=$(jq -n --argjson ms "$not_after_ms" --arg after "$not_after" --arg spki "$spki" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson roots "$(jq -R -s -c 'split("\n") | map(select(length > 0))' "$tmp/pins")" \
+    '{not_after_ms: $ms, not_after: $after, spki_sha256: $spki, roots: $roots, written_at: $at}')
+  if ! jq -e --argjson new "$new_json" 'del(.written_at) == ($new | del(.written_at))' "$CA_JSON" >/dev/null 2>&1; then
+    printf '%s\n' "$new_json" > "$CA_JSON.tmp" && chmod 0644 "$CA_JSON.tmp" && mv "$CA_JSON.tmp" "$CA_JSON"
+  fi
+
+  if [ "$changed" = "true" ]; then
+    # A RESTART AND NOT A REDEPLOY. Node-RED's tls-config node reads the CA file in its
+    # constructor (05-tls.js), which runs when the runtime starts or the flow is deployed -- so
+    # the running container holds the bytes it read then. A deploy would also re-read it, but
+    # nothing deploys when only this file changes: flow-sync deploys when flows.json changes.
+    # One restart, only when the file actually changed: the MQTT session drops for a few seconds
+    # and the gateway is reported STALE at worst.
+    if ( cd "$COMPOSE_DIR" && docker compose restart node-red ) >/dev/null 2>&1; then
+      log "restarted node-red so it reads the new root"
+    else
+      log "WARNING: could not restart node-red; it will read the new root at its next start"
+    fi
+  fi
+
+  TRUST_RECORD=$(trust_record installed "$spki" "$not_after" "$changed" \
+    "$count root(s) published, verified against $mqtt_host:$mqtt_port")
+  rm -rf "$tmp"
+  return 0
+}
+
+# This gateway's own playbook, beside its flow on the branch an administrator approved. Every
+# gateway runs the platform playbook; "custom" is a gateway whose repository also carries one.
+# Run after the platform's and never instead of it, because the platform is what puts Docker, the
+# compose project and the directories below in place.
+run_custom() {
+  if [ ! -f "$CUSTOM" ]; then
+    log "$REPO_DIR holds no custom.yml; this gateway runs the platform playbook alone"
+    return 0
+  fi
+
+  local revision paths rc
+  revision=$(git -c safe.directory="$REPO_DIR" -C "$REPO_DIR" rev-parse HEAD 2>/dev/null) || revision=""
+
+  # Where the platform put things, so a custom playbook states no path of its own. After the
+  # gateway's own vars, so these cannot be overridden by the file being run. `-c` because this
+  # becomes one command-line argument, and jq prints an object over several lines by default.
+  paths=$(jq -c -n --arg state "$STATE_DIR" --arg data "$DATA_DIR" --arg compose "$COMPOSE_DIR" \
+    --arg repo "$REPO_DIR" --arg tag "$TAG" \
+    '{aber_state_dir: $state, aber_data_dir: $data, aber_compose_dir: $compose, aber_repo_dir: $repo, aber_platform_tag: $tag}')
+
+  log "running this gateway's own custom.yml at ${revision:-an unknown revision}"
+  # From the checkout, so roles/, files/ and templates/ beside custom.yml resolve.
+  ( cd "$REPO_DIR" && ansible-playbook --inventory localhost, \
+      --extra-vars "$EXTRA" --extra-vars "$paths" custom.yml )
+  rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    CUSTOM_RECORD=$(custom_record converged "$revision" "custom.yml succeeded")
+    log "this gateway's custom.yml converged"
+    return 0
+  fi
+  CUSTOM_RECORD=$(custom_record failed "$revision" "custom.yml exited $rc")
+  log "this gateway's custom.yml exited $rc; the platform convergence above stands"
+  return "$rc"
+}
+
+for f in "$KEY" "$KNOWN_HOSTS" "$REPOSITORY"; do
+  if [ ! -f "$f" ]; then
+    log "REFUSING: $f does not exist; this appliance is not enrolled, or its data is not under $DATA_DIR"
+    exit 1
+  fi
+done
+
+PLATFORM_URL=$(jq -r '.platform_ssh_url // empty' "$REPOSITORY")
+if [ -z "$PLATFORM_URL" ]; then
+  log "REFUSING: $REPOSITORY names no platform_ssh_url; the platform had no platform repository when this appliance enrolled. Re-enrol, or add it by hand."
+  exit 1
+fi
+
+# The tag: platform.yml on main, which the puller keeps current; the tag enrolment recorded until
+# the first pull. Extra variables ride on the same file.
+TAG=""
+EXTRA="{}"
+if [ -f "$POINTER" ]; then
+  TAG=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])) or {}; print((d.get("platform") or {}).get("tag") or "")' "$POINTER" 2>/dev/null)
+  # Assigned only when it parsed. The pointer is changed by pull request, so it can arrive
+  # unparseable; a failed read would otherwise replace the declared default with the empty string
+  # and pass that to ansible-pull as its extra variables.
+  POINTER_VARS=$(python3 -c 'import sys, json, yaml; d = yaml.safe_load(open(sys.argv[1])) or {}; print(json.dumps((d.get("platform") or {}).get("vars") or {}))' "$POINTER" 2>/dev/null)
+  if [ -n "$POINTER_VARS" ]; then EXTRA="$POINTER_VARS"; fi
+fi
+if [ -z "$TAG" ]; then
+  TAG=$(jq -r '.platform_tag // empty' "$REPOSITORY")
+fi
+if [ -z "$TAG" ]; then
+  log "REFUSING: no platform tag: $POINTER names none and $REPOSITORY holds none"
+  record refused "" "no platform tag named"
+  exit 1
+fi
+
+export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN_HOSTS -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10"
+export GIT_TERMINAL_PROMPT=0
+export ANSIBLE_LOCALHOST_WARNING=false
+
+log "converging to $TAG from $PLATFORM_URL"
+ansible-pull --url "$PLATFORM_URL" --checkout "$TAG" --directory "$CHECKOUT" --purge \
+  --inventory localhost, --extra-vars "$EXTRA" site.yml
+rc=$?
+
+if [ "$rc" -ne 0 ]; then
+  # Neither the roots nor custom.yml is attempted, and both records stay null: work done on an
+  # appliance whose platform run failed would be reported against a platform that is not there.
+  record failed "$TAG" "ansible-pull exited $rc"
+  log "ansible-pull exited $rc; recorded, and the timer will try again"
+  exit $rc
+fi
+log "converged to $TAG"
+
+install_trust
+
+run_custom
+custom_rc=$?
+
+# The platform's outcome is what it was, whatever this gateway's own playbook did. The exit status
+# is not: a failing custom.yml has to reach the unit's status, or the only record of it is a field
+# in the forge nobody is watching.
+record converged "$TAG" "ansible-pull succeeded"
+exit $custom_rc

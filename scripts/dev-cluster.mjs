@@ -52,11 +52,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const CHART = 'deploy/helm/acs-cymru'
-const CLUSTER = process.env.ACS_DEV_CLUSTER || 'acs-cymru'
-const NS = process.env.ACS_DEV_NAMESPACE || 'acs-cymru'
-const RELEASE = 'acs-cymru'
-const IMG_NS = 'ghcr.io/harri-llewelyn/acs-cymru'
+const CHART = 'deploy/helm/aber'
+const CLUSTER = process.env.ABER_DEV_CLUSTER || 'aber'
+const NS = process.env.ABER_DEV_NAMESPACE || 'aber'
+const RELEASE = 'aber'
+const IMG_NS = 'ghcr.io/harri-llewelyn/aber'
 // The runbook's pin. cert-manager is cluster administration, installed once, not a chart dependency.
 const CERT_MANAGER_VERSION = 'v1.16.2'
 
@@ -214,9 +214,9 @@ function lbPublishes (port) {
 
 function ensureCertManager () {
   step('cert-manager and the internal CA')
-  const ready = () => capture('kubectl', ['get', 'clusterissuer', 'acs-cymru-ca',
+  const ready = () => capture('kubectl', ['get', 'clusterissuer', 'aber-ca',
     '-o', 'jsonpath={.status.conditions[?(@.type=="Ready")].status}']).out === 'True'
-  if (ready()) { console.log('  ClusterIssuer acs-cymru-ca is Ready'); return }
+  if (ready()) { console.log('  ClusterIssuer aber-ca is Ready'); return }
   if (!capture('kubectl', ['get', 'namespace', 'cert-manager']).ok) {
     must('kubectl', ['apply', '-f',
       `https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml`],
@@ -227,9 +227,9 @@ function ensureCertManager () {
   must('kubectl', ['-n', 'cert-manager', 'wait', '--for=condition=Available', 'deployment', '--all', '--timeout=300s'],
     'cert-manager did not become available')
   must('kubectl', ['apply', '-f', 'deploy/k8s/internal-ca.yaml'], 'the internal CA did not apply')
-  must('kubectl', ['-n', 'cert-manager', 'wait', '--for=condition=Ready', 'certificate/acs-cymru-ca', '--timeout=120s'],
+  must('kubectl', ['-n', 'cert-manager', 'wait', '--for=condition=Ready', 'certificate/aber-ca', '--timeout=120s'],
     'the root certificate was not issued')
-  must('kubectl', ['wait', '--for=condition=Ready', 'clusterissuer/acs-cymru-ca', '--timeout=120s'],
+  must('kubectl', ['wait', '--for=condition=Ready', 'clusterissuer/aber-ca', '--timeout=120s'],
     'the ClusterIssuer did not become Ready')
 }
 
@@ -346,6 +346,7 @@ async function installChart ({ tls, e2e }) {
     // everything a full backup takes; the stack lane asserts on the set of components.
     '--set', 'backup.enabled=true', '--set', 'backupService.enabled=true',
     '--set', 'backup.includeStorage=true', '--set', 'backup.includeForge=true',
+    '--set', 'backup.includeBroker=true',
     '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`]
   // What an appliance is told to dial. The browser-facing hosts stay on the loopback domain, which
   // resolves on this machine whatever the resolver does; the two functions that hand an appliance
@@ -364,7 +365,9 @@ async function installChart ({ tls, e2e }) {
     console.log('  no LAN address found: enrolment stays unconfigured, as the dev values leave it')
   }
   // The broker's listener and both databases, from the one internal CA.
-  if (tls) sets.push('--set', 'mosquitto.tls.enabled=true', '--set', 'postgresTls.enabled=true')
+  if (tls) sets.push('--set', 'mosquitto.tls.enabled=true', '--set', 'postgresTls.enabled=true',
+    // The CA the two listeners are issued from joins the backup (ensureCertManager names it).
+    '--set', 'backup.ca.secretName=aber-ca-key-pair')
   if (e2e) {
     // The validate Job follows browser-facing URLs, which resolve to the pod itself under the dev
     // domain; hostAliases point them at Traefik instead.
@@ -401,12 +404,12 @@ async function waitForStack () {
     // COMPARED AS NUMBERS. A gauge's value is a float in the exposition format, so the same 1 is
     // spelled `1` by one exporter and `1.0` by another; matching the text made this wait depend on
     // which. It read `1.0` as "not subscribed" and timed out against a daemon that was.
-    const up = Number(/^acs_ingestion_up (\S+)/m.exec(r.out)?.[1])
-    const connected = Number(/^acs_ingestion_mqtt_connected (\S+)/m.exec(r.out)?.[1])
+    const up = Number(/^aber_ingestion_up (\S+)/m.exec(r.out)?.[1])
+    const connected = Number(/^aber_ingestion_mqtt_connected (\S+)/m.exec(r.out)?.[1])
     if (up === 1 && connected === 1) { console.log('  subscribed'); return }
     await sleep(3000)
   }
-  die('the ingestion daemon never reported itself subscribed (acs_ingestion_mqtt_connected)')
+  die('the ingestion daemon never reported itself subscribed (aber_ingestion_mqtt_connected)')
 }
 
 function helmTest () {
@@ -566,7 +569,7 @@ function dbTlsEnvironment () {
   if (releaseValues().postgresTls?.enabled !== true) return {}
   const r = kubectl('get', 'secret', 'supabase-db-tls', '-o', 'jsonpath={.data.ca\\.crt}')
   if (!r.ok || !r.out) die('postgresTls is on but the supabase-db-tls Secret holds no ca.crt yet; is the Certificate issued?')
-  const file = path.join(os.tmpdir(), 'acs-cymru-db-ca.crt')
+  const file = path.join(os.tmpdir(), 'aber-db-ca.crt')
   writeFileSync(file, Buffer.from(r.out, 'base64'))
   return { PGSSLMODE: 'verify-full', PGSSLROOTCERT: file }
 }
@@ -585,10 +588,14 @@ function testEnvironment () {
   // than the value the daemon was actually given would make the check agree with itself.
   const primaryHostId = kubectl('get', 'deploy/ingestion', '-o',
     'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="PRIMARY_HOST_ID")].value}').out
+  // Off the running daemon for the same reason: validate.py publishes under this group and the
+  // gateway row it seeds carries it, so reading anything but what the daemon was given would let
+  // the run exercise the deprecated single-argument resolution arm and still pass.
+  const sparkplugGroup = kubectl('get', 'deploy/ingestion', '-o',
+    'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="SPARKPLUG_GROUP")].value}').out
   return {
     ...process.env,
     ...secrets,
-    ACS_STACK: 'k8s',
     KUBE_NAMESPACE: NS,
     HELM_RELEASE: RELEASE,
     DB_HOST: 'localhost', DB_PORT: '5433',
@@ -605,6 +612,7 @@ function testEnvironment () {
     // What the exporter embeds, so the suite's loopback judgement is made on the real value.
     AAS_MODEL_PUBLIC_BASE: modelBase,
     PRIMARY_HOST_ID: primaryHostId,
+    SPARKPLUG_GROUP: sparkplugGroup,
     // The forge's door is an OAuth flow whose registered callback is the Ingress host.
     GITEA_TEST_URL: process.env.GITEA_TEST_URL || `http://git.${domain}`,
     // Where a suite that acts as an appliance clones and pushes from this host; the clone URL

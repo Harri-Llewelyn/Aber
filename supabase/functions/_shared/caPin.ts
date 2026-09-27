@@ -7,7 +7,7 @@
  * with `rotationPolicy: Never`, so the key outlives the certificate and a pin on the key does not
  * break at the re-issue.
  *
- * The root arrives as ACS_CA_PEM, read at start by the image's entrypoint from the ingress TLS
+ * The root arrives as ABER_CA_PEM, read at start by the image's entrypoint from the ingress TLS
  * Secret's ca.crt (functions.yaml mounts it), which is the root that signs the API's own
  * certificate: the appliance trusts the API through this pin, so it must be that root and not the
  * broker's, which is allowed to differ.
@@ -81,6 +81,6 @@ export async function spkiPin(pem: string): Promise<string | null> {
 
 /** The root the platform pins, from the environment, or null when this deployment has none. */
 export function platformRootPem(): string | null {
-  const pem = (Deno.env.get("ACS_CA_PEM") ?? "").trim();
+  const pem = (Deno.env.get("ABER_CA_PEM") ?? "").trim();
   return pem.includes("BEGIN CERTIFICATE") ? pem : null;
 }

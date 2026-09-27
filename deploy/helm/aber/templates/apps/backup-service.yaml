@@ -1,0 +1,275 @@
+{{- if and .Values.backup.enabled .Values.backupService.enabled }}
+{{- $component := "backup-service" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- if ne .Values.backup.destination "pvc" }}
+{{- fail "\n\naber: backupService.enabled needs backup.destination=pvc.\n\nThe service writes one directory per backup onto the backup PVC and records where; it has no S3\nclient. Set backupService.enabled=false to keep the CronJob's s3 destination.\n" }}
+{{- end }}
+{{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
+      .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
+{{- $includeForge := and .Values.backup.includeForge .Values.gitea.enabled -}}
+{{- $includeBroker := and .Values.backup.includeBroker .Values.mosquitto.enabled -}}
+{{- $brokerClaim := .Values.mosquitto.persistence.existingClaim | default (printf "%s-mosquitto-data" $fullname) -}}
+{{- $ca := .Values.backup.ca -}}
+{{- $includeCa := and $ca.secretName $ca.namespace -}}
+{{/*
+=================================================================================================
+The backup service: a backup_jobs row (0101) becomes a tier 1 backup on the backup PVC.
+
+Replaces the CronJob when enabled (backup-cronjob.yaml renders the PVC alone): the schedule moves
+into pg_cron, registered by the service on backup.schedule, and a backup an Administrator asks
+for on the Backups page runs the same way. Both dumps as their superusers, the storage objects,
+the forge, the broker's data volume (its Dynamic Security document) and the internal CA's key
+pair, one directory per backup, manifest included; retention from backup.retentionDays for
+scheduled backups, and a requested one is pinned until released.
+
+THE CA IS A SECRET IN ANOTHER NAMESPACE (the ClusterIssuer's; deploy/k8s/internal-ca.yaml keeps
+it in cert-manager's), so it is read through the API rather than mounted: a ServiceAccount, and a
+Role in that namespace granting `get` on that one Secret by name. Nothing wider: not `list`, which
+resourceNames cannot restrict, and nothing in this namespace.
+
+THE SAME BASE IMAGE AS THE DATABASE, for its pg_dump (the client must be at least the server's
+version), plus node, sqlite3 and GNU tar. The code is projected from a ConfigMap, as the
+credential service's is, so a script change needs no image rebuild.
+
+NO SERVICE OBJECT. Nothing calls it; the liveness probe reads /healthz on the pod. The dumps
+never leave the PVC, and restore is the runbook in supabase/README.md.
+
+CO-LOCATION. The storage PVC and the forge's are ReadWriteOnce, so including either requires this
+pod on that pod's node -- the same podAffinity the CronJob carries, and required rather than
+preferred for the same reason. Including both on a cluster where those two pods are on different
+nodes leaves this one Pending, which is the honest outcome; the values file says so.
+=================================================================================================
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-backup-service-scripts" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  backup-service.mjs: |
+{{ .Files.Get "files/backup-service/backup-service.mjs" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-service
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  # One replica, Recreate: two services would each claim jobs. The single-flight index stops
+  # them running two backups, but a rolling update would still leave one to fail the other's.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $includeCa }}
+      serviceAccountName: {{ printf "%s-backup-service" $fullname }}
+      automountServiceAccountToken: false
+      {{- end }}
+      {{- if or $includeStorage $includeForge $includeBroker }}
+      {{/*
+        The storage, forge and broker volumes are ReadWriteOnce, so this pod has to sit on their
+        node. ONE term naming every component it follows: two required terms, one per component,
+        leave the pod Pending on k3s v1.35 ("didn't match pod affinity rules") even on a single
+        node where both run, measured 2026-09-12. A node-bound volume (local-path) pins the pod as
+        well; this is what carries the intent where the storage class does not.
+      */}}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ include "aber.name" . }}
+                  app.kubernetes.io/instance: {{ .Release.Name }}
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: In
+                    values:
+                      {{- if $includeStorage }}
+                      - supabase-storage
+                      {{- end }}
+                      {{- if $includeForge }}
+                      - gitea
+                      {{- end }}
+                      {{- if $includeBroker }}
+                      - mosquitto
+                      {{- end }}
+      {{- end }}
+      containers:
+        - name: backup-service
+          image: {{ include "aber.image" (dict "ctx" . "image" .Values.backupService.image) | quote }}
+          imagePullPolicy: {{ .Values.backupService.image.pullPolicy }}
+          command: ["node", "/scripts/backup-service.mjs"]
+          env:
+            {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
+            - name: SUPABASE_DB_HOST
+              value: {{ include "aber.supabaseDb.host" . | quote }}
+            - name: SUPABASE_DB_PORT
+              value: {{ include "aber.supabaseDb.port" . | quote }}
+            {{- include "aber.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            - name: TIMESCALE_HOST
+              value: {{ include "aber.timescale.host" . | quote }}
+            - name: TIMESCALE_PORT
+              value: {{ include "aber.timescale.port" . | quote }}
+            - name: TIMESCALE_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            - name: TIMESCALE_DB
+              value: {{ .Values.timescaledb.database | quote }}
+            {{- include "aber.secretEnv" (dict "name" "TIMESCALE_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            - name: BACKUP_DIR
+              value: /backups
+            - name: BACKUP_RETENTION_DAYS
+              value: {{ .Values.backup.retentionDays | quote }}
+            - name: BACKUP_SCHEDULE
+              value: {{ .Values.backup.schedule | quote }}
+            - name: BACKUP_FORMAT
+              value: {{ .Values.backupService.format | quote }}
+            # An empty path disables the component; the manifest records its absence.
+            - name: STORAGE_PATH
+              value: {{ ternary "/storage" "" $includeStorage | quote }}
+            - name: FORGE_PATH
+              value: {{ ternary "/forge" "" $includeForge | quote }}
+            - name: BROKER_PATH
+              value: {{ ternary "/broker" "" $includeBroker | quote }}
+            # Both empty disables the component; the manifest records its absence.
+            - name: CA_SECRET_NAME
+              value: {{ ternary $ca.secretName "" (not (not $includeCa)) | quote }}
+            - name: CA_SECRET_NAMESPACE
+              value: {{ ternary $ca.namespace "" (not (not $includeCa)) | quote }}
+          ports:
+            - name: healthz
+              containerPort: 9020
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.backupService.resources | nindent 12 }}
+          volumeMounts:
+            {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: backups
+              mountPath: /backups
+            {{- if $includeStorage }}
+            - name: storage-objects
+              mountPath: /storage
+              readOnly: true
+            {{- end }}
+            {{- if $includeForge }}
+            - name: forge
+              mountPath: /forge
+              readOnly: true
+            {{- end }}
+            {{- if $includeBroker }}
+            - name: broker
+              mountPath: /broker
+              readOnly: true
+            {{- end }}
+            {{- if $includeCa }}
+            - name: sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            {{- end }}
+      volumes:
+        {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
+        - name: scripts
+          configMap:
+            name: {{ printf "%s-backup-service-scripts" $fullname }}
+        - name: backups
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-backup" $fullname }}
+        {{- if $includeStorage }}
+        - name: storage-objects
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-storage" $fullname }}
+            readOnly: true
+        {{- end }}
+        {{- if $includeForge }}
+        - name: forge
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-gitea" $fullname }}
+            readOnly: true
+        {{- end }}
+        {{- if $includeBroker }}
+        - name: broker
+          persistentVolumeClaim:
+            claimName: {{ $brokerClaim }}
+            readOnly: true
+        {{- end }}
+        {{- if $includeCa }}
+        # Projected, so the token is short-lived and rotated in place; the service reads it on
+        # every call rather than caching it (the same arrangement as the credential service's).
+        - name: sa-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+        {{- end }}
+{{- if $includeCa }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ printf "%s-backup-service" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+automountServiceAccountToken: false
+---
+# In the CA's namespace, not the release's: a Role reaches only the namespace it is in.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-%s-backup-service-ca" .Release.Namespace $fullname }}
+  namespace: {{ $ca.namespace }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ $ca.secretName | quote }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-%s-backup-service-ca" .Release.Namespace $fullname }}
+  namespace: {{ $ca.namespace }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-%s-backup-service-ca" .Release.Namespace $fullname }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ printf "%s-backup-service" $fullname }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

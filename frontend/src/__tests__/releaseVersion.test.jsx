@@ -14,7 +14,7 @@ import path from 'node:path'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@acs-cymru.local',
+    email: 'admin@aber.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -44,7 +44,7 @@ vi.mock('../lib/supabaseClient', () => ({
 vi.mock('../version', () => ({
   APP_VERSION: '0.1.0',
   VERSION_IS_KNOWN: true,
-  versionTitle: () => 'Running ACS-Cymru 0.1.0 — git describe',
+  versionTitle: () => 'Running Aber 0.1.0 — git describe',
 }))
 
 import { supabase } from '../lib/supabaseClient'
@@ -54,19 +54,19 @@ import {
 } from '../utils/releaseVersion'
 
 const CHART_CONFIG = fs.readFileSync(
-  path.resolve(__dirname, '../../../deploy/helm/acs-cymru/templates/apps/frontend.yaml'), 'utf8')
+  path.resolve(__dirname, '../../../deploy/helm/aber/templates/apps/frontend.yaml'), 'utf8')
 const PLACEHOLDER = fs.readFileSync(path.resolve(__dirname, '../../public/config.js'), 'utf8')
 
 const openMenu = async () => {
   render(<App />)
-  await waitFor(() => expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText('Aber')).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: /open account menu/i }))
   return within(document.querySelector('.user-popover'))
 }
 
 /** What the chart's ConfigMap does: assign the global before the bundle reads it. */
 const deployedRelease = (version) => {
-  globalThis.__ACS_CYMRU_CONFIG__ = { VITE_RELEASE_VERSION: version }
+  globalThis.__ABER_CONFIG__ = { VITE_RELEASE_VERSION: version }
 }
 
 beforeEach(() => {
@@ -78,7 +78,7 @@ beforeEach(() => {
   supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
 })
 
-afterEach(() => { delete globalThis.__ACS_CYMRU_CONFIG__ })
+afterEach(() => { delete globalThis.__ABER_CONFIG__ })
 
 // The comparison
 

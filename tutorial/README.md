@@ -31,7 +31,7 @@ somebody else's plant in it. What that floor knew is in this file instead.
 
 ### 1. Sign in, and start with the dashboard
 
-Sign in at `http://localhost:3000` as `admin@acs-cymru.local` (password `acscymru123` on a seeded
+Sign in at `http://localhost:3000` as `admin@aber.local` (password `aber123` on a seeded
 development stack). **Do this before opening Node-RED or Grafana**: both federate to Supabase Auth,
 and GoTrue ships no consent UI, so the dashboard serves one at `/oauth/consent` and needs a session
 of its own first.
@@ -247,7 +247,7 @@ absence proves nothing.
 Settle it from inside the Node-RED container:
 
 ```bash
-docker exec acs-cymru_node_red node -e "
+docker exec aber_node_red node -e "
   const mqtt=require('/usr/src/node-red/node_modules/mqtt');
   const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
   c.on('connect',()=>{console.log('CONNECTED');c.end()});
@@ -273,8 +273,8 @@ click it to copy. It never changes, so an asset can be renamed freely without br
 
 **Nothing seeds these ids.** A fresh install has no gateways and no devices, so the pair you publish
 under is the pair the dashboard issued you in steps 3 and 6 — that is the whole reason those steps
-come first. [`0040_retire_demonstration_seed.sql`](../supabase/migrations/0040_retire_demonstration_seed.sql)
-and [`0073_the_shopfloor_ships_empty.sql`](../supabase/migrations/0073_the_shopfloor_ships_empty.sql)
+come first. [`0040_retire_demonstration_seed.sql`](../supabase/migrations/archive/0040_retire_demonstration_seed.sql)
+and [`0073_the_shopfloor_ships_empty.sql`](../supabase/migrations/archive/0073_the_shopfloor_ships_empty.sql)
 between them removed the last of the seeded assets and schemas from databases that still had them.
 
 The examples below use `gwy120000000000400080000` and `dev220000000000400080000` as stand-ins for
@@ -283,11 +283,15 @@ depends on the literal values.
 
 | Order | Type | Topic | Purpose |
 | :-- | :--- | :--- | :--- |
-| 1 | `NBIRTH` | `spBv1.0/ACS-Cymru/NBIRTH/gwy1200…` | The edge node's own birth certificate, once at startup, before any device birth |
-| 2 | `DBIRTH` | `spBv1.0/ACS-Cymru/DBIRTH/gwy1200…/dev2200…` | The metric names, types and config the device will report. Re-sent every 60 s |
-| 3 | `DDATA` | `spBv1.0/ACS-Cymru/DDATA/gwy1200…/dev2200…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
-| 4 | `DDEATH` | `spBv1.0/ACS-Cymru/DDEATH/gwy1200…/dev2200…` | Manually triggered — marks the device offline |
-| 5 | `NDATA` | `spBv1.0/ACS-Cymru/NDATA/gwy1200…` | Gateway heartbeat, every 30 s |
+| 1 | `NBIRTH` | `spBv1.0/Aber/NBIRTH/gwy1200…` | The edge node's own birth certificate, once at startup, before any device birth |
+| 2 | `DBIRTH` | `spBv1.0/Aber/DBIRTH/gwy1200…/dev2200…` | The metric names, types and config the device will report. Re-sent every 60 s |
+| 3 | `DDATA` | `spBv1.0/Aber/DDATA/gwy1200…/dev2200…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
+| 4 | `DDEATH` | `spBv1.0/Aber/DDEATH/gwy1200…/dev2200…` | Manually triggered — marks the device offline |
+| 5 | `NDATA` | `spBv1.0/Aber/NDATA/gwy1200…` | Gateway heartbeat, every 30 s |
+
+`Aber` is the Sparkplug group the development stack is installed with (`values-dev.yaml`). A site
+names its own with `ingestion.sparkplugGroup` at install, where it has no default; every topic above
+then carries that word instead, and the gateway's own row is what says which.
 
 ### Report by exception
 

@@ -93,9 +93,9 @@ UNKNOWN_DEVICE_ID = "dev" + "f" * 21
 MALFORMED_DEVICE_ID = "dev" + "f" * 20
 
 # The Sparkplug Group ID every message in this run is published under; the alias table and the
-# rebirth topic are both scoped by it. Must match gateways.sparkplug_group, whose default is
-# 'ACS-Cymru', or every check would exercise the deprecated fallback arm.
-VAL_GROUP = "ACS-Cymru"
+# rebirth topic are both scoped by it. Must match gateways.sparkplug_group, which defaults to the
+# site's group (0131), or every check would exercise the deprecated fallback arm.
+VAL_GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
 
 # The validator's gateway UUID is pinned so it can hold an ordinary per-gateway MQTT credential:
 # The broker's roles confine a client to `spBv1.0/+/+/<sparkplug_id>/#`, so the username must equal the gateway
@@ -243,7 +243,7 @@ def probe_nodered_editor_login():
         anon = SUPABASE_PUBLISHABLE_KEY
         token = json.loads(fetch(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-            json.dumps({"email": "admin@acs-cymru.local", "password": "acscymru123"}).encode(),
+            json.dumps({"email": "admin@aber.local", "password": "aber123"}).encode(),
             {"apikey": anon, "Content-Type": "application/json"},
         ).read())["access_token"]
 
@@ -316,7 +316,7 @@ def probe_nodered_editor_login():
         if flows_res.status != 200:
             return False, f"editor session cannot read the flows: GET /flows -> {flows_res.status}."
 
-        return True, ("admin@acs-cymru.local signed in through Supabase Auth; the editor session "
+        return True, ("admin@aber.local signed in through Supabase Auth; the editor session "
                       "reads /settings and /flows and carries permissions='*' (Deploy enabled).")
     except Exception as err:
         return False, f"{type(err).__name__}: {err}"
@@ -361,7 +361,7 @@ def preflight_supabase_admin():
         print(f"❌ PREFLIGHT: cannot reach the Supabase database as the owner ({label}).")
         print(f"   {exc}")
         print("   Set SUPABASE_DB_HOST / SUPABASE_DB_PORT / SUPABASE_DB_NAME / SUPABASE_DB_USER /")
-        print("   POSTGRES_PASSWORD. From the HOST the port is 54322 (the dev loop forwards it");
+        print("   POSTGRES_PASSWORD. From the HOST the port is 54322 (the dev loop forwards it")
         print("   there to avoid colliding with a local PostgreSQL); IN-CLUSTER it is 5432 and the")
         print("   host is `supabase-db`. Without this, audit-row cleanup cannot run.")
         return False
@@ -902,7 +902,7 @@ def run_simulation():
         time.sleep(3)
         SEEDED["ncmd_after_first"] = len(CAPTURED_NCMD)
 
-        print(f"\n--- A second undeclared alias immediately after -> expect NO further NCMD ---")
+        print("\n--- A second undeclared alias immediately after -> expect NO further NCMD ---")
         client.publish(
             f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{alias_dev}",
             make_alias_only_payload({ALIAS_UNDECLARED_SECOND: 2.0}, now_ms + 3000),
@@ -1092,10 +1092,6 @@ def verify_results():
                 "id", SEEDED.get("schema_uuid")
             ).execute()
 
-            re_res = supabase_client.table("schemas").select("schema_definition").eq(
-                "id", SEEDED.get("schema_uuid")
-            ).execute()
-            re_definition = re_res.data[0]["schema_definition"] if re_res.data else None
             cleared = unmodelled_metrics(
                 declared, device_schema_definitions(SEEDED.get("known_uuid")))
 
@@ -1506,8 +1502,8 @@ def verify_results():
         try:
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-                data=json.dumps({"email": "admin@acs-cymru.local",
-                                 "password": "acscymru123"}).encode(),
+                data=json.dumps({"email": "admin@aber.local",
+                                 "password": "aber123"}).encode(),
                 headers={"apikey": anon, "Content-Type": "application/json"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -1592,7 +1588,7 @@ def verify_results():
             except Exception as err:
                 return 0, str(err)
 
-        # 12. Unauthenticated /info -- a spec MUST, and the health probe both targets use.
+        # 12. Unauthenticated /info -- a spec MUST, and the health probe the chart uses.
         status, body = i3x("GET", "/info")
         info = json.loads(body) if status == 200 else {}
         result = info.get("result", info)

@@ -17,7 +17,7 @@ import App from '../App'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@acs-cymru.local',
+    email: 'admin@aber.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -60,7 +60,7 @@ const navTabs = () => [...document.querySelectorAll('.sidebar-item')]
 
 const renderShell = async () => {
   render(<App />)
-  await waitFor(() => expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText('Aber')).toBeInTheDocument())
 }
 
 describe('Merged navigation shell', () => {
@@ -250,7 +250,7 @@ describe('Merged navigation shell', () => {
       // The title is load-bearing: the button has no visible text, so this string is also its
       // accessible name.
       const title = trigger().getAttribute('title')
-      expect(title).toContain('admin@acs-cymru.local')
+      expect(title).toContain('admin@aber.local')
       // usePermissions resolves the role from the database before falling back to the built-in map,
       // so it arrives a tick after the bar does.
       await waitFor(() => expect(trigger().getAttribute('title')).toContain('Administrator'))
@@ -268,7 +268,7 @@ describe('Merged navigation shell', () => {
       fireEvent.click(trigger())
 
       const menu = screen.getByRole('menu')
-      expect(within(menu).getByText('admin@acs-cymru.local')).toBeTruthy()
+      expect(within(menu).getByText('admin@aber.local')).toBeTruthy()
       // The role is in the menu, so it must be present.
       await waitFor(() => expect(within(menu).getByText('Administrator')).toBeTruthy())
       expect(trigger()).toHaveAttribute('aria-expanded', 'true')
@@ -393,8 +393,8 @@ describe('Merged navigation shell', () => {
 
   /**
    * The bands that are left, as a set. Navigation is in neither: the rail's collapse is a mode
-   * rather than a width band, so no viewport can take a page away. The brand subtitle goes before
-   * the wordmark shortens, and the wordmark shortens rather than disappearing.
+   * rather than a width band, so no viewport can take a page away. The brand subtitle goes first;
+   * the wordmark is four letters and stays until the whole brand text goes.
    */
   it('sheds only recoverable text now that navigation is not in the bar', () => {
     const band = (px) => APP_CSS.match(new RegExp(`@media \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
@@ -404,10 +404,10 @@ describe('Merged navigation shell', () => {
     expect(narrow, 'the <1400px band is missing').toBeTruthy()
     expect(narrowest, 'the <1100px band is missing').toBeTruthy()
 
-    // <1400: the strapline goes and the wordmark shortens. The bar's remaining controls are
+    // <1400: the strapline goes and the wordmark stays. The bar's remaining controls are
     // icons already, so there is no button label left to shed.
     expect(narrow).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
-    expect(narrow).toMatch(/\.brand-name-short\s*\{\s*display:\s*inline/)
+    expect(narrow).not.toMatch(/\.brand-name/)
 
     // <1100: the brand text entirely, leaving the mark.
     expect(narrowest).toMatch(/\.brand-text\s*\{\s*display:\s*none/)
@@ -550,6 +550,20 @@ describe('area thumbnail grid across viewports', () => {
 describe('sidebar warning tone', () => {
   it('colours a flagged item, and never the current page', () => {
     expect(APP_CSS).toMatch(/\.sidebar-item\.sidebar-item-warning:not\(\.active\) \{ color: var\(--warning-text\); \}/)
+  })
+})
+
+/**
+ * The KPI ribbon was a clickable 48px bar of figures above the shopfloor map, retired when the Site
+ * Map became one view. This guard stops its stylesheet coming back and quietly re-enabling it.
+ *
+ * MOVED OUT OF THE TEST ABOVE, where it was one line with nothing to do with the sidebar's warning
+ * tone: an unrelated page adding a `.kpi-` class failed a test named "colours a flagged item, and
+ * never the current page", which says nothing about what was actually wrong or what to do about it.
+ * Same assertion, somewhere it can explain itself.
+ */
+describe('the retired KPI ribbon', () => {
+  it('does not come back', () => {
     expect(APP_CSS).not.toMatch(/\.kpi-/)
   })
 })

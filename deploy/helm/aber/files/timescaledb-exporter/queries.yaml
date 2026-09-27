@@ -1,0 +1,134 @@
+# Historian-specific series, in postgres_exporter's custom-query format.
+#
+# NONE OF THIS IS IN THE EXPORTER'S DEFAULT COLLECTORS. They describe a PostgreSQL server;
+# a hypertable's chunk count, how much of it is columnstore, and whether the ten retention,
+# compression and rollup policy jobs are succeeding are TimescaleDB's own questions -- and they are
+# the ones that answer whether telemetry lifecycle is keeping up, which is the decision this
+# historian exists to support.
+#
+# THE MECHANISM IS DEPRECATED UPSTREAM and still works: v0.20.1 reads this file and logs
+# `The extended queries.yaml config is DEPRECATED` at startup. There is no non-deprecated
+# replacement inside the exporter; if a later version removes it, `sql_exporter` as a second
+# sidecar is the fallback, and these queries move across unchanged.
+#
+# THE TOP-LEVEL KEY IS THE METRIC PREFIX, which is why these are `aber_historian_*` rather than
+# `pg_*`: they are this platform's series, not PostgreSQL's, and the distinction matters when
+# reading a dashboard that draws both. The exporter also appends a `server` label of its own; over
+# loopback that is `127.0.0.1:5432` on both databases, so it identifies nothing and the `job` label
+# is what separates them.
+#
+# EVERY QUERY HERE READS UNDER pg_monitor ALONE, except the storage footprint, which is a view in
+# `public` and needs its own GRANT -- issued in timescaledb/roles.sql beside the role.
+
+aber_historian_chunks:
+  # Per hypertable, because "19 chunks" says nothing without knowing which table they belong to:
+  # the raw `telemetry` hypertable and the three rollups age on completely different policies.
+  #
+  # THE JOIN IS FOR THE LABEL, NOT THE DATA. A continuous aggregate's chunks belong to a
+  # materialisation hypertable named `_materialized_hypertable_3`, which is the name nothing else
+  # in this platform uses -- the rollups are `telemetry_1m`, `_5m` and `_1h` everywhere an operator
+  # meets them, including the storage query below. Left join so the raw hypertable, which has no
+  # continuous aggregate, keeps its own name.
+  query: |
+    SELECT coalesce(ca.view_name, c.hypertable_name)::text        AS hypertable,
+           count(*)::bigint                                       AS count,
+           count(*) FILTER (WHERE c.is_compressed)::bigint        AS compressed
+      FROM timescaledb_information.chunks c
+      LEFT JOIN timescaledb_information.continuous_aggregates ca
+             ON ca.materialization_hypertable_schema = c.hypertable_schema
+            AND ca.materialization_hypertable_name   = c.hypertable_name
+     GROUP BY 1
+  metrics:
+    - hypertable:
+        usage: "LABEL"
+        description: "The hypertable the chunks belong to"
+    - count:
+        usage: "GAUGE"
+        description: "Chunks in this hypertable"
+    - compressed:
+        usage: "GAUGE"
+        description: "Chunks converted to the columnstore. Compare with count: the gap is what the compression policy has not reached yet"
+
+aber_historian_job:
+  # THE LEFT JOIN IS LOAD-BEARING. A job that has never run has no `job_stats` row at all --
+  # `policy_telemetry` (job_id 1) is in exactly that state on a fresh stack -- and an inner join
+  # would silently omit it. A policy that has never fired is precisely the one worth seeing.
+  #
+  # `last_run_succeeded` is 0 for a failure and ALSO 0 for a job that has never run, which those
+  # two series distinguish: runs_total 0 with last_run_succeeded 0 is "never ran", not "failed".
+  query: |
+    SELECT j.job_id::text                                   AS job_id,
+           j.proc_name::text                                AS proc_name,
+           coalesce(s.total_runs, 0)::bigint                AS runs_total,
+           coalesce(s.total_failures, 0)::bigint            AS failures_total,
+           (coalesce(s.last_run_status, '') = 'Success')::int::bigint AS last_run_succeeded
+      FROM timescaledb_information.jobs j
+      LEFT JOIN timescaledb_information.job_stats s USING (job_id)
+  metrics:
+    - job_id:
+        usage: "LABEL"
+        description: "The TimescaleDB background job id"
+    - proc_name:
+        usage: "LABEL"
+        description: "The job procedure: telemetry_raw_retention, policy_compression, policy_refresh_continuous_aggregate"
+    - runs_total:
+        usage: "COUNTER"
+        description: "Times this job has run"
+    - failures_total:
+        usage: "COUNTER"
+        description: "Times this job has failed. A rising rate is retention or compression falling behind"
+    - last_run_succeeded:
+        usage: "GAUGE"
+        description: "1 if the last run succeeded; 0 if it failed OR if the job has never run (runs_total tells them apart)"
+
+aber_historian_storage:
+  # `public.storage_footprint` is a point-in-time table read that Grafana already draws over
+  # postgres_fdw (0027). Scraping it is what turns it into a GROWTH RATE -- the thing an operator
+  # would actually alert on and the input `tier_after_days` should be chosen from, neither of which
+  # a table read can give.
+  query: |
+    SELECT relation::text          AS relation,
+           tier::text              AS tier,
+           total_bytes::bigint     AS total_bytes,
+           table_bytes::bigint     AS table_bytes,
+           index_bytes::bigint     AS index_bytes
+      FROM public.storage_footprint
+  metrics:
+    - relation:
+        usage: "LABEL"
+        description: "The table or view"
+    - tier:
+        usage: "LABEL"
+        description: "raw, rollup or metadata"
+    - total_bytes:
+        usage: "GAUGE"
+        description: "Total bytes, including indexes and TOAST"
+    - table_bytes:
+        usage: "GAUGE"
+        description: "Heap bytes"
+    - index_bytes:
+        usage: "GAUGE"
+        description: "Index bytes"
+
+aber_historian_compression:
+  # A SEPARATE QUERY BECAUSE OF THE NULLs. `uncompressed_bytes` and `compressed_bytes` are null for
+  # every relation that is not a compressed hypertable, and coalescing them to 0 would assert a
+  # compression ratio of zero for a rollup that simply has no columnstore. Filtering instead means
+  # the series is ABSENT where it does not apply, which is the honest encoding.
+  query: |
+    SELECT relation::text              AS relation,
+           uncompressed_bytes::bigint  AS uncompressed_bytes,
+           compressed_bytes::bigint    AS compressed_bytes
+      FROM public.storage_footprint
+     WHERE uncompressed_bytes IS NOT NULL
+       AND compressed_bytes IS NOT NULL
+  metrics:
+    - relation:
+        usage: "LABEL"
+        description: "The compressed hypertable"
+    - uncompressed_bytes:
+        usage: "GAUGE"
+        description: "Bytes before compression"
+    - compressed_bytes:
+        usage: "GAUGE"
+        description: "Bytes after. The ratio of the two is what tier_after_days should be chosen against"

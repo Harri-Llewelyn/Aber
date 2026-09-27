@@ -6,14 +6,14 @@ body:
     attributes:
       value: |
         **Two things are documented rather than defects**, and are listed in
-        [`SECURITY.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/SECURITY.md): `values-dev.yaml` carries working development
+        [`SECURITY.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/SECURITY.md): `values-dev.yaml` carries working development
         secrets on purpose, and a working tree holds secrets `git status` will not show you.
 
         **Do not report a security vulnerability here.** Use
-        [private vulnerability reporting](https://github.com/Harri-Llewelyn/ACS-Cymru/security/advisories/new) instead.
+        [private vulnerability reporting](https://github.com/Harri-Llewelyn/Aber/security/advisories/new) instead.
 
         Faults that were already found and fixed — and why their fixes look the way they do — are
-        in [`docs/incidents.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/docs/incidents.md). It is worth a search before
+        in [`docs/incidents.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/docs/incidents.md). It is worth a search before
         filing, because several of them recur in a new disguise.
 
   - type: textarea
@@ -89,7 +89,7 @@ body:
     attributes:
       label: Logs and error output
       description: >
-        Paste the relevant output — `kubectl -n acs-cymru logs <pod>`, the browser
+        Paste the relevant output — `kubectl -n aber logs <pod>`, the browser
         console, or a failing suite's output. It is rendered as a code block, so no backticks
         needed. **Redact credentials before pasting**; a container's environment is dumped in some
         of these.

@@ -3,14 +3,14 @@
  *
  * Vite inlines `import.meta.env` at build, so a bundle built for one environment carries that
  * environment's Supabase URL wherever it is deployed. `public/config.js` is a plain script that
- * sets `window.__ACS_CYMRU_CONFIG__` and is loaded before the module bundle; the chart replaces
+ * sets `window.__ABER_CONFIG__` and is loaded before the module bundle; the chart replaces
  * it with a ConfigMap mount, and a plain image build ships the no-op so the build-time values
  * win. Keys are the `VITE_*` names, so the ConfigMap is generated from the same variable names
  * the Dockerfile uses.
  */
 
 /** The global a deployment-supplied `config.js` assigns. */
-const RUNTIME_CONFIG_GLOBAL = '__ACS_CYMRU_CONFIG__';
+const RUNTIME_CONFIG_GLOBAL = '__ABER_CONFIG__';
 
 /**
  * Every setting resolvable through this module. `frontend/public/config.js` must declare exactly

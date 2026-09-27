@@ -1,5 +1,5 @@
 """
-The Administrator / Shopfloor_Manager split (migration 0069).
+The Administrator / Shopfloor_Manager split (archived migration 0069).
 
 WHAT THIS SUITE IS DEFENDING, because "the manager lost three permissions" is the easy half and
 only the first class below is about it:
@@ -40,7 +40,7 @@ DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
 # SELF-SEEDED, NOT THE DEMO PERSONAS. CI's RLS job applies the migrations and deliberately not
-# seed.sql, so `admin@acs-cymru.local` does not exist there -- a suite depending on it passes
+# seed.sql, so `admin@aber.local` does not exist there -- a suite depending on it passes
 # locally and fails in CI with a failure that looks like the policy and is actually the fixture.
 ADMIN_ID = "5e771465-0069-4000-8000-00000000ad11"
 MANAGER_ID = "5e771465-0069-4000-8000-00000000009f"

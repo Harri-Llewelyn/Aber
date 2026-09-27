@@ -33,11 +33,9 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-const require = createRequire(import.meta.url);
 
 const DATA_DIR = process.env.NODE_RED_DATA_DIR || '/data';
 const RUNTIME_DIR = process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
@@ -75,7 +73,7 @@ const REPORTED = join(GITOPS_DIR, 'reported.json');
 const REPORT_FILES = [
   { name: FLOW_FILE, path: FLOWS },
   { name: 'deployed.json', path: DEPLOYED },
-  // Written by acs-gateway-converge (the platform playbook's converge role) after each
+  // Written by aber-gateway-converge (the platform playbook's converge role) after each
   // ansible-pull: which platform tag this appliance ran, whether it succeeded, and what this
   // gateway's own custom.yml did if it carries one. Absent on an appliance that runs the bundle
   // alone.
@@ -495,7 +493,7 @@ function reportIdentity() {
   } catch {
     // Enrolled before the marker carried it, or not through bootstrap; the commit still says who.
   }
-  return { name: `gateway ${sparkplugId}`, email: `${sparkplugId}@gateway.acs-cymru.invalid` };
+  return { name: `gateway ${sparkplugId}`, email: `${sparkplugId}@gateway.aber.invalid` };
 }
 
 function readReported() {

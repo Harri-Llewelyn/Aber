@@ -107,3 +107,106 @@ export function coldStorageSummary(rows) {
     ),
   }
 }
+
+/**
+ * Days past the tiering threshold before a backlog is worth acting on.
+ *
+ * UP TO ONE CHUNK INTERVAL IS NORMAL. Chunks are at most seven days (the chart's ceiling on
+ * timescaledb.retention.chunkInterval) and one is not eligible for export until its whole span is
+ * past the threshold, so a healthy site sits between zero and seven days behind. Fourteen is two of
+ * those: beyond anything the ordinary cadence produces, and still two weeks before a historian
+ * with retention off is short of disk.
+ *
+ * The same number is the Archive Backlog alert rule's threshold
+ * (grafana/provisioning/alerting/alert-rules.yaml, `aber-archive-backlog`). A page that called a
+ * backlog fine while the alert was firing would be the more convincing of the two, so
+ * check-docs-drift.mjs holds them level.
+ */
+export const ARCHIVE_BACKLOG_TOLERANCE_DAYS = 14
+
+/** Seconds of overdue as whole days, for display. */
+export function overdueDays(seconds) {
+  const n = Number(seconds)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.round((n / 86400) * 10) / 10
+}
+
+/**
+ * `warning` once the backlog passes the tolerance, neutral below it.
+ *
+ * Never `success`: an archive that is up to date is the expected state, and colouring it green
+ * would make the ordinary case shout as loudly as the one that needs somebody.
+ */
+export function backlogTone(seconds) {
+  return overdueDays(seconds) > ARCHIVE_BACKLOG_TOLERANCE_DAYS ? 'warning' : 'neutral'
+}
+
+/**
+ * The destination fields an Administrator sets, in the order the page asks for them.
+ *
+ * KEPT IN STEP WITH `unconfigured()` in ingestion/cold_archive.py BY HAND, and the labels are the
+ * same words on purpose: the exporter's refusal ends up in a CronJob log, and an operator matching
+ * that log against this page should not have to translate. Two languages, one list; a test asserts
+ * the page's half and the migration seeds exactly these keys.
+ */
+export const DESTINATION_FIELDS = [
+  { key: 'archive.endpoint', label: 'S3 endpoint' },
+  { key: 'archive.region', label: 'S3 region' },
+  { key: 'archive.bucket', label: 'S3 bucket' },
+  { key: 'archive.access_key_id', label: 'S3 access key ID' },
+]
+
+/**
+ * What is still missing before anything can be exported, as labels.
+ *
+ * `siteKey` is included but is NOT set from the page: it is frozen at install because it is the
+ * prefix every object is already addressed under. It appears here so an operator is told the whole
+ * truth in one place rather than discovering the last field from a failed job.
+ */
+export function missingDestination({ values = {}, credentialSet = false, siteKey = '' } = {}) {
+  const missing = DESTINATION_FIELDS
+    .filter(f => !String(values[f.key] ?? '').trim())
+    .map(f => f.label)
+  if (!credentialSet) missing.push('the secret access key')
+  if (!String(siteKey ?? '').trim()) missing.push('the site key (set at install)')
+  return missing
+}
+
+/** `endpoint/bucket/site=key/`, or null when there is not enough to name one. */
+export function destinationSummary({ endpoint = '', bucket = '', siteKey = '' } = {}) {
+  if (!endpoint.trim() || !bucket.trim()) return null
+  const base = `${endpoint.trim().replace(/\/+$/, '')}/${bucket.trim()}`
+  return siteKey.trim() ? `${base}/site=${siteKey.trim()}/` : `${base}/`
+}
+
+/** A window in seconds as `14 days`, `12 hours` or `1 day`; whole days when it divides evenly. */
+export function formatWindow(seconds) {
+  const s = Number(seconds)
+  if (!Number.isFinite(s) || s <= 0) return null
+  const unit = s % 86400 === 0 ? ['day', 86400] : ['hour', 3600]
+  const n = Math.round(s / unit[1])
+  return `${n} ${unit[0]}${n === 1 ? '' : 's'}`
+}
+
+/**
+ * The one sentence the page states about the raw window (`raw_telemetry_window()`, 0005), or null
+ * when the historian could not say. `archiveEnabled` is the page's own setting; `archive_armed` is
+ * what the archiver last reported to the historian, which is what the retention job obeys.
+ */
+export function rawWindowStatement(window, archiveEnabled) {
+  if (!window) return null
+  const kept = window.raw_window_seconds == null
+    ? 'Raw telemetry is kept indefinitely.'
+    : `Raw telemetry is kept for ${formatWindow(window.raw_window_seconds)}.`
+  const older = window.raw_window_seconds == null
+    ? ''
+    : archiveEnabled
+      ? ' Older readings are in the 1-minute, 5-minute and 1-hour rollups, and here on cold storage.'
+      : ' Older readings are in the 1-minute, 5-minute and 1-hour rollups only.'
+  // Switched on, and the archiver has not run since: the window still drops unexported chunks.
+  const pending = archiveEnabled && !window.archive_armed && window.raw_window_seconds != null
+    ? ' The archiver has not run since archiving was switched on; until it does, raw chunks '
+      + 'past the window are dropped without being exported.'
+    : ''
+  return kept + older + pending
+}

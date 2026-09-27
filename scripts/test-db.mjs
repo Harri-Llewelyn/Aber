@@ -31,7 +31,7 @@
  * =================================================================================================
  * WHY A SEPARATE CONTAINER AND NOT A SECOND DATABASE ON THE LIVE CLUSTER
  *
- * `CREATE DATABASE acs_test` then pointing SUPABASE_DB_NAME at it is the obvious shape, and it does
+ * `CREATE DATABASE aber_test` then pointing SUPABASE_DB_NAME at it is the obvious shape, and it does
  * not work. 0001 line 67 creates pg_cron, which refuses outside the one database named by the
  * cluster's `cron.database_name` GUC:
  *
@@ -91,6 +91,12 @@
  *   node scripts/test-db.mjs --no-run     # bring up and migrate only, then stop
  *   node scripts/test-db.mjs -k test_role # run only suites whose filename contains this
  *   node scripts/test-db.mjs --with-history  # replay the chain against a deployed stack's rows
+ *   node scripts/test-db.mjs --lint-only  # migrate, lint the schema, stop (npm run lint:db)
+ *   node scripts/test-db.mjs --no-lint    # skip the schema lint
+ *
+ * THE SCHEMA IS LINTED after the chain applies and before any suite commits a fixture, with the
+ * SQL behind Studio's advisors (splinter) and plpgsql_check over every PL/pgSQL body. A finding not
+ * in scripts/lint/database-allowlist.json fails the run; see scripts/lib/db-lint.mjs.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -100,19 +106,22 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import { MIGRATION_VARS } from './migration-vars.mjs'
+import {
+  SPLINTER, splinterSql, splinterScript, plpgsqlCheckScript, splinterFindings, plpgsqlFindings, judge, report,
+} from './lib/db-lint.mjs'
 import { suitesInLane } from './python-suites.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 // PINNED TO THE SAME TAG THE STACK RUNS. The bootstrap above is a list of things that are true of
-// 17.6.1.160 specifically -- `postgres` not being superuser is the loudest -- so a floating tag
+// 17.6.1.175 specifically -- `postgres` not being superuser is the loudest -- so a floating tag
 // would break this script on an image bump with an error about schema ownership that names nothing.
-const IMAGE = 'supabase/postgres:17.6.1.160'
-const CONTAINER = 'acs-cymru_test_db'
+const IMAGE = 'supabase/postgres:17.6.1.175'
+const CONTAINER = 'aber_test_db'
 
 // NOT 54322. That is the live stack's published port, and the entire point of this script is to
 // not be there. Overridable for the case of two checkouts running at once.
-const PORT = process.env.ACS_TEST_DB_PORT || '54329'
+const PORT = process.env.ABER_TEST_DB_PORT || '54329'
 const PASSWORD = 'postgres'
 
 const args = process.argv.slice(2)
@@ -122,8 +131,10 @@ const noRun = args.includes('--no-run')
 const history = args.includes('--with-history') || args.some(a => a.startsWith('--history-file='))
 const historyFile = args.find(a => a.startsWith('--history-file='))?.split('=').slice(1).join('=') || null
 const historyOut = args.find(a => a.startsWith('--history-out='))?.split('=').slice(1).join('=') || null
-const HISTORY_NS = process.env.ACS_NAMESPACE || 'acs-cymru'
-const HISTORY_POD = process.env.ACS_DB_POD || 'supabase-db-0'
+const HISTORY_NS = process.env.ABER_NAMESPACE || 'aber'
+const HISTORY_POD = process.env.ABER_DB_POD || 'supabase-db-0'
+const lintOnly = args.includes('--lint-only')
+const noLint = args.includes('--no-lint')
 const filterIdx = args.findIndex(a => a === '-k')
 const filter = filterIdx !== -1 ? args[filterIdx + 1] : null
 
@@ -298,16 +309,16 @@ function captureHistory () {
   // A GUARD ON WHICH CLUSTER, because this copies real rows onto a laptop. The read is harmless
   // to the source; where the data ENDS UP is the thing worth a deliberate act. The dev cluster is
   // recognised by name and anything else has to be asked for.
-  if (!/^k3d-/.test(context) && !process.env.ACS_HISTORY_ANY_CONTEXT) {
+  if (!/^k3d-/.test(context) && !process.env.ABER_HISTORY_ANY_CONTEXT) {
     die(`refusing to capture history from ${context}: it is not a k3d dev cluster.`,
-        'Set ACS_HISTORY_ANY_CONTEXT=1 if that is really what you want.')
+        'Set ABER_HISTORY_ANY_CONTEXT=1 if that is really what you want.')
   }
 
   const pod = run('kubectl', ['-n', HISTORY_NS, 'get', 'pod', HISTORY_POD, '-o', 'name'],
     { env: { ...process.env, MSYS_NO_PATHCONV: '1' } })
   if (pod.status !== 0) {
     die(`no ${HISTORY_POD} in ${HISTORY_NS} on ${context}.`,
-        'Is the stack up? ACS_NAMESPACE and ACS_DB_POD override both names.')
+        'Is the stack up? ABER_NAMESPACE and ABER_DB_POD override both names.')
   }
 
   console.log(`${c.bold('Capturing history')} from ${context}/${HISTORY_NS}/${HISTORY_POD}...`)
@@ -329,13 +340,13 @@ function captureHistory () {
   // bookkeeping is excluded explicitly: it is the one auth table pg_dump would otherwise reach.
   const users = kubectl(['exec', HISTORY_POD, '-c', 'supabase-db', '--', 'bash', '-c',
     'pg_dump -U supabase_admin -d postgres --data-only --schema=public ' +
-    '--exclude-table=auth.schema_migrations -f /tmp/acs-history.sql 2>/dev/null && ' +
+    '--exclude-table=auth.schema_migrations -f /tmp/aber-history.sql 2>/dev/null && ' +
     'psql -U postgres -d postgres -Atc ' +
     '"COPY (SELECT ' + shared.join(', ') + ' FROM auth.users) TO STDOUT"'],
     { maxBuffer: 512 * 1024 * 1024 })
   if (users.status !== 0) die('pg_dump on the live stack failed.', users.stderr)
 
-  const body = kubectl(['exec', HISTORY_POD, '-c', 'supabase-db', '--', 'cat', '/tmp/acs-history.sql'],
+  const body = kubectl(['exec', HISTORY_POD, '-c', 'supabase-db', '--', 'cat', '/tmp/aber-history.sql'],
     { maxBuffer: 512 * 1024 * 1024 })
   if (body.status !== 0) die('could not read the dump back.', body.stderr)
 
@@ -387,7 +398,7 @@ function loadHistoryAndReplay () {
     }
   }
 
-  const staged = path.join(tmpdir(), 'acs-history-load.sql')
+  const staged = path.join(tmpdir(), 'aber-history-load.sql')
   writeFileSync(staged, sql)
   const copiedIn = run('docker', ['cp', staged, `${CONTAINER}:/tmp/history.sql`])
   if (copiedIn.status !== 0) die('could not copy the history in.', copiedIn.stderr)
@@ -404,6 +415,37 @@ function loadHistoryAndReplay () {
   applyChain('against that history')
 }
 
+// -------------------------------------------------------------------------------------------
+// Lint the schema, before any suite commits a fixture
+// -------------------------------------------------------------------------------------------
+async function lintSchema () {
+  const allow = JSON.parse(readFileSync(path.join(REPO, 'scripts', 'lint', 'database-allowlist.json'), 'utf8'))
+  const sql = (script) => {
+    const r = run('docker', [
+      'exec', '-i', '-e', `PGPASSWORD=${PASSWORD}`, CONTAINER,
+      'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-h', 'localhost', '-U', 'postgres', '-d', 'postgres', '-At', '-f', '-'
+    ], { input: script, maxBuffer: 1 << 28 })
+    if (r.status !== 0) die('the schema lint did not run.', r.stderr)
+    return r.stdout
+  }
+  console.log(`\n${c.bold('Linting the schema')}${c.dim(`  splinter ${SPLINTER.commit.slice(0, 12)}, plpgsql_check`)}`)
+  let text
+  try {
+    text = await splinterSql(REPO)
+  } catch (err) {
+    die(`splinter could not be loaded: ${err.message}`)
+  }
+  const splinterOk = report('splinter', judge(splinterFindings(sql(splinterScript(text))), allow.splinter), c)
+  const plpgsqlOk = report('plpgsql_check', judge(plpgsqlFindings(sql(plpgsqlCheckScript(['public']))), allow.plpgsql_check), c)
+  return splinterOk && plpgsqlOk
+}
+
+const lintOk = noLint ? true : await lintSchema()
+if (lintOnly) {
+  if (!keep) teardown()
+  process.exit(lintOk ? 0 : 1)
+}
+
 if (noRun) {
   console.log(`\n${c.green('Ready.')} Point a suite at it with:`)
   console.log(c.dim(`  SUPABASE_DB_PORT=${PORT} python supabase/migrations/test_audit_domain.py`))
@@ -417,15 +459,12 @@ if (noRun) {
 // -------------------------------------------------------------------------------------------
 // THE `db` LANE, FROM scripts/python-suites.mjs -- not a second discovery of its own.
 //
-// This used to readdirSync `supabase/migrations` and run whatever it found, which was right about
-// discovery and wrong about scope: three suites needing exactly this database live under
-// `supabase/functions/`, and a rule shaped like "the migrations directory" could never reach them.
-// They ran in CI and not here, so `npm run test:db` passing locally did not mean the db-lane job
-// would pass -- which is the specific way a local runner stops being trusted.
-//
-// The manifest is now the one place that answers "which suites need a migrated Postgres", and both
-// callers read it. It is also checked against the tree in both directions, so a new suite added to
-// this directory and forgotten fails the runner by name instead of silently not running.
+// NOT A DIRECTORY SCAN. Three suites needing exactly this database live under
+// `supabase/functions/`, so a rule shaped like "the migrations directory" cannot reach them, and a
+// local runner that misses what CI runs stops being trusted. The manifest is the one place that
+// answers "which suites need a migrated Postgres" and both callers read it. It is checked against
+// the tree in both directions, so a suite added here and forgotten fails the runner by name
+// instead of silently not running.
 let suites = suitesInLane('db')
 if (filter) suites = suites.filter(f => f.includes(filter))
 if (suites.length === 0) die(`no suites matched ${filter}.`)
@@ -465,6 +504,7 @@ if (failed.length > 0) {
 } else {
   console.log(c.green(`All ${suites.length} suites passed.`))
 }
+if (!lintOk) console.log(c.red('The schema lint found something new; see "Linting the schema" above.'))
 
 if (keep) {
   console.log(c.dim(`\nContainer ${CONTAINER} left running on port ${PORT}.`))
@@ -473,4 +513,4 @@ if (keep) {
   teardown()
 }
 
-process.exit(failed.length > 0 ? 1 : 0)
+process.exit(failed.length > 0 || !lintOk ? 1 : 0)

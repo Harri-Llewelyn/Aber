@@ -13,7 +13,6 @@ import { isPlaced } from '../../utils/floorPlans'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
 import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
-import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { HelpTip } from '../common/HelpTip'
@@ -274,7 +273,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             Areas
             <HelpTip
               label="About areas"
-              text="An area is the ISA-95 level between the site and its cells: one part of the campus, such as a building. Cells are filed into areas so the Unified Namespace can name where a reading came from, and so the Site Map can show one area at a time."
+              text="The ISA-95 level between the site and its cells: one part of the campus, such as a building. Cells are filed into areas so the Unified Namespace can say where a reading came from."
             />
           </h3>
           <button

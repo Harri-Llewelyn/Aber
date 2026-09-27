@@ -6,7 +6,7 @@ import App from '../App'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@acs-cymru.local',
+    email: 'admin@aber.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -56,7 +56,7 @@ describe('App Component', () => {
       expect(screen.getByText('Sign In')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('ACS-Cymru Supabase Portal')).toBeInTheDocument()
+    expect(screen.getByText('Sign in to Aber')).toBeInTheDocument()
     expect(screen.getByText('Email Address')).toBeInTheDocument()
   })
 
@@ -66,14 +66,14 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument()
+      expect(screen.getByText('Aber')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Shopfloor to Digital Twin Pipeline')).toBeInTheDocument()
+    expect(screen.getByText('The shopfloor data platform')).toBeInTheDocument()
     // The account control is an icon button with no text, so its `title` is both the hover text and
     // its accessible name; the address is asserted on the attribute.
     expect(screen.getByRole('button', { name: /account menu/i })).toHaveAttribute(
-      'title', expect.stringContaining('admin@acs-cymru.local')
+      'title', expect.stringContaining('admin@aber.local')
     )
   })
 
@@ -90,13 +90,13 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('ACS-Cymru Supabase Portal')).toBeInTheDocument()
+      expect(screen.getByText('Sign in to Aber')).toBeInTheDocument()
     })
 
     expect(screen.getByText(/session is no longer valid/i)).toBeInTheDocument()
     // Stale tokens are dropped locally; the server-side session is already gone.
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
-    expect(screen.queryByText('AMRC Connectivity Stack - Cymru')).not.toBeInTheDocument()
+    expect(screen.queryByText('Aber')).not.toBeInTheDocument()
   })
 
   it('stays signed in when the auth server is unreachable', async () => {
@@ -109,7 +109,7 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument()
+      expect(screen.getByText('Aber')).toBeInTheDocument()
     })
     expect(supabase.auth.signOut).not.toHaveBeenCalled()
   })

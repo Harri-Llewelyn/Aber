@@ -26,13 +26,13 @@ admin probes report healthy while every data request fails -- as a 404, so a mon
 5xx sees nothing and a Kubernetes readiness probe keeps the pod in service. A typo in that
 environment variable is therefore a total outage that nothing detects.
 
-THE CONTROL FOR IT IS STATIC, in `scripts/check-docs-drift.mjs`: the name is asserted to be
-identical on both targets and to be declared by a migration. A runtime probe cannot help -- by the
-time one could run, the outage has already started.
+THE CONTROL FOR IT IS STATIC, in `scripts/check-docs-drift.mjs`: the name the chart sets is
+asserted to be declared by a migration. A runtime probe cannot help -- by the time one could run,
+the outage has already started.
 
 =================================================================================================
 SELF-SEEDED, NOT THE DEMO PERSONAS. CI's RLS job applies the migrations and deliberately not
-seed.sql, so `admin@acs-cymru.local` does not exist there -- a suite depending on it passes locally
+seed.sql, so `admin@aber.local` does not exist there -- a suite depending on it passes locally
 and fails in CI with a failure that looks like the policy and is actually the fixture. Same
 approach, and the same teardown obligation, as test_system_settings_rls.py.
 """

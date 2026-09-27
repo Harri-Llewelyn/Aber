@@ -36,7 +36,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import timezone
 
 from logging_config import get_logger
 
@@ -60,7 +60,7 @@ TOPIC_UNSAFE = re.compile(r"[/+#]")
 # The metric leaf may contain `/` (a catalog group prefix); only the wildcards are refused.
 LEAF_UNSAFE = re.compile(r"[+#]")
 
-# The skip reasons, each a label value on acs_ingestion_uns_skipped_total. Listed so metrics.py's
+# The skip reasons, each a label value on aber_ingestion_uns_skipped_total. Listed so metrics.py's
 # table and this module cannot disagree about the set.
 SKIP_REASONS = (
     "site_unset",        # `site.name` is empty: nothing has a complete path yet

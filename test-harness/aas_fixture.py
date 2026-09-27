@@ -59,7 +59,7 @@ BIRTH_VALUES = {
 }
 
 NAMEPLATE = {
-    "manufacturer_name": "ACS-Cymru Conformance",
+    "manufacturer_name": "Aber Conformance",
     "manufacturer_product_designation": "AAS Conformance Fixture",
     "manufacturer_product_type": "Conformance test subject",
     "year_of_construction": "2026",

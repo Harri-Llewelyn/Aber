@@ -6,7 +6,7 @@
 services:
   adapter:
     build: .
-    container_name: acs-custom-adapter
+    container_name: aber-custom-adapter
     restart: unless-stopped
     # NO PORTS PUBLISHED. Nothing outside the appliance addresses this, and a published port is an
     # inbound path on a plant network, which the design exists to avoid.
@@ -30,4 +30,4 @@ networks:
     # The platform's own compose network, joined rather than created: that is where Node-RED is.
     # custom.yml passes the name, derived from the directory the platform deployed to.
     external: true
-    name: "${ACS_APPLIANCE_NETWORK:-acs-gateway_default}"
+    name: "${ABER_APPLIANCE_NETWORK:-aber-gateway_default}"

@@ -5,12 +5,12 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Check the [1.0](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/1) and [2.0](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/2) milestones first.**
+        **Check the [1.0](https://github.com/Harri-Llewelyn/Aber/milestone/1) and [2.0](https://github.com/Harri-Llewelyn/Aber/milestone/2) milestones first.**
         Between them they hold everything already accepted and not yet built, and an issue there
         names the code it would build on — so it tells you both whether a thing is already planned
         and how far away it is. Several turned out to be much closer than the person asking
         assumed. If your request is already open, say so there and add what you need from it rather
-        than opening a duplicate. [`docs/roadmap.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/docs/roadmap.md) is the
+        than opening a duplicate. [`docs/roadmap.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/docs/roadmap.md) is the
         record of what has already shipped and which documentation now holds it.
 
         The design ethos is **use pre-existing components and standards; minimise custom code.** A

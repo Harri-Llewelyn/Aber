@@ -28,8 +28,8 @@
 # person near it; the platform reports the appliance's uptime, and a reboot is a visit.
 - name: Unattended upgrades, without automatic reboot and with Docker held
   ansible.builtin.template:
-    src: 52-acs-gateway.j2
-    dest: /etc/apt/apt.conf.d/52-acs-gateway
+    src: 52-aber-gateway.j2
+    dest: /etc/apt/apt.conf.d/52-aber-gateway
     mode: "0644"
 
 - name: Unattended upgrades enabled
@@ -45,10 +45,10 @@
 # platform measures the offset per appliance and alerts; this is the fix.
 - name: Chrony sources
   ansible.builtin.copy:
-    dest: /etc/chrony/sources.d/acs-gateway.sources
+    dest: /etc/chrony/sources.d/aber-gateway.sources
     mode: "0644"
     content: |
-      # Managed by the ACS-Cymru platform playbook. Per-gateway sources come from platform.yml.
+      # Managed by the Aber platform playbook. Per-gateway sources come from platform.yml.
       {% for line in chrony_servers %}
       {{ line }}
       {% endfor %}
@@ -59,4 +59,4 @@
     name: chrony
     state: started
     enabled: true
-  when: acs_systemd
+  when: aber_systemd

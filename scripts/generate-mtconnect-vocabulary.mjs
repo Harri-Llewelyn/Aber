@@ -25,13 +25,11 @@ const SCHEMA_URL =
   `https://raw.githubusercontent.com/mtconnect/schema/master/MTConnectDevices_${SCHEMA_VERSION}_draft-04.schema.json`;
 
 /**
- * THE LIVE SEED, not the archived migration this used to write.
- *
- * It wrote `supabase/migrations/archive/20260101000018_mtconnect_vocabulary.sql` — a file
- * `supabase-db-init` never executes, because the glob `/migrations/*.sql` does not recurse. So the
- * documented procedure for adopting a newer MTConnect release ("bump SCHEMA_VERSION and re-run")
- * changed nothing on any database, on any target, and said so nowhere. The archived file stays
- * exactly as it is: it is the historical migration and the reasoning behind it, not an output.
+ * THE LIVE SEED (`0002`), AND IT HAS TO BE. `supabase-db-init` globs `/migrations/*.sql`, which
+ * does not recurse, so anything written into `archive/` is never executed -- and the documented
+ * procedure for adopting a newer MTConnect release ("bump SCHEMA_VERSION and re-run") would change
+ * nothing on any database and say so nowhere. The archived file is a historical record, not an
+ * output, and is never written here.
  *
  * Only the delimited block is rewritten. Everything else in 0002 — the commentary above the block,
  * the ISO 22400 and OPC UA vocabularies, every operator-facing row — is hand-maintained and must
@@ -56,14 +54,14 @@ const END_MARKER = '-- <<< END GENERATED mtconnect_vocabulary';
  * The form matches 0032's SQL expression exactly, and both are mirrored by `mtconnectSemanticId()`
  * in `frontend/src/utils/standards.js`:
  *
- *     https://acs-cymru.local/semantics/mtconnect/v2.0/<Kind>/<name>
+ *     https://aber.local/semantics/mtconnect/v2.0/<Kind>/<name>
  *
  * SCOPED BY KIND, because a component and a data item type could share a name and `(kind, name)`
  * is the table's key. **The namespace pins `v2.0`, the major line — deliberately NOT
  * SCHEMA_VERSION.** An id that changed every time the vocabulary was regenerated would defeat the
  * point of being a stable handle, and `semantic_id` is the one column downstream systems key on.
  *
- * The namespace is `acs-cymru.local` and must stay that way: an id under `mtconnect.org` would
+ * The namespace is `aber.local` and must stay that way: an id under `mtconnect.org` would
  * assert an interoperability nobody has agreed to. See the header of
  * supabase/migrations/archive/20260101000029_semantic_identifiers.sql.
  */
@@ -74,7 +72,7 @@ const KIND_SEGMENT = {
   NATIVE_UNIT: 'NativeUnit',
   COMPONENT: 'Component',
 };
-const SEMANTIC_BASE = 'https://acs-cymru.local/semantics/mtconnect/v2.0';
+const SEMANTIC_BASE = 'https://aber.local/semantics/mtconnect/v2.0';
 const semanticId = (kind, name) => {
   const segment = KIND_SEGMENT[kind];
   if (!segment) throw new Error(`no semantic-id segment defined for kind: ${kind}`);
@@ -136,10 +134,9 @@ for (const [name] of dataItemTypes) {
 /**
  * One statement per row, matching the seed's existing form exactly.
  *
- * NOT a single multi-row INSERT, which is what this generator used to emit for its own migration.
- * The per-row form is what 0002 already contains, so regenerating produces a clean diff instead of
- * rewriting 598 lines into 3 — and each row carries its own `ON CONFLICT`, which is what lets the
- * seed replay on every boot.
+ * NOT a single multi-row INSERT. The per-row form is what 0002 already contains, so regenerating
+ * produces a clean diff rather than rewriting 598 lines into 3, and each row carries its own
+ * `ON CONFLICT`, which is what lets the seed replay on every boot.
  *
  * `DO UPDATE SET category` ONLY, and that asymmetry is deliberate and load-bearing. `category` is
  * upstream fact and should be corrected on an existing database when MTConnect changes it.
@@ -192,7 +189,6 @@ if (beginAt < 0 || endAt < 0 || endAt < beginAt) {
     `markers not found in ${SEED}. Expected a block delimited by:\n  ${BEGIN_MARKER}\n  ${END_MARKER}`
   );
 }
-const lineEnd = seed.indexOf('\n', beginAt);
 const updated = seed.slice(0, beginAt) + header + '\n' + body + '\n' + seed.slice(endAt);
 writeFileSync(SEED, updated, 'utf8');
 

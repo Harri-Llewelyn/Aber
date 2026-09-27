@@ -234,20 +234,17 @@ html, body, #root {
 .topbar-brand:hover { background: var(--bg-glass); }
 .topbar-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* The emblem stands on the bar without a plate. --accent-strong is the deeper blue in the light
+   theme, which a filled shape needs; in the dark theme it is the same cyan as --accent. */
 .brand-icon {
   width: 28px;
   height: 28px;
-  /* The filled-button pair, not bare --accent with white ink. In the light theme --accent is
-     #0284c7, on which white measures APCA Lc 36.6 -- the "passes WCAG 2, unreadable on screen"
-     case the button tokens exist to avoid. */
-  background: var(--accent-strong);
-  color: var(--accent-contrast);
-  border-radius: 7px;
+  color: var(--accent-strong);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 0 14px var(--accent-glow);
+  filter: drop-shadow(0 0 6px var(--accent-glow));
 }
 
 .brand-text {
@@ -257,10 +254,6 @@ html, body, #root {
 
 /* Truncates rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be
    clipped mid-glyph. The element carries a `title` in App.jsx, so the full name stays reachable. */
-/* Two spellings of the wordmark, one shown. See the density ladder below for why the SHORT one
-   is the lever rather than the strapline. */
-.brand-name-short { display: none; }
-
 .brand-name {
   font-size: 14px;
   font-weight: 700;
@@ -732,14 +725,11 @@ html, body, #root {
   color: var(--text-dim);
 }
 
-/* Top bar responsive collapse. Below 1400px the strapline goes and the wordmark shortens, and
-   button labels go; below 1100px the brand text goes entirely. The wordmark shortens rather than
-   disappearing because `.brand-text` is a stacked block as wide as its wider line, and the
-   strapline is wider than the full wordmark, so hiding the strapline alone reclaims almost nothing. */
+/* Top bar responsive collapse. Below 1400px the strapline goes and button labels go; below
+   1100px the brand text goes entirely. `.brand-text` is a stacked block as wide as its wider
+   line, and the strapline is far wider than the wordmark, so hiding it reclaims the space. */
 @media (max-width: 1399px) {
   .brand-sub { display: none; }
-  .brand-name-full { display: none; }
-  .brand-name-short { display: inline; }
   /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
      leaves a shape and a figure -- whereas dropping the pill would hide the only changing thing in
      the bar at exactly the widths a kiosk display uses. */
@@ -814,6 +804,10 @@ html, body, #root {
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-muted);
+}
+
+.page-heading .page-heading-note {
+  color: var(--text);
 }
 
 /* ===== Cards & Containers ===== */
@@ -1151,14 +1145,15 @@ tbody tr:hover { background: var(--bg-glass); }
 .table-directory {
   table-layout: fixed;
   /* Below this the fixed columns crush rather than wrap, so `.table-wrap` scrolls instead. */
-  min-width: 760px;
+  min-width: 880px;
 }
 
-.table-directory th:nth-child(1) { width: 26%; }  /* Service name */
-.table-directory th:nth-child(2) { width: 16%; }  /* Service type */
-.table-directory th:nth-child(3) { width: 30%; }  /* Endpoint URL */
-.table-directory th:nth-child(4) { width: 14%; }  /* Status */
-.table-directory th:nth-child(5) { width: 14%; }  /* Last heartbeat */
+.table-directory th:nth-child(1) { width: 20%; }  /* Service name */
+.table-directory th:nth-child(2) { width: 14%; }  /* Service type */
+.table-directory th:nth-child(3) { width: 14%; }  /* Version */
+.table-directory th:nth-child(4) { width: 28%; }  /* Endpoint URL */
+.table-directory th:nth-child(5) { width: 12%; }  /* Reach */
+.table-directory th:nth-child(6) { width: 12%; }  /* Liveness */
 
 /* Compact rows: the directory is a reference list read top to bottom, not a work surface with
    per-row actions. */
@@ -1172,6 +1167,10 @@ tbody tr:hover { background: var(--bg-glass); }
 /* An endpoint is one unbroken token (`http://127.0.0.1:54321/functions/v1`), which a fixed
    column cannot break at a space. Without this it overruns its cell into STATUS. */
 .table-directory .cell-endpoint { overflow-wrap: anywhere; }
+
+/* A tag is one token too, and some are long (`2026.07.07-sha-a6a04f2`). */
+.table-directory .cell-version { overflow-wrap: anywhere; }
+.table-directory .cell-version .mono { font-size: 12px; }
 
 /* An endpoint reads as a control, and its shape says which: an accent-bordered one opens, a muted
    one copies. */
@@ -1655,6 +1654,31 @@ tbody tr:hover { background: var(--bg-glass); }
 /* An empty state that can offer a way out puts the control under the sentence. `.empty-state` is
    centred text, so the button needs to become a block to sit in the middle of it. */
 .empty-state .btn { display: inline-flex; margin-top: 12px; }
+
+/* ===== Stat strip ===== */
+/* A row of figures above a table, centred on the card and ruled between. Left-aligned and spaced
+   only by a gap, a run of six read as one ragged block with no boundary between "object storage
+   used" and the figure after it -- the eye had to use the label casing to find where each one
+   started. The rule does that instead, and centring stops a short run sitting off to one side of a
+   wide card. */
+.stat-strip {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.stat-strip > * {
+  padding: 0 20px;
+  text-align: center;
+}
+
+/* The separator belongs to the item on its right, so the first has none and a run of any length
+   stays ruled between and clear at both ends. */
+.stat-strip > * + * {
+  border-left: 1px solid var(--border);
+}
 
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
@@ -4162,7 +4186,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   line-height: 1.5;
   letter-spacing: normal;
   text-transform: none;
-  white-space: normal;
+  /* `pre-line`, not `normal`: a tooltip long enough to need a second paragraph -- Cold telemetry's,
+     which carries the only-copy warning -- had its blank line collapsed into one wall of text.
+     Spaces and wrapping still collapse as before, and no other tip's text contains a newline, so
+     this only enables the break rather than changing any existing bubble. */
+  white-space: pre-line;
   pointer-events: none;
 }
 

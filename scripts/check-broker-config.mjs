@@ -41,7 +41,7 @@ const ok = [];
 
 /** The tag the chart pins, so this tests what actually runs -- never `latest`. */
 function pinnedTag() {
-  const values = readFileSync(join(REPO, 'deploy', 'helm', 'acs-cymru', 'values.yaml'), 'utf8');
+  const values = readFileSync(join(REPO, 'deploy', 'helm', 'aber', 'values.yaml'), 'utf8');
   const m = values.match(/repository:\s*eclipse-mosquitto\s*\n\s*tag:\s*["']?([^\s"']+)/);
   if (!m) {
     throw new Error('could not find the eclipse-mosquitto image pin in values.yaml');
@@ -53,7 +53,7 @@ function pinnedTag() {
 const TAG = pinnedTag();
 const IMAGE = `eclipse-mosquitto:${TAG}`;
 /** The credential service's image, built from the repository so the check runs the real reconcile. */
-const CREDENTIAL_IMAGE = 'acs-cymru-gateway-credential:check';
+const CREDENTIAL_IMAGE = 'aber-gateway-credential:check';
 
 function docker(args, opts = {}) {
   return spawnSync('docker', args, { encoding: 'utf8', ...opts });
@@ -109,6 +109,16 @@ const IMPORTED = [GATEWAY_B, 'probe'];
  */
 const PRIMARY_HOST_ID = 'Check-Site';
 const OTHER_HOST_ID = 'Someone-Else';
+
+/**
+ * The Directory prefix this check reconciles against, and it is DELIBERATELY NOT the chart's
+ * default. The grant is derived from this value at reconcile time rather than written into
+ * dynsec-roles.json, so a prefix that happened to match the repository's old literal would pass
+ * whether or not the derivation ran at all.
+ */
+const DIRECTORY_PREFIX = 'Check-Site/Directory/v1';
+const DIRECTORY_DOC = `${DIRECTORY_PREFIX}/device`;
+const DIRECTORY_FILTER = `${DIRECTORY_PREFIX}/#`;
 const EXPECTED_CLIENTS = Object.keys(ACCOUNTS).sort();
 
 const INIT_ENV = {
@@ -130,10 +140,12 @@ const INIT_ENV = {
   // reading it out of the roles file. A literal here, not the chart's value: the point of the
   // assertions below is that the grant is exactly this one topic.
   PRIMARY_HOST_ID: PRIMARY_HOST_ID,
+  // Derived by the chart from the site group; the reconcile grants `<prefix>/#` from it.
+  DIRECTORY_MQTT_TOPIC_PREFIX: DIRECTORY_PREFIX,
 };
 
 /**
- * Run the real reconcile in the credential service's image, as both targets do before the broker
+ * Run the real reconcile in the credential service's image, as the chart does before the broker
  * starts. `outDir` is where the document lands; `preamble` runs first in the same shell.
  */
 function runInit({ outDir = dynsecDir, preamble = '' } = {}) {
@@ -175,13 +187,16 @@ function assemble({ withTls }) {
  * Start the broker on the composed config and the reconciled document, and return its log plus
  * whether it reached "running". The document is COPIED into the container rather than mounted:
  * the plugin rewrites it on every change, and each broker here must start from the same one. It
- * is chowned to 1883 at 0600 as both targets do; the plugin warns on anything wider.
+ * is chowned to 1883 at 0600 as the chart does; the plugin warns on anything wider.
  */
-function startBroker({ withTls, certsDir, ports = [] }) {
+function startBroker({ withTls, certsDir }) {
   assemble({ withTls });
   const name = `fp-broker-check-${Date.now()}`;
+  // NO PUBLISHED PORT. Every client below joins this container's network namespace with
+  // `--network container:<name>` or runs under `docker exec`, so nothing on the host connects to
+  // the broker. A published port only collides: two runs at once, and the second dies with
+  // "Bind for 0.0.0.0:21883 failed", which reads as the config failing to start.
   const args = ['run', '-d', '--name', name];
-  for (const p of ports) args.push('-p', p);
   args.push('-v', `${cfg}:/cfgsrc:ro`, '-v', `${dynsecDir}:/dynsrc:ro`);
   if (certsDir) args.push('-v', `${certsDir}:/mosquitto/certs:ro`);
   args.push(
@@ -299,7 +314,7 @@ try {
 
   // 1. The base policy starts on the pinned version.
   {
-    const r = startBroker({ withTls: false, ports: ['21883:1883'] });
+    const r = startBroker({ withTls: false });
     started.push(r.name);
     if (!r.running) {
       problems.push(`mosquitto.conf does NOT start on ${IMAGE}:\n         ${startFailure(r)}`);
@@ -335,7 +350,7 @@ try {
       const authed = docker([
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
         'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-u', 'probe', '-P', ACCOUNTS.probe,
-        '-t', 'spBv1.0/ACS-Cymru/DDATA/probe/dev1', '-m', 'x'
+        '-t', 'spBv1.0/Aber/DDATA/probe/dev1', '-m', 'x'
       ]);
       if (authed.status === 0) {
         ok.push('1883 accepts a client whose hash was transplanted from a password file');
@@ -377,57 +392,57 @@ try {
 
       expect(
         'a gateway may publish under its OWN edge node',
-        (delivers(GATEWAY_A, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers(GATEWAY_A, `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         true
       );
       expect(
         'a gateway may NOT publish under another edge node (the forgery gateway binding cannot catch)',
-        (delivers(GATEWAY_A, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_B}/dev1`)),
+        (delivers(GATEWAY_A, `spBv1.0/Aber/DDATA/${GATEWAY_B}/dev1`)),
         false
       );
       expect(
         'an imported gateway account is confined exactly as an issued one',
-        (delivers(GATEWAY_B, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_B}/dev1`)),
+        (delivers(GATEWAY_B, `spBv1.0/Aber/DDATA/${GATEWAY_B}/dev1`)),
         true
       );
       expect(
         'an imported account with no role authenticates and reaches nothing (publish)',
-        (delivers('probe', 'spBv1.0/ACS-Cymru/DDATA/probe/dev1')),
+        (delivers('probe', 'spBv1.0/Aber/DDATA/probe/dev1')),
         false
       );
       expect(
         'an imported account with no role authenticates and reaches nothing (subscribe)',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
         false
       );
       expect(
         'the ingestion principal may NOT publish DDATA',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal may NOT publish DBIRTH',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/DBIRTH/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/DBIRTH/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal MAY publish a rebirth NCMD (alias recovery depends on it)',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
         true
       );
       expect(
         'the i3X principal may publish NOTHING (it refuses writes in code; the broker agrees)',
-        (delivers('factoryplus_i3x', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`)),
+        (delivers('factoryplus_i3x', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
         false
       );
       expect(
         'the monitoring principal may publish NOTHING',
-        (delivers('factoryplus_monitor', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_monitor', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the plugin\'s admin reads NOTHING under spBv1.0 (it speaks to the plugin and nothing else)',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
         false
       );
       // A gateway's own NCMD must reach it through the wildcard subscription the simulator flow and
@@ -436,13 +451,13 @@ try {
       // instead, rebirth recovery breaks silently.
       expect(
         'a gateway receives its own NCMD through a wildcard subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`,
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         true
       );
       expect(
         'a gateway does NOT receive another edge node\'s NCMD through that same subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_B}`,
+        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_B}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         false
       );
@@ -453,14 +468,14 @@ try {
       // be able to enumerate the site, and reading is silent.
       expect(
         'the ingestion principal MAY publish the Directory (it is the only writer)',
-        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
-          'factoryplus_ingestion', 'ACS-Cymru/Directory/#')),
+        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
+          'factoryplus_ingestion', DIRECTORY_FILTER)),
         true
       );
       expect(
         'a gateway may NOT read the Directory (it would enumerate every asset on the site)',
-        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
-          GATEWAY_A, 'ACS-Cymru/Directory/#')),
+        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
+          GATEWAY_A, DIRECTORY_FILTER)),
         false
       );
       // The i3X server reads the Directory over PostgREST, so its role holds no grant here
@@ -468,8 +483,8 @@ try {
       // check would notice it coming back.
       expect(
         'the i3X principal may NOT read the Directory (it reads it from the database)',
-        (delivers('factoryplus_ingestion', 'ACS-Cymru/Directory/v1/device',
-          'factoryplus_i3x', 'ACS-Cymru/Directory/#')),
+        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
+          'factoryplus_i3x', DIRECTORY_FILTER)),
         false
       );
 
@@ -478,19 +493,19 @@ try {
       // reading the tree would read every machine's telemetry with one credential.
       expect(
         'the ingestion principal MAY publish the Unified Namespace (it is the only writer)',
-        (delivers('factoryplus_ingestion', 'uns/ACS-Cymru/Site/Area/Cell/dev1/Speed',
+        (delivers('factoryplus_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
           'factoryplus_ingestion', 'uns/#')),
         true
       );
       expect(
         'a gateway may NOT read the Unified Namespace (one credential would read the whole plant)',
-        (delivers('factoryplus_ingestion', 'uns/ACS-Cymru/Site/Area/Cell/dev1/Speed',
+        (delivers('factoryplus_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
           GATEWAY_A, 'uns/#')),
         false
       );
       expect(
         'a gateway may NOT publish into the Unified Namespace (only decoded, verified readings belong there)',
-        (delivers(GATEWAY_A, `uns/ACS-Cymru/Site/Area/Cell/${GATEWAY_A}/Speed`,
+        (delivers(GATEWAY_A, `uns/Aber/Site/Area/Cell/${GATEWAY_A}/Speed`,
           'factoryplus_ingestion', 'uns/#')),
         false
       );
@@ -592,7 +607,7 @@ try {
       const passwordC1 = 'gateway-c-secret-0001';
       const passwordC2 = 'gateway-c-secret-0002';
       const pubAsC = (password) => docker(['exec', r.name, 'mosquitto_pub', '-u', GATEWAY_C, '-P', password,
-        '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_C}/dev1`, '-m', 'x']);
+        '-t', `spBv1.0/Aber/DDATA/${GATEWAY_C}/dev1`, '-m', 'x']);
       let issued;
       try {
         issued = issueWithControl(send, GATEWAY_C, passwordC1);
@@ -605,12 +620,12 @@ try {
         ACCOUNTS[GATEWAY_C] = passwordC1;
         expect(
           'an issued gateway may publish under its own edge node, with no reload',
-          (delivers(GATEWAY_C, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_C}/dev1`)),
+          (delivers(GATEWAY_C, `spBv1.0/Aber/DDATA/${GATEWAY_C}/dev1`)),
           true
         );
         expect(
           'an issued gateway may NOT publish under another edge node',
-          (delivers(GATEWAY_C, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
+          (delivers(GATEWAY_C, `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
           false
         );
 
@@ -632,7 +647,7 @@ try {
         docker(['exec', r.name, 'sleep', '2']);
         docker(['exec', r.name, 'mosquitto_pub',
           '-u', 'factoryplus_ingestion', '-P', ACCOUNTS.factoryplus_ingestion,
-          '-t', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_C}`, '-m', MARKER]);
+          '-t', `spBv1.0/Aber/NCMD/${GATEWAY_C}`, '-m', MARKER]);
         docker(['exec', r.name, 'sleep', '2']);
         const beforeRotation = docker(['exec', r.name, 'cat', rotated]).stdout || '';
         const sessionWasLive = beforeRotation.includes(MARKER);
@@ -758,7 +773,7 @@ try {
       chmodSync(join(certs, 'tls.key'), 0o644);
       chmodSync(join(certs, 'tls.crt'), 0o644);
       chmodSync(join(certs, 'ca.crt'), 0o644);
-      const r = startBroker({ withTls: true, certsDir: certs, ports: ['28883:8883'] });
+      const r = startBroker({ withTls: true, certsDir: certs });
       started.push(r.name);
       if (!r.running) {
         problems.push(
@@ -773,7 +788,7 @@ try {
           '-v', `${certs}:/c:ro`, IMAGE,
           'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
           '-u', GATEWAY_A, '-P', ACCOUNTS[GATEWAY_A],
-          '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/tls`, '-m', 'x'
+          '-t', `spBv1.0/Aber/DDATA/${GATEWAY_A}/tls`, '-m', 'x'
         ]);
         if (tls.status === 0) {
           ok.push('8883 completes a verified TLS handshake and accepts an authenticated publish');
@@ -794,7 +809,7 @@ try {
   // refused on 8883 as on 1883; and re-running the generator does not mint a new root, asserted by
   // fingerprint, since the root is distributed by hand to every appliance.
   {
-    const TLS_INIT_IMAGE = 'acs-cymru-mosquitto-tls-init:check';
+    const TLS_INIT_IMAGE = 'aber-mosquitto-tls-init:check';
     const build = docker(['build', '-q', '-t', TLS_INIT_IMAGE, join(REPO, 'mosquitto', 'tls-init')]);
 
     if (build.status !== 0) {
@@ -849,7 +864,7 @@ try {
         // (a) + (b): the broker serves the issued leaf, and TLS does not relax authentication. The
         // generator chowns the key to uid 1883 itself, so this also exercises the ownership logic
         // the real deployment depends on.
-        const r = startBroker({ withTls: true, certsDir: certs, ports: ['28884:8883'] });
+        const r = startBroker({ withTls: true, certsDir: certs });
         started.push(r.name);
 
         if (!r.running) {
@@ -862,7 +877,7 @@ try {
             '-v', `${certs}:/c:ro`, IMAGE,
             'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
             '-u', GATEWAY_A, '-P', ACCOUNTS[GATEWAY_A],
-            '-t', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/tls`, '-m', 'x',
+            '-t', `spBv1.0/Aber/DDATA/${GATEWAY_A}/tls`, '-m', 'x',
           ]);
           if (verified.status === 0) {
             ok.push('8883 serves the issued leaf and a client verifies it against the issued root');
@@ -932,7 +947,7 @@ if (problems.length) {
   console.error(
     `\nThis is checked against ${IMAGE} -- the tag the chart pins -- because mosquitto's\n` +
       'accepted syntax and the plugin\'s behaviour CHANGE BETWEEN MINOR VERSIONS. A config that works\n' +
-      'on `latest` can take the broker down on both targets the moment the image is pinned, and the\n' +
+      'on `latest` can take the broker down the moment the image is pinned, and the\n' +
       'plugin\'s treatment of `%u`, of a deleted role and of a disabled session is measured, not\n' +
       'assumed (mosquitto/README.md).\n'
   );

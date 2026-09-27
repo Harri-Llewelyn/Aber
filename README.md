@@ -1,19 +1,42 @@
-# AMRC Connectivity Stack - Cymru
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/aber-mark-dark.svg">
+  <img src="docs/assets/aber-mark.svg" alt="The Aber emblem: three streams meeting the sea under an open sky" width="112">
+</picture>
 
-[![CI Pipeline](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml)
+# Aber - the shopfloor data platform
 
-An industrial, asset-centric manufacturing management platform aligned with the
-**AMRC Connectivity Stack (ACS / Factory+)** framework.
+[![CI Pipeline](https://github.com/Harri-Llewelyn/Aber/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/Aber/actions/workflows/ci.yml)
 
-Real-time telemetry streaming, shopfloor cell mapping, zero-touch edge device onboarding,
-row-level security, continuous Digital Thread audit logging, AAS V3 export, and edge flow
-management.
+Aber is Welsh for a river mouth, where many streams converge and leave as one. That is the
+ingestion topology: telemetry from every gateway on the shopfloor converges on one broker and one
+historian, and leaves through one API, one Unified Namespace and one digital thread.
+
+An industrial, asset-centric platform: real-time telemetry streaming, shopfloor cell mapping,
+zero-touch edge device onboarding, row-level security, continuous Digital Thread audit logging,
+AAS V3 export, and edge flow management. It speaks Factory+ Sparkplug B on the wire, and it was
+inspired by the **AMRC Connectivity Stack (ACS)**; [how far that goes](#relationship-to-acs) is below.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
-> Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
+> Where ACS ships bespoke microservices, Aber uses Supabase, TimescaleDB, Grafana and
 > Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
 > the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
 > cold archival — sixteen edge functions, an i3X server and a React dashboard.
+
+## Relationship to ACS
+
+**Aber is an independent project.** It was built from the ground up, taking the AMRC Connectivity
+Stack's documentation as its inspiration, and contains no ACS code. It does not follow ACS releases
+and is not intended to merge back. It is not affiliated with or endorsed by the AMRC.
+
+What it keeps is interoperability with Factory+:
+
+- **On the wire:** Sparkplug B, with the Factory+ metric naming rule and payload marker.
+- **The Directory:** the read half of the Factory+ Directory's REST contract, at the unprefixed
+  `/ping` and `/v1/…` paths a Factory+ client expects
+  ([`fplus-directory`](supabase/README.md#the-factory-directory-adapter)), and its documents on MQTT
+  ([`directory_publish.py`](ingestion/README.md#the-directory-on-mqtt)).
+- **Identifiers are local.** Schema and service UUIDs are minted by each deployment rather than
+  registered with the AMRC, and every response that carries one says so.
 
 ---
 
@@ -87,7 +110,7 @@ the dashboard reads PostgREST and subscribes to Realtime.
 ## Deployment
 
 **Kubernetes is the deployment target.** The Helm chart in
-[`deploy/helm/acs-cymru`](deploy/helm/acs-cymru) deploys the whole platform onto k3s, or onto k3d
+[`deploy/helm/aber`](deploy/helm/aber) deploys the whole platform onto k3s, or onto k3d
 for development; the runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md) and the design
 record is [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md). The one thing that
 runs on Docker Compose is the gateway appliance: a Raspberry Pi runs the bundle the dashboard hands
@@ -110,8 +133,8 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 # Ten images are built from this repository. They are published to GHCR at the chart's
 # appVersion, and the chart pulls them under exactly these names: a local build that is
 # tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
-NS=ghcr.io/harri-llewelyn/acs-cymru
-V=0.1.0                                       # appVersion in deploy/helm/acs-cymru/Chart.yaml
+NS=ghcr.io/harri-llewelyn/aber
+V=0.1.0                                       # appVersion in deploy/helm/aber/Chart.yaml
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
 docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
@@ -125,23 +148,23 @@ docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestio
 
 # A local cluster: k3d is k3s in Docker, with the Traefik, ServiceLB and local-path that
 # production has. Port 80 is the Ingress; 1883 is the broker for gateways on the LAN.
-k3d cluster create acs-cymru --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
+k3d cluster create aber --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" --wait
 k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
-  gateway-credential backup-service db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c acs-cymru
+  gateway-credential backup-service db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c aber
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 
-kubectl create namespace acs-cymru
-helm install acs-cymru deploy/helm/acs-cymru -n acs-cymru \
-  -f deploy/helm/acs-cymru/values-dev.yaml --timeout 15m
+kubectl create namespace aber
+helm install aber deploy/helm/aber -n aber \
+  -f deploy/helm/aber/values-dev.yaml --timeout 15m
 
 # NOT `--wait` — it deadlocks the first install. See deploy/k8s/README.md.
-for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
-  kubectl -n acs-cymru rollout status "$w" --timeout=10m
+for w in $(kubectl -n aber get statefulset,deploy -o name); do
+  kubectl -n aber rollout status "$w" --timeout=10m
 done
 
-helm test acs-cymru -n acs-cymru          # the postgres_fdw gate
+helm test aber -n aber          # the postgres_fdw gate
 ```
 
 Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
@@ -149,7 +172,7 @@ Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `
 neither of which is HTTP and so neither of which can ride an Ingress.
 
 - **`values-dev.yaml` carries published demo credentials, and they are in git.** `npm run setup`
-  writes `deploy/helm/acs-cymru/values-local.yaml` (gitignored) with credentials minted for this
+  writes `deploy/helm/aber/values-local.yaml` (gitignored) with credentials minted for this
   install; for anything another person can reach, start from `values-prod.yaml.example` and point
   `secrets.existingSecret` at an externally managed Secret.
 - **`npm run dev:reset` is the way back to a blank stack**: it uninstalls, drops every claim and
@@ -273,20 +296,20 @@ for — plus demo accounts (`supabase/seed.sql`).
 
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
-prompt rather than a login form. In Node-RED, click **Sign in with ACS-Cymru**; Administrator can
+prompt rather than a login form. In Node-RED, click **Sign in with Aber**; Administrator can
 deploy, every other role gets a read-only editor. Deploying a flow is `gitops:manage`, which
 `0069` made Administrator-only. The editor used to be the *second* door onto that permission; since
 the Directory page's Sync button and the `deploy-nodered` function were retired with the
 demonstrator, it is the only one.
 
-**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `acscymru123`:
+**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `aber123`:
 
 | Email | Role | Access |
 | :--- | :--- | :--- |
-| `admin@acs-cymru.local` | `Administrator` | Full CRUD |
-| `manager@acs-cymru.local` | `Shopfloor_Manager` | Full CRUD |
-| `operator@acs-cymru.local` | `Operator` | Read-only + telemetry |
-| `auditor@acs-cymru.local` | `Auditor` | Digital Thread read-only |
+| `admin@aber.local` | `Administrator` | Full CRUD |
+| `manager@aber.local` | `Shopfloor_Manager` | Full CRUD |
+| `operator@aber.local` | `Operator` | Read-only + telemetry |
+| `auditor@aber.local` | `Auditor` | Digital Thread read-only |
 
 Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
 `Administrator` must promote them.
@@ -311,16 +334,16 @@ administrator, who can set a password through the Auth API or Studio instead.
 | **[`tutorial/`](tutorial/README.md)** | The walkthrough for a blank install: one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it |
 | **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, the development loop, upgrade, teardown, hardening, releases |
-| [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
+| [`deploy/helm/aber/`](deploy/helm/aber) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
-| [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the three places that is not the whole truth |
+| [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the four places that is not the whole truth, and the floor it holds from |
 | [`docs/releases.md`](docs/releases.md) | What a release promises: the supported window, what makes a version major, deprecation, and how a site learns a release matters to it |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 99 superseded migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
 | [`scripts/`](scripts) | Setup, the dev loop, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, AAS push |
-| [`test-harness/`](test-harness) | Vendored IDTA AAS schema, conformance test-runner image |
+| **[`test-harness/`](test-harness/README.md)** | The test-runner image, the synthetic load generator and the scale envelope, the stack-only suites, the vendored IDTA AAS schema |
 | [`forge/`](forge) | Everything the platform publishes into the forge as a repository. `gateway-platform/` is the playbook every appliance converges to with `ansible-pull`, tagged at the platform's version; its `appliance/` is the compose project the appliance runs, which the installer lays down and the ZIP bundle ships |
 
 ---
@@ -338,37 +361,38 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | Component | Image | Reached at |
 | :--- | :--- | :--- |
 | `alloy` | `grafana/alloy:v1.11.2` | the one collector: logs, metrics and host metrics; `alloy:12345` |
-| `backup` | `supabase/postgres:17.6.1.160` | the nightly CronJob, when the backup service is off |
-| `backup-service` | `ghcr.io/harri-llewelyn/acs-cymru/backup-service` | the Backups page's worker (`backupService.enabled`) |
-| `cold-archive` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | CronJob: exports, verifies and drops cold chunks |
-| `db-init` | `ghcr.io/harri-llewelyn/acs-cymru/db-init` | hook Job: the migration chain, on every install and upgrade |
-| `db-roles-init` | `supabase/postgres:17.6.1.160` | hook Job: the Supabase roles and their passwords |
-| `e2e-aas-export` | `ghcr.io/harri-llewelyn/acs-cymru/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
-| `e2e-validate` | `ghcr.io/harri-llewelyn/acs-cymru/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
-| `frontend` | `ghcr.io/harri-llewelyn/acs-cymru/frontend` | `app.<domain>` |
+| `backup` | `supabase/postgres:17.6.1.175` | the nightly CronJob, when the backup service is off |
+| `backup-service` | `ghcr.io/harri-llewelyn/aber/backup-service` | the Backups page's worker (`backupService.enabled`) |
+| `cold-archive` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: exports, verifies and drops cold chunks |
+| `db-init` | `ghcr.io/harri-llewelyn/aber/db-init` | hook Job: the migration chain, on every install and upgrade |
+| `db-roles-init` | `supabase/postgres:17.6.1.175` | hook Job: the Supabase roles and their passwords |
+| `e2e-aas-export` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
+| `e2e-validate` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
+| `frontend` | `ghcr.io/harri-llewelyn/aber/frontend` | `app.<domain>` |
 | `gitea` | `gitea/gitea:1.27.3` | `git.<domain>` through the gateway's forge listener; SSH on `gitea-external:22` (LoadBalancer) |
 | `grafana` | `grafana/grafana:13.2.0` | `grafana.<domain>` |
-| `i3x-service` | `ghcr.io/harri-llewelyn/acs-cymru/i3x-service` | `i3x.<domain>` |
-| `ingestion` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | no route; `ingestion-metrics:9108` is scraped |
+| `i3x-service` | `ghcr.io/harri-llewelyn/aber/i3x-service` | `i3x.<domain>` |
+| `ingestion` | `ghcr.io/harri-llewelyn/aber/ingestion` | no route; `ingestion-metrics:9108` is scraped |
+| `load-test` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`loadTest.enabled`): synthetic Sparkplug load, applied by `scripts/load-test.mjs` |
 | `loki` | `grafana/loki:3.5.7` | `loki:3100`, read by Grafana |
 | `mosquitto` | `eclipse-mosquitto:2.0.22`, the `gateway-credential` sidecar, `sapcc/mosquitto-exporter:0.8.0` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
-| `node-red` | `ghcr.io/harri-llewelyn/acs-cymru/node-red` | `nodered.<domain>` |
-| `playback` | `ghcr.io/harri-llewelyn/acs-cymru/ingestion` | the broker playback worker (`playback.enabled`) |
+| `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |
+| `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
 | `prometheus` | `prom/prometheus:v3.14.0` | `prometheus:9090`, read by Grafana |
 | `realtime` | `supabase/realtime:v2.102.3` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
 | `storage-init` | `node:24-alpine` | hook Job: the storage buckets |
-| `storage-policies` | `supabase/postgres:17.6.1.160` | hook Job: the storage RLS policies |
+| `storage-policies` | `supabase/postgres:17.6.1.175` | hook Job: the storage RLS policies |
 | `supabase-auth` | `supabase/gotrue:v2.189.0` | behind `api.<domain>/auth/v1` |
-| `supabase-db` | `supabase/postgres:17.6.1.160`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
+| `supabase-db` | `supabase/postgres:17.6.1.175`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
 | `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (Service `supabase-kong:8000`), Studio on 8001, the forge on 8002 |
-| `supabase-functions` | `ghcr.io/harri-llewelyn/acs-cymru/edge-runtime` | behind `api.<domain>/functions/v1` |
+| `supabase-functions` | `ghcr.io/harri-llewelyn/aber/edge-runtime` | behind `api.<domain>/functions/v1` |
 | `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
 | `supabase-rest` | `postgrest/postgrest:v14.12` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
 | `supabase-storage` | `supabase/storage-api:v1.60.4` | behind `api.<domain>/storage/v1` |
 | `supabase-studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `studio.<domain>`, off by default, behind the gateway's login |
-| `swagger-ui` | `ghcr.io/harri-llewelyn/acs-cymru/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
-| `test-db-tls` | `supabase/postgres:17.6.1.160` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
-| `test-fdw` | `supabase/postgres:17.6.1.160` | `helm test`: the postgres_fdw gate |
+| `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
+| `test-db-tls` | `supabase/postgres:17.6.1.175` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
+| `test-fdw` | `supabase/postgres:17.6.1.175` | `helm test`: the postgres_fdw gate |
 | `timescaledb` | `timescale/timescaledb:2.29.2-pg17`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `timescaledb:5432`; `:9187` is scraped |
 | `timescaledb-maintenance` | `timescale/timescaledb:2.29.2-pg17` | hook Job: extension, retention, rollups, roles |
 
@@ -469,7 +493,7 @@ the render fails naming them rather than publishing a login nobody can complete.
 reaching it is a port-forward:
 
 ```bash
-kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
+kubectl -n <ns> port-forward svc/supabase-studio 54323:3000
 ```
 
 Two consequences worth stating on the front page; both are detailed in
@@ -482,8 +506,9 @@ Two consequences worth stating on the front page; both are detailed in
   from `msg.req.headers`.
 - **The `asset-3d-models` bucket is public-read**, because an exported AAS `File` URL must resolve
   for a viewer holding no session and a signed URL would turn every shell already handed out into a
-  time bomb. Anything in it must carry nothing beyond machine geometry. Writes are gated on
-  `device:manage`, not merely `authenticated`.
+  time bomb. Anything in it must carry nothing beyond machine geometry. The objects are public; the
+  listing is not: keys are `<device_uuid>/<file>`, so listing the bucket, like writing to it, is
+  gated on `device:manage`, not merely `authenticated`.
 
 ### Machine identities
 
@@ -516,7 +541,7 @@ The mechanism and its limits are in
 [`supabase/README.md`](supabase/README.md#the-access-control-page-states-what-is-outstanding).
 
 **Known issues** — things that can be worked on — are tracked as
-[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues). **Accepted risks are not**, and
+[GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues). **Accepted risks are not**, and
 live below.
 
 ### Accepted risks
@@ -635,7 +660,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 [`supabase/README.md`](supabase/README.md#adding-a-vocabulary).
 
 > Adopting the MTConnect vocabulary is not a compliance claim; that requires the Implementer
-> License. Locally-minted semantic ids live under `https://acs-cymru.local/semantics/…` — the
+> License. Locally-minted semantic ids live under `https://aber.local/semantics/…` — the
 > namespace is the honesty mechanism, and an id under `mtconnect.org` would assert an
 > interoperability that does not exist.
 
@@ -677,6 +702,7 @@ cd frontend && npm test                 # Frontend — 1,600+ tests
 npm run test:py                         # Python unit lane — no services needed
 npm run test:db                         # database lane, against a throwaway Postgres
 npm run dev:test                        # validate.py and the stack lane, against the k3d cluster
+npm run lint                            # the nine static checks in docs/static-analysis.md
 ```
 
 **`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
@@ -716,10 +742,10 @@ port-forwards**, and the two agreeing is the wiring check.
 
 ## Roadmap & Future Extensions
 
-**The roadmap is the [1.0 milestone](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/1)**, and none of
+**The roadmap is the [1.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/1)**, and none of
 it is speculative: every issue on it names the code it would build on, so a reader can tell how far
 away each is. A thing that is not built and that 1.0 does not need competes for
-[2.0](https://github.com/Harri-Llewelyn/ACS-Cymru/milestone/2) rather than sitting in the release's critical
+[2.0](https://github.com/Harri-Llewelyn/Aber/milestone/2) rather than sitting in the release's critical
 path.
 
 **[`docs/roadmap.md`](docs/roadmap.md) is what the roadmap left behind:** every entry that has
@@ -727,7 +753,7 @@ retired and the documentation its substance moved into. Work does not stay on a 
 — it becomes the component's own documentation, and that file says which.
 
 **Defects and accepted risks are separate.** A known issue is a `bug` in
-[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues); **accepted risks** live under
+[GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues); **accepted risks** live under
 [Accepted risks](#accepted-risks).
 
 ---
@@ -751,6 +777,7 @@ are in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 | :--- | :--- |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Working rules, and what to run before opening a pull request |
 | [`docs/testing.md`](docs/testing.md) | Every suite and what it needs, the six CI jobs, the release workflow |
+| [`docs/static-analysis.md`](docs/static-analysis.md) | The lints and scans, what each judges, and how a finding is accepted |
 | [`docs/handover.md`](docs/handover.md) | Packaging a hand-off — what to purge before transferring a tree |
 | [`docs/releases.md`](docs/releases.md) | What a release promises — the supported window, the version policy and the deprecation path |
 | [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability privately, and the supported version window |

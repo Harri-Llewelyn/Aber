@@ -109,7 +109,7 @@ class CapacityTest(unittest.TestCase):
     def test_evictions_are_counted_so_hitting_the_cap_is_observable(self):
         """
         A cache silently at its bound is a cache dropping entries nobody asked about. The counter
-        is exported as acs_ingestion_cache_evictions_total; non-zero is the interesting case.
+        is exported as aber_ingestion_cache_evictions_total; non-zero is the interesting case.
         """
         c = cache(maxsize=3)
         for i in range(3):
@@ -119,6 +119,28 @@ class CapacityTest(unittest.TestCase):
         for i in range(3, 8):
             c.set(i, i)
         self.assertEqual(c.evictions, 5)
+
+    def test_growing_evicts_nothing(self):
+        c = cache(maxsize=3)
+        for key in ("a", "b", "c"):
+            c.set(key, key)
+        self.assertTrue(c.resize(10))
+        for key in ("d", "e", "f"):
+            c.set(key, key)
+        self.assertEqual((len(c), c.evictions), (6, 0))
+
+    def test_shrinking_evicts_the_oldest_and_counts_them(self):
+        c = cache(maxsize=5)
+        for key in ("a", "b", "c", "d", "e"):
+            c.set(key, key)
+        c.get("a")
+        c.resize(3)
+        self.assertEqual(c.evictions, 2)
+        for key in ("a", "d", "e"):
+            self.assertIn(key, c)
+
+    def test_resizing_to_the_same_capacity_reports_no_change(self):
+        self.assertFalse(cache(maxsize=3).resize(3))
 
     def test_the_cap_is_environment_overridable_and_declared_as_a_constant(self):
         # Mirrors MAX_ALIASES_PER_NODE, which is the precedent this was written from.
@@ -300,7 +322,7 @@ class CallSiteTest(unittest.TestCase):
         self.assertGreater(ingestion.SCHEMA_CACHE_TTL_SECONDS, ingestion.CACHE_TTL_SECONDS)
 
     def test_each_cache_is_named_for_its_metric_label(self):
-        # The names become acs_ingestion_cache_entries{cache="..."}, so they have to be distinct.
+        # The names become aber_ingestion_cache_entries{cache="..."}, so they have to be distinct.
         names = [c.name for c in
                  (ingestion._device_cache, ingestion._gateway_cache, ingestion._schema_cache)]
         self.assertEqual(sorted(names), ["device", "gateway", "schema"])

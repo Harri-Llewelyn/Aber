@@ -1,49 +1,33 @@
 """
 Publishing a stored capture back into the stack, as a simulated gateway.
 
-=================================================================================================
-A SEPARATE PROCESS, AND A SEPARATE PRINCIPAL, AND NOT THE INGESTION DAEMON
-=================================================================================================
-
-The broker's roles grant the ingestion principal `read spBv1.0/#` and `write spBv1.0/+/NCMD/+` --
-rebirth requests and nothing else. Teaching it to publish asset data would widen the one account the
-whole ACL is built around, and `verify_gateway_binding()` cannot tell a forged message under a
-correctly bound device from a real one.
-
-THE SEQ OBJECTION THAT KEPT CAPTURE INSIDE THE DAEMON DOES NOT APPLY HERE. That objection was about
-a second SUBSCRIBER: `_last_seq` is keyed `(group, edge_node)`, so two consumers split the stream and
-gap detection fires permanently. This process only PUBLISHES. It holds no subscription.
-
-=================================================================================================
-TWO IDENTITIES, WHICH IS THE ARRANGEMENT WORTH UNDERSTANDING BEFORE READING ANYTHING ELSE
-=================================================================================================
+TWO IDENTITIES, AND THAT SPLIT IS THE ARRANGEMENT TO UNDERSTAND FIRST.
 
   SUPABASE     `Service_Playback` (0056). Reads the queue, reads the capture, writes status.
                Fixed, and the same for every job.
   MQTT         THE TARGET GATEWAY'S OWN ACCOUNT -- username equals its `sparkplug_id`. Per job,
                and supplied as a secret the way `MQTT_VALIDATOR_USER` is.
 
-One says what this may do in the database; the other says what the broker will carry. That split is
-what lets `spBv1.0/+/+/<sparkplug_id>/#` confine a playback with NO ACL CHANGE AT ALL: a
-worker connected as `gwyAAA...` cannot publish under `gwyBBB...`, because the broker drops it at the
-network protocol layer before any subscriber sees it. Even a job carrying a wrong mapping cannot
-reach another gateway's topics.
+One says what this may do in the database; the other says what the broker will carry, which is what
+confines a playback to one edge node with no ACL change at all: a worker connected as `gwyAAA...`
+cannot publish under `gwyBBB...`, because the broker drops it before any subscriber sees it.
 
-=================================================================================================
-WHAT THIS PROCESS DOES NOT DECIDE
-=================================================================================================
+A SEPARATE PROCESS, NOT THE INGESTION DAEMON, because that principal is the one the whole ACL is
+built around and publishing asset data would widen it. This process only PUBLISHES and holds no
+subscription, so it takes nothing from the daemon's view of the stream.
 
-Nothing about WHETHER a playback is allowed. `start_playback_job()` has already refused a target
-that is not `is_simulated`, one holding no broker credential, and a device map naming devices of
-another gateway. This process refuses one further thing -- a target it holds no MQTT password for --
-and otherwise carries out what it is given.
-
-The publishing itself is `capture.py`'s, unchanged: `plan_playback()` decides every topic, payload
-and delay with no broker and no clock, so this file is a loop that cannot make a new decision.
+THIS DECIDES NOTHING ABOUT WHETHER A PLAYBACK IS ALLOWED. `start_playback_job()` has already refused
+a target that is not `is_simulated`, one holding no broker credential, and a device map naming
+another gateway's devices. This refuses one further thing -- a target it holds no MQTT password for
+-- and otherwise carries out what it is given. The publishing is `capture.py`'s `plan_playback()`,
+which decides every topic, payload and delay with no broker and no clock, so this file is a loop
+that cannot make a new decision.
 
 Related: supabase/migrations/archive/0056_playback_orchestration.sql (every gate called here),
          capture.py (the plan, the identity rewrite, the rebasing),
-         README.md -> "Playback from the dashboard".
+         README.md -> "Playback from the dashboard" (the three tiers of confinement, why the
+         per-gateway role is generated rather than a pattern, and what a failed playback looks
+         like).
 """
 
 import json
@@ -58,7 +42,8 @@ from logging_config import get_logger
 
 # `get_logger`, not `logging.getLogger(__name__)`: this stack configures NAMED loggers with
 # `propagate = False`, so a module logger made the standard-library way has no handler and its INFO
-# lines are discarded. capture_worker.py records what that cost when it happened there.
+# lines are discarded. (docs/incidents.md -- "A worker that logged nothing looked like one nobody
+# had asked for")
 logger = get_logger("playback")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
@@ -96,22 +81,19 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 # Where the credential service drops passwords for simulated gateways (0078).
 #
 # THE FILE EXISTS BECAUSE THE ENVIRONMENT CANNOT BE RE-READ. A container's environment is fixed at
-# creation, so before this the only way to hand this worker a newly-issued password was a pod
-# restart -- and an operator who had just clicked "Generate broker credential" had no reason to
-# think that was the next step. The credential was correct, the worker held the previous one, and
-# the failure arrived as a broker refusal.
+# creation, so a newly-issued password reaches a running worker only through a file it can re-read.
 #
 # WRITTEN ONLY FOR GATEWAYS THE DATABASE CALLS PLAYBACK TARGETS. The filter is applied at issue time
 # by authorize_host_gateway_credential() (0078), not here, because `is_simulated` is the
 # database's fact and a worker deciding which passwords it is allowed to have would be deciding its
 # own blast radius. This end only reads what it was given.
 #
-# THE STRING IS DUPLICATED IN scripts/lib/mosquitto-credentials.mjs, which is the writer, and in the
-# mount both deployment targets provide. Python and JavaScript cannot share a constant, and a
-# mismatch is silent at BOTH ends -- the write succeeds and the read finds nothing -- so
-# scripts/check-docs-drift.mjs asserts all four agree.
+# THE STRING IS DUPLICATED IN scripts/lib/mosquitto-credentials.mjs, which is the writer, and twice
+# more in the chart -- the mount and the Secret key projected into it. Python and JavaScript cannot
+# share a constant, and a mismatch is silent at BOTH ends -- the write succeeds and the read finds
+# nothing -- so scripts/check-docs-drift.mjs asserts all four agree.
 PLAYBACK_CREDENTIAL_FILE = os.getenv(
-    "PLAYBACK_CREDENTIAL_FILE", "/var/lib/acs-cymru/playback/credentials.json"
+    "PLAYBACK_CREDENTIAL_FILE", "/var/lib/aber/playback/credentials.json"
 )
 
 
@@ -121,10 +103,9 @@ def _file_credentials(path=None):
 
     ABSENT IS NORMAL AND IS NOT AN ERROR, and absent has two forms: no file at all, and a file with
     nothing in it -- which is what the chart's Secret projection presents until something has been
-    delivered. A stack that has never issued a playback credential is in that state, and a worker
-    logging an error every three seconds about a file it does not need would train an operator to
-    ignore the log that also carries the real refusals. Unreadable or malformed IS an error,
-    because that is a delivery that happened and did not arrive.
+    delivered. Unreadable or malformed IS an error, because that is a delivery that happened and did
+    not arrive. (docs/incidents.md -- "An empty credential file is the normal state, and reading it
+    as malformed logged forever")
     """
     path = path or PLAYBACK_CREDENTIAL_FILE
     try:
@@ -139,12 +120,10 @@ def _file_credentials(path=None):
         )
         return {}
 
-    # EMPTY IS ABSENT, and on Kubernetes it is the ONLY form absent takes. The chart creates
+    # EMPTY IS ABSENT, and on a cluster it is the ONLY form absent takes. The chart creates
     # `playback_credentials.json` as a key of the broker's credential Secret on every install and
     # the projection mounts it whether or not anything has been delivered, so the file a fresh
-    # stack presents is blank rather than missing. Parsing that as malformed logged an error every
-    # poll -- forever, on any stack with no playback target yet, which is exactly the log the
-    # FileNotFoundError arm above exists to avoid producing.
+    # stack presents is blank rather than missing.
     if not raw.strip():
         return {}
 
@@ -222,7 +201,7 @@ def _supabase():
     # ingestion.py records at length that setting the session header instead silently sends the
     # gateway key. The storage client is built separately below for exactly that reason.
     client.postgrest.auth(SUPABASE_PLAYBACK_KEY)
-    client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "playback"
+    client.postgrest.session.headers["X-Aber-Actor"] = "playback"
     return client
 
 
@@ -231,8 +210,8 @@ def _storage():
     A storage client authenticating as the worker, not as `anon`.
 
     THE SHARED CLIENT WOULD READ AS `anon` AND SAY NOTHING ABOUT IT. `client.storage` keeps the key
-    it was constructed with; only the PostgREST sub-client is re-authenticated. capture_worker.py
-    hit this and the symptom was a refusal naming RLS that was really about identity.
+    it was constructed with; only the PostgREST sub-client is re-authenticated.
+    (docs/incidents.md -- "A storage client that quietly read as `anon`")
     """
     from storage3 import create_client as create_storage_client
     return create_storage_client(
@@ -251,27 +230,22 @@ def _connect(edge_node_id, password):
     """
     Connect AS the target gateway. Its `sparkplug_id` is the username, and that is the point.
 
-    THE CONNACK IS CAPTURED, WHICH IT WAS NOT, AND THE GAP WAS A SILENT SUCCESS.
-    `client.connect()` completes the TCP handshake and returns; the CONNACK arrives later on the
-    network loop. So a WRONG password -- as opposed to a missing one -- got past the credential
-    check above, connected at the socket level, was refused with rc=5, and every QoS 0 publish
-    after that was dropped locally with no error anywhere. The job ran to completion, reported the
-    full message count, and moved nothing.
-
-    That is precisely the outcome the credential check's own comment predicts and calls the reason
-    it exists -- it just cannot see this case, because a stale password is not a missing one. It
-    happens whenever a credential is re-minted and the worker is not restarted, which is the
-    ordinary way of rotating one.
+    THE CONNACK IS CAPTURED, AND NOTHING MAY COUNT AS SENT UNTIL IT ARRIVES. `client.connect()`
+    completes the TCP handshake and returns; the CONNACK arrives later on the network loop, so a
+    WRONG password -- as opposed to a missing one -- connects at the socket level and is refused
+    afterwards, and every QoS 0 publish after that is dropped locally with no error anywhere.
+    (docs/incidents.md -- "A playback published an entire capture into a closed socket and reported
+    success")
 
     `rc` is recorded rather than raised from the callback: it arrives on paho's thread, where an
     exception would be swallowed and logged by the library rather than reaching the caller.
     """
-    client = mqtt.Client(client_id="acs-playback-%s" % edge_node_id)
+    client = mqtt.Client(client_id="aber-playback-%s" % edge_node_id)
     client.username_pw_set(edge_node_id, password)
     # A list because the callback closes over it; `rc` stays None until the broker answers, which
     # is itself the third outcome -- no answer at all.
-    client.acs_connack = []
-    client.on_connect = lambda _c, _u, _f, rc, *args: client.acs_connack.append(rc)
+    client.aber_connack = []
+    client.on_connect = lambda _c, _u, _f, rc, *args: client.aber_connack.append(rc)
     if os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
         import ssl
         ca = os.getenv("MQTT_TLS_CA_FILE", "").strip()
@@ -388,25 +362,18 @@ def _run_job(supabase, storage, credentials, job):
     client.loop_start()
 
     # ------------------------------------------------------------------------------------------
-    # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT.
-    #
-    # Without this the worker published an entire capture into a closed socket and reported
-    # success: `connect()` returns after the TCP handshake, the CONNACK arrives later on this loop,
-    # and a QoS 0 publish to a refused connection is dropped locally with no error to catch. The
-    # job finished, `messages_sent` matched the plan, and no telemetry existed.
-    #
-    # THE CREDENTIAL CHECK ABOVE CANNOT SEE THIS. It refuses a MISSING password; this is a WRONG
-    # one, which is what a re-minted credential leaves behind until the worker is restarted -- the
-    # ordinary way of rotating one, and how this was found.
+    # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT. The credential check
+    # above refuses a MISSING password and cannot see a WRONG one, which is what a re-minted
+    # credential leaves behind until the worker is restarted.
     #
     # rc 4 and 5 are the two that mean the password: 4 is bad username/password, 5 is not
     # authorised. They are named rather than lumped in, because they are the ones an operator fixes
     # by rotating MQTT_PLAYBACK_CREDENTIALS and restarting rather than by looking at the broker.
     deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
-    while not client.acs_connack and time.monotonic() < deadline:
+    while not client.aber_connack and time.monotonic() < deadline:
         time.sleep(0.05)
 
-    if not client.acs_connack:
+    if not client.aber_connack:
         client.loop_stop()
         return 0, out_of_window, (
             "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
@@ -414,7 +381,7 @@ def _run_job(supabase, storage, credentials, job):
             % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
         )
 
-    rc = client.acs_connack[0]
+    rc = client.aber_connack[0]
     if rc != 0:
         client.loop_stop()
         detail = {

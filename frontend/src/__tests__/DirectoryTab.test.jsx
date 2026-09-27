@@ -1,11 +1,12 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   DirectoryTab,
   isBrowsableEndpoint,
   endpointReach,
-  viewerIsOnDeploymentHost
+  viewerIsOnDeploymentHost,
+  imageVersion
 } from '../components/tabs/DirectoryTab'
 import { api } from '../api'
 
@@ -22,6 +23,7 @@ const svc = (name, type, url) => ({
   service_name: name,
   service_type: type,
   endpoint_url: url,
+  image: 'registry.example/service:1.0.0',
   status: 'ACTIVE',
   last_heartbeat: HEARTBEAT
 })
@@ -386,7 +388,7 @@ describe('DirectoryTab refresh', () => {
  * so `viewerIsOnDeploymentHost` is true for all of them and the exposure column's case has to be
  * asked for explicitly.
  */
-describe('Directory reachability (migration 0084)', () => {
+describe('Directory reachability (archived migration 0084)', () => {
   describe('viewerIsOnDeploymentHost', () => {
     it('recognises every spelling of this machine, including the bracketed IPv6 form', () => {
       for (const h of ['localhost', '127.0.0.1', '::1', '[::1]']) {
@@ -395,7 +397,7 @@ describe('Directory reachability (migration 0084)', () => {
     })
 
     it('treats a real hostname as somewhere else', () => {
-      for (const h of ['acs-server.factory.local', '10.4.1.9', 'app.plant.example', '']) {
+      for (const h of ['aber-server.factory.local', '10.4.1.9', 'app.plant.example', '']) {
         expect(viewerIsOnDeploymentHost(h)).toBe(false)
       }
     })
@@ -481,5 +483,65 @@ describe('Directory reachability (migration 0084)', () => {
       expect(screen.getByText('http://localhost:3002').closest('a')).toBeTruthy()
       expect(screen.getByText('http://localhost:9090').closest('a')).toBeTruthy()
     })
+  })
+})
+
+describe('the Version column (migration 0007)', () => {
+  describe('imageVersion', () => {
+    it('reads the tag of a repository:tag reference', () => {
+      expect(imageVersion('grafana/grafana:13.2.0')).toBe('13.2.0')
+      expect(imageVersion('supabase/studio:2026.07.07-sha-a6a04f2')).toBe('2026.07.07-sha-a6a04f2')
+      expect(imageVersion('ghcr.io/harri-llewelyn/aber/ingestion:0.1.0')).toBe('0.1.0')
+    })
+
+    it('does not mistake a registry port for a tag', () => {
+      expect(imageVersion('registry.internal:5000/aber/ingestion:0.1.0-hotfix.2')).toBe('0.1.0-hotfix.2')
+      expect(imageVersion('registry.internal:5000/aber/ingestion')).toBe('latest')
+    })
+
+    it('prefers the tag over a digest, and shortens a digest that stands alone', () => {
+      const digest = 'sha256:' + 'ab12'.repeat(16)
+      expect(imageVersion(`prom/prometheus:v3.14.0@${digest}`)).toBe('v3.14.0')
+      expect(imageVersion(`prom/prometheus@${digest}`)).toBe('sha256:ab12ab12ab12')
+    })
+
+    it('names what Docker pulls for an untagged reference', () => {
+      expect(imageVersion('eclipse-mosquitto')).toBe('latest')
+    })
+
+    it('has nothing to show for no reference', () => {
+      expect(imageVersion(null)).toBeNull()
+      expect(imageVersion(undefined)).toBeNull()
+      expect(imageVersion('  ')).toBeNull()
+    })
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue([
+      { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'), image: 'grafana/grafana:13.2.0', exposure: 'NETWORK' },
+      { ...svc('Something Newly Registered', 'GRAPHICAL_UI', 'http://elsewhere.plant.local'), image: null, exposure: 'NETWORK' }
+    ])
+  })
+
+  it('shows the tag, with the full reference in its tooltip', async () => {
+    await renderTab()
+    const version = screen.getByText('13.2.0')
+    expect(version.getAttribute('title')).toMatch(/^grafana\/grafana:13\.2\.0 /)
+    // Stated as what the release deploys, not as something observed in the container.
+    expect(version.getAttribute('title')).toMatch(/this release deploys/)
+  })
+
+  it('says "not recorded" for a service with no image, rather than leaving a blank', async () => {
+    await renderTab()
+    const missing = screen.getByText('not recorded')
+    expect(missing.closest('td').className).toContain('cell-version')
+    expect(missing.getAttribute('title')).toMatch(/disabled in this deployment/)
+  })
+
+  it('sits between what the service is and where to reach it', async () => {
+    await renderTab()
+    const headers = [...document.querySelector('table').querySelectorAll('th')].map(th => th.textContent)
+    expect(headers).toEqual(['Service Name', 'Service Type', 'Version', 'Endpoint URL', 'Reach', 'Liveness'])
   })
 })

@@ -152,6 +152,29 @@ describe('the shortcuts dialog', () => {
     expect(described.filter(k => k === 'Esc').length).toBeGreaterThan(0)
   })
 
+  it('lists the stepping keys the Digital Thread drawer installs', () => {
+    // Bound in DigitalThreadTab while an event is selected; digitalThreadArrowKeys.test.jsx proves
+    // the binding. A row here without that binding would teach a key that does nothing.
+    const group = shortcutGroups().find(g => g.title === 'Digital Thread')
+    expect(group).toBeTruthy()
+    expect(group.items.map(i => i.keys.join('+'))).toContain('←+→')
+  })
+
+  it('joins alternative keys with or, and a chord with +', () => {
+    /* ↑ ↓ and ← → are each a pair of alternatives, and "← + →" would read as a chord nobody can
+       press. The join used to be special-cased to the ↓ key, which the arrow row would have got
+       wrong. */
+    render(<ShortcutsModal onClose={vi.fn()} />)
+    const rows = [...document.querySelectorAll('.shortcut-row')]
+    const joinOf = (keys) => rows
+      .find(r => [...r.querySelectorAll('kbd')].map(k => k.textContent).join(' ') === keys)
+      ?.querySelector('.shortcut-join')?.textContent
+
+    expect(joinOf('↑ ↓')).toBe('or')
+    expect(joinOf('← →')).toBe('or')
+    expect(joinOf('Ctrl K')).toBe('+')
+  })
+
   it('claims no shortcut this application does not bind', () => {
     // The bindings installed in source, as opposed to the browser's own. If a row ever names one of
     // these modified combinations, it has to be real.

@@ -37,8 +37,8 @@ SHARED_SHELL = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "shell
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
-DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
+DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
+DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
 # Provisioned by this suite, not seeded. See the note in test_aas_export.py -- the two share
 # test-harness/aas_fixture.py so they cannot disagree about what a conformance subject is.
 TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "")
@@ -275,14 +275,14 @@ class TestBase64UrlContract(unittest.TestCase):
     """
 
     def test_a_shell_identifier_encodes_without_path_separators(self):
-        identifier = "https://acs-cymru.local/ids/asset/dev220000000000400080000/shell"
+        identifier = "https://aber.local/ids/asset/dev220000000000400080000/shell"
         encoded = b64url(identifier)
         self.assertNotIn("/", encoded)
         self.assertNotIn("+", encoded)
         self.assertNotIn("=", encoded)
 
     def test_round_trips(self):
-        identifier = "https://acs-cymru.local/ids/asset/dev220000000000400080000/submodel/Nameplate"
+        identifier = "https://aber.local/ids/asset/dev220000000000400080000/submodel/Nameplate"
         padded = b64url(identifier) + "=" * (-len(b64url(identifier)) % 4)
         self.assertEqual(base64.urlsafe_b64decode(padded).decode(), identifier)
 

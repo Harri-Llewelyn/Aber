@@ -17,8 +17,10 @@ import { describeResetError } from './utils/authErrors'
 import { useClickOutside } from './hooks/useClickOutside'
 import { useEscapeKey } from './hooks/useEscapeKey'
 import { useSidebarMode } from './hooks/useSidebarMode'
+import { useDocumentTitle } from './hooks/useDocumentTitle'
 import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
+import { AberMark } from './components/common/AberMark'
 
 /* There is no sign-up form. Registration is disabled server-side by GOTRUE_DISABLE_SIGNUP, so
    accounts arrive by invitation, admin provisioning or an upstream identity provider; a client-side
@@ -31,7 +33,6 @@ const OAUTH_CONSENT_PATH = '/oauth/consent'
 const RESET_PASSWORD_PATH = '/reset-password'
 
 import {
-  IconFactory,
   IconKeyboard,
   IconHelp,
   IconSun,
@@ -97,6 +98,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
   const [mode, setMode] = useState('signin')
   const [resetSent, setResetSent] = useState(null)
   const passwordRef = useRef(null)
+  useDocumentTitle(mode === 'forgot' ? 'Reset password' : 'Sign in')
 
   const handleAuth = async (e) => {
     e.preventDefault()
@@ -149,7 +151,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
     <AuthShell
       theme={theme}
       onToggleTheme={toggleTheme}
-      title="ACS-Cymru Supabase Portal"
+      title={mode === 'forgot' ? 'Reset your password' : 'Sign in to Aber'}
       subtitle={mode === 'forgot'
         ? 'Enter your email address and a link to choose a new password will be sent to it'
         : 'Sign in with your platform account'}
@@ -478,6 +480,9 @@ function Dashboard({ session, onSignOut }) {
   // visible whichever page is open.
   const firingAlerts = usePlatformAlerts(showToast)
 
+  // The page's rail label, and the pill's count, so the tab and the bar never disagree.
+  useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length)
+
   // What the rail flags in the warning colour: quarantine, offline gateways, unfiled cells. Owned
   // here for the same reason the alerts are.
   const navSignals = useNavSignals()
@@ -505,20 +510,15 @@ function Dashboard({ session, onSignOut }) {
         <button
           className="topbar-brand"
           onClick={() => handleNavClick('site-map')}
-          title="ACS Cymru — go to the Site Map page"
-          aria-label="ACS Cymru, go to the Site Map page"
+          title="Aber — go to the Site Map page"
+          aria-label="Aber, go to the Site Map page"
         >
-          <div className="brand-icon"><IconFactory size={18} /></div>
+          <div className="brand-icon"><AberMark size={28} /></div>
           <div className="brand-text">
             {/* Titled because .brand-name truncates: it is the region that yields space to the
-                search box and the session controls. The short form is hidden from assistive
-                technology and `title` carries the full name, so the accessible name never changes
-                with the viewport. */}
-            <div className="brand-name" title="AMRC Connectivity Stack - Cymru">
-              <span className="brand-name-full">AMRC Connectivity Stack - Cymru</span>
-              <span className="brand-name-short" aria-hidden="true">ACS Cymru</span>
-            </div>
-            <div className="brand-sub">Shopfloor to Digital Twin Pipeline</div>
+                search box and the session controls. */}
+            <div className="brand-name" title="Aber">Aber</div>
+            <div className="brand-sub">The shopfloor data platform</div>
           </div>
         </button>
 

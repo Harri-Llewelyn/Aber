@@ -38,7 +38,7 @@ DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
 # Self-seeded rather than the demo personas: CI's RLS job applies the migrations and deliberately
-# not seed.sql, so a suite depending on `admin@acs-cymru.local` fails there with a failure that
+# not seed.sql, so a suite depending on `admin@aber.local` fails there with a failure that
 # looks like the policy and is actually the fixture.
 ADMIN_ID = "a0d17070-0000-4000-8000-00000000ad11"
 MANAGER_ID = "a0d17070-0000-4000-8000-0000000000b9"

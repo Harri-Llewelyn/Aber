@@ -34,9 +34,9 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 
 
 # Pinned so a failed run leaves rows that the next setUpClass reclaims rather than accumulating.
-# The 2f/2e prefixes continue the convention in scripts/provision-gateways.mjs and cannot collide
-# with the simulator (12-15…) or validator (11…) blocks -- and, per that script's warning, they
-# differ in the FIRST group because sparkplug_id is derived from the leading 21 hex characters.
+# The 2f/2e prefixes cannot collide with the simulator (12-15…) or validator (11…) blocks, and
+# they differ in the FIRST group because sparkplug_id is GENERATED from the leading 21 hex
+# characters (0001): ids differing only in a later group collide on the generated column.
 REMOTE_GW = "2f000000-0000-4000-8000-000000000001"
 HOST_GW = "2e000000-0000-4000-8000-000000000001"
 
@@ -690,28 +690,17 @@ class TestBrokerCapturePolicies(GatewayEnrollmentBase):
 
 
 # ---------------------------------------------------------------------------------------------
-# TestMigrationIdempotency was HERE, and its subject no longer exists.
+# NO PER-MIGRATION IDEMPOTENCY TEST LIVES HERE, AND ONE CANNOT.
 # ---------------------------------------------------------------------------------------------
-# It read 0025_physical_gateway_enrollment.sql, executed it twice to prove re-entrancy, and
-# asserted its self-check guards had not been quietly deleted. The squash folded 0025 into
-# 0001_baseline_schema.sql, so there is no per-migration file left to read.
+# psycopg executes SQL, and the baseline opens with psql meta-commands
+# (`\if :{?bi_reader_password}`) that only psql understands -- so a test that read a migration and
+# ran it twice would be running something other than what db-init runs.
 #
-# THE PROPERTY IS NOT DROPPED, IT IS ENFORCED MORE BROADLY NOW, and by things that could not have
-# been written as a unit test here:
-#
-#   scripts/check-migration-idempotency.mjs   replays the WHOLE chain against a live database and
-#                                             asserts the schema digest is unchanged, that no
-#                                             'migration' audit rows were added, and that no
-#                                             operator rows were deleted. That covers every file,
-#                                             not the one this suite happened to name.
-#
-#   scripts/verify-schema-equivalence.mjs     builds a database from each of two chains and
-#                                             asserts they arrive at the same schema and the same
-#                                             seed rows.
-#
-# Re-pointing the old test at 0001 was the obvious move and does not work: psycopg executes SQL,
-# and the baseline opens with psql meta-commands (`\if :{?bi_reader_password}`) that only psql
-# understands. A test that stripped them would be running something other than what db-init runs.
+# The property is enforced more broadly instead: scripts/check-migration-idempotency.mjs replays
+# the WHOLE chain against a live database and asserts the schema digest is unchanged, that no
+# 'migration' audit rows were added and that no operator rows were deleted, and
+# scripts/verify-schema-equivalence.mjs builds a database from each of two chains and asserts they
+# arrive at the same schema and the same seed rows.
 #
 # The other 30 tests in this file are untouched: they exercise enrolment against a live database,
 # which is where the behaviour that matters actually lives.

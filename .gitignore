@@ -21,9 +21,10 @@ build/
 
 # Mosquitto generated credentials.
 #
-# Neither target writes here -- Compose assembles /mosquitto/config inside a named volume and
-# the chart uses a Secret -- but mosquitto/ is now a real directory holding the policy files,
-# so a hand-run `mosquitto_passwd -c mosquitto/password_file` while debugging lands beside them.
+# Nothing in the deployment writes here -- the chart mounts the policy files from a ConfigMap and
+# the plugin keeps its hashes in its own document -- but mosquitto/ is a real directory holding
+# those policy files, so a hand-run `mosquitto_passwd -c mosquitto/password_file` while debugging
+# lands beside them.
 # That file is $7$ hashes of the five platform principals.
 mosquitto/password_file
 
@@ -34,7 +35,7 @@ supabase/.temp/
 # Helm
 #
 # A filled-in production values file holds real credentials. The .example is committed and is the
-# starting point; the copy never is. deploy/helm/acs-cymru/files/ IS committed on purpose --
+# starting point; the copy never is. deploy/helm/aber/files/ IS committed on purpose --
 # those are mirrored config files a packaged chart must carry, see scripts/sync-helm-chart-files.mjs.
 deploy/helm/**/values-prod.yaml
 deploy/helm/**/values-local.yaml
@@ -54,7 +55,7 @@ backups/
 # THE ONE EXCEPTION, and it is narrow on purpose.
 #
 # The chart carries the migration chain gzipped, one archive per file, because uncompressed it is 85%
-# of the 1 MiB ConfigMap limit -- see the header of deploy/helm/acs-cymru/templates/jobs/db-init.yaml.
+# of the 1 MiB ConfigMap limit -- see the header of deploy/helm/aber/templates/jobs/db-init.yaml.
 # Those files share the `.sql.gz` extension with the backups above and are the opposite kind of
 # thing: schema and seed data, already public in supabase/migrations/, and a packaged chart is
 # unusable without them.
@@ -66,7 +67,7 @@ backups/
 # Without this negation the archives are silently absent from a commit, and a fresh clone renders a
 # chart with no migrations at all. That fails loudly -- db-init.yaml's `fail` guard refuses to
 # install an empty ConfigMap -- but it fails a long way from the cause.
-!deploy/helm/acs-cymru/files/migrations/*.sql.gz
+!deploy/helm/aber/files/migrations/*.sql.gz
 
 # OS / IDE
 .DS_Store

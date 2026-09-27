@@ -120,12 +120,12 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 
 The full request and response reference is [`docs/i3x-openapi.yaml`](../docs/i3x-openapi.yaml),
 which swagger-ui serves in the same dropdown as the platform spec. It is a **separate document
-from `docs/openapi.yaml` on purpose**: this server is not behind Kong, takes no `apikey`, and
+from `docs/openapi.yaml` on purpose**: this server is not behind the gateway, takes no `apikey`, and
 `/v1/schema` already means something else there.
 
 ### Subscriptions
 
-Three rules are easy to get wrong and each fails quietly:
+Five rules are easy to get wrong and each fails quietly:
 
 1. **`/sync` must not clear the queue when `lastSequenceNumber` is omitted or invalid**, must clear
    at-or-below a valid one, and must clear everything for `-1`. Treating "omitted" as "acknowledge
@@ -144,6 +144,9 @@ Three rules are easy to get wrong and each fails quietly:
    ("delete deletes the subscription") failed — reported as a 15-second timeout on an endpoint that
    was never reached, which reads as a hung server rather than as a stream that had not noticed it
    was over. It reproduces only against a client that pools connections.
+5. **Sync and stream are mutually exclusive.** `/sync` must error while a stream is open, because
+   the stream has already delivered — and discarded — the queue the sync caller is asking to
+   acknowledge.
 
 ### Writes are refused
 
@@ -171,7 +174,7 @@ layer` — because RLS grants reads to `authenticated`, not `anon`. Get one with
 ```bash
 curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
   -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Content-Type: application/json" \
-  -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
+  -d '{"email":"admin@aber.local","password":"aber123"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
 ```
 
@@ -202,7 +205,7 @@ conformant i3X server** — it discovers everything through the spec's explorato
 is nothing to write here. It asks this service questions in English on behalf of a model.
 
 **Verified against this server on 2026-08-22** by driving the published package over stdio, as
-`operator@acs-cymru.local` so that RLS was actually in the path. Every claim below was observed, not
+`operator@aber.local` so that RLS was actually in the path. Every claim below was observed, not
 inferred from the package's README — which matters, because the configuration this section used to
 carry named a package that does not exist.
 
@@ -212,7 +215,7 @@ carry named a package that does not exist.
 // claude_desktop_config.json, or any MCP host's equivalent
 {
   "mcpServers": {
-    "acs-cymru": {
+    "aber": {
       "command": "npx",
       "args": ["-y", "i3x-mcp@0.1.0"],
       "env": {
@@ -402,7 +405,7 @@ and discover it during their own integration.
 
 | | Commitment |
 | :--- | :--- |
-| Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/acs-cymru/templates/apps/i3x-service.yaml) |
+| Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/aber/templates/apps/i3x-service.yaml) |
 | Endpoint reachability across a restart | **None.** `Recreate` stops the old pod before starting the new one, so there is a window with no i3X endpoint at all rather than a degraded one |
 | Subscription survival across a restart | **None.** Queues, sequence numbers and open SSE streams are process memory |
 | Current values immediately after a restart | **Cold, and reported as cold.** The MQTT cache refills from `spBv1.0/#` as devices publish; until a device next publishes, `/objects/value` answers `quality: "GoodNoData"` with a null value for it |
@@ -478,7 +481,7 @@ than minutes, and why `0` disables the cache outright.
 
   The suite runs against a port-forward — `http://127.0.0.1:8090/v1` — which is a loopback
   socket, not a deployment surface. In the cluster i3X rides the shared Ingress like every other
-  service (`acs-cymru.ingressRoutes` appends it), which terminates TLS against one wildcard
+  service (`aber.ingressRoutes` appends it), which terminates TLS against one wildcard
   certificate issued by cert-manager, so a production endpoint is served over HTTPS and the
   advisory does not apply to it. The TLS edge is browser-only, as it is for every other service.
 

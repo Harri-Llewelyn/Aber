@@ -300,7 +300,7 @@ supplies no release version, is not evidence of drift.
 ## Contextual help
 
 A control in the top bar opens a drawer describing **the page you are on** — what it is for, what
-its controls do, and what its states mean ([issue #39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39):
+its controls do, and what its states mean ([issue #39](https://github.com/Harri-Llewelyn/Aber/issues/39):
 *"going to the GitHub to read the documentation takes a lot of time"*).
 
 **The hard part was never the button.** The documentation this repository already had is written for

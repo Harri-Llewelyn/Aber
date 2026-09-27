@@ -33,7 +33,6 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
 import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
@@ -81,8 +80,8 @@ def delete_broker_account(username):
 TEST_GW_ID = "2d000000-0000-4000-8000-000000000001"
 
 
-ADMIN_EMAIL = os.getenv("ACS_ADMIN_EMAIL", "admin@acs-cymru.local")
-ADMIN_PASSWORD = os.getenv("ACS_ADMIN_PASSWORD", "acscymru123")
+ADMIN_EMAIL = os.getenv("ABER_ADMIN_EMAIL", "admin@aber.local")
+ADMIN_PASSWORD = os.getenv("ABER_ADMIN_PASSWORD", "aber123")
 
 
 def rest(path, method="GET", body=None, bearer=None, prefer=None):
@@ -101,7 +100,7 @@ def rest(path, method="GET", body=None, bearer=None, prefer=None):
             "apikey": PUBLISHABLE_KEY,
             "Authorization": f"Bearer {bearer or SERVICE_ROLE_KEY}",
             "Content-Type": "application/json",
-            "X-ACS-Cymru-Actor": "service",
+            "X-Aber-Actor": "service",
             **({"Prefer": prefer} if prefer else {}),
         },
     )
@@ -251,7 +250,7 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         self.assertEqual(payload["mqtt_username"], self.sparkplug_id)
         # The other half of the address resolve_gateway() looks up FIRST. An appliance told only the
         # node id falls through to the group-agnostic arm, which works until a second group exists.
-        self.assertEqual(payload["sparkplug_group"], "ACS-Cymru")
+        self.assertEqual(payload["sparkplug_group"], "Aber")
 
         # ENDPOINT. Must be an address an appliance can actually resolve -- never the in-network
         # name, which the function refuses to emit.
@@ -488,9 +487,9 @@ class TestForgeProvisioning(EnrollGatewayBase):
     def setUpClass(cls):
         super().setUpClass()
         cls.forge_url = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
-        cls.machine_user = os.getenv("GITEA_MACHINE_USER", "acs_platform")
+        cls.machine_user = os.getenv("GITEA_MACHINE_USER", "aber_platform")
         cls.machine_password = os.getenv(
-            "GITEA_MACHINE_PASSWORD", "acs-platform-machine-account"
+            "GITEA_MACHINE_PASSWORD", "aber-platform-machine-account"
         )
         # Every gateway repository lives in this organisation (forge.ts); the machine account owns
         # it, which is exactly the authority to create a repository in it and no more.
@@ -542,7 +541,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         super().setUp()
         self.delete_repo()
         # A throwaway keypair per test, so one test's key cannot satisfy another's assertion.
-        self.key_dir = tempfile.mkdtemp(prefix="acs-deploy-key-")
+        self.key_dir = tempfile.mkdtemp(prefix="aber-deploy-key-")
         self.key_path = os.path.join(self.key_dir, "id_ed25519")
         subprocess.run(
             ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", self.key_path],
@@ -662,7 +661,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
         repo = f"/api/v1/repos/{self.organisation}/{self.repo_name()}"
         templates = {t["file_name"] for t in self.forge(f"{repo}/issue_templates")}
         self.assertIn(".gitea/ISSUE_TEMPLATE/incident.md", templates, templates)
-        labels = {l["name"] for l in self.forge(f"{repo}/labels")}
+        labels = {label["name"] for label in self.forge(f"{repo}/labels")}
         self.assertIn("incident", labels, labels)
         # And `main` is protected afterwards, not instead: the seed did not cost the review gate.
         self.assertFalse(self.forge(f"{repo}/branch_protections/main")["enable_push"])

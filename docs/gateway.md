@@ -3,7 +3,7 @@
 Envoy is the API gateway on the cluster. Its template is
 [`supabase/envoy.yaml`](../supabase/envoy.yaml), mirrored into the chart by
 `scripts/sync-helm-chart-files.mjs` and rendered by the initContainer in
-[`templates/supabase/envoy.yaml`](../deploy/helm/acs-cymru/templates/supabase/envoy.yaml). Three
+[`templates/supabase/envoy.yaml`](../deploy/helm/aber/templates/supabase/envoy.yaml). Three
 listeners: the API on 8000, Studio's login on 8001 and the forge's login on 8002 (the last two are
 documented with [Studio's door](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
 and [the forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094)).
@@ -92,8 +92,8 @@ cover the keys, which come from the Secret: rotating one needs
 
 ```bash
 node scripts/check-gateway-surface.mjs                      # static: placeholders, no committed key
-kubectl -n acs-cymru port-forward svc/supabase-kong 18080:8000
-SUPABASE_PUBLISHABLE_KEY=$(kubectl -n acs-cymru get secret acs-cymru-secrets \
+kubectl -n aber port-forward svc/supabase-kong 18080:8000
+SUPABASE_PUBLISHABLE_KEY=$(kubectl -n aber get secret aber-secrets \
   -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d) \
   node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
 ```

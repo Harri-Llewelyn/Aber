@@ -37,6 +37,9 @@ python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
+# The JSON encoding the appliance publishes: a metric's own timestamp survives the parse, so a
+# report-by-exception refresh or a batched reading is filed when it was taken.
+python ingestion/test_json_payload.py
 python ingestion/test_mqtt_tls.py
 # The Directory's MQTT half. Mostly assertions about what it does NOT do: the publisher is
 # fed from the enrolment record, so one test reads directory_publish.py's own source and
@@ -70,6 +73,13 @@ python ingestion/test_structured_logging.py
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
 # the log store exists to keep is actually being kept.
 python test-harness/test_log_pipeline.py
+# The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
+# by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
+# before the run rather than after it. Two of its conclusions are wrong in a believable direction
+# if this is: a write-latency quantile taken over Prometheus's CUMULATIVE buckets answers for every
+# write since the daemon started, and a saturated stack and a generator that cannot push hard
+# enough both show as a shortfall against target.
+python test-harness/test_load_generator.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # The historian writer -- several messages become one transaction; one bad message still loses one
@@ -278,6 +288,15 @@ python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
+# The site's Sparkplug group (0131), which is DISPLAYED and not editable. An Administrator holds
+# GRANT UPDATE (value) on system_settings, so a direct PostgREST write is admitted by RLS and only
+# the trigger refuses it -- a read-only control in the browser alone would be a suggestion. Also
+# that gateways.sparkplug_group now defaults to the setting rather than the old literal.
+python supabase/migrations/test_sparkplug_group_setting.py
+# The Directory's Version column (0007). The chart's component -> image map reaches every row it
+# manages, clears a component the chart stops deploying, leaves other registrations alone, and the
+# writer is callable by db-init only.
+python supabase/migrations/test_directory_images.py
 # Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
 # property is in the function body rather than in a grant, so a gate that stops working fails open
 # with the page looking exactly as it should. Both directions per role, and `anon` stopped by the
@@ -302,6 +321,24 @@ python supabase/migrations/test_archive_purge_cascade.py
 # thread's DELETE row, and one that was never archived leaves none; the tombstone table has one
 # SELECT policy and no way in for authenticated; an export reaches the thread as EXPORTED.
 python supabase/migrations/test_archiving_is_a_lifecycle.py
+# How far behind the cold archive is (0133), and chiefly the property the rest of the platform's
+# alerting rests on. `platform_health_rows()` is ONE UNION and postgres_fdw raises on CONNECT, not
+# on scan -- so the first version of 0133, which read the historian's manifest directly in a new
+# arm, took gateway staleness, stuck enrolments, the quarantine queue and expected publishers down
+# with it whenever the historian was unreachable: four conditions unrelated to the archive, absent
+# exactly when the database they describe is in trouble. THIS LANE HAS NO HISTORIAN, which is what
+# makes it the one that exercises that path on every run. Also that "cannot be computed" arrives as
+# an absent row rather than a reassuring zero, and that the ungated arithmetic behind the figure is
+# not callable from PostgREST.
+python supabase/migrations/test_cold_archive_backlog.py
+# The cold archive's destination and who may see it (0134). `system_settings` is readable by every
+# signed-in user deliberately, so the five rows naming the endpoint, bucket and access key ID are
+# hidden by ONE clause on ONE policy -- `USING (NOT sensitive OR has_role(...))`. Losing it breaks
+# nothing visible: the page renders, the exporter exports, and every Operator with a login can read
+# where the plant's history is written. Asserted from both sides, because a policy that hid
+# everything would pass the negative and break the Settings page for every role but one. The
+# credential is never asserted by value -- nothing reads it back, and that is the property.
+python supabase/migrations/test_cold_archive_destination.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid
@@ -573,7 +610,7 @@ schedule, not on this repository's.
 | Workflow | Job | Asks |
 | :--- | :--- | :--- |
 | [`renovate.yml`](../.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — routine PRs monthly, security PRs immediately |
-| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly, third-party images only; the ten built here are gated at release |
+| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly, third-party images only; every image built here is gated at release |
 | [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) | **rehearse** | *Would a restore actually work today?* — weekly |
 
 ### The restore rehearsal is the odd one out
@@ -584,9 +621,11 @@ databases, the Supabase role set, the pgsodium root key and the migration chain,
 those changes. A restore that worked in August fails in November, and nothing else would notice
 until it was needed.
 
-It runs a full cycle against a disposable k3d cluster — seed → back up → **destroy the namespace
-and its volumes** → reinstall → restore → assert — driven by `scripts/rehearse-restore.sh`, which
-an operator can also run by hand against any cluster. Destroying the volumes is what makes it
+It runs a full cycle against a disposable k3d cluster — seed → back up through the backup service
+→ **destroy the namespace and its volumes** → reinstall → restore → assert → back up again — driven
+by `scripts/rehearse-restore.sh`, which an operator can also run by hand against any cluster. The
+backup is the service's, asked for the way the Backups page asks, and it carries the two dumps,
+the storage objects, the forge's volume and the broker's document. Destroying the volumes is what makes it
 meaningful; a restore over surviving data proves nothing, so the workflow fails if a
 `PersistentVolume` outlives the namespace or if the reinstalled stack is not empty before the
 restore.
@@ -640,16 +679,20 @@ never on a branch:
 | Job | Covers |
 | :--- | :--- |
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
-| **build-images** | The eight independent images, in parallel: built, **scanned**, then pushed to GHCR |
-| **build-ingestion-chain** | `ingestion`, then `test-runner` **on the same runner** — the latter is built `FROM` the former, so the base must be in the local image store. Both scanned before either is pushed |
-| **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back |
+| **build-images** | The eight independent images, in parallel, each built to an OCI archive and **scanned** before it is pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
+| **build-ingestion-chain** | `ingestion`, then `test-runner` `FROM` it, as one `docker buildx bake` of `docker-bake.hcl`; built to OCI archives first so the attestations are asserted and both images **scanned** before (and without) a push, then pushed, signed and verified |
+| **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back, sign the pushed digest and verify it |
+| **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
 
 The tag is the single place the version is written — it stamps the ten image tags, the chart
 `version` and `appVersion` in one run. **Images publish before the chart**, because a chart naming
 images that do not exist yet does not fail: `helm install` succeeds and the workloads sit in
-`ImagePullBackOff` while everything else comes up healthy. Installation, the one-time GHCR
-visibility step, and what a release deliberately does *not* do (no `latest`, no arm64, no signing)
-are in [`deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release).
+`ImagePullBackOff` while everything else comes up healthy. **Nothing publishes unsigned or
+unattested**: [`sign-and-verify.sh`](../.github/scripts/sign-and-verify.sh) runs the consumer's
+verification inside the release and refuses an image whose SBOM or provenance did not arrive.
+Installation, the one-time GHCR visibility step, what is signed and how, and what a release
+deliberately does *not* do (no `latest`, no arm64) are in
+[`deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release).
 
 **What the release promises a site** — the supported window, what makes a version major, the
 deprecation path and the release-note headings — is [`releases.md`](releases.md). This section is

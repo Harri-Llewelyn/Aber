@@ -1,0 +1,433 @@
+{{- if .Values.grafana.enabled }}
+{{- $component := "grafana" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $ini := .Files.Get "files/grafana/grafana.ini" -}}
+{{- $dsTemplate := .Files.Get "files/grafana-datasources/datasources.template.yml" -}}
+{{- if or (not $ini) (not $dsTemplate) }}
+{{- fail "\n\naber: files/grafana/grafana.ini and/or files/grafana-datasources/datasources.template.yml are missing.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nWithout grafana.ini there is no [auth.generic_oauth] block, so Grafana comes up with SSO simply\nabsent -- local admin login still works, which is why this fails the render instead of being left\nto be noticed later.\n" }}
+{{- end }}
+{{- /* The alerting directory is rendered once, at pod start, by the initContainer below; the
+       pod must roll for a changed rule, policy or contact point to be read. */ -}}
+{{- $alerting := "" -}}
+{{- range $path, $bytes := .Files.Glob "files/grafana-alerting/*.yaml" }}
+{{- $alerting = printf "%s%s" $alerting ($.Files.Get $path) }}
+{{- end }}
+{{- $supabasePublic := include "aber.supabaseUrl" . -}}
+{{- $grafanaPublic := include "aber.grafanaUrl" . -}}
+---
+{{/*
+grafana.ini and the file-based provisioning, all read-only.
+
+THE FILE IS THE REPOSITORY'S, unchanged. Everything in it that is deployment-specific
+is a BROWSER-FACING URL, and those are overridden by GF_* environment variables below rather than by
+forking the file -- Grafana's env override maps GF_<SECTION>_<KEY> onto any ini key, so
+`GF_AUTH_GENERIC_OAUTH_AUTH_URL` replaces `[auth.generic_oauth] auth_url` with no edit.
+
+That is what keeps ONE grafana.ini: the long, load-bearing OAuth reasoning in its comments stays in
+one place, and only the two addresses a browser follows differ between targets.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-config" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  grafana.ini: |
+{{ $ini | indent 4 }}
+  # The datasource TEMPLATE. __DB_PASSWORD__ is substituted by the initContainer below, never by
+  # Helm -- see the note there.
+  datasources.template.yml: |
+{{ $dsTemplate | indent 4 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-dashboards/*.yml" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+{{/*
+The dashboards, in their own ConfigMap.
+
+Separate from the provisioning above because they mount at a DIFFERENT PATH -- dashboards.yml points
+its provider at /etc/grafana/provisioning/dashboards/json, a subdirectory of where it itself lives.
+One ConfigMap cannot supply both a file and a subdirectory beneath it.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-dashboards-platform" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- $foundPlatform := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-dashboards-platform/*.json" }}
+{{- $foundPlatform = add1 $foundPlatform }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $foundPlatform 0 }}
+{{- fail "\n\naber: no dashboards found at files/grafana-dashboards-platform/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. An empty ConfigMap mounts cleanly and Grafana comes up with an\nempty folder, which reads as a Grafana fault rather than a missing mirror.\n" }}
+{{- end }}
+---
+{{/*
+Unified alerting: the rules, the notification policy and the contact-point TEMPLATE.
+
+A ConfigMap and not a Secret, because NONE of these three files contains a credential -- the
+contact point is a template whose bearer token is still a `__PLACEHOLDER__` here. The
+render-alerting initContainer reads the secret from the Secret at pod start and writes the
+substituted file into an emptyDir, which is what Grafana actually mounts. That keeps the token out
+of the rendered manifest entirely, the same arrangement the datasource uses.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-alerting" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- $foundAlerting := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-alerting/*.yaml" }}
+{{- $foundAlerting = add1 $foundAlerting }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $foundAlerting 0 }}
+{{- fail "\n\naber: no alerting provisioning found at files/grafana-alerting/*.yaml\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. An empty ConfigMap mounts cleanly and Grafana comes up with no\nalert rules and no contact point -- a stack that looks healthy and will never tell anyone that a\nmachine is overheating.\n" }}
+{{- end }}
+---
+{{- if .Values.grafana.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-grafana" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # Grafana's SQLite holds users created through SSO, their org roles, starred dashboards, and any
+    # dashboard saved in the UI rather than provisioned from a file. Provisioned content is
+    # reproducible; that is not.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - {{ .Values.grafana.persistence.accessMode }}
+  {{- include "aber.storageClass" (dict "ctx" . "component" .Values.grafana.persistence) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.grafana.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      # 3000 in the container. The dev loop forwards it to 3002 on a laptop to avoid colliding
+      # with the frontend's 3000; there is no such collision inside a cluster.
+      port: 3000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    # Single writer: the default backend is a SQLite file on a ReadWriteOnce PVC. Scaling Grafana
+    # out means moving its database to Postgres first, which is a separate concern.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Grafana reads grafana.ini once at start, and the alerting directory is rendered once
+        # at start, so a change to either rolls the pod. Dashboards are mounted from their
+        # ConfigMap and re-read on the provider's schedule, so they are not in this sum.
+        checksum/config: {{ printf "%s%s%s" $ini $dsTemplate $alerting | sha256sum }}
+        # Grafana serves /metrics on its normal port, unauthenticated.
+        {{- include "aber.scrapeAnnotations" (dict "port" 3000 "path" "/metrics") | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # M5. grafana/grafana runs as uid/gid 472 -- NOT 1000, which is the mistake to make here.
+      securityContext:
+        {{- toYaml .Values.grafana.podSecurityContext | nindent 8 }}
+      initContainers:
+        {{/*
+          Renders the datasource template, exactly as the gateway's config is rendered and for the same
+          reason.
+
+          NOT SUBSTITUTED BY HELM. With `secrets.existingSecret` set the chart cannot see
+          `timescalePassword`, so Helm would substitute an EMPTY STRING and provision the historian
+          datasource with no password -- every panel then fails authentication against a database
+          that is perfectly healthy, which reads as a database fault.
+
+          Reading it from the Secret at pod start works whoever owns the Secret and keeps the
+          password out of the rendered manifest entirely.
+
+          Grafana runs its stock /run.sh; the substitution is done here rather than by an
+          entrypoint override.
+        */}}
+        - name: render-datasource
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          env:
+            {{- include "aber.secretEnv" (dict "name" "BI_READER_PASSWORD" "secretName" $secretName "key" "BI_READER_PASSWORD") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              if [ -z "$BI_READER_PASSWORD" ]; then
+                echo 'BI_READER_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password. It is the password of the read-only powerbi_reader role created by timescaledb/roles.sql.' >&2
+                exit 1
+              fi
+              {{- /*
+                __PROMETHEUS_URL__ and __LOKI_URL__ resolve to the chart's own stores
+                (observability.enabled) unless grafana.prometheusUrl / grafana.lokiUrl name a
+                cluster's; the helpers fail the render when neither applies.
+              */}}
+              {{- /* The two database datasources verify the server when postgresTls is on; the
+                     lines that only make sense then carry a marker and are dropped otherwise. */}}
+              sed -e "s|__BI_READER_PASSWORD__|$BI_READER_PASSWORD|g" \
+                  -e "s|__PROMETHEUS_URL__|{{ include "aber.prometheusUrl" . }}|g" \
+                  -e "s|__LOKI_URL__|{{ include "aber.lokiUrl" . }}|g" \
+                  {{- if .Values.postgresTls.enabled }}
+                  -e "s|__DB_SSLMODE__|verify-full|g" \
+                  -e "s|__DB_SSLROOTCERT__|{{ include "aber.dbCaPath" . }}|g" \
+                  -e "s| # __DB_TLS_ONLY__||" \
+                  {{- else }}
+                  -e "s|__DB_SSLMODE__|disable|g" \
+                  -e "/__DB_TLS_ONLY__/d" \
+                  {{- end }}
+                  /config/datasources.template.yml > /datasources/datasources.yml
+              # Comment lines excluded: the template's own header documents the placeholder
+              # convention BY NAME, so a whole-file scan flags the documentation of the rule as a
+              # violation of it. A real placeholder is always in a value position.
+              if grep -vE '^[[:space:]]*#' /datasources/datasources.yml \
+                 | grep -qE '__[A-Z0-9_]+__'; then
+                echo 'Grafana datasource config still contains unsubstituted placeholders.' >&2
+                exit 1
+              fi
+              echo 'Rendered the TimescaleDB datasource.'
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: datasources
+              mountPath: /datasources
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+        {{/*
+          Alerting provisioning, rendered the same way and for the same reason.
+
+          THE RULES AND THE POLICY ARE COPIED; ONLY THE CONTACT POINT IS RENDERED. A contact point
+          carries a bearer token, so it cannot be mounted straight from a ConfigMap -- the whole
+          reason this initContainer exists. The rules and the policy carry no secret at all and are
+          copied from the same ConfigMap unchanged.
+
+          ONE DIRECTORY, so all three land in the emptyDir together: Grafana reads
+          /etc/grafana/provisioning/alerting as a single provisioning path, and mounting the
+          ConfigMap over part of it would leave nowhere to write the rendered file.
+
+          GRAFANA IS NOT GIVEN THE SERVICE-ROLE KEY. It holds GRAFANA_ALERT_WEBHOOK_SECRET, which
+          authorises recording an alert and nothing else -- see the template's header. The
+          publishable key is here only to get past the gateway's key check and is public by
+          construction.
+        */}}
+        - name: render-alerting
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          env:
+            {{- include "aber.secretEnv" (dict "name" "GRAFANA_ALERT_WEBHOOK_SECRET" "secretName" $secretName "key" "GRAFANA_ALERT_WEBHOOK_SECRET") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              if [ -z "$GRAFANA_ALERT_WEBHOOK_SECRET" ]; then
+                echo 'GRAFANA_ALERT_WEBHOOK_SECRET must be set -- Grafana would otherwise provision the alert contact point with an empty bearer token, and grafana-alert-webhook would refuse every notification with 401 while the rules themselves looked healthy.' >&2
+                exit 1
+              fi
+              if [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+                echo 'SUPABASE_PUBLISHABLE_KEY must be set -- it is what gets the alert webhook past the gateway key check.' >&2
+                exit 1
+              fi
+              # Globbed so a rules file added to grafana/provisioning/alerting/ is carried
+              # through without editing this line.
+              cp /alerting-config/policies.yaml /alerting-config/*alert-rules.yaml /alerting/
+              sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
+                  -e "s|__SUPABASE_PUBLISHABLE_KEY__|$SUPABASE_PUBLISHABLE_KEY|g" \
+                  /alerting-config/contact-points.template.yaml > /alerting/contact-points.yaml
+              # Comment lines excluded, same as above: the template documents the placeholder
+              # convention by name in its own header.
+              if grep -vE '^[[:space:]]*#' /alerting/contact-points.yaml \
+                 | grep -qE '__[A-Z0-9_]+__'; then
+                echo 'Grafana alert contact point still contains unsubstituted placeholders.' >&2
+                exit 1
+              fi
+              echo 'Rendered the alert contact point and copied the rules and policy.'
+          volumeMounts:
+            - name: alerting-config
+              mountPath: /alerting-config
+              readOnly: true
+            - name: alerting
+              mountPath: /alerting
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+        {{/*
+          A plugin downloaded into the data volume loads in place of the copy the image bundles.
+          Preinstall no longer updates those downloads (grafana.ini, [plugins]), so one left from an
+          earlier boot would stay at its version through every Grafana upgrade. Removing it lets
+          the image's own copy run. GF_INSTALL_PLUGINS installs after this, so an explicit choice
+          still wins.
+        */}}
+        - name: drop-shadowed-plugins
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              for dir in /var/lib/grafana/plugins/*/; do
+                id=$(basename "$dir")
+                if [ -d "/usr/share/grafana/data/plugins-bundled/$id" ]; then
+                  rm -rf "$dir"
+                  echo "Removed the downloaded copy of $id; the image bundles it."
+                fi
+              done
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+      containers:
+        - name: grafana
+          # STOCK IMAGE, no entrypoint override -- see the initContainer above.
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            {{- include "aber.secretEnv" (dict "name" "GF_SECURITY_ADMIN_USER" "secretName" $secretName "key" "GRAFANA_ADMIN_USER") | nindent 12 }}
+            {{- include "aber.secretEnv" (dict "name" "GF_SECURITY_ADMIN_PASSWORD" "secretName" $secretName "key" "GRAFANA_ADMIN_PASSWORD") | nindent 12 }}
+            # Read by grafana.ini as $__env{GRAFANA_OAUTH_CLIENT_SECRET}. The plaintext here must
+            # match the base64url(sha256(...)) hash 0002_seed_data.sql wrote into auth.oauth_clients
+            # -- both come from the same value, so rotating it means restarting db-init AND this.
+            {{- include "aber.secretEnv" (dict "name" "GRAFANA_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "GRAFANA_OAUTH_CLIENT_SECRET") | nindent 12 }}
+            {{/*
+              THE TWO BROWSER-FACING URLS, overriding grafana.ini rather than editing it.
+
+              root_url is what Grafana builds its own redirect back to after the OAuth dance, and it
+              MUST equal the origin registered as the client's redirect_uris -- which db-init
+              registers from this same publicUrls.grafana value (M3). One value, two consumers, so
+              they cannot drift; a mismatch answers `invalid redirect_uri` at /oauth/authorize and
+              reads as a Grafana fault.
+
+              auth_url is FOLLOWED BY THE BROWSER, so it is the ingress address. token_url and
+              api_url stay as grafana.ini has them -- http://supabase-kong:8000 -- because those are
+              called by the CONTAINER. Using one address for both is the classic way this breaks: a
+              browser cannot resolve `supabase-kong`, and the container's 127.0.0.1 is itself.
+            */}}
+            - name: GF_SERVER_ROOT_URL
+              value: {{ printf "%s/" $grafanaPublic | quote }}
+            - name: GF_AUTH_GENERIC_OAUTH_AUTH_URL
+              value: {{ printf "%s/auth/v1/oauth/authorize" $supabasePublic | quote }}
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+            # Provisioning lives in two directories rather than one; see the ConfigMap notes.
+            - name: GF_PATHS_PROVISIONING
+              value: /etc/grafana/provisioning
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.grafana.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/grafana/grafana.ini
+              subPath: grafana.ini
+              readOnly: true
+            # The RENDERED datasource, from the initContainer's emptyDir.
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: config
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yml
+              subPath: dashboards.yml
+              readOnly: true
+            - name: dashboards-platform
+              mountPath: /etc/grafana/provisioning/dashboards/platform
+              readOnly: true
+            # The RENDERED alerting directory -- rules, policy and the contact point with its bearer
+            # secret substituted in. From the initContainer's emptyDir, never from the ConfigMap.
+            - name: alerting
+              mountPath: /etc/grafana/provisioning/alerting
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+            {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
+      volumes:
+        {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
+        - name: config
+          configMap:
+            name: {{ printf "%s-grafana-config" $fullname }}
+        - name: dashboards-platform
+          configMap:
+            name: {{ printf "%s-grafana-dashboards-platform" $fullname }}
+        - name: alerting-config
+          configMap:
+            name: {{ printf "%s-grafana-alerting" $fullname }}
+        - name: datasources
+          emptyDir: {}
+        - name: alerting
+          emptyDir: {}
+        - name: data
+          {{- if .Values.grafana.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-grafana" $fullname }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

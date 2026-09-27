@@ -1,25 +1,21 @@
 # Edge functions, baked into an image rather than bind-mounted.
 #
-# WHY. docker-compose.yml mounts ./supabase/functions into the stock
-# supabase/edge-runtime image and assembles the rest in a shell entrypoint. That is right for
-# Compose -- editing a function and restarting one container is the whole development loop -- but
-# it does not survive the move to Kubernetes: there is no repository on a cluster node to mount,
-# and "which revision of aas-export is running" becomes a property of whatever happens to be on
-# disk rather than of the deployed artefact. Baking makes the functions version with the image,
-# which is what lets a rollback actually roll the functions back.
-#
-# THE COMPOSE PATH IS UNCHANGED and keeps bind-mounting. Both run identical code; only the
-# delivery differs. See docs/kubernetes-architecture.md §2.2.
+# WHY. Mounting ./supabase/functions into the stock supabase/edge-runtime image is the obvious
+# arrangement -- editing a function and restarting one container is the whole development loop --
+# and it does not survive a cluster: there is no repository on a node to mount, and "which
+# revision of aas-export is running" becomes a property of whatever happens to be on disk rather
+# than of the deployed artefact. Baking makes the functions version with the image, which is what
+# lets a rollback actually roll the functions back. See docs/kubernetes-architecture.md §2.2.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT, as the release workflow and the dev loop build it:
-#   docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:<tag> .
+#   docker build -f supabase/functions/Dockerfile -t aber/edge-runtime:<tag> .
 # Nothing outside supabase/functions/ is copied any more (the appliance's files reach the functions
 # as a generated module under _shared/), so the context is a convention the two build sites share
 # rather than a requirement.
 #
-# PINNED to the tag docker-compose.yml runs. The runtime and the functions are versioned together
-# on purpose -- main/index.ts is an allow-list against a specific edge-runtime API.
-FROM supabase/edge-runtime:v1.74.2
+# PINNED. The runtime and the functions are versioned together on purpose -- main/index.ts is an
+# allow-list against a specific edge-runtime API.
+FROM supabase/edge-runtime:v1.77.0
 
 # The functions themselves, including main/ -- the allow-list stating what each one may reach. An
 # unregistered function 404s before a worker spawns, so main/index.ts must ship alongside them.
@@ -36,10 +32,10 @@ RUN rm -f /home/deno/functions/Dockerfile
 # delivery that needs no entry in main/index.ts's allow-list.
 #
 # A user worker has NO FILESYSTEM ACCESS to anything in this image -- edge-runtime sandboxes it,
-# and main/index.ts forwards only environment variables to each worker it spawns. ACS_CA_PEM is
+# and main/index.ts forwards only environment variables to each worker it spawns. ABER_CA_PEM is
 # the platform's root, read here in the plain container shell before edge-runtime starts, from the
 # ingress TLS Secret the chart mounts at /home/deno/ca when ingress TLS is on: gateway-bundle
 # computes the one-liner's pin from it. Absent on a deployment without ingress TLS, and the
 # dashboard then offers the ZIP bundle alone. Exec form with a literal script, so the quoting
 # survives.
-ENTRYPOINT ["/bin/sh", "-e", "-c", "export ACS_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
+ENTRYPOINT ["/bin/sh", "-e", "-c", "export ABER_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]

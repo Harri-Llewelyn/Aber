@@ -87,8 +87,14 @@ past PostgREST's `max-rows` — every `DIRECTORY_REFRESH_SECONDS` (5) and re-fil
 the same keys and identity sources the per-entity path would have produced, so nothing downstream
 can tell which path filled the cache. The hot path then misses only for an id the directory does
 not hold, and that miss costs what it always did. A failed pass changes nothing: entries expire on
-their TTL and the per-entity lookup takes over. The pass warns when the directory holds more ids
-than `MAX_ENTITIES_PER_CACHE`, because a cache that cannot hold the fleet evicts what it just filled.
+their TTL and the per-entity lookup takes over.
+
+**Each pass sizes the caches to the directory before filling them**: a key per device identity
+(`sparkplug_id`, and `reported_identity` where there is one), a row per gateway, a device per
+schema entry, plus `MAX_ENTITIES_PER_CACHE` of headroom for ids the directory does not hold. A
+fixed capacity of 1000 was measured failing at 1,200 devices (#395, `test-harness/README.md`,
+*Device count*): the caches evicted every entry inside its TTL, every message paid a PostgREST
+round trip, and the rate the stack could take fell to a quarter.
 
 **One window is left open knowingly.** The DBIRTH path mutates a cached row in place after writing
 the same change to Supabase, so the next birth inside the TTL does not re-detect it. A pass that
@@ -237,7 +243,7 @@ device, so the loss is made **loud** instead:
 - each drop logs the device, the metric, the constraint it failed and the fact that the reading
   cannot be recovered;
 - a per-message summary follows, naming how to switch the device back to `audit`;
-- `acs_ingestion_schema_rejected_total` counts it, beside `acs_ingestion_metrics_written_total`.
+- `aber_ingestion_schema_rejected_total` counts it, beside `aber_ingestion_metrics_written_total`.
 
 A metric dropped this way is still recorded in `digital_thread`, and that row is then the **only**
 remaining evidence the device sent anything — which is why enforcement does not switch recording
@@ -366,9 +372,10 @@ reports can tell replayed data apart through a join they already make, and synth
 exactly like real ones — which is the behaviour under test when the question is "do the rollups
 work".
 
-**Distinct from `deployment`**, which is about where the connector runs rather than whether the
-readings are real. An appliance out on the plant network replaying a capture is
-`deployment = 'remote'`, `is_simulated = true`.
+**A separate column from `deployment`**, which is about where the connector runs rather than
+whether the readings are real, but not an independent one: the table holds a simulated gateway to
+`deployment = 'host'` (`gateways_simulated_is_host`). A capture is replayed onto a simulated
+gateway, so never onto a remote one.
 
 ### Where captures are kept
 
@@ -395,7 +402,7 @@ read. It also only ever covered gateways, and a device is now a subject in its o
 | Auditor | yes | **no** — a read-only role that can remove evidence is not one |
 | Operator | no | no |
 
-**The upload checks that the file is a capture**, not merely that it is JSON — `acs_capture_version`
+**The upload checks that the file is a capture**, not merely that it is JSON — `aber_capture_version`
 present, matching the version this stack reads, and a non-empty `messages` array. The bucket has to
 accept several JSON-ish MIME types because browsers report a hand-picked `.json` inconsistently, so
 the type is close to no check at all, and a wrong file is otherwise discovered when somebody tries to
@@ -919,7 +926,7 @@ everything.
 
 **Failure granularity is still one message.** A transaction carrying more than one message that
 fails is retried one message at a time, so the message at fault is the only one lost — counted by
-`acs_ingestion_write_failures_total` as before — and `acs_ingestion_write_batch_failures_total`
+`aber_ingestion_write_failures_total` as before — and `aber_ingestion_write_batch_failures_total`
 records that a batch had to be split. A message whose every metric was filtered still upserts its
 asset row and still counts as written; the empty telemetry statement is guarded, since
 `execute_values` on an empty list is a syntax error.
@@ -932,7 +939,12 @@ into the writer.
 thread for `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` (5) first — the broker sees a slow consumer, which
 is backpressure — and only then drops, with `reason="write_queue_full"`, so a writer that is merely
 slow costs latency and a writer that is stuck costs a counted drop rather than a hung daemon.
-`acs_ingestion_write_queue_depth` is the saturation signal: it grows only while the writer is behind.
+`aber_ingestion_write_queue_depth` is the saturation signal: it grows only while the writer is behind.
+
+**The table above is a bench measurement of the write path alone**, taken against the database with
+nothing else in the way. What the assembled stack sustains — broker, directory, caches and disk all
+in the path, and the queue depth above as the signal — is measured by the load harness:
+[`../test-harness/README.md`](../test-harness/README.md), *The scale envelope*.
 
 **A SIGTERM drains the queue before the process exits**, bounded by
 `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` (8, inside the pod's termination grace period). A restart under load
@@ -959,7 +971,7 @@ A separate healer thread retries, off the message path and every `DB_HEAL_INTERV
 steps a dependency that was not up yet can prevent: the historian connection and `capture_worker.reconcile()`.
 It opens a connection with the lock released and only takes `_ts_conn_lock` to publish the result, so a
 batch arriving mid-heal never waits on a network round trip. It stays resident so
-`acs_ingestion_db_connected` answers "can this daemon reach the historian" at all times.
+`aber_ingestion_db_connected` answers "can this daemon reach the historian" at all times.
 
 ---
 
@@ -967,7 +979,7 @@ batch arriving mid-heal never waits on a network round trip. It stays resident s
 
 Sparkplug binds each metric name to an **integer alias** in a birth certificate, and thereafter
 publishes DATA carrying the alias alone with no name. That is the normal production configuration
-for a real gateway — including upstream ACS's `acs-edge`.
+for a real gateway — including ACS's `acs-edge`.
 
 Until this was implemented the daemon read only `metric.name`, so an alias-optimised gateway
 **ingested zero metrics and logged nothing**. It was a total, silent data-loss path for any
@@ -1027,8 +1039,10 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
   healthy daemon reports a failure whose text describes a serious fault. Check 9b exists to assert
   the very throttle that causes it. Space runs by more than `REBIRTH_REQUEST_INTERVAL_SECONDS`, and
   when in doubt grep the daemon's log for `REBIRTH REQUESTED`: the line states the deadline.
-- **The demo Node-RED simulator does not answer a rebirth** — it publishes on a timer and
-  subscribes to no command topic. That is a simulator limitation, not a daemon one.
+- **The gateway appliance answers it** (`forge/gateway-platform/appliance/`, #414): an `NBIRTH`,
+  then a `DBIRTH` for every device at its last values, all on the node's one `seq`. A
+  `Device Control/Rebirth` on `DCMD` re-births one device. A gateway of your own has to answer it
+  too, or a lost change waits for its next report.
 
 ## The Directory on MQTT
 
@@ -1044,7 +1058,7 @@ and reads nothing back.
 | `<prefix>/schema` | Locally minted schema identifiers |
 | `<prefix>/service` | Stack service endpoints |
 
-**It is off by default.** `DIRECTORY_MQTT_ENABLED` is unset on both targets, and the daemon logs
+**It is off by default.** `DIRECTORY_MQTT_ENABLED` is unset in the chart, and the daemon logs
 which state it is in at startup rather than staying silent — an unconfigured deployment should be
 able to tell that the tree is empty on purpose.
 
@@ -1055,12 +1069,17 @@ subscriber. Publishing the Directory therefore moves the access decision out of 
 into the broker, and turning it on is an exposure decision that belongs to a deployment, not a
 default.
 
-**The broker's roles are the whole of that access control**, and they are deliberately narrow
-(`mosquitto/dynsec-roles.json`):
+**The broker's roles are the whole of that access control**, and they are deliberately narrow:
 
 ```
-ingestion   publish, subscribe, receive   ACS-Cymru/Directory/#
+ingestion   publish, subscribe, receive   <DIRECTORY_MQTT_TOPIC_PREFIX>/#
 ```
+
+**That grant is not in `dynsec-roles.json`.** The subtree is named after the site's Sparkplug
+group, which this repository does not choose, so it is injected at reconcile time from the same
+rendered prefix the daemon publishes to — the arrangement the primary-host STATE grant already
+used. A broker granted one subtree while the daemon writes another would drop every Directory
+publish silently, because refusal is silent at QoS 0.
 
 **Nothing else holds a Directory grant**, including the i3X server: it reads the Directory from
 the database over PostgREST, where the rows are authoritative, so a broker grant would be one it
@@ -1070,10 +1089,10 @@ never exercises (issue #297).
 edge node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting
 it here would undo that confinement through the back door.
 `scripts/check-broker-config.mjs` asserts all three by delivery: that ingestion may publish
-`ACS-Cymru/Directory/v1/device`, and that neither a gateway nor the i3X principal may read it.
+`Aber/Directory/v1/device`, and that neither a gateway nor the i3X principal may read it.
 
 **The source is the enrolment record, never a birth.** This is the point on which
-[issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)'s design was refused. A registry
+[issue #64](https://github.com/Harri-Llewelyn/Aber/issues/64)'s design was refused. A registry
 built by writing a topic binding on each NBIRTH/DBIRTH would make the Directory a record of what
 devices *claim*, and a self-declared marker is not evidence: an address that answers is not an
 address that is authorised, and nothing would ever remove a device that stopped birthing. The
@@ -1097,7 +1116,8 @@ interoperability claim would become false the moment the payload left HTTP.
 | Variable | Default | |
 | :--- | :--- | :--- |
 | `DIRECTORY_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
-| `DIRECTORY_MQTT_TOPIC_PREFIX` | `ACS-Cymru/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any |
+| `DIRECTORY_MQTT_TOPIC_PREFIX` | `<SPARKPLUG_GROUP>/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any. The broker's grant is derived from this same value |
+| `SPARKPLUG_GROUP` | **required** (the chart sets it) | The site's group, from `ingestion.sparkplugGroup`. Names the Directory subtree above and the group a log line reports when a gateway's row carries none; resolution always uses the row |
 | `DIRECTORY_MQTT_INTERVAL_SECONDS` | `60` | Republish interval |
 
 ## The Unified Namespace
@@ -1105,7 +1125,7 @@ interoperability claim would become false the moment the payload left HTTP.
 `uns_publish.py` republishes every metric a DDATA wrote to the historian on a plain, retained topic,
 as JSON, for the consumer that has a broker connection and no Sparkplug decoder: a BI tool, a SCADA
 client, a dashboard. It runs on the historian writer thread, after the commit, so what it
-publishes is exactly what was recorded ([issue #66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66)).
+publishes is exactly what was recorded ([issue #66](https://github.com/Harri-Llewelyn/Aber/issues/66)).
 
 **The topic is ISA-95's hierarchy, and the path is fixed at the level the asset honestly occupies.**
 
@@ -1141,7 +1161,7 @@ stake: a cell is not addressed on the wire, and `<cell>` is the cell's name, not
 
 **An incomplete path is skipped, never filled with a placeholder.** A device that is unassigned, a
 cell filed in no area, a site whose name is unset: none is published, each is counted under
-`acs_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Overview's
+`aber_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Overview's
 Unassigned lane are where an operator completes the path. An invented segment would put a word
 nobody chose in every topic, which is the trap the derived lanes exist to avoid. Names are checked
 for `/`, `+` and `#` on the way in (`areas_name_topic_safe`, `cells_name_topic_safe`; the cell
@@ -1166,8 +1186,8 @@ exists to prevent. A BI or SCADA consumer gets its own account and a role readin
 deliberately in `mosquitto/dynsec-roles.json`. `scripts/check-broker-config.mjs` asserts all three halves by delivery.
 
 **The cost is on the single-writer path**, one publish per metric per message on the same thread
-as the historian write, and it is measured the same way: `acs_ingestion_uns_publish_seconds` sits
-beside `acs_ingestion_write_seconds`, and the two together are the per-message cost. The location
+as the historian write, and it is measured the same way: `aber_ingestion_uns_publish_seconds` sits
+beside `aber_ingestion_write_seconds`, and the two together are the per-message cost. The location
 context — the device's resolved cell and area, their names, the site — is cached for
 `UNS_CONTEXT_TTL_SECONDS`, so a message costs no directory read and a relocation on the dashboard
 moves a device's topic within that window.
@@ -1307,27 +1327,27 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
 | `PRIMARY_HOST_ID` | **required** | The Sparkplug primary host id — see [The Primary Host](#the-primary-host-and-the-state-every-gateway-watches). The daemon refuses to start without it |
 | `MAX_ALIASES_PER_NODE` | `5000` | Cap on the per-node alias table |
-| `MAX_ENTITIES_PER_CACHE` | `1000` | Cap on each entity resolution cache. Same reasoning, applied to the caches keyed by the id seen on the wire |
+| `MAX_ENTITIES_PER_CACHE` | `1000` | Headroom on each entity resolution cache beyond what the directory holds, for ids seen on the wire that it does not; the whole capacity when the refresher is off |
 | `DIRECTORY_REFRESH_SECONDS` | `5` | Seconds between directory refresh passes — see [The directory refresher](#the-directory-refresher). `0` disables the thread |
 | `TELEMETRY_BATCH_MAX_MESSAGES` | `500` | Messages per historian transaction, at most — see [The historian writer](#the-historian-writer) |
 | `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop |
 | `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` | `5` | How long a full queue holds the callback thread before dropping |
-| `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM waits for the queue to drain. Inside the container grace period on both targets |
+| `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM waits for the queue to drain. Inside the pod's termination grace period |
 | `INGESTION_STATS_INTERVAL` | `60` | Seconds between `STATS` log lines. `0` disables the reporter |
 | `INGESTION_METRICS_PORT` | `9108` | Prometheus endpoint. `0` disables it — see [Metrics](#metrics) |
 | `LOG_LEVEL` | `INFO` | Any level name; an unrecognised one falls back to `INFO` |
-| `LOG_FORMAT` | `text` in code, **`json` in both deployments** | `json` emits one object per line with the drop fields promoted to top level — see [Log fields](#log-fields). An unrecognised value is `text` |
+| `LOG_FORMAT` | `text` in code, **`json` in the chart** | `json` emits one object per line with the drop fields promoted to top level — see [Log fields](#log-fields). An unrecognised value is `text` |
 
 The first three are the chart's `ingestion.*` values —
 `validate.py`'s watchdog check reads them from its own environment to decide whether the window is
-short enough to wait for, and it runs against both targets.
+short enough to wait for, and it runs against the deployed stack.
 
 ### Log fields
 
 Every drop is a **counter and a log line**, written at the same site by one `drop()` call. The
 counter says a drop happened and how many; the line says **which device, under which edge node,
 and why**. `drop("gateway_binding")` produces both `dropped_gateway_binding` — exported as
-`acs_ingestion_messages_dropped_total{reason="gateway_binding"}` — and a warning carrying
+`aber_ingestion_messages_dropped_total{reason="gateway_binding"}` — and a warning carrying
 `reason=gateway_binding`, from that one string, so the two cannot drift apart.
 
 That matters because it is what makes a dashboard panel a **drill-down**: a spike on the drop
@@ -1407,7 +1427,7 @@ than raised.
 **Every series `COUNTER_MAP` declares is present at zero from startup**, not from its first event —
 labelled ones included. A counter whose series springs into existence at 1 has no previous sample
 for `rate()` to compare against, so the step from no drops to some would be invisible for one scrape
-interval. `acs_ingestion_messages_total{msg_type=…}` is the exception: its label values are whatever
+interval. `aber_ingestion_messages_total{msg_type=…}` is the exception: its label values are whatever
 the fleet publishes, so they cannot be declared in advance.
 
 The `STATS` log line remains, and still reports by the **flat** names the call sites use
@@ -1421,31 +1441,40 @@ the line, so a drop counter appearing there at all is still the signal.
 
 | Metric | Labels | A non-zero value means |
 | :--- | :--- | :--- |
-| `acs_ingestion_messages_total` | `msg_type` | Messages acted on, after parsing and the command-topic filter. **Flat is the signal**: a running daemon consuming nothing. |
-| `acs_ingestion_metrics_written_total` | — | Metric samples written to the historian. |
-| `acs_ingestion_messages_written_total` | — | DDATA messages whose telemetry the historian committed. Divided by `acs_ingestion_write_seconds_count` it is messages per transaction: 1 while the writer keeps up, rising as it batches. |
-| `acs_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
-| `acs_ingestion_timestamps_rejected_total` | `edge_node` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. The label names the appliance, which is almost always a clock rather than a device — read it beside the gauge below. |
-| `acs_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
-| `acs_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
-| `acs_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
-| `acs_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
-| `acs_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
-| `acs_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
-| `acs_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
-| `acs_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
-| `acs_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
-| `acs_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
-| `acs_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by `MAX_ENTITIES_PER_CACHE`. |
-| `acs_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
-| `acs_ingestion_gateway_clock_offset_seconds` | `edge_node` | Gauge. How far that appliance's clock is from this server's, **positive meaning it is ahead**. Derived from the timestamp on its own heartbeat against the time that heartbeat arrived — no appliance change, nothing added to the wire. See below. |
-| `acs_ingestion_gateway_clock_measured_timestamp_seconds` | `edge_node` | Gauge. When that offset was last measured. **Read the offset only beside this**: a gauge holds its last value indefinitely, so an appliance powered down mid-fault reports it forever. |
-| `acs_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
+| `aber_ingestion_messages_total` | `msg_type` | Messages acted on, after parsing and the command-topic filter. **Flat is the signal**: a running daemon consuming nothing. |
+| `aber_ingestion_metrics_written_total` | — | Metric samples written to the historian. |
+| `aber_ingestion_messages_written_total` | — | DDATA messages whose telemetry the historian committed. Divided by `aber_ingestion_write_seconds_count` it is messages per transaction: 1 while the writer keeps up, rising as it batches. |
+| `aber_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
+| `aber_ingestion_timestamps_rejected_total` | `edge_node` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. The label names the appliance, which is almost always a clock rather than a device — read it beside the gauge below. |
+| `aber_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
+| `aber_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
+| `aber_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
+| `aber_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
+| `aber_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
+| `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
+| `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
+| `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
+| `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
+| `aber_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
+| `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by the directory plus `MAX_ENTITIES_PER_CACHE`. |
+| `aber_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
+| `aber_ingestion_gateway_clock_offset_seconds` | `edge_node` | Gauge. How far that appliance's clock is from this server's, **positive meaning it is ahead**. Derived from the timestamp on its own heartbeat against the time that heartbeat arrived — no appliance change, nothing added to the wire. See below. |
+| `aber_ingestion_gateway_clock_measured_timestamp_seconds` | `edge_node` | Gauge. When that offset was last measured. **Read the offset only beside this**: a gauge holds its last value indefinitely, so an appliance powered down mid-fault reports it forever. |
+| `aber_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
 
 `reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not
 own it), `gateway_archived`, `device_archived`, `quarantined_or_unregistered`, `db_unavailable`,
 `write_queue_full` (the writer's queue stayed full for the put timeout), and the four
 directory-unavailable reasons below.
+
+**Loss this counter cannot see.** Telemetry is QoS 0, so when the daemon falls behind, Mosquitto
+discards messages for it before they are delivered, and no `reason` ever counts them. The broker's
+own record is `broker_publish_messages_dropped` on the Mosquitto exporter (port 9234): broker-wide,
+not per subscriber, and zero in steady state. The daemon infers the same loss from Sparkplug `seq`
+(`aber_ingestion_sequence_gaps_total`, below). The Ingestion dashboard's *Messages Lost* panel
+shows all three; the `Broker Shedding Messages` alert fires on any increase. Measured in
+[`test-harness/README.md`](../test-harness/README.md) *Results*: a 20-minute soak at 1,250 msg/s
+lost 27,299 messages this way while every drop reason read zero.
 
 **`device_archived` is one reason for all three message kinds**, unlike the directory-unavailable
 family: a birth, a death and a reading are refused for the same cause and at the same cost, and
@@ -1473,8 +1502,8 @@ number and the log undercounts deliberately.
 ### The sequence counters are a lower bound, and that is inherent
 
 `seq` is 8-bit and the gap size is computed modulo 256, so **a single gap larger than 255 is
-undercounted**. `acs_ingestion_sequence_messages_missed_total` is therefore a floor, not a
-measurement. Read it beside `acs_ingestion_sequence_gaps_total`: the gap count is exact, the missed
+undercounted**. `aber_ingestion_sequence_messages_missed_total` is therefore a floor, not a
+measurement. Read it beside `aber_ingestion_sequence_gaps_total`: the gap count is exact, the missed
 count is "at least this many".
 
 Two things that are *not* gaps and never increment either counter — the 255 → 0 wrap, which is the
@@ -1489,17 +1518,19 @@ That is worth knowing rather than smoothing away.
 
 1. **Is it one edge node or all of them?** The `edge_node` label is there to answer this. One is a
    flapping gateway or its network; all of them is the broker, or this daemon.
-2. **Did the daemon or the broker restart?** Cross-check `acs_ingestion_up` and the container's
+2. **Did the daemon or the broker restart?** Cross-check `aber_ingestion_up` and the container's
    start time. A gap concentrated at one instant is a restart; a steady rate is live loss.
 3. **Is a rebirth being answered?** A gap triggers an NCMD rebirth request, which repairs the
-   divergence by re-declaring every metric. If `acs_ingestion_alias_unresolved_total` is also
+   divergence by re-declaring every metric. If `aber_ingestion_alias_unresolved_total` is also
    climbing, the node is not answering.
 
 ### Alert rules — shipped
 
-**All seven are provisioned**, in the `Ingestion Pipeline` group of
+**Every rule in the table is provisioned**, in the `Ingestion Pipeline` group of
 [`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
 reading the chart's own Prometheus.
+The reasoning behind each rule's shape, `for` and `noDataState` is in
+[`grafana/README.md`](../grafana/README.md).
 
 **The table stays even though the rules shipped**, because a provisioned rule states its threshold
 and not its reasoning — and the reasoning is the part that has to survive someone deciding a number
@@ -1507,13 +1538,14 @@ looks wrong.
 
 | Alert | Expression | For | Why this threshold |
 | :--- | :--- | :--- | :--- |
-| Ingestion consuming nothing | `rate(acs_ingestion_messages_total[5m]) == 0` | 10m | A running daemon with no traffic. On a plant that is always publishing this is the highest-value rule here, and it is the one the heartbeat file cannot express. |
-| Telemetry being dropped | `sum(rate(acs_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero, and `for: 5m` is what absorbs a restart. |
-| Binding rejections rising | `rate(acs_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
-| Historian unreachable | `acs_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
-| Message loss | `increase(acs_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
-| Historian writer saturating | `sum(rate(acs_ingestion_write_seconds_sum[5m])) > 0.5` | 10m | The writer thread's occupancy, read straight off the histogram. Half is the warning: the daemon keeps up, and a burst or a slower historian takes it the rest of the way. Queue depth is deliberately not the trigger — it moves only once the writer is already behind, and a full queue's drops reach the drop rule anyway. |
-| Gateway clock skew | `abs(acs_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |
+| Ingestion consuming nothing | `rate(aber_ingestion_messages_total[5m]) == 0` | 10m | A running daemon with no traffic. On a plant that is always publishing this is the highest-value rule here, and it is the one the heartbeat file cannot express. |
+| Telemetry being dropped | `sum(rate(aber_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero, and `for: 5m` is what absorbs a restart. |
+| Binding rejections rising | `rate(aber_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
+| Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
+| Broker shedding messages | `sum(increase(broker_publish_messages_dropped[5m])) > 0` | 1m | **Zero is the steady state.** A shed message never reached the daemon, so the drop rule cannot see it. Broker-wide: Message loss rising beside it places the loss on the historian path. |
+| Message loss | `increase(aber_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
+| Historian writer saturating | `sum(rate(aber_ingestion_write_seconds_sum[5m])) > 0.5` | 10m | The writer thread's occupancy, read straight off the histogram. Half is the warning: the daemon keeps up, and a burst or a slower historian takes it the rest of the way. Queue depth is deliberately not the trigger — it moves only once the writer is already behind, and a full queue's drops reach the drop rule anyway. |
+| Gateway clock skew | `abs(aber_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |
 
 **Binding rejections rising is the one to read first.** It was the last outstanding rule of the
 platform alerting work: the other three platform rules — Gateway Stale, Enrolment Stuck, Quarantine
@@ -1528,17 +1560,17 @@ Operator CRDs, and must set `grafana.prometheusUrl` — the render refuses an em
 placeholder in `grafana/provisioning/datasources/datasources.template.yml` is substituted per
 deployment target for that reason.
 
-### `acs_ingestion_write_seconds` — the one distribution
+### `aber_ingestion_write_seconds` — the one distribution
 
 Every other series here answers *how many*; this one answers *how long*, and it is the measurement
 of the ceiling. One observation per historian transaction, which carries every message queued while
 the previous one ran.
 
-**`rate(acs_ingestion_write_seconds_sum[5m])` is the writer's occupancy** — the fraction of the
+**`rate(aber_ingestion_write_seconds_sum[5m])` is the writer's occupancy** — the fraction of the
 writer thread's time spent inside transactions — and that is the capacity gauge the `Historian
-Writer Saturating` rule reads. At 1 the writer is saturated and `acs_ingestion_write_queue_depth`
-grows. Messages per transaction is `acs_ingestion_messages_written_total /
-acs_ingestion_write_seconds_count`: 1 while the writer keeps up, rising as it batches.
+Writer Saturating` rule reads. At 1 the writer is saturated and `aber_ingestion_write_queue_depth`
+grows. Messages per transaction is `aber_ingestion_messages_written_total /
+aber_ingestion_write_seconds_count`: 1 while the writer keeps up, rising as it batches.
 
 **What it times, and why it starts where it does.** The clock starts before the connection is
 acquired, not at the `INSERT`, and stops after `with db_conn` commits. A reconnect occupies the
@@ -1548,7 +1580,7 @@ hide inside a bucket that also holds healthy writes: **anything at or above `le=
 reconnect path, not the database.**
 
 **Committed writes only.** A transaction that raised is counted by
-`acs_ingestion_write_failures_total` and excluded here, so a p99 spike means a slow database and
+`aber_ingestion_write_failures_total` and excluded here, so a p99 spike means a slow database and
 never an absent one. Letting the two share a distribution would make the quantile ambiguous between
 conditions that call for opposite responses.
 
@@ -1573,7 +1605,7 @@ callback thread no longer writes; [the historian writer](#the-historian-writer) 
 transaction per batch, and the fixed cost that set the 240 is paid once per batch. Under
 report-by-exception a message is one row at about 0.04 ms, so the writer's ceiling is set by how
 many messages a transaction carries — and it carries whatever arrived during the previous commit.
-The measurement that matters now is `rate(acs_ingestion_write_seconds_sum)`, the occupancy, and the
+The measurement that matters now is `rate(aber_ingestion_write_seconds_sum)`, the occupancy, and the
 `Historian Writer Saturating` rule reads it.
 
 **The directory was the nearer ceiling, and it was never measured.** Every device cost a PostgREST
@@ -1649,9 +1681,9 @@ npm run dev:test          # validate.py, then the stack lane
 **In-cluster, as a Job in the namespace:**
 
 ```bash
-helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru \
-  -f deploy/helm/acs-cymru/values-dev.yaml --set e2e.enabled=true
-kubectl -n acs-cymru logs -f job/acs-cymru-e2e-validate
+helm upgrade aber deploy/helm/aber -n aber \
+  -f deploy/helm/aber/values-dev.yaml --set e2e.enabled=true
+kubectl -n aber logs -f job/aber-e2e-validate
 ```
 
 **No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-kong` *are* the

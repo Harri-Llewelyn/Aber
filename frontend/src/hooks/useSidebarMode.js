@@ -6,7 +6,7 @@ export const SIDEBAR_MODES = [
   { id: 'collapsed', label: 'Collapsed',       description: 'Icons only. Hover does nothing; keyboard focus still shows labels.' }
 ]
 
-export const SIDEBAR_MODE_KEY = 'acs_cymru_sidebar_mode'
+export const SIDEBAR_MODE_KEY = 'aber_sidebar_mode'
 const DEFAULT_MODE = 'hover'
 
 const isMode = (v) => SIDEBAR_MODES.some(m => m.id === v)
