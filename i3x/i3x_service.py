@@ -63,7 +63,8 @@ logger = logging.getLogger("i3x")
 
 SPEC_VERSION = "1.0"
 SERVER_NAME = os.getenv("I3X_SERVER_NAME", "aber-i3x")
-SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "0.1.0")
+# The chart sets it from its appVersion. `dev` marks a process started without the chart.
+SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "dev")
 
 LISTEN_HOST = os.getenv("I3X_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("I3X_PORT", "8090"))
@@ -272,14 +273,21 @@ def _read_address_space(pg: PostgrestClient) -> dict:
 
     UNCACHED. Every caller should go through `_load_address_space()`; this is the cold read behind
     it, separated so the cache has something to call and so a test can measure the difference.
+
+    A failed read raises; it never becomes "no rows". Only a 401/403 on the location view reads as
+    empty, because a caller denied that view is still shown every asset it may see, under
+    Unassigned.
     """
     # ARCHIVED ROWS ARE EXCLUDED EVERYWHERE. A soft-deleted asset is not part of the live address
     # space -- it is restorable history, and the Archives tab is where it lives. Including it would
     # publish elementIds that resolve to nothing a client can subscribe to, and an archived device
     # publishes no values, so every one of them would read as GoodNoData forever.
     live = "eq.false"
-    cells = pg.get("cells", {"select": "id,name", "is_archived": live, "order": "name"})
-    gateways = pg.get(
+    cells = _read_relation(
+        pg, "cells", {"select": "id,name,description", "is_archived": live, "order": "name"}
+    )
+    gateways = _read_relation(
+        pg,
         "gateways",
         {
             "select": "id,sparkplug_id,name,cell_id,location_scope,sparkplug_group,status,"
@@ -287,7 +295,8 @@ def _read_address_space(pg: PostgrestClient) -> dict:
             "is_archived": live,
         },
     )
-    devices = pg.get(
+    devices = _read_relation(
+        pg,
         "devices",
         {
             "select": "id,sparkplug_id,name,gateway_id,is_quarantined,last_birth_metrics,"
@@ -295,13 +304,16 @@ def _read_address_space(pg: PostgrestClient) -> dict:
             "is_archived": live,
         },
     )
-    # The resolved cell per device -- COALESCE(device.cell_id, gateway.cell_id) -- which is a view
-    # precisely because that resolution must not be re-implemented per consumer.
-    try:
-        locations = pg.get("device_locations", {"select": "id,effective_cell_id"})
-    except SubscriptionError:
-        locations = []
-    schemas = pg.get(
+    # The resolved cell and area per device, keyed by `device_id`. A view because that resolution
+    # must not be re-implemented per consumer; `effective_area_id` is carried for the Area level.
+    locations = _read_relation(
+        pg,
+        "device_locations",
+        {"select": "device_id,effective_cell_id,effective_area_id"},
+        denied_is_empty=True,
+    )
+    schemas = _read_relation(
+        pg,
         "schemas",
         {"select": "id,schema_name,description,schema_definition,semantic_id,version,status,"
                    "change_description"},
@@ -310,9 +322,25 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         "cells": cells,
         "gateways": gateways,
         "devices": devices,
-        "locations": {row["id"]: row.get("effective_cell_id") for row in locations},
+        "locations": {row["device_id"]: row for row in locations},
         "schemas": schemas,
     }
+
+
+def _read_relation(pg: PostgrestClient, relation: str, params: dict,
+                   denied_is_empty: bool = False) -> List[dict]:
+    """
+    One address-space read. A 401/403 raises unless `denied_is_empty`; any other failure is a 502
+    naming the relation and carrying PostgREST's message, so a bad column cannot pass as no rows.
+    """
+    try:
+        return pg.get(relation, params)
+    except SubscriptionError as exc:
+        if exc.status in (401, 403):
+            if denied_is_empty:
+                return []
+            raise
+        raise SubscriptionError(502, "Bad Gateway", f"Reading {relation}: {exc.detail}") from exc
 
 
 def _modelled_metrics(schema_definition) -> set:
@@ -365,8 +393,8 @@ def _build_objects(space: dict) -> Dict[str, dict]:
             device.get("last_birth_metrics") or [],
             _modelled_metrics(schema.get("schema_definition")) if schema else set(),
         )
-        cell_id = space["locations"].get(device["id"])
-        obj = A.device_object(device, cell_id, device.get("schema_id"))
+        cell_id = (space["locations"].get(device["id"]) or {}).get("effective_cell_id")
+        obj = A.device_object(device, cell_id, device.get("schema_id"), schema)
         objects[obj["elementId"]] = obj
         if cell_id:
             children_by_cell.setdefault(cell_id, []).append(obj["elementId"])
@@ -636,7 +664,35 @@ def _require_element_ids(body: dict, required: bool = True) -> list:
         return []
     if not isinstance(wanted, list):
         raise Problem(400, "Bad Request", "elementIds array is required.")
-    return _cap_bulk(wanted, "elementIds")
+    _cap_bulk(wanted, "elementIds")
+    if not all(isinstance(eid, str) for eid in wanted):
+        # An object or array here is unhashable, and would be a 500 at the first lookup.
+        raise Problem(400, "Bad Request", "elementIds must be an array of strings.")
+    return wanted
+
+
+def _int_field(body: dict, name: str, default: int, minimum: int) -> int:
+    """
+    An integer body field of at least `minimum`, or `default` when absent or null. Anything else
+    is a 400: JSON `true` is refused although Python counts it as 1, and `2.0` is taken as 2.
+    """
+    value = body.get(name)
+    if value is None:
+        return default
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise Problem(
+            400,
+            "Bad Request",
+            f"{name} must be an integer of {minimum} or more; got {json.dumps(value)}.",
+        )
+    return value
+
+
+def _max_depth(body: dict) -> int:
+    """`maxDepth`: 1 (the default) is the object alone, 0 is unbounded, N descends N-1 levels."""
+    return _int_field(body, "maxDepth", 1, 0)
 
 
 def _cap_bulk(entries: list, field: str) -> list:
@@ -698,9 +754,12 @@ class Handler(BaseHTTPRequestHandler):
         if not getattr(self, "_raw_body", b""):
             return {}
         try:
-            return json.loads(self._raw_body.decode("utf-8") or "{}")
+            body = json.loads(self._raw_body.decode("utf-8") or "{}")
         except (ValueError, UnicodeDecodeError):
             raise Problem(400, "Bad Request", "Request body is not valid JSON.")
+        if not isinstance(body, dict):
+            raise Problem(400, "Bad Request", "Request body must be a JSON object.")
+        return body
 
     def _query(self) -> dict:
         from urllib.parse import parse_qs, urlparse
@@ -826,8 +885,14 @@ def h_namespaces(req: Handler) -> None:
     req._ok(A.namespaces())
 
 
+def _in_namespace(req: Handler, types: List[dict]) -> List[dict]:
+    """`?namespaceUri=` keeps the types in that namespace; one that serves nothing gives []."""
+    uri = req._query().get("namespaceUri")
+    return [t for t in types if t["namespaceUri"] == uri] if uri else types
+
+
 def h_objecttypes(req: Handler) -> None:
-    req._ok(_build_types(_load_address_space(req._pg())))
+    req._ok(_in_namespace(req, _build_types(_load_address_space(req._pg()))))
 
 
 def h_objecttypes_query(req: Handler) -> None:
@@ -857,7 +922,7 @@ def h_objecttypes_query(req: Handler) -> None:
 
 def h_relationshiptypes(req: Handler) -> None:
     req._bearer()
-    req._ok(A.relationship_types())
+    req._ok(_in_namespace(req, A.relationship_types()))
 
 
 def h_relationshiptypes_query(req: Handler) -> None:
@@ -1011,8 +1076,12 @@ def _current_value(objects, space: dict, element_id: str):
     devices_by_sid = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
     if element_id in devices_by_sid:
         return A.device_value(devices_by_sid[element_id], metrics_for(element_id))
+    # A container's value is what its type declares. Counts are of devices, never of children:
+    # a cell's children include its gateways, and the site's are cells and Unassigned.
+    if element_id == A.SITE_ELEMENT_ID:
+        return A.site_value(len(space["cells"]), len(devices_by_sid))
     rels = (obj.get("metadata") or {}).get("relationships") or {}
-    return A.container_value(obj, len(rels.get("HasChildren", [])))
+    return A.cell_value(obj, sum(1 for c in rels.get("HasChildren", []) if c in devices_by_sid))
 
 
 def h_objects_value(req: "Handler") -> None:
@@ -1027,7 +1096,7 @@ def h_objects_value(req: "Handler") -> None:
     """
     body = req._body()
     wanted = _require_element_ids(body)
-    max_depth = body.get("maxDepth", 1)
+    max_depth = _max_depth(body)
     space = _load_address_space(req._pg())
     objects = _build_objects(space)
 
@@ -1064,6 +1133,21 @@ def h_objects_value(req: "Handler") -> None:
 RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}")
 
 
+def _read_telemetry(pg: PostgrestClient, element_id: str, start, end, limit: int) -> List[dict]:
+    """One device's raw samples in [start, end], newest first."""
+    return pg.get(
+        "telemetry",
+        {
+            "select": "time,metric_name,val_double,val_string,val_bool",
+            "asset_id": "eq." + element_id,
+            "time": "gte." + str(start),
+            "and": "(time.lte." + str(end) + ")",
+            "order": "time.desc",
+            "limit": str(limit),
+        },
+    )
+
+
 def h_objects_history(req: "Handler") -> None:
     """
     History comes from TimescaleDB through PostgREST, never from the value cache.
@@ -1080,8 +1164,8 @@ def h_objects_history(req: "Handler") -> None:
         raise Problem(400, "Bad Request", "startTime and endTime are required.")
     if not RFC3339.match(str(start)) or not RFC3339.match(str(end)):
         raise Problem(400, "Bad Request", "startTime and endTime must be valid RFC 3339 timestamps.")
-    limit = min(int(body.get("limit") or 1000), 10000)
-    max_depth = body.get("maxDepth", 1)
+    limit = min(_int_field(body, "limit", 1000, 1), 10000)
+    max_depth = _max_depth(body)
 
     pg = req._pg()
     space = _load_address_space(pg)
@@ -1093,17 +1177,7 @@ def h_objects_history(req: "Handler") -> None:
         # honest answer -- inventing an aggregate would assert a measurement nobody took.
         if eid not in device_sids:
             return []
-        rows = pg.get(
-            "telemetry",
-            {
-                "select": "time,metric_name,val_double,val_string,val_bool",
-                "asset_id": "eq." + eid,
-                "time": "gte." + str(start),
-                "and": "(time.lte." + str(end) + ")",
-                "order": "time.desc",
-                "limit": str(limit),
-            },
-        )
+        rows = _read_telemetry(pg, eid, start, end, limit)
         out = []
         for row in rows:
             value = row.get("val_double")

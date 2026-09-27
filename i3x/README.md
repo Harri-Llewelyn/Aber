@@ -103,6 +103,22 @@ Six mappings that are decisions rather than mechanics:
   `GoodNoData` with no value. A `quality` column on the hypertable would be a stored verdict that
   goes stale the moment the gateway does.
 
+A device's cell is `effective_cell_id` from the `device_locations` view, keyed by `device_id`,
+so an explicit cell and one inherited from the gateway resolve the way the Directory resolves
+them. `effective_area_id` is read with it and not yet projected. An object's
+`metadata.sourceTypeId` is its type's: a device's is its schema's `semantic_id`, else the schema's
+name, and `Device` when it has no schema. The site, a cell and Unassigned have values too, and each
+sends exactly the properties its synthetic type declares; `deviceCount` counts devices, not
+children, so a cell's gateways and the site's cells are not in it.
+
+**A failed read is an error, never an empty answer.** A read behind the address space that
+PostgREST answers with a 400 or a 5xx is a 502 naming the relation and carrying PostgREST's
+message, a read that cannot reach PostgREST is a 502 too, and a 401 or 403 is answered as itself.
+The one read that takes a 401 or 403 as empty is `device_locations`, so a caller denied that view
+still sees every asset it may, under Unassigned. The location read once selected a column the view does not have, the 400 was
+taken for "no rows", and every device sat under Unassigned without an error anywhere (#492).
+`TestAddressSpaceReads` now holds every select list to the columns the migrations create.
+
 ## Endpoints
 
 All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
@@ -111,9 +127,9 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | :--- | :--- | :--- |
 | GET | `/info` | **Unauthenticated.** Capabilities + health |
 | GET | `/namespaces` | The two every type belongs to: local and relationships |
-| GET | `/objecttypes` | `schemas` rows + synthetic Site/Cell/Gateway types |
+| GET | `/objecttypes` | `schemas` rows + synthetic Site/Cell/Gateway types. `?namespaceUri=` |
 | POST | `/objecttypes/query` | |
-| GET | `/relationshiptypes` | Six types, all registered with their `reverseOf` |
+| GET | `/relationshiptypes` | Six types, all registered with their `reverseOf`. `?namespaceUri=` |
 | POST | `/relationshiptypes/query` | |
 | GET | `/objects` | `?typeElementId=`, `?root=true`, `?includeMetadata=true` |
 | POST | `/objects/list` | Bulk, **results in request order** |
@@ -124,6 +140,10 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | POST | `/subscriptions/sync` | MUST. 206 on queue overflow |
 | POST | `/subscriptions/stream` | MAY. SSE, **one stream per subscription** |
 | PUT | `/objects/value`, `/objects/history` | **405** — see below |
+
+An invalid parameter is a 400 before anything is read: the body must be a JSON object, `elementIds`
+an array of strings, `maxDepth` an integer of 0 or more, and `limit` a positive integer.
+`_int_field()` is the one check for the integers.
 
 The full request and response reference is [`docs/i3x-openapi.yaml`](../docs/i3x-openapi.yaml),
 which swagger-ui serves in the same dropdown as the platform spec. It is a **separate document
@@ -391,6 +411,7 @@ clock.
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `I3X_PORT` | `8090` | |
+| `I3X_SERVER_VERSION` | `dev` | `GET /info` `serverVersion`. The chart sets it to its `appVersion` |
 | `SUPABASE_URL` | `http://supabase-kong:8000` | |
 | `SUPABASE_PUBLISHABLE_KEY` | — | For the gateway's key check. **Not** the secret key |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | |

@@ -24,6 +24,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,6 +35,7 @@ from subscriptions import SubscriptionError, SubscriptionRegistry  # noqa: E402
 MODELLED_METRICS_FIXTURE = (
     Path(__file__).resolve().parents[1] / "test-harness" / "fixtures" / "modelled-metrics.json"
 )
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "supabase" / "migrations"
 
 
 class FakeClock:
@@ -370,6 +372,7 @@ class TestAddressSpace(unittest.TestCase):
     def test_exactly_one_root(self):
         site = A.site_object(["cell-1"])
         self.assertIsNone(site["parentId"], "the site is the only object with a null parentId")
+        self.assertEqual(site["displayName"], "Site")
         self.assertEqual(A.unassigned_object([])["parentId"], A.SITE_ELEMENT_ID)
 
     def test_every_edge_has_its_inverse(self):
@@ -471,6 +474,489 @@ class TestAddressSpace(unittest.TestCase):
         device = {"sparkplug_id": "dev1", "is_quarantined": True}
         env = A.device_value(device, {"m": {"value": 1.0, "timestamp": "2026-01-01T00:00:00Z"}})
         self.assertEqual(env["quality"], "Uncertain")
+
+
+# -------------------------------------------------------------------------------------------------
+# The columns PostgREST would accept, replayed from the live migrations.
+# -------------------------------------------------------------------------------------------------
+_KEYWORD_ITEMS = re.compile(r"^(CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LIKE)\b", re.I)
+
+
+def _split_top_level(sql: str, start: int = 0, stop_at_from: bool = False):
+    """
+    Split at depth-0 commas from `start`, ending at the closing paren of the enclosing list, a
+    depth-0 `;`, or (for a SELECT list) a depth-0 FROM. Returns (items, end offset).
+    """
+    items, buf, depth, quote, i = [], [], 0, None, start
+    while i < len(sql):
+        ch = sql[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            buf.append(ch)
+        elif ch == "(":
+            depth += 1
+            buf.append(ch)
+        elif ch == ")":
+            if depth == 0:
+                break
+            depth -= 1
+            buf.append(ch)
+        elif depth == 0 and ch == ";":
+            break
+        elif depth == 0 and ch == ",":
+            items.append("".join(buf))
+            buf = []
+        elif (
+            stop_at_from and depth == 0 and sql[i:i + 4].upper() == "FROM"
+            and not (sql[i - 1:i].isalnum() or sql[i - 1:i] == "_")
+            and not (sql[i + 4:i + 5].isalnum() or sql[i + 4:i + 5] == "_")
+        ):
+            break
+        else:
+            buf.append(ch)
+        i += 1
+    items.append("".join(buf))
+    return [item.strip() for item in items if item.strip()], i
+
+
+def _select_output_name(item: str) -> str:
+    alias = re.search(r'\bAS\s+"?(\w+)"?\s*$', item, re.I)
+    if alias:
+        return alias.group(1)
+    return re.search(r'"?(\w+)"?\s*$', item).group(1)
+
+
+def _relation_columns() -> dict:
+    """
+    The columns of every `public` table and view, replaying the live migrations in filename order.
+
+    Tables take CREATE TABLE plus ALTER TABLE ADD / DROP / RENAME COLUMN; a view takes its last
+    CREATE [OR REPLACE] VIEW, and DROP VIEW removes it. Statements must start in column 0, which is
+    how pg_dump writes them; a DO block's dynamic SQL is not replayed.
+    """
+    columns: dict = {}
+    statement = re.compile(
+        r"^(?:CREATE TABLE (?:IF NOT EXISTS )?public\.(?P<table>\w+)\s*\("
+        r"|ALTER TABLE (?:IF EXISTS )?(?:ONLY )?public\.(?P<altered>\w+)\b"
+        r"|CREATE (?:OR REPLACE )?VIEW public\.(?P<view>\w+)(?:\s+WITH\s*\([^)]*\))?\s+AS\s+SELECT\b"
+        r"|DROP VIEW (?:IF EXISTS )?public\.(?P<dropped>\w+))",
+        re.M,
+    )
+    for path in sorted(MIGRATIONS_DIR.glob("[0-9]*.sql")):
+        sql = path.read_text(encoding="utf-8")
+        for m in statement.finditer(sql):
+            if m.group("table"):
+                items, _ = _split_top_level(sql, m.end())
+                columns[m.group("table")] = {
+                    item.split()[0].strip('"') for item in items if not _KEYWORD_ITEMS.match(item)
+                }
+            elif m.group("view"):
+                items, _ = _split_top_level(sql, m.end(), stop_at_from=True)
+                columns[m.group("view")] = {_select_output_name(item) for item in items}
+            elif m.group("dropped"):
+                columns.pop(m.group("dropped"), None)
+            else:
+                cols = columns.setdefault(m.group("altered"), set())
+                end = sql.find(";", m.end())
+                body = sql[m.end():end if end >= 0 else None]
+                for add in re.finditer(
+                    r"\bADD\s+COLUMN\s+(?:IF NOT EXISTS\s+)?\"?(\w+)", body, re.I
+                ):
+                    cols.add(add.group(1))
+                for drop in re.finditer(
+                    r"\bDROP\s+COLUMN\s+(?:IF EXISTS\s+)?\"?(\w+)", body, re.I
+                ):
+                    cols.discard(drop.group(1))
+                for rename in re.finditer(
+                    r"\bRENAME\s+(?:COLUMN\s+)?(?!TO\b)\"?(\w+)\"?\s+TO\s+\"?(\w+)", body, re.I
+                ):
+                    cols.discard(rename.group(1))
+                    cols.add(rename.group(2))
+    return columns
+
+
+_POSTGREST_RESERVED = {"select", "order", "limit", "offset", "and", "or", "on_conflict", "columns"}
+
+
+class ColumnCheckingPostgrest:
+    """
+    Answers like PostgREST over the migrated schema: a read naming a column the relation lacks
+    fails as `PostgrestClient.get` fails on PostgREST's 400, and rows come back projected onto
+    `select`. Seeded rows are held to the same columns, so a fixture cannot invent one either.
+    """
+
+    COLUMNS = None
+
+    def __init__(self, rows=None, bearer="Bearer test"):
+        if ColumnCheckingPostgrest.COLUMNS is None:
+            ColumnCheckingPostgrest.COLUMNS = _relation_columns()
+        self.bearer = bearer
+        self.rows = rows or {}
+        self.calls = []
+        for relation, seeded in self.rows.items():
+            for row in seeded:
+                unknown = set(row) - self.COLUMNS[relation]
+                assert not unknown, f"fixture row for {relation} names {sorted(unknown)}"
+
+    def _refuse(self, relation, column):
+        raise SubscriptionError(
+            502,
+            "Bad Gateway",
+            'Upstream read failed (400): {"code":"42703","message":"column %s.%s does not exist"}'
+            % (relation, column),
+        )
+
+    def get(self, relation, params=None):
+        params = dict(params or {})
+        self.calls.append((relation, params))
+        known = self.COLUMNS.get(relation)
+        if known is None:
+            raise SubscriptionError(502, "Bad Gateway", f"Upstream read failed (404): {relation}")
+        selected = params.get("select", "").split(",")
+        named = list(selected)
+        named += [k for k in params if k not in _POSTGREST_RESERVED]
+        named += [part.split(".")[0] for part in params.get("order", "").split(",") if part]
+        for key in ("and", "or"):
+            named += re.findall(r"[(,]\s*(\w+)\.", params.get(key, ""))
+        for column in named:
+            if column not in known:
+                self._refuse(relation, column)
+        return [{c: row.get(c) for c in selected} for row in self.rows.get(relation, [])]
+
+
+class FakeRequest:
+    """
+    Stands in for `Handler` in a handler call: a path, a parsed body, and a PostgREST. With no
+    PostgREST given, reaching for one fails the test, which is how a test asserts that a request
+    was refused before anything was read.
+    """
+
+    def __init__(self, path="/v1/", body=None, pg=None):
+        self.path = path
+        self.body = {} if body is None else body
+        self.pg = pg
+        self.status = None
+        self.result = None
+
+    _query = i3x_service.Handler._query
+
+    def _body(self):
+        return self.body
+
+    def _bearer(self):
+        return "Bearer test"
+
+    def _pg(self):
+        if self.pg is None:
+            raise AssertionError("the handler read PostgREST before validating its input")
+        return self.pg
+
+    def _ok(self, result, status=200, detail=None):
+        self.status, self.result = status, result
+
+    def _bulk(self, results):
+        self.status, self.result = 200, results
+
+
+class _FakeResponse:
+    def __init__(self, status, body):
+        self.status_code = status
+        self.ok = status < 400
+        self.text = json.dumps(body)
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+CELL_A = "11111111-1111-1111-1111-111111111111"
+CELL_B = "22222222-2222-2222-2222-222222222222"
+AREA = "33333333-3333-3333-3333-333333333333"
+
+
+def _seeded_rows() -> dict:
+    """Two cells; a device placed explicitly, one inheriting its gateway's cell, one unplaced."""
+    return {
+        "cells": [
+            {"id": CELL_A, "name": "Cell A", "description": "Welding"},
+            {"id": CELL_B, "name": "Cell B", "description": None},
+        ],
+        "gateways": [{"id": "g1", "sparkplug_id": "gwy-1", "name": "Gateway", "cell_id": CELL_B}],
+        "devices": [
+            {"id": "d-explicit", "sparkplug_id": "dev-explicit", "name": "Placed",
+             "gateway_id": "g1", "cell_id": CELL_A},
+            {"id": "d-inherits", "sparkplug_id": "dev-inherits", "name": "Inherits",
+             "gateway_id": "g1", "cell_id": None},
+            {"id": "d-nowhere", "sparkplug_id": "dev-nowhere", "name": "Nowhere",
+             "gateway_id": None, "cell_id": None},
+        ],
+        "device_locations": [
+            {"device_id": "d-explicit", "effective_cell_id": CELL_A, "effective_area_id": AREA},
+            {"device_id": "d-inherits", "effective_cell_id": CELL_B, "effective_area_id": AREA},
+            {"device_id": "d-nowhere", "effective_cell_id": None, "effective_area_id": None},
+        ],
+        "schemas": [],
+    }
+
+
+class TestAddressSpaceReads(unittest.TestCase):
+    """
+    The reads behind the address space, against the schema the migrations build.
+
+    Every device was once filed under Unassigned because the location read selected a column
+    the view does not have, PostgREST answered 400, and the failure was read as "no rows".
+    """
+
+    def test_the_migrations_are_parsed(self):
+        # A parser that found nothing would make every other test here refuse everything; one
+        # that found the wrong thing would accept the column that started this.
+        columns = _relation_columns()
+        self.assertIn("sparkplug_id", columns["devices"])
+        self.assertIn("effective_area_id", columns["device_locations"])
+        self.assertIn("device_id", columns["device_locations"])
+        self.assertNotIn("id", columns["device_locations"])
+        self.assertIn("time", columns["telemetry"])
+
+    def test_every_address_space_read_names_real_columns(self):
+        pg = ColumnCheckingPostgrest()
+        i3x_service._read_address_space(pg)
+        self.assertEqual(
+            sorted(relation for relation, _ in pg.calls),
+            ["cells", "device_locations", "devices", "gateways", "schemas"],
+        )
+
+    def test_the_history_read_names_real_columns(self):
+        pg = ColumnCheckingPostgrest()
+        i3x_service._read_telemetry(pg, "dev1", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 10)
+        self.assertEqual([relation for relation, _ in pg.calls], ["telemetry"])
+
+    def test_a_device_is_filed_under_its_resolved_cell(self):
+        space = i3x_service._read_address_space(ColumnCheckingPostgrest(_seeded_rows()))
+        objects = i3x_service._build_objects(space)
+        self.assertEqual(objects["dev-explicit"]["parentId"], CELL_A)
+        self.assertEqual(objects["dev-inherits"]["parentId"], CELL_B, "inherits its gateway's")
+        self.assertEqual(objects["dev-nowhere"]["parentId"], A.UNASSIGNED_ELEMENT_ID)
+        self.assertIn("dev-explicit", objects[CELL_A]["metadata"]["relationships"]["HasChildren"])
+        self.assertEqual(space["locations"]["d-explicit"]["effective_area_id"], AREA)
+
+    def _respond(self, failing, status, body):
+        def fake_get(url, **_kwargs):
+            if url.endswith("/" + failing):
+                return _FakeResponse(status, body)
+            return _FakeResponse(200, [])
+        return mock.patch.object(i3x_service.requests, "get", side_effect=fake_get)
+
+    def test_a_rejected_read_is_a_502_carrying_postgrests_message(self):
+        error = {"code": "42703", "message": "column device_locations.id does not exist"}
+        with self._respond("device_locations", 400, error):
+            with self.assertRaises(SubscriptionError) as caught:
+                i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+        self.assertEqual(caught.exception.status, 502)
+        self.assertIn("device_locations", caught.exception.detail)
+        self.assertIn("column device_locations.id does not exist", caught.exception.detail)
+
+    def test_a_server_error_on_any_read_is_a_502(self):
+        for relation in ("cells", "gateways", "devices", "device_locations", "schemas"):
+            with self.subTest(relation=relation), self._respond(relation, 503, {"message": "down"}):
+                with self.assertRaises(SubscriptionError) as caught:
+                    i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+                self.assertEqual(caught.exception.status, 502)
+
+    def test_an_unreachable_data_layer_is_not_an_empty_tree(self):
+        def refuse(url, **_kwargs):
+            if url.endswith("/device_locations"):
+                raise i3x_service.requests.ConnectionError("refused")
+            return _FakeResponse(200, [])
+        with mock.patch.object(i3x_service.requests, "get", side_effect=refuse):
+            with self.assertRaises(i3x_service.requests.RequestException):
+                i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+
+    def test_a_denied_location_read_is_empty(self):
+        with self._respond("device_locations", 403, {"code": "42501"}):
+            space = i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+        self.assertEqual(space["locations"], {})
+
+    def test_a_denied_primary_read_is_still_refused(self):
+        # A token PostgREST rejects must not read as an empty plant.
+        with self._respond("cells", 401, {"code": "PGRST301"}):
+            with self.assertRaises(SubscriptionError) as caught:
+                i3x_service._read_address_space(i3x_service.PostgrestClient("Bearer t"))
+        self.assertEqual(caught.exception.status, 401)
+
+
+class TestObjectsMatchTheirTypes(unittest.TestCase):
+    """An object says what its ObjectType says: the same `sourceTypeId`, and a conforming value."""
+
+    SEMANTIC = "https://admin-shell.io/idta/example/Mill/1/0"
+
+    def space(self):
+        rows = _seeded_rows()
+        rows["schemas"] = [
+            {"id": "s-semantic", "schema_name": "Mill", "semantic_id": self.SEMANTIC,
+             "schema_definition": {"properties": {"Spindle/SPEED": {}}}},
+            {"id": "s-local", "schema_name": "Local Pump", "semantic_id": None,
+             "schema_definition": {"properties": {"Flow": {}}}},
+        ]
+        rows["devices"][0]["schema_id"] = "s-semantic"
+        rows["devices"][1]["schema_id"] = "s-local"
+        rows["gateways"].append(
+            {"id": "g2", "sparkplug_id": "gwy-site", "name": "Site-wide",
+             "location_scope": "site_wide", "status": "ONLINE", "sparkplug_group": "Aber",
+             "last_heartbeat": "2026-08-07T19:14:11.11239+00:00"}
+        )
+        space = i3x_service._read_address_space(ColumnCheckingPostgrest(rows))
+        return space, i3x_service._build_objects(space), i3x_service._build_types(space)
+
+    def test_every_objects_source_type_id_is_its_types(self):
+        _, objects, types = self.space()
+        by_type = {t["elementId"]: t["sourceTypeId"] for t in types}
+        for element_id, obj in objects.items():
+            with self.subTest(element_id=element_id):
+                self.assertEqual(obj["metadata"]["sourceTypeId"], by_type[obj["typeElementId"]])
+
+    def test_a_devices_source_type_id_names_its_schema_not_itself(self):
+        _, objects, _ = self.space()
+        self.assertEqual(objects["dev-explicit"]["metadata"]["sourceTypeId"], self.SEMANTIC)
+        self.assertEqual(objects["dev-inherits"]["metadata"]["sourceTypeId"], "Local Pump")
+        self.assertEqual(objects["dev-nowhere"]["metadata"]["sourceTypeId"], "Device")
+
+    JSON_TYPES = {
+        "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+        "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+        "string": lambda v: isinstance(v, str),
+        "boolean": lambda v: isinstance(v, bool),
+        "null": lambda v: v is None,
+    }
+
+    def nonconformance(self, value, schema) -> list:
+        """What in `value` a flat object schema does not describe, or describes and is not sent."""
+        if not isinstance(value, dict):
+            return [f"value is {value!r}, not an object"]
+        declared = schema.get("properties", {})
+        problems = [f"{k} is sent and not declared" for k in value if k not in declared]
+        problems += [f"{k} is declared and not sent" for k in declared if k not in value]
+        for key, spec in declared.items():
+            if key not in value:
+                continue
+            allowed = spec["type"] if isinstance(spec["type"], list) else [spec["type"]]
+            if not any(self.JSON_TYPES[t](value[key]) for t in allowed):
+                problems.append(f"{key} is {value[key]!r}, not {allowed}")
+            if "enum" in spec and value[key] not in spec["enum"]:
+                problems.append(f"{key} is {value[key]!r}, not one of {spec['enum']}")
+        return problems
+
+    def test_every_synthetic_objects_value_conforms_to_its_type(self):
+        space, objects, _ = self.space()
+        schemas = {t["elementId"]: t["schema"] for t in A.SYNTHETIC_TYPES}
+        checked = set()
+        for element_id, obj in objects.items():
+            type_id = obj["typeElementId"]
+            if type_id not in schemas or type_id == A.UNTYPED_DEVICE_TYPE_ID:
+                continue
+            with self.subTest(element_id=element_id):
+                value = i3x_service._current_value(objects, space, element_id)["value"]
+                self.assertEqual(self.nonconformance(value, schemas[type_id]), [])
+                checked.add(type_id)
+        self.assertEqual(checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.GATEWAY_TYPE_ID})
+
+    def test_containers_count_devices_not_children(self):
+        space, objects, _ = self.space()
+
+        def value(element_id):
+            return i3x_service._current_value(objects, space, element_id)["value"]
+
+        cell_a, cell_b = CELL_A, CELL_B
+        # Three devices and two cells; the site's children are the cells, Unassigned and a
+        # site-wide gateway.
+        self.assertEqual(value(A.SITE_ELEMENT_ID), {"cellCount": 2, "deviceCount": 3})
+        self.assertEqual(value(cell_a), {"deviceCount": 1, "description": "Welding"})
+        # Cell B holds one device and the gateway it inherits from.
+        self.assertEqual(value(cell_b), {"deviceCount": 1, "description": None})
+        self.assertEqual(value(A.UNASSIGNED_ELEMENT_ID)["deviceCount"], 1)
+
+    def test_a_gateways_heartbeat_inside_its_value_is_rfc3339_utc(self):
+        # The envelope's timestamp was normalised and the same instant inside the value was not.
+        space, objects, _ = self.space()
+        vqt = i3x_service._current_value(objects, space, "gwy-site")
+        self.assertEqual(vqt["value"]["lastHeartbeat"], "2026-08-07T19:14:11.112Z")
+        self.assertEqual(vqt["value"]["lastHeartbeat"], vqt["timestamp"])
+
+
+class TestRequestValidation(unittest.TestCase):
+    """Invalid parameters on the Exploratory and Query endpoints are a 400, before any read."""
+
+    HISTORY = {"startTime": "2026-01-01T00:00:00Z", "endTime": "2026-01-02T00:00:00Z"}
+    NOT_A_DEPTH = ("abc", "2", -1, 1.5, True, False, [], {"n": 1}, float("inf"))
+
+    def setUp(self):
+        i3x_service._space_cache_clear()
+
+    def tearDown(self):
+        i3x_service._space_cache_clear()
+
+    def refused(self, handler, body):
+        with self.assertRaises(i3x_service.Problem) as caught:
+            handler(FakeRequest(body=body))
+        self.assertEqual(caught.exception.status, 400)
+        return caught.exception.detail
+
+    def test_max_depth_accepts_a_non_negative_integer(self):
+        for given, expected in ((0, 0), (1, 1), (7, 7), (2.0, 2), (None, 1)):
+            with self.subTest(given=given):
+                self.assertEqual(i3x_service._max_depth({"maxDepth": given}), expected)
+        self.assertEqual(i3x_service._max_depth({}), 1)
+
+    def test_anything_else_as_max_depth_is_a_400(self):
+        for handler, base in (
+            (i3x_service.h_objects_value, {}),
+            (i3x_service.h_objects_history, self.HISTORY),
+        ):
+            for bad in self.NOT_A_DEPTH:
+                with self.subTest(handler=handler.__name__, maxDepth=bad):
+                    detail = self.refused(handler, {**base, "elementIds": ["i3x:site"], "maxDepth": bad})
+                    self.assertIn("maxDepth", detail)
+
+    def test_limit_must_be_a_positive_integer(self):
+        for bad in ("100", 0, -5, 2.5, True, [10]):
+            with self.subTest(limit=bad):
+                detail = self.refused(
+                    i3x_service.h_objects_history,
+                    {**self.HISTORY, "elementIds": ["dev1"], "limit": bad},
+                )
+                self.assertIn("limit", detail)
+        self.assertEqual(i3x_service._int_field({"limit": 1}, "limit", 1000, 1), 1)
+
+    def test_element_ids_must_be_strings(self):
+        for handler in (
+            i3x_service.h_objects_list,
+            i3x_service.h_objects_related,
+            i3x_service.h_objects_value,
+        ):
+            with self.subTest(handler=handler.__name__):
+                self.refused(handler, {"elementIds": ["i3x:site", {"elementId": "x"}]})
+
+    def test_a_body_that_is_not_an_object_is_a_400(self):
+        for raw in (b"[1, 2]", b'"elementIds"', b"7"):
+            with self.subTest(raw=raw):
+                req = FakeRequest()
+                req._raw_body = raw
+                with self.assertRaises(i3x_service.Problem) as caught:
+                    i3x_service.Handler._body(req)
+                self.assertEqual(caught.exception.status, 400)
+
+    def test_max_depth_zero_still_reads_the_whole_composition(self):
+        rows = _seeded_rows()
+        req = FakeRequest(
+            body={"elementIds": [A.SITE_ELEMENT_ID], "maxDepth": 0},
+            pg=ColumnCheckingPostgrest(rows),
+        )
+        i3x_service.h_objects_value(req)
+        components = req.result[0]["result"]["components"]
+        self.assertIn("dev-explicit", components, "unbounded descends site -> cell -> device")
 
 
 class TestMirroredConstants(unittest.TestCase):
@@ -579,6 +1065,47 @@ class TestNamespaces(unittest.TestCase):
         # A local type under mtconnect.org or opcfoundation.org would claim that body defined it.
         for namespace in A.namespaces():
             self.assertTrue(namespace["uri"].startswith("https://aber.local/"), namespace["uri"])
+
+
+class TestNamespaceFilter(unittest.TestCase):
+    """`GET /objecttypes` and `GET /relationshiptypes` honour `?namespaceUri=`."""
+
+    def setUp(self):
+        i3x_service._space_cache_clear()
+
+    def tearDown(self):
+        i3x_service._space_cache_clear()
+
+    def served(self, handler, query=""):
+        req = FakeRequest(path="/v1/types" + query, pg=ColumnCheckingPostgrest())
+        handler(req)
+        self.assertEqual(req.status, 200)
+        return req.result
+
+    def test_no_filter_returns_every_type(self):
+        self.assertEqual(len(self.served(i3x_service.h_objecttypes)), len(A.SYNTHETIC_TYPES))
+        self.assertEqual(
+            len(self.served(i3x_service.h_relationshiptypes)), len(A.RELATIONSHIP_TYPES)
+        )
+
+    def test_each_namespace_returns_only_its_own_types(self):
+        encoded = "?namespaceUri=https%3A%2F%2Faber.local%2Fi3x"
+        object_types = self.served(i3x_service.h_objecttypes, encoded)
+        self.assertEqual(len(object_types), len(A.SYNTHETIC_TYPES))
+        self.assertEqual(self.served(i3x_service.h_relationshiptypes, encoded), [])
+
+        relationships = self.served(
+            i3x_service.h_relationshiptypes, "?namespaceUri=" + A.NS_RELATIONSHIPS
+        )
+        self.assertEqual(len(relationships), len(A.RELATIONSHIP_TYPES))
+        self.assertEqual(
+            self.served(i3x_service.h_objecttypes, "?namespaceUri=" + A.NS_RELATIONSHIPS), []
+        )
+
+    def test_an_unknown_namespace_is_an_empty_list(self):
+        for handler in (i3x_service.h_objecttypes, i3x_service.h_relationshiptypes):
+            with self.subTest(handler=handler.__name__):
+                self.assertEqual(self.served(handler, "?namespaceUri=urn:nothing"), [])
 
 
 class ModelledMetricsContractTest(unittest.TestCase):

@@ -1714,6 +1714,8 @@ function edgeFunctionNames() {
     // deliberately not listed.
     'docs/i3x-openapi.yaml':
       'Swagger UI renders info.title as the heading of the published i3X specification',
+    'i3x/address_space.py':
+      'the i3X displayName and namespace strings are what an i3X client shows for this site',
   };
 
   const branded = [];

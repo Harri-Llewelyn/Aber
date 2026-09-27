@@ -97,6 +97,7 @@ SYNTHETIC_TYPES = [
         "schema": {"type": "object", "additionalProperties": True},
     },
 ]
+_SYNTHETIC_SOURCE_TYPE_IDS = {t["elementId"]: t["sourceTypeId"] for t in SYNTHETIC_TYPES}
 
 # Relationship types, registered in both directions. `reverseOf` is a MUST-have pair: the conformance
 # suite checks that following a relationship and then its reverse returns you to where you started,
@@ -155,6 +156,14 @@ def namespaces() -> List[dict]:
     ]
 
 
+def schema_source_type_id(row: dict) -> str:
+    """
+    A schema type's `sourceTypeId`, which its devices carry too: the semantic id when there is
+    one, the identifier of the concept the type instantiates, else the name.
+    """
+    return row.get("semantic_id") or row.get("schema_name") or row["id"]
+
+
 def object_type_from_schema(row: dict) -> dict:
     """A `schemas` row is an ObjectType with no translation -- its definition IS JSON Schema."""
     definition = row.get("schema_definition")
@@ -167,10 +176,7 @@ def object_type_from_schema(row: dict) -> dict:
         "elementId": row["id"],
         "displayName": row.get("schema_name") or row["id"],
         "namespaceUri": NS_LOCAL,
-        # The semantic id when there is one -- that is precisely "the identifier of the concept this
-        # type instantiates", which is what sourceTypeId means. Falling back to the name keeps the
-        # field populated for locally-minted schemas.
-        "sourceTypeId": row.get("semantic_id") or row.get("schema_name") or row["id"],
+        "sourceTypeId": schema_source_type_id(row),
         "version": str(row.get("version") or "1"),
         "schema": definition,
         "metadata": {
@@ -190,9 +196,23 @@ def _quality_for_device(device: dict, has_value: bool) -> str:
     return "Good"
 
 
-def device_object(device: dict, effective_cell_id: Optional[str], schema_id: Optional[str]) -> dict:
-    """Project a `devices` row (joined with its resolved location) onto an i3X Object."""
+def device_object(
+    device: dict,
+    effective_cell_id: Optional[str],
+    schema_id: Optional[str],
+    schema: Optional[dict] = None,
+) -> dict:
+    """
+    Project a `devices` row (joined with its resolved location) onto an i3X Object.
+
+    `schema` is the row `schema_id` names, when the caller can see it; the object's `sourceTypeId`
+    is its type's, so it comes from there.
+    """
     element_id = device["sparkplug_id"]
+    if schema:
+        source_type_id = schema_source_type_id(schema)
+    else:
+        source_type_id = schema_id or _SYNTHETIC_SOURCE_TYPE_IDS[UNTYPED_DEVICE_TYPE_ID]
     gateway_sid = device.get("_gateway_sparkplug_id")
     relationships = {}
     parent = effective_cell_id or UNASSIGNED_ELEMENT_ID
@@ -218,7 +238,7 @@ def device_object(device: dict, effective_cell_id: Optional[str], schema_id: Opt
         "metadata": {
             "description": device.get("description"),
             "typeNamespaceUri": NS_LOCAL,
-            "sourceTypeId": device.get("sparkplug_id"),
+            "sourceTypeId": source_type_id,
             "relationships": relationships,
             "quarantined": bool(device.get("is_quarantined")),
         },
@@ -301,7 +321,7 @@ def _site_relationships(child_ids: List[str]) -> dict:
 def site_object(child_ids: List[str]) -> dict:
     return {
         "elementId": SITE_ELEMENT_ID,
-        "displayName": "Factory+ Site",
+        "displayName": "Site",
         "typeElementId": SITE_TYPE_ID,
         # The only true root. i3X reads `parentId: null` as root, so there must be exactly one.
         "parentId": None,
@@ -437,19 +457,28 @@ def value_envelope(element_id: str, value, quality: str, timestamp: Optional[str
     }
 
 
-def container_value(obj: dict, child_count: int, extra: Optional[dict] = None) -> dict:
+def site_value(cell_count: int, device_count: int) -> dict:
     """
-    A value for a cell, the site, or Unassigned.
+    The site's value: exactly the properties the Site type declares.
 
     EVERY OBJECT NEEDS A VALUE, not only the ones that publish telemetry. `POST /objects/value` is
     how a client reads any object, and a composition with no value of its own cannot be the subject
     of a `maxDepth > 1` query -- which is the only way to read a subtree in one call. Reporting
     "no such element" for a cell that plainly exists in `/objects` is worse than reporting a count.
     """
-    value = {"deviceCount": child_count}
-    if extra:
-        value.update(extra)
-    return value_envelope(obj["elementId"], value, "Good", _now_iso())
+    return value_envelope(
+        SITE_ELEMENT_ID, {"cellCount": cell_count, "deviceCount": device_count}, "Good", _now_iso()
+    )
+
+
+def cell_value(obj: dict, device_count: int) -> dict:
+    """A cell's value, and Unassigned's, which shares the Cell type: its devices and description."""
+    return value_envelope(
+        obj["elementId"],
+        {"deviceCount": device_count, "description": (obj.get("metadata") or {}).get("description")},
+        "Good",
+        _now_iso(),
+    )
 
 
 def gateway_value(gateway: dict) -> dict:
@@ -467,7 +496,7 @@ def gateway_value(gateway: dict) -> dict:
         {
             "status": status,
             "sparkplugGroup": gateway.get("sparkplug_group") or "",
-            "lastHeartbeat": gateway.get("last_heartbeat"),
+            "lastHeartbeat": to_rfc3339_utc(gateway.get("last_heartbeat")),
         },
         quality,
         gateway.get("last_heartbeat") or _now_iso(),

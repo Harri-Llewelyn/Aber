@@ -181,6 +181,11 @@ paths:
         Rows from `schemas` — **a `schema_definition` already is a JSON Schema**, so there is
         no translation step — plus the synthetic Site, Cell, Gateway and untyped-device types
         that give the structural objects something to point at.
+      parameters:
+        - name: namespaceUri
+          in: query
+          schema: { type: string, format: uri, example: 'https://aber.local/i3x' }
+          description: 'Return only the types in this namespace. One this server does not serve gives an empty list, not an error.'
       responses:
         '200':
           description: All object types visible to this caller.
@@ -231,6 +236,11 @@ paths:
         gives an Object one parent, `HasParent` is organizational hierarchy, so the cell wins
         and the data path becomes `ConnectsVia`/`ProvidesConnectivityFor`. Collapsing them
         would make a host-run gateway unrepresentable.
+      parameters:
+        - name: namespaceUri
+          in: query
+          schema: { type: string, format: uri, example: 'https://aber.local/i3x/relationships' }
+          description: 'Return only the types in this namespace. One this server does not serve gives an empty list, not an error.'
       responses:
         '200':
           description: All relationship types.
@@ -406,7 +416,8 @@ paths:
                 maxDepth:
                   type: integer
                   default: 1
-                  description: '`1` is the object itself. `0` is unbounded; anything higher descends that many levels of `HasComponent` into `components`.'
+                  minimum: 0
+                  description: '`1` is the object itself. `0` is unbounded; anything higher descends that many levels of `HasComponent` into `components`. Anything but an integer of 0 or more is a 400.'
       responses:
         '200':
           description: Current value per requested id, in order.
@@ -425,7 +436,11 @@ paths:
                         Controller/EXECUTION: ACTIVE
                       quality: Good
                       timestamp: '2026-08-10T13:06:29.423Z'
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: '`elementIds` missing or not an array of strings, or `maxDepth` not an integer of 0 or more.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Values]
@@ -467,8 +482,12 @@ paths:
                   items: { type: string }
                 startTime: { type: string, format: date-time, description: RFC 3339. Required. }
                 endTime: { type: string, format: date-time, description: RFC 3339. Required. }
-                limit: { type: integer, default: 1000, maximum: 10000 }
-                maxDepth: { type: integer, default: 1 }
+                limit:
+                  type: integer
+                  default: 1000
+                  minimum: 1
+                  description: 'Samples per element. A value above 10000 is served as 10000.'
+                maxDepth: { type: integer, default: 1, minimum: 0 }
       responses:
         '200':
           description: Samples per requested id, newest first.
@@ -476,7 +495,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
         '400':
-          description: '`elementIds` missing, or `startTime`/`endTime` absent or not RFC 3339.'
+          description: '`elementIds` missing or not an array of strings, `startTime`/`endTime` absent or not RFC 3339, `limit` not a positive integer, or `maxDepth` not an integer of 0 or more.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -827,7 +846,7 @@ components:
       type: object
       properties:
         specVersion: { type: string, example: '1.0' }
-        serverVersion: { type: string, example: 0.1.0 }
+        serverVersion: { type: string, example: 0.1.0, description: "The Helm chart's `appVersion`; `dev` when started without the chart." }
         serverName: { type: string, example: aber-i3x }
         capabilities:
           type: object
@@ -912,7 +931,9 @@ components:
       properties:
         description: { type: string, nullable: true }
         typeNamespaceUri: { type: string, format: uri }
-        sourceTypeId: { type: string }
+        sourceTypeId:
+          type: string
+          description: "The same as its ObjectType's: a schema's `semantic_id`, else its name; `Device` for a device with no schema."
         quarantined:
           type: boolean
           description: 'Present in the directory but its telemetry is being dropped. Drives `quality: Uncertain`.'
@@ -934,7 +955,11 @@ components:
       properties:
         isComposition: { type: boolean }
         value:
-          description: 'For a device, an object of metric name to latest value. `null` when quality is `GoodNoData`.'
+          description: |
+            For a device, an object of metric name to latest value, `null` when quality is
+            `GoodNoData`. Every other object sends exactly what its ObjectType declares: the site
+            `{cellCount, deviceCount}`, a cell or Unassigned `{deviceCount, description}`, a
+            gateway `{status, sparkplugGroup, lastHeartbeat}`. Counts are of devices only.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }
         components:

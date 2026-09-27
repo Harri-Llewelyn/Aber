@@ -1625,20 +1625,22 @@ def verify_results():
                       f"{anon_status}, expected 401.")
                 passed = False
 
-            # 12c. The address space contains this run's device, and its parent is a location, a
-            # cell or the synthetic Unassigned, never its gateway.
+            # 12c. The address space contains this run's device, parented to the cell the Directory
+            # resolves for it: the seeded gateway's, since the device names no cell of its own.
             status, body = i3x("GET", "/objects", {"Authorization": f"Bearer {token}"})
             objects = json.loads(body).get("result", []) if status == 200 else []
             device = next((o for o in objects if o.get("elementId") == SEEDED["known_id"]), None)
             gateway_ids = {o["elementId"] for o in objects
                            if o.get("typeElementId") == "i3x:type:gateway"}
-            if device and device.get("parentId") not in gateway_ids:
+            if device and device.get("parentId") == SEEDED["cell_uuid"]:
                 print(f"✅ 12c. i3X ADDRESS SPACE: {SEEDED['known_id']} is present, parented to "
-                      f"{device['parentId']} (a location, not its gateway)")
+                      f"its gateway's cell {SEEDED['cell_uuid']}")
             elif device:
+                wrong = ("its gateway: HasParent is organizational hierarchy, and the data path "
+                         "belongs on ConnectsVia"
+                         if device.get("parentId") in gateway_ids else "not the resolved cell")
                 print(f"❌ 12c. i3X ADDRESS SPACE FAIL: the device's parentId is {device['parentId']}, "
-                      "which is a gateway. HasParent is organizational hierarchy; the data path "
-                      "belongs on ConnectsVia.")
+                      f"{wrong}. Expected its gateway's cell {SEEDED['cell_uuid']}.")
                 passed = False
             else:
                 print(f"❌ 12c. i3X ADDRESS SPACE FAIL: {SEEDED['known_id']} is not in /objects "
