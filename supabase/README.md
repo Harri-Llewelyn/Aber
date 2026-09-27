@@ -4644,6 +4644,72 @@ not a capability.
 
 ---
 
+### How the service takes a backup
+
+**Why a service.** `request_backup()` (archived migration 0101) is a row, and nothing else in the
+stack can turn a row into a backup: `pg_dump` against both databases, a tar of the storage
+objects and a consistent copy of the forge's volume need a process beside the volumes holding a
+superuser credential, which is neither an edge function nor a browser. `scripts/backup-service.mjs`
+is that process and does that one thing. It serves nothing but `/healthz` and hands no bytes to
+anybody: a dump holds `auth.users`, every OAuth secret's hash, the whole `digital_thread` and the
+historian's password, and "any Administrator session" is a wider audience than "a shell on the
+host". Restore is the runbook above, run from that shell against the volume. The chart projects
+the script through a ConfigMap over an image built from the database's own
+(`backup-service/Dockerfile`), so `pg_dump` is at least the server's version.
+
+**It talks to the database through psql, as `supabase_admin`**, the session `pg_dump` needs
+anyway: the event triggers are its, and a dump taken as `postgres` restores as nobody. Values are
+passed as psql variables and interpolated as quoted literals, on stdin because psql substitutes
+variables in a script it reads and not in a `-c` command, so nothing concatenates a value into
+SQL. The gates it calls refuse every PostgREST role and any session that is not a superuser's, so
+holding this credential is the whole of the authority and there is no second one to keep in step.
+Both database passwords are required: a service that could reach one of them would record a
+backup of half the stack as a backup.
+
+**The schedule is this process's.** At start it registers `enqueue_scheduled_backup()` with
+pg_cron on `BACKUP_SCHEDULE`, or removes the job when the schedule is empty, so a stack with no
+service queues nothing nobody will take. Retention is applied after every run: a scheduled backup
+older than `BACKUP_RETENTION_DAYS` is deleted and forgotten, the row only after the files are
+gone, and a prune can never remove a path outside the backup directory; a requested backup is
+pinned until an Administrator releases it. A `RUNNING` job that no process is running is failed
+before each claim, not only at start: the service is one replica, so such a row is a previous
+process's, or it came back in a restore from a backup taken while that job ran, and left standing
+it would refuse every new backup.
+
+**The files.** One directory per backup, named by the UTC stamp, holding what
+`backup-databases.sh` writes plus the keys and the volumes: `supabase-db-<stamp>.sql.gz`,
+`timescaledb-<stamp>.sql.gz`, `vault-key-<stamp>.txt`, `storage-objects-<stamp>.tar.gz`,
+`forge-<stamp>.tar.gz`, `broker-<stamp>.tar.gz` (the broker's data volume, which is the Dynamic
+Security document), `ca-<stamp>.tar.gz` (the internal CA's key pair, read from its Secret through
+the API), `manifest-<stamp>.txt` (the text manifest `restore-databases.sh` reads) and
+`manifest.json` (digests). Written under `.partial-<stamp>` and renamed on success, so a directory
+named by a stamp is a complete backup or absent, and a `.partial-*` directory found at start is a
+backup the previous process did not finish. A dump smaller than `MIN_DUMP_BYTES` is a failure,
+not a backup: an empty database, a wrong `-d` or a server that died mid-write all produce a
+well-formed short file. `--clean --if-exists` on the plain format is what lets a restore replace
+the auth and storage schemas the image ships; the custom format carries the same as a flag at
+restore time. A component whose directory is not mounted is absent from the backup and the
+manifest says so; an empty path variable disables one deliberately.
+
+**The forge's SQLite database** is copied with sqlite3's online backup, which is consistent while
+Gitea writes, from a staging directory so that tar's second `-C` lands it at `gitea/gitea.db`
+inside the archive where a restore expects it. On a read-only volume SQLite cannot open the WAL
+database for reading, so the raw `db`, `-wal` and `-shm` files are copied together, the WAL
+folded into the copy with a checkpoint, and the copy integrity-checked; the method used is in
+`manifest.json`. GNU tar exits 1 for "file changed as we read it", which an upload landing
+mid-run produces and which is acceptable for immutable blobs, so that status is a warning and
+every other non-zero status is a failure.
+
+**The two keys.** pgsodium's root key is read through the same superuser session the dump uses,
+since `pg_read_file` resolves a relative path against the data directory; a dump without it
+restores a Vault that nothing can decrypt, because a fresh server mints its own key, and the file
+is written as read with no newline so a restore can put it back byte for byte. The CA's key pair
+is read from its Secret as cert-manager keeps it (`tls.crt`, `tls.key`, `ca.crt`), staged at
+0600 and archived; a named CA that cannot be read fails the backup rather than going absent,
+because the values named it and a backup without it is a fleet-wide re-enrolment. The
+ServiceAccount token is read on every API call because projected tokens are short-lived and
+rotated in place.
+
 ## Storage buckets and why they differ
 
 Four buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
@@ -4745,6 +4811,57 @@ capture that completed cannot then fail to upload.
 
 ---
 
+### How the policies are applied
+
+`storage-policies.sql` runs on every boot as the storage-policies Job, after `supabase-storage`
+is healthy and before `storage-init`. The order is the whole of the ordering argument:
+storage-api creates `storage.objects` by its own migrations and the PG17 image ships the
+`storage` schema empty, which is why the policies are not in the baseline migration; and
+`storage-init` creates the buckets through the Storage REST API as `service_role`, which needs the
+grants this file makes or fails with a misleading `400 new row violates row-level security
+policy`. The script checks that the table exists before anything else and fails with the reason
+rather than a bare "relation does not exist", because reaching it too early is an ordering fault
+in the service graph and a different problem from a wrong policy. Between storage-api creating
+the table and this file running, RLS is enabled with no policies, so `anon` and `authenticated`
+are denied and `service_role`, which bypasses RLS, is unaffected: a brief loss of function, never
+of control. RLS is enabled here again rather than assumed, because this file is the access control
+for the table and must not depend on storage-api's migrations having done it.
+
+**The grants are enumerated.** On the PG17 image storage-api creates its tables with no grants to
+the API roles, so each privilege is stated and only what each role needs. `service_role` gets the
+admin surface because storage-api assumes it to serve the REST API, and since it bypasses RLS the
+grants are the only limit that applies to it, which is why it is enumerated rather than given
+`ALL`.
+
+**Public reads never consult a SELECT policy.** `/object/public/...` is served by the bucket's
+`public` flag. SELECT governs listing, and storage-api's writes read the row back, so on the
+3D-model bucket it takes the same authority as writing: the geometry is public, the inventory of
+which devices have a model is not.
+
+**`storage.objects.name` is qualified in every policy, and must be.** `public.gateways` has a
+`name` column of its own, and an unqualified reference inside a policy binds to the gateway's
+display label, which refuses every upload and would accept any prefix if a gateway were ever named
+something path-shaped.
+
+**Every bucket's block ends in a self-check.** The failure these guard against is silent in the
+direction that matters least and loudest in the direction that matters most: a missing policy
+denies, so the viewer simply shows nothing and nobody reads a log. The checks assert the set is
+complete by name rather than by count, so a policy another chart version left behind is reported
+without failing the boot; the capture bucket's check also asserts that Auditor never writes, that
+the ingestion daemon appears in exactly SELECT, INSERT and UPDATE with every arm confined to the
+object of its running job, that it never deletes, and that the playback worker appears in SELECT
+alone. Each exception says what the missing arm looks like from outside, which is a job that
+failed for no stated reason.
+
+**Retired policies are dropped explicitly.** Cold telemetry once had a bucket here and now goes
+to a configured S3 endpoint, somewhere a site loss does not reach. Deleting the block would not
+remove the policies: this file drops each policy it is about to create, so a policy it no longer
+mentions survives every boot on a database that already has it, guarding a bucket nothing writes
+to. The four `telemetry_archive_*` policies are therefore dropped by name and asserted gone. The
+bucket itself is deleted by nobody: it is left with whatever it holds, for an Administrator to
+empty and remove from Studio once satisfied the objects in it are also at the remote endpoint,
+which `cold_archive audit` answers for the manifest's rows.
+
 ## Adding a vocabulary
 
 A **vocabulary** is reference data describing what a standard *defines*. It is deliberately separate
@@ -4772,6 +4889,47 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
    string the migration writes.
 
 ---
+
+## The development seed
+
+[`seed.sql`](seed.sql) creates the four demo personas and nothing else. It is local development
+data, never for a production database, and db-init replays it on every start against a
+persistent volume, so every statement in it has to be repeatable on a database that already holds
+these rows.
+
+**GoTrue's columns.** Every varchar token column on `auth.users` must be set to the empty string
+rather than NULL: GoTrue maps them to Go `string` fields, and a NULL aborts the row scan with
+`converting NULL to string is unsupported`, which the login reports as a 500. `email_change` in
+particular is nullable with no default, so omitting it from the INSERT is enough to break
+authentication entirely. `aud` must be `authenticated` and match `GOTRUE_JWT_AUD` in the chart's
+auth environment, or GoTrue looks users up under a different audience and finds nothing;
+`raw_app_meta_data` must carry the `role` key, and `identity_data` on `auth.identities` must carry
+`sub` and `email`.
+
+**`ON CONFLICT DO UPDATE`, not `DO NOTHING`.** With `DO NOTHING` a persona row written by an
+older, broken version of the seed could never be repaired; the seed would silently report
+`INSERT 0 0` forever.
+
+**Only the role mappings that are wrong are removed.** `user_roles` is audited and append-only
+(archived migration 0070), and the unconditional DELETE this replaced removed all four rows and
+the INSERT put them straight back, so every boot appended four `ROLE_REVOKED` and four
+`ROLE_GRANTED` rows to a table that cannot be pruned. `check-migration-idempotency.mjs` reported
+it, and the audit trail would have read as though somebody re-granted every persona's role
+nightly. The `NOT IN` keeps the guarantee, that any mapping for these four that is not the
+intended pair is removed, while a settled database matches no rows. Each persona holds exactly one
+role because `usePermissions.js` reads `data[0]` and `custom_access_token_hook()` uses `LIMIT 1`,
+so a persona holding two would resolve non-deterministically.
+
+**The causation demonstration is gone, with the floor it demonstrated on.** The seed used to end
+by re-describing one gateway and three of its devices inside a single transaction, so the audit
+rows shared one `txid_current()` and the drawer's "Same transaction" control had something to
+render on a fresh stack. Its subject was addressed by pinned ids a provisioning script issued, and
+that script, those ids and the four-cell floor were retired together, so the UPDATEs could match
+no row on any stack and the NOTICE they fell through to named a command that no longer existed.
+What was lost is the demonstration, not the feature: `causation_id` is written on every
+transaction, so the control works the moment one act touches several rows, and commissioning a
+gateway alongside its devices through the UI is exactly that act. The tutorial walks a reader
+through doing it for real.
 
 ## Testing
 

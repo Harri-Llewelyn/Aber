@@ -1,25 +1,11 @@
--- =============================================================================
--- Aber local development seed data
--- =============================================================================
--- WARNING: THIS FILE CONTAINS LOCAL DEVELOPMENT SEED DATA ONLY.
--- DO NOT RUN OR EXECUTE THIS FILE AGAINST A PRODUCTION DATABASE OR CLOUD ENVIRONMENT.
--- =============================================================================
-
+-- Local development seed data: the four demo personas. NOT FOR A PRODUCTION DATABASE. Replayed by
+-- db-init on every start against a persistent volume, so every statement here is repeatable on a
+-- database that already holds these rows. Reasoning: ./README.md, "The development seed".
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
--- Seed auth.users with the 4 standard demo personas
--- Note: For GoTrue v2.x, we need to set:
--- - EVERY varchar token column to an empty string (not NULL). GoTrue maps these to Go
---   `string` fields, so a NULL aborts the row scan with
---   `converting NULL to string is unsupported` and the login returns a 500.
---   auth.users.email_change in particular is nullable with NO default, so omitting
---   it from this INSERT is enough to break authentication entirely.
--- - email_confirmed_at to NOW() to mark users as confirmed
--- - encrypted_password is stored as bcrypt hash
--- - raw_app_meta_data must include the 'role' key with the user's role name
--- - is_sso_user must be false (default)
--- - aud must be 'authenticated' and must match GOTRUE_JWT_AUD in the chart's auth env,
---   otherwise GoTrue looks users up under a different audience and finds nothing.
+-- GoTrue maps every varchar token column to a Go string, so each must be '' and not NULL:
+-- email_change is nullable with no default, and omitting it breaks every login with a 500. aud must
+-- equal GOTRUE_JWT_AUD or GoTrue finds nobody; raw_app_meta_data carries the role.
 INSERT INTO auth.users (
   instance_id,
   id,
@@ -145,10 +131,8 @@ INSERT INTO auth.users (
   '',  -- phone_change_token
   ''   -- reauthentication_token
 )
--- DO UPDATE, not DO NOTHING: supabase-db-init re-runs this seed on every start, and
--- the Supabase DB lives on a persistent volume. With DO NOTHING a persona row that
--- was written by an older, broken version of this seed could never be repaired --
--- the seed would silently report "INSERT 0 0" forever.
+-- DO UPDATE, not DO NOTHING: a persona row written by an older, broken seed must be repairable,
+-- or the seed would report INSERT 0 0 forever.
 ON CONFLICT (id) DO UPDATE SET
   aud                        = EXCLUDED.aud,
   role                       = EXCLUDED.role,
@@ -167,8 +151,7 @@ ON CONFLICT (id) DO UPDATE SET
   is_sso_user                = EXCLUDED.is_sso_user,
   updated_at                 = NOW();
 
--- Seed auth.identities for password authentication
--- The identity_data must include 'sub' (user_id) and 'email'
+-- identity_data must carry sub and email.
 INSERT INTO auth.identities (
   id,
   user_id,
@@ -226,20 +209,10 @@ ON CONFLICT (id) DO UPDATE SET
   provider_id   = EXCLUDED.provider_id,
   updated_at    = NOW();
 
--- Seed public.user_roles mapping auth user_id to public.roles(id).
--- Clear any pre-existing mappings for the demo personas so each one ends up with exactly one
--- role. usePermissions.js reads data[0] and custom_access_token_hook() uses LIMIT 1, so a persona
--- holding two roles would resolve non-deterministically.
---
--- ONLY THE MAPPINGS THAT ARE WRONG, and the `NOT IN` is what makes this file replayable now that
--- `user_roles` is audited (0070). The unconditional DELETE this replaces removed all four rows and
--- the INSERT below put them straight back, so every boot appended four ROLE_REVOKED rows and four
--- ROLE_GRANTED rows to a table that is append-only and cannot be pruned --
--- `check-migration-idempotency.mjs` reports it, and the audit trail would have read as though
--- somebody re-granted every persona's role nightly.
---
--- The guarantee is unchanged: any mapping for these four that is not the intended pair is removed.
--- What changes is that a settled database matches no rows.
+-- Only the mappings that are wrong. user_roles is audited and append-only, so the unconditional
+-- DELETE plus re-INSERT this replaces appended eight audit rows per boot; a settled database now
+-- matches no rows. Each persona holds exactly one role, because usePermissions.js reads data[0]
+-- and custom_access_token_hook() uses LIMIT 1.
 DELETE FROM public.user_roles
 WHERE user_id IN (
   'a0000000-0000-0000-0000-000000000001',
@@ -260,23 +233,3 @@ INSERT INTO public.user_roles (user_id, role_id) VALUES
   ('a0000000-0000-0000-0000-000000000003', 3), -- Operator
   ('a0000000-0000-0000-0000-000000000004', 4)  -- Auditor
 ON CONFLICT (user_id, role_id) DO NOTHING;
-
--- =============================================================================================
--- THE DIGITAL THREAD CAUSATION DEMONSTRATION USED TO END THIS FILE, and it is gone with the floor
--- it demonstrated on.
---
--- It re-described one gateway and three of its devices inside a single BEGIN/COMMIT, so that the
--- audit rows shared one `txid_current()` and the drawer's "Same transaction" control had something
--- to render on a fresh stack. Its subject was addressed by the pinned ids `provision-gateways.mjs`
--- issued -- and that script, those ids and the four-cell floor were all retired together. So the
--- UPDATEs could no longer match a row on ANY stack, and the NOTICE they fell through to told the
--- reader to run `npm run provision:gateways`, which no longer exists either. A seeded
--- demonstration whose subject cannot be created is not a demonstration; it is an instruction that
--- fails.
---
--- WHAT WAS LOST IS THE DEMONSTRATION, NOT THE FEATURE. `causation_id` is written by 0003 on every
--- transaction, so the "Same transaction" control works the moment one act touches several rows --
--- and commissioning a gateway alongside its devices through the UI is exactly the act this block
--- imitated. The tutorial walks a reader through doing it for real, which is the swap this stack
--- keeps making: build the example rather than be handed it.
--- =============================================================================================
