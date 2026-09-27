@@ -2801,7 +2801,7 @@ paths:
                 properties:
                   assetAdministrationShells: { type: array, items: { type: object } }
                   submodels: { type: array, items: { type: object } }
-                  conceptDescriptions: { type: array, items: { type: object }, description: 'Omitted entirely when empty — `minItems: 1` in the IDTA schema.' }
+                  conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
                   stats: { type: object }
             application/asset-administration-shell-package+zip:
               schema: { type: string, format: binary }

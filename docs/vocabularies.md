@@ -71,7 +71,14 @@ before proposing a change:
   [`supabase/functions/_shared/aas/shell.ts`](../supabase/functions/_shared/aas/shell.ts)) —
   correct AAS V3 for IRIs and IRDIs alike, so IRDIs export with no code change. `semantic_id_type`
   is validation metadata here, not export input. A `ModelReference` would be emitted wrongly as an
-  `ExternalReference`; nothing sets one.
+  `ExternalReference`; nothing sets one. **Each id also gets a `ConceptDescription`** in the
+  Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
+  operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
+  `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
+  `dataType` derived from the Sparkplug datatype. The definition is the catalog description only
+  when every live metric carrying the id agrees on it: the POSITION metrics describe their own axes,
+  so that concept's definition defers to MTConnect instead. A new standard's ids are covered with
+  no code change.
 
 ## How a vocabulary entry becomes a metric
 
