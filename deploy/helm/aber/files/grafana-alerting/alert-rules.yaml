@@ -322,7 +322,7 @@ groups:
         noDataState: OK
         execErrState: Error
         labels:
-          severity: warning
+          severity: critical
           entity_type: platform
         annotations:
           summary: >-

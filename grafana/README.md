@@ -213,8 +213,9 @@ shorter window would only re-report the same reading. The view emits this row on
 
 ### Backup Stale (`aber-backup-stale`)
 
-Warning, `for: 0s`, over 36 hours. No platform backup (the backup service's dump of both
-databases, the keys and the volumes) has succeeded for a day and a half. The schedule is nightly by
+Critical, `for: 0s`, over 36 hours: a restore can reach no later than the last good backup. No
+platform backup (the backup service's dump of both databases, the keys and the volumes) has
+succeeded for a day and a half. The schedule is nightly by
 default (`backup.schedule`), so 36 hours is one missed night with half a day in hand for a slow run
 or a restart; the window is the delay, so there is no `for`. The Backups page shows its line on the
 same number, `BACKUP_STALE_HOURS`, and a guard holds the two equal. A site that sets a sparser
