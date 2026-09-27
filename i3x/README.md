@@ -4,7 +4,8 @@ A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
 eXchange) server over this stack's existing model.
 
 **Current verdict: `1.0 Compatible`** — 52 passed, 0 failed against CESMII's official 60-test
-conformance suite. Not *Full 1.0 Compliance*, and deliberately so: that requires the optional
+conformance suite at `5010274f` (cesmii/i3X, 2026-06-18), the ref CI pins. That predates the
+Implementation Guide's 1.0 final of 2026-09-25, whose changes were editorial. Not *Full 1.0 Compliance*, and deliberately so: that requires the optional
 Update methods, which this server refuses (see [Writes](#writes-are-refused)).
 
 ---
@@ -44,9 +45,8 @@ engineering.
 ## Security
 
 **This process holds no service-role key, and `main()` refuses to start if one is in its
-environment.** Every metadata read is a PostgREST request carrying the *caller's* bearer token, so
-the i3X address space is exactly what that caller could see in the dashboard — RLS decides, not this
-code.
+environment.** It holds no JWT secret either: every check of a caller is PostgREST's, made with the
+caller's own token.
 
 `ingestion.py` is deliberately **not imported** for the same reason: it constructs a service-role
 Supabase client at import time whenever the key is set. The cost of that refusal is a little
@@ -58,6 +58,32 @@ because PostgREST enforces policy; the cache is just a dict keyed by `sparkplug_
 request is answered in two steps — resolve the requested elementIds through PostgREST *as the
 caller* first, then serve only the ids that came back. An element the caller cannot see reports as
 not found, indistinguishable from one that does not exist.
+
+**Every request except `GET /info` is authenticated before it is dispatched**, by one PostgREST
+call carrying the caller's `Authorization`: `rpc/service_token_max_days`, an immutable constant
+granted to `authenticated` and `service_role` and not to `anon`. PostgREST checks the signature and
+`exp`, and its pre-request hook `auth_pre_request()` refuses a revoked token or a revoked service
+principal. So a missing header, a string that is not a token, the publishable key, and an expired or
+revoked token each get a 401. A success is cached for at most 15 seconds, keyed by a SHA-256 of the
+header and never past the token's `exp`; a refusal is never cached. Check 32 of
+`check-docs-drift.mjs` holds that function to those grants.
+
+What that guarantees:
+
+- **The address space is read as the caller**, so RLS decides what it contains when it is read,
+  give or take [the address-space cache](#the-address-space-cache)'s few seconds. Values and
+  history are served only for elements that read returned.
+- **A subscription belongs to the token's `sub` and its `clientId` together.** Another principal
+  quoting both gets the same 404 as a subscription that does not exist. A credential with no `sub`,
+  such as the secret key, is its own principal, identified by a digest of it.
+- **A revoked or expired token loses the subscription path too.** `/sync` and the other
+  subscription calls are refused within 15 seconds of the revocation, and at `exp`. An open stream
+  re-checks its token, past the cache, on every 15-second keepalive tick, and ends cleanly when the
+  check fails or `exp` arrives.
+- **Registration is not re-checked.** The monitored set is validated against the caller's address
+  space when elements are registered. A grant withdrawn later while the token stays valid (a user's
+  role removed) stops that caller's reads at once, but values for elements already registered keep
+  arriving on the subscription until it is deleted or expires, or the token fails the check.
 
 `GET /info` is unauthenticated, because the spec requires it and because it doubles as the health
 check. It reports capabilities and nothing about the address space.
@@ -171,6 +197,13 @@ Five rules are easy to get wrong and each fails quietly:
    ("delete deletes the subscription") failed — reported as a 15-second timeout on an endpoint that
    was never reached, which reads as a hung server rather than as a stream that had not noticed it
    was over. It reproduces only against a client that pools connections.
+
+   A client that stays connected but stops *reading* (a sleeping laptop, a background tab, a proxy
+   that stopped draining) is bounded too. Only the stream's own handler thread writes to its
+   socket, with a 10-second send timeout; the MQTT thread only queues the value and wakes the
+   stream. So that client loses its own stream after 10 seconds and holds up nothing else. When the
+   MQTT thread did the write itself, one such client froze every value on the site until the kernel
+   gave up on the connection.
 5. **Sync and stream are mutually exclusive.** `/sync` must error while a stream is open, because
    the stream has already delivered — and discarded — the queue the sync caller is asking to
    acknowledge.
@@ -195,8 +228,8 @@ at `http://localhost:8090` fails its version probe and quietly decides the serve
 after which nothing it sends is in the right shape.
 
 **2. The token is a user access token, not the publishable key.** The publishable key authenticates at the gateway
-and is then rejected by the data layer — `401 The supplied credentials were rejected by the data
-layer` — because RLS grants reads to `authenticated`, not `anon`. Get one with:
+and is then rejected by the data layer — `401 The data layer refused this token: a user or service
+access token is required` — because it stands for `anon`. Get one with:
 
 ```bash
 curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
@@ -248,7 +281,7 @@ carry named a package that does not exist.
       "env": {
         "I3X_BASE_URL": "http://localhost:8090/v1",
         "I3X_AUTH_SCHEME": "bearer",
-        "I3X_TOKEN": "<a Supabase access token — see Connecting a client, above>"
+        "I3X_TOKEN": "<a service principal's token — see The token, below>"
       }
     }
   }
@@ -327,26 +360,35 @@ That is the whole argument for [Writes are refused](#writes-are-refused) working
 client-side flag is a convenience, and the durable control is that this server implements no write
 verb. A user who defeats the flag gets the refusal and the reason for it.
 
-### The token is the user's own
+### The token
 
-The MCP client inherits exactly that user's RLS scope, because this server passes the bearer
-straight to PostgREST. An operator asking a model about the shopfloor sees what an operator can see.
+The MCP client inherits exactly the RLS scope of whoever its token names, because this server
+passes the bearer straight to PostgREST. With an operator's token, a model asking about the
+shopfloor sees what an operator can see.
 
 **A token copied out of a browser session expires in an hour** (`GOTRUE_JWT_EXP: 3600`) — the same
 trap the Explorer note above describes. A host config is a *file*, so the token in it is stale by
 the next session, and the symptom is `401`s on a server that was working.
 
-**Mint a durable one instead:**
+**Issue a service principal's token instead**, in either of two ways:
 
-```bash
-node scripts/mint-mcp-token.mjs            # 90 days, prints the token
-node scripts/mint-mcp-token.mjs --json     # a ready-to-paste mcpServers block
-```
+- **On the dashboard**, as an Administrator: Access Control → the principal's **Issue Token**
+  (the Service Token modal). It offers 7, 30 or 90 days, 30 by default, and shows the token once
+  with its `jti`.
+- **From a shell** on a machine that can reach the stack:
 
-It signs a JWT for `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
-migration `0034`, using the same HS256 secret the rest of the stack shares — so PostgREST validates
-it exactly as it validates a GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP`
-governs what GoTrue *issues* and does not apply.
+  ```bash
+  node scripts/mint-mcp-token.mjs            # 30 days, prints the token
+  node scripts/mint-mcp-token.mjs --days 90  # 90 is the ceiling, not the default
+  node scripts/mint-mcp-token.mjs --json     # a ready-to-paste mcpServers block
+  ```
+
+Both record the issue in the Digital Thread before they reveal the token, and both sign a JWT with
+the HS256 secret the rest of the stack shares, so PostgREST validates it exactly as it validates a
+GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP` governs what GoTrue *issues* and
+does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
+read-only MCP principal seeded by archived migration 0034. The ceiling is
+`service_token_max_days()`, which the database enforces as well as both issuers.
 
 **The principal holds `telemetry:read` and nothing else, and the narrowness is deliberate.** Every
 write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069`
@@ -365,11 +407,22 @@ this principal must not hold `digital_thread:read`.
 **It is not `service_role`**, which would be the one-line answer and would bypass the RLS scoping
 that makes the paragraph above true.
 
-**There is no revocation.** PostgREST checks the signature, not a session table, so withdrawing a
-minted token means rotating `SUPABASE_JWT_SECRET` — which invalidates every token in the stack,
-including the anon and service-role keys. The expiry is the only bound that exists. That is why
-`--days` is a real decision and why a laptop leaving the building takes a working credential with
-it.
+**A token can be revoked on its own.** Each carries a `jti`, which the script prints and the modal
+shows. `SELECT revoke_service_token('<jti>')` as an Administrator, or withdrawing it from the
+principal's token list on the Access Control page, adds it to the denylist `auth_pre_request()`
+consults; withdrawing the principal refuses every token that names it. What that reaches:
+
+- **PostgREST** refuses the token on its next request.
+- **This server** refuses it within 15 seconds, because it authenticates every request but
+  `GET /info` through PostgREST ([Security](#security)). An open stream ends at its next
+  15-second keepalive.
+- **Storage, Realtime and the edge runtime do not.** They check only the signature, and accept a
+  revoked token until it expires.
+
+So the expiry still bounds those three, which is why `--days` is a real decision: a token revoked
+after a laptop left the building still reaches them until it expires. **Do not rotate
+`SUPABASE_JWT_SECRET` to withdraw one token**: that invalidates every token in the stack, including
+the stack's own keys.
 
 ### Troubleshooting: `server_info` succeeding proves nothing about your token
 
@@ -418,6 +471,9 @@ clock.
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `300` | Spec MUST — abandoned subscriptions are deleted |
 | `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `10000` | Batches per subscription before 206 |
+| `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `20` | Per token `sub`; past it, create answers 429 |
+| `I3X_MAX_SUBSCRIPTIONS` | `500` | On the server; past it, create answers 429 |
+| `I3X_MAX_STREAMS` | `50` | Open SSE streams; past it, stream answers 429 |
 | `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
 | `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
 | `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
@@ -439,6 +495,7 @@ and discover it during their own integration.
 | Current values immediately after a restart | **Cold, and reported as cold.** The MQTT cache refills from `spBv1.0/#` as devices publish; until a device next publishes, `/objects/value` answers `quality: "GoodNoData"` with a null value for it |
 | Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
 | Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
+| Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. A principal is the token's `sub`, so every token minted for one service principal shares its 20 |
 
 ### Why 404-then-recreate is the contract and not a workaround
 

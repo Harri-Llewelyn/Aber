@@ -32,13 +32,19 @@ info:
     ### Authentication
 
     `Authorization: Bearer <access_token>` — the **user's own** access token from
-    `POST /auth/v1/token?grant_type=password` on the Platform API.
+    `POST /auth/v1/token?grant_type=password` on the Platform API, or a service principal's
+    token minted for i3X clients.
+
+    Every request except `GET /info` is authenticated first, by one PostgREST call carrying
+    your token, so a revoked or expired token is refused here as it is on the Platform API
+    (within 15 seconds). A subscription belongs to your token's `sub` as well as to its
+    `clientId`: another principal gets `404` for it.
 
     > ⚠️ **The anon key is not a substitute.** This service holds no service-role key and
     > refuses to start if one is in its environment. It replays your token to PostgREST for
-    > every metadata read, so RLS decides what the address space contains. The anon key
-    > authenticates but is rejected by the data layer with
-    > `401 The supplied credentials were rejected by the data layer`.
+    > every metadata read, so RLS decides what the address space contains. The publishable
+    > key stands for `anon` and is refused with
+    > `401 The data layer refused this token: a user or service access token is required`.
 
     > ℹ️ **Tokens expire after an hour.** A client that persists its connection settings —
     > Explorer does — will start returning 401 on a profile that worked earlier. Paste a
@@ -454,6 +460,7 @@ paths:
         does not implement the verb cannot be talked into it. Writes belong on the
         Sparkplug/NCMD command path, where they are audited.
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /objects/history:
@@ -505,6 +512,7 @@ paths:
       summary: Write history — refused
       description: '**405.** See `PUT /objects/value`.'
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   # --------------------------------------------------------- Subscriptions ----
@@ -549,6 +557,11 @@ paths:
                       result: { $ref: '#/components/schemas/Subscription' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429':
+          description: 'The caller''s principal holds `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` subscriptions (default 20), or the server holds `I3X_MAX_SUBSCRIPTIONS` (default 500). `responseDetail.detail` names which.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   /subscriptions/list:
     post:
@@ -745,6 +758,9 @@ paths:
         keep-alive *serialises* a connection, so a pooling client that abandons a stream and
         immediately issues another request has that request queued behind the corpse of the
         first — which presents as a hung server on an endpoint that was never reached.
+
+        **A client that stops reading loses its stream after 10 seconds.** A write that cannot
+        finish in that time ends the stream, and the connection with it; nothing else waits on it.
       requestBody:
         required: true
         content:
@@ -763,6 +779,11 @@ paths:
               schema: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
+        '429':
+          description: 'The server has `I3X_MAX_STREAMS` streams open (default 50). Replacing this subscription''s own stream is not refused. Poll `/subscriptions/sync` instead.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
 components:
 
@@ -773,14 +794,14 @@ components:
       bearerFormat: JWT
       description: |
         The **user's** access token from `POST /auth/v1/token?grant_type=password` on the
-        Platform API. Not the anon key, and not a service-role key — this server refuses to
-        start if one is in its environment.
+        Platform API, or a service principal's minted token. Not the anon key. This server holds
+        no service-role key and refuses to start if one is in its environment.
 
   responses:
     Unauthorized:
       description: |
-        No `Authorization` header, or a token the data layer rejected. Only `GET /info` is
-        unauthenticated.
+        No `Authorization` header, or a token PostgREST refused: not a token, the anon key,
+        expired, or revoked. Checked before every request except `GET /info`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -790,7 +811,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     SubscriptionNotFound:
-      description: 'No such subscription for this `clientId` — including after a restart, since subscription state is in memory.'
+      description: 'No such subscription for this `clientId` and this token''s principal — including after a restart, since subscription state is in memory.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }

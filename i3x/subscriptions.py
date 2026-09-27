@@ -32,6 +32,10 @@ from typing import Callable, Dict, Iterable, List, Optional
 # subscription.
 DEFAULT_QUEUE_LIMIT = 10_000
 DEFAULT_TTL_SECONDS = 300
+# Past these, create and stream answer 429 naming the limit. An open stream holds a server thread.
+DEFAULT_MAX_PER_PRINCIPAL = 20
+DEFAULT_MAX_SUBSCRIPTIONS = 500
+DEFAULT_MAX_STREAMS = 50
 
 # 2**64 - 1. Sequence numbers MUST be 64-bit unsigned; a subscription that somehow reached this
 # would wrap into reuse, so it is refused instead.
@@ -51,10 +55,19 @@ class SubscriptionError(Exception):
 class Subscription:
     """One client's subscription: its monitored set, its queue, and its stream (if any)."""
 
-    def __init__(self, subscription_id: str, client_id: str, display_name: str, now: float):
+    def __init__(
+        self,
+        subscription_id: str,
+        client_id: str,
+        display_name: str,
+        now: float,
+        principal: str = "",
+    ):
         self.subscription_id = subscription_id
         self.client_id = client_id
         self.display_name = display_name
+        # Who created it: the token's `sub`. Ownership is this AND the clientId.
+        self.principal = principal
         # elementId -> maxDepth. Ordered so `/subscriptions/list` reports registrations in the order
         # they were made, which makes a diff against the client's own view readable.
         self.monitored: "OrderedDict[str, int]" = OrderedDict()
@@ -91,9 +104,15 @@ class SubscriptionRegistry:
         queue_limit: int = DEFAULT_QUEUE_LIMIT,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
         clock: Callable[[], float] = time.monotonic,
+        max_per_principal: int = DEFAULT_MAX_PER_PRINCIPAL,
+        max_subscriptions: int = DEFAULT_MAX_SUBSCRIPTIONS,
+        max_streams: int = DEFAULT_MAX_STREAMS,
     ):
         self.queue_limit = queue_limit
         self.ttl_seconds = ttl_seconds
+        self.max_per_principal = max_per_principal
+        self.max_subscriptions = max_subscriptions
+        self.max_streams = max_streams
         self._clock = clock
         self._lock = threading.RLock()
         self._subs: Dict[str, Subscription] = {}
@@ -103,44 +122,67 @@ class SubscriptionRegistry:
 
     # -- lifecycle ---------------------------------------------------------------------------
 
-    def create(self, client_id: str, display_name: str = "") -> Subscription:
+    def create(
+        self, client_id: str, display_name: str = "", *, principal: str = ""
+    ) -> Subscription:
         # "SHOULD be reasonably complex and difficult for other clients to guess" -- 256 bits from
-        # secrets, not uuid4 and not anything derived from the clientId. The subscriptionId is the
-        # only thing standing between two authenticated callers, since ownership is checked by
-        # comparing clientId but the id itself is what gets quoted in every later request.
-        sub = Subscription(secrets.token_urlsafe(32), client_id, display_name, self._clock())
+        # secrets, not uuid4 and not anything derived from the clientId.
+        sub = Subscription(
+            secrets.token_urlsafe(32), client_id, display_name, self._clock(), principal
+        )
         with self._lock:
+            held = sum(1 for s in self._subs.values() if s.principal == principal)
+            if held >= self.max_per_principal:
+                raise SubscriptionError(
+                    429,
+                    "Too Many Requests",
+                    f"This principal already holds {held} subscriptions, the per-principal limit "
+                    f"(I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL). Delete one it no longer needs; an "
+                    f"idle one expires after {self.ttl_seconds} s.",
+                )
+            if len(self._subs) >= self.max_subscriptions:
+                raise SubscriptionError(
+                    429,
+                    "Too Many Requests",
+                    f"This server already holds {len(self._subs)} subscriptions, its limit "
+                    f"(I3X_MAX_SUBSCRIPTIONS). Retry after idle ones expire "
+                    f"({self.ttl_seconds} s without a sync or stream).",
+                )
             self._subs[sub.subscription_id] = sub
         return sub
 
-    def get_owned(self, client_id: str, subscription_id: str) -> Subscription:
+    def get_owned(
+        self, client_id: str, subscription_id: str, *, principal: str = ""
+    ) -> Subscription:
         """
         Resolve a subscription, or raise 404.
 
-        A subscription owned by ANOTHER client raises the same 404 as one that never existed. That
-        is a spec MUST and it is the whole point: a 403 would confirm the id is real, turning the
-        endpoint into an oracle for guessing other clients' subscription ids.
+        A subscription owned by ANOTHER client, or created by another principal, raises the same
+        404 as one that never existed. That is a spec MUST and it is the whole point: a 403 would
+        confirm the id is real, turning the endpoint into an oracle for guessing other clients' ids.
         """
         with self._lock:
             sub = self._subs.get(subscription_id)
-            if sub is None or sub.client_id != client_id:
+            if sub is None or sub.client_id != client_id or sub.principal != principal:
                 raise SubscriptionError(
                     404, "Not Found", f"No subscription {subscription_id!r} for this client."
                 )
             return sub
 
-    def delete(self, client_id: str, subscription_id: str) -> None:
+    def delete(self, client_id: str, subscription_id: str, *, principal: str = "") -> None:
         with self._lock:
-            sub = self.get_owned(client_id, subscription_id)
+            sub = self.get_owned(client_id, subscription_id, principal=principal)
             self._close_stream(sub)
             del self._subs[subscription_id]
 
-    def list_owned(self, client_id: str, subscription_ids: Iterable[str]) -> List[dict]:
+    def list_owned(
+        self, client_id: str, subscription_ids: Iterable[str], *, principal: str = ""
+    ) -> List[dict]:
         """Bulk lookup. Missing or unowned entries report per-item failure, not a whole-request one."""
         out = []
         for sid in subscription_ids:
             try:
-                sub = self.get_owned(client_id, sid)
+                sub = self.get_owned(client_id, sid, principal=principal)
             except SubscriptionError:
                 out.append(
                     {
@@ -201,8 +243,8 @@ class SubscriptionRegistry:
         Queue a batch for every subscription monitoring any of these elements.
 
         Called from the MQTT thread on every value change. Returns the subscriptions with an open
-        stream, so the caller can push to exactly those without holding this lock across a socket
-        write -- a slow or dead SSE consumer must not be able to stall the ingest thread.
+        stream so the caller can wake exactly those; each stream's own handler thread drains and
+        writes, so a slow or dead SSE consumer cannot stall the ingest thread.
         """
         streaming = []
         with self._lock:
@@ -291,8 +333,20 @@ class SubscriptionRegistry:
         The backlog is DRAINED here rather than left in place: SSE is at-most-once with no
         acknowledgement, so anything handed to the stream is gone. Leaving it queued would mean a
         later `/sync` re-delivered updates the stream had already sent.
+
+        A stream that replaces this subscription's own does not count against `max_streams`.
         """
         with self._lock:
+            if not sub.stream_open:
+                open_now = sum(1 for s in self._subs.values() if s.stream_open)
+                if open_now >= self.max_streams:
+                    raise SubscriptionError(
+                        429,
+                        "Too Many Requests",
+                        f"This server already has {open_now} open streams, its limit "
+                        f"(I3X_MAX_STREAMS). Poll with /subscriptions/sync instead, or close a "
+                        f"stream.",
+                    )
             if sub.stream_open:
                 self._close_stream(sub)
             sub.stream_open = True
@@ -305,9 +359,9 @@ class SubscriptionRegistry:
         """
         Take every queued batch, leaving the queue empty.
 
-        Used only by the streaming path. Draining under the registry's own lock is what keeps it
-        atomic against the MQTT thread appending concurrently -- a copy-then-clear outside the lock
-        would silently discard anything staged in between.
+        Used only by the streaming path, on the stream's handler thread. Draining under the
+        registry's own lock is what keeps it atomic against the MQTT thread appending concurrently --
+        a copy-then-clear outside the lock would silently discard anything staged in between.
         """
         with self._lock:
             batches = [dict(b) for b in sub.batches]

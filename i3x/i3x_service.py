@@ -13,6 +13,10 @@ THE SECURITY MODEL IS THE MOST IMPORTANT THING IN THIS FILE.
   the key is set. Every metadata read carries the CALLER's bearer token, so RLS decides what the
   address space contains.
 
+  EVERY REQUEST BUT `GET /info` IS AUTHENTICATED BEFORE DISPATCH by one PostgREST call made as the
+  caller (`_authenticate`), so revocation and expiry reach the subscription endpoints too, and each
+  subscription belongs to the token's `sub`.
+
   THE MQTT VALUE CACHE HAS NO RLS, and that is the trap this file closes. It is a dict keyed by
   sparkplug_id, so serving from it directly would hand any authenticated caller live values for
   every device on the site. A value request therefore resolves its elementIds through PostgREST AS
@@ -32,6 +36,7 @@ Related: README.md -> "Why this is an adapter, not a feature", "Why it is a sepa
 """
 from __future__ import annotations
 
+import base64
 import gzip
 import io
 import json
@@ -40,6 +45,7 @@ import os
 import re
 import select
 import hashlib
+import socket
 import sys
 import threading
 import time
@@ -89,9 +95,14 @@ MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
 SUBSCRIPTION_TTL_SECONDS = int(os.getenv("I3X_SUBSCRIPTION_TTL_SECONDS", "300"))
 SUBSCRIPTION_QUEUE_LIMIT = int(os.getenv("I3X_SUBSCRIPTION_QUEUE_LIMIT", "10000"))
+MAX_SUBSCRIPTIONS_PER_PRINCIPAL = int(os.getenv("I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL", "20"))
+MAX_SUBSCRIPTIONS = int(os.getenv("I3X_MAX_SUBSCRIPTIONS", "500"))
+MAX_STREAMS = int(os.getenv("I3X_MAX_STREAMS", "50"))
 REAPER_INTERVAL_SECONDS = int(os.getenv("I3X_REAPER_INTERVAL_SECONDS", "30"))
 # Comfortably inside the TTL, so an idle-but-connected client keeps its subscription alive.
 SSE_KEEPALIVE_SECONDS = float(os.getenv("I3X_SSE_KEEPALIVE_SECONDS", "15"))
+# A stream write that cannot finish in this long ends the stream: its client has stopped reading.
+SSE_SEND_TIMEOUT_SECONDS = 10.0
 
 # MIRRORED FROM ingestion.py. Keep in step -- `test_i3x_service.py` asserts both files agree, the
 # same discipline `sparkplugToXsd.ts` has against `sparkplugDatatype.js`. ingestion.py is not
@@ -124,7 +135,11 @@ _alias_map: Dict[tuple, Dict[int, str]] = {}
 _alias_lock = threading.RLock()
 
 registry = SubscriptionRegistry(
-    queue_limit=SUBSCRIPTION_QUEUE_LIMIT, ttl_seconds=SUBSCRIPTION_TTL_SECONDS
+    queue_limit=SUBSCRIPTION_QUEUE_LIMIT,
+    ttl_seconds=SUBSCRIPTION_TTL_SECONDS,
+    max_per_principal=MAX_SUBSCRIPTIONS_PER_PRINCIPAL,
+    max_subscriptions=MAX_SUBSCRIPTIONS,
+    max_streams=MAX_STREAMS,
 )
 
 
@@ -506,12 +521,17 @@ def resolve_metric_name(group_id, edge_node_id, metric) -> Optional[str]:
 
 
 def _stage_and_push(sparkplug_id: str, metrics: Dict[str, dict]) -> None:
-    """Queue a value change for every subscription watching this element, then push to open streams."""
+    """
+    Queue a value change for every subscription watching this element, then wake their streams.
+
+    Runs on the MQTT network thread, so it never writes to a client socket: each stream's own
+    handler thread drains its queue and writes (see `_serve_stream`).
+    """
     device_stub = {"sparkplug_id": sparkplug_id, "is_quarantined": False}
     envelope = A.device_value(device_stub, metrics)
     streaming = registry.stage({sparkplug_id: envelope})
     for sub in streaming:
-        _push_to_stream(sub)
+        _wake_stream(sub)
 
 
 # =================================================================================================
@@ -527,27 +547,70 @@ class SseChannel:
 
     The chunked framing is done here rather than by the handler because the body is unbounded and so
     has no Content-Length -- and under HTTP/1.1 a response with neither leaves the client waiting for
-    a close that never comes. Writes are serialised: the MQTT thread and the keep-alive loop both
-    push, and interleaved chunk headers would corrupt the stream irrecoverably.
+    a close that never comes.
+
+    ONLY THE STREAM'S OWN HANDLER THREAD WRITES (`send`, `keepalive`, `finish`). Every other thread
+    -- the MQTT thread, a displacing stream, a delete -- calls `wake()` or `close()`, which only
+    signal. A client that stops reading then stalls its own thread until the send timeout, and
+    nothing else.
     """
 
     def __init__(self, handler: BaseHTTPRequestHandler):
         self.handler = handler
-        self.lock = threading.Lock()
+        # Set once the response has ended, cleanly or not; nothing is written after it.
         self.closed = threading.Event()
+        # True only when the terminating chunk went out, so the connection can serve a next request.
+        self.ended_cleanly = False
+        self.close_requested = threading.Event()
+        # The wake signal is a socket pair so the handler's `select` can wait on the client and on
+        # wakes at once. `_wake_lock` stops a late wake writing to a descriptor `release()` freed.
+        self._wake_r, self._wake_w = socket.socketpair()
+        self._wake_r.setblocking(False)
+        self._wake_w.setblocking(False)
+        self._wake_lock = threading.Lock()
+        self._released = False
+
+    # -- any thread ------------------------------------------------------------------------------
+    def wake(self) -> None:
+        """Ask the handler thread to drain the queue. Never blocks: a full pair means one is due."""
+        with self._wake_lock:
+            if self._released:
+                return
+            try:
+                self._wake_w.send(b"\0")
+            except OSError:
+                pass
+
+    def close(self) -> None:
+        """Ask the handler thread to end the response cleanly."""
+        self.close_requested.set()
+        self.wake()
+
+    # -- the stream's handler thread only --------------------------------------------------------
+    @property
+    def wake_socket(self) -> socket.socket:
+        return self._wake_r
+
+    def consume_wakes(self) -> None:
+        try:
+            while self._wake_r.recv(4096):
+                pass
+        except OSError:
+            # BlockingIOError: every pending wake has been read.
+            pass
 
     def _write(self, text: str) -> bool:
-        with self.lock:
-            if self.closed.is_set():
-                return False
-            try:
-                data = text.encode("utf-8")
-                self.handler.wfile.write(b"%X\r\n" % len(data) + data + b"\r\n")
-                self.handler.wfile.flush()
-                return True
-            except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
-                self.closed.set()
-                return False
+        if self.closed.is_set():
+            return False
+        data = text.encode("utf-8")
+        try:
+            self.handler.wfile.write(b"%X\r\n" % len(data) + data + b"\r\n")
+            self.handler.wfile.flush()
+            return True
+        except (OSError, ValueError):
+            # OSError includes a reset, a broken pipe and the send timeout (TimeoutError).
+            self.closed.set()
+            return False
 
     def send(self, payload) -> bool:
         return self._write(f"data: {json.dumps(payload, default=str)}\n\n")
@@ -566,45 +629,29 @@ class SseChannel:
         so simply dropping the socket is wrong: the client sees a truncated chunked body and reports
         a network fault for what was an orderly, expected handover.
         """
-        with self.lock:
-            if self.closed.is_set():
-                return
-            try:
-                self.handler.wfile.write(b"0\r\n\r\n")
-                self.handler.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
-                pass
-            self.closed.set()
+        if self.closed.is_set():
+            return
+        try:
+            self.handler.wfile.write(b"0\r\n\r\n")
+            self.handler.wfile.flush()
+            self.ended_cleanly = True
+        except (OSError, ValueError):
+            pass
+        self.closed.set()
 
-    def close(self) -> None:
-        self.finish()
+    def release(self) -> None:
+        with self._wake_lock:
+            self._released = True
+            self._wake_r.close()
+            self._wake_w.close()
 
 
-def _push_to_stream(sub) -> None:
-    """
-    Flush this subscription's queue down its open stream.
-
-    Drains the QUEUE rather than sending the live value directly: the queue is the single source of
-    ordering, and pushing straight from the MQTT callback could deliver a newer value before an older
-    one that was still waiting. Delivered means discarded -- SSE is at-most-once with no
-    acknowledgement, so anything handed to the stream must leave the queue or a later `/sync` would
-    re-deliver it.
-    """
+def _wake_stream(sub) -> None:
+    """Tell this subscription's open stream, if any, that its queue has something to send."""
     with _streams_lock:
         channel = _streams.get(sub.subscription_id)
-    if channel is None:
-        return
-    for batch in _drain_for_stream(sub):
-        if not channel.send(batch["updates"]):
-            # Same identity guard as the handler's own unwind: this push may be racing a client
-            # that has just opened a replacement stream.
-            _detach_stream(sub, channel)
-            return
-
-
-def _drain_for_stream(sub):
-    """Take everything queued. SSE is at-most-once, so delivered means discarded."""
-    return registry.drain(sub)
+    if channel is not None:
+        channel.wake()
 
 
 def _detach_stream(sub, only_if=None) -> None:
@@ -634,6 +681,236 @@ def _on_registry_stream_close(sub) -> None:
 
 
 registry.on_stream_close = _on_registry_stream_close
+
+
+def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") -> None:
+    """
+    Answer `/subscriptions/stream` on this handler thread, which is the only one that writes to it.
+
+    It ends when the client disconnects, when another stream or a delete displaces it, when a write
+    cannot finish inside SSE_SEND_TIMEOUT_SECONDS, at the token's `exp`, or when the token fails
+    the re-check made on every keepalive tick. All but the first and third end cleanly, with the
+    terminating chunk, and only a clean end leaves the connection open for a next request.
+
+    It sends the QUEUE, never the live value, because the queue is the one source of ordering.
+    Delivered means discarded: SSE is at-most-once, so a later `/sync` must not re-deliver it.
+    """
+    conn = req.connection
+    try:
+        channel = SseChannel(req)
+    except OSError:
+        # No stream was opened, so `/sync` must work again rather than answer 409 forever.
+        registry.close_stream(sub)
+        raise
+    with _streams_lock:
+        existing = _streams.get(sub.subscription_id)
+        if existing:
+            existing.close()
+        _streams[sub.subscription_id] = channel
+
+    try:
+        conn.settimeout(SSE_SEND_TIMEOUT_SECONDS)
+        req.send_response(200)
+        req.send_header("Content-Type", "text/event-stream")
+        req.send_header("Cache-Control", "no-cache")
+        req.send_header("Connection", "keep-alive")
+        # Chunked rather than a Content-Length: the body is unbounded. HTTP/1.1 without either
+        # would make the client wait for a close that never comes.
+        req.send_header("Transfer-Encoding", "chunked")
+        req.end_headers()
+
+        # Plus anything staged before the channel was registered, whose wake found no channel.
+        batches = backlog + registry.drain(sub)
+        next_tick = time.monotonic() + SSE_KEEPALIVE_SECONDS
+        expires = _monotonic_deadline(caller.expires_at)
+        while True:
+            for batch in batches:
+                if not channel.send(batch["updates"]):
+                    return
+            # WAIT ON THE SOCKET, NOT ON THE CLOCK, so an abandoned stream frees this thread at
+            # once rather than at the next keepalive (README.md -> "Subscriptions", rule 4). A
+            # readable stream socket means EOF: the request body was consumed at dispatch.
+            try:
+                ready, _, _ = select.select(
+                    [conn, channel.wake_socket], [], [],
+                    max(0.0, min(next_tick, expires) - time.monotonic()),
+                )
+            except (OSError, ValueError):
+                return
+            if conn in ready:
+                return
+            if channel.close_requested.is_set() or time.monotonic() >= expires:
+                channel.finish()
+                return
+            batches = []
+            if channel.wake_socket in ready:
+                # Consumed before the drain, so a wake landing after the drain is not lost.
+                channel.consume_wakes()
+                batches = registry.drain(sub)
+            if time.monotonic() >= next_tick:
+                # Bypasses the cache, so a revoked token loses its stream within one tick.
+                try:
+                    expires = _monotonic_deadline(_authenticate(bearer, fresh=True).expires_at)
+                except (Problem, requests.RequestException):
+                    channel.finish()
+                    return
+                # The reaper treats an open stream as activity. The comment frame still goes out
+                # when idle: intermediaries time out a silent connection.
+                registry.touch(sub)
+                if not channel.keepalive():
+                    return
+                next_tick = time.monotonic() + SSE_KEEPALIVE_SECONDS
+    except OSError:
+        # The headers could not be written: the client left before the stream began.
+        pass
+    finally:
+        _detach_stream(sub, channel)
+        channel.release()
+        if channel.ended_cleanly:
+            conn.settimeout(req.timeout)
+        else:
+            # A partial chunk, or a client already gone: the connection cannot take another request.
+            req.close_connection = True
+
+
+# =================================================================================================
+# Authentication (README.md -> "Security")
+# =================================================================================================
+# Every route but these is authenticated in `_dispatch` before its handler runs.
+UNAUTHENTICATED_ROUTES = frozenset({"GET /info"})
+# An IMMUTABLE constant granted to `authenticated` and `service_role`, not `anon`. Calling it as the
+# caller costs no table read and succeeds only when PostgREST accepts the token's signature and
+# `exp` and the pre-request hook `auth_pre_request()` finds neither its jti nor its sub revoked.
+AUTH_PROBE_PATH = "rpc/service_token_max_days"
+# A success is reused for at most this long, and never past the token's `exp`. A refusal is never
+# stored, and a fresh refusal evicts the stored success.
+AUTH_CACHE_SECONDS = 15.0
+# Keyed on a client-controlled header, so bounded and evicted least-recently-used.
+AUTH_CACHE_MAX = 1024
+
+
+class Caller:
+    """An accepted token: the principal its subscriptions belong to, and its `exp` if any."""
+
+    __slots__ = ("principal", "expires_at")
+
+    def __init__(self, principal: str, expires_at: Optional[float]):
+        self.principal = principal
+        self.expires_at = expires_at
+
+
+_auth_cache: "OrderedDict[str, tuple]" = OrderedDict()
+_auth_lock = threading.Lock()
+
+
+def _credential_key(bearer: str) -> str:
+    # A digest, so the cache and the principal of a token with no `sub` never hold the token itself.
+    return hashlib.sha256(bearer.encode("utf-8")).hexdigest()
+
+
+def _unverified_claims(bearer: str) -> dict:
+    """
+    The JWT payload, decoded WITHOUT verifying the signature: `{}` for anything that is not a JWT.
+    Trusted only once `_probe` has accepted the token, or to refuse one whose `exp` has passed.
+    """
+    scheme, _, rest = bearer.strip().partition(" ")
+    token = rest.strip() if scheme.lower() == "bearer" else bearer.strip()
+    parts = token.split(".")
+    if len(parts) != 3:
+        return {}
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except ValueError:
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def _principal(bearer: str, claims: dict) -> str:
+    """The token's `sub`. A credential with none (an `sb_` key) is its own principal."""
+    sub = claims.get("sub")
+    if isinstance(sub, str) and sub:
+        return sub
+    return "credential:" + _credential_key(bearer)
+
+
+def _expiry(claims: dict) -> Optional[float]:
+    exp = claims.get("exp")
+    if isinstance(exp, (int, float)) and not isinstance(exp, bool):
+        return float(exp)
+    return None
+
+
+def _monotonic_deadline(expires_at: Optional[float]) -> float:
+    if expires_at is None:
+        return float("inf")
+    return time.monotonic() + (expires_at - time.time())
+
+
+def _probe(bearer: str) -> None:
+    """One PostgREST call carrying the caller's token. Raises Problem 401 if it is refused."""
+    pg = PostgrestClient(bearer)
+    resp = requests.get(f"{pg.base}/{AUTH_PROBE_PATH}", headers=pg._headers(), timeout=pg.timeout)
+    if resp.status_code in (401, 403):
+        try:
+            message = str(resp.json().get("message") or "")
+        except (ValueError, AttributeError):
+            message = ""
+        if not message or message.startswith("permission denied"):
+            # What PostgREST says to the anon role: no user or service token was presented.
+            message = "a user or service access token is required"
+        raise Problem(
+            401,
+            "Unauthorized",
+            f"The data layer refused this token: {message[:200]}. Only GET /info is "
+            f"unauthenticated.",
+        )
+    if not resp.ok:
+        raise Problem(
+            502,
+            "Bad Gateway",
+            f"The token could not be checked ({resp.status_code} from the data layer).",
+        )
+
+
+def _forget(key: str) -> None:
+    with _auth_lock:
+        _auth_cache.pop(key, None)
+
+
+def _authenticate(bearer: str, fresh: bool = False) -> Caller:
+    """Accept the token or raise Problem. `fresh` skips the cache: an open stream's re-check."""
+    key = _credential_key(bearer)
+    if not fresh:
+        with _auth_lock:
+            hit = _auth_cache.get(key)
+            if hit is not None and hit[0] > time.monotonic():
+                _auth_cache.move_to_end(key)
+                return hit[1]
+
+    claims = _unverified_claims(bearer)
+    expires_at = _expiry(claims)
+    try:
+        if expires_at is not None and expires_at <= time.time():
+            # Refused on this server's clock too, so a stream and a request agree on the moment.
+            raise Problem(
+                401, "Unauthorized", "This token has expired. Only GET /info is unauthenticated."
+            )
+        _probe(bearer)
+    except Problem:
+        _forget(key)
+        raise
+
+    caller = Caller(_principal(bearer, claims), expires_at)
+    keep = AUTH_CACHE_SECONDS
+    if expires_at is not None:
+        keep = min(keep, expires_at - time.time())
+    if keep > 0:
+        with _auth_lock:
+            _auth_cache[key] = (time.monotonic() + keep, caller)
+            _auth_cache.move_to_end(key)
+            while len(_auth_cache) > AUTH_CACHE_MAX:
+                _auth_cache.popitem(last=False)
+    return caller
 
 
 # =================================================================================================
@@ -844,7 +1121,11 @@ class Handler(BaseHTTPRequestHandler):
         if handler is None:
             self._fail(404, "Not Found", f"No such i3X endpoint: {route}")
             return
+        # Reset per request: a keep-alive connection reuses this handler for the next one.
+        self.caller = None
         try:
+            if route not in UNAUTHENTICATED_ROUTES:
+                self.caller = _authenticate(self._bearer())
             handler(self)
         except Problem as exc:
             self._fail(exc.status, exc.title, exc.detail)
@@ -1256,11 +1537,19 @@ def h_update_refused(req: Handler) -> None:
 
 
 # -- subscriptions ----------------------------------------------------------------------------
+def _owned_subscription(req: Handler, client_id: str, body: dict):
+    """The subscription named in the body, if this clientId AND this principal own it; else 404."""
+    return registry.get_owned(
+        client_id, body.get("subscriptionId") or "", principal=req.caller.principal
+    )
+
+
 def h_sub_create(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.create(client_id, body.get("displayName") or "")
+    sub = registry.create(
+        client_id, body.get("displayName") or "", principal=req.caller.principal
+    )
     req._ok(
         {
             "clientId": client_id,
@@ -1271,20 +1560,22 @@ def h_sub_create(req: Handler) -> None:
 
 
 def h_sub_list(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    req._bulk(registry.list_owned(client_id, body.get("subscriptionIds") or []))
+    req._bulk(
+        registry.list_owned(
+            client_id, body.get("subscriptionIds") or [], principal=req.caller.principal
+        )
+    )
 
 
 def h_sub_delete(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
     results = []
     for sid in body.get("subscriptionIds") or []:
         try:
-            registry.delete(client_id, sid)
+            registry.delete(client_id, sid, principal=req.caller.principal)
         except SubscriptionError as exc:
             results.append(
                 {
@@ -1331,10 +1622,9 @@ def h_sub_register(req: Handler) -> None:
     arrive. Validating here also means the monitored set can only ever contain ids this caller is
     allowed to see, so the subscription cannot become a way around RLS on the value path.
     """
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
+    sub = _owned_subscription(req, client_id, body)
     entries = _registration_entries(body)
     known = _build_objects(_load_address_space(req._pg())) if entries else {}
 
@@ -1377,10 +1667,9 @@ def h_sub_unregister(req: Handler) -> None:
     the client is working from a stale or wrong view of the address space and silence would let it
     keep doing so.
     """
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
+    sub = _owned_subscription(req, client_id, body)
     entries = _registration_entries(body)
     known = _build_objects(_load_address_space(req._pg())) if entries else {}
 
@@ -1399,10 +1688,9 @@ def h_sub_unregister(req: Handler) -> None:
 
 
 def h_sub_sync(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
+    sub = _owned_subscription(req, client_id, body)
     batches, status = registry.sync(sub, body.get("lastSequenceNumber"))
     detail = None
     if status == 206:
@@ -1418,60 +1706,10 @@ def h_sub_sync(req: Handler) -> None:
 
 
 def h_sub_stream(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
-
-    backlog = registry.open_stream(sub)
-    channel = SseChannel(req)
-    with _streams_lock:
-        existing = _streams.get(sub.subscription_id)
-        if existing:
-            existing.close()
-        _streams[sub.subscription_id] = channel
-
-    req.send_response(200)
-    req.send_header("Content-Type", "text/event-stream")
-    req.send_header("Cache-Control", "no-cache")
-    req.send_header("Connection", "keep-alive")
-    # Chunked rather than a Content-Length: the body is unbounded. HTTP/1.1 without either would
-    # make the client wait for a close that never comes.
-    req.send_header("Transfer-Encoding", "chunked")
-    req.end_headers()
-
-    for batch in backlog:
-        if not channel.send(batch["updates"]):
-            _detach_stream(sub, channel)
-            return
-
-    # Hold the connection open. The reaper treats an open stream as activity, so a quiet machine does
-    # not have its subscription deleted underneath a healthy connection.
-    #
-    # WAIT ON THE SOCKET, NOT ON THE CLOCK. Sleeping discovers an abandoned stream only when the
-    # next keepalive write fails, which pins the thread and its TCP connection for up to a full
-    # interval -- and HTTP/1.1 keep-alive SERIALISES a connection, so a pooling client's next
-    # request queues behind the corpse of the stream it just abandoned.
-    # (README.md -> "Subscriptions", rule 4, which records how that failed SUB-10)
-    #
-    # A readable stream socket means EOF here: the request body was fully consumed at dispatch and
-    # no client sends more on an SSE connection. Either way -- orderly close, reset, or a client
-    # that has started talking nonsense -- ending the stream is the right response.
-    try:
-        while not channel.closed.is_set():
-            try:
-                ready, _, _ = select.select([req.connection], [], [], SSE_KEEPALIVE_SECONDS)
-            except (OSError, ValueError):
-                break
-            if ready:
-                break
-            registry.touch(sub)
-            # Still sent on the idle path: intermediaries time out a silent connection, and the
-            # comment frame is what keeps a proxy from closing a healthy stream.
-            if not channel.keepalive():
-                break
-    finally:
-        _detach_stream(sub, channel)
+    sub = _owned_subscription(req, client_id, body)
+    _serve_stream(req, sub, registry.open_stream(sub), req._bearer(), req.caller)
 
 
 ROUTES = {

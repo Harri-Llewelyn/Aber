@@ -764,6 +764,54 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 32. i3X's authentication probe is a function `authenticated` may call and `anon` may not.
+//
+// i3x_service.py authenticates every request but GET /info by calling AUTH_PROBE_PATH as the
+// caller. Revoked from `authenticated`, dropped or given an argument, it refuses every token;
+// callable by `anon`, it accepts the publishable key and any string that is not a token.
+// -------------------------------------------------------------------------------------------------
+{
+  const probe = read('i3x/i3x_service.py').match(/^AUTH_PROBE_PATH = "rpc\/([a-z_]+)"$/m);
+  if (!probe) {
+    fail('i3x/i3x_service.py: AUTH_PROBE_PATH is not an "rpc/<function>" literal, so check 32 cannot read it');
+  } else {
+    const fn = probe[1];
+    const sig = `public\\.${fn}\\(\\)`;
+    const dir = 'supabase/migrations';
+    const sql = readdirSync(join(REPO, dir))
+      .filter((n) => /^\d+_.*\.sql$/.test(n))
+      .sort()
+      .map((n) => read(`${dir}/${n}`))
+      .join('\n');
+    const faults = [];
+    if (!new RegExp(`CREATE OR REPLACE FUNCTION ${sig}`).test(sql)) {
+      faults.push(`no migration declares public.${fn}() with no arguments`);
+    }
+    if (!new RegExp(`GRANT (ALL|EXECUTE) ON FUNCTION ${sig} TO [^;]*\\bauthenticated\\b`).test(sql)) {
+      faults.push(`public.${fn}() is not granted to authenticated`);
+    }
+    if (!new RegExp(`REVOKE ALL ON FUNCTION ${sig} FROM PUBLIC`).test(sql)) {
+      faults.push(`public.${fn}() keeps PUBLIC's default EXECUTE, which anon inherits`);
+    }
+    if (new RegExp(`GRANT [^;]* ON FUNCTION ${sig} TO [^;]*\\b(anon|PUBLIC)\\b`, 'i').test(sql)) {
+      faults.push(`public.${fn}() is granted to anon or PUBLIC`);
+    }
+    if (new RegExp(`(REVOKE [^;]* ON FUNCTION ${sig} FROM [^;]*\\bauthenticated\\b|DROP FUNCTION[^;]*\\b${fn}\\b)`, 'i').test(sql)) {
+      faults.push(`a migration revokes public.${fn}() from authenticated, or drops it`);
+    }
+    if (!read('i3x/README.md').includes(`rpc/${fn}`)) {
+      faults.push(`i3x/README.md -> "Security" does not name the probe, rpc/${fn}`);
+    }
+    if (faults.length) {
+      fail(`i3X's authentication probe rpc/${fn} would refuse every token or admit anon:\n` +
+        faults.map((f) => `        ${f}`).join('\n'));
+    } else {
+      pass(`i3X authenticates through rpc/${fn}, which authenticated may call and anon may not`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 10. docs/openapi.yaml covers every public relation and every edge function. The spec is the
 // only externally facing contract this project publishes.
 //
