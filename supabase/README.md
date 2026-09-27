@@ -4672,6 +4672,81 @@ bucket admits `image/svg+xml` only, and the dashboard never inlines it. The name
 retirement of floors as a modelled level: one plan belongs to one area, and the drawing is still
 a floor plan.
 
+### How `storage-init.mjs` creates them
+
+**Not a SQL migration.** `storage.buckets` is owned by storage-api, which runs its own migrations
+against that schema when it boots. The supabase/postgres image ships only a stub of it (`id`,
+`name`, `owner`, timestamps, and none of `public`, `file_size_limit` or `allowed_mime_types`), and
+db-init replays our migrations long before storage-api starts. On a fresh stack a migration
+inserting into `storage.buckets` would hit the stub: it could create the row but could not mark it
+public, so the bucket would come up private on first boot and correct itself only on the second.
+Creating it through the Storage REST API instead runs after storage-api is healthy and is
+indifferent to which columns this version's schema has. The two files must agree on the bucket
+names: a bucket created with no policies is invisible to every browser-facing role, and a policy
+naming a bucket that was never created is dead text. Neither errors, which is why
+`check-docs-drift.mjs` holds the script, `storage-policies.sql` and the table above together.
+
+**Idempotent by inspection, and reconciled on every boot.** The hook Job runs on every upgrade.
+The script asks whether each bucket exists before deciding to create it, rather than creating it
+and treating the failure as success, because storage-api v1.11 answers a duplicate create with
+HTTP 400 "The resource already exists" rather than 409, and answers a missing bucket with 400 as
+well, so a conflict, an absence and a malformed request are indistinguishable by status and only
+the payload tells them apart (verified against the running service; the obvious reading of 404
+and 409 is wrong for both). The settings are then reconciled either way, on the create path too,
+so a bucket created by an older revision of the script or by hand in Studio is brought up to the
+current settings, a changed size limit takes effect on the next boot rather than needing the bucket
+dropped, and for the private buckets `public: false` is re-asserted. The buckets are created
+sequentially, not with `Promise.all`, so a failure part-way through names the bucket that failed.
+
+**The buckets are a list in code, not parameters.** They differ in the setting that matters most,
+whether they are public, and expressing that as an environment variable would leave "is this
+bucket public?" answerable only by reading a `.env` file. `asset-exports` and `floor-plans` are fixed names rather
+than environment variables because `storage-policies.sql` and `frontend/src/api.js` name them
+too; a name that can be changed in one place is a bucket with no policies.
+
+**Two size variables, two jobs.** `STORAGE_FILE_SIZE_LIMIT` is storage-api's global ceiling for
+every bucket, and storage-api refuses to create a bucket whose limit exceeds it, so the ceiling has
+to be at least the largest bucket (`broker-captures`, 100 MiB). `STORAGE_MODEL_FILE_SIZE_LIMIT`
+is the 3D-model bucket's own limit; reading the ceiling for it would mean raising the ceiling for
+one bucket silently raised this one too.
+
+**The capture limit is sized from the traffic and read together with the job caps.** The fleet's
+measured rate is 0.95 msg/s and a message is a few hundred bytes of JSON, so an hour of a real
+shift is single-digit megabytes and a full working day fits in 100 MiB; what the limit refuses is
+a capture taken at the ingestion ceiling and left running for far longer than anybody needs.
+Archived migration 0055 raised it from 25 MiB because `capture_jobs` caps a recording at 50 MiB,
+and that cap is useless unless the bucket can hold what it allows: the failure of getting it
+backwards is the worst possible ordering, a capture that reached its size cap terminating
+successfully, being uploaded, and being refused, by which time the recording exists only in a
+buffer about to be freed. The three job caps are mutually consistent so that the message cap binds
+first (100,000 messages at a few hundred bytes is roughly 40 MB), leaving headroom above the size
+cap. Anything raising the job cap in `capture_jobs_caps_are_bounded` has to raise the bucket limit
+too. The export bucket's 256 MiB is likewise above the largest bundle the row caps in
+`supabase/functions/_shared/aas/bundle.ts` admit (200,000 telemetry rows and 20,000 thread rows);
+the row caps are the real limit, and the bucket limit is what stops a bug from becoming a disk.
+
+**The MIME lists are the control, and two of them are deliberately loose.** The client-side
+accept filter is a convenience. `model/*` is the registered tree for 3D formats (RFC 9245 registers
+`model/gltf+json` and `model/gltf-binary`), but browsers are inconsistent about what they put in
+`File.type`: `.obj` and `.stl` frequently arrive as `application/octet-stream` or an empty string
+because the OS has no mapping for them, so rejecting those would make uploads fail on some
+machines and not others. The octet-stream fallback is deliberate rather than lax, and the
+extension allow-list in the 3D-model migration's CHECK is what actually constrains what a shell can
+reference. Captures admit `text/plain` and `application/octet-stream` for the same reason and not
+because anything but JSON is allowed; the uploader checks that the payload carries
+`aber_capture_version` and a `messages` array before it is sent, so the list is the coarse outer
+bound rather than the check. `.aasx` is a ZIP by construction and browsers disagree about what to
+call one, so both the generic and the ZIP types are admitted; the function sets the type itself
+and uploads as `service_role`, and the list is what keeps a hand-uploaded file from arriving as
+something a viewer would execute. Floor plans admit `image/svg+xml` exactly, with no fallback:
+every browser reports it, and the dashboard sets the type itself.
+
+**`asset-exports` is its own bucket, not the cold archive's.** They are not the same kind of
+object: a bundle is a copy somebody asked for, derived from rows still in the database, so it
+belongs on local storage where the browser can sign a URL for it. A cold telemetry object is the
+only remaining copy of that history and goes to a remote endpoint the browser never touches
+(archived migration 0132). One retention decision cannot serve both.
+
 ### `asset-3d-models` is public-read, and that is not laziness
 
 An exported AAS `File` element's URL has to be dereferenceable by a viewer holding no Aber
