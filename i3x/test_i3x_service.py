@@ -519,6 +519,173 @@ class TestMirroredConstants(unittest.TestCase):
         self.assertIn("IDENTITY_METRICS", mine)
         self.assertIn("MAX_ALIASES_PER_NODE", mine)
 
+    def _integer_decoder(self, path):
+        """`sparkplug_integer_value` as code (docstring aside) and `SPARKPLUG_SIGNED_INT_BITS` as data."""
+        import ast
+
+        out = {}
+        for node in ast.parse(open(path, encoding="utf-8").read()).body:
+            if isinstance(node, ast.FunctionDef) and node.name == "sparkplug_integer_value":
+                body = node.body[1:] if ast.get_docstring(node) else node.body
+                out["function"] = [ast.dump(node.args)] + [ast.dump(stmt) for stmt in body]
+            elif isinstance(node, ast.Assign) and any(
+                getattr(target, "id", None) == "SPARKPLUG_SIGNED_INT_BITS" for target in node.targets
+            ):
+                out["widths"] = ast.literal_eval(node.value)
+        return out
+
+    def test_the_integer_decoder_agrees_with_ingestion(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        mine = self._integer_decoder(os.path.join(here, "i3x_service.py"))
+        theirs = self._integer_decoder(os.path.join(here, "..", "ingestion", "ingestion.py"))
+        self.assertEqual(set(mine), {"function", "widths"})
+        self.assertEqual(
+            mine, theirs, "sparkplug_integer_value has drifted between i3x_service.py and ingestion.py"
+        )
+
+
+INGESTION_DIR = Path(__file__).resolve().parents[1] / "ingestion"
+
+INT8, INT16, INT32, INT64, UINT8, UINT16, UINT32, UINT64, DATETIME = 1, 2, 3, 4, 5, 6, 7, 8, 13
+
+# (datatype, value) at each signed type's minimum, -1 and maximum, and each unsigned type's maximum.
+SIGNED_CASES = [
+    (INT8, -128), (INT8, -1), (INT8, 127),
+    (INT16, -32768), (INT16, -1), (INT16, 32767),
+    (INT32, -(2**31)), (INT32, -1), (INT32, 2**31 - 1),
+    (INT64, -(2**63)), (INT64, -1), (INT64, 2**63 - 1),
+]
+UNSIGNED_CASES = [(UINT8, 255), (UINT16, 65535), (UINT32, 2**32 - 1), (UINT64, 2**64 - 1)]
+
+
+class _Message:
+    def __init__(self, topic, payload):
+        self.topic, self.payload = topic, payload
+
+
+class TestSparkplugValues(unittest.TestCase):
+    """
+    Values as the MQTT side decodes them: a signed integer is the number the device sent.
+
+    Sparkplug carries Int8-32 in the uint32 `int_value` and Int64 in the uint64 `long_value` as two's
+    complement, and DDATA may name a metric by alias or name alone with no datatype -- so the
+    datatype comes from the birth. Real protobuf payloads through `on_message`, the path the broker
+    drives; the generated module is the one `npm run proto` writes into ingestion/.
+    """
+
+    GROUP, NODE, DEVICE = "Aber", "gwy120000000000400080000", "dev220000000000400080000"
+
+    @classmethod
+    def setUpClass(cls):
+        if str(INGESTION_DIR) not in sys.path:
+            sys.path.append(str(INGESTION_DIR))
+        import sparkplug_b_pb2  # noqa: E402 -- a missing module fails here, not as silent None values
+
+        cls.pb = sparkplug_b_pb2
+
+    def setUp(self):
+        for table in ("_values", "_alias_map", "_alias_datatypes", "_name_datatypes"):
+            getattr(i3x_service, table).clear()
+
+    tearDown = setUp
+
+    def publish(self, msg_type, *metrics, device=DEVICE, raw=None):
+        payload = self.pb.Payload()
+        payload.timestamp = 1790000000000
+        for fields in metrics:
+            metric = payload.metrics.add()
+            for field, value in fields.items():
+                if hasattr(value, "CopyFrom"):
+                    getattr(metric, field).CopyFrom(value)
+                else:
+                    setattr(metric, field, value)
+        topic = "spBv1.0/%s/%s/%s" % (self.GROUP, msg_type, self.NODE) + ("/" + device if device else "")
+        i3x_service.on_message(None, None, _Message(topic, raw or payload.SerializeToString()))
+
+    def served(self):
+        return {name: entry["value"] for name, entry in i3x_service.metrics_for(self.DEVICE).items()}
+
+    @staticmethod
+    def on_the_wire(datatype, value):
+        """Eclipse Tahu's Java encoding: Int8-32 sign-extended into the uint32, Int64 into the uint64."""
+        if datatype in (INT64, UINT64, DATETIME):
+            return {"long_value": value & (2**64 - 1)}
+        return {"int_value": value & (2**32 - 1)}
+
+    def cases(self):
+        return [
+            ("m%d" % i, 100 + i, datatype, value)
+            for i, (datatype, value) in enumerate(SIGNED_CASES + UNSIGNED_CASES)
+        ]
+
+    def assert_served(self, cases):
+        served = self.served()
+        for name, _alias, datatype, value in cases:
+            with self.subTest(datatype=datatype, value=value):
+                self.assertEqual(served[name], value)
+                self.assertIs(type(served[name]), int)
+
+    def test_an_aliased_ddata_reads_each_width_at_its_limits(self):
+        cases = self.cases()
+        self.publish("DBIRTH", *[
+            {"name": name, "alias": alias, "datatype": datatype, **self.on_the_wire(datatype, 0)}
+            for name, alias, datatype, _ in cases
+        ])
+        self.publish("DDATA", *[
+            {"alias": alias, **self.on_the_wire(datatype, value)} for _, alias, datatype, value in cases
+        ])
+        self.assert_served(cases)
+
+    def test_a_named_ddata_reads_each_width_at_its_limits(self):
+        cases = self.cases()
+        self.publish("DBIRTH", *[
+            {"name": name, "datatype": datatype, **self.on_the_wire(datatype, 0)}
+            for name, _, datatype, _ in cases
+        ])
+        self.publish("DDATA", *[
+            {"name": name, **self.on_the_wire(datatype, value)} for name, _, datatype, value in cases
+        ])
+        self.assert_served(cases)
+
+    def test_an_alias_the_nbirth_declared_is_read_on_a_devices_ddata(self):
+        self.publish("NBIRTH", {"name": "offset", "alias": 7, "datatype": INT16, "int_value": 0}, device=None)
+        self.publish("DDATA", {"alias": 7, "int_value": 2**32 - 300})
+        self.assertEqual(self.served(), {"offset": -300})
+
+    def test_a_birth_value_is_read_through_its_own_datatype(self):
+        self.publish("DBIRTH", {"name": "offset", "datatype": INT32, "int_value": 2**32 - 5})
+        self.assertEqual(self.served(), {"offset": -5})
+
+    def test_an_undeclared_integer_is_served_unsigned(self):
+        # No birth seen since startup: served as it arrived, as ingestion stores it.
+        with self.assertLogs(i3x_service.logger, "WARNING"):
+            i3x_service._undeclared_integer_warned_at = 0.0
+            self.publish("DDATA", {"name": "offset", "int_value": 2**32 - 5})
+        self.assertEqual(self.served(), {"offset": 4294967291})
+
+    def test_a_datetime_is_served_as_epoch_milliseconds(self):
+        # The Schema Builder declares DateTime as `number`, so no ObjectType asks for `date-time`.
+        self.publish("DBIRTH", {"name": "since", "datatype": DATETIME, "long_value": 1790000000000})
+        self.assertEqual(self.served(), {"since": 1790000000000})
+
+    def test_values_it_cannot_represent_are_skipped_not_stringified(self):
+        self.publish(
+            "DDATA",
+            {"name": "blob", "datatype": 17, "bytes_value": b"\x00\x01"},
+            {"name": "table", "datatype": 16, "dataset_value": self.pb.Payload.DataSet(num_of_columns=0)},
+            {"name": "udt", "datatype": 19, "template_value": self.pb.Payload.Template(is_definition=False)},
+            {"name": "speed", "datatype": 10, "double_value": 1.5},
+        )
+        self.assertEqual(self.served(), {"speed": 1.5})
+
+    def test_a_negative_json_integer_is_served_as_itself(self):
+        body = {"timestamp": 1790000000000, "metrics": [
+            {"name": "a", "int_value": -5},
+            {"name": "b", "datatype": INT16, "int_value": -32768},
+        ]}
+        self.publish("DDATA", raw=json.dumps(body).encode("utf-8"))
+        self.assertEqual(self.served(), {"a": -5, "b": -32768})
+
 
 class TestNamespaces(unittest.TestCase):
     """
