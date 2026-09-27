@@ -1285,6 +1285,17 @@ tbody tr:hover { background: var(--bg-glass); }
 .badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning-text); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
 
+/* Variants named for what they say. `ok`, `critical` and `unknown` are the tones the credential,
+   broker, token and cold-storage helpers return, used as `badge-${tone}`. Danger takes --danger-text,
+   which clears AA on the rose tint where --danger does not. Unknown is neutral with a dashed border:
+   the page could not read the state, which is not the same as a neutral one. */
+.badge-success,
+.badge-ok       { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
+.badge-danger,
+.badge-critical { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
+.badge-info     { background: var(--accent-dim); color: var(--accent); }
+.badge-unknown  { background: var(--bg-glass); color: var(--text-muted); border: 1px dashed var(--border); }
+
 /* The two remote gateway enrolment states. Neither existing variant fits: `badge-warning` means
    look at this, and `badge-neutral` reads as decommissioned. They differ by border, not only tint:
    solid is waiting on a person (go install it), dashed is waiting on a machine that already has
