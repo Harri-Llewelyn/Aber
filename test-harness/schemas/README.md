@@ -34,7 +34,8 @@ against the real schema immediately found three in the exporter that the bespoke
    unset" value and expresses that by **omitting the field**.
 2. **`SubmodelElementCollection.value` is `minItems: 1`** — an empty collection is invalid, not
    merely useless.
-3. **`conceptDescriptions` is `minItems: 1`** — an empty array is invalid, so the key is omitted.
+3. **`conceptDescriptions` is `minItems: 1`** — an empty array is invalid, so the key is omitted
+   when a shell carries no semantic id.
 
 It is validated by draft 2019-09, matching the schema's own `$schema`; using a different draft
 would silently relax rules the document depends on.

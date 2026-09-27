@@ -72,18 +72,18 @@ export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconne
 export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400`
 
 /**
- * The semantic id for an MTConnect metric, from its full name. Mirror of the SQL in
- * 0002_seed_data.sql: `'https://aber.local/semantics/mtconnect/v2.0/' || name`. The whole
- * name, because a catalog entry is a data item on a component path, which is what an AAS
- * SubmodelElement corresponds to.
+ * The semantic id for an MTConnect metric: its data item type's vocabulary id, so `Axes/X/POSITION`
+ * and `Axes/Y/POSITION` name one concept (#457). The component path, instance and subType stay in
+ * the name and `sub_type`. Callers pass nothing for a custom type, which has no vocabulary id.
  */
-export function mtconnectSemanticId(metricName) {
-  const name = (metricName || '').trim()
-  if (!name) return ''
-  return `${MTCONNECT_SEMANTIC_NAMESPACE}/${name}`
+export function mtconnectSemanticId(dataItemType) {
+  return mtconnectVocabularySemanticId('DATA_ITEM_TYPE', dataItemType)
 }
 
-/** The kind segment used by `mtconnect_vocabulary.semantic_id`. Mirrors the CASE in 0032. */
+/**
+ * The kind segment used by `mtconnect_vocabulary.semantic_id`. Mirrors KIND_SEGMENT in
+ * scripts/generate-mtconnect-vocabulary.mjs; check-mirror-drift.mjs check 8 compares the result.
+ */
 const VOCABULARY_KIND_SEGMENT = {
   DATA_ITEM_TYPE: 'DataItemType',
   COMPONENT: 'Component',

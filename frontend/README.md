@@ -57,8 +57,9 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/deviceTags.js` | `ingestion/validate.py`'s Python mirror |
 | `utils/sparkplugDatatype.js` | `functions/_shared/aas/sparkplugToXsd.ts` |
 | `utils/model3d.js` | `functions/_shared/aas/model3dContentType.ts` |
+| `utils/standards.js` (`mtconnectSemanticId()`) | `mtconnect_vocabulary.semantic_id`, as `0002` seeds it |
 
-All eight are now guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or
+All nine are now guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or
 `test_aas_export.py`. `sparkplugId.js` matters most — it derives an **immutable wire identity**, so
 a divergence cannot be corrected in place.
 
@@ -67,7 +68,7 @@ last definition of each function**, because migrations are replayed on every boo
 `ensure_gateway_status_view()` is declared in `0001` and redeclared in `0025`, and for a while the
 guard was reading the dead one.
 
-A ninth mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
+A tenth mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
 contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by four implementations in
 three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 

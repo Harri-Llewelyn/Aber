@@ -49,7 +49,7 @@ const BLANK_METRIC = {
   group: '', newGroup: '', instance: '', type: '', customType: '',
   subType: '', units: '', datatype: 10, description: '',
   // AAS semanticId. ISO 22400 and OPC UA take theirs from the vocabulary row; MTConnect derives one
-  // from the composed name. `semanticIdManual` records that the operator has taken the field over.
+  // from the data item type. `semanticIdManual` records that the operator has taken the field over.
   semanticId: '', semanticIdType: '', semanticIdManual: false,
   // Only set for standards whose vocabulary states it. MTConnect derives it from the data item
   // type instead, so this stays blank there and effectiveCategory falls back to the derivation.
@@ -443,12 +443,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     effectiveType,
     isMTConnect ? newMetric.subType : ''
   )
-  // MTConnect metrics get a semantic id derived from the composed name in this deployment's
-  // namespace (utils/standards.js). It tracks the name until the operator types their own, and only
-  // once a type is chosen: with only a group picked, the composed name names a group rather than a
-  // metric.
+  // MTConnect metrics get their data item type's vocabulary id (utils/standards.js), so every
+  // metric of one type shares a concept (#457). It follows the type until the operator types their
+  // own. A custom type is a local extension with no vocabulary id, so it derives nothing.
   const derivedSemanticId =
-    isMTConnect && effectiveType !== '' ? mtconnectSemanticId(composedName) : ''
+    isMTConnect && !usingCustomType && effectiveType !== '' ? mtconnectSemanticId(effectiveType) : ''
   const semanticIdValue = (newMetric.semanticIdManual ? newMetric.semanticId : derivedSemanticId).trim()
   const semanticIdTypeValue = newMetric.semanticIdManual
     ? newMetric.semanticIdType
@@ -788,12 +787,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               </div>
 
               {/* Semantic ids: prefilled from the vocabulary for ISO 22400 and OPC UA, derived from
-                  the composed name for MTConnect, and editable in every case. */}
+                  the data item type for MTConnect, and editable in every case. */}
               <div className="form-group" style={{ margin: 0, flex: '2 1 260px' }}>
                 <label className="form-label">
                   Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span>
                   {!newMetric.semanticIdManual && derivedSemanticId && (
-                    <span style={{ fontWeight: 400, color: 'var(--text-dim)', marginLeft: '5px' }} title="Built from the metric name in this deployment's namespace. Type to override.">
+                    <span style={{ fontWeight: 400, color: 'var(--text-dim)', marginLeft: '5px' }} title="The data item type's id in this deployment's MTConnect namespace, shared by every metric of that type. Type to override.">
                       · auto
                     </span>
                   )}

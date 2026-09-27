@@ -184,6 +184,157 @@ export function modelledMetrics(definition: Record<string, unknown> | null): str
   return [...names].sort();
 }
 
+// Concept descriptions
+
+/**
+ * The IEC 61360 data specification template, IDTA-01003-a 3.1. `…/3/0` is its deprecated
+ * spelling. AASc-3a-050 requires this reference beside every IEC 61360 content.
+ */
+export const IEC61360_TEMPLATE =
+  "https://admin-shell.io/DataSpecificationTemplates/DataSpecificationIec61360/3";
+
+const IEC61360_BY_SPARKPLUG: Record<number, string> = {
+  11: "BOOLEAN",
+  12: "STRING",
+  13: "TIMESTAMP",
+  14: "STRING",
+  15: "STRING",
+  17: "BLOB",
+  18: "FILE",
+};
+
+/**
+ * The IEC 61360 `dataType` for a Sparkplug datatype code, or undefined where none fits (DataSet,
+ * Template, an unknown code). A number is a MEASURE only with a unit, because AASc-3a-009 requires
+ * one on every MEASURE type, and a COUNT without.
+ */
+export function sparkplugToIec61360(
+  code: number | null | undefined,
+  hasUnit: boolean,
+): string | undefined {
+  if (code === null || code === undefined) return undefined;
+  if (code >= 1 && code <= 8) return hasUnit ? "INTEGER_MEASURE" : "INTEGER_COUNT";
+  if (code === 9 || code === 10) return hasUnit ? "REAL_MEASURE" : "REAL_COUNT";
+  return IEC61360_BY_SPARKPLUG[code];
+}
+
+/** Every GlobalReference a semanticId in `node` names, sorted, each once. */
+export function referencedSemanticIds(node: unknown): string[] {
+  const ids = new Set<string>();
+  const walk = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+    } else if (value && typeof value === "object") {
+      const keys = (value as { semanticId?: { keys?: { type?: string; value?: string }[] } })
+        .semanticId?.keys ?? [];
+      for (const key of keys) if (key.type === "GlobalReference" && key.value) ids.add(key.value);
+      Object.values(value).forEach(walk);
+    }
+  };
+  walk(node);
+  return [...ids].sort();
+}
+
+/** The last segment of an IRI, which names the concept in every vocabulary here; null otherwise. */
+function conceptName(id: string): string | null {
+  if (!/^(https?:\/\/|urn:)/i.test(id)) return null;
+  const tail = id.split(/[/#]/).filter(Boolean).pop() ?? "";
+  return /^[A-Za-z]/.test(tail) ? tail : null;
+}
+
+/** The single distinct non-empty value, or undefined when there are none or they disagree. */
+function onlyValue(values: unknown[]): string | undefined {
+  const distinct = [...new Set(values.map((v) => String(v ?? "").trim()).filter(Boolean))];
+  return distinct.length === 1 ? distinct[0] : undefined;
+}
+
+function conceptDescription(
+  id: string,
+  name: string,
+  definition: string,
+  opts: { unit?: string; dataType?: string } = {},
+) {
+  return {
+    modelType: "ConceptDescription",
+    id,
+    idShort: toIdShort(name, "Concept"),
+    embeddedDataSpecifications: [{
+      dataSpecification: {
+        type: "ExternalReference",
+        keys: [{ type: "GlobalReference", value: IEC61360_TEMPLATE }],
+      },
+      dataSpecificationContent: {
+        modelType: "DataSpecificationIec61360",
+        preferredName: [{ language: "en", text: name.slice(0, 255) }],
+        unit: opts.unit,
+        dataType: opts.dataType,
+        // Mandatory in English (AASc-3a-008), so every source below supplies one.
+        definition: [{ language: "en", text: definition.slice(0, 1023) }],
+      },
+    }],
+  };
+}
+
+/**
+ * One ConceptDescription per semantic id, from rows the shell was built from: the nameplate
+ * template, else the catalog rows carrying the id, else the schema. A catalog description is the
+ * definition only when every live row carrying the id agrees on it, since several metrics can share
+ * one concept (#457); the unit and datatype likewise. `unitId` is not set: the units are MTConnect
+ * UnitEnum names, which IEC 61360 `unit` takes as free text.
+ */
+export function buildConceptDescriptions(
+  ids: string[],
+  rows: Pick<DeviceRecord, "catalog" | "templates" | "schemas">,
+): Record<string, unknown>[] {
+  return ids.map((id) => {
+    const template = rows.templates.find((t) => t.semantic_id === id);
+    if (template) {
+      return conceptDescription(
+        id,
+        template.id_short,
+        template.description || `The IDTA 02006 nameplate element ${template.id_short}.`,
+        { dataType: "STRING" },
+      );
+    }
+
+    const carrying = rows.catalog.filter((m) => m.semantic_id === id);
+    const live = carrying.filter((m) => !m.deprecated);
+    const metrics = live.length > 0 ? live : carrying;
+    if (metrics.length > 0) {
+      const named = conceptName(id);
+      const name = named ?? String(metrics.map((m) => m.name).sort()[0]);
+      const standard = onlyValue(metrics.map((m) => m.standard));
+      const units = new Set(metrics.map((m) => String(m.units ?? "").trim()).filter(Boolean));
+      const unit = units.size === 1 ? [...units][0] : undefined;
+      const datatype = onlyValue(metrics.map((m) => m.datatype));
+      // Without one agreed description, the definition defers to the identifier's source.
+      const deferred = !named
+        ? `The concept identified by ${id}.`
+        : standard
+        ? `${name}, as ${standard} defines it.`
+        : `${name}, a local extension with no recorded definition.`;
+      return conceptDescription(
+        id,
+        name,
+        onlyValue(metrics.map((m) => m.description)) ?? deferred,
+        {
+          unit,
+          // Units that disagree leave the type unsaid: MEASURE needs one unit, COUNT claims none.
+          dataType: units.size > 1 || datatype === undefined
+            ? undefined
+            : sparkplugToIec61360(Number(datatype), unit !== undefined),
+        },
+      );
+    }
+
+    const schema = rows.schemas.find((s) => s.semantic_id === id);
+    const name = conceptName(id) ?? String(schema?.schema_name ?? "Concept");
+    const definition = (schema?.description as string | null) ||
+      `The concept ${name}, which this shell references.`;
+    return conceptDescription(id, name, definition);
+  });
+}
+
 // Loading
 
 /** Everything one shell is built from. Rows exactly as PostgREST returns them. */
@@ -194,7 +345,7 @@ export interface DeviceRecord {
   catalog: Record<string, unknown>[];
   gateway: Record<string, unknown> | null;
   nameplate: Record<string, unknown> | null;
-  templates: { id_short: string; semantic_id: string }[];
+  templates: { id_short: string; semantic_id: string; description?: string | null }[];
   schemas: Record<string, unknown>[];
 }
 
@@ -238,7 +389,7 @@ export async function loadDeviceRecord(
       ? client.from("gateways").select("name,sparkplug_id").eq("id", device.gateway_id)
       : Promise.resolve({ data: [] }),
     client.from("device_nameplate").select("*").eq("device_id", device.id),
-    client.from("idta_submodel_templates").select("id_short, semantic_id")
+    client.from("idta_submodel_templates").select("id_short, semantic_id, description")
       .eq("template_id", NAMEPLATE_TEMPLATE_ID),
   ]);
 
@@ -514,13 +665,20 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     })),
   };
 
+  const conceptDescriptions = buildConceptDescriptions(referencedSemanticIds(submodels), {
+    catalog,
+    templates,
+    schemas,
+  });
+
   const environment = {
     // AAS Part 5 "Environment": the container serialisation, which is what an AASX package holds
     // and what every AAS tool accepts as a JSON drop-in.
     assetAdministrationShells: [shell],
     submodels,
-    // `conceptDescriptions` is minItems:1 in the schema, so the key is omitted rather than set to
-    // an empty array. Every semanticId here is already a resolvable identifier.
+    // One per semanticId above, since most resolve nowhere (#460). minItems: 1, so omitted when
+    // the shell references none.
+    ...(conceptDescriptions.length > 0 ? { conceptDescriptions } : {}),
   };
 
   const stats = {
@@ -529,6 +687,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     telemetry_metrics: telemetryTotal,
     kpi_metrics: kpiTotal,
     unmapped_semantic_ids: unmappedCount,
+    concept_descriptions: conceptDescriptions.length,
     has_3d_model: Boolean(modelPath),
     // A warning here and not a refusal: in the JSON export the URL is visible to the caller, and a
     // developer exporting on their own machine is the case the localhost default serves. The AASX

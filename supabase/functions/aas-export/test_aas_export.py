@@ -4,8 +4,9 @@ Tests for the aas-export Edge Function.
 Two layers, deliberately in one file:
 
   * Offline checks always run. They guard the Sparkplug -> XSD mapping (which is duplicated between
-    Deno and the frontend bundle and would otherwise drift silently) and the authorization ladder.
-    These need no stack, so they run in the edge-function CI job alongside the other auth tests.
+    Deno and the frontend bundle and would otherwise drift silently), the authorization ladder, and
+    the ConceptDescriptions shell.ts builds for a fixture shell (run in Node, which strips the
+    types). These need no stack, so they run in the edge-function CI job alongside the auth tests.
 
   * Live checks invoke the deployed function against `Sim_CNC_Mill_01` and validate the emitted
     document. They skip when no stack is reachable, so the same file is safe in both CI jobs; the
@@ -388,6 +389,236 @@ class TestModelledMetricsContract(unittest.TestCase):
                     )
 
 
+# The IEC 61360 template reference AASc-3a-050 requires, and the types AASc-3a-009 requires a unit
+# for. Neither rule is in the JSON schema, which is why they are asserted here.
+IEC61360_TEMPLATE = "https://admin-shell.io/DataSpecificationTemplates/DataSpecificationIec61360/3"
+IEC61360_NEEDS_UNIT = {
+    "INTEGER_MEASURE", "REAL_MEASURE", "RATIONAL_MEASURE", "INTEGER_CURRENCY", "REAL_CURRENCY",
+}
+
+
+def semantic_ids(node) -> set:
+    """Every GlobalReference value any `semanticId` in the document names."""
+    found = set()
+    if isinstance(node, dict):
+        for key in (node.get("semanticId") or {}).get("keys", []):
+            if key.get("type") == "GlobalReference":
+                found.add(key.get("value"))
+        for value in node.values():
+            found |= semantic_ids(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= semantic_ids(item)
+    return found
+
+
+def concept_description_problems(environment: dict) -> list:
+    """
+    What is wrong with an Environment's ConceptDescriptions, as sentences.
+
+    One per semanticId the shells and submodels carry, and none for anything else (#460). Each
+    carries IEC 61360 content with an English preferred name and definition (AASc-3a-002, -008),
+    the template reference (-050), and a unit wherever its dataType is a measure (-009).
+    """
+    problems = []
+    descriptions = environment.get("conceptDescriptions")
+    if descriptions == []:
+        problems.append("conceptDescriptions is present and empty; minItems is 1")
+    descriptions = descriptions or []
+    ids = [cd.get("id") for cd in descriptions]
+    if len(ids) != len(set(ids)):
+        problems.append(f"duplicate ConceptDescription ids: {sorted(i for i in ids if ids.count(i) > 1)}")
+    referenced = semantic_ids({k: v for k, v in environment.items() if k != "conceptDescriptions"})
+    if set(ids) != referenced:
+        problems.append(
+            f"semanticIds with no ConceptDescription: {sorted(referenced - set(ids))}; "
+            f"ConceptDescriptions nothing references: {sorted(set(ids) - referenced)}"
+        )
+    for cd in descriptions:
+        specs = cd.get("embeddedDataSpecifications") or []
+        iec = [s for s in specs if (s.get("dataSpecificationContent") or {}).get("modelType")
+               == "DataSpecificationIec61360"]
+        if len(iec) != 1:
+            problems.append(f"{cd.get('id')}: {len(iec)} IEC 61360 specifications, expected 1")
+            continue
+        template = [k.get("value") for k in iec[0].get("dataSpecification", {}).get("keys", [])]
+        content = iec[0]["dataSpecificationContent"]
+        if template != [IEC61360_TEMPLATE]:
+            problems.append(f"{cd.get('id')}: data specification {template}, not the IEC 61360 template")
+        for field in ("preferredName", "definition"):
+            if not any(s.get("language") == "en" and s.get("text") for s in content.get(field) or []):
+                problems.append(f"{cd.get('id')}: no English {field}")
+        if content.get("dataType") in IEC61360_NEEDS_UNIT and not (content.get("unit") or content.get("unitId")):
+            problems.append(f"{cd.get('id')}: dataType {content.get('dataType')} with no unit")
+    return problems
+
+
+def node_strips_types() -> bool:
+    """Node 22.6 and later run TypeScript by stripping its types; earlier releases cannot."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    out = subprocess.run([node, "--version"], capture_output=True, text=True).stdout.strip()
+    major, minor = (int(p) for p in out.lstrip("v").split(".")[:2])
+    return (major, minor) >= (22, 6)
+
+
+def run_build_environment(record: dict) -> dict:
+    """
+    Run _shared/aas/shell.ts's own buildEnvironment() over `record`, in Node, and return its result.
+
+    The module is imported, not extracted: Node strips the types, and `Deno.env` -- read at load for
+    the AAS_* settings, all of which have defaults -- is the only Deno API it touches.
+    """
+    harness = (
+        "globalThis.Deno = { env: { get: () => undefined } };\n"
+        f"const shell = await import({json.dumps(TS_SHELL.as_uri())});\n"
+        "let text = ''; for await (const chunk of process.stdin) text += chunk;\n"
+        "const built = shell.buildEnvironment(JSON.parse(text));\n"
+        "console.log(JSON.stringify({ environment: built.environment, stats: built.stats }));\n"
+    )
+    completed = subprocess.run(
+        [shutil.which("node"), "--experimental-strip-types", "--input-type=module", "-e", harness],
+        input=json.dumps(record), capture_output=True, text=True, timeout=60,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(f"buildEnvironment() failed in Node:\n{completed.stderr[-2000:]}")
+    return json.loads(completed.stdout)
+
+
+MTC = "https://aber.local/semantics/mtconnect/v2.0/DataItemType/"
+ISO = "https://aber.local/semantics/iso22400/"
+
+
+def metric(name, semantic_id, datatype, units=None, description=None, standard="MTConnect",
+           deprecated=False):
+    return {"name": name, "semantic_id": semantic_id, "datatype": datatype, "units": units,
+            "description": description, "standard": standard, "deprecated": deprecated}
+
+
+# One shell's rows, as loadDeviceRecord() returns them: two metrics sharing an MTConnect concept
+# with different descriptions, a KPI whose deprecated predecessor shares its id, an operator's
+# IRDI, a local extension, an unmapped metric, two nameplate elements and a schema with an id.
+SHELL_RECORD = {
+    "device": {"id": "d1", "sparkplug_id": "dev1", "name": "Mill 1", "status": "ONLINE",
+               "connection_method": "MQTT / Sparkplug B"},
+    "config": [{"metric_name": "SERIAL_NUMBER", "val_string": "SN-1"}],
+    "links": [{"schema_id": "s1", "submodel_key": None}],
+    "catalog": [
+        metric("Axes/X/POSITION", MTC + "POSITION", 10, "MILLIMETER", "Linear position of the X axis"),
+        metric("Axes/Y/POSITION", MTC + "POSITION", 10, "MILLIMETER", "Linear position of the Y axis"),
+        metric("Controller/EXECUTION", MTC + "EXECUTION", 12, None, "Controller execution state"),
+        metric("OEE/EFFECTIVENESS", ISO + "EFFECTIVENESS", 10, "PERCENT", "ISO 22400 effectiveness ratio",
+               standard="ISO 22400"),
+        metric("OEE/PERFORMANCE", ISO + "EFFECTIVENESS", 10, "PERCENT", "ISO 22400 performance ratio",
+               standard="ISO 22400", deprecated=True),
+        metric("Spindle/TORQUE", "0173-1#02-AAO677#002", 10, "NEWTON_METER", None),
+        metric("safety_interlock", "https://aber.local/semantics/local/safety_interlock", 11, None,
+               "Safety interlock present", standard=None),
+        metric("Custom/UNMAPPED", None, 10, None, None, standard=None),
+        metric("SERIAL_NUMBER", MTC + "SERIAL_NUMBER", 12, None, "Manufacturer serial number"),
+    ],
+    "gateway": None,
+    "nameplate": {"manufacturer_name": "Acme"},
+    "templates": [
+        {"id_short": "ManufacturerName", "semantic_id": "0112/2///61987#ABA565#009",
+         "description": "Legal name of the manufacturer."},
+        {"id_short": "SerialNumber", "semantic_id": "0112/2///61987#ABA951#009",
+         "description": "Serial number of the instance."},
+    ],
+    "schemas": [{
+        "id": "s1", "schema_name": "Mill", "description": "Mill telemetry",
+        "semantic_id": "https://example.org/submodels/Mill/1/0",
+        "schema_definition": {"properties": {n: {} for n in (
+            "Axes/X/POSITION", "Axes/Y/POSITION", "Controller/EXECUTION", "OEE/EFFECTIVENESS",
+            "OEE/PERFORMANCE", "Spindle/TORQUE", "safety_interlock", "Custom/UNMAPPED",
+        )}},
+    }],
+}
+
+
+@unittest.skipUnless(node_strips_types(), "Node 22.6 or later is needed to run shell.ts")
+class TestConceptDescriptions(unittest.TestCase):
+    """
+    The Environment's ConceptDescriptions, from shell.ts's own buildEnvironment() over a fixture.
+
+    Offline, so the metamodel shape is checked without a stack; the live classes below run the
+    same checks over a real export. Most semantic ids here resolve nowhere (`aber.local`, an
+    operator's IRDI), so the ConceptDescription is the only place a consumer finds their meaning,
+    unit and datatype (#460).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        built = run_build_environment(SHELL_RECORD)
+        cls.environment, cls.stats = built["environment"], built["stats"]
+        cls.by_id = {cd["id"]: cd for cd in cls.environment.get("conceptDescriptions", [])}
+
+    def content(self, semantic_id):
+        return self.by_id[semantic_id]["embeddedDataSpecifications"][0]["dataSpecificationContent"]
+
+    def test_every_semantic_id_has_one_well_formed_concept_description(self):
+        self.assertEqual(concept_description_problems(self.environment), [])
+        self.assertEqual(self.stats["concept_descriptions"], len(self.by_id))
+
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema not installed")
+    def test_the_environment_validates_against_the_official_schema(self):
+        schema = json.loads(AAS_SCHEMA_PATH.read_text(encoding="utf-8"))
+        errors = list(Draft201909Validator(schema).iter_errors(self.environment))
+        detail = "\n".join(
+            f"  {'/'.join(str(x) for x in e.absolute_path) or '<root>'}: {e.message[:180]}"
+            for e in errors[:10]
+        )
+        self.assertEqual(errors, [], f"AAS V3 schema violations:\n{detail}")
+
+    def test_a_shared_concept_gets_one_description_that_names_no_instance(self):
+        # Two POSITION metrics describe their own axes; neither description defines the concept.
+        content = self.content(MTC + "POSITION")
+        self.assertEqual(content["preferredName"], [{"language": "en", "text": "POSITION"}])
+        self.assertEqual(content["definition"][0]["text"], "POSITION, as MTConnect defines it.")
+        self.assertEqual((content["unit"], content["dataType"]), ("MILLIMETER", "REAL_MEASURE"))
+        self.assertEqual(self.by_id[MTC + "POSITION"]["idShort"], "POSITION")
+
+    def test_a_deprecated_metric_does_not_define_the_concept_its_successor_carries(self):
+        content = self.content(ISO + "EFFECTIVENESS")
+        self.assertEqual(content["definition"][0]["text"], "ISO 22400 effectiveness ratio")
+        self.assertEqual(content["unit"], "PERCENT")
+
+    def test_units_are_carried_as_the_catalog_spells_them(self):
+        self.assertEqual(self.content("0173-1#02-AAO677#002")["unit"], "NEWTON_METER")
+
+    def test_an_undescribed_irdi_is_defined_by_its_identifier_alone(self):
+        # Its metric is filed under MTConnect, but the IRDI is not MTConnect's to define.
+        self.assertEqual(
+            self.content("0173-1#02-AAO677#002")["definition"][0]["text"],
+            "The concept identified by 0173-1#02-AAO677#002.",
+        )
+
+    def test_a_value_without_a_unit_is_not_a_measure(self):
+        self.assertEqual(self.content(MTC + "EXECUTION")["dataType"], "STRING")
+        self.assertNotIn("unit", self.content(MTC + "EXECUTION"))
+        self.assertEqual(self.content("https://aber.local/semantics/local/safety_interlock")["dataType"], "BOOLEAN")
+
+    def test_an_irdi_takes_its_name_from_the_metric_or_the_template(self):
+        self.assertEqual(self.by_id["0173-1#02-AAO677#002"]["idShort"], "Spindle_TORQUE")
+        self.assertEqual(self.by_id["0112/2///61987#ABA565#009"]["idShort"], "ManufacturerName")
+        self.assertEqual(
+            self.content("0112/2///61987#ABA565#009")["definition"][0]["text"],
+            "Legal name of the manufacturer.",
+        )
+
+    def test_the_submodel_semantic_id_is_described_by_its_schema(self):
+        content = self.content("https://example.org/submodels/Mill/1/0")
+        self.assertEqual(content["definition"][0]["text"], "Mill telemetry")
+        self.assertNotIn("dataType", content)
+
+    def test_the_key_is_omitted_when_nothing_carries_a_semantic_id(self):
+        bare = {**SHELL_RECORD, "catalog": [], "templates": [], "schemas": [], "links": []}
+        environment = run_build_environment(bare)["environment"]
+        self.assertEqual(semantic_ids(environment), set())
+        self.assertNotIn("conceptDescriptions", environment)
+
+
 class TestAasExportAuthorization(unittest.TestCase):
     def test_missing_auth_header_returns_401(self):
         status, message = evaluate_aas_export_authorization({}, None)
@@ -659,6 +890,9 @@ class TestAasExportSchemaConformance(unittest.TestCase):
                 self.assertIsInstance(
                     node["value"], str,
                     f"{node.get('idShort')} carries a non-string value {node['value']!r}")
+
+    def test_every_semantic_id_has_a_concept_description(self):
+        self.assertEqual(concept_description_problems(self.body.get("aas", {})), [])
 
     def test_no_empty_collections_are_emitted(self):
         for node in TestAasExportLive.walk(self.body.get("aas", {})):

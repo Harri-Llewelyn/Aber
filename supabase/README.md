@@ -390,8 +390,7 @@ gateway as `STALE`.
 and the only insert path is the operator-facing form behind `POST /api/v1/metric-catalog`. Good
 property — but it means a mixed-standard fleet is registered by hand, one form at a time, and
 `name` is UNIQUE and IMMUTABLE, so the first row to claim a name owns it permanently along with
-whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export and the
-i3X `sourceTypeId`.
+whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export.
 
 `0018` front-runs that for the demonstrator's metric set. Three properties worth knowing:
 
@@ -420,14 +419,16 @@ i3X `sourceTypeId`.
   dots and hyphens, so the ASHRAE concept `Constituent-CO2` is registered as
   `BMS/CO2_CONCENTRATION`. The join still uses the vocabulary's own unmodified key.
 
-**One inconsistency this surfaced and deliberately did not fix.** `0002`'s rows mint semantic ids
-*path-shaped* (`…/mtconnect/v2.0/Axes/C/ANGLE`) where `mtconnect_vocabulary` mints them
-*type-shaped* (`…/mtconnect/v2.0/DataItemType/ANGLE`). Both are under the locally-minted
-`aber.local` namespace, so neither asserts a false interoperability and neither is wrong —
-they are two conventions for the same thing, and `0002`'s predates the vocabulary tables.
-Reconciling them is deprecate-and-supersede with its own reasoning to write.
-`test_metric_catalog_seed.py` scopes its provenance assertions to the rows `0018` owns for exactly
-this reason.
+**An MTConnect metric's semantic id names its data item type (#457).** The original seed rows and
+the Add Metric form once built the id from the whole name (`…/mtconnect/v2.0/Axes/C/ANGLE`), which
+names one data item: `Axes/W/POSITION` could never share a concept with `Axes/X/POSITION`, and an
+AAS consumer grouping Properties by `semanticId` split them. Every MTConnect row now carries the
+vocabulary's concept id (`…/mtconnect/v2.0/DataItemType/ANGLE`), with the component path, instance
+and subType left to the name and `sub_type`. `0002` seeds that form, `mtconnectSemanticId()` derives
+it, and `0009_mtconnect_metrics_carry_their_data_item_type_id.sql` repoints a database seeded
+earlier. It is an UPDATE because `semantic_id` is correctable in place. Only a row still holding
+the name-built id is touched, and only when its type is in `mtconnect_vocabulary`; a NOTICE counts
+any left behind. `test_metric_catalog_seed.py` holds every MTConnect row to its type's id.
 
 ### Metric name format (0007)
 
@@ -5070,11 +5071,9 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 7. Frontend mirror module plus unit tests; check whether `scripts/check-docs-drift.mjs` or
    `scripts/check-mirror-drift.mjs` needs a new pair.
 8. `docs/openapi.yaml` updated if any endpoint shape changes.
-9. **A `STANDARD_NAMESPACES` entry in [`../i3x/address_space.py`](../i3x/address_space.py).** This
-   is the one that fails silently: i3X maps `metric_catalog.standard` onto a Namespace, so a
-   standard with no entry is **omitted from `GET /namespaces`** — a 200 with a shorter list, which
-   reads as "this deployment does not use that standard". The key must be the exact `standard`
-   string the migration writes.
+9. **No i3X namespace.** i3X namespaces group types and every type there is local, so a
+   vocabulary is not listed by `GET /namespaces` (#459, [`../i3x/README.md`](../i3x/README.md#address-space)).
+   Do not add a per-standard namespace table back.
 
 ---
 

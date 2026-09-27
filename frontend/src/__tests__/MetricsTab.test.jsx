@@ -717,12 +717,12 @@ describe('Metric builder — semantic id', () => {
 describe('Metric builder — MTConnect semantic id derivation', () => {
   const typePicker = () => screen.getByTitle(/MTConnect data item type/)
 
-  it('derives an id from the composed name, in the local namespace', async () => {
+  it('derives the data item type vocabulary id, in the local namespace', async () => {
     await openForm()
     fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
     fireEvent.change(screen.getByTitle(/The category this metric belongs to/), { target: { value: 'Axes' } })
 
-    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/Axes/ANGLE')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
     expect(referenceTypeSelect().value).toBe('IRI')
   })
 
@@ -733,13 +733,25 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
     expect(semanticIdInput().value).toBe('')
   })
 
-  it('tracks the name as the rest of it is filled in', async () => {
+  it('keeps the concept id as the rest of the name is filled in', async () => {
+    // The instance names the data item, not the concept: Axes/C/ANGLE and Axes/A/ANGLE share one
+    // id, which is what lets a consumer group them (#457).
     await openForm()
     fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
-    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/ANGLE')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
 
     fireEvent.change(screen.getByPlaceholderText('e.g. C'), { target: { value: 'C' } })
-    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/C/ANGLE')
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
+  })
+
+  it('derives nothing for a custom type, which no vocabulary defines', async () => {
+    await openForm()
+    fireEvent.change(typePicker(), { target: { value: '__custom__' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g. VIBRATION_RMS'), { target: { value: 'VIBRATION_RMS' } })
+
+    expect(within(namePreview()).getByText('VIBRATION_RMS')).toBeTruthy()
+    expect(semanticIdInput().value).toBe('')
+    expect(referenceTypeSelect().value).toBe('')
   })
 
   it('stops deriving once the operator types their own', async () => {

@@ -77,29 +77,28 @@ describe('semantic id namespaces', () => {
 })
 
 describe('mtconnectSemanticId', () => {
-  it('mirrors the SQL in archived migration 0032 — namespace plus the whole metric name', () => {
-    expect(mtconnectSemanticId('Axes/C/ANGLE'))
-      .toBe('https://aber.local/semantics/mtconnect/v2.0/Axes/C/ANGLE')
+  it('is the vocabulary id of the data item type, the form mtconnect_vocabulary seeds (#457)', () => {
+    expect(mtconnectSemanticId('ANGLE'))
+      .toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
+    expect(mtconnectSemanticId('ANGLE')).toBe(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', 'ANGLE'))
   })
 
-  it('uses the full path, not just the type — a catalog entry is a specific observation', () => {
-    // Axes/C/ANGLE and Axes/X/ANGLE are different data items on different components.
-    expect(mtconnectSemanticId('Axes/C/ANGLE')).not.toBe(mtconnectSemanticId('Axes/X/ANGLE'))
+  it('names the concept, so two metrics of one type share an id', () => {
+    // Axes/X/POSITION and Axes/W/POSITION are two data items and one concept. The component path,
+    // instance and subType stay in the name and the sub_type column.
+    expect(mtconnectSemanticId('POSITION'))
+      .toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/POSITION')
+    expect(mtconnectSemanticId('POSITION')).not.toContain('Axes')
   })
 
-  it('handles an ungrouped name', () => {
-    expect(mtconnectSemanticId('SERIAL_NUMBER'))
-      .toBe('https://aber.local/semantics/mtconnect/v2.0/SERIAL_NUMBER')
-  })
-
-  it('returns empty for an empty name rather than a dangling namespace', () => {
+  it('returns empty for an empty type rather than a dangling namespace', () => {
     expect(mtconnectSemanticId('')).toBe('')
     expect(mtconnectSemanticId(null)).toBe('')
     expect(mtconnectSemanticId('   ')).toBe('')
   })
 
   it('produces something inferSemanticIdType reads back as an IRI', () => {
-    expect(inferSemanticIdType(mtconnectSemanticId('Axes/C/ANGLE'))).toBe('IRI')
+    expect(inferSemanticIdType(mtconnectSemanticId('ANGLE'))).toBe('IRI')
   })
 })
 
@@ -120,11 +119,6 @@ describe('mtconnectVocabularySemanticId', () => {
   it('keeps a component and a data item type of the same name apart', () => {
     expect(mtconnectVocabularySemanticId('COMPONENT', 'X'))
       .not.toBe(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', 'X'))
-  })
-
-  it('is distinct from the observation-level id for the same token', () => {
-    // The vocabulary row identifies the concept; the catalog row identifies a specific data item.
-    expect(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', 'ANGLE')).not.toBe(mtconnectSemanticId('ANGLE'))
   })
 
   it('returns empty for an empty name', () => {

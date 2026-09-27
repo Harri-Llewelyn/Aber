@@ -4,9 +4,9 @@ Integration tests for 0018_metric_catalog_standards_seed.sql.
     python supabase/migrations/test_metric_catalog_seed.py
 
 WHAT IS ACTUALLY AT RISK HERE. `metric_catalog.name` is UNIQUE and IMMUTABLE, and the `standard`
-and `semantic_id` a row is created with flow into the AAS export and the i3X `sourceTypeId`. A row
-seeded with the wrong semantic id does not fail anywhere -- it asserts an interoperability that
-does not exist, in an artefact handed to a customer, and it cannot be corrected in place.
+and `semantic_id` a row is created with flow into the AAS export. A row seeded with the wrong
+semantic id does not fail anywhere -- it asserts an interoperability that does not exist, in an
+artefact handed to a customer, until something notices.
 
 So the assertions below are about PROVENANCE as much as presence: every seeded row must carry a
 semantic id that is still resolvable in the vocabulary table it came from. A vocabulary re-key or
@@ -156,19 +156,9 @@ class TestSeededRows(SeedTestCase):
                 )
 
 
-# The names 0018 inserts, listed explicitly rather than derived by metric_group.
-#
-# SCOPED DELIBERATELY, and the reason is a real difference this suite found. The rows 0002 seeded
-# mint their semantic ids PATH-SHAPED --
-#   https://aber.local/semantics/mtconnect/v2.0/Axes/C/ANGLE
-# -- where mtconnect_vocabulary mints them TYPE-SHAPED --
-#   https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE
-#
-# Both live under the locally-minted `aber.local` namespace, so neither asserts an
-# interoperability that does not exist and neither is wrong; they are two conventions for the same
-# thing, and 0002's predates the vocabulary tables. Reconciling them is a deprecate-and-supersede
-# exercise with its own reasoning to write, not something to do silently here. A group-wide
-# assertion would have forced that decision by failing, which is why this list names rows instead.
+# The names the standards seed inserts, listed so a missing row is named. Every MTConnect row, seeded
+# or not, is also held to its data item type's id by
+# test_every_mtconnect_row_carries_its_data_item_types_id.
 SEEDED_BY_0018 = {
     "mtconnect_vocabulary": [
         "Axes/X/POSITION", "Axes/Y/POSITION", "Axes/Z/POSITION",
@@ -273,6 +263,34 @@ class TestProvenanceResolves(SeedTestCase):
         names = SEEDED_BY_0018["mtconnect_vocabulary"]
         self._assert_all_present(names)
         self._assert_resolves("mtconnect_vocabulary", names)
+
+    def test_every_mtconnect_row_carries_its_data_item_types_id(self):
+        """
+        Every MTConnect metric with an id carries its data item type's vocabulary id. The type is
+        the last name segment once a trailing `sub_type` is removed. An id built from the whole
+        name (`…/mtconnect/v2.0/Axes/C/ANGLE`) names one data item, not a concept, and fails here
+        (#457).
+        """
+        wrong = self.rows(
+            "SELECT c.name, c.semantic_id FROM public.metric_catalog c "
+            "  LEFT JOIN public.mtconnect_vocabulary v "
+            "    ON v.kind = 'DATA_ITEM_TYPE' AND v.semantic_id = c.semantic_id "
+            " WHERE c.standard = 'MTConnect' AND c.semantic_id IS NOT NULL "
+            "   AND v.name IS DISTINCT FROM regexp_replace("
+            "         CASE WHEN NULLIF(c.sub_type, '') IS NOT NULL "
+            "               AND right(c.name, length(c.sub_type) + 1) = '/' || c.sub_type "
+            "              THEN left(c.name, length(c.name) - length(c.sub_type) - 1) "
+            "              ELSE c.name END, '^.*/', '') "
+            " ORDER BY c.name"
+        )
+        self.assertEqual(wrong, [], "(name, semantic_id) not its data item type's vocabulary id")
+
+    def test_the_mtconnect_sweep_has_rows_to_check(self):
+        """The sweep above passes on an empty catalog, so its subject is counted: 0002 seeds 17."""
+        self.assertGreaterEqual(
+            self.scalar("SELECT count(*) FROM public.metric_catalog WHERE standard = 'MTConnect'"),
+            17,
+        )
 
     def test_opcua_rows_are_present_and_resolve(self):
         names = SEEDED_BY_0018["opcua_vocabulary"]

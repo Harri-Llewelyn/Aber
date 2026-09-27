@@ -520,61 +520,65 @@ class TestMirroredConstants(unittest.TestCase):
         self.assertIn("MAX_ALIASES_PER_NODE", mine)
 
 
-class TestStandardNamespaces(unittest.TestCase):
+class TestNamespaces(unittest.TestCase):
     """
-    `STANDARD_NAMESPACES` is keyed on `metric_catalog.standard`, and a key that does not match the
-    column fails SILENTLY -- `namespaces()` skips what it cannot resolve, so the endpoint answers
-    200 with a shorter list. Nothing raises, nothing logs, and the omission reads as "this
-    deployment does not use that standard".
+    GET /namespaces lists the namespaces the served types belong to, and only those (#459).
 
-    That is not hypothetical: the keys were `ISO-22400` and `OPC-UA` while the column has held
-    `ISO 22400` and `OPC UA` since 0030/0031, so two of the three vocabularies were missing from
-    GET /namespaces. Adding a vocabulary is the moment this recurs, which is why the second test
-    pins the key set against the frontend's canonical list rather than against a literal here.
+    i3X groups ObjectTypes and RelationshipTypes into namespaces, and an Object reaches one through
+    its type (`typeNamespaceUri`), so a client reads the list as the set it will meet there. It
+    used to add one URI per `metric_catalog.standard` -- MTConnect's under mtconnect.org, which
+    the semantic ids disclaim -- that no type or object carried. The space includes a device typed
+    by a schema whose metrics come from standards, the case that once looked like a reason to
+    advertise them.
     """
 
-    def test_namespaces_emit_every_standard_in_use(self):
-        result = A.namespaces({"MTConnect", "ISO 22400", "OPC UA"})
-        uris = {n["uri"] for n in result}
-        self.assertIn(A.NS_LOCAL, uris)
-        self.assertIn(A.NS_RELATIONSHIPS, uris)
-        for standard in ("MTConnect", "ISO 22400", "OPC UA"):
-            self.assertIn(
-                A.STANDARD_NAMESPACES[standard],
-                uris,
-                f"{standard!r} is in use but contributed no namespace to GET /namespaces",
-            )
+    SCHEMA = {
+        "id": "schema-1",
+        "schema_name": "Mill",
+        "schema_definition": {"properties": {"Axes/X/POSITION": {}, "OEE/OEE": {}}},
+        "semantic_id": "https://admin-shell.io/idta/example/1/0",
+    }
 
-    def test_unknown_standard_is_skipped_rather_than_invented(self):
-        # A standard with no registered URI must not fall back to the local namespace: that would
-        # assert this deployment minted the concept, which is the opposite of what provenance means.
-        result = A.namespaces({"Not A Standard"})
-        self.assertEqual(
-            [n["uri"] for n in result],
-            [A.NS_LOCAL, A.NS_RELATIONSHIPS],
+    def served(self):
+        types = i3x_service._build_types({"schemas": [self.SCHEMA]})
+        objects = dict(_representative_space())
+        typed = A.device_object({"sparkplug_id": "dev-typed", "_gateway_sparkplug_id": None}, None, "schema-1")
+        objects[typed["elementId"]] = typed
+        return types, A.relationship_types(), objects
+
+    def used(self):
+        types, relationships, objects = self.served()
+        return (
+            {t["namespaceUri"] for t in types}
+            | {r["namespaceUri"] for r in relationships}
+            | {o["metadata"]["typeNamespaceUri"] for o in objects.values()}
         )
 
-    def test_standard_namespaces_cover_every_known_standard(self):
-        import re
-
-        here = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(here, "..", "frontend", "src", "utils", "standards.js")
-        src = open(path, encoding="utf-8").read()
-        block = re.search(r"export const STANDARDS = \{(.*?)\}", src, re.S)
-        self.assertIsNotNone(block, "STANDARDS not found in standards.js")
-        # Key/value lines only. A bare `'([^']*)'` would also match the quoted word in the comment
-        # that documents the CUSTOM entry.
-        values = re.findall(r"^\s*[A-Z0-9_]+:\s*'([^']*)'", block.group(1), re.M)
-        self.assertTrue(values, "no STANDARDS values parsed from standards.js")
-        for value in values:
-            if not value:
-                continue  # CUSTOM is stored as NULL -- it is the absence of a standard.
+    def test_every_advertised_namespace_is_one_a_type_belongs_to(self):
+        used = self.used()
+        for namespace in A.namespaces():
             self.assertIn(
-                value,
-                A.STANDARD_NAMESPACES,
-                f"{value!r} is offered as a standard but has no i3X namespace, so metrics carrying "
-                f"it would be dropped from GET /namespaces",
+                namespace["uri"], used,
+                f"{namespace['uri']} is advertised but no type or object carries it",
             )
+
+    def test_every_namespace_a_type_belongs_to_is_advertised(self):
+        advertised = {n["uri"] for n in A.namespaces()}
+        self.assertLessEqual(self.used(), advertised)
+
+    def test_an_objects_type_namespace_is_its_types(self):
+        types, _, objects = self.served()
+        by_id = {t["elementId"]: t["namespaceUri"] for t in types}
+        for element_id, obj in objects.items():
+            with self.subTest(element_id=element_id):
+                self.assertEqual(
+                    obj["metadata"]["typeNamespaceUri"], by_id[obj["typeElementId"]],
+                )
+
+    def test_nothing_is_advertised_under_a_standards_bodys_authority(self):
+        # A local type under mtconnect.org or opcfoundation.org would claim that body defined it.
+        for namespace in A.namespaces():
+            self.assertTrue(namespace["uri"].startswith("https://aber.local/"), namespace["uri"])
 
 
 class ModelledMetricsContractTest(unittest.TestCase):
@@ -742,10 +746,6 @@ class BulkElementIdsCapTest(unittest.TestCase):
                 )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAddressSpaceCache(unittest.TestCase):
     """
     The short-TTL address-space cache.
@@ -776,7 +776,7 @@ class TestAddressSpaceCache(unittest.TestCase):
             # A distinguishable payload per caller, so a leak across identities shows up as the
             # WRONG CONTENT rather than only as a suspicious read count.
             return {"cells": [], "gateways": [], "devices": [], "locations": {},
-                    "schemas": [], "standards": set(), "_marker": pg.marker}
+                    "schemas": [], "_marker": pg.marker}
 
         self._real_read = i3x_service._read_address_space
         i3x_service._read_address_space = fake_read
@@ -869,3 +869,7 @@ class TestAddressSpaceCache(unittest.TestCase):
         keys = set(i3x_service._space_cache)
         self.assertIn(i3x_service._space_cache_key("Bearer a"), keys)
         self.assertNotIn(i3x_service._space_cache_key("Bearer b"), keys)
+
+
+if __name__ == "__main__":
+    unittest.main()

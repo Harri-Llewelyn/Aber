@@ -455,7 +455,8 @@ ON CONFLICT DO NOTHING;
 -- `name` is immutable (`enforce_metric_catalog_immutability()`), so DO UPDATE would be rejected
 -- by the trigger. Changing a metric is deprecate-and-supersede. `OEE/PERFORMANCE` is deprecated
 -- in favour of `OEE/EFFECTIVENESS` (ISO 22400-2's name); both carry the same semantic_id, which
--- is why that index is not unique.
+-- is why that index is not unique. An MTConnect row carries its data item type's
+-- `mtconnect_vocabulary` id, as the standards seed below does (#457).
 
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000007', 'OEE/AVAILABILITY', 10, 'ISO 22400 availability ratio -- NOT MTConnect AVAILABILITY, which means "device connected"', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://aber.local/semantics/iso22400/AVAILABILITY', 'IRI')
 ON CONFLICT (name) DO NOTHING;
@@ -465,19 +466,19 @@ INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000010'
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000008', 'OEE/PERFORMANCE', 10, 'ISO 22400 performance ratio', true, 'c0000001-0000-4000-8000-000000000010', '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://aber.local/semantics/iso22400/EFFECTIVENESS', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000001', 'Systems/TEMPERATURE', 10, 'Machine system temperature', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Systems/TEMPERATURE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000001', 'Systems/TEMPERATURE', 10, 'Machine system temperature', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/TEMPERATURE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000002', 'Axes/DISPLACEMENT', 10, 'Axis displacement amplitude (was: vibration)', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'MILLIMETER', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Axes/DISPLACEMENT', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000002', 'Axes/DISPLACEMENT', 10, 'Axis displacement amplitude (was: vibration)', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'MILLIMETER', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000003', 'Controller/EXECUTION', 12, 'Controller execution state: READY / ACTIVE / INTERRUPTED / FEED_HOLD / STOPPED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Controller/EXECUTION', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000003', 'Controller/EXECUTION', 12, 'Controller execution state: READY / ACTIVE / INTERRUPTED / FEED_HOLD / STOPPED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/EXECUTION', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000004', 'Controller/EMERGENCY_STOP', 12, 'Emergency stop circuit: ARMED (healthy) or TRIGGERED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Controller/EMERGENCY_STOP', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000004', 'Controller/EMERGENCY_STOP', 12, 'Emergency stop circuit: ARMED (healthy) or TRIGGERED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/EMERGENCY_STOP', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000005', 'Controller/FIRMWARE', 12, 'Controller firmware version', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Controller/FIRMWARE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000005', 'Controller/FIRMWARE', 12, 'Controller firmware version', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/FIRMWARE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000006', 'SERIAL_NUMBER', 12, 'Manufacturer serial number', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/SERIAL_NUMBER', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000006', 'SERIAL_NUMBER', 12, 'Manufacturer serial number', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/SERIAL_NUMBER', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000011', 'Axes/C/ANGLE', 10, 'Angular position of the C axis (MTConnect ANGLE on the Axes component)', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'DEGREE', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Axes/C/ANGLE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000011', 'Axes/C/ANGLE', 10, 'Angular position of the C axis (MTConnect ANGLE on the Axes component)', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'DEGREE', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000012', 'Machine/OperatingMode', 12, 'Machine operating mode -- Processing, Setup, Maintenance or Normal. OPC 40001 calls this browse name MachineryOperationMode; the semantic id binds this metric to that concept.', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'EVENT', NULL, NULL, 'OPC UA', 'http://opcfoundation.org/UA/Machinery/MachineryOperationMode', 'IRI')
 ON CONFLICT (name) DO NOTHING;

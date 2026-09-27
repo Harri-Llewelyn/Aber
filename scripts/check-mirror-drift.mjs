@@ -7,7 +7,7 @@
  * Usage: node scripts/check-mirror-drift.mjs
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -373,6 +373,34 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   const pyService = need(py, /^LOCAL_SERVICE_NOTE = "([^"]+)"/m, 'LOCAL_SERVICE_NOTE in directory_publish.py');
   if (tsService && pyService) {
     compare('directoryServiceNote', 'the local-service qualification', pyService[1], tsService[1]);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 8. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
+// for that data item type, and the id every MTConnect catalog row in the seed carries (#457). The
+// form's own function is run, so a change to the namespace or the kind segment on either side
+// fails here rather than as a form-created metric naming no concept.
+// -------------------------------------------------------------------------------------------------
+{
+  const { mtconnectSemanticId } = await import(pathToFileURL(join(ROOT, 'frontend/src/utils/standards.js')).href);
+  const vocabulary = [...SCHEMA.matchAll(
+    /^INSERT INTO public\.mtconnect_vocabulary VALUES \('DATA_ITEM_TYPE', '([^']+)', (?:'[^']*'|NULL), '([^']+)'\)/gm
+  )];
+  const catalog = [...SCHEMA.matchAll(
+    /^INSERT INTO public\.metric_catalog VALUES \('[^']*', '([^']+)',.*'MTConnect', '([^']*)', 'IRI'\)/gm
+  )];
+  if (vocabulary.length === 0 || catalog.length === 0) {
+    problems.push('mtconnectSemanticId: found no seeded DATA_ITEM_TYPE or MTConnect catalog row -- the seed\'s shape changed, so this check is no longer checking anything');
+  } else {
+    const strays = [
+      ...vocabulary.filter(([, type, id]) => mtconnectSemanticId(type) !== id)
+        .map(([, type, id]) => `vocabulary ${type}: seeded ${id}, form derives ${mtconnectSemanticId(type)}`),
+      ...catalog.filter(([, name, id]) => mtconnectSemanticId(name.split('/').pop()) !== id)
+        .map(([, name, id]) => `catalog ${name}: seeded ${id}, form derives ${mtconnectSemanticId(name.split('/').pop())}`),
+    ];
+    if (strays.length) problems.push(`mtconnectSemanticId: ${strays.slice(0, 5).join('; ')}`);
+    else ok.push(`mtconnectSemanticId: ${vocabulary.length} data item types and ${catalog.length} catalog rows agree`);
   }
 }
 
