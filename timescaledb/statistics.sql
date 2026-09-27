@@ -1,29 +1,7 @@
--- =============================================================================================
--- Statement statistics on the historian.
--- =============================================================================================
---
--- WHY THE HISTORIAN NEEDS THIS AND THE PLATFORM DATABASE DOES NOT. supabase/postgres preloads
--- `pg_stat_statements` already; the timescale image preloads `timescaledb` alone. So this is the
--- half that had no server-side view of how long a write actually took.
---
--- WHAT IT ANSWERS. `aber_ingestion_write_seconds` measures a telemetry write from the CLIENT and
--- was the instrument that retired horizontal ingestion scaling as an item. It cannot distinguish a
--- slow disk from lock contention from a saturated connection pool, and the single-writer ceiling
--- is argued on exactly that distinction. These are the server-side series that can.
---
--- THE LIBRARY IS LOADED BY THE STATEFULSET, NOT HERE. `shared_preload_libraries` is a postmaster
--- setting and only the server's own command line can set it: the chart appends
--- `pg_stat_statements` beside `timescaledb` under `databaseMetrics.statementStats`. This file
--- creates the SQL-level extension, which is the other half and is not implied by the first.
---
--- FAILS SOFT, DELIBERATELY. If the library is not loaded -- an operator running this file by hand
--- against a server started without it -- creating the extension succeeds and every read of the
--- view then raises. Rather than leave that to be discovered from a dashboard, this checks first
--- and says which half is missing.
---
--- Applied on every boot by the chart's maintenance hook Job, after extension.sql.
--- =============================================================================================
-
+-- pg_stat_statements on the historian, applied after extension.sql when databaseMetrics.statementStats
+-- is on. The StatefulSet preloads the library; this creates the SQL-level extension, which the first
+-- does not imply. Fails soft when the library is absent, saying which half is missing, because the
+-- extension would install and every read of the view would then raise. Reasoning: timescaledb/README.md.
 \set ON_ERROR_STOP on
 
 DO $$
@@ -43,9 +21,8 @@ BEGIN
     RAISE NOTICE 'statistics: created pg_stat_statements';
   END IF;
 
-  -- No GRANT here. The view is world-readable, and WHOSE statements a caller sees is decided by
-  -- pg_monitor rather than by a table privilege: without it a role sees only its own. metrics_reader
-  -- holds pg_monitor (roles.sql), which is what makes the exporter's view of this complete.
+  -- No GRANT: the view is world-readable, and whose statements a caller sees is decided by
+  -- pg_monitor (roles.sql), not by a table privilege.
   RAISE NOTICE 'statistics: pg_stat_statements is loaded and installed; % statement(s) tracked.',
     (SELECT count(*) FROM public.pg_stat_statements);
 END $$;
