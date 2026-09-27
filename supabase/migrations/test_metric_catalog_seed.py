@@ -1,5 +1,6 @@
 """
-Integration tests for 0018_metric_catalog_standards_seed.sql.
+The metric catalogue's standards seed: the section of 0002_seed_data.sql that files MTConnect,
+OPC UA, ASHRAE 223P and ISO 22400 metrics under their groups, read from a migrated database.
 
     python supabase/migrations/test_metric_catalog_seed.py
 
@@ -10,16 +11,15 @@ artefact handed to a customer, until something notices.
 
 So the assertions below are about PROVENANCE as much as presence: every seeded row must carry a
 semantic id that is still resolvable in the vocabulary table it came from. A vocabulary re-key or
-a renamed concept would otherwise leave the catalog quietly pointing at nothing.
+a renamed concept would otherwise leave the catalog quietly pointing at nothing. The suite also
+holds each group to one standard, every name to the metric-name format, and the immutability
+trigger to freezing name and datatype while semantic_id and permitted_values stay correctable.
 
-IDEMPOTENCY IS TESTED BY RE-RUNNING THE REAL FILE, not by inspection. Every migration is replayed
-on every boot with ON_ERROR_STOP=1 and no ledger, so "runs twice cleanly" is a hard requirement
-rather than a nicety, and the only convincing evidence is running it twice.
+Replaying the seed is not tested here: `npm run test:db -- --with-history` and
+check-migration-idempotency replay the whole chain.
 """
 import os
-import subprocess
 import unittest
-from pathlib import Path
 
 import psycopg2
 
@@ -28,8 +28,6 @@ DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
 DB_NAME = os.getenv("SUPABASE_DB_NAME", "postgres")
 DB_USER = os.getenv("SUPABASE_DB_USER", "postgres")
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("POSTGRES_PASSWORD", "postgres"))
-
-MIGRATION = Path(__file__).with_name("0018_metric_catalog_standards_seed.sql")
 
 # One top-level segment per standard. The whole point of the taxonomy is that this mapping is a
 # function -- a group belonging to two standards is the collision the naming plan exists to stop.
@@ -131,8 +129,8 @@ class TestSeededRows(SeedTestCase):
 
     def test_every_name_satisfies_the_factory_plus_format(self):
         """
-        0007's constraint is NOT VALID, so it enforces on INSERT but may not have back-scanned.
-        Checked directly rather than trusted -- and these names are permanent.
+        `metric_catalog_name_format` enforces this on write. Checked directly rather than trusted,
+        because these names are permanent.
         """
         bad = self.rows(
             "SELECT name FROM public.metric_catalog "
@@ -159,7 +157,7 @@ class TestSeededRows(SeedTestCase):
 # The names the standards seed inserts, listed so a missing row is named. Every MTConnect row, seeded
 # or not, is also held to its data item type's id by
 # test_every_mtconnect_row_carries_its_data_item_types_id.
-SEEDED_BY_0018 = {
+SEEDED = {
     "mtconnect_vocabulary": [
         "Axes/X/POSITION", "Axes/Y/POSITION", "Axes/Z/POSITION",
         "Axes/S/ROTARY_VELOCITY", "Axes/S/LOAD",
@@ -232,7 +230,7 @@ class TestWhatStaysCorrectable(SeedTestCase):
 
 class TestProvenanceResolves(SeedTestCase):
     """
-    Every semantic id 0018 wrote must still be findable in the vocabulary it was SELECTed from.
+    Every semantic id the seed wrote must still be findable in the vocabulary it was SELECTed from.
 
     This is what catches a vocabulary re-key. The catalog rows survive one -- `name` is immutable
     and nothing cascades -- while silently ceasing to correspond to anything, and the first visible
@@ -256,11 +254,11 @@ class TestProvenanceResolves(SeedTestCase):
             "SELECT name FROM public.metric_catalog WHERE name = ANY(%s)", (names,)
         )}
         self.assertEqual(
-            set(names) - found, set(), "0018 did not insert every metric it declares"
+            set(names) - found, set(), "the seed did not insert every metric listed in SEEDED"
         )
 
     def test_mtconnect_rows_are_present_and_resolve(self):
-        names = SEEDED_BY_0018["mtconnect_vocabulary"]
+        names = SEEDED["mtconnect_vocabulary"]
         self._assert_all_present(names)
         self._assert_resolves("mtconnect_vocabulary", names)
 
@@ -293,17 +291,17 @@ class TestProvenanceResolves(SeedTestCase):
         )
 
     def test_opcua_rows_are_present_and_resolve(self):
-        names = SEEDED_BY_0018["opcua_vocabulary"]
+        names = SEEDED["opcua_vocabulary"]
         self._assert_all_present(names)
         self._assert_resolves("opcua_vocabulary", names)
 
     def test_ashrae_rows_are_present_and_resolve(self):
-        names = SEEDED_BY_0018["ashrae223_vocabulary"]
+        names = SEEDED["ashrae223_vocabulary"]
         self._assert_all_present(names)
         self._assert_resolves("ashrae223_vocabulary", names)
 
     def test_iso22400_rows_are_present_and_resolve(self):
-        names = SEEDED_BY_0018["iso22400_vocabulary"]
+        names = SEEDED["iso22400_vocabulary"]
         self._assert_all_present(names)
         self._assert_resolves("iso22400_vocabulary", names)
 
@@ -339,58 +337,6 @@ class TestProvenanceResolves(SeedTestCase):
             (list(GROUP_STANDARD),),
         )
         self.assertEqual(bad, [])
-
-
-class TestIdempotency(SeedTestCase):
-    """
-    Re-runs the actual migration file with psql, exactly as supabase-db-init does on every boot.
-    """
-
-    def apply_migration(self):
-        env = {**os.environ, "PGPASSWORD": DB_PASSWORD}
-        return subprocess.run(
-            ["docker", "exec", "-e", f"PGPASSWORD={DB_PASSWORD}",
-             os.getenv("SUPABASE_DB_CONTAINER", "aber_supabase_db"),
-             "psql", "-v", "ON_ERROR_STOP=1", "-U", DB_USER, "-d", DB_NAME, "-f", "/tmp/0018.sql"],
-            capture_output=True, text=True, env=env,
-        )
-
-    def test_reapplying_adds_no_rows_and_does_not_error(self):
-        container = os.getenv("SUPABASE_DB_CONTAINER", "aber_supabase_db")
-        copy = subprocess.run(
-            ["docker", "cp", str(MIGRATION), f"{container}:/tmp/0018.sql"],
-            capture_output=True, text=True,
-        )
-        if copy.returncode != 0:
-            self.skipTest(f"cannot copy the migration into {container}: {copy.stderr.strip()}")
-
-        before = self.scalar("SELECT count(*) FROM public.metric_catalog")
-
-        first = self.apply_migration()
-        self.assertEqual(first.returncode, 0, f"first replay failed: {first.stderr}")
-
-        after_first = self.scalar("SELECT count(*) FROM public.metric_catalog")
-
-        second = self.apply_migration()
-        self.assertEqual(second.returncode, 0, f"second replay failed: {second.stderr}")
-
-        after_second = self.scalar("SELECT count(*) FROM public.metric_catalog")
-
-        self.assertEqual(after_first, before, "replaying the migration inserted rows")
-        self.assertEqual(after_second, after_first, "a second replay inserted rows")
-
-    def test_self_check_passes_on_replay(self):
-        container = os.getenv("SUPABASE_DB_CONTAINER", "aber_supabase_db")
-        copy = subprocess.run(
-            ["docker", "cp", str(MIGRATION), f"{container}:/tmp/0018.sql"],
-            capture_output=True, text=True,
-        )
-        if copy.returncode != 0:
-            self.skipTest(f"cannot copy the migration into {container}: {copy.stderr.strip()}")
-
-        result = self.apply_migration()
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("0018 self-check passed", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
