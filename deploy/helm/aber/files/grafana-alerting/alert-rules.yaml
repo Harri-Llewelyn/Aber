@@ -1,51 +1,23 @@
-# Alert rules, file-provisioned: the platform's own. Every rule here evaluates the stack, which
-# exists whether or not anything is publishing. A rule about a machine goes in a group of its own
-# and needs a metric that exists in `metric_catalog`, which check-docs-drift asserts.
-#
-# Rules provision into the same folder as the platform dashboards. Provisioning is additive: an
-# existing Grafana keeps a rule until it is named in a `deleteRules:` block.
-#
-# Two facts about file-provisioned rules:
-#   1. They are read-only in the UI ("Provisioned" badge). Edit this file and restart.
-#   2. Deleting a rule here does not delete it from Grafana; retiring one means adding its uid to
-#      a delete block. The uids below are stable.
-#
-# Every rule is multi-dimensional: one alert instance per asset, with the asset in the labels.
-# The `timescaledb` datasource connects as `grafana_reader`, which may read the rollups, raw
-# `telemetry`, `telemetry_latest` and `assets`. `asset_config` lives in Supabase and postgres_fdw
-# runs Supabase -> TimescaleDB only, so a per-device limit travels as a published metric.
+# The platform's own alert rules, provisioned into the "Aber - Platform Infrastructure" folder.
+# Each rule states what it evaluates and nothing else; the reasoning behind every threshold, `for`,
+# noDataState and query shape is in grafana/README.md, which is not shipped in the chart.
+# Provisioned rules are read-only in the UI, and a retired rule is named in a `deleteRules:` block
+# rather than removed, so the uids are stable.
 apiVersion: 1
 
 groups:
-  # ===============================================================================================
-  # PLATFORM CONDITIONS: the stack's own health, not the machines'.
-  #
-  # These read one view, `public.platform_health`, through the Supabase datasource. `grafana_reader`
-  # may SELECT that view and `storage_footprint` and nothing else, so a browser-SSO-fronted service
-  # never holds the plant's inventory. `entity_type` (`gateway` or `platform`; the webhook defaults
-  # to `device`) is what lets the dashboard tell an asset alert from a fleet one.
-  # ===============================================================================================
+  # Platform Conditions: rows of public.platform_health and gateway_health, read as grafana_reader
+  # through the Supabase datasource. NoData is OK throughout: the views emit a row only for a condition.
   - orgId: 1
     name: Platform Conditions
     folder: Aber - Platform Infrastructure
-    # One minute: none of these conditions moves faster (the staleness threshold is 90s, an enrolment
-    # is measured in hours, a quarantine queue changes when a person approves something).
     interval: 1m
     rules:
-      # -----------------------------------------------------------------------------------------
-      # 1. GATEWAY STALE: an appliance that has stopped reporting.
-      # The view owns the definition of stale (`gateway_status.is_stale`, the 90s threshold that
-      # check-mirror-drift.mjs holds in step with the frontend); the rule only decides how long to
-      # tolerate it. `for: 5m` on top, so a couple of missed heartbeats across a broker reconnect do
-      # not fire.
-      # -----------------------------------------------------------------------------------------
+      # Gateway Stale: a gateway the view already calls stale (90s), tolerated for 5m.
       - uid: aber-gateway-stale
         title: Gateway Stale
         condition: C
         for: 5m
-        # NoData IS OK HERE, and that is a real decision rather than a default. The query returns NO
-        # ROWS when every gateway is healthy -- there is nothing to report -- so treating an empty
-        # frame as anything but OK would alarm permanently on a well-behaved stack.
         noDataState: OK
         execErrState: Error
         labels:
@@ -69,9 +41,7 @@ groups:
               format: time_series
               rawQuery: true
               editorMode: code
-              # `collected_at AS "time"` because Grafana's time_series format requires a time
-              # column, and this view is a point-in-time answer rather than a series. The reduce
-              # below takes the single value regardless.
+              # collected_at AS "time": the time_series format needs a time column; the view is point-in-time.
               rawSql: |
                 SELECT collected_at   AS "time",
                        subject        AS gateway,
@@ -95,9 +65,6 @@ groups:
               refId: C
               type: threshold
               expression: B
-              # ANY ROW AT ALL IS THE ALERT. The view only emits a gateway that is already stale, so
-              # the threshold is a formality -- `> 0` on a quiet-seconds count that cannot be zero.
-              # Expressed rather than omitted because a Grafana rule needs a condition node.
               conditions:
                 - evaluator:
                     type: gt
@@ -106,11 +73,7 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -----------------------------------------------------------------------------------------
-      # 2. ENROLMENT STUCK: a gateway that redeemed its token, landed in AWAITING_BIRTH, and never
-      # published. `for: 0s` because the view already carries the delay (one hour of `enrolled_at`
-      # age).
-      # -----------------------------------------------------------------------------------------
+      # Enrolment Stuck: AWAITING_BIRTH for over an hour. The view carries the delay, so `for: 0s`.
       - uid: aber-enrolment-stuck
         title: Enrolment Stuck
         condition: C
@@ -162,8 +125,6 @@ groups:
               refId: C
               type: threshold
               expression: B
-              # One hour. An enrolment that completes normally does so in seconds; an hour is long
-              # enough that nobody is still watching the appliance boot.
               conditions:
                 - evaluator:
                     type: gt
@@ -172,11 +133,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -----------------------------------------------------------------------------------------
-      # 3. QUARANTINE QUEUE DEPTH: devices waiting on a human decision. The one rule with no subject,
-      # hence `entity_type: platform`. The view emits this row at zero, so "the queue is empty" and
-      # "the datasource is down" are distinguishable. Five is a demonstrator threshold.
-      # -----------------------------------------------------------------------------------------
+      # Quarantine Queue Depth: more than 5 devices awaiting a decision for 5m. Emitted at zero, so an
+      # empty frame is the datasource, not an empty queue.
       - uid: aber-quarantine-depth
         title: Quarantine Queue Depth
         condition: C
@@ -233,29 +191,12 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -----------------------------------------------------------------------------------------
-      # 4. GATEWAY CA EXPIRING: the failure that takes the whole fleet at once.
-      #
-      # The broker's internal CA is copied by hand into every appliance's trust store, and re-minting
-      # it succeeds silently and drops every gateway together (docs/incidents.md). The appliance
-      # reports the date it actually holds, which is what each client will accept;
-      # `gateway_health.cert_expires_in_days` derives the day count once so this rule and the
-      # dashboard cannot disagree.
-      #
-      # `for: 0s`: the threshold is the delay. The threshold is in the rule, not the query, so the
-      # thirty days is visible where an operator opens it and the rule is one instance per gateway. A
-      # negative value fires the same rule: an already-expired CA is this condition found late.
-      #
-      # Read from the database, not Prometheus: the metrics endpoint is unauthenticated and
-      # deliberately does not export the certificate date (ingestion/metrics.py).
-      # -----------------------------------------------------------------------------------------
+      # Gateway CA Expiring: the CA each appliance reports holding, under 30 days (negative: expired).
+      # The threshold is the delay. NoData is a fleet with no appliances.
       - uid: aber-gateway-ca-expiring
         title: Gateway CA Expiring
         condition: C
         for: 0s
-        # NoData IS OK. On a stack with no Remote gateways -- the demonstrator, and every CI run --
-        # no appliance reports a certificate date and the query returns nothing. That is a fleet
-        # with no appliances, not a fleet in trouble.
         noDataState: OK
         execErrState: Error
         labels:
@@ -281,9 +222,7 @@ groups:
               format: time_series
               rawQuery: true
               editorMode: code
-              # `collected_at AS "time"` because the time_series format requires a time column.
-              # `IS NOT NULL` is load-bearing: a host-run gateway, or an appliance on an older bundle, reports
-              # no certificate date, and a NULL per gateway would become an alert instance.
+              # IS NOT NULL is load-bearing: a gateway that reports no date would otherwise be an instance.
               rawSql: |
                 SELECT collected_at          AS "time",
                        gateway_name          AS gateway,
@@ -307,9 +246,6 @@ groups:
               refId: C
               type: threshold
               expression: B
-              # THIRTY DAYS. Long enough to schedule a fleet-wide trust-store update through
-              # whatever change process a plant has, which is the constraint that sets it -- the
-              # work is a visit to every appliance, not a command.
               conditions:
                 - evaluator:
                     type: lt
@@ -318,27 +254,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -----------------------------------------------------------------------------------------
-      # 5. ARCHIVE BACKLOG: cold telemetry that should be on the remote endpoint and is not.
-      #
-      # Since 0132 the archive is somewhere else, so exporting is a network operation with an
-      # outage window measured in days. What follows an outage is one of two things: a retention
-      # policy deleting chunks the archiver never reached, or the historian's volume filling. The
-      # chart defaults retention to `never` once a destination is configured, which makes the
-      # second the one a site gets -- recoverable, and losing nothing, PROVIDED somebody is told.
-      # This is the telling.
-      #
-      # The value is DAYS PAST THE THRESHOLD, from the newest verified `range_end`. Up to one chunk
-      # interval of backlog is normal: chunks are at most seven days and one is not eligible until
-      # its whole span is past the threshold, so a healthy site sits between zero and seven days
-      # overdue. FOURTEEN is two of those -- comfortably beyond normal, and still two weeks before
-      # anyone is short of disk. A threshold of "any backlog" would fire on every install, every
-      # week, correctly, and be switched off.
-      #
-      # `for: 1h` because the exporter runs nightly: this number moves once a day, and a shorter
-      # window would only re-report the same reading. NoData IS OK -- the view emits this row only
-      # while `archive.enabled` is on, so its absence means a stack that does not archive.
-      # -----------------------------------------------------------------------------------------
+      # Archive Backlog: days past the tiering threshold with no verified export, over 14 for 1h. The
+      # row exists only while archiving is on.
       - uid: aber-archive-backlog
         title: Archive Backlog
         condition: C
@@ -396,43 +313,19 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-  # ===============================================================================================
-  # INGESTION PIPELINE: whether telemetry is being recorded at all.
-  #
-  # Neither group above can see the pipe between the historian and the stack: under
-  # report-by-exception a daemon that has stopped writing looks like a quiet shopfloor. These read
-  # the daemon's counters from Prometheus.
-  #
-  # On Kubernetes the chart ships ServiceMonitors and defers to the cluster's Prometheus, so these
-  # rules resolve only where a datasource with uid `prometheus` exists; elsewhere they report
-  # `DatasourceError`, which the policy tree routes like any other error.
-  # ===============================================================================================
+  # Ingestion Pipeline: the daemon's Prometheus counters, which see the pipe the views cannot. Resolves
+  # only where a datasource with uid `prometheus` exists; elsewhere DatasourceError, routed by the policy.
   - orgId: 1
     name: Ingestion Pipeline
     folder: Aber - Platform Infrastructure
-    # 1m. These are rates over 5-15 minute windows; evaluating faster re-reads a number that cannot
-    # have moved, and the machine group's 10s exists only because someone is standing in front of a
-    # fault-injection button.
     interval: 1m
     rules:
-      # -------------------------------------------------------------------------------------------
-      # 1. CONSUMING NOTHING: a daemon that is running and has stopped recording. The liveness
-      # heartbeat cannot express this: the health file is written while the MQTT connection is up.
-      #
-      # `for: 10m` against a 5m rate window: long enough to ride out a broker restart, short enough
-      # that a shift does not pass unnoticed.
-      #
-      # Gated on there being something to consume: the subject is `expected_publishers`, devices that
-      # are registered, not archived, not quarantined, and bound to a gateway that has reported. Each
-      # clause is a reason a device legitimately publishes nothing. Zero devices disables the rule;
-      # the first device someone registers re-arms it.
-      # -------------------------------------------------------------------------------------------
+      # Ingestion Consuming Nothing: no messages for 10m while expected_publishers > 0. The one rule
+      # where NoData is Alerting: an empty frame is a failed scrape.
       - uid: aber-ingestion-silent
         title: Ingestion Consuming Nothing
         condition: F
         for: 10m
-        # NoData is not OK here, unlike the platform rules: an empty frame means the scrape failed,
-        # which is worse than the condition being alerted on.
         noDataState: Alerting
         execErrState: Error
         labels:
@@ -454,12 +347,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              # sum() across msg_type, because a daemon receiving only NDATA is still consuming. instant:true
-              # so the reduce has a single value.
-              # `or vector(0)` because the counter does not exist until the first message: Prometheus returns
-              # an empty result, Grafana reads NoData, and `noDataState: Alerting` would fire before the gate
-              # in F ran. A daemon that has gone away also yields vector(0), and with devices registered the
-              # rule still fires.
+              # sum across msg_type; `or vector(0)` because the counter does not exist before the first message.
               expr: sum(rate(aber_ingestion_messages_total[5m])) or vector(0)
               instant: true
           - refId: B
@@ -484,8 +372,7 @@ groups:
                 uid: supabase
               format: time_series
               editorMode: code
-              # Through `platform_health`, not `public.devices`: `grafana_reader` holds SELECT on the view and
-              # nothing else, and querying devices fails as `permission denied` with the rule in error health.
+              # platform_health, not public.devices: grafana_reader holds SELECT on the view only.
               rawSql: |
                 SELECT collected_at AS "time",
                        value        AS expected_publishers
@@ -506,25 +393,17 @@ groups:
             model:
               refId: F
               type: math
-              # `$B < 0.001` is the absence of traffic; `$E > 0` is the assertion that somebody should have
-              # been sending some.
               expression: ($B < 0.001) && ($E > 0)
               datasource:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 2. TELEMETRY BEING DROPPED. The correct number is zero: every drop is a message the daemon
-      # refused, and under report-by-exception nothing restates it. `for: 5m` absorbs a restart or a
-      # momentary directory outage. Multi-dimensional on `reason`.
-      # -------------------------------------------------------------------------------------------
+      # Telemetry Being Dropped: any refused message, by reason, for 5m. The counter exists only once
+      # something is dropped, so NoData is OK.
       - uid: aber-ingestion-drops
         title: Telemetry Being Dropped
         condition: C
         for: 5m
-        # OK, unlike the rule above. No dropped series exists until something is dropped -- the
-        # counter is created on first use -- so an empty frame here genuinely means nothing has been
-        # refused. The silent-daemon rule is what covers the scrape being broken.
         noDataState: OK
         execErrState: Error
         labels:
@@ -571,12 +450,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 3. BINDING REJECTIONS RISING: something published telemetry for a device it does not own.
-      # `verify_gateway_binding()` refuses it, so nothing is corrupted and the only trace is a counter.
-      # A misconfigured gateway republishing another's devices looks identical to forged telemetry, so
-      # this is separated from the drop rule at a higher severity.
-      # -------------------------------------------------------------------------------------------
+      # Gateway Binding Rejections Rising: telemetry for devices the sender does not own, for 15m.
+      # Critical: a misconfigured gateway and forged telemetry look the same here.
       - uid: aber-ingestion-binding-rejections
         title: Gateway Binding Rejections Rising
         condition: C
@@ -627,14 +502,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 3b. BIRTH CERTIFICATES BEING DROPPED, at critical. A dropped DDATA costs one sample; a
-      # dropped DBIRTH costs a device, because the birth carries the alias table, and an NBIRTH
-      # resets it for every device behind the node. Both reasons (`sum by (reason)`), since the
-      # remedies differ. `for: 5m`: the trigger is a directory that is briefly unreachable, and the
-      # daemon does not retry these, so recovery waits on the next rebirth timer or an operator's
-      # request.
-      # -------------------------------------------------------------------------------------------
+      # Ingestion Dropping Birth Certificates: a DBIRTH or NBIRTH refused because the directory was
+      # unreachable, for 5m. A dropped birth costs the alias table, not one sample.
       - uid: aber-ingestion-birth-drops
         title: Ingestion Dropping Birth Certificates
         condition: C
@@ -688,19 +557,12 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 3c. THE AUDIT TABLE'S PARTITIONS FALLING BEHIND. `digital_thread` is range-partitioned by
-      # month and a pg_cron job keeps three months ahead; a cron job that stops is silent. A default
-      # partition absorbs the rows so asset writes never fail, which is why this is a warning: the
-      # condition is `default_rows > 0`, because a row filed outside its month is never detached with
-      # it. `for: 30m`, since the job runs daily at 03:20 and the minutes after a boundary are noise.
-      # -------------------------------------------------------------------------------------------
+      # Digital Thread Partitions Falling Behind: rows in the DEFAULT partition, for 30m. The view
+      # always returns one row, so an empty frame is the datasource.
       - uid: aber-digital-thread-partitions
         title: Digital Thread Partitions Falling Behind
         condition: C
         for: 30m
-        # OK rather than NoData: the view always returns exactly one row, so an empty frame here
-        # means the datasource is broken, which the Grafana datasource health check owns.
         noDataState: OK
         execErrState: Error
         labels:
@@ -754,21 +616,13 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 4. HISTORIAN UNREACHABLE, WITH TELEMETRY ARRIVING. Both halves: `$B < 1` is the daemon holding
-      # no connection, `$E > 0` is somebody publishing (`or vector(0)` for the same reason rule 1
-      # needs it). On an idle stack the gauge alone is not data loss; that case is 4b. `for: 2m`
-      # because the daemon retries internally, so two minutes means the retries are not winning.
-      # `db_connected` cannot see a connection dropped by the server; the drop rule catches that
-      # consequence.
-      # -------------------------------------------------------------------------------------------
+      # Historian Unreachable From Ingestion: no connection while messages arrive, for 2m. NoData is
+      # OK: a missing scrape is the silent-daemon rule's job, and alerting on it was this rule's
+      # loudest false positive.
       - uid: aber-ingestion-db-down
         title: Historian Unreachable From Ingestion
         condition: F
         for: 2m
-        # OK, NOT Alerting. NoData here means the ingestion scrape has gone away, which is the
-        # silent-daemon rule's job -- and firing a data-loss alert on a missing scrape is how this
-        # rule produced its loudest false positives.
         noDataState: OK
         execErrState: Error
         labels:
@@ -811,8 +665,6 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              # sum() ACROSS msg_type, as rule 1 does: a daemon receiving only NDATA is still being
-              # published to, and this half of the condition asks only whether anything is.
               expr: sum(rate(aber_ingestion_messages_total[5m])) or vector(0)
               instant: true
           - refId: E
@@ -835,19 +687,12 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 4b. HISTORIAN UNREACHABLE, AND NOTHING PUBLISHING. Not critical: nothing is being lost, but
-      # the moment a gateway publishes it becomes rule 4. Read from the recovery loop's own counter
-      # (`aber_ingestion_db_heal_failures_total`), which rises only when the daemon tried to reach the
-      # historian off the message path and could not; a stack that has not written yet cannot produce
-      # it. `for: 10m` against a 30s loop: twenty consecutive failures.
-      # -------------------------------------------------------------------------------------------
+      # Historian Unreachable, No Traffic: the recovery loop failing for 10m (twenty 30s attempts) with
+      # nothing publishing. Becomes the rule above the moment a gateway publishes.
       - uid: aber-ingestion-db-unreachable-idle
         title: Historian Unreachable From Ingestion (No Traffic)
         condition: C
         for: 10m
-        # OK: the counter does not exist until the recovery loop first fails, so an empty frame
-        # means it never has.
         noDataState: OK
         execErrState: Error
         labels:
@@ -894,12 +739,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 5. MESSAGE LOSS: a Sparkplug sequence gap. Under report-by-exception this is the only loss
-      # signal there is. Per edge node, so one flapping gateway is distinguishable from plant-wide
-      # loss. Messages published while the daemon is down are not replayed, so a deploy produces a
-      # real gap at every node; `for: 15m` rides that out.
-      # -------------------------------------------------------------------------------------------
+      # Sparkplug Message Loss: seq gaps per edge node, for 15m, which rides out the gap every deploy
+      # produces.
       - uid: aber-ingestion-sequence-gaps
         title: Sparkplug Message Loss
         condition: C
@@ -950,20 +791,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 6. APPLIANCE CLOCK SKEW: the fault that passes every other check. A gateway with a wrong
-      # clock is ONLINE, drops nothing, skips no sequence numbers and verifies its certificate, and
-      # files every reading at a time that never happened. ingestion.py subtracts the heartbeat's own
-      # timestamp from its arrival time; nothing changes on the appliance.
-      #
-      # The staleness gate is the second half of the expression and is not optional: a gauge holds
-      # its last value forever, so a powered-down appliance would alert on its last reading. 300s is
-      # past the 90s the dashboard calls STALE, so an OFFLINE gateway is reported by rule 1 instead.
-      #
-      # 60 seconds matches GATEWAY_CLOCK_OFFSET_WARN_SECONDS in ingestion.py and is well inside the
-      # daemon's sanity window (-24h/+5m), so this fires while the data is still being accepted.
-      # `for: 15m` because a broker or network stall reads as a negative offset for its duration.
-      # -------------------------------------------------------------------------------------------
+      # Gateway Clock Skew: |offset| over 60s for 15m, gated on a measurement under 300s old so a
+      # powered-down appliance does not alert on its last value.
       - uid: aber-gateway-clock-skew
         title: Gateway Clock Skew
         condition: C
@@ -1019,14 +848,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 7. HISTORIAN WRITER SATURATING. rate(aber_ingestion_write_seconds_sum) is the fraction of the
-      # writer thread's time spent inside transactions -- its occupancy. Half is the warning: the
-      # daemon keeps up, and a burst (a gateway flushing an outage's backlog) or a slower historian
-      # is what takes it the rest of the way. Queue depth is deliberately not the trigger: it grows
-      # only once the writer is already behind, and a full queue's drops reach rule 2 anyway.
-      # `for: 10m` rides out a backlog flush, which is meant to run hot.
-      # -------------------------------------------------------------------------------------------
+      # Historian Writer Saturating: writer occupancy over 0.5 for 10m. Queue depth is deliberately not
+      # the trigger; it grows only once the writer is already behind.
       - uid: aber-ingestion-writer-saturating
         title: Historian Writer Saturating
         condition: C
@@ -1078,18 +901,12 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 8. THE BROKER IS SHEDDING. Telemetry is QoS 0, so Mosquitto discards messages for a
-      # subscriber that cannot keep up, and a discarded message never reaches the daemon: rule 2
-      # reads zero throughout. broker_publish_messages_dropped (the Mosquitto exporter) is the only
-      # direct record. The counter is broker-wide, not per subscriber; rule 5 rising beside it
-      # places the loss on the historian path. Zero is the steady state, so any increase fires.
-      # -------------------------------------------------------------------------------------------
+      # Broker Shedding Messages: any QoS 0 discard in 5m, broker-wide. No series while the exporter
+      # (mosquitto.metrics.enabled) is off.
       - uid: aber-broker-shedding
         title: Broker Shedding Messages
         condition: C
         for: 1m
-        # No series exists while the exporter is disabled (mosquitto.metrics.enabled).
         noDataState: OK
         execErrState: Error
         labels:
@@ -1138,36 +955,19 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-  # ===============================================================================================
-  # THE LOG PIPELINE. Loki and Alloy hold the evidence for every other fault here, so their own
-  # failure destroys the record of itself. Four rules for four distinct failures:
-  #
-  #   Collector Down      the container is gone.
-  #   Collection Stalled  the container is up and shipping nothing; looks like a quiet plant.
-  #   Store Refusing      a ceiling in loki/loki.yaml is biting; lines are being lost now.
-  #   Cannot Decode       the collector reads a container and fails to parse it; every other
-  #                       signal is green because the rest of the pipeline is.
-  #
-  # The first two are a pair: `up == 0` cannot see a broken collector that still answers its
-  # scrape, and a rate on shipped entries cannot tell a dead collector from a cluster that never
-  # had one.
-  # ===============================================================================================
+  # Log Pipeline: Alloy and Loki, whose own failure destroys the record of itself. NoData is OK: a
+  # cluster running its own log stack (observability.enabled=false) has no series here.
   - orgId: 1
     name: Log Pipeline
     folder: Aber - Platform Infrastructure
     interval: 1m
     rules:
 
-      # -------------------------------------------------------------------------------------------
-      # 1. THE COLLECTOR IS GONE. `up`, because Prometheus can state this directly. Warning, not
-      # critical: no telemetry is lost, only the record, and only for as long as this lasts.
-      # -------------------------------------------------------------------------------------------
+      # Log Collector Down: up{job="alloy"} == 0 for 5m. Warning: only the record is lost.
       - uid: aber-log-collector-down
         title: Log Collector Down
         condition: C
         for: 5m
-        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
-        # series here, and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1215,17 +1015,12 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 2. THE COLLECTOR IS UP AND COLLECTING NOTHING. Fifteen minutes, because this stack logs about
-      # itself (the ingestion daemon writes a STATS line every 60s), so a silent quarter-hour is a
-      # fault. A rate rather than an absence: `lt 0.001` distinguishes nothing from very little.
-      # -------------------------------------------------------------------------------------------
+      # Log Collection Stalled: shipped-entry rate under 0.001/s for 15m. This stack logs about itself
+      # every 60s, so a silent quarter-hour is a fault.
       - uid: aber-log-collection-stalled
         title: Log Collection Stalled
         condition: C
         for: 15m
-        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
-        # series here, and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1273,18 +1068,12 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 3. A CEILING IS BITING. loki.yaml bounds the store by ingest rate because Loki has no byte
-      # ceiling, and log volume scales with fault rate. The `reason` filter excludes `ingester_error`
-      # on purpose: that counts the "entry too far behind" refusals a collector produces when it first
-      # attaches to long-running containers, which is self-limiting (see loki/loki.yaml).
-      # -------------------------------------------------------------------------------------------
+      # Log Store Refusing Lines: rate_limited or stream_limited drops for 10m. ingester_error is
+      # excluded on purpose (loki/loki.yaml).
       - uid: aber-log-store-refusing
         title: Log Store Refusing Lines
         condition: C
         for: 10m
-        # OK, not Alerting: a cluster running its own log stack (observability.enabled=false) has no
-        # series here, and NoData is the correct state.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1333,31 +1122,19 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-
-  # ===============================================================================================
-  # THE HOST. The databases, the metrics store and the log store share one volume, and a full
-  # disk stops all of them at once: Postgres refuses writes, Prometheus refuses samples, Loki
-  # refuses lines. `node_filesystem_*` comes from the node_exporter collectors, which Alloy's
-  # prometheus.exporter.unix runs.
-  # ===============================================================================================
+  # Host: the node's root filesystem, from the node_exporter collectors Alloy runs. NoData is OK: no
+  # host metrics, no series.
   - orgId: 1
     name: Host
     folder: Aber - Platform Infrastructure
     interval: 1m
     rules:
 
-      # -------------------------------------------------------------------------------------------
-      # Free space on the root filesystem, as a fraction, per host. 15% for 15 minutes: Postgres
-      # checkpoints and Loki compaction need headroom, and a store that has run out reports it as
-      # a write error somewhere else. `mountpoint="/"` is where every data directory here lives;
-      # a deployment that mounts data elsewhere edits this selector.
-      # -------------------------------------------------------------------------------------------
+      # Host Disk Filling: root filesystem under 15% free for 15m. Every store here writes to it.
       - uid: aber-host-disk-filling
         title: Host Disk Filling
         condition: C
         for: 15m
-        # OK, not Alerting: a deployment without host metrics (observability.alloy.hostMetrics
-        # off, or an external Prometheus that does not scrape nodes) has no series here.
         noDataState: OK
         execErrState: Error
         labels:
@@ -1409,25 +1186,15 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-
-  # ===============================================================================================
-  # THE CLUSTER. What the kubelet and cAdvisor report about the node and the pods on it, scraped
-  # by Alloy (observability.alloy.kubeletMetrics). Every rule here is per node, per container or
-  # per claim, and reads Prometheus. noDataState is OK throughout: a deployment that scrapes no
-  # kubelet has no series here and that is not a condition.
-  # ===============================================================================================
+  # Cluster: kubelet and cAdvisor, per node, container or claim. NoData is OK throughout: a deployment
+  # that scrapes no kubelet has no series here.
   - orgId: 1
     name: Cluster
     folder: Aber - Platform Infrastructure
     interval: 1m
     rules:
 
-      # -------------------------------------------------------------------------------------------
-      # Working set against the container's memory limit. Past 100% the kernel kills the process
-      # and the kubelet restarts the container: an OOMKilled restart, with the daemon's queue and
-      # the broker's session gone with it. Ten minutes at 90%: a checkpoint or a compaction peaks
-      # and falls back; a leak does not.
-      # -------------------------------------------------------------------------------------------
+      # Container Near Memory Limit: working set over 90% of the limit for 10m.
       - uid: aber-cluster-container-memory
         title: Container Near Memory Limit
         condition: C
@@ -1485,11 +1252,7 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # Starts of one container in an hour, counted as changes of its start time (the cgroup and
-      # runtime ids are dropped at collection, so a restart is a new value on one series). A
-      # rollout is one; a crash loop is many, with the kubelet's back-off spacing them out.
-      # -------------------------------------------------------------------------------------------
+      # Container Restarting: more than 2 starts in an hour, as changes of container_start_time_seconds.
       - uid: aber-cluster-container-restarting
         title: Container Restarting
         condition: C
@@ -1544,12 +1307,7 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # Used against capacity per PersistentVolumeClaim, as the kubelet measures the mounted
-      # filesystem. On local-path every claim reports the node disk as its capacity and this
-      # tracks Host Disk Filling; on a provisioner that sizes volumes it is the per-claim figure,
-      # and a full claim stops one store while the node still has room.
-      # -------------------------------------------------------------------------------------------
+      # Volume Filling: a claim over 85% full for 15m, as the kubelet measures the mounted filesystem.
       - uid: aber-cluster-volume-filling
         title: Volume Filling
         condition: C
@@ -1605,11 +1363,7 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # MemAvailable against MemTotal per node. Below the kubelet's eviction threshold it evicts
-      # pods by priority, and everything here has the same priority; below the kernel's it OOM
-      # kills. Ten minutes under 10%: page cache is reclaimed first and that alone dips it.
-      # -------------------------------------------------------------------------------------------
+      # Node Memory Pressure: MemAvailable under 10% of MemTotal for 10m.
       - uid: aber-cluster-node-memory
         title: Node Memory Pressure
         condition: C
@@ -1664,11 +1418,7 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # Non-idle share of the node's cores, fifteen minutes above 90%. Nothing fails at full
-      # CPU; everything slows, and the first thing to slow is the ingestion writer, whose own
-      # rule fires next. This one says why.
-      # -------------------------------------------------------------------------------------------
+      # Node CPU Saturated: non-idle share over 90% for 15m. Nothing fails; the ingestion writer slows first.
       - uid: aber-cluster-node-cpu
         title: Node CPU Saturated
         condition: C
@@ -1721,39 +1471,16 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-  # ===============================================================================================
-  # DATABASES: the two PostgreSQL servers, from the postgres_exporter sidecar in each database pod.
-  #
-  # EVERY RULE HERE IS `noDataState: OK`, AND THAT IS A DELIBERATE CHOICE WITH A KNOWN COST.
-  # `databaseMetrics.enabled` can be turned off, and this file is provisioned whatever it is set to
-  # -- a static file, not a template. With the exporters gone every series below is absent, and
-  # `OK` is what keeps six rules from alerting forever about a measurement the operator declined.
-  # The cost is recorded on the "not observed" rule, which is the one it weakens.
-  #
-  # The `job` label is the pod's component, as the chart's Alloy writes it: `supabase-db` and
-  # `timescaledb`. Each rule is multi-dimensional on it, so one alert instance per database.
-  # ===============================================================================================
+  # Databases: the postgres_exporter sidecar in each database pod, one instance per `job`. NoData is OK
+  # throughout because databaseMetrics.enabled may be off; the README records what that blinds.
   - orgId: 1
     name: Databases
     folder: Aber - Platform Infrastructure
-    # 1m, like the other Prometheus groups. Nothing here moves faster: the slowest is transaction-ID
-    # age, which takes days, and the fastest is a connection count already smoothed by `for: 5m`.
     interval: 1m
     rules:
 
-      # -------------------------------------------------------------------------------------------
-      # 1. CONNECTIONS NEAR THE LIMIT. Past `max_connections` PostgreSQL refuses new connections
-      # outright, and every client sees it at once: PostgREST's pool, the ingestion daemon's writer,
-      # the edge functions. There is no degradation before it, which is why the alert is at 80%
-      # rather than at the wall.
-      #
-      # THE DENOMINATOR IS A CUSTOM QUERY, not the exporter's `settings` collector -- that one is
-      # off because it emits a series per GUC. `aber_postgres_max_connections` is the single number
-      # that collector was wanted for.
-      #
-      # `for: 5m` because a connection count is spiky by nature: a rollout opens a pool, a backup
-      # opens its own. Five minutes at 80% is a pool that is not going to drain on its own.
-      # -------------------------------------------------------------------------------------------
+      # Database Connections Near Limit: over 80% of max_connections for 5m. The denominator is
+      # aber_postgres_max_connections, a custom query; the exporter's settings collector is off.
       - uid: aber-db-connections
         title: Database Connections Near Limit
         condition: C
@@ -1810,16 +1537,7 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 2. DEADLOCKS. The correct number is zero. A deadlock is two transactions taking the same
-      # locks in different orders; PostgreSQL resolves it by killing one, so the DATABASE considers
-      # the matter closed and only the application sees an error. Nothing restates it afterwards.
-      #
-      # `for: 0s` BECAUSE THE WINDOW IS THE DELAY. `increase(...[10m])` already requires the
-      # deadlock to have happened within ten minutes; a `for` on top would mean the condition has to
-      # persist, and a single deadlock does not persist -- it happens once and the rule would never
-      # fire. The same reasoning as the enrolment and CA-expiry rules above.
-      # -------------------------------------------------------------------------------------------
+      # Database Deadlocks: any deadlock in 10m. The window is the delay, so `for: 0s`.
       - uid: aber-db-deadlocks
         title: Database Deadlocks
         condition: C
@@ -1873,24 +1591,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 3. TRANSACTION ID AGE. At 2^31 (~2.147e9) PostgreSQL stops accepting writes CLUSTER-WIDE and
-      # will only come back after a single-user-mode vacuum. It is the one condition here that ends
-      # in downtime measured in hours, and it approaches slowly enough to be entirely preventable --
-      # which is why an alert exists at all.
-      #
-      # THE METRIC IS NOT SECONDS. `pg_database_wraparound_age_datfrozenxid_seconds` is
-      # `age(datfrozenxid)`, a TRANSACTION COUNT; the suffix is an upstream misnomer. Verified
-      # against the server: the metric read 222470 while `age(datfrozenxid)` was 222470 and the
-      # postmaster had been up 477 seconds. DO NOT "correct" the threshold below into a duration.
-      #
-      # 1e9 is half the wall and five times `autovacuum_freeze_max_age` (200M by default), so
-      # reaching it means autovacuum has not merely fallen behind but has been prevented -- almost
-      # always by a long-lived transaction or an abandoned replication slot.
-      #
-      # `for: 15m` is a scrape-blip guard and nothing more. This number moves in one direction, over
-      # days; waiting longer would only delay a warning that is already deliberately early.
-      # -------------------------------------------------------------------------------------------
+      # Transaction ID Wraparound Approaching: age(datfrozenxid) over 1e9. A TRANSACTION count, whatever
+      # the metric's _seconds suffix says; do not turn the threshold into a duration.
       - uid: aber-db-wraparound
         title: Transaction ID Wraparound Approaching
         condition: C
@@ -1944,34 +1646,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 4. A HISTORIAN POLICY JOB IS FAILING. This is the "is the telemetry lifecycle keeping up?"
-      # question #150 was filed about, and it is the one failure here with NO OTHER SYMPTOM: a
-      # retention job that stops running leaves the volume growing, a compression job that stops
-      # leaves it growing faster, and a continuous-aggregate refresh that stops leaves the rollups
-      # silently behind the raw data while every dashboard built on them keeps drawing.
-      #
-      # ON THE FAILURE COUNT RISING, not on the last run's status. `last_run_succeeded` is 0 both
-      # for a job that failed and for one that has never run -- `policy_telemetry` is in the second
-      # state on every fresh stack -- so alerting on it would fire on every install. An increase in
-      # `failures_total` cannot be that: it requires a run that happened and went wrong.
-      #
-      # `for: 0s`, as with deadlocks: the one-hour window is the tolerance. Labelled with the job id
-      # AND the procedure, because the id is what `timescaledb_information.jobs` is queried by and
-      # the procedure is what tells an operator which policy stopped.
-      #
-      # `and on (job_id) aber_historian_job_runs_total` RESTRICTS THIS TO JOBS THAT STILL EXIST, and
-      # it is not tidiness. TimescaleDB re-creates its policy jobs with NEW IDS every time the
-      # maintenance hook runs, which is every helm upgrade -- so the one-hour window accumulates the
-      # ids from every upgrade in the last hour. Measured on the dev stack mid-build: 10 jobs
-      # actually existed and the rule was evaluating 66 instances. An `and` against an INSTANT
-      # selector filters to series with a recent sample, taking it back to 10.
-      #
-      # The instance count is the lesser half. A job that failed and was then re-created under a new
-      # id would go on alerting under the OLD one for an hour, naming a job_id an operator would
-      # look up in `timescaledb_information.jobs` and not find -- which reads as the alert being
-      # wrong rather than as the job having been replaced.
-      # -------------------------------------------------------------------------------------------
+      # Historian Policy Job Failing: failures_total rising within 1h. On the failure count, not
+      # last_run_succeeded, which is 0 for a job that has never run.
       - uid: aber-db-historian-job-failing
         title: Historian Policy Job Failing
         condition: C
@@ -1999,6 +1675,8 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
+              # `and on (job_id)`: TimescaleDB re-creates policy jobs with new ids at every upgrade; this
+              # drops the retired ids, which otherwise alert for an hour under a job_id nobody can find.
               expr: >-
                 sum by (job_id, proc_name) (increase(aber_historian_job_failures_total[1h]))
                 and on (job_id) aber_historian_job_runs_total
@@ -2027,22 +1705,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 5. A DATABASE IS NOT ANSWERING. `pg_up` is the exporter's own verdict on the connection it
-      # opens over loopback, so 0 means the sidecar is running and the server beside it did not
-      # answer -- a server that is down, still starting, in recovery, or refusing connections
-      # because rule 1 went unheeded.
-      #
-      # WHAT THIS RULE CANNOT SEE, stated because `noDataState: OK` is what makes it blind: if the
-      # POD is gone, Alloy stops discovering it, the series stop existing, and this evaluates NoData
-      # and reports OK. That case belongs to the Cluster group -- Container Restarting and the
-      # workload rules beside it -- which reads cAdvisor and does not depend on this exporter. The
-      # alternative, `noDataState: Alerting`, would make all six rules in this group fire forever on
-      # any stack running with `databaseMetrics.enabled: false`, which is a supported configuration.
-      #
-      # `for: 5m` rides out a rolling restart of the database StatefulSet, which is a normal upgrade
-      # and takes well under that.
-      # -------------------------------------------------------------------------------------------
+      # Database Not Answering: pg_up == 0 for 5m. A pod that is gone yields NoData and OK; the
+      # Cluster group covers that case.
       - uid: aber-db-not-answering
         title: Database Not Answering
         condition: C
@@ -2096,23 +1760,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # -------------------------------------------------------------------------------------------
-      # 6. A COLLECTOR IS FAILING, which is the rule that keeps the other five honest.
-      #
-      # THE EXPORTER DOES NOT FAIL A SCRAPE WHEN A COLLECTOR FAILS. It logs an error, keeps serving,
-      # and `pg_exporter_last_scrape_error` stays 0 -- so that collector's series simply stop
-      # existing, every panel drawn on them goes empty, and every rule written against them
-      # evaluates NoData and reports OK. A monitoring stack that has quietly stopped monitoring
-      # part of its subject, which is the exact failure `templates/obs/servicemonitors.yaml`
-      # refuses to create a ServiceMonitor for.
-      #
-      # BOTH FAILURES THIS CLASS PRODUCES WERE OBSERVED WHILE #150 WAS BUILT: `stat_statements`
-      # against a database where the extension was not loaded, and `wal` under a role whose
-      # pg_monitor grant was held without INHERIT. In both cases this gauge was the only signal.
-      #
-      # `for: 10m` because a collector can fail once on a statement timeout during a checkpoint and
-      # recover by itself; ten minutes of continuous failure is configuration, not load.
-      # -------------------------------------------------------------------------------------------
+      # Database Collector Failing: a collector unsuccessful for 10m. The scrape still succeeds, so this
+      # gauge is the only signal that the panels and rules on its series are empty.
       - uid: aber-db-collector-failing
         title: Database Collector Failing
         condition: C

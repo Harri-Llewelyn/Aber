@@ -1529,6 +1529,8 @@ That is worth knowing rather than smoothing away.
 **Every rule in the table is provisioned**, in the `Ingestion Pipeline` group of
 [`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
 reading the chart's own Prometheus.
+The reasoning behind each rule's shape, `for` and `noDataState` is in
+[`grafana/README.md`](../grafana/README.md).
 
 **The table stays even though the rules shipped**, because a provisioned rule states its threshold
 and not its reasoning — and the reasoning is the part that has to survive someone deciding a number
