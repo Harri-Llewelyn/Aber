@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
+import { PERMISSION_UUIDS } from '../constants'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -167,26 +168,6 @@ describe('Metric Catalog — collapsible groups', () => {
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
   })
 
-  it('collapses deprecated metrics by default — they are context, not the working set', async () => {
-    renderTab()
-    await waitForCatalog()
-
-    expect(screen.queryByText('temperature')).toBeNull()
-    fireEvent.click(screen.getByTitle(/Show metrics that have been retired/))
-    expect(screen.getByText('temperature')).toBeTruthy()
-  })
-
-  it('renders no deprecated section when nothing is deprecated', async () => {
-    api.get.mockImplementation((path) =>
-      Promise.resolve(path.startsWith('/api/v1/metric-catalog')
-        ? CATALOG.filter(m => !m.deprecated)
-        : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
-
-    renderTab()
-    await waitForCatalog()
-    expect(screen.queryByText('Deprecated')).toBeNull()
-  })
-
   it('leaves the rest of the row intact when expanded', async () => {
     // Guards the table rendering itself, not just visibility: expansion is a row-level condition
     // inside the same <tbody>, so a mistake here silently drops columns.
@@ -197,6 +178,150 @@ describe('Metric Catalog — collapsible groups', () => {
     expect(within(row).getByText('SAMPLE')).toBeTruthy()
     expect(within(row).getByText('MILLIMETER')).toBeTruthy()
     expect(within(row).getByRole('button', { name: /Deprecate/ })).toBeTruthy()
+  })
+})
+
+// A second deprecated row that names a replacement, so the Superseded By column has a name to show.
+const WITH_REPLACEMENT = [
+  ...CATALOG,
+  { metric_uuid: 'm8', name: 'Controller/OLD_EXECUTION', metric_group: 'Controller', datatype: 12, category: 'EVENT', standard: 'MTConnect', deprecated: true, superseded_by: 'm2' }
+]
+
+/**
+ * #468. Deprecated metrics moved out of a collapsed tail inside the catalog table, where there was
+ * nothing to act on, to a card of their own with a Restore per row.
+ */
+describe('Deprecated Metrics card', () => {
+  const withCatalog = (rows) => api.get.mockImplementation((path) =>
+    Promise.resolve(path.startsWith('/api/v1/metric-catalog')
+      ? rows
+      : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+
+  const deprecatedTable = () => cardTable('Deprecated Metrics')
+
+  it('lists deprecated metrics on their own card, and not in the catalog table', async () => {
+    renderTab()
+    await waitForCatalog()
+    await waitFor(() => expect(deprecatedTable()).toBeTruthy())
+
+    expect(within(deprecatedTable()).getByText('temperature')).toBeTruthy()
+    // Every group is open, so absence here means the row is not in the catalog at all.
+    expect(within(catalogTable()).queryByText('temperature')).toBeNull()
+  })
+
+  it('renders no card when nothing is deprecated', async () => {
+    withCatalog(CATALOG.filter(m => !m.deprecated))
+    renderTab()
+    await waitForCatalog()
+
+    expect(screen.queryByText('Deprecated Metrics')).toBeNull()
+  })
+
+  it('names the replacement, not its uuid', async () => {
+    withCatalog(WITH_REPLACEMENT)
+    renderTab()
+    await waitFor(() => expect(deprecatedTable()).toBeTruthy())
+
+    const row = within(deprecatedTable()).getByText('Controller/OLD_EXECUTION').closest('tr')
+    expect(within(row).getByText('Controller/EXECUTION')).toBeTruthy()
+    expect(within(row).queryByText('m2')).toBeNull()
+  })
+
+  it('is not narrowed by the catalog search, which belongs to the card above', async () => {
+    renderTab()
+    await waitFor(() => expect(deprecatedTable()).toBeTruthy())
+
+    fireEvent.change(screen.getByLabelText('Search the metric catalog'), { target: { value: 'EXECUTION' } })
+    expect(within(deprecatedTable()).getByText('temperature')).toBeTruthy()
+  })
+
+  it('disables Restore without the archive permission, as Deprecate is', async () => {
+    render(<MetricsTab showToast={vi.fn()} hasPermission={(p) => p !== PERMISSION_UUIDS.ARCHIVE_MANAGE} />)
+    await waitFor(() => expect(deprecatedTable()).toBeTruthy())
+
+    const restore = within(deprecatedTable()).getByRole('button', { name: /Restore/ })
+    expect(restore.disabled).toBe(true)
+    expect(restore.title).toBe('Requires Admin permissions')
+  })
+})
+
+describe('Restore Metric', () => {
+  const setup = async (rows = CATALOG) => {
+    api.get.mockImplementation((path) =>
+      Promise.resolve(path.startsWith('/api/v1/metric-catalog')
+        ? rows
+        : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    const showToast = vi.fn()
+    render(<MetricsTab showToast={showToast} hasPermission={() => true} />)
+    await waitFor(() => expect(cardTable('Deprecated Metrics')).toBeTruthy())
+    return showToast
+  }
+
+  const openRestore = (name) => {
+    const row = within(cardTable('Deprecated Metrics')).getByText(name).closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: /Restore/ }))
+    return document.querySelector('.modal')
+  }
+
+  it('asks first, naming the metric and the replacement pointer it clears', async () => {
+    await setup(WITH_REPLACEMENT)
+    const modal = openRestore('Controller/OLD_EXECUTION')
+
+    expect(modal).toBeTruthy()
+    expect(within(modal).getByText(/offered to schema authors/)).toBeTruthy()
+    expect(within(modal).getByText('Controller/EXECUTION')).toBeTruthy()
+    expect(modal.textContent).toMatch(/restoring clears that pointer/)
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('says there is no pointer to clear when none was named', async () => {
+    await setup()
+    const modal = openRestore('temperature')
+
+    expect(modal.textContent).toMatch(/names no replacement/)
+  })
+
+  it('posts the restore route on confirmation and reloads the catalog', async () => {
+    const showToast = await setup()
+    openRestore('temperature')
+    const loads = api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/metric-catalog')).length
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Metric' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog/m9/restore'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/temperature.*restored/), 'success'))
+    expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/metric-catalog')).length).toBeGreaterThan(loads)
+    expect(document.querySelector('.modal')).toBeNull()
+  })
+
+  it('posts nothing when cancelled', async () => {
+    await setup()
+    openRestore('temperature')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.querySelector('.modal')).toBeNull()
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('reports a refused restore and leaves the dialog open', async () => {
+    api.post.mockRejectedValueOnce(new Error('Metric not restored — it may no longer exist, or you may not have permission to change the catalog.'))
+    const showToast = await setup()
+    openRestore('temperature')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Metric' }))
+
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/^Metric not restored/), 'error'))
+    expect(document.querySelector('.modal')).toBeTruthy()
+  })
+
+  it('names Restore in the toast a deprecation leaves', async () => {
+    const showToast = await setup()
+    await waitForCatalog()
+    const row = within(catalogTable()).getByText('Axes/DISPLACEMENT').closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: /Deprecate/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Deprecate Metric' }))
+
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/deprecated.*restore it/), 'success'))
   })
 })
 

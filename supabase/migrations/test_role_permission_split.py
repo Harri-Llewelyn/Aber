@@ -383,6 +383,42 @@ class TheWithdrawalReachesPostgres(RoleSplitFixture):
             " VALUES ('Fixture0069/Value', 9);"
         )
 
+    def test_only_an_administrator_can_restore_a_deprecated_metric(self):
+        """
+        #468's Restore sets `deprecated` false and clears `superseded_by`. The immutability trigger
+        freezes only `name` and `datatype`, so an Administrator may; a Shopfloor_Manager holds
+        archive:manage and is shown the button, and the policy filters the row away without an
+        error, which is why api.js reads an empty result as a refusal.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype)"
+                " VALUES ('Fixture0069/Replacement', 9) RETURNING id;"
+            )
+            replacement = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype, deprecated, superseded_by)"
+                " VALUES ('Fixture0069/Deprecated', 9, true, %s) RETURNING id;",
+                (replacement,),
+            )
+            metric = cur.fetchone()[0]
+            restore = ("UPDATE public.metric_catalog SET deprecated = false, superseded_by = NULL"
+                       " WHERE id = %s;")
+
+            as_user(cur, MANAGER_ID)
+            cur.execute(restore, (metric,))
+            self.assertEqual(cur.rowcount, 0, "a Shopfloor_Manager restored a deprecated metric")
+
+            cur.execute("RESET ROLE;")
+            as_user(cur, ADMIN_ID)
+            cur.execute(restore, (metric,))
+            self.assertEqual(cur.rowcount, 1, "an Administrator could not restore a deprecated metric")
+
+            cur.execute("RESET ROLE;")
+            cur.execute("SELECT deprecated, superseded_by FROM public.metric_catalog WHERE id = %s;",
+                        (metric,))
+            self.assertEqual(cur.fetchone(), (False, None))
+
     def test_manager_cannot_register_a_metric_group(self):
         self._refused_outright("INSERT INTO public.metric_groups (name) VALUES ('Fixture0069');")
 

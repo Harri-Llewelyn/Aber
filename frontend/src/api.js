@@ -2267,6 +2267,26 @@ const apiMethods = {
       return data;
     }
 
+    // A metric's lifecycle (#468). Matched before the generic `/restore` below, which would write
+    // `is_archived` to a table named after the path. Restore clears `superseded_by` with the flag.
+    // No row back means RLS refused the UPDATE (Administrator only), so it is not a success.
+    const metricLifecycle = path.match(/^\/api\/v1\/metric-catalog\/([^/]+)\/(deprecate|restore)$/);
+    if (metricLifecycle) {
+      const [, id, action] = metricLifecycle;
+      const change = action === 'deprecate'
+        ? { deprecated: true, superseded_by: emptyToNull(body?.superseded_by) }
+        : { deprecated: false, superseded_by: null };
+      const { data, error } = await supabase.from('metric_catalog').update(change).eq('id', id).select();
+      if (error) throw error;
+      if (!data?.length) {
+        throw new Error(
+          `Metric not ${action === 'deprecate' ? 'deprecated' : 'restored'} — it may no longer exist, ` +
+          'or you may not have permission to change the catalog.'
+        );
+      }
+      return data[0];
+    }
+
     if (path.includes('/archive')) {
       const parts = path.split('/');
       const entityType = parts[3];
@@ -2435,17 +2455,6 @@ const apiMethods = {
       if (error) throw error;
       const item = data?.[0] || {};
       return { metric_uuid: item.id || '', ...item };
-    }
-
-    if (path.includes('/metric-catalog/') && path.endsWith('/deprecate')) {
-      const parts = path.split('/');
-      const id = parts[4];
-      const { data, error } = await supabase.from('metric_catalog').update({
-        deprecated: true,
-        superseded_by: emptyToNull(body?.superseded_by)
-      }).eq('id', id).select();
-      if (error) throw error;
-      return data?.[0] || {};
     }
 
     if (path === '/api/v1/schemas/validate') {
