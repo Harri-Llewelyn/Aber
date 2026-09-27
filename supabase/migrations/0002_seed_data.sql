@@ -2942,11 +2942,12 @@ SELECT set_config('aber.gitea_oauth_client_secret', '', false);
 -- The metric group these concepts file under
 -- ---------------------------------------------------------------------------------------------
 -- One group, not one per concept: `enforce_metric_group_spelling()` makes the first spelling
--- permanent, and the standard is not yet published. A BMS point is named `Building/<concept>`.
+-- permanent, and the standard is not yet published. A BMS point is named `BMS/<concept>`, the
+-- group the standards seed files its 223P metrics under (0008 retires the earlier `Building`).
 
 INSERT INTO public.metric_groups (id, name, description, standard)
-VALUES ('9d3a4f2e-6b1c-4e58-9a77-2f5c8d1b4e60', 'Building',
-        'ASHRAE 223P building system points -- HVAC, electrical and the sensing around them',
+VALUES ('5868dc1c-b33f-41e1-92a7-bddd7e57a3ac', 'BMS',
+        'ASHRAE 223P building management system points -- HVAC, electrical and the sensing around them',
         'ASHRAE 223P')
 ON CONFLICT DO NOTHING;
 

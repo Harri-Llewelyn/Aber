@@ -295,7 +295,10 @@ companion specification, and filing it in `opcua_vocabulary` would misstate its 
   a concept moving before publication is foreseeable rather than a surprise.
 - **One `metric_groups` row, not 640.** `enforce_metric_group_spelling()` makes the first spelling
   permanent, so registering a group per concept, for a standard that is not yet published, would
-  permanently fix a naming the standard may still change. BMS points are `Building/<concept>`.
+  permanently fix a naming the standard may still change. The group is `BMS`, so a point is
+  `BMS/<concept>`: a `Building` group would put the word in the group picker and in device tags,
+  where the dashboard says *area* (#456). `check-mirror-drift.mjs` holds the form and the seed to
+  the same group.
 - **A real Turtle tokeniser, not a regex, and the trap was concrete.** `rdfs:comment` appears inside
   the nested `sh:property [ … ]` blank nodes as a SHACL constraint message, several times per class.
   A scan that found `rdfs:comment` after a subject would have described `s223:Fan` as *"A `Fan` shall
@@ -353,4 +356,5 @@ companion specification, and filing it in `opcua_vocabulary` would misstate its 
 | Is OPC 34100 (ECM) seeded too? | **No** — only Machinery/Energy; ECM is recorded as a dependency |
 | Which `category` does a non-MTConnect metric get? | MTConnect's: `SAMPLE`, `EVENT` or `CONDITION`, translated per standard; 223P leaves it null |
 | Which datatypes can the form create? | Double, Boolean and String; OPC UA integers become Double |
+| Which group do 223P metrics file under? | **`BMS`**, the one group registered under ASHRAE 223P (#456) |
 | Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. Not one of the eight registered formulas is computable from the catalogued metrics, and moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |

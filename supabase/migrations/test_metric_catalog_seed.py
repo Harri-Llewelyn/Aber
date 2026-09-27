@@ -101,6 +101,25 @@ class TestSeededRows(SeedTestCase):
                 }
                 self.assertEqual(found, {standard})
 
+    def test_every_metric_group_is_registered_under_its_metrics_standard(self):
+        """
+        The other direction: one standard spread over two groups. 223P's seeded metrics once sat
+        under an unregistered `BMS` while the form filed under `Building` (#456), and the picker
+        showed the one under Local and the other under ASHRAE 223P with nothing in it.
+        """
+        strays = self.rows(
+            "SELECT DISTINCT c.metric_group, c.standard, g.standard FROM public.metric_catalog c "
+            "  LEFT JOIN public.metric_groups g ON g.name = c.metric_group "
+            " WHERE c.standard IS NOT NULL AND c.metric_group IS NOT NULL "
+            "   AND g.standard IS DISTINCT FROM c.standard"
+        )
+        self.assertEqual(strays, [], "(group, metrics' standard, group's registered standard)")
+
+    def test_ashrae_223p_registers_one_group(self):
+        groups = [r[0] for r in self.rows(
+            "SELECT name FROM public.metric_groups WHERE standard = 'ASHRAE 223P' ORDER BY name")]
+        self.assertEqual(groups, ["BMS"])
+
     def test_no_seeded_row_is_missing_its_standard_or_semantic_id(self):
         """A row created with standard = NULL is the exact defect this migration exists to prevent."""
         bad = self.rows(

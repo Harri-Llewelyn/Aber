@@ -80,7 +80,7 @@ const routes = {
     { group_uuid: 'g2', name: 'OEE', standard: 'ISO 22400' },
     { group_uuid: 'g3', name: 'Machine', standard: 'OPC UA' },
     { group_uuid: 'g4', name: 'Hydraulic', standard: null },
-    { group_uuid: 'g5', name: 'Building', standard: 'ASHRAE 223P' }
+    { group_uuid: 'g5', name: 'BMS', standard: 'ASHRAE 223P' }
   ],
   '/api/v1/mtconnect-vocabulary': VOCABULARY,
   '/api/v1/iso22400-vocabulary': ISO_VOCABULARY,
@@ -489,7 +489,7 @@ describe('Metric builder — ASHRAE 223P', () => {
     const offered = [...conceptSelect().querySelectorAll('option')].map(o => o.value)
     expect(offered).toContain('TemperatureSensor')
     expect(offered).toContain('Fan')
-    // `Building/hasProperty` would name nothing: a relation is a predicate, not a thing.
+    // `BMS/hasProperty` would name nothing: a relation is a predicate, not a thing.
     expect(offered).not.toContain('hasProperty')
   })
 
@@ -509,7 +509,7 @@ describe('Metric builder — ASHRAE 223P', () => {
 
     expect(semanticIdInput().value).toBe('http://data.ashrae.org/standard223#TemperatureSensor')
     expect(referenceTypeSelect().value).toBe('IRI')
-    expect(within(namePreview()).getByText('Building/TemperatureSensor')).toBeTruthy()
+    expect(within(namePreview()).getByText('BMS/TemperatureSensor')).toBeTruthy()
 
     // Nothing chosen, and the control says so rather than reading "Double".
     expect(datatypeSelect().value).toBe('')
@@ -531,7 +531,7 @@ describe('Metric builder — ASHRAE 223P', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/metric-catalog',
       expect.objectContaining({
-        name: 'Building/TemperatureSensor',
+        name: 'BMS/TemperatureSensor',
         datatype: 10,
         standard: 'ASHRAE 223P',
         semantic_id: 'http://data.ashrae.org/standard223#TemperatureSensor',
@@ -548,8 +548,8 @@ describe('Metric builder — ASHRAE 223P', () => {
     fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
 
     const groupSelect = screen.getByTitle(/The category this metric belongs to/)
-    const building = [...groupSelect.querySelectorAll('option')].find(o => o.value === 'Building')
-    expect(building.closest('optgroup').label).toBe('ASHRAE 223P (1)')
+    const bms = [...groupSelect.querySelectorAll('option')].find(o => o.value === 'BMS')
+    expect(bms.closest('optgroup').label).toBe('ASHRAE 223P (1)')
   })
 })
 
@@ -728,7 +728,7 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
 
     expect(standardSelect().value).toBe('ASHRAE 223P')
     expect(conceptSelect().value).toBe('TemperatureSensor')
-    expect(within(namePreview()).getByText('Building/TemperatureSensor')).toBeTruthy()
+    expect(within(namePreview()).getByText('BMS/TemperatureSensor')).toBeTruthy()
     expect(datatypeSelect().value).toBe('')
     expect(addMetricButton().disabled).toBe(true)
 
