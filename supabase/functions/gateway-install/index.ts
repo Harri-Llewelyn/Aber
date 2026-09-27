@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
+import { zipSync, strToU8 } from "fflate";
 
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -126,4 +125,4 @@ export default async function handler(req: Request): Promise<Response> {
   });
 }
 
-serve(handler);
+Deno.serve(handler);
