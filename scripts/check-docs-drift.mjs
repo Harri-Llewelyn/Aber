@@ -1987,6 +1987,34 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// Every humanize call in an alert summary is given a float
+//
+// `$values.B` is a struct (Labels, Value) with a String() method, so `{{ $values.B }}` prints and
+// `printf "%.0f" $values.B.Value` formats -- but `humanizePercentage $values.B` fails the whole
+// template with `can't convert template.Value to float`, and Grafana then delivers the summary as
+// its raw template text. Six rules shipped that way; the error appears only in Grafana's own log.
+{
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+  const offences = [];
+  let calls = 0;
+  for (const [i, line] of rules.split('\n').entries()) {
+    for (const m of line.matchAll(/\{\{\s*humanize\w*\s+(\$values\.[A-Z]\w*)((?:\.\w+)?)\s*\}\}/g)) {
+      calls += 1;
+      if (m[2] !== '.Value') offences.push(`line ${i + 1}: ${m[0]}`);
+    }
+  }
+  if (offences.length) {
+    fail(
+      `${offences.length} humanize call(s) in the alert summaries are given the whole $values ` +
+        'struct rather than its .Value; Grafana fails to expand the template and delivers the ' +
+        'summary as raw template text:\n  ' + offences.join('\n  ')
+    );
+  } else {
+    pass(`all ${calls} humanize call(s) in the alert summaries pass a float`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // The buckets agree in all three places that decide whether one works
 //
 // A bucket created with no policies is invisible to every browser role; a policy naming a bucket
