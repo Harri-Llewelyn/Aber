@@ -203,13 +203,21 @@ class TestWhatStaysCorrectable(SeedTestCase):
     """
 
     ROW = "Controller/EXECUTION"
+    CORRECTABLE = (
+        "UPDATE public.metric_catalog SET semantic_id = semantic_id || '-corrected' WHERE name = %s",
+        "UPDATE public.metric_catalog SET permitted_values = ARRAY['CORRECTED'] WHERE name = %s",
+    )
+    FROZEN = (
+        "UPDATE public.metric_catalog SET name = name || '_RENAMED' WHERE name = %s",
+        "UPDATE public.metric_catalog SET datatype = CASE WHEN datatype = 10 THEN 12 ELSE 10 END WHERE name = %s",
+    )
 
-    def update(self, assignment):
+    def update(self, statement):
         conn = connect()
         conn.autocommit = False
         try:
             with conn.cursor() as cur:
-                cur.execute(f"UPDATE public.metric_catalog SET {assignment} WHERE name = %s", (self.ROW,))
+                cur.execute(statement, (self.ROW,))
                 return cur.rowcount, None
         except psycopg2.Error as exc:
             return 0, exc
@@ -218,19 +226,17 @@ class TestWhatStaysCorrectable(SeedTestCase):
             conn.close()
 
     def test_semantic_id_and_permitted_values_can_be_corrected(self):
-        for assignment in ("semantic_id = semantic_id || '-corrected'",
-                           "permitted_values = ARRAY['CORRECTED']"):
-            with self.subTest(assignment=assignment):
-                rows, error = self.update(assignment)
-                self.assertIsNone(error, f"{assignment} was refused: {error}")
+        for statement in self.CORRECTABLE:
+            with self.subTest(statement=statement):
+                rows, error = self.update(statement)
+                self.assertIsNone(error, f"refused: {error}")
                 self.assertEqual(rows, 1, f"{self.ROW} is not seeded")
 
     def test_name_and_datatype_are_frozen(self):
-        for assignment in ("name = name || '_RENAMED'",
-                           "datatype = CASE WHEN datatype = 10 THEN 12 ELSE 10 END"):
-            with self.subTest(assignment=assignment):
-                _, error = self.update(assignment)
-                self.assertIsNotNone(error, f"{assignment} was accepted")
+        for statement in self.FROZEN:
+            with self.subTest(statement=statement):
+                _, error = self.update(statement)
+                self.assertIsNotNone(error, "accepted")
                 self.assertIn("immutable", str(error))
 
 
