@@ -9,12 +9,13 @@ The catalog of metrics every schema is built from. A metric is a name, a datatyp
 - **Semantic ID** and **Reference Type** are where a metric stops being local to this stack and becomes a term somebody else also uses. ISO 22400, OPC UA and ASHRAE 223P supply theirs; MTConnect metrics get their data item type's id, shared by every metric of that type, until you type your own; a custom type gets none.
 - **Sparkplug Datatype** is how the value is encoded on the wire, and the one field that cannot be changed afterwards. ISO 22400 and OPC UA entries fill it in; a 223P concept names a thing rather than a reading, so it leaves the choice to you and the metric cannot be added until you make it.
 - **Search** reaches a known metric without opening every group. The groups are collapsed by default and carry a count, so a shut catalog still says what is in it.
+- **Edit** corrects a metric's **Semantic ID** and **Reference Type**, and nothing else: a mistyped id, or a mapping that has moved on, is fixed in place. Clearing the id leaves the metric unmapped. The confirmation says how many schemas model the metric, because every shell exported from them carries the new id. It is recorded in the Digital Thread.
 - **Deprecate** retires a metric from the schema builder and can name the metric that supersedes it. The confirmation says how many schemas model it.
 - **Restore**, on the Deprecated Metrics card, is the way back: it offers the metric to schema authors again and clears the replacement it named. It asks first, as Deprecate does. Both are recorded in the Digital Thread, under Metric catalog, with who made them.
 
 ## What the states mean
 
-**A metric name is immutable.** It is what the device publishes, so it reaches MQTT, TimescaleDB and Grafana, and renaming it would orphan every reading already stored under it. That is why the composed name is shown before the metric is created, and why the way to withdraw one is to deprecate it.
+**A metric name is immutable.** It is what the device publishes, so it reaches MQTT, TimescaleDB and Grafana, and renaming it would orphan every reading already stored under it. That is why the composed name is shown before the metric is created, and why the way to withdraw one is to deprecate it. The datatype is fixed for the same reason. The semantic id is not on the wire: it is a claim about what the metric means, so it can be corrected.
 
 **Deprecated is not deleted.** A deprecated metric keeps its readings and stays on the schemas that already model it; it is withheld from the builder so no new schema picks it up. Deprecated metrics are listed on a card of their own below the catalog, with the metric each was superseded by, and the card appears only when something is deprecated.
 

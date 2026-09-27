@@ -4,11 +4,9 @@ import { ActionButton } from '../common/ActionButton'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { groupCatalog } from '../../utils/metricGroup'
-import {
-  STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, LOCAL_EXTENSION_LABEL
-} from '../../utils/standards'
+import { STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL } from '../../utils/standards'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
-import { HelpTip } from '../common/HelpTip'
+import { SemanticIdField } from '../common/SemanticIdField'
 
 /** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
 const ANY_STANDARD = '__any__'
@@ -31,17 +29,6 @@ function FieldError({ children }) {
     </div>
   )
 }
-
-const SEMANTIC_ID_HELP = 'The identifier of the standard Submodel this schema corresponds to, so an '
-  + 'AAS consumer can recognise it as, say, a Digital Nameplate rather than a set of metric names '
-  + 'only this platform understands. Use the published id of an IDTA submodel template, for example '
-  + 'https://admin-shell.io/idta/nameplate/3/0/Nameplate.\n\n'
-  + 'Leave it blank for a schema you have composed yourself, which is most of them: a local '
-  + 'composition matches no published template, and claiming one it does not match is worse than '
-  + 'claiming none.\n\n'
-  + 'The type beside it says how to read the id — IRI for a URL, IRDI for an ECLASS or IEC code, '
-  + 'ModelReference for a pointer to another element in this shell. It is guessed from what you '
-  + 'type and can be corrected.'
 
 /**
  * Build a schema from catalog metrics. It does this and nothing else: a device is given its schema
@@ -159,40 +146,16 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
           <input className="form-control" value={description} onChange={e => setDescription(e.target.value)} placeholder="What this schema is for" />
         </div>
 
-        <div className="form-group">
-          {/* The tip is a sibling of the label, never a child: a button inside a label answers to
-              the label's name too, and the field stops being the only thing that does. */}
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '7px' }}>
-            <label className="form-label" style={{ marginBottom: 0 }} htmlFor="schema-builder-semantic-id">
-              Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span>
-            </label>
-            <HelpTip text={SEMANTIC_ID_HELP} label="What a semantic ID is for" />
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              id="schema-builder-semantic-id"
-              className="form-control mono"
-              style={{ flex: '1 1 auto', fontSize: '11px' }}
-              value={semanticId}
-              onChange={e => {
-                setSemanticId(e.target.value)
-                setSemanticIdType(t => t || inferSemanticIdType(e.target.value))
-              }}
-              placeholder="e.g. https://admin-shell.io/idta/SubmodelTemplate/…"
-              title="AAS (IEC 63278) semanticId for the Submodel this schema corresponds to."
-            />
-            <select
-              className="form-control"
-              style={{ flex: '0 0 140px' }}
-              value={semanticIdType}
-              onChange={e => setSemanticIdType(e.target.value)}
-              title="Which kind of AAS Reference the semantic id is"
-            >
-              <option value="">— None —</option>
-              {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
+        <SemanticIdField
+          idPrefix="schema-builder"
+          subject="schema"
+          semanticId={semanticId}
+          semanticIdType={semanticIdType}
+          onChange={({ semanticId: id, semanticIdType: type }) => {
+            setSemanticId(id)
+            setSemanticIdType(type)
+          }}
+        />
 
         <div className="form-group">
           <label className="form-label">

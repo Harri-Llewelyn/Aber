@@ -554,6 +554,23 @@ class TestMetricCatalogReachesTheThread(AuditGuardTestCase):
         self.assertEqual((old["deprecated"], old["superseded_by"]), (True, replacement))
         self.assertEqual((new["deprecated"], new["superseded_by"]), (False, None))
 
+    def test_a_semantic_id_correction_is_logged(self):
+        """Edit on the Metrics page is an UPDATE of the pair, recorded like any other."""
+        metric = self._metric("MAPPED", semantic_id="https://aber.local/semantics/fixture",
+                              semantic_id_type="IRI")
+        self._mark()
+        self.cur.execute(
+            "UPDATE public.metric_catalog SET semantic_id = %s, semantic_id_type = 'IRDI' WHERE id = %s",
+            ("0112/2///61987#ABA565#009", metric),
+        )
+        rows = self.audit_rows("metric_catalog")
+        self.assertEqual(len(rows), 1, "correcting a semantic id left no record")
+        _, _, old, new = rows[0]
+        self.assertEqual((old["semantic_id"], old["semantic_id_type"]),
+                         ("https://aber.local/semantics/fixture", "IRI"))
+        self.assertEqual((new["semantic_id"], new["semantic_id_type"]),
+                         ("0112/2///61987#ABA565#009", "IRDI"))
+
     def test_a_replayed_seed_update_is_not(self):
         """
         0002 re-applies `permitted_values` on every boot with an unguarded UPDATE. It writes the

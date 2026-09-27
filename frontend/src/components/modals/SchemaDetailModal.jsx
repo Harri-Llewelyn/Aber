@@ -7,20 +7,21 @@ import { ActionButton } from '../common/ActionButton'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { groupCatalog } from '../../utils/metricGroup'
 import { modelledMetrics } from '../../utils/deviceTags'
-import { LOCAL_EXTENSION_LABEL } from '../../utils/standards'
+import { LOCAL_EXTENSION_LABEL, storedSemanticIdPair } from '../../utils/standards'
 import {
   schemaVersion, schemaStatus, statusLabel, statusBadgeClass, schemaVersionLabel,
   isSchemaEditable, canForkSchema, nextVersion, lineageOf, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { SemanticIdField } from '../common/SemanticIdField'
 
 /**
  * One modal, two modes, decided by the schema's status. Read-only is the default and is the same
  * read-only the database enforces: `prevent_active_schema_mutation()` rejects the write, so an
- * active or archived version renders its metrics as a list. `isSchemaEditable()` is the single
- * predicate and fails closed. The change description is shown at the top because it is the only
- * part of a version that says why it exists. Create Version is the one primary action in read-only
- * mode.
+ * active or archived version renders its metrics as a list and its semantic id as text.
+ * `isSchemaEditable()` is the single predicate and fails closed. The change description is shown at
+ * the top because it is the only part of a version that says why it exists. Create Version is the
+ * one primary action in read-only mode.
  */
 export function SchemaDetailModal({
   schema, schemas = [], catalog = [], deviceCount = 0, canManage = false,
@@ -38,6 +39,11 @@ export function SchemaDetailModal({
   )
   const [description, setDescription] = useState(schema?.description || '')
   const [changeDescription, setChangeDescription] = useState(schema?.change_description || '')
+  // A draft inherits its parent's id through fork_schema(), so this is where a wrong claim, or a
+  // template that has moved on, is corrected or cleared before it is published again.
+  const [semantic, setSemantic] = useState(
+    () => storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
+  )
   const [search, setSearch] = useState('')
   // Which write is running, not merely whether one is -- see `run` below.
   const [busyAction, setBusyAction] = useState(null)
@@ -89,10 +95,23 @@ export function SchemaDetailModal({
   const modelledNow = modelledMetrics(schema) || new Set()
   const added = [...selectedNames].filter(n => !modelledNow.has(n))
   const removed = [...modelledNow].filter(n => !selectedNames.has(n))
+  const semanticNow = storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
+  const semanticEdited = storedSemanticIdPair(semantic.semanticId, semantic.semanticIdType)
   const dirty =
     added.length > 0 || removed.length > 0 ||
     description !== (schema?.description || '') ||
-    changeDescription !== (schema?.change_description || '')
+    changeDescription !== (schema?.change_description || '') ||
+    semanticEdited.semanticId !== semanticNow.semanticId ||
+    semanticEdited.semanticIdType !== semanticNow.semanticIdType
+
+  /** Everything a draft save writes. api.js sends the type as NULL when the id is blank. */
+  const draftPatch = () => ({
+    schema_definition: buildDefinition(),
+    description,
+    change_description: changeDescription,
+    semantic_id: semanticEdited.semanticId,
+    semantic_id_type: semanticEdited.semanticIdType
+  })
 
   /**
    * @param {string} name Which action is running, 'save' or 'publish', so the clicked button can
@@ -115,23 +134,13 @@ export function SchemaDetailModal({
   }
 
   const handleSaveDraft = () => run('save', async () => {
-    await onSaveDraft?.({
-      schema_definition: buildDefinition(),
-      description,
-      change_description: changeDescription
-    })
+    await onSaveDraft?.(draftPatch())
   })
 
   const handlePublish = () => run('publish', async () => {
     // Saved first if dirty, so publishing can never activate a version missing the edits on screen.
     // The publish RPC takes no payload.
-    if (dirty) {
-      await onSaveDraft?.({
-        schema_definition: buildDefinition(),
-        description,
-        change_description: changeDescription
-      })
-    }
+    if (dirty) await onSaveDraft?.(draftPatch())
     await onPublish?.()
   })
 
@@ -210,6 +219,15 @@ export function SchemaDetailModal({
             <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{schema?.description || '—'}</div>
           )}
         </div>
+
+        <SemanticIdField
+          idPrefix="schema-detail"
+          subject="schema"
+          readOnly={!editable}
+          semanticId={semantic.semanticId}
+          semanticIdType={semantic.semanticIdType}
+          onChange={setSemantic}
+        />
 
         <div className="form-group">
           <label className="form-label">

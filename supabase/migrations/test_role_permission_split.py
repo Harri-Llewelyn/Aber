@@ -419,6 +419,38 @@ class TheWithdrawalReachesPostgres(RoleSplitFixture):
                         (metric,))
             self.assertEqual(cur.fetchone(), (False, None))
 
+    def test_only_an_administrator_can_correct_a_metrics_semantic_id(self):
+        """
+        Edit on the Metrics page writes `semantic_id` and `semantic_id_type` and nothing else. The
+        immutability trigger freezes only `name` and `datatype`, so an Administrator may; the policy
+        filters anyone else's UPDATE away without an error, which is why api.js reads no row back
+        as a refusal.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype, semantic_id, semantic_id_type)"
+                " VALUES ('Fixture0069/Mapped', 9, 'https://aber.local/semantics/fixture', 'IRI')"
+                " RETURNING id;"
+            )
+            metric = cur.fetchone()[0]
+            correct = ("UPDATE public.metric_catalog"
+                       " SET semantic_id = '0112/2///61987#ABA565#009', semantic_id_type = 'IRDI'"
+                       " WHERE id = %s;")
+
+            as_user(cur, MANAGER_ID)
+            cur.execute(correct, (metric,))
+            self.assertEqual(cur.rowcount, 0, "a Shopfloor_Manager changed a metric's semantic id")
+
+            cur.execute("RESET ROLE;")
+            as_user(cur, ADMIN_ID)
+            cur.execute(correct, (metric,))
+            self.assertEqual(cur.rowcount, 1, "an Administrator could not correct a metric's semantic id")
+
+            cur.execute("RESET ROLE;")
+            cur.execute("SELECT semantic_id, semantic_id_type FROM public.metric_catalog WHERE id = %s;",
+                        (metric,))
+            self.assertEqual(cur.fetchone(), ("0112/2///61987#ABA565#009", "IRDI"))
+
     def test_manager_cannot_register_a_metric_group(self):
         self._refused_outright("INSERT INTO public.metric_groups (name) VALUES ('Fixture0069');")
 

@@ -334,6 +334,65 @@ describe('a metric is deprecated and restored (#468)', () => {
   });
 });
 
+describe('a semantic id is corrected, never half-populated', () => {
+  const written = { data: [{ id: 'row' }], error: null };
+
+  it('sends a metric only its semantic id and type, whatever else the body carries', async () => {
+    state.responses.metric_catalog = written;
+    await api.put('/api/v1/metric-catalog/m2', {
+      semantic_id: ' 0112/2///61987#ABA565#009 ', semantic_id_type: 'IRDI', name: 'Renamed', datatype: 10
+    });
+
+    const call = callFor('metric_catalog');
+    expect(call.op).toBe('update');
+    expect(call.payload).toEqual({ semantic_id: '0112/2///61987#ABA565#009', semantic_id_type: 'IRDI' });
+    expect(call.filters).toContainEqual(['eq', 'id', 'm2']);
+  });
+
+  it('clears a metric’s type with its id', async () => {
+    state.responses.metric_catalog = written;
+    await api.put('/api/v1/metric-catalog/m2', { semantic_id: '', semantic_id_type: 'IRI' });
+    expect(callFor('metric_catalog').payload).toEqual({ semantic_id: null, semantic_id_type: null });
+  });
+
+  it('treats no metric row back as refused rather than done', async () => {
+    // metric_catalog_update_privileged admits Administrators only; anyone else matches no row.
+    await expect(api.put('/api/v1/metric-catalog/m2', { semantic_id: 'urn:x', semantic_id_type: 'IRI' }))
+      .rejects.toThrow(/^Semantic id not changed/);
+  });
+
+  it('forwards a draft schema’s pair with the same rule', async () => {
+    state.responses.schemas = written;
+    await api.put('/api/v1/schemas/v2', {
+      schema_definition: { type: 'object' }, description: 'd', change_description: 'c',
+      semantic_id: 'https://admin-shell.io/idta/nameplate/3/0/Nameplate', semantic_id_type: 'IRI'
+    });
+    expect(callFor('schemas').payload).toMatchObject({
+      semantic_id: 'https://admin-shell.io/idta/nameplate/3/0/Nameplate', semantic_id_type: 'IRI'
+    });
+  });
+
+  it('clears a draft schema’s type with its id', async () => {
+    state.responses.schemas = written;
+    await api.put('/api/v1/schemas/v2', { semantic_id: '   ', semantic_id_type: 'IRDI' });
+    expect(callFor('schemas').payload).toEqual({ semantic_id: null, semantic_id_type: null });
+  });
+
+  it('leaves a draft’s pair alone when the save does not mention it', async () => {
+    state.responses.schemas = written;
+    await api.put('/api/v1/schemas/v2', { description: 'only this' });
+    expect(callFor('schemas').payload).toEqual({ description: 'only this' });
+  });
+
+  it('applies the rule on create too', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog', {
+      name: 'Axes/ANGLE', datatype: 10, semantic_id: '', semantic_id_type: 'IRI'
+    });
+    expect(callFor('metric_catalog').payload).toMatchObject({ semantic_id: null, semantic_id_type: null });
+  });
+});
+
 describe('telemetry queries', () => {
   it('reads the telemetry view with filters, ordering and a bounded page', async () => {
     await api.get('/api/v1/telemetry?metric_name=temperature&minutes=15&limit=200&offset=200');

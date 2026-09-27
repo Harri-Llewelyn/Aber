@@ -191,4 +191,21 @@ describe('the builder says why it will not save', () => {
     await openBuilder()
     expect(screen.getByRole('button', { name: /What a semantic ID is for/ })).toBeTruthy()
   })
+
+  it('offers IRI and IRDI only, and types an IEC CDD id as an IRDI', async () => {
+    await openBuilder()
+    const type = screen.getByRole('combobox', { name: 'Reference Type' })
+    expect([...type.querySelectorAll('option')].map(o => o.value)).toEqual(['', 'IRI', 'IRDI'])
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: '0112/2///61987#ABA565#009' } })
+    expect(type.value).toBe('IRDI')
+
+    fireEvent.change(screen.getByLabelText(/Schema Name/), { target: { value: 'Nameplate_Schema' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/schemas',
+      expect.objectContaining({ semantic_id: '0112/2///61987#ABA565#009', semantic_id_type: 'IRDI' })
+    ))
+  })
 })

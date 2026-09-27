@@ -107,6 +107,19 @@ async function loadDeviceLocations() {
 // submits exactly that.
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
+/**
+ * `semantic_id` and `semantic_id_type` as every write stores them: the id trimmed, and the type NULL
+ * whenever the id is, so the pair is never half-populated. A type with no id would export as an AAS
+ * Reference with no key.
+ */
+const semanticIdPair = (body) => {
+  const semanticId = emptyToNull(String(body?.semantic_id ?? '').trim());
+  return {
+    semantic_id: semanticId,
+    semantic_id_type: semanticId ? emptyToNull(body?.semantic_id_type) : null
+  };
+};
+
 // The UI carries a device's gateway as `active_gateway_id`; the column is `gateway_id`.
 const gatewayIdFrom = (body) => emptyToNull(body.active_gateway_id ?? body.gateway_id);
 
@@ -2467,10 +2480,7 @@ const apiMethods = {
         units: emptyToNull(body.units),
         sub_type: emptyToNull(body.sub_type),
         standard: emptyToNull(body.standard),
-        semantic_id: emptyToNull(body.semantic_id),
-        // Only meaningful alongside an id. Sent as NULL when the id is blank so the pair cannot
-        // end up half-populated, which would export as a Reference with a type and no value.
-        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null,
+        ...semanticIdPair(body),
         description: body.description || null
       }).select();
       if (error) throw error;
@@ -2555,8 +2565,7 @@ const apiMethods = {
         schema_name: body.schema_name,
         description: body.description,
         schema_definition: body.schema_definition,
-        semantic_id: emptyToNull(body.semantic_id),
-        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null,
+        ...semanticIdPair(body),
         // A newly built schema is v1 and in force immediately; `version` and `status` are left to their
         // column defaults because sending them is what the provenance trigger refuses.
         change_description: emptyToNull(body.change_description) || 'Initial release'
@@ -2706,13 +2715,34 @@ const apiMethods = {
     const parts = path.split('/');
     const id = parts[parts.length - 1];
 
-    // Editing a draft version's metric set. No status guard here beyond sending only the editable
-    // keys: `prevent_active_schema_mutation()` refuses this write against an active or archived row.
+    /**
+     * Correct a catalog metric's semantic id. Only the pair is sent: `name` and `datatype` are what
+     * devices publish, and enforce_metric_catalog_immutability() refuses both regardless. No row
+     * back means RLS refused the UPDATE (Administrator only), so it is not a success.
+     */
+    if (/^\/api\/v1\/metric-catalog\/[^/]+$/.test(path)) {
+      const { data, error } = await supabase
+        .from('metric_catalog').update(semanticIdPair(body)).eq('id', id).select();
+      if (error) throw error;
+      if (!data?.length) {
+        throw new Error(
+          'Semantic id not changed — the metric may no longer exist, or you may not have permission ' +
+          'to change the catalog.'
+        );
+      }
+      return data[0];
+    }
+
+    // Editing a draft version: its metric set, description and semantic id. No status guard here
+    // beyond sending only the editable keys: `prevent_active_schema_mutation()` refuses this write
+    // against an active or archived row.
     if (path.startsWith('/api/v1/schemas/')) {
       const patch = {};
       if ('schema_definition' in body) patch.schema_definition = body.schema_definition;
       if ('description' in body) patch.description = body.description;
       if ('change_description' in body) patch.change_description = emptyToNull(body.change_description);
+      // The pair travels together, so clearing the id clears the type with it.
+      if ('semantic_id' in body) Object.assign(patch, semanticIdPair(body));
 
       const { data, error } = await supabase.from('schemas').update(patch).eq('id', id).select();
       if (error) throw error;

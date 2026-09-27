@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { RestoreMetricModal } from '../modals/RestoreMetricModal'
+import { EditMetricSemanticIdModal } from '../modals/EditMetricSemanticIdModal'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
   groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
@@ -14,8 +15,8 @@ import {
   typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS
 } from '../../utils/mtconnect'
 import {
-  STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, LOCAL_EXTENSION_LABEL,
-  mtconnectSemanticId, DEFAULT_SEMANTIC_ID_TYPE
+  STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, followSemanticIdType,
+  LOCAL_EXTENSION_LABEL, mtconnectSemanticId, DEFAULT_SEMANTIC_ID_TYPE
 } from '../../utils/standards'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
@@ -24,7 +25,8 @@ import {
 } from '../../utils/ashrae223'
 import CopyableId from '../common/CopyableId'
 import {
-  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX, IconRefreshCw
+  IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX, IconRefreshCw,
+  IconPencil
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 
@@ -64,7 +66,7 @@ const BLANK_METRIC = {
  * models, and it keeps growing for as long as standards are adopted -- so each was capping its own
  * height to leave the other room, and neither had a full viewport. The registry still reads the
  * catalog, for the schema builder; nothing here reads the registry except the usage count on a
- * deprecation.
+ * deprecation or a semantic id edit.
  *
  * @param {Object} pendingVocabularyEntry Handed over by Use on the Vocabulary page: identifiers
  * for a standard's entry, resolved here because applyPrefill() is the only place that knows how a
@@ -73,8 +75,8 @@ const BLANK_METRIC = {
 export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, onConsumeVocabularyEntry }) {
   const [catalog, setCatalog]         = useState([])
   const [groups, setGroups]           = useState([])
-  // Read for the usage count on a deprecation and nothing else -- how many schemas model the
-  // metric is the impact warning on a destructive act.
+  // Read for the usage count on a deprecation or a semantic id edit and nothing else -- how many
+  // schemas model the metric is the impact warning on either act.
   const [schemas, setSchemas]         = useState([])
   const [vocabulary, setVocabulary]   = useState([])
   const [isoVocabulary, setIsoVocabulary]     = useState([])
@@ -88,6 +90,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [newMetric, setNewMetric] = useState(BLANK_METRIC)
   const [deprecateTarget, setDeprecateTarget] = useState(null)
   const [restoreTarget, setRestoreTarget] = useState(null)
+  const [editTarget, setEditTarget] = useState(null)
   // Expansion state for the catalog's group sections, keyed by label; absent means collapsed. The
   // headers carry a count, so a collapsed catalog still says what is in it.
   const [expandedGroups, setExpandedGroups] = useState({})
@@ -338,14 +341,32 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     }
   }
 
+  const handleEditSemanticId = async (pair) => {
+    try {
+      await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, pair)
+      setEditTarget(null)
+      load()
+      showToast(
+        pair.semantic_id
+          ? `Semantic id of '${editTarget.name}' saved`
+          : `Semantic id of '${editTarget.name}' cleared; the metric is now unmapped`,
+        'success'
+      )
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+
   // Still `schema:manage`, unchanged by the split: the catalogue and the registry were one page
   // and they are still one permission, so the gate here and the gate on Schemas stay the same one.
   // It is not what refuses the write -- metric_catalog's INSERT and UPDATE policies check
   // has_role('Administrator') -- so this disables the control rather than deciding anything.
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
-  // Deprecate and Restore write metric_catalog too, so they share Add Metric's gate. A permission a
-  // Shopfloor_Manager holds, such as archive:manage, would offer a button the database refuses.
+  // Deprecate, Restore and Edit write metric_catalog too, so they share Add Metric's gate. A
+  // permission a Shopfloor_Manager holds, such as archive:manage, would offer a button the database
+  // refuses.
   const canDeprecateMetric = canManageSchema
+  const canEditMetric = canManageSchema
 
   /**
    * Narrows the catalog by metric name only: matching description or units would return rows whose
@@ -466,6 +487,22 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     // A type without a value would export as an AAS Reference with no key. Rejected here rather
     // than nulled on the way out, so the operator sees the field they left half-filled.
     (semanticIdValue !== '' || semanticIdTypeValue === '')
+
+  /**
+   * Edit, on both cards: a deprecated metric still carries its id into the schemas that model it.
+   * It changes the semantic id and reference type and nothing else.
+   */
+  const editButton = (m) => (
+    <button
+      className={`btn btn-ghost btn-sm ${!canEditMetric ? 'btn-disabled' : ''}`}
+      style={{ marginRight: '6px' }}
+      disabled={!canEditMetric}
+      onClick={() => canEditMetric && setEditTarget(m)}
+      title={!canEditMetric ? 'Requires Admin permissions' : "Correct this metric's semantic id and reference type"}
+    >
+      <IconPencil size={12} /> Edit
+    </button>
+  )
 
   /** The seven cells the catalog and the Deprecated Metrics card share, so a metric reads the same in both. */
   const metricCells = (m) => (
@@ -810,12 +847,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                       // Taking the field over stops the derivation, so it cannot overwrite a
                       // hand-entered crosswalk on the next keystroke.
                       semanticIdManual: true,
-                      // Only ever fills a blank type, so a deliberate choice is never overwritten.
-                      semanticIdType: m.semanticIdType || inferSemanticIdType(value)
+                      // Follows the guess while the shown type agrees with it and clears with the
+                      // id; a type chosen against the guess is kept.
+                      semanticIdType: followSemanticIdType(semanticIdValue, semanticIdTypeValue, value)
                     }))
                   }}
                   placeholder="e.g. http://opcfoundation.org/UA/Robotics/ActualPosition"
-                  title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures. Unlike the name, it can be corrected later."
+                  title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures. Unlike the name, an Administrator can correct it later with Edit."
                 />
               </div>
 
@@ -832,7 +870,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     semanticIdManual: true,
                     semanticId: m.semanticIdManual ? m.semanticId : semanticIdValue
                   }))}
-                  title="Which kind of AAS Reference the semantic id is. IRI for a URI, IRDI for an ECLASS or IEC CDD identifier, ModelReference to point inside another AAS."
+                  title="Which kind of AAS Reference the semantic id is. IRI for a URL or URN, IRDI for an ECLASS or IEC CDD identifier."
                 >
                   <option value="">— None —</option>
                   {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -861,7 +899,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 : <> Recorded as a <strong>local extension</strong>, with no standard provenance.</>}
               {semanticIdValue && (
                 <> Semantic id <span className="mono" style={{ color: 'var(--accent)' }}>{semanticIdValue}</span>
-                  {semanticIdTypeValue ? ` (${semanticIdTypeValue})` : ''} — editable later, unlike the name.</>
+                  {semanticIdTypeValue ? ` (${semanticIdTypeValue})` : ''} — correctable later with Edit, unlike the name.</>
               )}
             </div>
 
@@ -949,7 +987,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   {open && group.metrics.map(m => (
                     <tr key={m.metric_uuid}>
                       {metricCells(m)}
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {editButton(m)}
                         <button
                           className={`btn btn-ghost btn-sm ${!canDeprecateMetric ? 'btn-disabled' : ''}`}
                           disabled={!canDeprecateMetric}
@@ -997,7 +1036,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                           ? <span className="mono">{replacement.name}</span>
                           : <span style={{ color: 'var(--text-dim)' }} title="No replacement was named">—</span>}
                       </td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {editButton(m)}
                         <button
                           className={`btn btn-ghost btn-sm ${!canDeprecateMetric ? 'btn-disabled' : ''}`}
                           disabled={!canDeprecateMetric}
@@ -1023,6 +1063,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           catalog={catalog}
           onConfirm={handleDeprecate}
           onCancel={() => setDeprecateTarget(null)}
+        />
+      )}
+
+      {editTarget && (
+        <EditMetricSemanticIdModal
+          metric={editTarget}
+          usageCount={usageCountFor(editTarget.name)}
+          onConfirm={handleEditSemanticId}
+          onCancel={() => setEditTarget(null)}
         />
       )}
 
