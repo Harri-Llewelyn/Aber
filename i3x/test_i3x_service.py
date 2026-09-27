@@ -825,6 +825,60 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
         self.assertEqual(objects["dev-inherits"]["metadata"]["sourceTypeId"], "Local Pump")
         self.assertEqual(objects["dev-nowhere"]["metadata"]["sourceTypeId"], "Device")
 
+    JSON_TYPES = {
+        "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+        "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+        "string": lambda v: isinstance(v, str),
+        "boolean": lambda v: isinstance(v, bool),
+        "null": lambda v: v is None,
+    }
+
+    def nonconformance(self, value, schema) -> list:
+        """What in `value` a flat object schema does not describe, or describes and is not sent."""
+        if not isinstance(value, dict):
+            return [f"value is {value!r}, not an object"]
+        declared = schema.get("properties", {})
+        problems = [f"{k} is sent and not declared" for k in value if k not in declared]
+        problems += [f"{k} is declared and not sent" for k in declared if k not in value]
+        for key, spec in declared.items():
+            if key not in value:
+                continue
+            allowed = spec["type"] if isinstance(spec["type"], list) else [spec["type"]]
+            if not any(self.JSON_TYPES[t](value[key]) for t in allowed):
+                problems.append(f"{key} is {value[key]!r}, not {allowed}")
+            if "enum" in spec and value[key] not in spec["enum"]:
+                problems.append(f"{key} is {value[key]!r}, not one of {spec['enum']}")
+        return problems
+
+    def test_every_synthetic_objects_value_conforms_to_its_type(self):
+        space, objects, _ = self.space()
+        schemas = {t["elementId"]: t["schema"] for t in A.SYNTHETIC_TYPES}
+        checked = set()
+        for element_id, obj in objects.items():
+            type_id = obj["typeElementId"]
+            if type_id not in schemas or type_id == A.UNTYPED_DEVICE_TYPE_ID:
+                continue
+            with self.subTest(element_id=element_id):
+                value = i3x_service._current_value(objects, space, element_id)["value"]
+                self.assertEqual(self.nonconformance(value, schemas[type_id]), [])
+                checked.add(type_id)
+        self.assertEqual(checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.GATEWAY_TYPE_ID})
+
+    def test_containers_count_devices_not_children(self):
+        space, objects, _ = self.space()
+
+        def value(element_id):
+            return i3x_service._current_value(objects, space, element_id)["value"]
+
+        cell_a, cell_b = TestAddressSpaceReads.CELL, TestAddressSpaceReads.OTHER_CELL
+        # Three devices and two cells; the site's children are the cells, Unassigned and a
+        # site-wide gateway.
+        self.assertEqual(value(A.SITE_ELEMENT_ID), {"cellCount": 2, "deviceCount": 3})
+        self.assertEqual(value(cell_a), {"deviceCount": 1, "description": "Welding"})
+        # Cell B holds one device and the gateway it inherits from.
+        self.assertEqual(value(cell_b), {"deviceCount": 1, "description": None})
+        self.assertEqual(value(A.UNASSIGNED_ELEMENT_ID)["deviceCount"], 1)
+
 
 class TestMirroredConstants(unittest.TestCase):
     """

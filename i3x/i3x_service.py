@@ -1044,8 +1044,12 @@ def _current_value(objects, space: dict, element_id: str):
     devices_by_sid = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
     if element_id in devices_by_sid:
         return A.device_value(devices_by_sid[element_id], metrics_for(element_id))
+    # A container's value is what its type declares. Counts are of devices, never of children:
+    # a cell's children include its gateways, and the site's are cells and Unassigned.
+    if element_id == A.SITE_ELEMENT_ID:
+        return A.site_value(len(space["cells"]), len(devices_by_sid))
     rels = (obj.get("metadata") or {}).get("relationships") or {}
-    return A.container_value(obj, len(rels.get("HasChildren", [])))
+    return A.cell_value(obj, sum(1 for c in rels.get("HasChildren", []) if c in devices_by_sid))
 
 
 def h_objects_value(req: "Handler") -> None:

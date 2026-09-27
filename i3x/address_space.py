@@ -457,19 +457,28 @@ def value_envelope(element_id: str, value, quality: str, timestamp: Optional[str
     }
 
 
-def container_value(obj: dict, child_count: int, extra: Optional[dict] = None) -> dict:
+def site_value(cell_count: int, device_count: int) -> dict:
     """
-    A value for a cell, the site, or Unassigned.
+    The site's value: exactly the properties the Site type declares.
 
     EVERY OBJECT NEEDS A VALUE, not only the ones that publish telemetry. `POST /objects/value` is
     how a client reads any object, and a composition with no value of its own cannot be the subject
     of a `maxDepth > 1` query -- which is the only way to read a subtree in one call. Reporting
     "no such element" for a cell that plainly exists in `/objects` is worse than reporting a count.
     """
-    value = {"deviceCount": child_count}
-    if extra:
-        value.update(extra)
-    return value_envelope(obj["elementId"], value, "Good", _now_iso())
+    return value_envelope(
+        SITE_ELEMENT_ID, {"cellCount": cell_count, "deviceCount": device_count}, "Good", _now_iso()
+    )
+
+
+def cell_value(obj: dict, device_count: int) -> dict:
+    """A cell's value, and Unassigned's, which shares the Cell type: its devices and description."""
+    return value_envelope(
+        obj["elementId"],
+        {"deviceCount": device_count, "description": (obj.get("metadata") or {}).get("description")},
+        "Good",
+        _now_iso(),
+    )
 
 
 def gateway_value(gateway: dict) -> dict:

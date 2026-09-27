@@ -107,7 +107,9 @@ A device's cell is `effective_cell_id` from the `device_locations` view, keyed b
 so an explicit cell and one inherited from the gateway resolve the way the Directory resolves
 them. `effective_area_id` is read with it and not yet projected. An object's
 `metadata.sourceTypeId` is its type's: a device's is its schema's `semantic_id`, else the schema's
-name, and `Device` when it has no schema.
+name, and `Device` when it has no schema. The site, a cell and Unassigned have values too, and each
+sends exactly the properties its synthetic type declares; `deviceCount` counts devices, not
+children, so a cell's gateways and the site's cells are not in it.
 
 **A failed read is an error, never an empty answer.** Any read behind the address space that
 PostgREST refuses answers 502 naming the relation and carrying PostgREST's message. The one
