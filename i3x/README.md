@@ -111,11 +111,12 @@ name, and `Device` when it has no schema. The site, a cell and Unassigned have v
 sends exactly the properties its synthetic type declares; `deviceCount` counts devices, not
 children, so a cell's gateways and the site's cells are not in it.
 
-**A failed read is an error, never an empty answer.** Any read behind the address space that
-PostgREST refuses answers 502 naming the relation and carrying PostgREST's message. The one
-exception is a 401 or 403 on `device_locations`: the caller still sees every asset it may, under
-Unassigned. The location read once selected a column the view does not have, the 400 was taken
-for "no rows", and every device sat under Unassigned without an error anywhere (#492).
+**A failed read is an error, never an empty answer.** A read behind the address space that
+PostgREST answers with a 400 or a 5xx is a 502 naming the relation and carrying PostgREST's
+message, a read that cannot reach PostgREST is a 502 too, and a 401 or 403 is answered as itself.
+The one read that takes a 401 or 403 as empty is `device_locations`, so a caller denied that view
+still sees every asset it may, under Unassigned. The location read once selected a column the view does not have, the 400 was
+taken for "no rows", and every device sat under Unassigned without an error anywhere (#492).
 `TestAddressSpaceReads` now holds every select list to the columns the migrations create.
 
 ## Endpoints
