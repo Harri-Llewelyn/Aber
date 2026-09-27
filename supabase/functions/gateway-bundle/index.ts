@@ -1,6 +1,5 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
+import { createClient } from "@supabase/supabase-js";
+import { zipSync, strToU8 } from "fflate";
 
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -488,4 +487,4 @@ See README.md for the rest, including what to do if the token has expired.
   }
 }
 
-serve(handler);
+Deno.serve(handler);

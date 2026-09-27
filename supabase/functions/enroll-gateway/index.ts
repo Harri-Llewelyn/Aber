@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 import { corsHeaders } from "../_shared/cors.ts";
@@ -350,4 +349,4 @@ export default async function handler(req: Request): Promise<Response> {
   });
 }
 
-serve(handler);
+Deno.serve(handler);

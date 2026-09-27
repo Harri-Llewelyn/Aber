@@ -2,7 +2,7 @@
  * Edge Function router (main service). supabase/edge-runtime does not execute functions via
  * in-process `import()`; each function is spawned as an isolated user worker via
  * EdgeRuntime.userWorkers.create() and handed the request, so every function keeps its own
- * `serve(handler)` entry point. This stack runs with VERIFY_JWT="false" because each function
+ * `Deno.serve(handler)` entry point. This stack runs with VERIFY_JWT="false" because each function
  * performs its own role check and fails closed.
  */
 
@@ -271,6 +271,7 @@ Deno.serve(async (req: Request) => {
       servicePath,
       memoryLimitMb: 150,
       workerTimeoutMs: 60 * 1000,
+      // The image's module cache is the only source of dependencies; true would refetch them.
       noModuleCache: false,
       importMapPath: null,
       envVars,

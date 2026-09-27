@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
@@ -608,4 +607,4 @@ export default async function handler(req: Request): Promise<Response> {
   return json(summary, 200);
 }
 
-serve(handler);
+Deno.serve(handler);
