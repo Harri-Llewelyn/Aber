@@ -44,9 +44,8 @@ engineering.
 ## Security
 
 **This process holds no service-role key, and `main()` refuses to start if one is in its
-environment.** Every metadata read is a PostgREST request carrying the *caller's* bearer token, so
-the i3X address space is exactly what that caller could see in the dashboard — RLS decides, not this
-code.
+environment.** It holds no JWT secret either: every check of a caller is PostgREST's, made with the
+caller's own token.
 
 `ingestion.py` is deliberately **not imported** for the same reason: it constructs a service-role
 Supabase client at import time whenever the key is set. The cost of that refusal is a little
@@ -58,6 +57,32 @@ because PostgREST enforces policy; the cache is just a dict keyed by `sparkplug_
 request is answered in two steps — resolve the requested elementIds through PostgREST *as the
 caller* first, then serve only the ids that came back. An element the caller cannot see reports as
 not found, indistinguishable from one that does not exist.
+
+**Every request except `GET /info` is authenticated before it is dispatched**, by one PostgREST
+call carrying the caller's `Authorization`: `rpc/service_token_max_days`, an immutable constant
+granted to `authenticated` and `service_role` and not to `anon`. PostgREST checks the signature and
+`exp`, and its pre-request hook `auth_pre_request()` refuses a revoked token or a revoked service
+principal. So a missing header, a string that is not a token, the publishable key, and an expired or
+revoked token each get a 401. A success is cached for at most 15 seconds, keyed by a SHA-256 of the
+header and never past the token's `exp`; a refusal is never cached. Check 32 of
+`check-docs-drift.mjs` holds that function to those grants.
+
+What that guarantees:
+
+- **The address space is read as the caller**, so RLS decides what it contains when it is read,
+  give or take [the address-space cache](#the-address-space-cache)'s few seconds. Values and
+  history are served only for elements that read returned.
+- **A subscription belongs to the token's `sub` and its `clientId` together.** Another principal
+  quoting both gets the same 404 as a subscription that does not exist. A credential with no `sub`,
+  such as the secret key, is its own principal, identified by a digest of it.
+- **A revoked or expired token loses the subscription path too.** `/sync` and the other
+  subscription calls are refused within 15 seconds of the revocation, and at `exp`. An open stream
+  re-checks its token, past the cache, on every 15-second keepalive tick, and ends cleanly when the
+  check fails or `exp` arrives.
+- **Registration is not re-checked.** The monitored set is validated against the caller's address
+  space when elements are registered. A grant withdrawn later while the token stays valid (a user's
+  role removed) stops that caller's reads at once, but values for elements already registered keep
+  arriving on the subscription until it is deleted or expires, or the token fails the check.
 
 `GET /info` is unauthenticated, because the spec requires it and because it doubles as the health
 check. It reports capabilities and nothing about the address space.
@@ -182,8 +207,8 @@ at `http://localhost:8090` fails its version probe and quietly decides the serve
 after which nothing it sends is in the right shape.
 
 **2. The token is a user access token, not the publishable key.** The publishable key authenticates at the gateway
-and is then rejected by the data layer — `401 The supplied credentials were rejected by the data
-layer` — because RLS grants reads to `authenticated`, not `anon`. Get one with:
+and is then rejected by the data layer — `401 The data layer refused this token: a user or service
+access token is required` — because it stands for `anon`. Get one with:
 
 ```bash
 curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
@@ -404,6 +429,9 @@ clock.
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `300` | Spec MUST — abandoned subscriptions are deleted |
 | `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `10000` | Batches per subscription before 206 |
+| `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `20` | Per token `sub`; past it, create answers 429 |
+| `I3X_MAX_SUBSCRIPTIONS` | `500` | On the server; past it, create answers 429 |
+| `I3X_MAX_STREAMS` | `50` | Open SSE streams; past it, stream answers 429 |
 | `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
 | `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
 | `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
@@ -425,6 +453,7 @@ and discover it during their own integration.
 | Current values immediately after a restart | **Cold, and reported as cold.** The MQTT cache refills from `spBv1.0/#` as devices publish; until a device next publishes, `/objects/value` answers `quality: "GoodNoData"` with a null value for it |
 | Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
 | Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
+| Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. A principal is the token's `sub`, so every token minted for one service principal shares its 20 |
 
 ### Why 404-then-recreate is the contract and not a workaround
 

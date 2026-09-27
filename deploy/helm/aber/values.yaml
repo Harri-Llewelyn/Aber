@@ -942,6 +942,12 @@ i3xService:
   # How many update batches one subscription may queue before the oldest are dropped. Dropping
   # is reported: the next /sync answers 206 and the client backfills from /objects/history.
   subscriptionQueueLimit: 10000
+  # Past these, creating a subscription or opening a stream answers 429 naming the limit. A
+  # principal is the token's `sub`, so every token minted for one service principal shares its
+  # allowance. Each open stream holds a server thread.
+  maxSubscriptionsPerPrincipal: 20
+  maxSubscriptions: 500
+  maxStreams: 50
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     # Sized for connection handling; the value cache and queues are bounded.

@@ -13,6 +13,10 @@ THE SECURITY MODEL IS THE MOST IMPORTANT THING IN THIS FILE.
   the key is set. Every metadata read carries the CALLER's bearer token, so RLS decides what the
   address space contains.
 
+  EVERY REQUEST BUT `GET /info` IS AUTHENTICATED BEFORE DISPATCH by one PostgREST call made as the
+  caller (`_authenticate`), so revocation and expiry reach the subscription endpoints too, and each
+  subscription belongs to the token's `sub`.
+
   THE MQTT VALUE CACHE HAS NO RLS, and that is the trap this file closes. It is a dict keyed by
   sparkplug_id, so serving from it directly would hand any authenticated caller live values for
   every device on the site. A value request therefore resolves its elementIds through PostgREST AS
@@ -32,6 +36,7 @@ Related: README.md -> "Why this is an adapter, not a feature", "Why it is a sepa
 """
 from __future__ import annotations
 
+import base64
 import gzip
 import io
 import json
@@ -89,6 +94,9 @@ MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
 SUBSCRIPTION_TTL_SECONDS = int(os.getenv("I3X_SUBSCRIPTION_TTL_SECONDS", "300"))
 SUBSCRIPTION_QUEUE_LIMIT = int(os.getenv("I3X_SUBSCRIPTION_QUEUE_LIMIT", "10000"))
+MAX_SUBSCRIPTIONS_PER_PRINCIPAL = int(os.getenv("I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL", "20"))
+MAX_SUBSCRIPTIONS = int(os.getenv("I3X_MAX_SUBSCRIPTIONS", "500"))
+MAX_STREAMS = int(os.getenv("I3X_MAX_STREAMS", "50"))
 REAPER_INTERVAL_SECONDS = int(os.getenv("I3X_REAPER_INTERVAL_SECONDS", "30"))
 # Comfortably inside the TTL, so an idle-but-connected client keeps its subscription alive.
 SSE_KEEPALIVE_SECONDS = float(os.getenv("I3X_SSE_KEEPALIVE_SECONDS", "15"))
@@ -126,7 +134,11 @@ _alias_map: Dict[tuple, Dict[int, str]] = {}
 _alias_lock = threading.RLock()
 
 registry = SubscriptionRegistry(
-    queue_limit=SUBSCRIPTION_QUEUE_LIMIT, ttl_seconds=SUBSCRIPTION_TTL_SECONDS
+    queue_limit=SUBSCRIPTION_QUEUE_LIMIT,
+    ttl_seconds=SUBSCRIPTION_TTL_SECONDS,
+    max_per_principal=MAX_SUBSCRIPTIONS_PER_PRINCIPAL,
+    max_subscriptions=MAX_SUBSCRIPTIONS,
+    max_streams=MAX_STREAMS,
 )
 
 
@@ -532,7 +544,7 @@ class SseChannel:
 
     # -- any thread ------------------------------------------------------------------------------
     def wake(self) -> None:
-        """Ask the handler thread to drain the queue. Never blocks: a full pair means one is pending."""
+        """Ask the handler thread to drain the queue. Never blocks: a full pair means one is due."""
         with self._wake_lock:
             if self._released:
                 return
@@ -643,13 +655,14 @@ def _on_registry_stream_close(sub) -> None:
 registry.on_stream_close = _on_registry_stream_close
 
 
-def _serve_stream(req, sub, backlog: List[dict]) -> None:
+def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") -> None:
     """
     Answer `/subscriptions/stream` on this handler thread, which is the only one that writes to it.
 
-    It ends when the client disconnects, when another stream or a delete displaces it (cleanly,
-    with the terminating chunk), or when a write cannot finish inside SSE_SEND_TIMEOUT_SECONDS.
-    Only a clean end leaves the connection open for a next request.
+    It ends when the client disconnects, when another stream or a delete displaces it, when a write
+    cannot finish inside SSE_SEND_TIMEOUT_SECONDS, at the token's `exp`, or when the token fails
+    the re-check made on every keepalive tick. All but the first and third end cleanly, with the
+    terminating chunk, and only a clean end leaves the connection open for a next request.
 
     It sends the QUEUE, never the live value, because the queue is the one source of ordering.
     Delivered means discarded: SSE is at-most-once, so a later `/sync` must not re-deliver it.
@@ -681,6 +694,7 @@ def _serve_stream(req, sub, backlog: List[dict]) -> None:
         # Plus anything staged before the channel was registered, whose wake found no channel.
         batches = backlog + registry.drain(sub)
         next_tick = time.monotonic() + SSE_KEEPALIVE_SECONDS
+        expires = _monotonic_deadline(caller.expires_at)
         while True:
             for batch in batches:
                 if not channel.send(batch["updates"]):
@@ -690,13 +704,14 @@ def _serve_stream(req, sub, backlog: List[dict]) -> None:
             # readable stream socket means EOF: the request body was consumed at dispatch.
             try:
                 ready, _, _ = select.select(
-                    [conn, channel.wake_socket], [], [], max(0.0, next_tick - time.monotonic())
+                    [conn, channel.wake_socket], [], [],
+                    max(0.0, min(next_tick, expires) - time.monotonic()),
                 )
             except (OSError, ValueError):
                 return
             if conn in ready:
                 return
-            if channel.close_requested.is_set():
+            if channel.close_requested.is_set() or time.monotonic() >= expires:
                 channel.finish()
                 return
             batches = []
@@ -705,6 +720,12 @@ def _serve_stream(req, sub, backlog: List[dict]) -> None:
                 channel.consume_wakes()
                 batches = registry.drain(sub)
             if time.monotonic() >= next_tick:
+                # Bypasses the cache, so a revoked token loses its stream within one tick.
+                try:
+                    expires = _monotonic_deadline(_authenticate(bearer, fresh=True).expires_at)
+                except (Problem, requests.RequestException):
+                    channel.finish()
+                    return
                 # The reaper treats an open stream as activity. The comment frame still goes out
                 # when idle: intermediaries time out a silent connection.
                 registry.touch(sub)
@@ -720,8 +741,148 @@ def _serve_stream(req, sub, backlog: List[dict]) -> None:
         if channel.ended_cleanly:
             conn.settimeout(req.timeout)
         else:
-            # A partial chunk, or a client already gone: the connection cannot carry another request.
+            # A partial chunk, or a client already gone: the connection cannot take another request.
             req.close_connection = True
+
+
+# =================================================================================================
+# Authentication (README.md -> "Security")
+# =================================================================================================
+# Every route but these is authenticated in `_dispatch` before its handler runs.
+UNAUTHENTICATED_ROUTES = frozenset({"GET /info"})
+# An IMMUTABLE constant granted to `authenticated` and `service_role`, not `anon`. Calling it as the
+# caller costs no table read and succeeds only when PostgREST accepts the token's signature and
+# `exp` and the pre-request hook `auth_pre_request()` finds neither its jti nor its sub revoked.
+AUTH_PROBE_PATH = "rpc/service_token_max_days"
+# A success is reused for at most this long, and never past the token's `exp`. A refusal is never
+# stored, and a fresh refusal evicts the stored success.
+AUTH_CACHE_SECONDS = 15.0
+# Keyed on a client-controlled header, so bounded and evicted least-recently-used.
+AUTH_CACHE_MAX = 1024
+
+
+class Caller:
+    """An accepted token: the principal its subscriptions belong to, and its `exp` if any."""
+
+    __slots__ = ("principal", "expires_at")
+
+    def __init__(self, principal: str, expires_at: Optional[float]):
+        self.principal = principal
+        self.expires_at = expires_at
+
+
+_auth_cache: "OrderedDict[str, tuple]" = OrderedDict()
+_auth_lock = threading.Lock()
+
+
+def _credential_key(bearer: str) -> str:
+    # A digest, so the cache and the principal of a token with no `sub` never hold the token itself.
+    return hashlib.sha256(bearer.encode("utf-8")).hexdigest()
+
+
+def _unverified_claims(bearer: str) -> dict:
+    """
+    The JWT payload, decoded WITHOUT verifying the signature: `{}` for anything that is not a JWT.
+    Trusted only once `_probe` has accepted the token, or to refuse one whose `exp` has passed.
+    """
+    scheme, _, rest = bearer.strip().partition(" ")
+    token = rest.strip() if scheme.lower() == "bearer" else bearer.strip()
+    parts = token.split(".")
+    if len(parts) != 3:
+        return {}
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except ValueError:
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def _principal(bearer: str, claims: dict) -> str:
+    """The token's `sub`. A credential with none (an `sb_` key) is its own principal."""
+    sub = claims.get("sub")
+    if isinstance(sub, str) and sub:
+        return sub
+    return "credential:" + _credential_key(bearer)
+
+
+def _expiry(claims: dict) -> Optional[float]:
+    exp = claims.get("exp")
+    if isinstance(exp, (int, float)) and not isinstance(exp, bool):
+        return float(exp)
+    return None
+
+
+def _monotonic_deadline(expires_at: Optional[float]) -> float:
+    if expires_at is None:
+        return float("inf")
+    return time.monotonic() + (expires_at - time.time())
+
+
+def _probe(bearer: str) -> None:
+    """One PostgREST call carrying the caller's token. Raises Problem 401 if it is refused."""
+    pg = PostgrestClient(bearer)
+    resp = requests.get(f"{pg.base}/{AUTH_PROBE_PATH}", headers=pg._headers(), timeout=pg.timeout)
+    if resp.status_code in (401, 403):
+        try:
+            message = str(resp.json().get("message") or "")
+        except (ValueError, AttributeError):
+            message = ""
+        if not message or message.startswith("permission denied"):
+            # What PostgREST says to the anon role: no user or service token was presented.
+            message = "a user or service access token is required"
+        raise Problem(
+            401,
+            "Unauthorized",
+            f"The data layer refused this token: {message[:200]}. Only GET /info is "
+            f"unauthenticated.",
+        )
+    if not resp.ok:
+        raise Problem(
+            502,
+            "Bad Gateway",
+            f"The token could not be checked ({resp.status_code} from the data layer).",
+        )
+
+
+def _forget(key: str) -> None:
+    with _auth_lock:
+        _auth_cache.pop(key, None)
+
+
+def _authenticate(bearer: str, fresh: bool = False) -> Caller:
+    """Accept the token or raise Problem. `fresh` skips the cache: an open stream's re-check."""
+    key = _credential_key(bearer)
+    if not fresh:
+        with _auth_lock:
+            hit = _auth_cache.get(key)
+            if hit is not None and hit[0] > time.monotonic():
+                _auth_cache.move_to_end(key)
+                return hit[1]
+
+    claims = _unverified_claims(bearer)
+    expires_at = _expiry(claims)
+    try:
+        if expires_at is not None and expires_at <= time.time():
+            # Refused on this server's clock too, so a stream and a request agree on the moment.
+            raise Problem(
+                401, "Unauthorized", "This token has expired. Only GET /info is unauthenticated."
+            )
+        _probe(bearer)
+    except Problem:
+        _forget(key)
+        raise
+
+    caller = Caller(_principal(bearer, claims), expires_at)
+    keep = AUTH_CACHE_SECONDS
+    if expires_at is not None:
+        keep = min(keep, expires_at - time.time())
+    if keep > 0:
+        with _auth_lock:
+            _auth_cache[key] = (time.monotonic() + keep, caller)
+            _auth_cache.move_to_end(key)
+            while len(_auth_cache) > AUTH_CACHE_MAX:
+                _auth_cache.popitem(last=False)
+    return caller
 
 
 # =================================================================================================
@@ -901,7 +1062,11 @@ class Handler(BaseHTTPRequestHandler):
         if handler is None:
             self._fail(404, "Not Found", f"No such i3X endpoint: {route}")
             return
+        # Reset per request: a keep-alive connection reuses this handler for the next one.
+        self.caller = None
         try:
+            if route not in UNAUTHENTICATED_ROUTES:
+                self.caller = _authenticate(self._bearer())
             handler(self)
         except Problem as exc:
             self._fail(exc.status, exc.title, exc.detail)
@@ -1298,11 +1463,19 @@ def h_update_refused(req: Handler) -> None:
 
 
 # -- subscriptions ----------------------------------------------------------------------------
+def _owned_subscription(req: Handler, client_id: str, body: dict):
+    """The subscription named in the body, if this clientId AND this principal own it; else 404."""
+    return registry.get_owned(
+        client_id, body.get("subscriptionId") or "", principal=req.caller.principal
+    )
+
+
 def h_sub_create(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.create(client_id, body.get("displayName") or "")
+    sub = registry.create(
+        client_id, body.get("displayName") or "", principal=req.caller.principal
+    )
     req._ok(
         {
             "clientId": client_id,
@@ -1313,20 +1486,22 @@ def h_sub_create(req: Handler) -> None:
 
 
 def h_sub_list(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    req._bulk(registry.list_owned(client_id, body.get("subscriptionIds") or []))
+    req._bulk(
+        registry.list_owned(
+            client_id, body.get("subscriptionIds") or [], principal=req.caller.principal
+        )
+    )
 
 
 def h_sub_delete(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
     results = []
     for sid in body.get("subscriptionIds") or []:
         try:
-            registry.delete(client_id, sid)
+            registry.delete(client_id, sid, principal=req.caller.principal)
         except SubscriptionError as exc:
             results.append(
                 {
@@ -1373,10 +1548,9 @@ def h_sub_register(req: Handler) -> None:
     arrive. Validating here also means the monitored set can only ever contain ids this caller is
     allowed to see, so the subscription cannot become a way around RLS on the value path.
     """
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
+    sub = _owned_subscription(req, client_id, body)
     entries = _registration_entries(body)
     known = _build_objects(_load_address_space(req._pg())) if entries else {}
 
@@ -1419,10 +1593,9 @@ def h_sub_unregister(req: Handler) -> None:
     the client is working from a stale or wrong view of the address space and silence would let it
     keep doing so.
     """
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
+    sub = _owned_subscription(req, client_id, body)
     entries = _registration_entries(body)
     known = _build_objects(_load_address_space(req._pg())) if entries else {}
 
@@ -1441,10 +1614,9 @@ def h_sub_unregister(req: Handler) -> None:
 
 
 def h_sub_sync(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
+    sub = _owned_subscription(req, client_id, body)
     batches, status = registry.sync(sub, body.get("lastSequenceNumber"))
     detail = None
     if status == 206:
@@ -1460,11 +1632,10 @@ def h_sub_sync(req: Handler) -> None:
 
 
 def h_sub_stream(req: Handler) -> None:
-    req._bearer()
     body = req._body()
     client_id = _require_client_id(body)
-    sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
-    _serve_stream(req, sub, registry.open_stream(sub))
+    sub = _owned_subscription(req, client_id, body)
+    _serve_stream(req, sub, registry.open_stream(sub), req._bearer(), req.caller)
 
 
 ROUTES = {

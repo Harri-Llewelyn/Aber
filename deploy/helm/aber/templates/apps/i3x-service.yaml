@@ -92,6 +92,12 @@ spec:
               value: {{ .Values.i3xService.subscriptionTtlSeconds | quote }}
             - name: I3X_SUBSCRIPTION_QUEUE_LIMIT
               value: {{ .Values.i3xService.subscriptionQueueLimit | quote }}
+            - name: I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL
+              value: {{ .Values.i3xService.maxSubscriptionsPerPrincipal | quote }}
+            - name: I3X_MAX_SUBSCRIPTIONS
+              value: {{ .Values.i3xService.maxSubscriptions | quote }}
+            - name: I3X_MAX_STREAMS
+              value: {{ .Values.i3xService.maxStreams | quote }}
             - name: I3X_SERVER_NAME
               value: {{ .Values.i3xService.serverName | quote }}
             {{/*

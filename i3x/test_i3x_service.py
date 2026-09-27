@@ -18,13 +18,17 @@ controlled queue:
 
 Run: python -m unittest discover -s i3x
 """
+import base64
+import http.client
 import json
 import os
 import re
 import socket
 import sys
 import threading
+import time
 import unittest
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -63,7 +67,7 @@ def stage(registry, element_id="dev1", value=1.0):
 
 class TestSubscriptionScoping(unittest.TestCase):
     def test_subscription_ids_are_unguessable(self):
-        registry, _ = make_registry()
+        registry, _ = make_registry(max_per_principal=50)
         ids = {registry.create("client").subscription_id for _ in range(50)}
         self.assertEqual(len(ids), 50, "subscription ids must not collide")
         self.assertTrue(all(len(i) >= 32 for i in ids), "ids must be long enough not to be guessed")
@@ -86,6 +90,217 @@ class TestSubscriptionScoping(unittest.TestCase):
         self.assertTrue(results[0]["success"])
         self.assertFalse(results[1]["success"])
         self.assertEqual(results[1]["responseDetail"]["status"], 404)
+
+
+def _jwt(**claims):
+    """An unsigned JWT: the data layer is faked here, so only the payload is read."""
+    def part(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode("utf-8")).rstrip(b"=").decode("ascii")
+
+    return "Bearer " + ".".join([part({"alg": "HS256", "typ": "JWT"}), part(claims), "sig"])
+
+
+class TestSubscriptionsAuthenticateEveryRequest(unittest.TestCase):
+    """
+    Every request but GET /info is authenticated before dispatch, and a subscription belongs to the
+    token's `sub` as well as to its clientId.
+
+    The subscription endpoints used to check only that an Authorization header was present, so
+    `not-a-token` could create, sync and delete, and a revoked or expired token kept receiving
+    values. Driven through a real HTTP server with the PostgREST probe faked: `accepted` is the set
+    of tokens the data layer would accept, and removing one from it is a revocation.
+    """
+
+    def setUp(self):
+        now = int(time.time())
+        self.alice = _jwt(sub="a1ice000-0000-4000-8000-000000000001", role="authenticated",
+                          exp=now + 3600)
+        self.bob = _jwt(sub="b0b00000-0000-4000-8000-000000000002", role="authenticated",
+                        exp=now + 3600)
+        self.key_a = "Bearer sb_secret_key_a"
+        self.key_b = "Bearer sb_secret_key_b"
+        self.accepted = {self.alice, self.bob, self.key_a, self.key_b}
+        self.probes = []
+
+        def fake_probe(bearer):
+            self.probes.append(bearer)
+            if bearer not in self.accepted:
+                raise i3x_service.Problem(401, "Unauthorized", "The data layer refused this token.")
+
+        self._saved = (i3x_service.registry, i3x_service._probe, i3x_service.SSE_KEEPALIVE_SECONDS)
+        i3x_service._probe = fake_probe
+        self.registry = SubscriptionRegistry(max_per_principal=3, max_subscriptions=5, max_streams=1)
+        self.registry.on_stream_close = i3x_service._on_registry_stream_close
+        i3x_service.registry = self.registry
+        i3x_service._auth_cache.clear()
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), i3x_service.Handler)
+        self.server.daemon_threads = True
+        threading.Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        ).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        i3x_service.registry, i3x_service._probe, i3x_service.SSE_KEEPALIVE_SECONDS = self._saved
+        i3x_service._auth_cache.clear()
+
+    def call(self, method, path, auth=None, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        headers = {"Content-Type": "application/json"}
+        if auth is not None:
+            headers["Authorization"] = auth
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        try:
+            conn.request(method, "/v1" + path, body=data, headers=headers)
+            resp = conn.getresponse()
+            return resp.status, json.loads(resp.read() or b"{}")
+        finally:
+            conn.close()
+
+    def create(self, auth, client_id="shared-client"):
+        status, payload = self.call("POST", "/subscriptions", auth, {"clientId": client_id})
+        self.assertEqual(status, 200, payload)
+        return payload["result"]["subscriptionId"]
+
+    def test_every_endpoint_but_info_refuses_a_token_the_data_layer_refuses(self):
+        for route in i3x_service.ROUTES:
+            method, path = route.split(" ", 1)
+            with self.subTest(route=route):
+                body = None if method == "GET" else {"clientId": "c", "subscriptionId": "s"}
+                status, payload = self.call(method, path, "not-a-token", body)
+                if route == "GET /info":
+                    self.assertEqual(status, 200)
+                else:
+                    self.assertEqual(status, 401, payload)
+                    self.assertEqual(payload["responseDetail"]["status"], 401)
+        self.assertEqual(self.registry.count(), 0, "a refused caller created a subscription")
+        self.assertEqual(len(self.probes), len(i3x_service.ROUTES) - 1, "GET /info was probed")
+
+    def test_a_missing_header_is_refused_without_asking_the_data_layer(self):
+        status, _ = self.call("POST", "/subscriptions", None, {"clientId": "c"})
+        self.assertEqual(status, 401)
+        self.assertEqual(self.probes, [])
+
+    def test_another_principal_gets_404_on_the_same_client_id(self):
+        sid = self.create(self.alice)
+        ask = {"clientId": "shared-client", "subscriptionId": sid}
+        for path in ("/subscriptions/sync", "/subscriptions/register", "/subscriptions/stream"):
+            with self.subTest(path=path):
+                self.assertEqual(self.call("POST", path, self.bob, ask)[0], 404)
+        listed = {"clientId": "shared-client", "subscriptionIds": [sid]}
+        for path in ("/subscriptions/list", "/subscriptions/delete"):
+            with self.subTest(path=path):
+                status, payload = self.call("POST", path, self.bob, listed)
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["results"][0]["responseDetail"]["status"], 404)
+        self.assertEqual(self.call("POST", "/subscriptions/sync", self.alice, ask)[0], 200,
+                         "the owner lost its subscription to another principal's delete")
+
+    def test_a_credential_with_no_sub_is_its_own_principal(self):
+        sid = self.create(self.key_a)
+        ask = {"clientId": "shared-client", "subscriptionId": sid}
+        self.assertEqual(self.call("POST", "/subscriptions/sync", self.key_b, ask)[0], 404)
+        self.assertEqual(self.call("POST", "/subscriptions/sync", self.key_a, ask)[0], 200)
+        principal = self.registry.get_owned(
+            "shared-client", sid, principal=i3x_service._authenticate(self.key_a).principal
+        ).principal
+        self.assertNotIn("sb_secret", principal, "the principal holds the credential itself")
+
+    def test_the_caps_answer_429_and_name_the_limit(self):
+        for _ in range(3):
+            self.create(self.alice)
+        status, payload = self.call("POST", "/subscriptions", self.alice, {"clientId": "c"})
+        self.assertEqual(status, 429)
+        self.assertIn("I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL", payload["responseDetail"]["detail"])
+
+        for _ in range(2):
+            self.create(self.bob)
+        status, payload = self.call("POST", "/subscriptions", self.bob, {"clientId": "c"})
+        self.assertEqual(status, 429)
+        self.assertIn("5 subscriptions", payload["responseDetail"]["detail"])
+        self.assertIn("I3X_MAX_SUBSCRIPTIONS)", payload["responseDetail"]["detail"])
+
+    def test_the_stream_cap_does_not_count_a_replacement(self):
+        registry, _ = make_registry(max_streams=1)
+        first, second = registry.create("a"), registry.create("b")
+        registry.open_stream(first)
+        registry.open_stream(first)
+        with self.assertRaises(SubscriptionError) as ctx:
+            registry.open_stream(second)
+        self.assertEqual(ctx.exception.status, 429)
+        self.assertIn("I3X_MAX_STREAMS", ctx.exception.detail)
+
+    def test_a_success_is_cached_and_a_refusal_is_not(self):
+        i3x_service._authenticate(self.alice)
+        i3x_service._authenticate(self.alice)
+        self.assertEqual(self.probes, [self.alice])
+
+        for _ in range(2):
+            with self.assertRaises(i3x_service.Problem):
+                i3x_service._authenticate("Bearer revoked")
+        self.assertEqual(self.probes.count("Bearer revoked"), 2)
+
+        # Revoked while cached: a fresh check refuses it and evicts the cached success.
+        self.accepted.discard(self.alice)
+        with self.assertRaises(i3x_service.Problem):
+            i3x_service._authenticate(self.alice, fresh=True)
+        with self.assertRaises(i3x_service.Problem):
+            i3x_service._authenticate(self.alice)
+
+    def test_a_cached_success_never_outlives_the_tokens_exp(self):
+        short = _jwt(sub="s", exp=int(time.time()) + 2)
+        self.accepted.add(short)
+        i3x_service._authenticate(short)
+        valid_until, _ = i3x_service._auth_cache[i3x_service._credential_key(short)]
+        self.assertLessEqual(valid_until - time.monotonic(), 2)
+
+        expired = _jwt(sub="s", exp=int(time.time()) - 1)
+        self.accepted.add(expired)
+        with self.assertRaises(i3x_service.Problem):
+            i3x_service._authenticate(expired)
+        self.assertNotIn(expired, self.probes, "an expired token was sent to the data layer")
+
+    def test_the_principal_is_the_sub_claim(self):
+        self.assertEqual(
+            i3x_service._authenticate(self.alice).principal, "a1ice000-0000-4000-8000-000000000001"
+        )
+
+    def _stream(self, sub, bearer, expires_at):
+        client_end, server_end = socket.socketpair()
+        self.addCleanup(server_end.close)
+        self.addCleanup(client_end.close)
+        writer = _RecordingWriter()
+        req = _StreamRequest(server_end, writer)
+        caller = i3x_service.Caller("p", expires_at)
+        backlog = self.registry.open_stream(sub)
+        thread = threading.Thread(
+            target=i3x_service._serve_stream, args=(req, sub, backlog, bearer, caller), daemon=True
+        )
+        thread.start()
+        return req, writer, thread
+
+    def test_an_open_stream_ends_cleanly_once_its_token_is_revoked(self):
+        i3x_service.SSE_KEEPALIVE_SECONDS = 0.05
+        self.accepted.discard(self.alice)
+        sub = self.registry.create("c", principal="p")
+        req, writer, thread = self._stream(sub, self.alice, None)
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "a revoked token kept its stream")
+        self.assertIn(self.alice, self.probes, "the keepalive tick did not re-check the token")
+        self.assertTrue(writer.text().endswith("0\r\n\r\n"), "the stream was not ended cleanly")
+        self.assertFalse(sub.stream_open)
+        self.assertFalse(req.close_connection)
+
+    def test_an_open_stream_ends_cleanly_at_the_tokens_exp(self):
+        sub = self.registry.create("c", principal="p")
+        req, writer, thread = self._stream(sub, self.alice, time.time() + 0.1)
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "a stream outlived its token's exp")
+        self.assertEqual(self.probes, [], "it ended on a re-check, not on the exp")
+        self.assertTrue(writer.text().endswith("0\r\n\r\n"))
+        self.assertFalse(sub.stream_open)
 
 
 class TestSyncAcknowledgement(unittest.TestCase):
@@ -373,8 +588,10 @@ class TestAStalledStreamStallsOnlyItself(unittest.TestCase):
         self.addCleanup(server_end.close)
         self.addCleanup(client_end.close)
         req = _StreamRequest(server_end, writer)
+        backlog = self.registry.open_stream(sub)
+        caller = i3x_service.Caller("principal-494", None)
         thread = threading.Thread(
-            target=i3x_service._serve_stream, args=(req, sub, self.registry.open_stream(sub)),
+            target=i3x_service._serve_stream, args=(req, sub, backlog, "Bearer t", caller),
             daemon=True,
         )
         thread.start()
