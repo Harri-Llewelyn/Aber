@@ -11,7 +11,15 @@ FROM timescale/timescaledb:2.29.2-pg17
 
 # Alpine community. Installed whether or not physical backup is switched on, so turning it on is a
 # values change and a restart, not a different image.
-RUN apk add --no-cache pgbackrest tini
+#
+# The release scan fails on the base's stale Alpine packages and Go tools, so: upgrade the first;
+# take gosu, which the entrypoint uses to drop root, from Alpine's current build; and remove
+# timescaledb-tune, its init script and timescaledb-parallel-copy, which nothing here runs (the chart
+# mounts its own /docker-entrypoint-initdb.d and passes the server its settings).
+RUN apk upgrade --no-cache \
+ && apk add --no-cache pgbackrest tini gosu \
+ && rm /usr/local/bin/gosu /usr/local/bin/timescaledb-tune /usr/local/bin/timescaledb-parallel-copy \
+       /docker-entrypoint-initdb.d/001_timescaledb_tune.sh
 
 # TINI IS PID 1, NOT THE POSTMASTER. Asynchronous archive-push forks a process that outlives the
 # archive_command that started it; orphaned, it is adopted by PID 1. When the postmaster is PID 1 it
