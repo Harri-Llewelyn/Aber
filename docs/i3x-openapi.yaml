@@ -922,7 +922,9 @@ components:
       properties:
         description: { type: string, nullable: true }
         typeNamespaceUri: { type: string, format: uri }
-        sourceTypeId: { type: string }
+        sourceTypeId:
+          type: string
+          description: "The same as its ObjectType's: a schema's `semantic_id`, else its name; `Device` for a device with no schema."
         quarantined:
           type: boolean
           description: 'Present in the directory but its telemetry is being dropped. Drives `quality: Uncertain`.'

@@ -97,6 +97,7 @@ SYNTHETIC_TYPES = [
         "schema": {"type": "object", "additionalProperties": True},
     },
 ]
+_SYNTHETIC_SOURCE_TYPE_IDS = {t["elementId"]: t["sourceTypeId"] for t in SYNTHETIC_TYPES}
 
 # Relationship types, registered in both directions. `reverseOf` is a MUST-have pair: the conformance
 # suite checks that following a relationship and then its reverse returns you to where you started,
@@ -155,6 +156,14 @@ def namespaces() -> List[dict]:
     ]
 
 
+def schema_source_type_id(row: dict) -> str:
+    """
+    A schema type's `sourceTypeId`, which its devices carry too: the semantic id when there is
+    one, the identifier of the concept the type instantiates, else the name.
+    """
+    return row.get("semantic_id") or row.get("schema_name") or row["id"]
+
+
 def object_type_from_schema(row: dict) -> dict:
     """A `schemas` row is an ObjectType with no translation -- its definition IS JSON Schema."""
     definition = row.get("schema_definition")
@@ -167,10 +176,7 @@ def object_type_from_schema(row: dict) -> dict:
         "elementId": row["id"],
         "displayName": row.get("schema_name") or row["id"],
         "namespaceUri": NS_LOCAL,
-        # The semantic id when there is one -- that is precisely "the identifier of the concept this
-        # type instantiates", which is what sourceTypeId means. Falling back to the name keeps the
-        # field populated for locally-minted schemas.
-        "sourceTypeId": row.get("semantic_id") or row.get("schema_name") or row["id"],
+        "sourceTypeId": schema_source_type_id(row),
         "version": str(row.get("version") or "1"),
         "schema": definition,
         "metadata": {
@@ -190,9 +196,23 @@ def _quality_for_device(device: dict, has_value: bool) -> str:
     return "Good"
 
 
-def device_object(device: dict, effective_cell_id: Optional[str], schema_id: Optional[str]) -> dict:
-    """Project a `devices` row (joined with its resolved location) onto an i3X Object."""
+def device_object(
+    device: dict,
+    effective_cell_id: Optional[str],
+    schema_id: Optional[str],
+    schema: Optional[dict] = None,
+) -> dict:
+    """
+    Project a `devices` row (joined with its resolved location) onto an i3X Object.
+
+    `schema` is the row `schema_id` names, when the caller can see it; the object's `sourceTypeId`
+    is its type's, so it comes from there.
+    """
     element_id = device["sparkplug_id"]
+    if schema:
+        source_type_id = schema_source_type_id(schema)
+    else:
+        source_type_id = schema_id or _SYNTHETIC_SOURCE_TYPE_IDS[UNTYPED_DEVICE_TYPE_ID]
     gateway_sid = device.get("_gateway_sparkplug_id")
     relationships = {}
     parent = effective_cell_id or UNASSIGNED_ELEMENT_ID
@@ -218,7 +238,7 @@ def device_object(device: dict, effective_cell_id: Optional[str], schema_id: Opt
         "metadata": {
             "description": device.get("description"),
             "typeNamespaceUri": NS_LOCAL,
-            "sourceTypeId": device.get("sparkplug_id"),
+            "sourceTypeId": source_type_id,
             "relationships": relationships,
             "quarantined": bool(device.get("is_quarantined")),
         },

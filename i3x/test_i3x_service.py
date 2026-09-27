@@ -789,6 +789,43 @@ class TestAddressSpaceReads(unittest.TestCase):
         self.assertEqual(caught.exception.status, 401)
 
 
+class TestObjectsMatchTheirTypes(unittest.TestCase):
+    """An object says what its ObjectType says: the same `sourceTypeId`, and a conforming value."""
+
+    SEMANTIC = "https://admin-shell.io/idta/example/Mill/1/0"
+
+    def space(self):
+        rows = TestAddressSpaceReads().seeded()
+        rows["schemas"] = [
+            {"id": "s-semantic", "schema_name": "Mill", "semantic_id": self.SEMANTIC,
+             "schema_definition": {"properties": {"Spindle/SPEED": {}}}},
+            {"id": "s-local", "schema_name": "Local Pump", "semantic_id": None,
+             "schema_definition": {"properties": {"Flow": {}}}},
+        ]
+        rows["devices"][0]["schema_id"] = "s-semantic"
+        rows["devices"][1]["schema_id"] = "s-local"
+        rows["gateways"].append(
+            {"id": "g2", "sparkplug_id": "gwy-site", "name": "Site-wide",
+             "location_scope": "site_wide", "status": "ONLINE", "sparkplug_group": "Aber",
+             "last_heartbeat": "2026-08-07T19:14:11.11239+00:00"}
+        )
+        space = i3x_service._read_address_space(ColumnCheckingPostgrest(rows))
+        return space, i3x_service._build_objects(space), i3x_service._build_types(space)
+
+    def test_every_objects_source_type_id_is_its_types(self):
+        _, objects, types = self.space()
+        by_type = {t["elementId"]: t["sourceTypeId"] for t in types}
+        for element_id, obj in objects.items():
+            with self.subTest(element_id=element_id):
+                self.assertEqual(obj["metadata"]["sourceTypeId"], by_type[obj["typeElementId"]])
+
+    def test_a_devices_source_type_id_names_its_schema_not_itself(self):
+        _, objects, _ = self.space()
+        self.assertEqual(objects["dev-explicit"]["metadata"]["sourceTypeId"], self.SEMANTIC)
+        self.assertEqual(objects["dev-inherits"]["metadata"]["sourceTypeId"], "Local Pump")
+        self.assertEqual(objects["dev-nowhere"]["metadata"]["sourceTypeId"], "Device")
+
+
 class TestMirroredConstants(unittest.TestCase):
     """
     `i3x_service.py` mirrors a little of `ingestion.py` rather than importing it.

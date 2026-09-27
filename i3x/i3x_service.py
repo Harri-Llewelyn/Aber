@@ -393,7 +393,7 @@ def _build_objects(space: dict) -> Dict[str, dict]:
             _modelled_metrics(schema.get("schema_definition")) if schema else set(),
         )
         cell_id = (space["locations"].get(device["id"]) or {}).get("effective_cell_id")
-        obj = A.device_object(device, cell_id, device.get("schema_id"))
+        obj = A.device_object(device, cell_id, device.get("schema_id"), schema)
         objects[obj["elementId"]] = obj
         if cell_id:
             children_by_cell.setdefault(cell_id, []).append(obj["elementId"])

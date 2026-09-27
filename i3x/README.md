@@ -105,7 +105,9 @@ Six mappings that are decisions rather than mechanics:
 
 A device's cell is `effective_cell_id` from the `device_locations` view, keyed by `device_id`,
 so an explicit cell and one inherited from the gateway resolve the way the Directory resolves
-them. `effective_area_id` is read with it and not yet projected.
+them. `effective_area_id` is read with it and not yet projected. An object's
+`metadata.sourceTypeId` is its type's: a device's is its schema's `semantic_id`, else the schema's
+name, and `Device` when it has no schema.
 
 **A failed read is an error, never an empty answer.** Any read behind the address space that
 PostgREST refuses answers 502 naming the relation and carrying PostgREST's message. The one
