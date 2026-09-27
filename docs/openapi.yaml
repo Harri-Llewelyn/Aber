@@ -746,19 +746,25 @@ paths:
       tags: [Audit]
       summary: Read the Digital Thread audit log
       description: |
-        **Append-only.** Rows are written exclusively by the `log_digital_thread_event()`
-        trigger on `cells`, `gateways` and `devices`; `INSERT`/`UPDATE`/`DELETE` are revoked
-        from every application role — `service_role` included. Readable by `Administrator`,
-        `Shopfloor_Manager` and `Auditor`.
+        **Append-only.** Rows are written only by `log_digital_thread_event()` and its named
+        siblings: triggers on the audited tables, and the `SECURITY DEFINER` functions behind
+        proposals, backups, service identities and gateway credentials. `INSERT`/`UPDATE`/`DELETE`
+        are revoked from every application role — `service_role` included. The asset lane
+        (`audit_domain = 'asset'`) is readable by `Administrator`, `Shopfloor_Manager` and
+        `Auditor`, the security lane by `Administrator` and `Auditor`.
 
-        `entity_type` only ever holds `cells`, `gateways` or `devices`, and rows key on
-        `entity_id`. To find an entity's history after deleting it, collect the ids first.
+        `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
+        `device_nameplate`, `schemas`, `metric_catalog` and `change_proposals` in the asset lane,
+        and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and `backups` in
+        the security lane. A thread older than their retirement also holds `area_floors`,
+        `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
+        entity's history after deleting it, collect the ids first.
 
         `actor_source` records who made the change (`user` / `ingestion` / `service` /
         `migration`). The trigger refuses to accept `user` from a client-supplied header.
       parameters:
         - { name: entity_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
-        - { name: entity_type, in: query, schema: { type: string }, description: '`eq.devices` | `eq.gateways` | `eq.cells`' }
+        - { name: entity_type, in: query, schema: { type: string }, description: 'e.g. `eq.devices` or `eq.metric_catalog`; any `DigitalThreadEntry.entity_type`' }
         - { name: action, in: query, schema: { type: string }, description: '`eq.INSERT` | `eq.UPDATE` | `eq.DELETE`' }
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
@@ -4109,10 +4115,17 @@ components:
 
     DigitalThreadEntry:
       type: object
-      description: One trigger-written audit event.
+      description: One audit event.
       properties:
         id: { type: integer, readOnly: true }
-        entity_type: { type: string, enum: [cells, gateways, devices] }
+        entity_type:
+          type: string
+          enum: [areas, cells, gateways, devices, device_nameplate, schemas, metric_catalog, change_proposals,
+                 user_roles, service_principals, system_settings, backup_jobs, backups]
+          description: >-
+            The table the event is about: the types the thread records today. A thread older than
+            their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
+            `device_links` rows.
         entity_id: { type: string, format: uuid }
         action: { type: string, enum: [INSERT, UPDATE, DELETE] }
         old_data: { type: object, nullable: true }
