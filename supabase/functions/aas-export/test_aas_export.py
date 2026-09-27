@@ -885,6 +885,36 @@ class TestVisualRepresentation(unittest.TestCase):
     def test_the_model_uploaded(self):
         self.assertIn(self.upload_status, (200, 201), "could not place the test model in Storage")
 
+    def _list_device_folder(self, token=None):
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/storage/v1/object/list/{MODEL_BUCKET}",
+            data=json.dumps({"prefix": DEVICE_ID, "limit": 100}).encode(), method="POST",
+        )
+        req.add_header("apikey", PUBLISHABLE_KEY)
+        req.add_header("Content-Type", "application/json")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as res:
+                return [o.get("name") for o in json.loads(res.read())]
+        except urllib.error.HTTPError:
+            return []
+
+    def test_the_model_is_readable_with_no_session_and_no_key(self):
+        # The AAS contract: an exported File URL resolves for a viewer holding nothing.
+        url = f"{SUPABASE_URL}/storage/v1/object/public/{MODEL_BUCKET}/{self.path}"
+        with urllib.request.urlopen(url, timeout=20) as res:
+            self.assertEqual(res.read(), self.MODEL_BYTES)
+
+    def test_an_anonymous_caller_cannot_list_the_bucket(self):
+        # Keys are <device_uuid>/<file>, so a public listing is a public device inventory
+        # (storage-policies.sql, asset_3d_models_select_privileged).
+        self.assertEqual(self._list_device_folder(), [])
+
+    def test_the_uploader_can_list_the_bucket(self):
+        # The control for the test above: the endpoint answers, so an empty list is the policy.
+        self.assertIn(self.MODEL_NAME, self._list_device_folder(TOKEN))
+
     def test_emits_a_visual_representation_submodel(self):
         shorts = [s["idShort"] for s in self.body["aas"]["submodels"]]
         self.assertIn("VisualRepresentation", shorts)
@@ -1310,12 +1340,12 @@ class TestAssetBundle(unittest.TestCase):
         # A CSV part's rows are its lines less the header; both parts are oldest-first.
         raw_lines = self.zip.read("aasx/files/aber/telemetry-raw.csv").decode().split("\r\n")
         self.assertEqual(raw_lines[0], "time,metric_name,val_double,val_string,val_bool")
-        self.assertEqual(m["telemetry"]["raw"]["rows"], len([l for l in raw_lines[1:] if l]))
+        self.assertEqual(m["telemetry"]["raw"]["rows"], len([line for line in raw_lines[1:] if line]))
         # The hourly header is the rollup's own columns: the first live run of this class found a
         # column the view does not have, and PostgREST fails the whole request for one.
         hourly_lines = self.zip.read("aasx/files/aber/telemetry-1h.csv").decode().split("\r\n")
         self.assertEqual(hourly_lines[0], "bucket,metric_name,avg_double,min_double,max_double,last_double,last_string,last_bool,n_double,n_rows")
-        self.assertEqual(m["telemetry"]["hourly"]["rows"], len([l for l in hourly_lines[1:] if l]))
+        self.assertEqual(m["telemetry"]["hourly"]["rows"], len([line for line in hourly_lines[1:] if line]))
         # The fixture just arrived: nothing has been read from it, so the fixture also proves the
         # two standing exclusions are stated on an otherwise empty bundle.
         self.assertTrue(any("never read back" in s for s in m["not_included"]))
@@ -1359,9 +1389,12 @@ if __name__ == "__main__":
         print("[test_aas_export] jsonschema not installed: official-schema validation skipped")
     # Teardown AFTER the report, so a failing run still leaves its console output intact -- and
     # only when this run created the subject, or the AAS_TEST_DEVICE escape hatch would delete
-    # somebody's real asset.
+    # somebody's real asset. `exit=False` keeps the teardown reachable, so the exit status is
+    # set here from the result; the runner reads nothing else.
+    result = None
     try:
-        unittest.main(verbosity=2, exit=False)
+        result = unittest.main(verbosity=2, exit=False).result
     finally:
         if LIVE and PROVISION_FIXTURE:
             aas_fixture.teardown(SUPABASE_URL, TOKEN, PUBLISHABLE_KEY)
+    sys.exit(0 if result is not None and result.wasSuccessful() else 1)

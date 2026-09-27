@@ -7,7 +7,7 @@
  * UNIQUE(name).
  */
 
-import { METRIC_GROUP_SEPARATOR, composeMetricName } from './metricGroup'
+import { METRIC_GROUP_SEPARATOR } from './metricGroup'
 import { STANDARDS } from './standards'
 
 const VOCABULARY_KINDS = {

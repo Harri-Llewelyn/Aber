@@ -1,26 +1,11 @@
--- =============================================================================================
--- Storage footprint: what the historian is spending disk on, and how far back it goes.
---
--- Applied on every boot by the chart's maintenance hook Job.
--- Runs after aggregates.sql (it reports on the rollups) and before roles.sql (which grants on the
--- view); run first, the view creates successfully and fails in a dashboard panel instead.
---
--- A view rather than a Grafana query: `hypertable_detailed_size()` takes one hypertable and a
--- continuous aggregate must be resolved to its materialisation hypertable first;
--- `hypertable_compression_stats()` raises on a hypertable with no compression policy, which is a
--- supported configuration; and postgres_fdw maps relations, not function calls.
---
--- It reports bytes and horizons, never readings, which is what makes it safe to expose to a
--- dashboard role that may not read the historian's contents.
--- =============================================================================================
-
+-- The storage footprint: bytes and chunk horizons per relation, never readings. Applied after
+-- aggregates.sql (it reports on the rollups) and before roles.sql (which grants on the view). A view
+-- rather than a Grafana query because postgres_fdw maps relations, not function calls, and the size
+-- functions need a hypertable resolved first. Reasoning: timescaledb/README.md.
 \set ON_ERROR_STOP on
 
--- ---------------------------------------------------------------------------------------------
--- 1. The collector
--- ---------------------------------------------------------------------------------------------
--- SECURITY DEFINER, so neither reader role has to be widened to the hypertables; it returns only
--- aggregate byte counts. STABLE: it reads catalogs and writes nothing.
+-- SECURITY DEFINER so neither reader role is widened to the hypertables; returns byte counts only.
+-- STABLE: reads catalogs, writes nothing.
 CREATE OR REPLACE FUNCTION public.storage_footprint_rows()
 RETURNS TABLE (
     tier               text,
@@ -41,16 +26,12 @@ AS $fn$
 DECLARE
     spec     record;
     v_size   record;
-    -- Two scalars rather than a second `record`: a RECORD variable cannot be reset with `:= NULL`, so
-    -- an exception handler would leave the previous hypertable's figures in place.
+    -- Scalars rather than a second record: a RECORD cannot be reset to NULL, so a handler would leave
+    -- the previous hypertable's figures in place.
     v_before bigint;
     v_after  bigint;
     v_toast  bigint;
 BEGIN
-    -- -----------------------------------------------------------------------------------------
-    -- Hypertables: raw telemetry, and each rollup through its materialisation hypertable, resolved
-    -- through timescaledb_information.continuous_aggregates rather than by guessing the name.
-    -- -----------------------------------------------------------------------------------------
     FOR spec IN
         SELECT
             'raw'::text                       AS tier,
@@ -70,10 +51,9 @@ BEGIN
           FROM timescaledb_information.continuous_aggregates c
          WHERE c.view_schema = 'public'
     LOOP
-        -- Sizes. Wrapped because a hypertable can be dropped between the catalog read above and
-        -- this call -- unlikely, but the failure mode is a dashboard panel erroring rather than
-        -- one row being absent, and the second is plainly better.
         BEGIN
+            -- Wrapped: a hypertable dropped between the catalog read and this call should cost one row, not
+            -- the panel.
             SELECT s.table_bytes, s.index_bytes, s.toast_bytes, s.total_bytes
               INTO v_size
               FROM hypertable_detailed_size(spec.target) s;
@@ -81,11 +61,11 @@ BEGIN
             CONTINUE;
         END;
 
-        -- Compression: the call that raises on an uncompressed hypertable. Both columns stay NULL when
-        -- there is no policy; "not compressed" and "compressed to zero bytes" must not render the same.
         v_before := NULL;
         v_after  := NULL;
         BEGIN
+            -- Raises on a hypertable with no compression policy; both columns stay NULL, so 'not compressed'
+            -- and 'compressed to zero' do not render alike.
             SELECT sum(cs.before_compression_total_bytes)::bigint,
                    sum(cs.after_compression_total_bytes)::bigint
               INTO v_before, v_after
@@ -104,9 +84,7 @@ BEGIN
         uncompressed_bytes := v_before;
         compressed_bytes   := v_after;
 
-        -- The lifecycle half: `range_start` / `range_end` are chunk boundaries in the catalog, a
-        -- metadata read, where `min(time)` would scan the hypertable. It reports the span the chunks
-        -- cover, a slight overstatement of the span the data covers.
+        -- Chunk boundaries from the catalog, a metadata read; min(time) would scan the hypertable.
         SELECT count(*)::bigint, min(ch.range_start), max(ch.range_end)
           INTO chunks, oldest_data, newest_data
           FROM timescaledb_information.chunks ch
@@ -115,12 +93,8 @@ BEGIN
         RETURN NEXT;
     END LOOP;
 
-    -- -----------------------------------------------------------------------------------------
-    -- Plain tables, enumerated by catalog rather than named, so a table added later appears here
-    -- without anyone remembering: a size report that misses a table is wrong, where roles.sql's
-    -- allow-list is the opposite choice for the opposite reason.
-    -- -----------------------------------------------------------------------------------------
     FOR spec IN
+        -- Plain tables enumerated by catalog rather than named: a size report that misses a table is wrong.
         SELECT c.oid::regclass AS target, c.relname::text AS label
           FROM pg_class c
           JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -133,8 +107,7 @@ BEGIN
                )
          ORDER BY c.relname
     LOOP
-        -- Split to match hypertable_detailed_size()'s semantics: `pg_table_size()` includes TOAST and
-        -- `table_bytes` does not, so subtracting TOAST out makes the two tiers add up the same way.
+        -- TOAST split out so both tiers add up the way hypertable_detailed_size() does.
         SELECT coalesce(pg_total_relation_size(c.reltoastrelid), 0)
           INTO v_toast
           FROM pg_class c WHERE c.oid = spec.target;
@@ -160,11 +133,10 @@ COMMENT ON FUNCTION public.storage_footprint_rows() IS
   'the historian. SECURITY DEFINER so a dashboard role that may not read telemetry can still be '
   'told how large it is; returns no observation, asset id or metric name.';
 
--- ---------------------------------------------------------------------------------------------
--- 2. The relation postgres_fdw maps and Grafana queries
--- ---------------------------------------------------------------------------------------------
--- `collected_at` is stamped here so a panel can tell a stalled maintenance job from a cached
--- foreign scan.
+-- Creation grants EXECUTE to PUBLIC; revoked on every boot, and roles.sql grants it to the readers.
+REVOKE ALL ON FUNCTION public.storage_footprint_rows() FROM PUBLIC;
+
+-- collected_at is stamped here so a panel can tell a stalled job from a cached foreign scan.
 DROP VIEW IF EXISTS public.storage_footprint;
 CREATE VIEW public.storage_footprint AS
 SELECT
@@ -188,11 +160,8 @@ COMMENT ON VIEW public.storage_footprint IS
   'time span the chunks cover. Read directly by Grafana and mapped into Supabase over '
   'postgres_fdw as timescale.storage_footprint (archived migration 0027).';
 
--- ---------------------------------------------------------------------------------------------
--- 3. Self-check
--- ---------------------------------------------------------------------------------------------
--- The view resolves lazily, so selecting from it once here finds a broken column reference now
--- rather than in a panel.
+-- The view resolves lazily; selecting from it once here finds a broken column now rather than in
+-- a panel.
 DO $selfcheck$
 DECLARE
     v_rows integer;

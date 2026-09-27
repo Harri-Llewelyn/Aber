@@ -103,6 +103,19 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(document.querySelectorAll('.shopfloor-map-card')).toHaveLength(1)
   })
 
+  it('names the enterprise from the group the site was installed with, before any gateway enrols', async () => {
+    // The group is named at install (ingestion.sparkplugGroup), so a fresh stack knows it; a
+    // gateway enrolled under another group does not replace it.
+    api.get.mockImplementation(routeGet({
+      settings: [{ key: 'sparkplug.group_id', value: 'Broughton-Plant' }],
+      gateways: [{ ...gateway, sparkplug_group: 'Elsewhere' }],
+    }))
+    await renderSiteMap()
+    const hierarchy = screen.getByRole('group', { name: 'Hierarchy' })
+    await waitFor(() => expect(within(hierarchy).getByText('Broughton-Plant')).toBeInTheDocument())
+    expect(within(hierarchy).queryByText(/Elsewhere/)).toBeNull()
+  })
+
   it('names the site once the setting holds a name', async () => {
     api.get.mockImplementation(routeGet({ settings: [{ key: 'site.name', value: 'Broughton' }] }))
     await renderSiteMap()

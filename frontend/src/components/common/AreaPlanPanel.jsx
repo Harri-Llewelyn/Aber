@@ -94,7 +94,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
           Floor plan
           <HelpTip
             label="About the plan"
-            text="An area can carry one SVG plan, which the Site Map draws with the area's cells pinned on it; without one it shows a plain outline. The SVG needs a viewBox (or a width and height) so places on it stay put, and a file a browser cannot draw is refused. A cell is placed on the plan from the Cells page."
+            text="One SVG plan per area, drawn on the Site Map with its cells pinned. The SVG needs a viewBox or a width and height so pins stay put. Cells are placed on it from the Cells page."
             size={12}
           />
         </span>

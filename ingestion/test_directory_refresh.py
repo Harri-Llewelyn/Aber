@@ -131,20 +131,25 @@ class FakeSupabase:
 
 class RefreshTestCase(unittest.TestCase):
 
+    CACHES = ("_device_cache", "_gateway_cache", "_schema_cache")
+
     def setUp(self):
-        ingestion._device_cache.clear()
-        ingestion._gateway_cache.clear()
+        for name in self.CACHES:
+            getattr(ingestion, name).clear()
+        self._sizes = {name: getattr(ingestion, name).maxsize for name in self.CACHES}
         self._real = {
             "supabase_client": ingestion.supabase_client,
             "DIRECTORY_PAGE_SIZE": ingestion.DIRECTORY_PAGE_SIZE,
             "DIRECTORY_REFRESH_SECONDS": ingestion.DIRECTORY_REFRESH_SECONDS,
+            "MAX_ENTITIES_PER_CACHE": ingestion.MAX_ENTITIES_PER_CACHE,
         }
 
     def tearDown(self):
         for name, value in self._real.items():
             setattr(ingestion, name, value)
-        ingestion._device_cache.clear()
-        ingestion._gateway_cache.clear()
+        for name in self.CACHES:
+            getattr(ingestion, name).clear()
+            getattr(ingestion, name).resize(self._sizes[name])
 
     def use(self, fake):
         ingestion.supabase_client = fake
@@ -201,6 +206,42 @@ class TestRequestCount(RefreshTestCase):
         before = len(fake.calls)
         self.assertIsNone(ingestion.resolve_device("dev" + "f" * 21))
         self.assertGreater(len(fake.calls), before)
+
+
+class TestTheCacheHoldsTheFleet(RefreshTestCase):
+    """
+    #395: with a fixed capacity of 1000, a fleet of 1,200 devices evicted every entry inside its
+    TTL, and every message paid a PostgREST round trip (the load harness measured 117 requests a
+    second at 100 messages a second). The pass now sizes each cache to the directory first.
+    """
+
+    def test_a_fleet_larger_than_the_headroom_fits_without_eviction(self):
+        ingestion.MAX_ENTITIES_PER_CACHE = 50
+        rows = [device(n, reported_identity="serial-%d" % n) for n in range(300)]
+        fake = self.use(FakeSupabase(rows))
+        before = ingestion._device_cache.evictions
+        ingestion.refresh_directory_caches()
+        self.assertEqual(ingestion._device_cache.maxsize, 600 + 50,
+                         "two keys a device (sparkplug_id and reported_identity) plus the headroom")
+        self.assertEqual(ingestion._device_cache.evictions, before)
+        calls = len(fake.calls)
+        for n in range(300):
+            self.assertEqual(ingestion.resolve_device(device(n)["sparkplug_id"])["id"], device(n)["id"])
+        self.assertEqual(len(fake.calls), calls, "every device resolved from the cache")
+
+    def test_the_gateway_and_schema_caches_follow_the_directory(self):
+        ingestion.MAX_ENTITIES_PER_CACHE = 10
+        self.use(FakeSupabase([device(n) for n in range(120)], [gateway(n) for n in range(30)]))
+        ingestion.refresh_directory_caches()
+        self.assertEqual(ingestion._gateway_cache.maxsize, 30 + 10)
+        self.assertEqual(ingestion._schema_cache.maxsize, 120 + 10)
+
+    def test_the_headroom_is_the_floor_for_an_empty_directory(self):
+        ingestion.MAX_ENTITIES_PER_CACHE = 25
+        self.use(FakeSupabase())
+        ingestion.refresh_directory_caches()
+        for name in self.CACHES:
+            self.assertEqual(getattr(ingestion, name).maxsize, 25)
 
 
 class TestKeysAndSources(RefreshTestCase):

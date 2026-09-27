@@ -175,6 +175,9 @@ module.exports = {
     // HTTP endpoints, and adding one should be a deliberate act with its own auth decision.
     functionGlobalContext: {},
     logging: { console: { level: 'info', metrics: false, audit: false } },
+    // OFF. Update notifications send a daily ping to telemetry.nodered.org, and while the choice
+    // is unset the editor opens on a dialog asking for it. The admin can opt in from User Settings.
+    telemetry: { enabled: false, updateNotification: false },
     editorTheme: {
         page: { title: 'Aber Gateway' },
         header: { title: ${JSON.stringify(`Aber — ${GATEWAY_NAME}`)} }

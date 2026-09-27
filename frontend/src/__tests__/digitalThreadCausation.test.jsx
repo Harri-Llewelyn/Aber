@@ -2,12 +2,13 @@
  * Digital Thread: reading one operator action back as one act. `causation_id` is `txid_current()`,
  * so every row a transaction writes shares it. This suite pins two claims about what the page must
  * not say: a NULL causation is not a group (legacy rows carry NULL, and matching NULL to NULL would
- * fabricate a causal link), and absence asserts nothing (the sibling list is drawn from the
- * fetched, filtered set, so it is a lower bound).
+ * fabricate a causal link), and the sibling list is drawn from the fetched, filtered set, so on its
+ * own it is a lower bound.
  *
- * Being a lower bound is why the section renders with no siblings rather than disappearing, and
- * why "Show whole transaction" exists: searching the id makes the loaded set the act, and the
- * hedge in the hint is dropped exactly when it stops being true.
+ * `transaction_rows` (0006) is what turns the bound into an answer: the server counts the
+ * transaction over the whole table, so the drawer can say a single-row act wrote nothing else, that
+ * every row is loaded, or how many are missing and offer "Show whole transaction" for exactly
+ * those. Without the count the section hedges, as it did before 0006.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
@@ -28,46 +29,48 @@ const DEVICES = [
 ]
 
 /**
- * A schema rebinding across two devices, plus one unrelated edit a second later. The unrelated
- * event is the point: without it, grouping by entity or by timestamp would still pass.
+ * A schema rebinding across three devices, plus one unrelated edit a second later. The unrelated
+ * event is the point: without it, grouping by entity or by timestamp would still pass. The third
+ * device has since been deleted -- it is in no lookup -- so its row is hidden until deleted
+ * entities are shown. That is the shape a filter or a page boundary leaves: two of the act's three
+ * rows on the page, and the count saying three.
  */
 const TXN = 4471
+const rebind = (event_id, entity_id, name) => ({
+  event_id, entity_type: 'devices', entity_id, event_type: 'UPDATE',
+  timestamp: '2026-08-21T09:00:00Z', causation_id: TXN, transaction_rows: 3,
+  description: `Action UPDATE on devices [${entity_id}]`,
+  changed_by: 'user-1', actor_source: 'user',
+  old_data: { name, schema_id: 'schema-old' },
+  new_data: { name, schema_id: 'schema-new' }
+})
 const EVENTS = [
-  {
-    event_id: 1, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
-    timestamp: '2026-08-21T09:00:00Z', causation_id: TXN,
-    description: 'Action UPDATE on devices [dev-1]',
-    changed_by: 'user-1', actor_source: 'user',
-    old_data: { name: 'Simulated_CNC_01', schema_id: 'schema-old' },
-    new_data: { name: 'Simulated_CNC_01', schema_id: 'schema-new' }
-  },
-  {
-    event_id: 2, entity_type: 'devices', entity_id: 'dev-2', event_type: 'UPDATE',
-    timestamp: '2026-08-21T09:00:00Z', causation_id: TXN,
-    description: 'Action UPDATE on devices [dev-2]',
-    changed_by: 'user-1', actor_source: 'user',
-    old_data: { name: 'Press_02', schema_id: 'schema-old' },
-    new_data: { name: 'Press_02', schema_id: 'schema-new' }
-  },
+  rebind(1, 'dev-1', 'Simulated_CNC_01'),
+  rebind(2, 'dev-2', 'Press_02'),
   {
     event_id: 3, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
-    timestamp: '2026-08-21T09:00:01Z', causation_id: 4472,
+    timestamp: '2026-08-21T09:00:01Z', causation_id: 4472, transaction_rows: 1,
     description: 'Action UPDATE on devices [dev-1]',
     changed_by: null, actor_source: 'ingestion',
     old_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' },
     new_data: { name: 'Simulated_CNC_01', status: 'ONLINE' }
-  }
+  },
+  rebind(4, 'dev-3', 'Robot_03')
 ]
+/** The same rows with no count, as a server without 0006 returns them. */
+const UNCOUNTED = EVENTS.map(e => { const c = { ...e }; delete c.transaction_rows; return c })
+
+const serve = (events) => (path) => {
+  if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(events)
+  if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+  if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+  if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+  return Promise.resolve([])
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
-  api.get.mockImplementation((path) => {
-    if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
-    if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
-    if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
-    if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
-    return Promise.resolve([])
-  })
+  api.get.mockImplementation(serve(EVENTS))
 })
 
 const show = async () => {
@@ -80,14 +83,22 @@ const selectEvent = async (pattern) => {
   await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
 }
 
+/** Steps the drawer to the ingestion status flip: its own transaction, one row. */
+const stepToSingleRowAct = () => {
+  const nav = document.querySelector('.dt-drawer-nav-btns')
+  fireEvent.click(within(nav).getByRole('button', { name: /Next/ }))
+}
+
 const group = () => document.querySelector('.dt-causation')
+const control = () => within(group()).queryByRole('button', { name: /Show whole transaction/ })
+const chip = () => group().querySelector('.section-count')
 
 
 // The derivation
 describe('causationSiblings', () => {
   it('returns the other rows written by the same transaction', () => {
     const siblings = causationSiblings(EVENTS[0], EVENTS)
-    expect(siblings.map(s => s.event_id)).toEqual([2])
+    expect(siblings.map(s => s.event_id)).toEqual([2, 4])
   })
 
   it('excludes the event itself', () => {
@@ -141,15 +152,32 @@ describe('the Same transaction control', () => {
     expect(within(group()).getByText('Press_02')).toBeInTheDocument()
   })
 
-  it('states that it is limited to what is loaded and filtered', async () => {
-    /* The caveat is on screen rather than in a tooltip: the list is a lower bound, and a reader who
-       takes it for a count would conclude a transaction did less than it did. */
+  it('says how many of the rows the act wrote are not loaded, and offers the control', async () => {
+    /* Two of the act's three rows are on the page. Before 0006 the page could only say "one other
+       change, limited to what is loaded"; the count is what lets it say a row is missing. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
     await waitFor(() => expect(group()).toBeTruthy())
-    expect(within(group()).getByText(/Limited to the events currently loaded and filtered/))
-      .toBeInTheDocument()
+    expect(within(group()).getByText(
+      /2 other changes were written by this act\. One of them is not loaded: outside the current filters/
+    )).toBeInTheDocument()
+    expect(control()).toBeInTheDocument()
+    expect(chip()).toHaveTextContent('2')
+  })
+
+  it('says a single-row act wrote nothing else, and offers no control', async () => {
+    /* The case a user asked to go away: the button put the id in the search box and loaded the
+       same single row again. Only the count can tell this act from one whose siblings a filter
+       hides, which is why the button could not simply be hidden when the list was empty. */
+    await show()
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+    stepToSingleRowAct()
+
+    await waitFor(() =>
+      expect(within(group()).getByText('Nothing else was written by this act.')).toBeInTheDocument())
+    expect(control()).toBeNull()
+    expect(chip()).toHaveTextContent('0')
   })
 
   it('steps the drawer across to the sibling, which is a DIFFERENT entity', async () => {
@@ -165,28 +193,6 @@ describe('the Same transaction control', () => {
       expect(screen.getByRole('button', { name: /Copy entity id dev-2/ })).toBeInTheDocument())
   })
 
-  it('is still shown when no sibling is loaded, because that is not the same as none existing', async () => {
-    /* Not "0 related changes", and not hidden either. The set is filtered, so the page cannot tell
-       a single-row act from one whose siblings are outside the filter -- which is exactly when the
-       control that resolves the difference must be reachable. Hiding it left a reader with a
-       transaction id, a wrong impression and nothing to click. */
-    await show()
-    await selectEvent(/UPDATE on Simulated_CNC_01/)
-
-    // Event 3 is the ingestion status flip -- its own transaction, no loaded siblings.
-    const nav = document.querySelector('.dt-drawer-nav-btns')
-    fireEvent.click(within(nav).getByRole('button', { name: /Next/ }))
-
-    await waitFor(() => expect(document.querySelector('.dt-causation')).toBeTruthy())
-    expect(within(group()).getByText(/not the same as there being nothing else/))
-      .toBeInTheDocument()
-    expect(within(group()).getByRole('button', { name: /Show whole transaction/ }))
-      .toBeInTheDocument()
-    /* And no count: zero LOADED siblings is an unknown, not a total, so a "0" beside the heading
-       would assert the thing the hint is refusing to. */
-    expect(group().querySelector('.section-count')).toBeNull()
-  })
-
   it('shows the transaction id in the drawer metadata', async () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
@@ -196,15 +202,12 @@ describe('the Same transaction control', () => {
         .toBeInTheDocument())
   })
 
-  it('searches the transaction id, so the sibling list stops being a lower bound', async () => {
-    /* The list reads the LOADED events, so it can only ever report the siblings that happened to
-       be on the page. Searching the id makes the loaded set the transaction, which is what turns
-       the count from a floor into the answer. */
+  it('searches the transaction id, so the loaded set becomes the act', async () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
     await waitFor(() => expect(group()).toBeTruthy())
 
-    fireEvent.click(within(group()).getByRole('button', { name: /Show whole transaction/ }))
+    fireEvent.click(control())
 
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value)
@@ -227,25 +230,82 @@ describe('the Same transaction control', () => {
     await selectEvent(/UPDATE on Simulated_CNC_01/)
     await waitFor(() => expect(group()).toBeTruthy())
 
-    fireEvent.click(within(group()).getByRole('button', { name: /Show whole transaction/ }))
+    fireEvent.click(control())
 
     await waitFor(() =>
       expect(screen.getByTitle(/Show only events against one kind of asset/).value).toBe(''))
   })
 
-  it('stops hedging once the search IS the transaction', async () => {
-    /* The caveat is true while the page holds a filtered subset and false once it holds the act.
+  it('shows deleted entities, whose rows the count includes', async () => {
+    /* A delete's own row is about an entity no live table holds, so the default view hides it. The
+       count includes it, and a control that loaded "everything" and left it hidden would report a
+       row missing and offer nothing that reaches it. */
+    await show()
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+    await waitFor(() => expect(group()).toBeTruthy())
+    const toggle = () => screen.getByRole('button', { name: /Show deleted entities \(1\)/ })
+    expect(toggle()).not.toHaveClass('btn-primary')
+
+    fireEvent.click(control())
+
+    await waitFor(() => expect(toggle()).toHaveClass('btn-primary'))
+  })
+
+  it('says the list is complete once every row the act wrote is loaded', async () => {
+    /* The hedge is true while the page holds part of the act and false once it holds all of it.
        Repeating it there would teach a reader to discount a number that is exact. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
     await waitFor(() => expect(group()).toBeTruthy())
 
-    fireEvent.click(within(group()).getByRole('button', { name: /Show whole transaction/ }))
+    fireEvent.click(control())
 
     await waitFor(() =>
-      expect(within(group()).queryByText(/Limited to the events currently loaded/)).toBeNull())
-    expect(within(group()).queryByRole('button', { name: /Show whole transaction/ })).toBeNull()
-    expect(within(group()).getByText(/this is all of them/)).toBeInTheDocument()
+      expect(within(group()).getByText(/2 other changes written by this act, and this is all of them/))
+        .toBeInTheDocument())
+    expect(control()).toBeNull()
+    expect(within(group()).getByText('Robot_03')).toBeInTheDocument()
+    expect(group().querySelectorAll('.dt-causation-item')).toHaveLength(2)
+    expect(chip()).toHaveTextContent('2')
+  })
+
+  it('points at the next page when the search is the transaction and rows are still missing', async () => {
+    /* A transaction longer than a page. The search is already this transaction, so the control
+       would do what has been done; what is missing is further down the thread. */
+    api.get.mockImplementation(serve(EVENTS.filter(e => e.event_id !== 4)))
+    await show()
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+    await waitFor(() => expect(group()).toBeTruthy())
+
+    fireEvent.click(control())
+
+    await waitFor(() =>
+      expect(within(group()).getByText(/One of them is not loaded: on a page not yet fetched\./))
+        .toBeInTheDocument())
+    expect(control()).toBeNull()
+  })
+
+  it('hedges when the server did not say how many rows the act wrote', async () => {
+    /* A database without 0006. The list is a lower bound again, and the section says so rather
+       than reporting a count it does not have; the control is offered because nothing else can
+       tell a single-row act from a filtered group. */
+    api.get.mockImplementation(serve(UNCOUNTED))
+    await show()
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+
+    await waitFor(() => expect(group()).toBeTruthy())
+    expect(within(group()).getByText(/Limited to the events currently loaded and filtered/))
+      .toBeInTheDocument()
+    expect(control()).toBeInTheDocument()
+    expect(chip()).toHaveTextContent('1')
+
+    stepToSingleRowAct()
+    await waitFor(() =>
+      expect(within(group()).getByText(/not the same as there being nothing else/)).toBeInTheDocument())
+    expect(control()).toBeInTheDocument()
+    // And no chip: zero LOADED siblings is an unknown, not a total, and a "0" beside a hint that
+    // says so would assert the thing the hint is refusing to.
+    expect(chip()).toBeNull()
   })
 
   it('offers the siblings as real buttons, so the list is keyboard reachable', async () => {

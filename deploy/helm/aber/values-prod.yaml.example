@@ -205,11 +205,10 @@ ingestion:
   # REQUIRED -- the render fails while it is empty. The Sparkplug primary host application whose
   # `spBv1.0/STATE/<id>` every gateway on site watches to learn whether its consumer is there.
   primaryHostId: ""
-  # The Sparkplug group: the second segment of every topic this site publishes. It defaults to
-  # `Aber`, the platform's own name, which is a poor thing for a plant's data to live under.
-  # Name the site's own here, BEFORE the first install: db-init refuses a later boot whose value
-  # differs, because changing it re-addresses every gateway and all existing history.
-  sparkplugGroup: Aber
+  # REQUIRED -- the render fails while it is empty. The Sparkplug group: the second segment of every
+  # topic this site publishes. Name the site's own BEFORE the first install: db-init refuses a later
+  # boot whose value differs, because changing it re-addresses every gateway and all existing history.
+  sparkplugGroup: ""
 
 # publicUrls are derived from global.publicBaseDomain unless set. Override only when a service
 # lives somewhere that does not follow the pattern.

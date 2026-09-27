@@ -1,12 +1,14 @@
 import React from 'react'
-import { ashrae223Sections, conceptTooltip } from '../../utils/ashrae223'
+import { ashrae223Sections, conceptTooltip, isMetricConcept } from '../../utils/ashrae223'
 import { STANDARDS } from '../../utils/standards'
 
 /**
  * The ASHRAE 223P tab of the Standard Vocabulary Reference card. 223P names a thing (`Fan`,
  * `Damper`, `Sensor`), not a reading, so a selected concept names what the point is attached to and
  * the operator still says what is measured and in what type. In use is decided on semantic id
- * alone: 223P's names are ordinary English words that collide with local naming.
+ * alone: 223P's names are ordinary English words that collide with local naming. Relations are
+ * listed, since they are part of the standard, but carry no Use: the Metrics page's Concept picker
+ * does not offer them either, and the two follow the one rule in `isMetricConcept()`.
  */
 export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
   const sections = ashrae223Sections(vocabulary).map(s => ({
@@ -55,6 +57,7 @@ export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
     isUsed: item => !!item.concept.semantic_id && semanticIds.has(item.concept.semantic_id),
     tooltipFor: item => conceptTooltip(item.concept),
     metaFor: item => (item.concept.concept_kind === 'Class' ? '' : item.concept.concept_kind),
+    isActionable: item => isMetricConcept(item.concept),
     onUse: onUseConcept ? (item => onUseConcept(item.concept)) : undefined
   }
 }

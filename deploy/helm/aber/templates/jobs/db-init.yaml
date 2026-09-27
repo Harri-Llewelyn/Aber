@@ -145,6 +145,9 @@ spec:
               value: {{ include "aber.docsUrl" . | quote }}
             - name: SUPABASE_PUBLIC_URL
               value: {{ include "aber.supabaseUrl" . | quote }}
+            # The image each Directory row's workload runs, recorded by 0007 on every boot.
+            - name: DIRECTORY_IMAGES
+              value: {{ include "aber.directoryImages" . | quote }}
             - name: NODERED_OAUTH_CALLBACK_URL
               value: {{ printf "%s/auth/strategy/callback" (include "aber.noderedUrl" .) | quote }}
             {{/*
@@ -290,6 +293,7 @@ spec:
                     -v gitea_public_url="$GITEA_PUBLIC_URL" \
                     -v docs_public_url="$DOCS_PUBLIC_URL" \
                     -v supabase_public_url="$SUPABASE_PUBLIC_URL" \
+                    -v directory_images="$DIRECTORY_IMAGES" \
                     -v nodered_oauth_client_secret="$NODERED_OAUTH_CLIENT_SECRET" \
                     -v nodered_webhook_jwt_secret="$NODERED_WEBHOOK_JWT_SECRET" \
                     -v nodered_redirect_uri="$NODERED_OAUTH_CALLBACK_URL" \

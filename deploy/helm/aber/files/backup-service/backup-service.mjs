@@ -1,50 +1,11 @@
 #!/usr/bin/env node
-/**
- * The backup service: a queued backup_jobs row becomes a tier 1 backup on the backup volume.
- *
- * WHY IT EXISTS. request_backup() (archived migration 0101) is a row, and nothing else in the stack can
- * turn a row into a backup: pg_dump against both databases, a tar of the storage objects and a
- * consistent copy of the forge's volume need a process beside the volumes holding a superuser
- * credential, which is neither an edge function nor a browser. This service is that process and
- * does that one thing.
- *
- * WHAT IT IS NOT. It serves nothing but /healthz and hands no bytes to anybody: a dump holds
- * auth.users, every OAuth secret's hash, the whole digital_thread and the historian's password,
- * and "any Administrator session" is a wider audience than "a shell on the host". Restore is a
- * runbook (supabase/README.md, Backup and Recovery) run from that shell against the volume.
- *
- * HOW IT TALKS TO THE DATABASE. Through psql, as supabase_admin, the session pg_dump needs anyway
- * (the event triggers are its; a dump taken as postgres restores as nobody). The gates it calls
- * refuse every PostgREST role and any session that is not a superuser's, so holding this
- * credential is the whole of the authority, and there is no second one to keep in step.
- *
- * THE SCHEDULE IS THIS PROCESS'S. At start it registers enqueue_scheduled_backup() with pg_cron
- * on BACKUP_SCHEDULE, or removes the job when the schedule is empty, so a stack with no service
- * queues nothing nobody will take. Retention is applied here after every run: a scheduled backup
- * older than BACKUP_RETENTION_DAYS is deleted and forgotten; a requested one is pinned until an
- * Administrator releases it.
- *
- * A RUNNING job that no process is running is failed before each claim, not only at start. The
- * service is one replica, so such a row is a previous process's, or it came back in a restore
- * from a backup taken while that job ran; left standing it would refuse every new backup.
- *
- * THE FILES. One directory per backup, named by the UTC stamp, holding what backup-databases.sh
- * writes plus the keys and the volumes: supabase-db-<stamp>.sql.gz, timescaledb-<stamp>.sql.gz,
- * vault-key-<stamp>.txt (pgsodium's root key, read through the dump's own session; Vault is
- * ciphertext under it), storage-objects-<stamp>.tar.gz, forge-<stamp>.tar.gz,
- * broker-<stamp>.tar.gz (the broker's data volume, which is the Dynamic Security document),
- * ca-<stamp>.tar.gz (the internal CA's key pair, read from its Secret through the API),
- * manifest-<stamp>.txt (the text manifest restore-databases.sh reads) and manifest.json
- * (digests). Written under .partial-<stamp> and renamed on success, so a directory named by a
- * stamp is a complete backup or absent.
- *
- * THE FORGE'S SQLITE DATABASE is copied with sqlite3's online backup, which is consistent while
- * Gitea writes, and falls back to a raw copy of the db, -wal and -shm files followed by a
- * checkpoint and an integrity check on the copy. The method used is in manifest.json.
- *
- * The chart projects this file through a ConfigMap over an image built from the database's own
- * (backup-service/Dockerfile), so pg_dump is at least the server's version.
- */
+// The backup service: a queued backup_jobs row becomes a tier 1 backup on the backup volume. It is the
+// one process beside the volumes holding a superuser credential, so it can pg_dump both databases,
+// tar the storage objects and the broker's document, copy the forge consistently and archive the
+// keys. It serves nothing but /healthz and hands no bytes to anybody: restore is a runbook run from
+// a shell against the volume. Runs on an image built from the database's own, so pg_dump is at least
+// the server's version. Reasoning: supabase/README.md, "Backup and Recovery", "How the service takes
+// a backup".
 import { spawnSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -55,16 +16,13 @@ import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { join, resolve, sep } from 'node:path';
 
-// -------------------------------------------------------------------------------------------------
-// Configuration
-// -------------------------------------------------------------------------------------------------
 const BACKUP_DIR = process.env.BACKUP_DIR || '/backups';
 const RETENTION_DAYS = Number.parseInt(process.env.BACKUP_RETENTION_DAYS || '14', 10);
 const SCHEDULE = (process.env.BACKUP_SCHEDULE ?? '30 2 * * *').trim();
 const POLL_SECONDS = Math.max(2, Number.parseInt(process.env.BACKUP_POLL_SECONDS || '15', 10));
 const PORT = Number.parseInt(process.env.BACKUP_SERVICE_PORT || '9020', 10);
-// plain -> .sql.gz, what backup-databases.sh writes by default and what restore-databases.sh
-// replays with psql. custom -> .dump (pg_dump -Fc), restorable selectively with pg_restore.
+// plain: .sql.gz, what restore-databases.sh replays with psql. custom: .dump (pg_dump -Fc),
+// restorable selectively with pg_restore.
 const FORMAT = process.env.BACKUP_FORMAT || 'plain';
 // A dump smaller than this is a failure, not a backup: an empty database, a wrong -d or a server
 // that died mid-write can all produce a well-formed short file.
@@ -84,18 +42,18 @@ const TIMESCALE = {
   db: process.env.TIMESCALE_DB || 'postgres',
   password: process.env.TIMESCALE_PASSWORD || '',
 };
-// Optional: a component whose directory is not mounted is absent from the backup, and the
-// manifest says so. An empty string disables one deliberately.
+// Optional components: a directory not mounted is absent from the backup and the manifest says so.
+// An empty string disables one deliberately.
 const STORAGE_PATH = process.env.STORAGE_PATH ?? '/storage';
 const FORGE_PATH = process.env.FORGE_PATH ?? '/forge';
 const BROKER_PATH = process.env.BROKER_PATH ?? '/broker';
-// The CA behind the broker's and the databases' certificates, read from its Secret through the
-// API with the pod's ServiceAccount. Either empty: no CA to keep (an ACME issuer, or no TLS).
+// The CA behind the broker's and the databases' certificates, read from its Secret through the API
+// with the pod's ServiceAccount. Either empty: no CA to keep (an ACME issuer, or no TLS).
 const CA_SECRET_NAME = process.env.CA_SECRET_NAME || '';
 const CA_SECRET_NAMESPACE = process.env.CA_SECRET_NAMESPACE || '';
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
-// pgsodium's root key, relative to the database's data directory, where the chart's getkey script
-// keeps it. Vault's rows are ciphertext under it and nothing else. Empty: not archived.
+// pgsodium's root key, relative to the data directory where the chart's getkey script keeps it.
+// Vault's rows are ciphertext under it and nothing else. Empty: not archived.
 const VAULT_KEY_FILE = process.env.VAULT_KEY_FILE ?? 'pgsodium_root.key';
 // false while pgBackRest backs the historian up (timescaledb.physicalBackup). The manifest then
 // records timescaledb=physical, and restore-databases.sh expects the historian restored already.
@@ -125,14 +83,9 @@ const DUMP_EXT = FORMAT === 'plain' ? 'sql.gz' : 'dump';
 // schemas the image ships; the custom format carries the same as a flag at restore time.
 const DUMP_ARGS = FORMAT === 'plain' ? ['-Fp', '-Z6', '--clean', '--if-exists'] : ['-Fc'];
 
-// -------------------------------------------------------------------------------------------------
-// The database, through psql
-// -------------------------------------------------------------------------------------------------
-/**
- * One statement, as supabase_admin, with values passed as psql variables and interpolated as
- * quoted literals (`:'name'`), so nothing here concatenates a value into SQL. The statement goes
- * in on stdin: psql substitutes variables in a script it reads, and not in a `-c` command.
- */
+// One statement as supabase_admin, the session pg_dump needs anyway, with values passed as psql
+// variables and interpolated as quoted literals, so nothing here concatenates a value into SQL. On
+// stdin, because psql substitutes variables in a script it reads and not in a -c command.
 function sql(statement, vars = {}) {
   const args = [
     '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1',
@@ -168,9 +121,6 @@ const db = {
   forget: (id, reason) => sql("SELECT public.backup_forget(:'id'::uuid, :'reason')", { id, reason }),
 };
 
-// -------------------------------------------------------------------------------------------------
-// Files
-// -------------------------------------------------------------------------------------------------
 const STAMP_RE = /^\d{8}T\d{6}Z$/;
 const stampNow = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 
@@ -181,7 +131,6 @@ function sha256(path) {
   });
 }
 
-/** Run a command to completion, capturing stderr; resolves with the exit status. */
 function run(cmd, args, { env = {}, stdoutTo = null } = {}) {
   return new Promise((resolvePromise) => {
     const child = spawn(cmd, args, { env: { ...process.env, ...env }, stdio: ['ignore', stdoutTo ? 'pipe' : 'ignore', 'pipe'] });
@@ -193,7 +142,7 @@ function run(cmd, args, { env = {}, stdoutTo = null } = {}) {
   });
 }
 
-/** A path is inside BACKUP_DIR, so a prune can never remove anything else. */
+// So a prune can never remove anything outside BACKUP_DIR.
 function insideBackupDir(path) {
   const root = resolve(BACKUP_DIR) + sep;
   return resolve(path).startsWith(root);
@@ -212,11 +161,9 @@ async function dumpDatabase(name, target, dir, stamp) {
   return { name, file, size_bytes: size, sha256: await sha256(out) };
 }
 
-/**
- * GNU tar exits 1 for "file changed as we read it", which an upload landing mid-run produces and
- * which is acceptable for immutable blobs: the archive is complete except for that one object.
- * Anything else is a failure.
- */
+// GNU tar exits 1 for "file changed as we read it", which an upload landing mid-run produces and
+// which is acceptable for immutable blobs: the archive is complete except for that one object.
+// Anything else is a failure.
 async function tarDirectory(name, sourceDir, dir, stamp, extraArgs = [], appended = []) {
   const file = `${name}-${stamp}.tar.gz`;
   const out = join(dir, file);
@@ -227,11 +174,11 @@ async function tarDirectory(name, sourceDir, dir, stamp, extraArgs = [], appende
   return { name, file, size_bytes: size, sha256: await sha256(out) };
 }
 
-/**
- * The forge: everything under /data except the SQLite files and the logs, with a consistent copy
- * of gitea.db appended from a staging directory. GNU tar's second -C makes the copy land at
- * gitea/gitea.db inside the archive, where a restore expects it.
- */
+// Everything under /data except the SQLite files and the logs, with a consistent copy of gitea.db
+// appended from a staging directory (tar's second -C lands it at gitea/gitea.db, where a restore
+// expects it). sqlite3's online backup is consistent while Gitea writes; on a read-only volume it
+// falls back to a raw copy of db, -wal and -shm with a checkpoint and an integrity check on the
+// copy. The method used is in manifest.json.
 async function archiveForge(dir, stamp) {
   const dbPath = join(FORGE_PATH, 'gitea', 'gitea.db');
   const stage = join(dir, '.forge-stage');
@@ -242,8 +189,6 @@ async function archiveForge(dir, stamp) {
     if (existsSync(dbPath)) {
       const r = await run('sqlite3', ['-readonly', dbPath, `.backup '${staged.replace(/'/g, "''")}'`]);
       if (r.status !== 0) {
-        // The volume is read-only and SQLite could not open the WAL database for reading. The raw
-        // files are copied together and the WAL folded into the copy, then the copy is checked.
         method = 'raw-copy-with-checkpoint';
         log(`  forge: online backup unavailable (${r.stderr.split('\n').pop()}); copying raw files`);
         rmSync(staged, { force: true });
@@ -272,10 +217,8 @@ async function archiveForge(dir, stamp) {
   }
 }
 
-/**
- * A Secret, read through the API with the pod's ServiceAccount. The token is read on every call:
- * a projected token is short-lived and rotated in place.
- */
+// Through the API with the pod's ServiceAccount. The token is read on every call: a projected
+// token is short-lived and rotated in place.
 function readSecret(namespace, name) {
   const token = readFileSync(join(SA_DIR, 'token'), 'utf8').trim();
   const ca = readFileSync(join(SA_DIR, 'ca.crt'));
@@ -300,11 +243,9 @@ function readSecret(namespace, name) {
   });
 }
 
-/**
- * The CA's key pair, as the files cert-manager keeps in its Secret (tls.crt, tls.key, ca.crt),
- * staged at 0600 under ca/ and archived. A named CA that cannot be read fails the backup rather
- * than going absent: the values named it, and a backup without it is a fleet-wide re-enrolment.
- */
+// The CA's key pair as cert-manager keeps it (tls.crt, tls.key, ca.crt), staged at 0600. A named
+// CA that cannot be read fails the backup rather than going absent: the values named it, and a
+// backup without it is a fleet-wide re-enrolment.
 async function archiveCa(dir, stamp) {
   const secret = await readSecret(CA_SECRET_NAMESPACE, CA_SECRET_NAME);
   const keys = Object.keys(secret.data || {}).filter((k) => /^[A-Za-z0-9._-]+$/.test(k));
@@ -324,12 +265,9 @@ async function archiveCa(dir, stamp) {
   }
 }
 
-/**
- * pgsodium's root key, read through the same superuser session the dump uses: pg_read_file
- * resolves a relative path against the data directory. A dump without it restores a Vault that
- * nothing can decrypt, since a fresh server mints its own key; the file is written as read, with
- * no newline, so a restore can put it back byte for byte.
- */
+// Read through the dump's own superuser session: pg_read_file resolves a relative path against the
+// data directory. A dump without it restores a Vault nothing can decrypt, since a fresh server mints
+// its own key. Written as read, with no newline, so a restore puts it back byte for byte.
 async function archiveVaultKey(dir, stamp) {
   const key = sql("SELECT pg_read_file(:'path')", { path: VAULT_KEY_FILE });
   if (!/^[0-9a-f]{64}$/.test(key)) throw new Error(`${VAULT_KEY_FILE} does not hold a 32-byte hex key`);
@@ -339,12 +277,11 @@ async function archiveVaultKey(dir, stamp) {
   return { name: 'vault-key', file, size_bytes: statSync(out).size, sha256: await sha256(out) };
 }
 
-// -------------------------------------------------------------------------------------------------
-// One backup
-// -------------------------------------------------------------------------------------------------
 let current = null; // { job, stamp, partialDir }
 let lastRun = null;
 
+// One directory per backup, named by the UTC stamp, written under .partial-<stamp> and renamed on
+// success, so a directory named by a stamp is a complete backup or absent.
 async function takeBackup(job) {
   const stamp = stampNow();
   const partialDir = join(BACKUP_DIR, `.partial-${stamp}`);
@@ -396,8 +333,8 @@ async function takeBackup(job) {
     log('ca: no secret named; component absent');
   }
 
-  // The text manifest restore-databases.sh reads, in its format, and a JSON one with the digests.
   const byName = Object.fromEntries(components.map((c) => [c.name, c]));
+  // The text manifest restore-databases.sh reads, in its format, and a JSON one with the digests.
   const text = [
     `stamp=${stamp}`,
     'mode=direct',
@@ -433,7 +370,8 @@ function abandon(reason) {
   lastRun = { at: new Date().toISOString(), ok: false, error: reason };
 }
 
-/** Retention. The row is forgotten only after the files are gone. */
+// Retention: a scheduled backup older than the window is deleted and the row forgotten only after
+// the files are gone; a requested one is pinned until an Administrator releases it.
 function prune() {
   let rows;
   try { rows = db.prunable(RETENTION_DAYS); } catch (err) { log(`prune: ${err.message}`); return; }
@@ -448,7 +386,7 @@ function prune() {
   }
 }
 
-/** A .partial-* directory at start is a backup the previous process did not finish. */
+// A .partial-* directory at start is a backup the previous process did not finish.
 function sweepPartials() {
   for (const entry of readdirSync(BACKUP_DIR)) {
     if (entry.startsWith('.partial-')) {
@@ -458,17 +396,15 @@ function sweepPartials() {
   }
 }
 
-// -------------------------------------------------------------------------------------------------
-// The loop
-// -------------------------------------------------------------------------------------------------
 let stopping = false;
 
+// A RUNNING row while this process runs nothing is a job no process is running: a previous
+// process's, or restored with the database from a backup taken while it ran. Failed before each
+// claim, not only at start; left standing it would refuse every new backup.
 async function tick() {
   if (stopping || current) return;
   let job;
   try {
-    // A RUNNING row while this process runs nothing is a job no process is running: a previous
-    // process's, or restored with the database from a backup taken while it ran.
     const stale = db.reconcile('no backup service was running this job: the service restarted, or the database was restored from a backup taken while it ran');
     if (Number(stale) > 0) log(`failed ${stale} job(s) that no service was running`);
     job = db.claim();
@@ -495,7 +431,8 @@ async function waitForDatabase() {
 async function main() {
   await waitForDatabase();
   sweepPartials();
-  // A job left RUNNING by a previous process is failed by the first tick, with every other.
+  // The schedule is this process's: registered with pg_cron at start, or removed when empty, so a
+  // stack with no service queues nothing nobody will take.
   const scheduled = db.schedule(SCHEDULE);
   log(scheduled === 't' ? `scheduled backups: ${SCHEDULE}` : 'scheduled backups: off (BACKUP_SCHEDULE is empty)');
   log(`retention: ${RETENTION_DAYS > 0 ? `${RETENTION_DAYS} days` : 'off'}; format: ${FORMAT}; polling every ${POLL_SECONDS}s`);

@@ -87,8 +87,14 @@ past PostgREST's `max-rows` — every `DIRECTORY_REFRESH_SECONDS` (5) and re-fil
 the same keys and identity sources the per-entity path would have produced, so nothing downstream
 can tell which path filled the cache. The hot path then misses only for an id the directory does
 not hold, and that miss costs what it always did. A failed pass changes nothing: entries expire on
-their TTL and the per-entity lookup takes over. The pass warns when the directory holds more ids
-than `MAX_ENTITIES_PER_CACHE`, because a cache that cannot hold the fleet evicts what it just filled.
+their TTL and the per-entity lookup takes over.
+
+**Each pass sizes the caches to the directory before filling them**: a key per device identity
+(`sparkplug_id`, and `reported_identity` where there is one), a row per gateway, a device per
+schema entry, plus `MAX_ENTITIES_PER_CACHE` of headroom for ids the directory does not hold. A
+fixed capacity of 1000 was measured failing at 1,200 devices (#395, `test-harness/README.md`,
+*Device count*): the caches evicted every entry inside its TTL, every message paid a PostgREST
+round trip, and the rate the stack could take fell to a quarter.
 
 **One window is left open knowingly.** The DBIRTH path mutates a cached row in place after writing
 the same change to Supabase, so the next birth inside the TTL does not re-detect it. A pass that
@@ -366,9 +372,10 @@ reports can tell replayed data apart through a join they already make, and synth
 exactly like real ones — which is the behaviour under test when the question is "do the rollups
 work".
 
-**Distinct from `deployment`**, which is about where the connector runs rather than whether the
-readings are real. An appliance out on the plant network replaying a capture is
-`deployment = 'remote'`, `is_simulated = true`.
+**A separate column from `deployment`**, which is about where the connector runs rather than
+whether the readings are real, but not an independent one: the table holds a simulated gateway to
+`deployment = 'host'` (`gateways_simulated_is_host`). A capture is replayed onto a simulated
+gateway, so never onto a remote one.
 
 ### Where captures are kept
 
@@ -1032,8 +1039,10 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
   healthy daemon reports a failure whose text describes a serious fault. Check 9b exists to assert
   the very throttle that causes it. Space runs by more than `REBIRTH_REQUEST_INTERVAL_SECONDS`, and
   when in doubt grep the daemon's log for `REBIRTH REQUESTED`: the line states the deadline.
-- **The demo Node-RED simulator does not answer a rebirth** — it publishes on a timer and
-  subscribes to no command topic. That is a simulator limitation, not a daemon one.
+- **The gateway appliance answers it** (`forge/gateway-platform/appliance/`, #414): an `NBIRTH`,
+  then a `DBIRTH` for every device at its last values, all on the node's one `seq`. A
+  `Device Control/Rebirth` on `DCMD` re-births one device. A gateway of your own has to answer it
+  too, or a lost change waits for its next report.
 
 ## The Directory on MQTT
 
@@ -1108,7 +1117,7 @@ interoperability claim would become false the moment the payload left HTTP.
 | :--- | :--- | :--- |
 | `DIRECTORY_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
 | `DIRECTORY_MQTT_TOPIC_PREFIX` | `<SPARKPLUG_GROUP>/Directory/v1` | Deliberately **not** under `spBv1.0/`: these are not Sparkplug payloads and must not be parsed as any. The broker's grant is derived from this same value |
-| `SPARKPLUG_GROUP` | `Aber` | The site's group, from `ingestion.sparkplugGroup`. Names the Directory subtree above and the group a log line reports when a gateway's row carries none; resolution always uses the row |
+| `SPARKPLUG_GROUP` | **required** (the chart sets it) | The site's group, from `ingestion.sparkplugGroup`. Names the Directory subtree above and the group a log line reports when a gateway's row carries none; resolution always uses the row |
 | `DIRECTORY_MQTT_INTERVAL_SECONDS` | `60` | Republish interval |
 
 ## The Unified Namespace
@@ -1318,7 +1327,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
 | `PRIMARY_HOST_ID` | **required** | The Sparkplug primary host id — see [The Primary Host](#the-primary-host-and-the-state-every-gateway-watches). The daemon refuses to start without it |
 | `MAX_ALIASES_PER_NODE` | `5000` | Cap on the per-node alias table |
-| `MAX_ENTITIES_PER_CACHE` | `1000` | Cap on each entity resolution cache. Same reasoning, applied to the caches keyed by the id seen on the wire |
+| `MAX_ENTITIES_PER_CACHE` | `1000` | Headroom on each entity resolution cache beyond what the directory holds, for ids seen on the wire that it does not; the whole capacity when the refresher is off |
 | `DIRECTORY_REFRESH_SECONDS` | `5` | Seconds between directory refresh passes — see [The directory refresher](#the-directory-refresher). `0` disables the thread |
 | `TELEMETRY_BATCH_MAX_MESSAGES` | `500` | Messages per historian transaction, at most — see [The historian writer](#the-historian-writer) |
 | `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop |
@@ -1447,7 +1456,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
 | `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
 | `aber_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
-| `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by `MAX_ENTITIES_PER_CACHE`. |
+| `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by the directory plus `MAX_ENTITIES_PER_CACHE`. |
 | `aber_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
 | `aber_ingestion_gateway_clock_offset_seconds` | `edge_node` | Gauge. How far that appliance's clock is from this server's, **positive meaning it is ahead**. Derived from the timestamp on its own heartbeat against the time that heartbeat arrived — no appliance change, nothing added to the wire. See below. |
 | `aber_ingestion_gateway_clock_measured_timestamp_seconds` | `edge_node` | Gauge. When that offset was last measured. **Read the offset only beside this**: a gauge holds its last value indefinitely, so an appliance powered down mid-fault reports it forever. |
@@ -1457,6 +1466,15 @@ the line, so a drop counter appearing there at all is still the signal.
 own it), `gateway_archived`, `device_archived`, `quarantined_or_unregistered`, `db_unavailable`,
 `write_queue_full` (the writer's queue stayed full for the put timeout), and the four
 directory-unavailable reasons below.
+
+**Loss this counter cannot see.** Telemetry is QoS 0, so when the daemon falls behind, Mosquitto
+discards messages for it before they are delivered, and no `reason` ever counts them. The broker's
+own record is `broker_publish_messages_dropped` on the Mosquitto exporter (port 9234): broker-wide,
+not per subscriber, and zero in steady state. The daemon infers the same loss from Sparkplug `seq`
+(`aber_ingestion_sequence_gaps_total`, below). The Ingestion dashboard's *Messages Lost* panel
+shows all three; the `Broker Shedding Messages` alert fires on any increase. Measured in
+[`test-harness/README.md`](../test-harness/README.md) *Results*: a 20-minute soak at 1,250 msg/s
+lost 27,299 messages this way while every drop reason read zero.
 
 **`device_archived` is one reason for all three message kinds**, unlike the directory-unavailable
 family: a birth, a death and a reading are refused for the same cause and at the same cost, and
@@ -1508,9 +1526,11 @@ That is worth knowing rather than smoothing away.
 
 ### Alert rules — shipped
 
-**All seven are provisioned**, in the `Ingestion Pipeline` group of
+**Every rule in the table is provisioned**, in the `Ingestion Pipeline` group of
 [`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
 reading the chart's own Prometheus.
+The reasoning behind each rule's shape, `for` and `noDataState` is in
+[`grafana/README.md`](../grafana/README.md).
 
 **The table stays even though the rules shipped**, because a provisioned rule states its threshold
 and not its reasoning — and the reasoning is the part that has to survive someone deciding a number
@@ -1522,6 +1542,7 @@ looks wrong.
 | Telemetry being dropped | `sum(rate(aber_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero, and `for: 5m` is what absorbs a restart. |
 | Binding rejections rising | `rate(aber_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
 | Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
+| Broker shedding messages | `sum(increase(broker_publish_messages_dropped[5m])) > 0` | 1m | **Zero is the steady state.** A shed message never reached the daemon, so the drop rule cannot see it. Broker-wide: Message loss rising beside it places the loss on the historian path. |
 | Message loss | `increase(aber_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
 | Historian writer saturating | `sum(rate(aber_ingestion_write_seconds_sum[5m])) > 0.5` | 10m | The writer thread's occupancy, read straight off the histogram. Half is the warning: the daemon keeps up, and a burst or a slower historian takes it the rest of the way. Queue depth is deliberately not the trigger — it moves only once the writer is already behind, and a full queue's drops reach the drop rule anyway. |
 | Gateway clock skew | `abs(aber_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |

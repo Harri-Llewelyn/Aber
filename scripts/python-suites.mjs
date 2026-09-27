@@ -231,6 +231,13 @@ export const SUITES = {
       'a drop self-healed; under RBE, lose the DDATA that said INTERRUPTED and every consumer ' +
       'holds ACTIVE forever.',
   },
+  'ingestion/test_json_payload.py': {
+    lanes: ['unit'],
+    why:
+      'The JSON Sparkplug encoding the appliance template publishes. A metric\x27s own timestamp ' +
+      'must survive parse_sparkplug_payload() as it does on the protobuf path, or a report-by-' +
+      'exception refresh and a batched reading are filed at the time the message was built.',
+  },
   'ingestion/test_telemetry_batching.py': {
     lanes: ['unit'],
     why:
@@ -486,6 +493,14 @@ export const SUITES = {
       'in the browser alone would be a suggestion. And the column default now reads the setting ' +
       'rather than the old literal, so a default that silently reverted would address every ' +
       "gateway created afterwards in the vendor's namespace while every page looked correct.",
+  },
+  'supabase/migrations/test_directory_images.py': {
+    lanes: ['db'],
+    why:
+      "0007's Directory versions. Every chart-managed row is reached by the component map, a " +
+      'component the chart stops deploying is cleared rather than left showing the last release, a ' +
+      'row the chart does not manage is left alone, and no API role can call the writer -- so the ' +
+      'versions on the page are the ones db-init recorded and nobody else.',
   },
   'supabase/migrations/test_system_settings_rls.py': {
     lanes: ['db'],

@@ -120,6 +120,28 @@ class CapacityTest(unittest.TestCase):
             c.set(i, i)
         self.assertEqual(c.evictions, 5)
 
+    def test_growing_evicts_nothing(self):
+        c = cache(maxsize=3)
+        for key in ("a", "b", "c"):
+            c.set(key, key)
+        self.assertTrue(c.resize(10))
+        for key in ("d", "e", "f"):
+            c.set(key, key)
+        self.assertEqual((len(c), c.evictions), (6, 0))
+
+    def test_shrinking_evicts_the_oldest_and_counts_them(self):
+        c = cache(maxsize=5)
+        for key in ("a", "b", "c", "d", "e"):
+            c.set(key, key)
+        c.get("a")
+        c.resize(3)
+        self.assertEqual(c.evictions, 2)
+        for key in ("a", "d", "e"):
+            self.assertIn(key, c)
+
+    def test_resizing_to_the_same_capacity_reports_no_change(self):
+        self.assertFalse(cache(maxsize=3).resize(3))
+
     def test_the_cap_is_environment_overridable_and_declared_as_a_constant(self):
         # Mirrors MAX_ALIASES_PER_NODE, which is the precedent this was written from.
         self.assertIsInstance(ingestion.MAX_ENTITIES_PER_CACHE, int)

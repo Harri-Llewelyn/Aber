@@ -41,8 +41,8 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off.
-const SETTINGS_VERSION = 5;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off.
+const SETTINGS_VERSION = 6;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -462,6 +462,15 @@ module.exports = {
     // a shared workstation or a cleared profile replays it at somebody who has seen it already.
     // It is also a tour of stock Node-RED, which is not what a flow author is here to learn.
     tours: false
+  },
+
+  // OFF. Node-RED's update notifications work by sending a daily anonymised ping to
+  // telemetry.nodered.org, and while the choice is unset the editor opens on a dialog asking
+  // every Administrator and Manager to make it. Declaring it here answers that dialog for the
+  // site. An administrator can still opt in from User Settings; the runtime keeps that choice.
+  telemetry: {
+    enabled: false,
+    updateNotification: false
   },
 
   adminAuth: {

@@ -8,6 +8,13 @@
 
 # Stage 1: Build Vite application
 FROM node:24-alpine AS builder
+# Opt this stage into the release's SBOM scan (release.yml builds with `sbom: true`). The shipped
+# image is nginx plus a minified bundle that carries no manifest of what was compiled into it, so
+# the final filesystem's SBOM would list Alpine and nginx and none of the npm tree the bundle IS.
+# BuildKit scans a build stage only when the stage itself declares this ARG; it changes nothing in
+# either stage's filesystem. The stage's document lists devDependencies too, which overstates
+# rather than omits. Not a VITE_ variable, so it reaches no bundle.
+ARG BUILDKIT_SBOM_SCAN_STAGE=true
 WORKDIR /app
 
 COPY package*.json ./
@@ -92,6 +99,10 @@ RUN npm run build
 
 # Stage 2: Serve static production assets using NGINX
 FROM nginx:alpine
+
+# Alpine packages from the base, taken to the current fixes the distribution ships: a fix Alpine ships
+# between two base cuts reaches the release rather than waiting for the next base (#347).
+RUN apk upgrade --no-cache
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 

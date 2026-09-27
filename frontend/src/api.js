@@ -1476,7 +1476,7 @@ const apiMethods = {
     }
   },
 
-  get: async (path, options = {}) => {
+  get: async (path, _options = {}) => {
     const entityDigitalThreadMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/digital-thread/);
     if (entityDigitalThreadMatch) {
       const rawEntityType = entityDigitalThreadMatch[1];
@@ -2081,6 +2081,8 @@ const apiMethods = {
         // a row that predates the column reads UNKNOWN, and the Directory page says so in words
         // instead of guessing on its behalf.
         exposure: s.exposure,
+        // The image the release deploys for the service (0007); null when nothing recorded one.
+        image: s.image ?? null,
         status: s.status,
         last_heartbeat: s.last_heartbeat
       }));
@@ -2225,7 +2227,7 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  post: async (path, body, options = {}) => {
+  post: async (path, body, _options = {}) => {
     /**
      * File a proposal. A plain INSERT: `Operator` holds an INSERT policy on this one table, and
      * routing it through an RPC would put the grant somewhere the RLS policy is not. The errors are
@@ -2606,7 +2608,7 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  put: async (path, body, options = {}) => {
+  put: async (path, body, _options = {}) => {
     /**
      * Edit an open proposal: the patch and the rationale, the only two columns the transition
      * guard lets a proposer move. This is what makes the per-asset cap livable: told there is
@@ -2726,8 +2728,8 @@ const apiMethods = {
         access_url: body.access_url
       };
       if ('deployment' in body) patch.deployment = body.deployment === 'host' ? 'host' : 'remote';
-      // Separate from deployment and not derived from it: a remote appliance replaying a capture is
-      // remote and simulated at once.
+      // Sent separately from deployment, but not independent of it: the table holds a simulated
+      // gateway to 'host' (gateways_simulated_is_host), so pairing it with 'remote' is refused.
       if ('is_simulated' in body) patch.is_simulated = !!body.is_simulated;
       // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
       if ('description' in body) patch.description = emptyToNull(body.description);
@@ -2965,7 +2967,7 @@ const apiMethods = {
     });
   },
 
-  delete: async (path, options = {}) => {
+  delete: async (path, _options = {}) => {
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
       const { error } = await supabase.from('links').delete().eq('id', id);

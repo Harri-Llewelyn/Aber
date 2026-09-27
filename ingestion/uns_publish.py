@@ -36,7 +36,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import timezone
 
 from logging_config import get_logger
 

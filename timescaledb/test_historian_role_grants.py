@@ -36,7 +36,6 @@ on the parent did not reach them, ingestion would break when the NEXT chunk was 
 later, with nothing connecting cause to effect. test_insert_reaches_a_chunk is the guard.
 """
 import os
-import sys
 import unittest
 
 import psycopg2

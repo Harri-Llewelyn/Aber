@@ -1,24 +1,13 @@
--- =============================================================================================
--- TimescaleDB compression and retention policy reconciliation
---
--- Applied on every boot by the chart's maintenance hook Job,
--- against a database that already holds the hypertable. It takes these psql variables:
---
---     -v compress_after='7 days'      -v retain_after='90 days'
---     -v compress_after='never'       -v retain_after='never'      (policy removed)
+-- Chunk interval, columnstore and retention policy, reconciled on every boot. Variables:
 --     -v chunk_interval='12 hours'    optional; absent or empty leaves the interval as it is
---
--- Not in /docker-entrypoint-initdb.d: the postgres entrypoint runs initdb scripts only on an
--- empty data directory, so a policy defined there could never be changed on a running stack.
--- Running on every boot means the value in `.env` (or values.yaml) is the policy. Not pg_cron:
--- that runs inside the Supabase database and reaches this one only over the read-only FDW link;
--- TimescaleDB has its own job scheduler.
--- =============================================================================================
-
+--     -v compress_after='7 days'      'never' removes the policy
+--     -v retain_after='90 days'       'never' keeps raw telemetry indefinitely
+-- On every boot because initdb scripts never reach an existing database; TimescaleDB's own scheduler
+-- rather than pg_cron, which lives in the platform database. Reasoning: timescaledb/README.md.
 \set ON_ERROR_STOP on
 
--- Hand the psql variables to PL/pgSQL through GUCs: psql interpolates `:'var'` while lexing and
--- does not descend into dollar-quoted strings.
+-- psql interpolates :'var' while lexing and does not descend into dollar quotes, so the variables
+-- cross into PL/pgSQL as GUCs.
 SELECT set_config('aber.compress_after', :'compress_after', false);
 SELECT set_config('aber.retain_after',   :'retain_after',   false);
 \if :{?chunk_interval}
@@ -27,12 +16,8 @@ SELECT set_config('aber.chunk_interval', :'chunk_interval', false);
 SELECT set_config('aber.chunk_interval', '', false);
 \endif
 
--- ---------------------------------------------------------------------------------------------
--- The raw window
--- ---------------------------------------------------------------------------------------------
--- One row. `raw_window` is written below from timescaledb.retention.retainFor (NULL keeps raw
--- telemetry indefinitely). `archive_armed` is reported by the cold archiver on every run from the
--- platform's `archive.enabled`, which this database cannot read; until it reports, it is false.
+-- One row: raw_window (NULL keeps raw telemetry indefinitely) and whether the cold archiver last
+-- reported archiving on.
 CREATE TABLE IF NOT EXISTS public.telemetry_raw_window (
     singleton           boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     raw_window          interval,
@@ -47,8 +32,8 @@ COMMENT ON TABLE public.telemetry_raw_window IS
   'last reported archiving on. Read by telemetry_raw_retention() and, over the FDW, the Cold '
   'Storage page.';
 
--- The archiver's only write here. SECURITY DEFINER so ingest_writer, which it runs as, can report
--- without holding UPDATE on the window it must not change.
+-- The archiver's only write here. SECURITY DEFINER so ingest_writer can report without UPDATE on
+-- the window it must not change.
 CREATE OR REPLACE FUNCTION public.cold_archive_report_armed(p_armed boolean)
 RETURNS void
 LANGUAGE sql SECURITY DEFINER
@@ -59,14 +44,10 @@ AS $fn$
 $fn$;
 REVOKE ALL ON FUNCTION public.cold_archive_report_armed(boolean) FROM PUBLIC;
 
--- The retention job. Drops the oldest run of chunks that ended more than `raw_window` ago, and
--- stops at the first one it may not drop:
---   * a chunk whose export is in flight (a manifest row not yet verified), always;
---   * while archiving is armed, a chunk with no verified manifest row.
--- So an archive outage grows the volume, which the Archive Backlog alert reports, instead of the
--- window deleting what was never exported. Verified rows are stamped dropped in the same
--- transaction as the drop, as cold_tier_drop_verified() does. The manifest is read dynamically
--- because cold_archive.sql creates it after this file on a first boot.
+-- The retention job. Drops the oldest run of chunks past raw_window and stops at the first it may
+-- not drop: an export in flight, or, while archiving is armed, a chunk with no verified manifest
+-- row. Verified rows are stamped dropped in the same transaction. The manifest is read dynamically
+-- because a first boot creates it after this file.
 CREATE OR REPLACE PROCEDURE public.telemetry_raw_retention(job_id integer, config jsonb)
 LANGUAGE plpgsql
 SET search_path TO 'public', 'pg_catalog'
@@ -129,9 +110,7 @@ END $proc$;
 
 DO $$
 DECLARE
-  -- `never`, `off`, `disabled`, `none` and the empty string all mean "no policy". Several
-  -- spellings are accepted because this value is typed into a .env file by hand and a rejected
-  -- one would take the boot down over a synonym.
+  -- Several spellings of 'no policy': this value is typed into .env by hand.
   disabled  CONSTANT text[] := ARRAY['never', 'off', 'disabled', 'none', 'false', '0'];
 
   raw_compress text := btrim(coalesce(current_setting('aber.compress_after', true), ''));
@@ -152,9 +131,7 @@ BEGIN
       'means the volume was initialised before that script existed.';
   END IF;
 
-  -- Parse first, act second. A typo in either interval must stop the boot with a message naming
-  -- the setting, not leave the stack running with one policy applied and the other silently
-  -- absent.
+  -- Parse both intervals before acting on either, so a typo stops the boot naming its setting.
   IF raw_compress <> '' AND NOT (lower(raw_compress) = ANY (disabled)) THEN
     BEGIN
       v_compress := raw_compress::interval;
@@ -188,12 +165,8 @@ BEGIN
     END IF;
   END IF;
 
-  -- -------------------------------------------------------------------------------------------
-  -- Chunk interval
-  -- -------------------------------------------------------------------------------------------
-  -- Compression never touches the open chunk, so its span plus compress_after is the raw data
-  -- held uncompressed whatever the policy says. set_chunk_time_interval() applies to chunks
-  -- created afterwards; existing chunks keep the span they were made with.
+  -- set_chunk_time_interval() applies to chunks created afterwards. The open chunk plus
+  -- compress_after is the raw data held uncompressed whatever the policy says.
   SELECT d.time_interval INTO was_chunk
   FROM timescaledb_information.dimensions d
   WHERE d.hypertable_schema = 'public' AND d.hypertable_name = 'telemetry' AND d.column_name = 'time';
@@ -205,19 +178,9 @@ BEGIN
     RAISE NOTICE 'chunk interval: % (unchanged)', was_chunk;
   END IF;
 
-  -- -------------------------------------------------------------------------------------------
-  -- Columnstore (Hypercore)
-  -- -------------------------------------------------------------------------------------------
-  -- segmentby: rows for one asset/metric series compress together (matching how the dashboard
-  -- queries); orderby: time DESC matches the query order and the supporting index.
-  --
-  -- The columnstore API (TimescaleDB 2.18+), not the legacy compression one: the entry points are
-  -- procedures reached with CALL (`PERFORM` fails), and the options are `enable_columnstore`,
-  -- `segmentby`, `orderby`. The job still reports as `policy_compression` and the hypertable
-  -- state as `compression_enabled`, which the guard below and the CI assertions read.
-  --
-  -- Applied only once: re-issuing the SET with different segmentby columns raises once compressed
-  -- chunks exist, so this is guarded on the current state.
+  -- The columnstore API (TimescaleDB 2.18+): CALL, enable_columnstore/segmentby/orderby; the job
+  -- still reports as policy_compression. The SET is issued once, because re-issuing it with different
+  -- segmentby columns raises once compressed chunks exist.
   SELECT h.compression_enabled INTO compressed
   FROM timescaledb_information.hypertables h
   WHERE h.hypertable_schema = 'public' AND h.hypertable_name = 'telemetry';
@@ -230,31 +193,21 @@ BEGIN
     );
   END IF;
 
-  -- Removed and re-added rather than `if_not_exists => TRUE`: with the policy present at a
-  -- different interval, add_* emits a notice and does nothing.
+  -- Removed and re-added: with the policy present at a different interval, add_* emits a notice and
+  -- does nothing.
   CALL remove_columnstore_policy('public.telemetry', if_exists => TRUE);
 
   IF v_compress IS NOT NULL THEN
-    -- `after =>`, not the legacy positional `compress_after`.
     CALL add_columnstore_policy('public.telemetry', after => v_compress);
     RAISE NOTICE 'columnstore policy: chunks older than % are compressed', v_compress;
   ELSE
-    -- Existing compressed chunks are deliberately left compressed. Decompressing a history that
-    -- may be hundreds of gigabytes, unprompted, during a boot, is not something a config change
-    -- should do; turning the policy off means "stop compressing new chunks".
+    -- Off means stop compressing new chunks; decompressing a history during a boot is not a
+    -- configuration change's business.
     RAISE NOTICE 'columnstore policy: DISABLED (existing compressed chunks are left as they are)';
   END IF;
 
-  -- -------------------------------------------------------------------------------------------
-  -- Retention
-  -- -------------------------------------------------------------------------------------------
-  -- A hard delete with no undo, by telemetry_raw_retention() above rather than TimescaleDB's
-  -- add_retention_policy(): that policy drops on a timer with no knowledge of the archive, and
-  -- whether archiving is on is decided at runtime on the Cold Storage page.
+  -- Legal and almost certainly a mistake; a warning, because the configuration does what it says.
   IF v_retain IS NOT NULL AND v_compress IS NOT NULL AND v_retain < v_compress THEN
-    -- Legal, and almost certainly a mistake: chunks would be dropped before they were ever
-    -- compressed. A warning rather than an exception, because it is the operator's data and the
-    -- configuration does exactly what it says.
     RAISE WARNING
       'retention (%) is shorter than compression (%), so no chunk will ever be compressed '
       'before it is dropped.', v_retain, v_compress;
@@ -264,7 +217,8 @@ BEGIN
      SET raw_window = v_retain, updated_at = now()
    WHERE raw_window IS DISTINCT FROM v_retain;
 
-  -- The policy this job replaces, removed on every boot so an upgraded stack converges.
+  -- TimescaleDB's own retention policy knows nothing of the archive, so telemetry_raw_retention()
+  -- replaces it; removed on every boot so an upgraded stack converges.
   PERFORM remove_retention_policy('public.telemetry', if_exists => TRUE);
 
   SELECT j.job_id INTO v_job FROM timescaledb_information.jobs j
@@ -282,7 +236,5 @@ BEGIN
                  'without bound. This is a valid choice; it is not an unconfigured one.', v_job;
   END IF;
 
-  -- The `assets` dimension table is deliberately NOT covered by any of the above. It is small,
-  -- holds one row per device, and telemetry.asset_id references it -- dropping an asset row
-  -- would orphan history that has not yet aged out.
+-- assets is deliberately not covered: one small row per device, and telemetry.asset_id references it.
 END $$;

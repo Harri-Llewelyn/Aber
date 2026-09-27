@@ -19,7 +19,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
 
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
-  const [connMethod, setConnMethod] = useState('Sparkplug B')
+  const connMethod = 'Sparkplug B'
   const [gatewayId, setGatewayId] = useState(item.gateway_id || (gateways[0] ? gateways[0].gateway_id : ''))
 
   // The location is chosen here because the operator is already looking at the device. The same

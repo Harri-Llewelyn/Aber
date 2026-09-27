@@ -129,19 +129,23 @@ upgrade keeps the span it was made with, up to 70 days, until it closes.
 
 **What the stack does under load is a separate question, and it is measured separately.**
 [`test-harness/README.md`](../../test-harness/README.md), *The scale envelope*, carries the method,
-the full tables and what was not measured. The headline, measured 2026-09-23 on a 16 vCPU
-development node with the historian at its stock tuning in a 1 GiB container:
+the full tables and what was not measured. The headline, measured 2026-09-23 with the historian
+at its stock tuning in a 1 GiB container, on a 16 vCPU development node and again on a node
+capped to the minimum above, which agree:
 
 | | Measured | Where it breaks first |
 | :--- | :--- | :--- |
-| **Sustained** | **1,000 msg/s** (10,000 rows/s) held for 20 minutes, queue flat at 3 → 7 | — |
-| **Knee** | 1,250 msg/s: held 90 s, failed a 20-minute soak | the historian writer's single thread reaches a 0.98 duty cycle with 15 of 16 vCPU idle |
+| **Sustained** | **1,000 msg/s** (10,000 rows/s) held for 20 minutes on both | — |
+| **Knee** | 1,250 msg/s: held 90 s on both; a 20-minute soak failed on one and held on the other | the historian writer's single thread reaches a 0.98 duty cycle, with 15 of 16 vCPU idle on the large node |
 | **Beyond it** | 1,500 msg/s and up: queue grows to its 10,000 cap | the broker sheds QoS 0 telemetry the daemon never sees and no counter in the stack records |
 | **Disk** | 367 bytes per row, 74 % of it index | 295 GiB/day per 1,000 devices at 1 msg/s × 10 metrics, before compression |
 
 The knee is architectural — one writer, one transaction per batch, a commit that waits on fsync —
-so a bigger node does not move it, and a faster disk does (*The disk under the historian*). Size
-the historian's disk from *What grows* and the fleet's rate from the first row.
+so a bigger node does not move it, the minimum does not lower it, and a faster disk does (*The
+disk under the historian*). Size the historian's disk from *What grows* and the fleet's rate from
+the first row. Fewer metrics a message raise the knee in messages and lower it in rows: at 2, the
+report-by-exception shape, the minimum node held 2,000 msg/s (4,000 rows/s) for 20 minutes and
+failed a soak at 2,500, its CPU at the cap.
 
 ### Local cluster with k3d
 
@@ -221,6 +225,8 @@ speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 # What versions exist?
 helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.1.0
 
+# my-values.yaml must name ingestion.primaryHostId and ingestion.sparkplugGroup: both are fixed
+# for the life of the site, neither has a default, and the render refuses without them.
 helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --version 0.1.0 \
   --namespace aber --create-namespace \
@@ -260,9 +266,66 @@ it needs. Either write a `my-values.yaml` from
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
 
-The nine built images resolve automatically to the chart's `appVersion`, which the release stamps
+The ten built images resolve automatically to the chart's `appVersion`, which the release stamps
 equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
 hand and no `latest` tag to drift onto.
+
+#### Verify what you are about to install
+
+The chart and every image are signed by the release workflow, keyless, so the signature is bound
+to an identity you can name rather than a key you have to fetch: this repository's
+`release.yml`, at the tag it released from. Each image also carries an SBOM and SLSA provenance
+in its registry index; [`SECURITY.md`](../../SECURITY.md#what-a-release-carries-and-how-to-check-it)
+says what each is and how to read it.
+
+```bash
+V=0.1.0
+ID="https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v$V"
+ISSUER=https://token.actions.githubusercontent.com
+
+# The chart you are about to install, then every image it will pull.
+cosign verify ghcr.io/harri-llewelyn/aber/aber:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service db-init swagger-ui test-runner; do
+  cosign verify ghcr.io/harri-llewelyn/aber/$i:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
+done
+```
+
+Needs cosign 3. A refusal names the identity it found, so a release published from a branch by
+hand (Actions → Release → *Run workflow*, `dry_run` unticked) verifies only against
+`@refs/heads/<branch>`, which is the point: the identity says how the artefact was made.
+
+To have the cluster refuse anything else, a policy controller admits by the same two claims.
+With [Kyverno](https://kyverno.io/):
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: aber-images-are-signed
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: released-by-this-repository
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [aber]
+      verifyImages:
+        - imageReferences: ["ghcr.io/harri-llewelyn/aber/*"]
+          attestors:
+            - entries:
+                - keyless:
+                    subjectRegex: "^https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v.*$"
+                    issuer: https://token.actions.githubusercontent.com
+                    rekor:
+                      url: https://rekor.sigstore.dev
+```
+
+That admits only images released from a tag and rewrites each pod's image to the verified digest.
+The third-party images the chart also runs (`supabase/*`, `eclipse-mosquitto` and the rest) are
+signed by their own projects or not at all, and are outside this rule.
 
 > **linux/amd64 only.** These images are not built for arm64, so a Pi, Jetson or Graviton node
 > cannot run them — the pods land and fail with `exec format error`. On arm64, build locally
@@ -798,29 +861,62 @@ then the chart, to GHCR over OCI, on a `v*` tag.
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-That tag is the only place the version is written. It stamps the nine image tags, the chart
+That tag is the only place the version is written. It stamps the ten image tags, the chart
 `version` and the chart `appVersion` in one run — **nothing is bumped in a commit first**, which is
 the usual way a chart ends up published under a version naming a different build. `Chart.yaml`'s
 committed values are for the untagged path only (a checkout, `helm lint`, `helm template`).
 
 **Rehearse it first.** Actions → Release → *Run workflow*, with `dry_run` left ticked: everything
-builds, the chart packages, every check runs, and nothing is pushed.
+builds, the chart packages, every check runs, and nothing is pushed. The ingestion chain's
+attestations are checked on a dry run too, from the OCI archives it builds into; the other eight
+produce theirs only when pushing.
 
 **Images publish before the chart, and the chart job `needs` them.** A chart published ahead of its
-images does not fail — `helm install` succeeds, the databases and broker come up healthy, and nine
+images does not fail — `helm install` succeeds, the databases and broker come up healthy, and ten
 workloads sit in `ImagePullBackOff` with no failed release to point at.
+
+**Then the GitHub Release.** The workflow opens it as a draft from
+[`RELEASE_TEMPLATE.md`](../../.github/RELEASE_TEMPLATE.md) with `aber-<version>-sbom.tar.gz`
+attached — every image's SBOM and provenance, and a `DIGESTS` file naming what was signed. Write the
+notes and publish it:
+
+```bash
+gh release edit v0.2.0 --draft=false --notes-file notes.md
+```
+
+### What the release signs and attests
+
+Every image is built with `sbom: true` and `provenance: mode=max` — an SPDX SBOM and SLSA
+provenance in the image index — and every image and the chart is then signed with cosign,
+**keyless**: the job's `id-token: write` permission lets cosign exchange the run's OIDC token for a
+certificate naming `release.yml@refs/tags/v<version>`, and the certificate is recorded in Sigstore's
+public transparency log. Nothing is stored, rotated or leakable. The same job then verifies each
+signature against that identity and reads the SBOM and provenance back out of the registry, so a
+release cannot report green with an artefact nothing signed; [`sign-and-verify.sh`](../../.github/scripts/sign-and-verify.sh)
+is that check, and *Verify what you are about to install* under **Install** is the consumer's half.
+
+Three consequences worth knowing before the first signed release:
+
+- **The transparency log is public and names this repository and this file**, whatever the
+  repository's visibility. A release signed while the repository is private publishes that it exists.
+- **The GHCR package page shows an `unknown/unknown` platform** beside `linux/amd64`. That is the
+  attestation manifest in the index, not a broken build.
+- **`ingestion` and `test-runner` are one `docker buildx bake` of [`docker-bake.hcl`](../../docker-bake.hcl)**:
+  the second is `FROM` the first, and Bake's `target:` context hands one build's result to the other
+  without a registry round-trip, on the driver the attestations need.
 
 ### One-time: make the packages public
 
 **GHCR creates every new package private, whatever the repository's visibility**, and
 `GITHUB_TOKEN` cannot change it — package visibility is an account-level setting, not a repository
-one. So the first release publishes nine packages that nobody else can pull, and the symptom on a
-consumer's machine is an authentication error on a repository that is public.
+one. So the first release publishes eleven packages that nobody else can pull, and the symptom on a
+consumer's machine is an authentication error on a repository that is public. The signatures and
+attestations live inside each image's package, so the flip covers them too.
 
 After the first successful release, once per package:
 
 ```bash
-for p in aber edge-runtime ingestion node-red frontend test-runner; do
+for p in aber edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
   gh api --method PATCH -H "Accept: application/vnd.github+json" \
     "/user/packages/container/aber%2F$p" -f visibility=public
 done
@@ -843,9 +939,8 @@ helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.2.0
   `appVersion` precisely so a chart release can only run the images built beside it; a floating tag
   invites exactly the mixed-version stack that design prevents.
 - **No arm64.** See the note under *Install*.
-- **No signing or provenance attestation.** Consumers cannot verify these artefacts came from this
-  pipeline. Adding cosign keyless signing is a contained change and worth doing before anyone
-  outside depends on the chart.
+- **No signature on the release asset.** `aber-<version>-sbom.tar.gz` is a convenience copy; the
+  signed SBOM is the one in the registry, under the image's own signature.
 - **It does not re-run the E2E or in-cluster suites.** Those ran on the commit the tag points at.
   What it does repeat are the checks whose failure would be *baked into the artefact* rather than
   caught on the next commit — above all `sync-helm-chart-files.mjs --check`, because Helm cannot
@@ -962,6 +1057,39 @@ reasoning is from Cilium's documented semantics (#235).
 
 `mqttAllowedCidrs` has the same shape and the same SNAT, and has **not** been changed: that rule is
 opt-in, and the broker's exposure is a posture an operator chooses per site.
+
+### Outbound connections
+
+Nothing in the stack reports usage or checks for updates by itself. These are the upstream defaults
+that would, and where each is switched off:
+
+| Service | What its default does | Switched off in |
+| :--- | :--- | :--- |
+| Grafana | usage reports to Grafana Labs; Grafana and plugin update checks every 10 minutes; the news feed; gravatar lookups; plugin signing keys and plugin upgrades from grafana.com | `grafana/grafana.ini` |
+| Alloy | reports its enabled components to Grafana Labs | `--disable-reporting`, `templates/obs/alloy.yaml` |
+| Loki | usage reports to Grafana Labs | `analytics.reporting_enabled`, `loki/loki.yaml` |
+| Node-RED, on the stack and on each appliance | a daily ping to telemetry.nodered.org for update notifications, and an editor dialog asking to enable it | `telemetry` in `node-red/node-red-init.mjs` and the appliance's `bootstrap.mjs` |
+| TimescaleDB | a daily telemetry report | `timescaledb.telemetryLevel: "off"` |
+| Gitea | a release check | `GITEA__cron.update_checker__ENABLED`, `templates/apps/gitea.yaml` |
+| Swagger UI | a validator badge loaded from validator.swagger.io, carrying the spec's URL | `VALIDATOR_URL: none`, `templates/obs/swagger-ui.yaml` |
+
+`scripts/check-docs-drift.mjs` fails if any of these is switched back on.
+
+**What still leaves the stack**, each because something a person uses depends on it:
+
+- Grafana installs any preinstalled plugin it lacks, once, at first boot. Logs Drilldown is one. A
+  site with no route to grafana.com runs without them; the Prometheus, Loki and PostgreSQL
+  datasources are bundled in the image. The `drop-shadowed-plugins` init container removes a
+  downloaded copy of any plugin the image bundles, so the image's version is the one that runs.
+  The plugin catalogue page queries grafana.com when an administrator opens it.
+- Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
+  palette manager's Install tab and its update badges read it.
+- The dashboard's fonts come from Google Fonts (#438).
+- The edge functions fetch their dependencies from esm.sh and deno.land on first load (#437).
+- Destinations a site configures itself, such as a remote cold archive or backup target.
+
+An administrator can opt Node-RED into update notifications from its User Settings. The runtime
+keeps that choice over `settings.js`.
 
 ### PDBs and HPAs
 

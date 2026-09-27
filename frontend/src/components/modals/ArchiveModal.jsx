@@ -4,7 +4,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 
-export function ArchiveModal({ entityType, entityId, displayName, onArchive, onCancel }) {
+export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
   const [archiving, runArchive] = usePendingAction()
 
   // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.

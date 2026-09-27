@@ -389,7 +389,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               Playback
               <HelpTip
                 label="About playback"
-                text="Publish a stored capture back into the stack as a simulated gateway, through the real broker and the real ingestion path, rebased onto now. Every captured identity is rewritten onto the target's own assets."
+                text="Publish a stored capture back into the stack as a simulated gateway, through the real broker and ingestion path, rebased onto now. Captured identities are rewritten onto the target's own assets."
               />
             </h3>
           </div>
@@ -446,7 +446,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               Capture
               <HelpTip
                 label="About capture"
-                text="Record what a gateway or a single device actually said, and keep it. One capture is stored per subject; a new recording replaces it. Select a row to inspect it, upload a capture, or publish one."
+                text="Record what a gateway or a single device actually said, and keep it. One capture per subject; recording again replaces it. Select a row to inspect, upload or publish."
               />
             </h3>
 
@@ -1202,13 +1202,7 @@ function RecentDiscards({ jobs }) {
               for the historian, and those readings were discarded on ingest. The playback itself
               succeeded.
               {' '}
-              <HelpTip label="Why readings were discarded" text={
-                'Playback rebases every timestamp onto the moment it is sent, but preserves how far '
-                + 'each one sat from the capture\'s own epoch — so a reading that was already old '
-                + 'when recorded, or a device whose clock is skewed against the recorder\'s, stays '
-                + 'out of range. Speed cannot cause this. Correct the timestamps in the capture, or '
-                + 'accept that these readings will not appear.'
-              } />
+              <HelpTip label="Why readings were discarded" text="Playback rebases timestamps onto now but keeps each one's distance from the capture's epoch, so a reading already old when recorded stays too old. Speed is not the cause; correct the capture's timestamps." />
             </div>
             <button
               className="btn btn-ghost btn-sm"

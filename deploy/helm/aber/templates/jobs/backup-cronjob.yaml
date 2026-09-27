@@ -122,7 +122,7 @@ spec:
           {{- if eq .Values.backup.destination "pvc" }}
           # Same gid as supabase-db, whose image this Job reuses for its pg_dump -- so a restore Job
           # running from that same image can read what this one wrote. 101 is that image's `postgres`
-          # group at 17.6.1.160, verified against the pinned tag; it read 999 here for the same
+          # group at 17.6.1.175, verified against the pinned tag; it read 999 here for the same
           # reason it did in values.yaml and in the CI checker, which is that nobody had looked.
           #
           # IT MOVED AT THE PG17 BUMP -- 106 on the Ubuntu-based 15.x image, 101 on the Alpine-based

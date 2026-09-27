@@ -330,7 +330,7 @@ class DropPairTestCase(unittest.TestCase):
         # alphabetically, so on a stack where the drop has happened but the line has not yet
         # travelled daemon -> Docker -> Alloy -> Loki it fails with "no logged drop reasons" --
         # which reads as a broken drill-down contract rather than as the race it is.
-        expr = f'{{service="ingestion"}} | json | reason != ""'
+        expr = '{service="ingestion"} | json | reason != ""'
         deadline = time.time() + PROPAGATION_TIMEOUT
         fields = set()
         while time.time() < deadline:
@@ -394,7 +394,7 @@ class MultilineTestCase(unittest.TestCase):
             return "Traceback (most recent call last)" in payload and 'File "' in payload
 
         self.assertTrue(
-            any(whole(l) for l in lines),
+            any(whole(line) for line in lines),
             "no collected traceback carries both its header and a stack frame in ONE entry, so "
             "the exception is arriving split across records -- stage.multiline is not rejoining "
             "it. Note the stage is confined to ingestion|playback by a stage.match in "

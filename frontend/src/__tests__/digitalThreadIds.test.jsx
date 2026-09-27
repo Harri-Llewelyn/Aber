@@ -8,7 +8,7 @@
  * with a tooltip.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
@@ -25,7 +25,7 @@ const TXN = 908311
 
 const EVENTS = [{
   event_id: 42, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
-  timestamp: '2026-09-01T09:00:00Z', causation_id: TXN,
+  timestamp: '2026-09-01T09:00:00Z', causation_id: TXN, transaction_rows: 3,
   description: 'Action UPDATE on devices [dev-1]',
   old_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' },
   new_data: { name: 'Simulated_CNC_01', status: 'ONLINE' }
@@ -113,6 +113,19 @@ describe('one name per id, across the drawer and the export', () => {
     expect(Object.keys(rows[0])).not.toContain('causation_id')
     expect(rows[0].mutation_id).toBe(42)
     expect(rows[0].transaction_id).toBe(TXN)
+  })
+
+  it('exports how many rows the transaction wrote, beside its id', async () => {
+    // The count the drawer acts on (0006), so a reader of the export can tell a single-row act
+    // from a group the filters cut without re-deriving it from the transaction id column.
+    await show()
+    fireEvent.click(screen.getByTitle(/Download the events matching the current filters as CSV/))
+
+    await waitFor(() => expect(downloadCSV).toHaveBeenCalled())
+    const [rows] = downloadCSV.mock.calls[0]
+    const keys = Object.keys(rows[0])
+    expect(keys.indexOf('transaction_rows')).toBe(keys.indexOf('transaction_id') + 1)
+    expect(rows[0].transaction_rows).toBe(3)
   })
 })
 

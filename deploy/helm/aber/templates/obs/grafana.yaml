@@ -294,6 +294,34 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 64Mi }
+        {{/*
+          A plugin downloaded into the data volume loads in place of the copy the image bundles.
+          Preinstall no longer updates those downloads (grafana.ini, [plugins]), so one left from an
+          earlier boot would stay at its version through every Grafana upgrade. Removing it lets
+          the image's own copy run. GF_INSTALL_PLUGINS installs after this, so an explicit choice
+          still wins.
+        */}}
+        - name: drop-shadowed-plugins
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              for dir in /var/lib/grafana/plugins/*/; do
+                id=$(basename "$dir")
+                if [ -d "/usr/share/grafana/data/plugins-bundled/$id" ]; then
+                  rm -rf "$dir"
+                  echo "Removed the downloaded copy of $id; the image bundles it."
+                fi
+              done
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
       containers:
         - name: grafana
           # STOCK IMAGE, no entrypoint override -- see the initContainer above.

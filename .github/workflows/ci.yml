@@ -450,7 +450,7 @@ jobs:
           # so a partial set yields a stack that 401s at the gateway while looking fine. The primary
           # host id is set because its own refusal fires first and would mask this one.
           expect_failure "no credentials at all" "required credentials are not set" \
-            --set ingestion.primaryHostId=ci-render-check
+            --set ingestion.primaryHostId=ci-render-check --set ingestion.sparkplugGroup=ci-render-check
           expect_failure "jwtSecret set but anonKey empty" "secrets.anonKey" \
             -f "$DEV" --set secrets.anonKey=
           expect_failure "publishableKey empty" "secrets.publishableKey" \
@@ -549,6 +549,12 @@ jobs:
           expect_failure "primary host id spanning topic levels" "which is not one topic level" \
             -f "$DEV" --set ingestion.primaryHostId=site/a
 
+          # The group is in every topic and fixed at the first boot, so it has no default either.
+          expect_failure "no sparkplug group" "ingestion.sparkplugGroup is not set" \
+            -f "$DEV" --set ingestion.sparkplugGroup=
+          expect_failure "sparkplug group spanning topic levels" "which is not one topic level" \
+            -f "$DEV" --set ingestion.sparkplugGroup=plant/a
+
           # A nightly backup that writes nowhere is worse than none, because it looks like one.
           expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
             -f "$DEV" --set backup.enabled=true --set backup.destination=s3
@@ -586,7 +592,8 @@ jobs:
           # fails exactly when the string is present (grep closes the pipe, printf gets SIGPIPE).
           helm template aber deploy/helm/aber \
             -f "$PROD" --set secrets.existingSecret=ci-render-check \
-            --set ingestion.primaryHostId=ci-render-check > /tmp/prod-render.yaml
+            --set ingestion.primaryHostId=ci-render-check \
+            --set ingestion.sparkplugGroup=ci-render-check > /tmp/prod-render.yaml
 
           # A render that succeeds and emits nothing would satisfy a bare exit-code check.
           COUNT=$(grep -c '^kind:' /tmp/prod-render.yaml || true)
@@ -1229,7 +1236,7 @@ jobs:
       #
       #   docker run --rm --entrypoint sh <image>:<pinned-tag> -c 'getent passwd <user>'
       #
-      # timescale/timescaledb is Alpine (70); supabase/postgres 17.6.1.160 is Alpine with postgres at
+      # timescale/timescaledb is Alpine (70); supabase/postgres 17.6.1.175 is Alpine with postgres at
       # 100:101. Both entrypoints run as root and chown, so fsGroup only matters once `runAsUser` is set.
       # See docs/incidents.md -> "fsGroup restated in the checker rather than measured".
       - name: Verify fsGroup Is Set On Every Workload With A Volume
@@ -1333,7 +1340,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: supabase/postgres:17.6.1.160
+        image: supabase/postgres:17.6.1.175
         env:
           POSTGRES_PASSWORD: postgres
         ports:
