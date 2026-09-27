@@ -40,6 +40,7 @@ import os
 import re
 import select
 import hashlib
+import socket
 import sys
 import threading
 import time
@@ -91,6 +92,8 @@ SUBSCRIPTION_QUEUE_LIMIT = int(os.getenv("I3X_SUBSCRIPTION_QUEUE_LIMIT", "10000"
 REAPER_INTERVAL_SECONDS = int(os.getenv("I3X_REAPER_INTERVAL_SECONDS", "30"))
 # Comfortably inside the TTL, so an idle-but-connected client keeps its subscription alive.
 SSE_KEEPALIVE_SECONDS = float(os.getenv("I3X_SSE_KEEPALIVE_SECONDS", "15"))
+# A stream write that cannot finish in this long ends the stream: its client has stopped reading.
+SSE_SEND_TIMEOUT_SECONDS = 10.0
 
 # MIRRORED FROM ingestion.py. Keep in step -- `test_i3x_service.py` asserts both files agree, the
 # same discipline `sparkplugToXsd.ts` has against `sparkplugDatatype.js`. ingestion.py is not
@@ -478,12 +481,17 @@ def resolve_metric_name(group_id, edge_node_id, metric) -> Optional[str]:
 
 
 def _stage_and_push(sparkplug_id: str, metrics: Dict[str, dict]) -> None:
-    """Queue a value change for every subscription watching this element, then push to open streams."""
+    """
+    Queue a value change for every subscription watching this element, then wake their streams.
+
+    Runs on the MQTT network thread, so it never writes to a client socket: each stream's own
+    handler thread drains its queue and writes (see `_serve_stream`).
+    """
     device_stub = {"sparkplug_id": sparkplug_id, "is_quarantined": False}
     envelope = A.device_value(device_stub, metrics)
     streaming = registry.stage({sparkplug_id: envelope})
     for sub in streaming:
-        _push_to_stream(sub)
+        _wake_stream(sub)
 
 
 # =================================================================================================
@@ -499,27 +507,70 @@ class SseChannel:
 
     The chunked framing is done here rather than by the handler because the body is unbounded and so
     has no Content-Length -- and under HTTP/1.1 a response with neither leaves the client waiting for
-    a close that never comes. Writes are serialised: the MQTT thread and the keep-alive loop both
-    push, and interleaved chunk headers would corrupt the stream irrecoverably.
+    a close that never comes.
+
+    ONLY THE STREAM'S OWN HANDLER THREAD WRITES (`send`, `keepalive`, `finish`). Every other thread
+    -- the MQTT thread, a displacing stream, a delete -- calls `wake()` or `close()`, which only
+    signal. A client that stops reading then stalls its own thread until the send timeout, and
+    nothing else.
     """
 
     def __init__(self, handler: BaseHTTPRequestHandler):
         self.handler = handler
-        self.lock = threading.Lock()
+        # Set once the response has ended, cleanly or not; nothing is written after it.
         self.closed = threading.Event()
+        # True only when the terminating chunk went out, so the connection can serve a next request.
+        self.ended_cleanly = False
+        self.close_requested = threading.Event()
+        # The wake signal is a socket pair so the handler's `select` can wait on the client and on
+        # wakes at once. `_wake_lock` stops a late wake writing to a descriptor `release()` freed.
+        self._wake_r, self._wake_w = socket.socketpair()
+        self._wake_r.setblocking(False)
+        self._wake_w.setblocking(False)
+        self._wake_lock = threading.Lock()
+        self._released = False
+
+    # -- any thread ------------------------------------------------------------------------------
+    def wake(self) -> None:
+        """Ask the handler thread to drain the queue. Never blocks: a full pair means one is pending."""
+        with self._wake_lock:
+            if self._released:
+                return
+            try:
+                self._wake_w.send(b"\0")
+            except OSError:
+                pass
+
+    def close(self) -> None:
+        """Ask the handler thread to end the response cleanly."""
+        self.close_requested.set()
+        self.wake()
+
+    # -- the stream's handler thread only --------------------------------------------------------
+    @property
+    def wake_socket(self) -> socket.socket:
+        return self._wake_r
+
+    def consume_wakes(self) -> None:
+        try:
+            while self._wake_r.recv(4096):
+                pass
+        except OSError:
+            # BlockingIOError: every pending wake has been read.
+            pass
 
     def _write(self, text: str) -> bool:
-        with self.lock:
-            if self.closed.is_set():
-                return False
-            try:
-                data = text.encode("utf-8")
-                self.handler.wfile.write(b"%X\r\n" % len(data) + data + b"\r\n")
-                self.handler.wfile.flush()
-                return True
-            except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
-                self.closed.set()
-                return False
+        if self.closed.is_set():
+            return False
+        data = text.encode("utf-8")
+        try:
+            self.handler.wfile.write(b"%X\r\n" % len(data) + data + b"\r\n")
+            self.handler.wfile.flush()
+            return True
+        except (OSError, ValueError):
+            # OSError includes a reset, a broken pipe and the send timeout (TimeoutError).
+            self.closed.set()
+            return False
 
     def send(self, payload) -> bool:
         return self._write(f"data: {json.dumps(payload, default=str)}\n\n")
@@ -538,45 +589,29 @@ class SseChannel:
         so simply dropping the socket is wrong: the client sees a truncated chunked body and reports
         a network fault for what was an orderly, expected handover.
         """
-        with self.lock:
-            if self.closed.is_set():
-                return
-            try:
-                self.handler.wfile.write(b"0\r\n\r\n")
-                self.handler.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
-                pass
-            self.closed.set()
+        if self.closed.is_set():
+            return
+        try:
+            self.handler.wfile.write(b"0\r\n\r\n")
+            self.handler.wfile.flush()
+            self.ended_cleanly = True
+        except (OSError, ValueError):
+            pass
+        self.closed.set()
 
-    def close(self) -> None:
-        self.finish()
+    def release(self) -> None:
+        with self._wake_lock:
+            self._released = True
+            self._wake_r.close()
+            self._wake_w.close()
 
 
-def _push_to_stream(sub) -> None:
-    """
-    Flush this subscription's queue down its open stream.
-
-    Drains the QUEUE rather than sending the live value directly: the queue is the single source of
-    ordering, and pushing straight from the MQTT callback could deliver a newer value before an older
-    one that was still waiting. Delivered means discarded -- SSE is at-most-once with no
-    acknowledgement, so anything handed to the stream must leave the queue or a later `/sync` would
-    re-deliver it.
-    """
+def _wake_stream(sub) -> None:
+    """Tell this subscription's open stream, if any, that its queue has something to send."""
     with _streams_lock:
         channel = _streams.get(sub.subscription_id)
-    if channel is None:
-        return
-    for batch in _drain_for_stream(sub):
-        if not channel.send(batch["updates"]):
-            # Same identity guard as the handler's own unwind: this push may be racing a client
-            # that has just opened a replacement stream.
-            _detach_stream(sub, channel)
-            return
-
-
-def _drain_for_stream(sub):
-    """Take everything queued. SSE is at-most-once, so delivered means discarded."""
-    return registry.drain(sub)
+    if channel is not None:
+        channel.wake()
 
 
 def _detach_stream(sub, only_if=None) -> None:
@@ -606,6 +641,87 @@ def _on_registry_stream_close(sub) -> None:
 
 
 registry.on_stream_close = _on_registry_stream_close
+
+
+def _serve_stream(req, sub, backlog: List[dict]) -> None:
+    """
+    Answer `/subscriptions/stream` on this handler thread, which is the only one that writes to it.
+
+    It ends when the client disconnects, when another stream or a delete displaces it (cleanly,
+    with the terminating chunk), or when a write cannot finish inside SSE_SEND_TIMEOUT_SECONDS.
+    Only a clean end leaves the connection open for a next request.
+
+    It sends the QUEUE, never the live value, because the queue is the one source of ordering.
+    Delivered means discarded: SSE is at-most-once, so a later `/sync` must not re-deliver it.
+    """
+    conn = req.connection
+    try:
+        channel = SseChannel(req)
+    except OSError:
+        # No stream was opened, so `/sync` must work again rather than answer 409 forever.
+        registry.close_stream(sub)
+        raise
+    with _streams_lock:
+        existing = _streams.get(sub.subscription_id)
+        if existing:
+            existing.close()
+        _streams[sub.subscription_id] = channel
+
+    try:
+        conn.settimeout(SSE_SEND_TIMEOUT_SECONDS)
+        req.send_response(200)
+        req.send_header("Content-Type", "text/event-stream")
+        req.send_header("Cache-Control", "no-cache")
+        req.send_header("Connection", "keep-alive")
+        # Chunked rather than a Content-Length: the body is unbounded. HTTP/1.1 without either
+        # would make the client wait for a close that never comes.
+        req.send_header("Transfer-Encoding", "chunked")
+        req.end_headers()
+
+        # Plus anything staged before the channel was registered, whose wake found no channel.
+        batches = backlog + registry.drain(sub)
+        next_tick = time.monotonic() + SSE_KEEPALIVE_SECONDS
+        while True:
+            for batch in batches:
+                if not channel.send(batch["updates"]):
+                    return
+            # WAIT ON THE SOCKET, NOT ON THE CLOCK, so an abandoned stream frees this thread at
+            # once rather than at the next keepalive (README.md -> "Subscriptions", rule 4). A
+            # readable stream socket means EOF: the request body was consumed at dispatch.
+            try:
+                ready, _, _ = select.select(
+                    [conn, channel.wake_socket], [], [], max(0.0, next_tick - time.monotonic())
+                )
+            except (OSError, ValueError):
+                return
+            if conn in ready:
+                return
+            if channel.close_requested.is_set():
+                channel.finish()
+                return
+            batches = []
+            if channel.wake_socket in ready:
+                # Consumed before the drain, so a wake landing after the drain is not lost.
+                channel.consume_wakes()
+                batches = registry.drain(sub)
+            if time.monotonic() >= next_tick:
+                # The reaper treats an open stream as activity. The comment frame still goes out
+                # when idle: intermediaries time out a silent connection.
+                registry.touch(sub)
+                if not channel.keepalive():
+                    return
+                next_tick = time.monotonic() + SSE_KEEPALIVE_SECONDS
+    except OSError:
+        # The headers could not be written: the client left before the stream began.
+        pass
+    finally:
+        _detach_stream(sub, channel)
+        channel.release()
+        if channel.ended_cleanly:
+            conn.settimeout(req.timeout)
+        else:
+            # A partial chunk, or a client already gone: the connection cannot carry another request.
+            req.close_connection = True
 
 
 # =================================================================================================
@@ -1348,56 +1464,7 @@ def h_sub_stream(req: Handler) -> None:
     body = req._body()
     client_id = _require_client_id(body)
     sub = registry.get_owned(client_id, body.get("subscriptionId") or "")
-
-    backlog = registry.open_stream(sub)
-    channel = SseChannel(req)
-    with _streams_lock:
-        existing = _streams.get(sub.subscription_id)
-        if existing:
-            existing.close()
-        _streams[sub.subscription_id] = channel
-
-    req.send_response(200)
-    req.send_header("Content-Type", "text/event-stream")
-    req.send_header("Cache-Control", "no-cache")
-    req.send_header("Connection", "keep-alive")
-    # Chunked rather than a Content-Length: the body is unbounded. HTTP/1.1 without either would
-    # make the client wait for a close that never comes.
-    req.send_header("Transfer-Encoding", "chunked")
-    req.end_headers()
-
-    for batch in backlog:
-        if not channel.send(batch["updates"]):
-            _detach_stream(sub, channel)
-            return
-
-    # Hold the connection open. The reaper treats an open stream as activity, so a quiet machine does
-    # not have its subscription deleted underneath a healthy connection.
-    #
-    # WAIT ON THE SOCKET, NOT ON THE CLOCK. Sleeping discovers an abandoned stream only when the
-    # next keepalive write fails, which pins the thread and its TCP connection for up to a full
-    # interval -- and HTTP/1.1 keep-alive SERIALISES a connection, so a pooling client's next
-    # request queues behind the corpse of the stream it just abandoned.
-    # (README.md -> "Subscriptions", rule 4, which records how that failed SUB-10)
-    #
-    # A readable stream socket means EOF here: the request body was fully consumed at dispatch and
-    # no client sends more on an SSE connection. Either way -- orderly close, reset, or a client
-    # that has started talking nonsense -- ending the stream is the right response.
-    try:
-        while not channel.closed.is_set():
-            try:
-                ready, _, _ = select.select([req.connection], [], [], SSE_KEEPALIVE_SECONDS)
-            except (OSError, ValueError):
-                break
-            if ready:
-                break
-            registry.touch(sub)
-            # Still sent on the idle path: intermediaries time out a silent connection, and the
-            # comment frame is what keeps a proxy from closing a healthy stream.
-            if not channel.keepalive():
-                break
-    finally:
-        _detach_stream(sub, channel)
+    _serve_stream(req, sub, registry.open_stream(sub))
 
 
 ROUTES = {

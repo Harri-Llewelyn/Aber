@@ -201,8 +201,8 @@ class SubscriptionRegistry:
         Queue a batch for every subscription monitoring any of these elements.
 
         Called from the MQTT thread on every value change. Returns the subscriptions with an open
-        stream, so the caller can push to exactly those without holding this lock across a socket
-        write -- a slow or dead SSE consumer must not be able to stall the ingest thread.
+        stream so the caller can wake exactly those; each stream's own handler thread drains and
+        writes, so a slow or dead SSE consumer cannot stall the ingest thread.
         """
         streaming = []
         with self._lock:
@@ -305,9 +305,9 @@ class SubscriptionRegistry:
         """
         Take every queued batch, leaving the queue empty.
 
-        Used only by the streaming path. Draining under the registry's own lock is what keeps it
-        atomic against the MQTT thread appending concurrently -- a copy-then-clear outside the lock
-        would silently discard anything staged in between.
+        Used only by the streaming path, on the stream's handler thread. Draining under the
+        registry's own lock is what keeps it atomic against the MQTT thread appending concurrently --
+        a copy-then-clear outside the lock would silently discard anything staged in between.
         """
         with self._lock:
             batches = [dict(b) for b in sub.batches]

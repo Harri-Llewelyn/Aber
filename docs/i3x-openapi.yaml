@@ -726,6 +726,9 @@ paths:
         keep-alive *serialises* a connection, so a pooling client that abandons a stream and
         immediately issues another request has that request queued behind the corpse of the
         first — which presents as a hung server on an endpoint that was never reached.
+
+        **A client that stops reading loses its stream after 10 seconds.** A write that cannot
+        finish in that time ends the stream, and the connection with it; nothing else waits on it.
       requestBody:
         required: true
         content:

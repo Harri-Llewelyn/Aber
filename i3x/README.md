@@ -151,6 +151,13 @@ Five rules are easy to get wrong and each fails quietly:
    ("delete deletes the subscription") failed — reported as a 15-second timeout on an endpoint that
    was never reached, which reads as a hung server rather than as a stream that had not noticed it
    was over. It reproduces only against a client that pools connections.
+
+   A client that stays connected but stops *reading* (a sleeping laptop, a background tab, a proxy
+   that stopped draining) is bounded too. Only the stream's own handler thread writes to its
+   socket, with a 10-second send timeout; the MQTT thread only queues the value and wakes the
+   stream. So that client loses its own stream after 10 seconds and holds up nothing else. When the
+   MQTT thread did the write itself, one such client froze every value on the site until the kernel
+   gave up on the connection.
 5. **Sync and stream are mutually exclusive.** `/sync` must error while a stream is open, because
    the stream has already delivered — and discarded — the queue the sync caller is asking to
    acknowledge.
