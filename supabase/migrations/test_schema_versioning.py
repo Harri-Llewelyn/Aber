@@ -349,6 +349,60 @@ class TestImmutability(SchemaVersioningTestCase):
         self._act_as_owner()
         self.assertIn("OEE/QUALITY", self._fetch(schema_id)["schema_definition"]["properties"])
 
+    def test_a_drafts_semantic_id_can_be_changed_and_cleared(self):
+        """
+        fork_schema() copies the parent's semantic id into the draft, so the draft is where a wrong
+        claim, or a template that has moved on, is corrected or retracted. The dashboard writes the
+        pair together, and clearing the id clears its type. The parent keeps what it published.
+        """
+        nameplate = "https://admin-shell.io/idta/nameplate/3/0/Nameplate"
+        parent_id, _, _, _ = self._seed_schema("TESTVER_Semantic_Parent")
+        self.cur.execute(
+            "UPDATE public.schemas SET semantic_id = %s, semantic_id_type = 'IRI' WHERE id = %s;",
+            (nameplate, parent_id),
+        )
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft_id = self._fork(parent_id)["id"]
+
+        def pair(schema_id):
+            self.cur.execute(
+                "SELECT semantic_id, semantic_id_type FROM public.schemas WHERE id = %s;", (schema_id,)
+            )
+            return self.cur.fetchone()
+
+        self.assertEqual(pair(draft_id), (nameplate, "IRI"), "the draft did not inherit the id")
+
+        self.cur.execute(
+            "UPDATE public.schemas SET semantic_id = %s, semantic_id_type = 'IRDI' WHERE id = %s;",
+            ("0112/2///61987#ABA565#009", draft_id),
+        )
+        self.assertEqual(self.cur.rowcount, 1, "an Administrator could not change a draft's semantic id")
+        self.assertEqual(pair(draft_id), ("0112/2///61987#ABA565#009", "IRDI"))
+
+        self.cur.execute(
+            "UPDATE public.schemas SET semantic_id = NULL, semantic_id_type = NULL WHERE id = %s;",
+            (draft_id,),
+        )
+        self.assertEqual(self.cur.rowcount, 1, "an Administrator could not clear a draft's semantic id")
+        self.assertEqual(pair(draft_id), (None, None))
+
+        self._act_as_owner()
+        self.assertEqual(pair(parent_id), (nameplate, "IRI"), "editing the draft moved its parent")
+
+    def test_an_active_schemas_semantic_id_is_frozen(self):
+        """The id is part of what was published, so only a new version may change it."""
+        schema_id, _, _, _ = self._seed_schema("TESTVER_Semantic_Frozen")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+
+        self.assertRaisesInStatement(
+            lambda: self.cur.execute(
+                "UPDATE public.schemas SET semantic_id = 'urn:example:claim', semantic_id_type = 'IRI'"
+                " WHERE id = %s;",
+                (schema_id,),
+            ),
+            message_contains="immutable",
+        )
+
     def test_archived_schema_cannot_be_reactivated(self):
         """
         Binds every caller, including the owner -- history that can be re-opened is not history.
