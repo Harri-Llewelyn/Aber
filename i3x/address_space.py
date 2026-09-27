@@ -496,7 +496,7 @@ def gateway_value(gateway: dict) -> dict:
         {
             "status": status,
             "sparkplugGroup": gateway.get("sparkplug_group") or "",
-            "lastHeartbeat": gateway.get("last_heartbeat"),
+            "lastHeartbeat": to_rfc3339_utc(gateway.get("last_heartbeat")),
         },
         quality,
         gateway.get("last_heartbeat") or _now_iso(),

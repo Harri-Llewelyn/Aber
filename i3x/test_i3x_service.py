@@ -879,6 +879,13 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
         self.assertEqual(value(cell_b), {"deviceCount": 1, "description": None})
         self.assertEqual(value(A.UNASSIGNED_ELEMENT_ID)["deviceCount"], 1)
 
+    def test_a_gateways_heartbeat_inside_its_value_is_rfc3339_utc(self):
+        # The envelope's timestamp was normalised and the same instant inside the value was not.
+        space, objects, _ = self.space()
+        vqt = i3x_service._current_value(objects, space, "gwy-site")
+        self.assertEqual(vqt["value"]["lastHeartbeat"], "2026-08-07T19:14:11.112Z")
+        self.assertEqual(vqt["value"]["lastHeartbeat"], vqt["timestamp"])
+
 
 class TestMirroredConstants(unittest.TestCase):
     """
