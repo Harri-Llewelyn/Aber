@@ -372,6 +372,7 @@ class TestAddressSpace(unittest.TestCase):
     def test_exactly_one_root(self):
         site = A.site_object(["cell-1"])
         self.assertIsNone(site["parentId"], "the site is the only object with a null parentId")
+        self.assertEqual(site["displayName"], "Site")
         self.assertEqual(A.unassigned_object([])["parentId"], A.SITE_ELEMENT_ID)
 
     def test_every_edge_has_its_inverse(self):

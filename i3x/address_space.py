@@ -321,7 +321,7 @@ def _site_relationships(child_ids: List[str]) -> dict:
 def site_object(child_ids: List[str]) -> dict:
     return {
         "elementId": SITE_ELEMENT_ID,
-        "displayName": "Factory+ Site",
+        "displayName": "Site",
         "typeElementId": SITE_TYPE_ID,
         # The only true root. i3X reads `parentId: null` as root, so there must be exactly one.
         "parentId": None,
