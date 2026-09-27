@@ -4,7 +4,8 @@ A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
 eXchange) server over this stack's existing model.
 
 **Current verdict: `1.0 Compatible`** — 52 passed, 0 failed against CESMII's official 60-test
-conformance suite. Not *Full 1.0 Compliance*, and deliberately so: that requires the optional
+conformance suite at `5010274f` (cesmii/i3X, 2026-06-18), the ref CI pins. That predates the
+Implementation Guide's 1.0 final of 2026-09-25, whose changes were editorial. Not *Full 1.0 Compliance*, and deliberately so: that requires the optional
 Update methods, which this server refuses (see [Writes](#writes-are-refused)).
 
 ---
@@ -260,7 +261,7 @@ carry named a package that does not exist.
       "env": {
         "I3X_BASE_URL": "http://localhost:8090/v1",
         "I3X_AUTH_SCHEME": "bearer",
-        "I3X_TOKEN": "<a Supabase access token — see Connecting a client, above>"
+        "I3X_TOKEN": "<a service principal's token — see The token, below>"
       }
     }
   }
@@ -339,26 +340,35 @@ That is the whole argument for [Writes are refused](#writes-are-refused) working
 client-side flag is a convenience, and the durable control is that this server implements no write
 verb. A user who defeats the flag gets the refusal and the reason for it.
 
-### The token is the user's own
+### The token
 
-The MCP client inherits exactly that user's RLS scope, because this server passes the bearer
-straight to PostgREST. An operator asking a model about the shopfloor sees what an operator can see.
+The MCP client inherits exactly the RLS scope of whoever its token names, because this server
+passes the bearer straight to PostgREST. With an operator's token, a model asking about the
+shopfloor sees what an operator can see.
 
 **A token copied out of a browser session expires in an hour** (`GOTRUE_JWT_EXP: 3600`) — the same
 trap the Explorer note above describes. A host config is a *file*, so the token in it is stale by
 the next session, and the symptom is `401`s on a server that was working.
 
-**Mint a durable one instead:**
+**Issue a service principal's token instead**, in either of two ways:
 
-```bash
-node scripts/mint-mcp-token.mjs            # 90 days, prints the token
-node scripts/mint-mcp-token.mjs --json     # a ready-to-paste mcpServers block
-```
+- **On the dashboard**, as an Administrator: Access Control → the principal's **Issue Token**
+  (the Service Token modal). It offers 7, 30 or 90 days, 30 by default, and shows the token once
+  with its `jti`.
+- **From a shell** on a machine that can reach the stack:
 
-It signs a JWT for `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
-migration `0034`, using the same HS256 secret the rest of the stack shares — so PostgREST validates
-it exactly as it validates a GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP`
-governs what GoTrue *issues* and does not apply.
+  ```bash
+  node scripts/mint-mcp-token.mjs            # 30 days, prints the token
+  node scripts/mint-mcp-token.mjs --days 90  # 90 is the ceiling, not the default
+  node scripts/mint-mcp-token.mjs --json     # a ready-to-paste mcpServers block
+  ```
+
+Both record the issue in the Digital Thread before they reveal the token, and both sign a JWT with
+the HS256 secret the rest of the stack shares, so PostgREST validates it exactly as it validates a
+GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP` governs what GoTrue *issues* and
+does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
+read-only MCP principal seeded by archived migration 0034. The ceiling is
+`service_token_max_days()`, which the database enforces as well as both issuers.
 
 **The principal holds `telemetry:read` and nothing else, and the narrowness is deliberate.** Every
 write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069`
@@ -377,11 +387,22 @@ this principal must not hold `digital_thread:read`.
 **It is not `service_role`**, which would be the one-line answer and would bypass the RLS scoping
 that makes the paragraph above true.
 
-**There is no revocation.** PostgREST checks the signature, not a session table, so withdrawing a
-minted token means rotating `SUPABASE_JWT_SECRET` — which invalidates every token in the stack,
-including the anon and service-role keys. The expiry is the only bound that exists. That is why
-`--days` is a real decision and why a laptop leaving the building takes a working credential with
-it.
+**A token can be revoked on its own.** Each carries a `jti`, which the script prints and the modal
+shows. `SELECT revoke_service_token('<jti>')` as an Administrator, or withdrawing it from the
+principal's token list on the Access Control page, adds it to the denylist `auth_pre_request()`
+consults; withdrawing the principal refuses every token that names it. What that reaches:
+
+- **PostgREST** refuses the token on its next request.
+- **This server** refuses it within 15 seconds, because it authenticates every request but
+  `GET /info` through PostgREST ([Security](#security)). An open stream ends at its next
+  15-second keepalive.
+- **Storage, Realtime and the edge runtime do not.** They check only the signature, and accept a
+  revoked token until it expires.
+
+So the expiry still bounds those three, which is why `--days` is a real decision: a token revoked
+after a laptop left the building still reaches them until it expires. **Do not rotate
+`SUPABASE_JWT_SECRET` to withdraw one token**: that invalidates every token in the stack, including
+the stack's own keys.
 
 ### Troubleshooting: `server_info` succeeding proves nothing about your token
 
