@@ -46,9 +46,11 @@ function element(der: Uint8Array, offset: number): { tag: number; start: number;
 /**
  * The SubjectPublicKeyInfo of an X.509 certificate, as the raw DER element. Certificate is a
  * SEQUENCE whose first child is the TBSCertificate SEQUENCE; inside it, an optional [0] version,
- * then serialNumber, signature, issuer, validity, subject, and the SPKI is the next element.
+ * then serialNumber, signature, issuer, validity, subject, and the SPKI is the next element. A
+ * copy over its own ArrayBuffer, so typed as a BufferSource too, which crypto.subtle requires
+ * (see _shared/zip.ts).
  */
-export function subjectPublicKeyInfo(der: Uint8Array): Uint8Array {
+export function subjectPublicKeyInfo(der: Uint8Array): Uint8Array & BufferSource {
   const certificate = element(der, 0);
   if (certificate.tag !== 0x30) throw new Error("not a certificate");
   const tbs = element(der, certificate.start);

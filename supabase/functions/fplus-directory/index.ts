@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * Factory+ Directory adapter: the read half of the Factory+ Directory component's REST contract,
@@ -275,7 +275,7 @@ export default async function handler(req: Request): Promise<Response> {
  * provisioned through the legacy 1:1 `devices.schema_id`.
  */
 async function schemaMembers(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   schemaId: string,
 ): Promise<Response> {
   const { data: schemas, error: schemaError } = await supabase
@@ -331,7 +331,7 @@ async function schemaMembers(
  * provisioned through the legacy 1:1 column reports the same set the exporter and the frontend see.
  */
 async function attachSchemas(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   entries: DirectoryEntry[],
 ): Promise<DirectoryEntry[]> {
   if (!entries.length) return entries;

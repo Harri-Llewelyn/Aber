@@ -3068,7 +3068,9 @@ modules djwt imports by content hash.
   hand, when edge-runtime's embedded Deno does: a lock written by another Deno can be in a format
   the build cannot read.
 - `npm run lint:deno` enforces `no-import-prefix`, so a specifier written into an import instead of
-  `deno.json` fails lint.
+  `deno.json` fails lint. It also runs `deno check --frozen` over every entrypoint with the
+  Dockerfile's `denoland/deno` image, so a type error, or an import the lock does not cover, fails
+  it too.
 
 ### `approve_quarantined_device()`
 

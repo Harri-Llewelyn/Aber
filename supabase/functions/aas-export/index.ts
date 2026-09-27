@@ -13,7 +13,8 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
-import { zipSync, strToU8 } from "fflate";
+import { strToU8 } from "fflate";
+import { zip } from "../_shared/zip.ts";
 import { modelContentType } from "../_shared/aas/model3dContentType.ts";
 import {
   BUNDLE_PARTS,
@@ -77,7 +78,7 @@ const AASX_SPEC_PART = "aasx/aasenv-root.json";
  */
 type SupplementaryFile = { part: string; bytes: Uint8Array; contentType: string };
 
-function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[] = []): Uint8Array {
+function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[] = []) {
   // One Override per supplementary part rather than a Default per extension: two models could
   // share an extension, and an Override names the part exactly. Deduplicated by part name.
   const overrides = supplements
@@ -132,7 +133,7 @@ ${
     for (const s of supplements) entries[s.part] = s.bytes;
   }
 
-  return zipSync(entries);
+  return zip(entries);
 }
 
 export default async function handler(req: Request): Promise<Response> {
