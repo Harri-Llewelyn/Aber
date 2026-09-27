@@ -1399,6 +1399,64 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// Every variable a function declares is set on the functions Deployment
+//
+// main/index.ts forwards a worker nothing but the names its registry entry lists, and a name the
+// Deployment never sets is skipped silently, so the function reads `undefined` and refuses or
+// degrades on every call while the pod stays Ready. GRAFANA_ALERT_WEBHOOK_SECRET shipped that way
+// from the Compose removal: Grafana held the secret, the functions Deployment did not, and no alert
+// reached the dashboard on any Kubernetes install while every rule reported healthy.
+{
+  const registry = read('supabase/functions/main/index.ts');
+  const chart = read('deploy/helm/aber/templates/supabase/functions.yaml');
+
+  const from = registry.indexOf('const COMMON_ENV');
+  const to = registry.indexOf('function envForFunction');
+  const declared = new Set(
+    [...registry.slice(from, to).matchAll(/"([A-Z][A-Z0-9_]+)"/g)].map((m) => m[1])
+  );
+
+  // Set by something other than the Deployment's env list, each with what sets it.
+  const elsewhere = {
+    ABER_CA_PEM: 'the image entrypoint reads it from the mounted platform root',
+    ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+    ASSET_EXPORT_MAX_THREAD_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+  };
+
+  const set = new Set([
+    ...[...chart.matchAll(/^\s*-\s*name:\s*([A-Z][A-Z0-9_]+)\s*$/gm)].map((m) => m[1]),
+    ...[...chart.matchAll(/"aber\.(?:optional)?[sS]ecretEnv"\s*\(dict\s+"name"\s+"([A-Z][A-Z0-9_]+)"/g)]
+      .map((m) => m[1]),
+  ]);
+
+  const missing = [...declared].filter((n) => !set.has(n) && !(n in elsewhere));
+  const stale = Object.keys(elsewhere).filter((n) => !declared.has(n));
+
+  if (!declared.size || !set.size) {
+    fail(
+      'the function registry or the functions Deployment could not be read ' +
+        `(${declared.size} declared, ${set.size} set); one of them has moved.`
+    );
+  } else if (missing.length) {
+    fail(
+      `${missing.length} variable(s) the function registry declares are set nowhere on ` +
+        'supabase-functions, so the worker never receives them and the function fails on every ' +
+        `call while the pod stays Ready: ${missing.join(', ')}`
+    );
+  } else if (stale.length) {
+    fail(
+      `${stale.join(', ')} is listed here as set elsewhere but no function declares it any more; ` +
+        'remove it from the list.'
+    );
+  } else {
+    pass(
+      `all ${declared.size} variable(s) the function registry declares are set on ` +
+        `supabase-functions (${Object.keys(elsewhere).length} by something other than its env list)`
+    );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11d. The Access Control page describes every database principal a migration seeds.
 //
 // `describePrincipal()` falls back to "Undocumented principal" rather than hiding the row, so an
