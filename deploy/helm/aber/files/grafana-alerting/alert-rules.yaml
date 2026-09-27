@@ -6,8 +6,8 @@
 apiVersion: 1
 
 groups:
-  # Platform Conditions: rows of public.platform_health and gateway_health, read as grafana_reader
-  # through the Supabase datasource. NoData is OK throughout: the views emit a row only for a condition.
+  # Platform Conditions: rows of public.platform_health, gateway_health and backup_health, read as
+  # grafana_reader through the Supabase datasource. NoData is OK throughout: no row is nothing to report.
   - orgId: 1
     name: Platform Conditions
     folder: Aber - Platform Infrastructure
@@ -309,6 +309,64 @@ groups:
                 - evaluator:
                     type: gt
                     params: [14]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Backup Stale: no successful platform backup for 36h, counted from the first job recorded
+      # until one succeeds. The window is the delay. No row while no job exists.
+      - uid: aber-backup-stale
+        title: Backup Stale
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            No platform backup has succeeded for {{ humanizeDuration $values.B.Value }}. The
+            Backups page names the last good one and why later runs failed; a job queued and never
+            claimed means the backup service is not running.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       age_seconds  AS since_success_seconds
+                  FROM public.backup_health
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [129600]
               datasource:
                 type: __expr__
                 uid: __expr__

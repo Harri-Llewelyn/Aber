@@ -822,6 +822,11 @@ function edgeFunctionNames() {
       + 'datasource over a direct connection so an alert can see that the monthly partition job '
       + 'has stopped, and it counts audit rows: a published path would be a way to size the '
       + 'security lane without holding digital_thread:read',
+  backup_health:
+      'How long since the platform backup last succeeded (0011), granted to `grafana_reader` alone '
+      + 'and revoked from anon/authenticated -- the same arrangement as the views above. It reads '
+      + 'backup_jobs as its owner so the Backup Stale rule can see it; the Backups page reads the '
+      + 'table itself, under the Administrator-only RLS a published path would bypass',
   digital_thread_default:
       'The DEFAULT partition of digital_thread (0079), which exists so that a lapsed partition '
       + 'job degrades instead of refusing every audit write -- and therefore every asset write, '
@@ -2041,6 +2046,37 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`the archive backlog tolerance is ${page} days on the Cold Storage page and in its alert rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 28. The Backups page and the Backup Stale alert agree about when backups have stopped
+//
+// The page's current-state line and the rule count from the same clock; the page holds the
+// threshold in hours, the rule in seconds. Between two different numbers one surface says backups
+// are working while the other pages somebody.
+{
+  const page = read('frontend/src/components/tabs/BackupsTab.jsx')
+    .match(/BACKUP_STALE_HOURS\s*=\s*(\d+)/)?.[1];
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+  const at = rules.indexOf('uid: aber-backup-stale');
+  // The evaluator inside the rule: the first `params: [n]` after its uid.
+  const alert = at === -1 ? undefined : rules.slice(at).match(/type:\s*gt\s*\n\s*params:\s*\[(\d+)\]/)?.[1];
+
+  if (!page || !alert) {
+    fail(
+      `the backup staleness threshold could not be read from both sides (page: ${page || 'MISSING'}, ` +
+        `alert: ${alert || 'MISSING'}). One of them has been renamed or removed, and the other is ` +
+        'now the only definition of a threshold two surfaces are meant to share.'
+    );
+  } else if (Number(page) * 3600 !== Number(alert)) {
+    fail(
+      `the Backups page calls backups stopped after ${page} hours (${Number(page) * 3600}s) and the ` +
+        `Backup Stale alert fires above ${alert}s. Between those numbers one surface says backups ` +
+        'are working while the other pages somebody.'
+    );
+  } else {
+    pass(`the backup staleness threshold is ${page} hours on the Backups page and in its alert rule`);
   }
 }
 
