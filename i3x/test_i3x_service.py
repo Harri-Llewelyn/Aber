@@ -746,10 +746,6 @@ class BulkElementIdsCapTest(unittest.TestCase):
                 )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAddressSpaceCache(unittest.TestCase):
     """
     The short-TTL address-space cache.
@@ -873,3 +869,7 @@ class TestAddressSpaceCache(unittest.TestCase):
         keys = set(i3x_service._space_cache)
         self.assertIn(i3x_service._space_cache_key("Bearer a"), keys)
         self.assertNotIn(i3x_service._space_cache_key("Bearer b"), keys)
+
+
+if __name__ == "__main__":
+    unittest.main()
