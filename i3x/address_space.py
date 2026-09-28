@@ -33,8 +33,8 @@ UNASSIGNED_ELEMENT_ID = "i3x:unassigned"
 SITE_NAME_SETTING = "site.name"
 SITE_FALLBACK_NAME = "Site"
 
-# `device_locations.location_source` values placement reads. Kept in step with the view and with
-# ingestion/uns_publish.py's SOURCE_* constants.
+# The `device_locations.location_source` labels placement reads; ingestion/uns_publish.py mirrors
+# the same set. test_i3x_service.py holds these to the view's own labels.
 SOURCE_SHADOW = "shadow"
 SOURCE_SIMULATED = "simulated"
 SOURCE_SITE_WIDE = "site_wide"
@@ -54,7 +54,7 @@ LANES = {
     SOURCE_SHADOW: (
         "i3x:lane:shadow",
         "Shadow",
-        "Replay lanes behind a playback gateway: recorded captures of real machines, republished. "
+        "Assets behind a playback gateway: recorded captures of real machines, republished. "
         "Synthetic, and not a place: such an asset cannot be filed in a cell.",
     ),
 }
