@@ -2609,12 +2609,34 @@ def h_sub_register(req: Handler) -> None:
     element_ids = _registration_entries(body)
     max_depth = _max_depth(body)
     sub = _owned_subscription(req, client_id, body)
-    known = _build_objects(_load_address_space(req._pg())) if element_ids else {}
+    pg = req._pg() if element_ids else None
+    space = _load_address_space(pg) if pg else None
+    known = _build_objects(space) if space else {}
 
     def register(ids: list) -> List[dict]:
         return registry.register(sub, [{"elementId": e, "maxDepth": max_depth} for e in ids])
 
-    req._bulk(_per_item(element_ids, known, register))
+    results = _per_item(element_ids, known, register)
+    if space:
+        _fill_registered(pg, space, known, [e for e, r in zip(element_ids, results) if r["success"]])
+    req._bulk(results)
+
+
+def _fill_registered(pg: PostgrestClient, space: dict, objects, element_ids: list) -> None:
+    """
+    Fill what the value cache lacks for each device these registered ids name, a metric naming its
+    device, so the first map staged for a device no read has named since a restart is complete.
+    Bounded as a value read is (`_fill_from_historian`). A failure is logged and the registration
+    stands: those values stay missing until the device publishes them or a read fills them.
+    """
+    devices = space.get("_devices_by_sid") or {}
+    wanted = {element_id.partition("/")[0] for element_id in element_ids} & set(devices)
+    if not wanted:
+        return
+    try:
+        _fill_from_historian(pg, space, objects, wanted)
+    except Exception:  # noqa: BLE001
+        logger.exception("filling %d registered device(s) from telemetry_latest failed", len(wanted))
 
 
 def h_sub_unregister(req: Handler) -> None:

@@ -272,10 +272,12 @@ taken for "no rows", and every device sat under Unassigned without an error anyw
 
 **A value the cache lacks is read from the historian.** `/objects/value` is served from the MQTT
 cache, which is empty when the process starts, and Sparkplug reports by exception: a setpoint may
-not change for days. So for each device a value request names, the components the cache lacks are
-read from `telemetry_latest` as the caller, which is one row per series. There is one read per 50
-devices, capped at 5000 rows, and each device is read once per process. The cache is seeded with
-the answer, so a later DDATA merges into a complete map, on reads and on subscriptions alike. A
+not change for days. So for each device a value request or a subscription registration names (a
+metric naming its device), the components the cache lacks are read from `telemetry_latest` as the
+caller, which is one row per series. There is one read per 50 devices, capped at 5000 rows, and
+each device is read once per process. The cache is seeded with the answer, so a later DDATA merges
+into a complete map, on reads and on subscriptions alike. A fill that fails at registration is
+logged and the registration stands, with those values missing until they are published or read. A
 cached value is never replaced, and a stored series that is no longer a component is not added. A
 filled value's quality follows the table: `Good` for a device online now, `Uncertain` for one that
 is offline. If the read fails, what the cache lacks is `Bad` ("unavailable due to an error") and a
@@ -436,7 +438,7 @@ that is not a string failing its own item with a 400. A `subscriptionId` that is
 | A device at `maxDepth: 1` | The device: its map of metrics |
 | A device at `maxDepth: 0`, or 2 or more | The device, and each of its metrics as `<device>/<metric>`, in one batch when both change |
 | A metric, `<device>/<metric>` | That metric only, whatever its depth |
-| A gateway | That gateway only (its NBIRTH and NDEATH). It composes nothing, so not its devices |
+| A gateway | That gateway only: its birth, its death, and a heartbeat that changes its live status. It composes nothing, so not its devices |
 | The site, an area, a cell, a lane or Unassigned | Nothing |
 
 **A metric's parent is read from its elementId.** The only composition is a device's metrics, and a
@@ -798,7 +800,7 @@ and discover it during their own integration.
 | Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/aber/templates/apps/i3x-service.yaml) |
 | Endpoint reachability across a restart | **None.** `Recreate` stops the old pod before starting the new one, so there is a window with no i3X endpoint at all rather than a degraded one |
 | Subscription survival across a restart | **None.** Queues, sequence numbers and open SSE streams are process memory |
-| Current values immediately after a restart | **Filled on the first read.** The MQTT cache refills from `spBv1.0/#` as devices publish, and the first `/objects/value` naming a device fills what it lacks from `telemetry_latest`, with each sample's stored time ([Address space](#address-space)). Only a metric the historian does not hold within raw retention is `GoodNoData` until it next changes. A subscription's staged values come from the cache alone, so a device no value read has named since the restart is staged with only what it has published since |
+| Current values immediately after a restart | **Filled on the first read.** The MQTT cache refills from `spBv1.0/#` as devices publish, and the first `/objects/value` naming a device fills what it lacks from `telemetry_latest`, with each sample's stored time ([Address space](#address-space)). Only a metric the historian does not hold within raw retention is `GoodNoData` until it next changes. A subscription registration fills the devices it names the same way, so the first map staged for one is complete |
 | Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
 | Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
 | Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. A principal is the token's `sub`, so every token minted for one service principal shares its 20 |

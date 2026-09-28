@@ -1015,6 +1015,65 @@ class TestAStalledStreamStallsOnlyItself(unittest.TestCase):
         self.assertIsNone(req.connection.gettimeout(), "the send timeout outlived the stream")
 
 
+class TestAMessageReachesEachRegistration(unittest.TestCase):
+    """
+    The MQTT side and the registry together: `on_message` builds what some registration watches,
+    and the registry's depth rule decides which subscription each update reaches.
+    """
+
+    DEVICE, NODE = "dev-reach-499", "node-1"
+    METRIC = DEVICE + "/Temperature"
+
+    def setUp(self):
+        self._real_registry = i3x_service.registry
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        i3x_service._liveness_clear()
+        with i3x_service._values_lock:
+            i3x_service._values.pop(self.DEVICE, None)
+
+    def tearDown(self):
+        i3x_service.registry = self._real_registry
+        i3x_service._liveness_clear()
+        with i3x_service._values_lock:
+            i3x_service._values.pop(self.DEVICE, None)
+
+    def subscribe(self, element_id, depth=1):
+        sub = self.registry.create(f"client-{element_id}-{depth}")
+        self.registry.register(sub, [{"elementId": element_id, "maxDepth": depth}])
+        return sub
+
+    def delivered(self, sub):
+        """Each queued batch as [(elementId, quality)], then the queue acknowledged."""
+        batches, _ = self.registry.sync(sub)
+        self.registry.sync(sub, last_sequence_number=-1)
+        return [[(u["elementId"], u["quality"]) for u in b["updates"]] for b in batches]
+
+    def test_a_ddata_reaches_the_device_unbounded_and_the_metric_alone(self):
+        unbounded, shallow = self.subscribe(self.DEVICE, 0), self.subscribe(self.DEVICE, 1)
+        alone = self.subscribe(self.METRIC)
+        i3x_service.on_message(None, None, _ddata(self.DEVICE, 1.0))
+        ids = lambda sub: [[e for e, _ in batch] for batch in self.delivered(sub)]  # noqa: E731
+        self.assertEqual(ids(unbounded), [[self.DEVICE, self.METRIC]])
+        self.assertEqual(ids(shallow), [[self.DEVICE]])
+        self.assertEqual(ids(alone), [[self.METRIC]])
+
+    def test_an_ndeath_reaches_the_gateway_registration(self):
+        gateway, alone = self.subscribe(self.NODE, 0), self.subscribe(self.METRIC)
+        # The device's traffic is how the MQTT side learns which node it is behind.
+        i3x_service.on_message(None, None, _ddata(self.DEVICE, 1.0))
+        self.assertEqual(self.delivered(gateway), [], "a device's data reached its gateway")
+        self.delivered(alone)
+
+        i3x_service.on_message(None, None, _spb("NDEATH", node=self.NODE, group="TestGroup"))
+        batches, _ = self.registry.sync(gateway)
+        updates = [u for batch in batches for u in batch["updates"]]
+        self.assertEqual([(u["elementId"], u["value"]["status"], u["quality"]) for u in updates],
+                         [(self.NODE, "OFFLINE", "Good")])
+        # Its device's values are now held, so the metric registered alone hears that too.
+        self.assertEqual(self.delivered(alone), [[(self.METRIC, "Uncertain")]])
+
+
 class TestTtl(unittest.TestCase):
     def test_idle_subscription_is_reaped(self):
         registry, clock = make_registry(ttl_seconds=60)
@@ -3069,6 +3128,57 @@ class TestCurrentValuesAreFilledFromTheHistorian(_QualityCase):
             self.read(None, "dev-two", pg=first)
             self.read(None, "dev-two", pg=second)
         self.assertEqual((len(self.latest_reads(first)), len(self.latest_reads(second))), (1, 1))
+
+
+class TestARegistrationFillsFromTheHistorian(_QualityCase):
+    """
+    A registration fills what the cache lacks for each device it names, a metric naming its
+    device, as a value read does, so the first map staged for a device no read has named since a
+    restart is complete. A fill that fails leaves the registration standing.
+    """
+
+    DEV_TWO = TestCurrentValuesAreFilledFromTheHistorian.DEV_TWO
+    pg = TestCurrentValuesAreFilledFromTheHistorian.pg
+    latest_reads = TestCurrentValuesAreFilledFromTheHistorian.latest_reads
+
+    def register(self, pg, *element_ids):
+        i3x_service._space_cache_clear()
+        sub = i3x_service.registry.create("client-fill", principal="p-fill")
+        req = FakeRequest(body={"clientId": "client-fill", "subscriptionId": sub.subscription_id,
+                                "elementIds": list(element_ids)}, pg=pg)
+        req.caller = i3x_service.Caller("p-fill", None)
+        i3x_service.h_sub_register(req)
+        return [(r["elementId"], r["success"]) for r in req.result]
+
+    def test_registering_a_metric_fills_its_device_before_anything_is_staged(self):
+        pg = self.pg()
+        self.assertEqual(self.register(pg, "dev-two/OEE/AVAILABILITY"),
+                         [("dev-two/OEE/AVAILABILITY", True)])
+        self.assertEqual([r["asset_id"] for r in self.latest_reads(pg)], ["in.(dev-two)"])
+        i3x_service.on_message(None, None, _spb(
+            "DDATA", device="dev-two", metrics=[{"name": "OEE/AVAILABILITY", "value": 90.0}]))
+        # The map staged for the device holds the filled position, not only what was published.
+        self.assertEqual(self.last_staged()["dev-two"]["value"],
+                         {"Axes/X/POSITION": 7.0, "OEE/AVAILABILITY": 90.0})
+
+    def test_only_registered_devices_are_read_once_between_them(self):
+        pg = self.pg()
+        self.register(pg, "dev-one", "gwy-1", CELL_A, "dev-unknown", "dev-two/Axes/X/POSITION",
+                      "dev-two")
+        self.assertEqual([r["asset_id"] for r in self.latest_reads(pg)], ["in.(dev-one,dev-two)"])
+        nothing = self.pg()
+        self.register(nothing, "gwy-1", CELL_A)
+        self.assertEqual(self.latest_reads(nothing), [])
+
+    def test_a_failed_fill_leaves_the_registration_standing(self):
+        failing = self.pg(fail=SubscriptionError(502, "Bad Gateway", "historian down"))
+        with self.assertLogs(i3x_service.logger, "WARNING") as logged:
+            self.assertEqual(self.register(failing, "dev-two"), [("dev-two", True)])
+        self.assertIn("historian down", "\n".join(logged.output))
+        with mock.patch.object(i3x_service, "_fill_from_historian", side_effect=RuntimeError("x")), \
+                self.assertLogs(i3x_service.logger, "ERROR") as logged:
+            self.assertEqual(self.register(self.pg(), "dev-two"), [("dev-two", True)])
+        self.assertIn("filling 1 registered device(s)", "\n".join(logged.output))
 
 
 class LatestPostgrest(ColumnCheckingPostgrest):

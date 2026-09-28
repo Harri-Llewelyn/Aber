@@ -781,11 +781,15 @@ paths:
         | A device at `maxDepth: 1` | The device: its map of metrics |
         | A device at `maxDepth: 0`, or 2 or more | The device, and each of its metrics as `<device>/<metric>`, in one batch when both change |
         | A metric, `<device>/<metric>` | That metric only |
-        | A gateway | That gateway only (its NBIRTH and NDEATH), not its devices |
+        | A gateway | That gateway only (its birth, its death, and a heartbeat that changes its live status), not its devices |
         | The site, an area, a cell, a lane or Unassigned | Nothing: their values change only with the Directory, which is not staged |
 
         **Registering an object again succeeds and changes nothing**, as the guide requires, so
         its first `maxDepth` stands. Unregister it first to change the depth.
+
+        **Each device registered, or whose metric is, has what the server lacks for it filled
+        from the historian**, as `/objects/value` fills it, so the first map staged for it is
+        complete. A fill that fails does not fail the registration.
       requestBody:
         required: true
         content:
