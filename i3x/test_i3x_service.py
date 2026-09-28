@@ -2030,6 +2030,16 @@ class TestHistorySeries(_HistoryCase):
         # Unbounded below, so only a filter and an order postgres_fdw ships keep it cheap.
         self.assertEqual(pg.calls[2][1]["order"], "time.desc")
 
+    def test_the_read_before_the_window_asks_for_few_rows_whatever_the_limit(self):
+        # postgres_fdw ships its LIMIT only up to 6338 rows (README.md -> History); past that, this
+        # read, unbounded below, would fetch the device's whole history.
+        with mock.patch.object(i3x_service, "HISTORY_MAX_ROWS", 20000):
+            _, pg = self.history({"elementIds": [SID]}, self.ROWS, self.DEVICE)
+        self.assertEqual(pg.calls[0][1]["limit"], "20001")
+        self.assertEqual(pg.calls[2][1]["limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
+        self.assertLessEqual(i3x_service.HISTORY_SEED_MAX_ROWS, 6338)
+        self.assertLessEqual(i3x_service.HISTORY_MAX_ROWS + 1, 6338)
+
     def test_a_device_quiet_through_the_window_costs_one_read(self):
         rows = _telemetry((_at("09:50"), "Temp", 20.0), (_at("11:30"), "Temp", 23.0))
         req, pg = self.history({"elementIds": [SID]}, rows)

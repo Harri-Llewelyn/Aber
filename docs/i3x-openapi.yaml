@@ -532,7 +532,7 @@ paths:
         * **Anything else** (the site, a cell, a gateway) has no series of its own and returns
           an empty `values`. Inventing an aggregate would assert a measurement nobody took.
 
-        **Nothing is cut silently.** `I3X_HISTORY_MAX_ROWS` (default 10000) bounds each series:
+        **Nothing is cut silently.** `I3X_HISTORY_MAX_ROWS` (default 1000) bounds each series:
         the rows it reads and the values it returns, a device's map of N metrics counting N. A
         series that stops short keeps its newest values and answers **206**. Its item's
         `responseDetail` names the instant it stops at, and asking again with that instant as

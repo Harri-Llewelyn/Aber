@@ -100,8 +100,12 @@ MAX_SUBSCRIPTIONS = int(os.getenv("I3X_MAX_SUBSCRIPTIONS", "500"))
 MAX_STREAMS = int(os.getenv("I3X_MAX_STREAMS", "50"))
 # The most stored rows one history series reads, and the most values it returns, a device's map of
 # N metrics counting N. A request's `limit` may ask for fewer. A series cut short is answered 206,
-# naming the instant it stops at.
-HISTORY_MAX_ROWS = int(os.getenv("I3X_HISTORY_MAX_ROWS", "10000"))
+# naming the instant it stops at. Past about 6300, postgres_fdw no longer ships the LIMIT and each
+# read fetches its whole window (README.md -> History).
+HISTORY_MAX_ROWS = int(os.getenv("I3X_HISTORY_MAX_ROWS", "1000"))
+# The most rows the read just before a device's window asks for, whatever HISTORY_MAX_ROWS is. That
+# read has no lower time bound, so past the LIMIT postgres_fdw ships it would fetch every earlier row.
+HISTORY_SEED_MAX_ROWS = 1000
 # The most HasComponent descendants one value or history request returns under `components`,
 # summed over its elementIds. Past it the rest are left out and the answer is a 206.
 MAX_COMPONENTS = int(os.getenv("I3X_MAX_COMPONENTS", "10000"))
@@ -1827,9 +1831,9 @@ class _History:
                     notes = [self._cut_note(left_out, "values (a map of N metrics counts as N)")]
                 if missing:
                     notes.append(
-                        f"{len(missing)} metric(s) changed here with no value in the {self.rows} "
-                        f"rows read before the window, and may have one further back, so the "
-                        f"snapshots leave them out until they change: "
+                        f"{len(missing)} metric(s) changed here with no value in the "
+                        f"{self._seed_rows()} rows read before the window, and may have one "
+                        f"further back, so the snapshots leave them out until they change: "
                         f"{', '.join(sorted(missing)[:5])}. Their own elementIds give their samples."
                     )
             self._device_cache[sid] = (kept, snapshots, notes, row_notes)
@@ -1863,10 +1867,10 @@ class _History:
                 "select": TELEMETRY_COLUMNS,
                 "asset_id": "eq." + sid,
                 "time": ("lte." if inclusive else "lt.") + _pg_time(boundary),
-                # No lower bound: postgres_fdw ships the WHERE and ORDER BY, so the local scan
-                # stops after one fetch of the remote cursor. Nothing else may be added to them.
+                # No lower bound: postgres_fdw ships this WHERE, ORDER BY and LIMIT whole only
+                # while the LIMIT stays small, so nothing may be added to them.
                 "order": "time.desc",
-                "limit": str(self.rows),
+                "limit": str(self._seed_rows()),
             },
         )
         for row in before:
@@ -1874,7 +1878,10 @@ class _History:
                 seeds.setdefault(row["metric_name"], row)
         # A read that came back short reached the oldest row there is, so a metric it did not
         # meet had no earlier value. A full one may have stopped before reaching it.
-        return (active - set(seeds)) if len(before) >= self.rows else set()
+        return (active - set(seeds)) if len(before) >= self._seed_rows() else set()
+
+    def _seed_rows(self) -> int:
+        return min(self.rows, HISTORY_SEED_MAX_ROWS)
 
 
 class _Partial:

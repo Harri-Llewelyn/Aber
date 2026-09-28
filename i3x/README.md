@@ -248,11 +248,23 @@ not reach its earlier value. A noisy metric can fill that read before a quiet on
 The maps then leave the quiet metric out until it changes, and its own elementId gives its samples.
 
 `startTime` and `endTime` are RFC 3339 with `Z` or an offset, parsed in full. PostgREST is sent the
-parsed instant, never the text, and a start after the end is a 400. The read before the window has
-no lower time bound. It is the shape the AAS export pages with (`supabase/functions/_shared/aas/bundle.ts`):
-`postgres_fdw` pushes the `WHERE` and the `ORDER BY` to the historian, so the local scan stops after
-one fetch of the remote cursor. The reads run one after another, so a request naming N devices
-costs up to 3N.
+parsed instant, never the text, and a start after the end is a 400. The reads run one after
+another, so a request naming N devices costs up to 3N.
+
+**Every read depends on a small LIMIT.** `public.telemetry` is a `postgres_fdw` foreign table with
+no statistics. The planner ships the `WHERE`, `ORDER BY` and `LIMIT` to the historian whole only
+while the LIMIT is small. Measured on PostgreSQL 17 with the columns these reads select, that holds
+up to 6338 rows. From 6339 up it ships only the `WHERE`, then fetches every matching row and sorts
+them locally. Turning on `use_remote_estimate` would fix the plan but costs 4 to 80 ms of planning
+on every telemetry read, so it stays off. Two consequences:
+- `I3X_HISTORY_MAX_ROWS` defaults to 1000. Raised past about 6300, each window read fetches its
+  whole window.
+- The read before the window has no lower time bound, so it asks for at most 1000 rows
+  (`HISTORY_SEED_MAX_ROWS`) whatever the limit. Past the threshold it would fetch the device's
+  entire history.
+
+The AAS export's keyset pages (`supabase/functions/_shared/aas/bundle.ts`, 5000 rows) are under
+it too.
 
 ### Subscriptions
 
@@ -552,7 +564,7 @@ clock.
 | `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `20` | Per token `sub`; past it, create answers 429 |
 | `I3X_MAX_SUBSCRIPTIONS` | `500` | On the server; past it, create answers 429 |
 | `I3X_MAX_STREAMS` | `50` | Open SSE streams; past it, stream answers 429 |
-| `I3X_HISTORY_MAX_ROWS` | `10000` | Rows one history series reads, and values it returns (a device's map of N metrics counts N); past it, 206 |
+| `I3X_HISTORY_MAX_ROWS` | `1000` | Rows one history series reads, and values it returns (a device's map of N metrics counts N); past it, 206 |
 | `I3X_MAX_COMPONENTS` | `10000` | Components one value or history request returns, summed over its elementIds; past it, 206 |
 | `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
 | `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
