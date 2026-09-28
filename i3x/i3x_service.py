@@ -632,7 +632,7 @@ def metrics_for(sparkplug_id: str) -> Dict[str, dict]:
 LIVENESS_LAG_SECONDS = 5.0
 # Each map below is keyed by topic segments or rows, so each is bounded and evicted LRU. An
 # evicted entry costs only the overlay: the row is used alone.
-MAX_LIVENESS_ENTRIES = int(os.getenv("I3X_MAX_LIVENESS_ENTRIES", "10000"))
+MAX_LIVENESS_ENTRIES = 10000
 # Mirrored from ingestion.py (`RESERVED_GATEWAY_STATUSES`, `MAX_GATEWAY_STATUS_LENGTH`): the self-
 # reported gateway statuses ingestion refuses. `test_i3x_service.py` asserts they agree.
 RESERVED_GATEWAY_STATUSES = frozenset({"PENDING_ENROLLMENT", "AWAITING_BIRTH", "STALE"})

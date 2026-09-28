@@ -79,7 +79,7 @@ info:
     | Replicas | Exactly one, always. The service holds a plain `spBv1.0/#` broker subscription and its subscription state is in process memory; a second instance would answer `/subscriptions/sync` for ids it has never seen |
     | Reachability during a restart | None — the old instance stops before the new one starts, so the endpoint is absent rather than degraded |
     | Subscriptions across a restart | None. Queues, sequence numbers and open streams are lost |
-    | Current values just after a restart | Cold and **reported as cold**: `quality: "GoodNoData"` with a null value, until that device next publishes |
+    | Current values just after a restart | Filled on the first read: what the value cache lacks for a device is read from `telemetry_latest`, with each sample's stored time. Only a metric the historian does not hold is `GoodNoData` until it next changes |
     | Metadata and history | Unaffected — neither is held by this service |
 
     `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this
@@ -432,15 +432,15 @@ paths:
         Served from the MQTT value cache, **gated on a PostgREST read as the caller** — see
         the RLS note in the introduction.
 
-        `quality` is derived at read time, never stored: a quarantined device or stale
-        gateway is `Uncertain`; a metric that has never been published is `GoodNoData` with
-        no value; anything else is `Good`. A `quality` column on the hypertable would be a
-        stored verdict that goes stale the moment the gateway does.
+        `quality` is derived at read time, never stored, from the device, its gateway and
+        whether a value is held: see `Quality`. What the value cache lacks for a device named
+        here is read once from `telemetry_latest` as the caller, and a failed read makes what
+        is missing `Bad`.
 
         **A device and its metrics.** A device's value is the map of its metrics' latest
         values. Each metric is also an object, `<sparkplug_id>/<metric name>`, and a component
         of the device, whose value is a bare scalar: its latest sample, or `null` with
-        `GoodNoData` timestamped at the read when it has none. So `maxDepth: 1` on a device
+        `GoodNoData` (or `Bad`, per `Quality`) when it has none. So `maxDepth: 1` on a device
         returns the map, and `maxDepth: 0` or `2` adds each metric's own value under
         `components`.
       requestBody:
@@ -1147,7 +1147,7 @@ components:
           properties:
             quarantined:
               type: boolean
-              description: 'Present in the directory but its telemetry is being dropped. Drives `quality: Uncertain`.'
+              description: 'Present in the directory but its telemetry is being dropped. Makes a held value `Uncertain` and no value `Bad`.'
         relationships:
           type: object
           description: |
@@ -1168,10 +1168,11 @@ components:
         value:
           description: |
             For a device, an object of metric name to latest value, `null` when quality is
-            `GoodNoData`. Every other object sends exactly what its ObjectType declares: the site
+            `GoodNoData` or `Bad`. Every other object sends exactly what its ObjectType declares: the site
             `{cellCount, deviceCount}`, an area `{cellCount, deviceCount, description}`, a cell,
             lane or Unassigned `{deviceCount, description}`, a gateway `{status, sparkplugGroup,
-            lastHeartbeat}`. Counts are of devices or cells, never of children.
+            lastHeartbeat}`, or `null` with `GoodNoData` when it has no stored status. Counts are
+            of devices or cells, never of children.
             A metric sends its latest value, a bare scalar.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }
@@ -1202,14 +1203,23 @@ components:
 
     Quality:
       type: string
-      enum: [Good, Uncertain, GoodNoData]
+      enum: [Good, GoodNoData, Uncertain, Bad]
       description: |
-        Derived at read time, never stored. `Uncertain` — quarantined device, or a gateway
-        that is STALE/OFFLINE/UNKNOWN. `GoodNoData` — never published, and no value is
-        carried. `Good` — otherwise.
+        Derived at read time, never stored, by one rule for values, subscription updates and
+        history, following the i3X guide's quality table:
 
-        A STALE gateway is `Uncertain` rather than `Bad`: it has not been heard from inside
-        the threshold, which is doubt about currency, not a fault.
+        | Condition | With a held value | Without one |
+        | :--- | :--- | :--- |
+        | Device quarantined | `Uncertain` | `Bad` |
+        | Device OFFLINE, or its gateway OFFLINE or STALE | `Uncertain` | `Bad` |
+        | Device online, never published | n/a | `GoodNoData` |
+        | Otherwise | `Good` | n/a |
+
+        A device's map takes the worst quality among the metrics it holds. A gateway's own
+        value is its live status (STALE after 90 s without a heartbeat), and is `Good`
+        whenever that is known: it is the devices behind it whose values are stale. A stored
+        history sample is `Good`. `timestamp` is never null: the sample's, else the
+        device's last birth or death, else the time of the read.
 
     Subscription:
       type: object
