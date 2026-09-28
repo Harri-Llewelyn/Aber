@@ -397,9 +397,7 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     with no broker and no clock, so the tests can assert it and `play --dry-run` can show it.
     Publishing is then a loop that cannot make a new decision.
     """
-    # A capture recorded before 1.0 carries the key under the platform's former name; the format
-    # is the same, so it is read under either.
-    version = capture.get("aber_capture_version", capture.get("acs_capture_version"))
+    version = capture.get("aber_capture_version")
     if version != CAPTURE_VERSION:
         raise CaptureError(
             "capture file is version %r, this tool reads version %d. Refusing to guess at the "

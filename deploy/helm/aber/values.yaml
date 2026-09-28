@@ -22,7 +22,7 @@ global:
   # only, no path. An origin missing here presents as a dashboard that logs in and shows empty
   # tables while the gateway reports 200.
   #   corsExtraOrigins:
-  #     - https://acs.example.com
+  #     - https://aber.example.com
   corsExtraOrigins: []
 
   # PVC storage class for every stateful component. `local-path` (k3s's provisioner) is

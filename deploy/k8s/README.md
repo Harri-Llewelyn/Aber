@@ -1422,14 +1422,14 @@ only chance to check the archive before the data stops existing.
 
 ```bash
 # 1. DETACH -- instant, and reversible with ATTACH until you drop it.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
 
 # 2. VERIFY -- copy it out, then confirm the object exists and is the size you expect.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
 #    ...then move it off the pod and into wherever your retained audit lives.
 
 # 3. DROP -- only once step 2's artefact has been checked.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
 ```
 
 > **`DETACH` alone does not free any space.** The table is still there, still on the PVC, just no

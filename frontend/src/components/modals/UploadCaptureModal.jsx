@@ -28,8 +28,7 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
     file.text()
       .then(text => {
         const doc = JSON.parse(text)
-        // A capture recorded before 1.0 carries the key under the platform's former name.
-        const version = doc?.aber_capture_version ?? doc?.acs_capture_version
+        const version = doc?.aber_capture_version
         if (version === undefined) {
           throw new Error('That file carries no aber_capture_version, so it is not a broker capture.')
         }

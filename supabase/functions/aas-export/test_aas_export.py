@@ -772,7 +772,7 @@ class TestAasExportLive(unittest.TestCase):
             "the Nameplate submodel must not claim an IDTA template it cannot fully populate",
         )
 
-    def test_acs_cymru_nameplate_properties_are_not_given_invented_identifiers(self):
+    def test_aber_nameplate_properties_are_not_given_invented_identifiers(self):
         """AssetSparkplugId and friends are ours; IDTA defines nothing for them, so they carry
         nothing. An id minted under admin-shell.io for a local concept would be a forgery."""
         elements = {e["idShort"]: e for e in self.submodels["DigitalNameplate"]["submodelElements"]}
@@ -782,7 +782,7 @@ class TestAasExportLive(unittest.TestCase):
                 continue
             self.assertNotIn(
                 "semanticId", element,
-                f"{id_short} is a Factory+ concept and must not carry a standard identifier",
+                f"{id_short} is a concept of this platform and must not carry a standard identifier",
             )
 
     def test_telemetry_holds_metrics_and_a_linked_segment(self):
