@@ -2572,6 +2572,12 @@ class TestQualityOnTheStagingPath(_QualityCase):
         i3x_service.on_message(None, None, _spb(
             "DBIRTH", device="dev-one", metrics=[{"name": "Axes/X/POSITION", "value": 14.0}]))
         self.assertEqual(self.last_staged()["dev-one"]["quality"], "Good")
+        # A birth with nothing but its identity still changes the device's status.
+        i3x_service.on_message(None, None, _spb("DDEATH", device="dev-one"))
+        i3x_service.on_message(None, None, _spb(
+            "DBIRTH", device="dev-one", metrics=[{"name": "Asset_ID", "string_value": "x"}]))
+        self.assertEqual(set(self.last_staged()), {"dev-one"})
+        self.assertEqual(self.last_staged()["dev-one"]["quality"], "Good")
 
     def test_an_ndeath_stages_the_gateway_and_the_devices_it_holds(self):
         rows = _quality_rows({"status": "ONLINE"}, {"status": "ONLINE", "last_heartbeat": _iso_ago(5)})

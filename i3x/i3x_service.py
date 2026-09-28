@@ -2835,7 +2835,8 @@ def on_message(client, userdata, msg):  # noqa: ARG001
             value = metric_value(group_id, edge_node_id, device_id, name, metric)
             record_value(device_id, name, value, metric["timestamp"])
             named[name] = {"value": value, "timestamp": metric["timestamp"]}
-        if named and device_id in _watched_prefixes():
+        # A birth is staged even with no values: the device's status changed.
+        if (named or msg_type == "DBIRTH") and device_id in _watched_prefixes():
             _stage_and_push(device_id, metrics_for(device_id), named)
     except Exception:  # noqa: BLE001
         logger.exception("failed to handle %s", msg.topic)
