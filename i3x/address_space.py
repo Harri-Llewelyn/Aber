@@ -706,17 +706,9 @@ def _normalise_fractional_seconds(text: str) -> str:
     """
     Pad or trim the fractional-seconds field to exactly 6 digits, and `Z` to `+00:00`.
 
-    THIS EXISTS FOR PYTHON 3.10, WHICH THE CONTAINER RUNS. `datetime.fromisoformat` only became a
-    general ISO 8601 parser in 3.11; before that it accepted a fractional part of EXACTLY 3 or 6
-    digits and raised `ValueError` on anything else. PostgREST emits `timestamptz` with trailing
-    zeros stripped, so `...:11.11239+00:00` -- five digits, because the microsecond happened to end
-    in a zero -- is a perfectly ordinary response that 3.10 cannot parse and 3.12 can.
-
-    That asymmetry is the whole danger. `to_rfc3339_utc` returns an unparseable value UNCHANGED, by
-    design, so the failure was not an exception: roughly one timestamp in ten kept its `+00:00`
-    offset and shipped as a conformance violation, on the container only, intermittently. The
-    official suite caught it in CI on a value the local run happened not to produce. Same shape as
-    the f-string defect: 3.12 is more permissive than 3.10, and testing on the newer one hides it.
+    PostgREST strips trailing zeros from `timestamptz`, and `fromisoformat` before Python 3.11 read
+    only 3 or 6 digits. `to_rfc3339_utc` returns an unparseable value unchanged, so normalising first
+    keeps the result independent of the runtime's parser.
     """
     text = text.strip()
     if text.endswith(("Z", "z")):
