@@ -1642,18 +1642,19 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .form-control option { background: var(--bg-surface); color: var(--text-primary); }
 
-/* SemanticIdField's label row: the marker on a suggested id, and the compact actions pushed to the
-   row's end. --text-muted, not --text-dim, which falls under AA on the Add Metric form's glass. */
+/* SemanticIdField's row under the field: the marker on a suggested id and the compact actions.
+   --text-muted, not --text-dim, which falls under AA on the Add Metric form's glass. */
 .semantic-id-suggested {
-  margin-left: 5px;
   font-size: 12px;
   color: var(--text-muted);
 }
 
 .semantic-id-actions {
-  display: inline-flex;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  margin-left: auto;
+  margin-top: 6px;
 }
 
 .semantic-id-actions .btn { padding: 2px 8px; font-size: 12px; }

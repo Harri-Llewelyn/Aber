@@ -100,36 +100,6 @@ export function SemanticIdField({
                 </label>
               )}
             <HelpTip text={HELP[subject]} label="What a semantic ID is for" />
-            {showingSuggestion && (
-              <span className="semantic-id-suggested" title={suggestion.note}>· suggested</span>
-            )}
-            {(canRestore || canPick) && (
-              <span className="semantic-id-actions">
-                {canRestore && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => onChange?.({ ...suggested })}
-                    title={`Put the suggested id back: ${suggested.semanticId}`}
-                  >
-                    Use suggested
-                  </button>
-                )}
-                {canPick && (
-                  <button
-                    ref={toggleRef}
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    aria-expanded={picking}
-                    aria-controls={`${idPrefix}-semantic-id-picker`}
-                    onClick={() => (picking ? closePicker() : setPicking(true))}
-                    title="Find a concept's id in the standard vocabularies and the IDTA templates"
-                  >
-                    {picking ? 'Close search' : 'Search vocabularies'}
-                  </button>
-                )}
-              </span>
-            )}
           </div>
           {readOnly ? (
             <div className="mono" style={{ fontSize: '12px', wordBreak: 'break-all', color: hasId ? 'var(--text-primary)' : 'var(--text-dim)' }}>
@@ -176,6 +146,39 @@ export function SemanticIdField({
           )}
         </div>
       </div>
+
+      {/* A row of its own under the field, not beside the label: in a 480px dialog the label row
+          cannot hold them, and a taller label row drops the input below the type select. */}
+      {!readOnly && (showingSuggestion || canRestore || canPick) && (
+        <div className="semantic-id-actions">
+          {showingSuggestion && (
+            <span className="semantic-id-suggested" title={suggestion.note}>Suggested</span>
+          )}
+          {canRestore && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => onChange?.({ ...suggested })}
+              title={`Put the suggested id back: ${suggested.semanticId}`}
+            >
+              Use suggested
+            </button>
+          )}
+          {canPick && (
+            <button
+              ref={toggleRef}
+              type="button"
+              className="btn btn-ghost btn-sm"
+              aria-expanded={picking}
+              aria-controls={`${idPrefix}-semantic-id-picker`}
+              onClick={() => (picking ? closePicker() : setPicking(true))}
+              title="Find a concept's id in the standard vocabularies and the IDTA templates"
+            >
+              {picking ? 'Close search' : 'Search vocabularies'}
+            </button>
+          )}
+        </div>
+      )}
 
       {picking && (
         <div className="semantic-id-picker" id={`${idPrefix}-semantic-id-picker`} onKeyDown={onPickerKeyDown}>

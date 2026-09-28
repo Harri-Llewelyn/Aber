@@ -496,7 +496,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     await setup()
     const modal = openEdit('Controller/EXECUTION')
 
-    expect(modal.getByText('· suggested')).toBeTruthy()
+    expect(modal.getByText('Suggested')).toBeTruthy()
     expect(modal.queryByRole('button', { name: 'Use suggested' })).toBeNull()
   })
 
@@ -522,7 +522,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     const modal = openEdit('safety_interlock')
 
     expect(modal.queryByRole('button', { name: 'Use suggested' })).toBeNull()
-    expect(modal.queryByText('· suggested')).toBeNull()
+    expect(modal.queryByText('Suggested')).toBeNull()
   })
 
   it('points a metric at a nameplate element chosen from the search, not typed', async () => {
@@ -540,6 +540,20 @@ describe('Edit Metric — correcting a semantic id', () => {
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/api/v1/metric-catalog/m3', {
       semantic_id: '0112/2///61987#ABA951#009', semantic_id_type: 'IRDI'
     }))
+  })
+
+  it('keeps the label row to the label and its help, so the narrow dialog does not wrap it', async () => {
+    // Seen live: in the 480px dialog, Use suggested and Search vocabularies beside the label wrapped
+    // it onto three lines and pushed the search button over the Reference Type select.
+    await setup()
+    const modal = openEdit('Controller/EXECUTION')
+    const labelRow = document.querySelector('label[for="metric-edit-semantic-id"]').parentElement
+    expect(labelRow.contains(modal.getByText('Suggested'))).toBe(false)
+
+    fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: '' } })
+    for (const name of ['Use suggested', 'Search vocabularies']) {
+      expect(labelRow.contains(modal.getByRole('button', { name })), `${name} sits in the label row`).toBe(false)
+    }
   })
 
   it('closes only the search on Escape, and the dialog on the next one', async () => {
@@ -881,7 +895,7 @@ describe('Metric builder — OPC UA points that share a browse name', () => {
     expect(dataPointSelect().value).toBe(AM_KEY)
     expect(within(namePreview()).getByText('FeedstockType/Manufacturer')).toBeTruthy()
     expect(semanticIdInput().value).toBe(AM_MANUFACTURER.semantic_id)
-    expect(screen.getByText('· suggested')).toBeTruthy()
+    expect(screen.getByText('Suggested')).toBeTruthy()
   })
 
   it('clears the point when the group is the other specification\'s', async () => {
@@ -1161,7 +1175,7 @@ describe('Metric builder — the suggested semantic id', () => {
     await openForm()
     chooseActuatorAcceleration()
 
-    expect(screen.getByText('· suggested').title).toMatch(/ACCELERATION data item type's id/)
+    expect(screen.getByText('Suggested').title).toMatch(/ACCELERATION data item type's id/)
     expect(useSuggestedButton()).toBeNull()
   })
 
@@ -1169,7 +1183,7 @@ describe('Metric builder — the suggested semantic id', () => {
     await openForm()
     chooseActuatorAcceleration()
     fireEvent.change(semanticIdInput(), { target: { value: ECLASS } })
-    expect(screen.queryByText('· suggested')).toBeNull()
+    expect(screen.queryByText('Suggested')).toBeNull()
 
     fireEvent.click(useSuggestedButton())
 
@@ -1230,7 +1244,7 @@ describe('Metric builder — the suggested semantic id', () => {
     fireEvent.change(screen.getByPlaceholderText('e.g. VIBRATION_RMS'), { target: { value: 'VIBRATION_RMS' } })
 
     expect(semanticIdInput().value).toBe('')
-    expect(screen.queryByText('· suggested')).toBeNull()
+    expect(screen.queryByText('Suggested')).toBeNull()
     expect(useSuggestedButton()).toBeNull()
     fireEvent.click(addMetricButton())
 
@@ -1306,7 +1320,7 @@ describe('Metric builder — choosing a semantic id from the vocabularies', () =
     fireEvent.click(options()[0])
 
     expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
-    expect(screen.getByText('· suggested')).toBeTruthy()
+    expect(screen.getByText('Suggested')).toBeTruthy()
     expect(screen.queryByRole('note')).toBeNull()
   })
 
