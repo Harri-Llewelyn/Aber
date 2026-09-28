@@ -567,7 +567,7 @@ paths:
     post:
       tags: [Subscriptions]
       summary: List your subscriptions
-      description: 'Scoped to `clientId` — you cannot enumerate another client''s subscriptions. An empty `subscriptionIds` lists all of yours.'
+      description: 'Scoped to `clientId` and your token''s principal: an id that is not yours is a per-item 404, exactly as one that does not exist. Only the ids you name are listed. `monitoredObjects` is the set as of the last check of your view, made by each `/sync` and stream tick.'
       requestBody:
         required: true
         content:
@@ -623,7 +623,8 @@ paths:
         a machine that is simply quiet — it waits forever for a value that cannot arrive.
 
         Validating here also means the monitored set can only contain ids this caller may see,
-        so a subscription cannot become a way around RLS on the value path.
+        so a subscription cannot become a way around RLS on the value path. Each delivery checks
+        again: see `/subscriptions/sync`.
       requestBody:
         required: true
         content:
@@ -705,6 +706,15 @@ paths:
         **Overflow is reported, not hidden.** Past `I3X_SUBSCRIPTION_QUEUE_LIMIT` (default
         10,000) the oldest batches drop and the next sync answers **206**. Compute the gap
         from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`.
+
+        **What it delivers is checked against your view first.** Each call reads your address
+        space as you (cached per token for `I3X_ADDRESS_SPACE_TTL_SECONDS`). A registered element
+        you can no longer see, or a metric `<device>/<metric>` whose device you can no longer see,
+        is removed from the subscription and its queued updates are discarded, not delivered. The
+        call then answers **206**, with or without batches, and `responseDetail` names what was
+        removed, so "left your view" is not mistaken for "nothing changed". A batch left empty is
+        dropped, so its sequence number is a gap. If that read fails, the call answers `502` and
+        acknowledges and delivers nothing.
       requestBody:
         required: true
         content:
@@ -732,12 +742,17 @@ paths:
                         type: array
                         items: { $ref: '#/components/schemas/UpdateBatch' }
         '206':
-          description: 'Delivered, but batches were dropped from the queue. `responseDetail` says so.'
+          description: 'Delivered, but batches were dropped from the queue, or registered elements left your view and were removed with their queued updates, or both. `responseDetail` says which and names the removed elements. Reported once.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
+        '502':
+          description: 'Your address space could not be read to check what may be delivered. Nothing was acknowledged or delivered; retry.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   /subscriptions/stream:
     post:
@@ -761,6 +776,13 @@ paths:
 
         **A client that stops reading loses its stream after 10 seconds.** A write that cannot
         finish in that time ends the stream, and the connection with it; nothing else waits on it.
+
+        **What it carries is checked against your view**, as `/sync` checks it: at open, before
+        the backlog is sent, and on each 15-second keepalive tick, together with your token. An
+        element you can no longer see stops arriving, and its queued updates are discarded. A
+        stream whose last element left ends cleanly, and so does one whose check fails on a tick;
+        a check that fails at open answers `502` and leaves the queue in place. The stream cannot
+        say why, so the next `/sync` answers 206 naming what was removed.
       requestBody:
         required: true
         content:
@@ -773,7 +795,7 @@ paths:
                 subscriptionId: { type: string }
       responses:
         '200':
-          description: An open SSE stream of `UpdateBatch` events.
+          description: An open SSE stream; each event is one `UpdateBatch`'s `updates` array.
           content:
             text/event-stream:
               schema: { type: string }
@@ -781,6 +803,11 @@ paths:
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
         '429':
           description: 'The server has `I3X_MAX_STREAMS` streams open (default 50). Replacing this subscription''s own stream is not refused. Poll `/subscriptions/sync` instead.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '502':
+          description: 'Your address space could not be read to check what may be streamed. No stream was opened and the queue is untouched; retry.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -1025,13 +1052,12 @@ components:
 
     UpdateBatch:
       type: object
-      description: One batch of accumulated changes. Also the SSE event payload.
+      description: One batch of accumulated changes. Each SSE event carries one batch's `updates` array.
       properties:
         sequenceNumber:
           type: integer
-          description: 'Monotonic per subscription. A gap after a 206 is the overflow window.'
-        timestamp: { type: string, format: date-time }
-        values:
+          description: 'Increasing per subscription and never reused. A gap is updates that were dropped, by overflow or because their element left your view; the 206 that reports it says which.'
+        updates:
           type: array
           items:
             type: object

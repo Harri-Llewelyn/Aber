@@ -771,14 +771,17 @@ def _on_registry_stream_close(sub) -> None:
 registry.on_stream_close = _on_registry_stream_close
 
 
-def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") -> None:
+def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller",
+                  emptied: bool = False) -> None:
     """
     Answer `/subscriptions/stream` on this handler thread, which is the only one that writes to it.
 
     It ends when the client disconnects, when another stream or a delete displaces it, when a write
-    cannot finish inside SSE_SEND_TIMEOUT_SECONDS, at the token's `exp`, or when the token fails
-    the re-check made on every keepalive tick. All but the first and third end cleanly, with the
-    terminating chunk, and only a clean end leaves the connection open for a next request.
+    cannot finish inside SSE_SEND_TIMEOUT_SECONDS, at the token's `exp`, when the token or the
+    owner's view fails the re-check made on every keepalive tick, or once the last monitored
+    element has left that view (`emptied`: already at open). All but the first and third end
+    cleanly, with the terminating chunk, and only a clean end leaves the connection open for a
+    next request.
 
     It sends the QUEUE, never the live value, because the queue is the one source of ordering.
     Delivered means discarded: SSE is at-most-once, so a later `/sync` must not re-deliver it.
@@ -815,6 +818,9 @@ def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") 
             for batch in batches:
                 if not channel.send(batch["updates"]):
                     return
+            if emptied:
+                channel.finish()
+                return
             # WAIT ON THE SOCKET, NOT ON THE CLOCK, so an abandoned stream frees this thread at
             # once rather than at the next keepalive (README.md -> "Subscriptions", rule 4). A
             # readable stream socket means EOF: the request body was consumed at dispatch.
@@ -830,24 +836,26 @@ def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") 
             if channel.close_requested.is_set() or time.monotonic() >= expires:
                 channel.finish()
                 return
-            batches = []
-            if channel.wake_socket in ready:
-                # Consumed before the drain, so a wake landing after the drain is not lost.
-                channel.consume_wakes()
-                batches = registry.drain(sub)
             if time.monotonic() >= next_tick:
-                # Bypasses the cache, so a revoked token loses its stream within one tick.
+                # The token bypasses its cache, so a revoked one loses its stream within one tick.
+                # The view is checked before this pass drains, so nothing it withdrew is sent.
                 try:
                     expires = _monotonic_deadline(_authenticate(bearer, fresh=True).expires_at)
-                except (Problem, requests.RequestException):
+                    emptied = _withdraw_hidden(sub, bearer)
+                except (Problem, SubscriptionError, requests.RequestException):
                     channel.finish()
                     return
                 # The reaper treats an open stream as activity. The comment frame still goes out
                 # when idle: intermediaries time out a silent connection.
                 registry.touch(sub)
-                if not channel.keepalive():
+                if not emptied and not channel.keepalive():
                     return
                 next_tick = time.monotonic() + SSE_KEEPALIVE_SECONDS
+            batches = []
+            if channel.wake_socket in ready:
+                # Consumed before the drain, so a wake landing after the drain is not lost.
+                channel.consume_wakes()
+                batches = registry.drain(sub)
     except OSError:
         # The headers could not be written: the client left before the stream began.
         pass
@@ -1632,6 +1640,74 @@ def _owned_subscription(req: Handler, client_id: str, body: dict):
     )
 
 
+def _visibility(space: dict) -> tuple:
+    """
+    (every elementId the space shows, its device ids). Memoised on the space like the value-path
+    indexes: a function of the space alone, so the one read serves every check for the cache TTL.
+    """
+    memo = space.get("_visibility")
+    if memo is None:
+        memo = space["_visibility"] = (
+            frozenset(_build_objects(space)),
+            frozenset(d["sparkplug_id"] for d in space["devices"]),
+        )
+    return memo
+
+
+def _visible_to(bearer: str):
+    """
+    Whether an elementId is in this caller's address space, read as the caller through the
+    token-keyed cache. `<sparkplug_id>/<metric>` is visible exactly when its device is: a
+    sparkplug_id never contains `/`, so the device is the text before the first one.
+    """
+    ids, devices = _visibility(_load_address_space(PostgrestClient(bearer)))
+
+    def visible(element_id: str) -> bool:
+        if element_id in ids:
+            return True
+        device, sep, _ = element_id.partition("/")
+        return bool(sep) and device in devices
+
+    return visible
+
+
+def _withdraw_hidden(sub, bearer: str) -> bool:
+    """
+    Withdraw the subscription's elements its owner can no longer see, with their queued values.
+    True when that removed its last monitored element. A failed read raises: nothing is withdrawn
+    and nothing may be delivered on it. A subscription holding nothing costs no read.
+    """
+    if not registry.has_elements(sub):
+        return False
+    dropped, emptied = registry.withdraw(sub, _visible_to(bearer))
+    if dropped:
+        logger.info(
+            "subscription %s: %d element(s) left its owner's view and were withdrawn",
+            sub.subscription_id, len(dropped),
+        )
+    return emptied
+
+
+def _sync_detail(overflowed: bool, withdrawn: List[str]) -> Optional[dict]:
+    """The 206 `responseDetail`: queue overflow, elements that left the caller's view, or both."""
+    overflow = (
+        f"Updates were dropped from the subscription queue. The server limit is "
+        f"{registry.queue_limit} batches."
+    )
+    left = (
+        "These elements are no longer visible to this caller, so they were removed from the "
+        "subscription and their queued updates were not delivered: " + ", ".join(withdrawn) + "."
+    )
+    if overflowed and withdrawn:
+        title = "Updates dropped due to queue overflow, and elements left this caller's view"
+        return {"title": title, "status": 206, "detail": f"{overflow} {left}"}
+    if overflowed:
+        return {"title": "Updates dropped due to queue overflow", "status": 206, "detail": overflow}
+    if withdrawn:
+        return {"title": "Elements left this caller's view", "status": 206, "detail": left}
+    return None
+
+
 def h_sub_create(req: Handler) -> None:
     body = req._body()
     client_id = _require_client_id(body)
@@ -1707,8 +1783,8 @@ def h_sub_register(req: Handler) -> None:
     reasons, and the second is the one that matters: an unknown elementId that registers
     "successfully" produces a subscription that will never emit anything, and the client has no way
     to tell that from a machine that is simply quiet -- it waits forever for a value that cannot
-    arrive. Validating here also means the monitored set can only ever contain ids this caller is
-    allowed to see, so the subscription cannot become a way around RLS on the value path.
+    arrive. Validating here, and again at each delivery (`_withdraw_hidden`), keeps the monitored
+    set to ids this caller may see, so the subscription cannot become a way around RLS.
     """
     body = req._body()
     client_id = _require_client_id(body)
@@ -1776,28 +1852,32 @@ def h_sub_unregister(req: Handler) -> None:
 
 
 def h_sub_sync(req: Handler) -> None:
+    """
+    Re-check the owner's view, acknowledge, and return the queue. 206 when updates overflowed or
+    elements left the caller's view since the last report; the second is reported even with no
+    batches to return, since the client measures no gap from it.
+    """
     body = req._body()
     client_id = _require_client_id(body)
     sub = _owned_subscription(req, client_id, body)
+    _withdraw_hidden(sub, req._bearer())
     batches, status = registry.sync(sub, body.get("lastSequenceNumber"))
-    detail = None
-    if status == 206:
-        detail = {
-            "title": "Updates dropped due to queue overflow",
-            "status": 206,
-            "detail": (
-                f"Updates were dropped from the subscription queue. The server limit is "
-                f"{registry.queue_limit} batches."
-            ),
-        }
-    req._ok(batches, status=status, detail=detail)
+    withdrawn = registry.take_withdrawn(sub)
+    req._ok(
+        batches,
+        status=206 if withdrawn else status,
+        detail=_sync_detail(status == 206, withdrawn),
+    )
 
 
 def h_sub_stream(req: Handler) -> None:
     body = req._body()
     client_id = _require_client_id(body)
     sub = _owned_subscription(req, client_id, body)
-    _serve_stream(req, sub, registry.open_stream(sub), req._bearer(), req.caller)
+    bearer = req._bearer()
+    # Before the backlog is drained, so a failed read leaves the queue where it was.
+    emptied = _withdraw_hidden(sub, bearer)
+    _serve_stream(req, sub, registry.open_stream(sub), bearer, req.caller, emptied)
 
 
 ROUTES = {

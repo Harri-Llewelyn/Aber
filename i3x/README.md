@@ -80,10 +80,25 @@ What that guarantees:
   subscription calls are refused within 15 seconds of the revocation, and at `exp`. An open stream
   re-checks its token, past the cache, on every 15-second keepalive tick, and ends cleanly when the
   check fails or `exp` arrives.
-- **Registration is not re-checked.** The monitored set is validated against the caller's address
-  space when elements are registered. A grant withdrawn later while the token stays valid (a user's
-  role removed) stops that caller's reads at once, but values for elements already registered keep
-  arriving on the subscription until it is deleted or expires, or the token fails the check.
+- **A subscription delivers only what its owner can still see.** Registration checks each elementId
+  against the caller's address space, and every delivery checks again as the owner: each `/sync`,
+  a stream's open and each 15-second keepalive tick. The check reads through the token-keyed
+  [address-space cache](#the-address-space-cache), so it costs at most one address-space read per
+  cache TTL per caller. An element the caller can no longer see is removed from the subscription
+  and its queued values are discarded, where an unregister keeps them as the guide asks; a metric,
+  `<device>/<metric>`, goes with its device. The next `/sync` answers 206 with a `responseDetail`
+  naming what was removed, even with nothing else to return, so a client can tell "left your view"
+  from "nothing changed". A stream ends cleanly when its last element leaves. A failed read fails
+  closed: `/sync` and a stream's open answer 502 and deliver nothing, and an open stream ends. The
+  window is the cache's few seconds, plus one tick on a stream.
+
+Today every inventory read is open to any authenticated caller (`devices_select_authenticated` and
+its siblings are `USING (true)`), so what leaves a view in practice is an archived or deleted
+element, and removing a role hides nothing yet. The check reads through RLS, so a narrower policy
+would be honoured as written. The broader option, not built, is to end a user's sessions when a
+role is removed (a GoTrue sign-out for that user): the token check would then fail within one
+interval and the user would be signed out everywhere, at the cost of changing how every role change
+works.
 
 `GET /info` is unauthenticated, because the spec requires it and because it doubles as the health
 check. It reports capabilities and nothing about the address space.
@@ -207,6 +222,9 @@ Five rules are easy to get wrong and each fails quietly:
 5. **Sync and stream are mutually exclusive.** `/sync` must error while a stream is open, because
    the stream has already delivered — and discarded — the queue the sync caller is asking to
    acknowledge.
+
+A `/sync` also answers 206 when registered elements have left the caller's view, naming them; see
+[Security](#security).
 
 ### Writes are refused
 
