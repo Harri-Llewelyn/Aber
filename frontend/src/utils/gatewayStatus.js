@@ -1,12 +1,11 @@
 /**
  * Gateway heartbeat helpers. Ingestion stamps `gateways.last_heartbeat` on every node-level
  * message; a gateway that stops beating never gets an OFFLINE write, so freshness is derived on
- * read. Mirrors public.gateway_status, and scripts/check-mirror-drift.mjs asserts the threshold
- * matches. The PENDING states must agree with ensure_gateway_status_view() as well, which is not
- * machine-checked.
+ * read. Mirrors public.gateway_status; check 2 of scripts/check-mirror-drift.mjs asserts that the
+ * threshold and the PENDING states agree with ensure_gateway_status_view().
  */
 
-// node_red_flow.json beats every 30s; allow three missed beats before calling it stale.
+// The gateway appliance's flow beats every 30s; allow three missed beats before calling it stale.
 export const HEARTBEAT_STALE_MS = 90_000;
 
 /**

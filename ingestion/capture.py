@@ -215,10 +215,9 @@ def dict_to_payload_bytes(data):
 # ---------------------------------------------------------------------------------------------
 # Wire encodings
 # ---------------------------------------------------------------------------------------------
-# BOTH OF THESE ARE LIVE TRAFFIC ON THIS STACK, which is not obvious and cost a recording to find
-# out. `parse_sparkplug_payload()` falls back to JSON because the Node-RED simulator flow publishes
-# it, so a recorder that only understood protobuf skipped every single message from the seeded
-# fleet and then reported the fleet as idle.
+# BOTH OF THESE ARE LIVE TRAFFIC ON THIS STACK. `parse_sparkplug_payload()` falls back to JSON
+# because the gateway appliance's flow publishes it, and a standard Sparkplug B edge node publishes
+# protobuf, so a recorder that read only one would report the other's gateways as idle.
 ENCODING_PROTOBUF = "protobuf"
 ENCODING_JSON = "json"
 

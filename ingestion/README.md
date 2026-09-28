@@ -334,7 +334,7 @@ of what arrived — and the shape is the one `parse_sparkplug_payload()` already
 fallback, so a hand-edit valid in the file is valid to the daemon.
 
 **Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
-Node-RED simulator flow publishes JSON, Remote gateways publish protobuf — and they enter the
+gateway appliance's flow publishes JSON, a standard Sparkplug B edge node protobuf — and they enter the
 daemon down different branches of `parse_sparkplug_payload()`. Replaying a JSON fleet as protobuf
 would mean a fault reproduced through this tool could be one the playback introduced, or one it
 silently repaired.
