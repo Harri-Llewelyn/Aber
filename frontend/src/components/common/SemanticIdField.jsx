@@ -69,10 +69,20 @@ export function SemanticIdField({
   )
   const foreign = readOnly ? null : foreignConcept(candidates, semanticId, ownStandard)
 
+  const toggleRef = useRef(null)
   const closePicker = () => { setPicking(false); setQuery('') }
   const choose = (candidate) => {
     onChange?.({ semanticId: candidate.semanticId, semanticIdType: candidate.semanticIdType })
     closePicker()
+  }
+
+  // Escape closes the search, not the dialog around it: stopped here, before useEscapeKey's
+  // document listener, and focus goes back to the button that opened it.
+  const onPickerKeyDown = (e) => {
+    if (e.key !== 'Escape') return
+    e.stopPropagation()
+    closePicker()
+    toggleRef.current?.focus()
   }
 
   // Each tip is a sibling of its label, never a child: a button inside a label answers to the
@@ -107,6 +117,7 @@ export function SemanticIdField({
                 )}
                 {canPick && (
                   <button
+                    ref={toggleRef}
                     type="button"
                     className="btn btn-ghost btn-sm"
                     aria-expanded={picking}
@@ -167,7 +178,7 @@ export function SemanticIdField({
       </div>
 
       {picking && (
-        <div className="semantic-id-picker" id={`${idPrefix}-semantic-id-picker`}>
+        <div className="semantic-id-picker" id={`${idPrefix}-semantic-id-picker`} onKeyDown={onPickerKeyDown}>
           <input
             ref={searchRef}
             className="form-control"

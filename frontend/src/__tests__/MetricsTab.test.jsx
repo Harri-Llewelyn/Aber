@@ -541,6 +541,23 @@ describe('Edit Metric — correcting a semantic id', () => {
       semantic_id: '0112/2///61987#ABA951#009', semantic_id_type: 'IRDI'
     }))
   })
+
+  it('closes only the search on Escape, and the dialog on the next one', async () => {
+    await setup()
+    const modal = openEdit('Controller/FIRMWARE')
+    fireEvent.click(modal.getByRole('button', { name: 'Search vocabularies' }))
+    fireEvent.change(modal.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: 'serial' } })
+    // From a result as much as from the search box: both sit in the panel.
+    fireEvent.keyDown(within(modal.getByRole('list', { name: 'Matching concepts' })).getAllByRole('button')[0], { key: 'Escape' })
+
+    expect(document.querySelector('.modal')).toBeTruthy()
+    expect(modal.queryByRole('textbox', { name: 'Search the vocabularies and templates' })).toBeNull()
+    expect(document.activeElement).toBe(modal.getByRole('button', { name: 'Search vocabularies' }))
+    expect(api.put).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(document.querySelector('.modal')).toBeNull()
+  })
 })
 
 describe('Metric Catalog — search', () => {
