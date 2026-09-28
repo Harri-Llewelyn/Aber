@@ -69,12 +69,14 @@ NS_RELATIONSHIPS = "https://aber.local/i3x/relationships"
 
 # Synthetic ObjectTypes for the levels that have no `schemas` row. Areas, cells and gateways are
 # infrastructure, not modelled equipment; giving them a real schema row would put them in the
-# registry the Schemas tab manages, where an operator could version or archive them. A lane (and
-# Unassigned) is a grouping that claims no place, so it is not typed as a cell.
+# registry the Schemas tab manages, where an operator could version or archive them. A lane and
+# Unassigned are groupings that claim no place, so neither is typed as a cell; Unassigned is not a
+# lane either, so it has a type of its own.
 SITE_TYPE_ID = "i3x:type:site"
 AREA_TYPE_ID = "i3x:type:area"
 CELL_TYPE_ID = "i3x:type:cell"
 LANE_TYPE_ID = "i3x:type:lane"
+UNASSIGNED_TYPE_ID = "i3x:type:unassigned"
 GATEWAY_TYPE_ID = "i3x:type:gateway"
 UNTYPED_DEVICE_TYPE_ID = "i3x:type:device"
 
@@ -124,6 +126,20 @@ SYNTHETIC_TYPES = [
         "displayName": "Lane",
         "namespaceUri": NS_LOCAL,
         "sourceTypeId": "Lane",
+        "version": "1.0.0",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "deviceCount": {"type": "number"},
+                "description": {"type": ["string", "null"]},
+            },
+        },
+    },
+    {
+        "elementId": UNASSIGNED_TYPE_ID,
+        "displayName": "Unassigned",
+        "namespaceUri": NS_LOCAL,
+        "sourceTypeId": "Unassigned",
         "version": "1.0.0",
         "schema": {
             "type": "object",
@@ -448,7 +464,7 @@ def site_object(child_ids: List[str], name: Optional[str] = None) -> dict:
 
 def unassigned_object(child_ids: List[str]) -> dict:
     return _location_object(
-        UNASSIGNED_ELEMENT_ID, "Unassigned", LANE_TYPE_ID, SITE_ELEMENT_ID, child_ids,
+        UNASSIGNED_ELEMENT_ID, "Unassigned", UNASSIGNED_TYPE_ID, SITE_ELEMENT_ID, child_ids,
         "Assets nobody has placed: no cell, no area-wide or site-wide scope, and in no lane. "
         "Synthetic: this is the ABSENCE of a location decision, not a place, which is why it is "
         "not a row in `cells`.",

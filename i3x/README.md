@@ -115,7 +115,8 @@ Six mappings that are decisions rather than mechanics:
 - **Unassigned and the lanes are synthetic.** `parentId: null` means root, so an unplaced device
   would otherwise become a second root. A synthetic object is legitimate where a magic `cells` row
   is not: it has no table behind it, so it cannot be edited, deleted, or swept by the pg_cron purge
-  that runs past RLS. **Unassigned holds only assets nobody has placed.** A site-wide or area-wide
+  that runs past RLS. **Unassigned holds only assets nobody has placed**, and has a type of its
+  own, since it is neither a cell nor a lane. A site-wide or area-wide
   asset is filed at its own level, and one behind a simulated or playback gateway goes to the
   Simulated or Shadow lane, which `device_locations` resolves before any place: a lane is a fact
   about the gateway, typed `Lane` rather than `Cell` so it claims no place, and it exists only while
@@ -172,7 +173,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | :--- | :--- | :--- |
 | GET | `/info` | **Unauthenticated.** Capabilities + health |
 | GET | `/namespaces` | The two every type belongs to: local and relationships |
-| GET | `/objecttypes` | `schemas` rows + synthetic Site/Area/Cell/Lane/Gateway types. `?namespaceUri=` |
+| GET | `/objecttypes` | `schemas` rows + synthetic Site/Area/Cell/Lane/Unassigned/Gateway types. `?namespaceUri=` |
 | POST | `/objecttypes/query` | |
 | GET | `/relationshiptypes` | Six types, all registered with their `reverseOf`. `?namespaceUri=` |
 | POST | `/relationshiptypes/query` | |

@@ -1481,7 +1481,7 @@ def _current_value(objects, space: dict, element_id: str):
         children = ((obj.get("metadata") or {}).get("relationships") or {}).get("HasChildren", [])
         cells = sum(1 for c in children if objects.get(c, {}).get("typeElementId") == A.CELL_TYPE_ID)
         return A.area_value(obj, cells, devices)
-    if obj["typeElementId"] == A.LANE_TYPE_ID:
+    if obj["typeElementId"] in (A.LANE_TYPE_ID, A.UNASSIGNED_TYPE_ID):
         return A.lane_value(obj, devices)
     return A.cell_value(obj, devices)
 

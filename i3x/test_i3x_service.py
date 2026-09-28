@@ -771,7 +771,9 @@ class TestRfc3339(unittest.TestCase):
 SIMULATED_LANE = A.LANES[A.SOURCE_SIMULATED][0]
 SHADOW_LANE = A.LANES[A.SOURCE_SHADOW][0]
 # The types of the location tree's levels: HasParent/HasChildren only, never a composition.
-LOCATION_TYPES = {A.SITE_TYPE_ID, A.AREA_TYPE_ID, A.CELL_TYPE_ID, A.LANE_TYPE_ID}
+LOCATION_TYPES = {
+    A.SITE_TYPE_ID, A.AREA_TYPE_ID, A.CELL_TYPE_ID, A.LANE_TYPE_ID, A.UNASSIGNED_TYPE_ID,
+}
 
 
 def _representative_space() -> dict:
@@ -1573,7 +1575,9 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
                 value = i3x_service._current_value(objects, space, element_id)["value"]
                 self.assertEqual(self.nonconformance(value, schemas[type_id]), [])
                 checked.add(type_id)
-        self.assertEqual(checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.LANE_TYPE_ID, A.GATEWAY_TYPE_ID})
+        self.assertEqual(
+            checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.UNASSIGNED_TYPE_ID, A.GATEWAY_TYPE_ID}
+        )
 
     def test_containers_count_devices_not_children(self):
         space, objects, _ = self.space()

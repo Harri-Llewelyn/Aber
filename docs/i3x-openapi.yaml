@@ -185,8 +185,8 @@ paths:
       summary: Every ObjectType
       description: |
         Rows from `schemas` — **a `schema_definition` already is a JSON Schema**, so there is
-        no translation step — plus the synthetic Site, Area, Cell, Lane, Gateway and
-        untyped-device types that give the structural objects something to point at.
+        no translation step — plus the synthetic Site, Area, Cell, Lane, Unassigned, Gateway
+        and untyped-device types that give the structural objects something to point at.
       parameters:
         - name: namespaceUri
           in: query
