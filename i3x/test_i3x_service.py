@@ -1913,8 +1913,12 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
             if type_id not in schemas or type_id == A.UNTYPED_DEVICE_TYPE_ID:
                 continue
             with self.subTest(element_id=element_id):
-                value = i3x_service._current_value(objects, space, element_id)["value"]
-                self.assertEqual(self.nonconformance(value, schemas[type_id]), [])
+                vqt = i3x_service._current_value(objects, space, element_id)
+                if vqt["value"] is None:
+                    # The guide's null rule: no value is Bad or GoodNoData, and conforms to nothing.
+                    self.assertIn(vqt["quality"], ("Bad", "GoodNoData"))
+                    continue
+                self.assertEqual(self.nonconformance(vqt["value"], schemas[type_id]), [])
                 checked.add(type_id)
         self.assertEqual(
             checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.UNASSIGNED_TYPE_ID, A.GATEWAY_TYPE_ID}
@@ -2112,9 +2116,10 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
 
     def test_a_quarantined_devices_metrics_are_uncertain_only_with_a_value(self):
         self.assertEqual(self.value("dev-ext/Axes/X/POSITION")["quality"], "Uncertain")
-        # A null value is never Uncertain: the guide allows only Bad or GoodNoData with it.
+        # A null value is never Uncertain: the guide allows only Bad or GoodNoData with it, and a
+        # source nobody vouches for is not "connected but silent".
         silent = self.value("dev-ext/Environmental/HUMIDITY")
-        self.assertEqual((silent["value"], silent["quality"]), (None, "GoodNoData"))
+        self.assertEqual((silent["value"], silent["quality"]), (None, "Bad"))
 
     def test_the_device_keeps_its_map_as_its_own_value(self):
         rows = _metric_rows()
@@ -2841,7 +2846,7 @@ class TestComponentLimit(_HistoryCase):
         space, objects = _device_space(*self.DEVICES)
         req = FakeRequest(body=body, pg=ColumnCheckingPostgrest())
 
-        def current(objects_, space_, element_id):
+        def current(objects_, space_, element_id, unfilled=frozenset()):
             if element_id not in objects_:
                 return None
             return {"value": 1.0, "quality": "Good", "timestamp": "2026-09-28T10:00:00Z"}

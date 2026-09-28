@@ -363,7 +363,11 @@ def _read_address_space(pg: PostgrestClient) -> dict:
     schemas_by_device: Dict[str, List[str]] = {}
     for row in attached:
         schemas_by_device.setdefault(row["device_id"], []).append(row["schema_id"])
+    read_at = time.time()
+    _record_directory(devices, gateways, read_at)
     return {
+        # When these rows were read: an MQTT observation newer than this outranks them.
+        "_read_at": read_at,
         "cells": cells,
         "areas": areas,
         # Matched on the key as well as filtered by it, so no other setting can name the root.
@@ -620,6 +624,154 @@ def metrics_for(sparkplug_id: str) -> Dict[str, dict]:
         return dict(_values.get(sparkplug_id, {}))
 
 
+# =================================================================================================
+# Liveness: the Directory's rows, overlaid with what the broker has said since they were read
+# =================================================================================================
+# An MQTT observation outranks a device row read up to this long after it: how long ingestion may
+# take to write the same message. A gateway needs none, since its row carries the heartbeat time.
+LIVENESS_LAG_SECONDS = 5.0
+# Each map below is keyed by topic segments or rows, so each is bounded and evicted LRU. An
+# evicted entry costs only the overlay: the row is used alone.
+MAX_LIVENESS_ENTRIES = int(os.getenv("I3X_MAX_LIVENESS_ENTRIES", "10000"))
+# Mirrored from ingestion.py (`RESERVED_GATEWAY_STATUSES`, `MAX_GATEWAY_STATUS_LENGTH`): the self-
+# reported gateway statuses ingestion refuses. `test_i3x_service.py` asserts they agree.
+RESERVED_GATEWAY_STATUSES = frozenset({"PENDING_ENROLLMENT", "AWAITING_BIRTH", "STALE"})
+MAX_GATEWAY_STATUS_LENGTH = 32
+
+_liveness_lock = threading.Lock()
+# Node id -> {"status", "at" (epoch seconds), "heard_at" (RFC 3339), "group"}: the last NBIRTH,
+# NDATA or NDEATH, as ingestion writes it to `gateways.status` and `last_heartbeat`.
+_gateways_heard: "OrderedDict[str, dict]" = OrderedDict()
+# Device id -> {"status", "at", "node"}: the last DBIRTH (ONLINE) or DDEATH (OFFLINE), and the node
+# its messages last came through. A DDATA moves only "node", as it moves nothing in `devices`.
+_devices_heard: "OrderedDict[str, dict]" = OrderedDict()
+# The rows the last address-space read returned, for the MQTT thread, which never reads PostgREST.
+# Only what quality needs; `_read_at` is when they were read.
+_directory_devices: "OrderedDict[str, dict]" = OrderedDict()
+_directory_gateways: "OrderedDict[str, dict]" = OrderedDict()
+
+
+def _remember(table: "OrderedDict[str, dict]", key: str, entry: dict) -> None:
+    """Store under the liveness lock, evicting least-recently-used past MAX_LIVENESS_ENTRIES."""
+    table[key] = entry
+    table.move_to_end(key)
+    while len(table) > MAX_LIVENESS_ENTRIES:
+        table.popitem(last=False)
+
+
+def _liveness_clear() -> None:
+    """Forget every observation and row. For tests."""
+    with _liveness_lock:
+        for table in (_gateways_heard, _devices_heard, _directory_devices, _directory_gateways):
+            table.clear()
+
+
+def _record_directory(devices: List[dict], gateways: List[dict], read_at: float) -> None:
+    gateway_sids = {g.get("id"): g.get("sparkplug_id") for g in gateways}
+    with _liveness_lock:
+        for g in gateways:
+            _remember(_directory_gateways, g["sparkplug_id"], {
+                "sparkplug_id": g["sparkplug_id"], "status": g.get("status"),
+                "last_heartbeat": g.get("last_heartbeat"),
+                "sparkplug_group": g.get("sparkplug_group"), "_read_at": read_at,
+            })
+        for d in devices:
+            _remember(_directory_devices, d["sparkplug_id"], {
+                "sparkplug_id": d["sparkplug_id"], "status": d.get("status"),
+                "is_quarantined": d.get("is_quarantined"),
+                "_gateway_sparkplug_id": gateway_sids.get(d.get("gateway_id")), "_read_at": read_at,
+            })
+
+
+def _hear_gateway(node: str, group: str, status: str, at: float) -> None:
+    heard_at = datetime.fromtimestamp(at, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    with _liveness_lock:
+        _remember(_gateways_heard, node,
+                  {"status": status, "at": at, "heard_at": heard_at, "group": group})
+
+
+def _hear_device(device_id: str, node: str, status: Optional[str], at: float) -> None:
+    """Note the node a device's message came through, and with a status, its birth or death."""
+    with _liveness_lock:
+        entry = dict(_devices_heard.get(device_id) or {"status": None, "at": None})
+        entry["node"] = node
+        if status is not None:
+            entry["status"], entry["at"] = status, at
+        _remember(_devices_heard, device_id, entry)
+
+
+def _effective_gateway(row: Optional[dict]) -> Optional[dict]:
+    """A gateway row with the broker's word on it when that is newer than its `last_heartbeat`."""
+    if row is None:
+        return None
+    with _liveness_lock:
+        heard = _gateways_heard.get(row["sparkplug_id"])
+    if heard is None:
+        return row
+    stored = A.instant(row.get("last_heartbeat"))
+    if stored is not None and stored.timestamp() >= heard["at"]:
+        return row
+    return dict(row, status=heard["status"], last_heartbeat=heard["heard_at"])
+
+
+def _effective_device(row: dict, read_at: float) -> dict:
+    """
+    A device row with its last birth or death overlaid unless the row was read more than
+    LIVENESS_LAG_SECONDS after it, and `_status_changed_at` set to that message's time. A copy:
+    the row may belong to a cached address space.
+    """
+    with _liveness_lock:
+        heard = _devices_heard.get(row["sparkplug_id"])
+    if not heard or heard.get("status") is None:
+        return row
+    changed_at = datetime.fromtimestamp(heard["at"], tz=timezone.utc).isoformat()
+    if heard["at"] + LIVENESS_LAG_SECONDS < read_at:
+        return dict(row, _status_changed_at=changed_at) if row.get("status") == heard["status"] else row
+    return dict(row, status=heard["status"], _status_changed_at=changed_at)
+
+
+def _live_rows(space: dict, device_row: dict) -> tuple:
+    """(device, gateway) for the quality of a device's values on the read path."""
+    gateways = space.get("_gateways_by_sid") or {g["sparkplug_id"]: g for g in space["gateways"]}
+    gateway = gateways.get(device_row.get("_gateway_sparkplug_id"))
+    return (_effective_device(device_row, space.get("_read_at", 0.0)),
+            _effective_gateway(gateway))
+
+
+def _staging_gateway(node: Optional[str]) -> Optional[dict]:
+    if not node:
+        return None
+    with _liveness_lock:
+        row = _directory_gateways.get(node)
+    return _effective_gateway(dict(row) if row else {"sparkplug_id": node})
+
+
+def _staging_rows(device_id: str) -> tuple:
+    """(device, gateway) for staging: the last rows read, overlaid as the read path overlays them."""
+    with _liveness_lock:
+        row = _directory_devices.get(device_id)
+        heard = _devices_heard.get(device_id) or {}
+    row = dict(row) if row else {"sparkplug_id": device_id}
+    node = row.get("_gateway_sparkplug_id") or heard.get("node")
+    return _effective_device(row, row.get("_read_at", 0.0)), _staging_gateway(node)
+
+
+def reported_gateway_status(group_id, edge_node_id, metrics) -> Optional[str]:
+    """
+    The status a node-level message reports for its gateway, as ingestion accepts it: the first
+    Gateway_Status or Node_Status string, trimmed, if it is not blank, over-long or reserved.
+    """
+    for metric in metrics:
+        name = resolve_metric_name(group_id, edge_node_id, metric)
+        if name in ("Gateway_Status", "Node_Status") and metric.get("field") == "string_value":
+            candidate = metric["value"].strip() if isinstance(metric["value"], str) else ""
+            if (not candidate or len(candidate) > MAX_GATEWAY_STATUS_LENGTH
+                    or candidate.upper() in RESERVED_GATEWAY_STATUSES):
+                return None
+            return candidate
+    return None
+
+
 def alias_key(group_id, edge_node_id):
     """
     Aliases are scoped to the (group, edge node) the topic names; a missing group is "", never the
@@ -749,18 +901,95 @@ def metric_value(group_id, edge_node_id, device_id, name, metric):
     return sparkplug_integer_value(datatype, value)
 
 
-def _stage_and_push(sparkplug_id: str, metrics: Dict[str, dict]) -> None:
+def _push(updates: Dict[str, dict]) -> None:
     """
-    Queue a value change for every subscription watching this element, then wake their streams.
+    Queue these VQTs for every subscription the registry matches them to, then wake their streams.
 
     Runs on the MQTT network thread, so it never writes to a client socket: each stream's own
     handler thread drains its queue and writes (see `_serve_stream`).
     """
-    device_stub = {"sparkplug_id": sparkplug_id, "is_quarantined": False}
-    envelope = A.device_value(device_stub, metrics)
-    streaming = registry.stage({sparkplug_id: envelope})
-    for sub in streaming:
+    if not updates:
+        return
+    for sub in registry.stage(updates):
         _wake_stream(sub)
+
+
+def _watched_prefixes() -> set:
+    """
+    The device (or other) id before the first `/` of every monitored elementId. An element is worth
+    staging when its own prefix is in it: it, its device, or a metric under it is monitored.
+    """
+    return {element_id.partition("/")[0] for element_id in registry.monitored_element_ids()}
+
+
+def _device_updates(sparkplug_id: str, metrics: Dict[str, dict], names, now: float) -> dict:
+    """The device's map VQT and each named metric's, with the quality staging derives."""
+    device, gateway = _staging_rows(sparkplug_id)
+    updates = {sparkplug_id: A.device_value(device, metrics, gateway, now=now)}
+    for name in names:
+        if name in metrics and name not in IDENTITY_METRICS and A.metric_name_is_addressable(name):
+            element_id = A.metric_element_id(sparkplug_id, name)
+            updates[element_id] = A.device_metric_value(
+                device, element_id, metrics[name], gateway, now=now
+            )
+    return updates
+
+
+def _stage_and_push(sparkplug_id: str, metrics: Dict[str, dict], changed=()) -> None:
+    """A device's DBIRTH or DDATA: its map, and each metric in `changed`, as VQTs."""
+    _push(_device_updates(sparkplug_id, metrics, changed, time.time()))
+
+
+def _on_device_death(device_id: str, node: str) -> None:
+    """DDEATH: the device is OFFLINE, so its map and each metric it holds go Uncertain or Bad."""
+    now = time.time()
+    _hear_device(device_id, node, "OFFLINE", now)
+    if device_id in _watched_prefixes():
+        metrics = metrics_for(device_id)
+        _push(_device_updates(device_id, metrics, metrics, now))
+
+
+def _devices_behind(node: str, candidates) -> list:
+    """Which of `candidates` connect through this node: by their row, else by their traffic."""
+    with _liveness_lock:
+        out = []
+        for device_id in candidates:
+            row = _directory_devices.get(device_id) or {}
+            via = row.get("_gateway_sparkplug_id") or (_devices_heard.get(device_id) or {}).get("node")
+            if via == node:
+                out.append(device_id)
+        return out
+
+
+def _on_node_message(group_id: str, msg_type: str, node: str, metrics: List[dict]) -> None:
+    """
+    NBIRTH, NDATA or NDEATH: the gateway's status as ingestion writes it. NBIRTH and NDEATH, and an
+    NDATA that changes the gateway's live status, stage the gateway's VQT and those of the watched
+    devices behind it whose quality changed.
+    """
+    now = time.time()
+    status = "OFFLINE" if msg_type == "NDEATH" else (
+        reported_gateway_status(group_id, node, metrics) or "ONLINE"
+    )
+    before = _staging_gateway(node)
+    _hear_gateway(node, group_id, status, now)
+    watched = _watched_prefixes()
+    if not watched:
+        return
+    after = _staging_gateway(node)
+    if msg_type == "NDATA" and A.gateway_live_status(before, now) == A.gateway_live_status(after, now):
+        return
+    updates = {}
+    if node in watched:
+        group = after.get("sparkplug_group") or group_id
+        updates[node] = A.gateway_value(dict(after, sparkplug_group=group), now)
+    for device_id in _devices_behind(node, watched):
+        device, _ = _staging_rows(device_id)
+        metrics = metrics_for(device_id)
+        was = A.device_value(device, metrics, before, now=now)["quality"]
+        if A.device_value(device, metrics, after, now=now)["quality"] != was:
+            updates.update(_device_updates(device_id, metrics, metrics, now))
+    _push(updates)
 
 
 # =================================================================================================
@@ -1585,8 +1814,82 @@ def _component_ids(objects, element_id: str, budget) -> list:
     return out
 
 
-def _current_value(objects, space: dict, element_id: str):
-    """The bare {value, quality, timestamp} for one object, or None if it is not in the space."""
+# The most devices one `telemetry_latest` read names, and the most rows it takes. The view is one
+# row per series, so a read is bounded by those devices' series; one that comes back full may have
+# stopped short, and its devices are read again on their next request.
+FILL_DEVICES_PER_READ = 50
+FILL_MAX_ROWS = 5000
+# The Sparkplug datatypes served as integers; the historian stores them in `val_double`.
+INTEGER_DATATYPES = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 13})
+
+# Devices whose cache has been filled from `telemetry_latest` since this process started. Keyed by
+# rows the caller could read, so bounded by the Directory.
+_filled: set = set()
+_filled_lock = threading.Lock()
+
+
+def _stored_value(row: dict, datatype):
+    """A `telemetry_latest` row's reading as the MQTT path would serve it: integers as integers."""
+    value = _sample_value(row)
+    if isinstance(value, float) and value.is_integer() and datatype in INTEGER_DATATYPES:
+        return int(value)
+    return value
+
+
+def _fill_from_historian(pg: PostgrestClient, space: dict, objects, device_ids) -> set:
+    """
+    Seed the value cache with each device's components it lacks, from `telemetry_latest` read as
+    the caller, once per device per process: Sparkplug reports by exception, so a restart would
+    otherwise leave a slow metric empty until it next changes. A value already cached is never
+    replaced. Returns the devices whose read failed, for which what the cache lacks is Bad.
+    """
+    missing: Dict[str, set] = {}
+    with _filled_lock:
+        filled = set(_filled)
+    for sid in sorted(set(device_ids) - filled):
+        rels = (objects.get(sid, {}).get("metadata") or {}).get("relationships") or {}
+        names = {c.partition("/")[2] for c in rels.get("HasComponent", [])} - set(metrics_for(sid))
+        if names:
+            missing[sid] = names
+    if not missing:
+        return set()
+    catalog = {row["name"]: row.get("datatype") for row in space.get("metric_catalog") or []}
+    births = _birth_datatypes()
+    failed, pending = set(), sorted(missing)
+    for start in range(0, len(pending), FILL_DEVICES_PER_READ):
+        chunk = pending[start:start + FILL_DEVICES_PER_READ]
+        try:
+            rows = pg.get("telemetry_latest", {
+                "select": "asset_id," + TELEMETRY_COLUMNS,
+                "asset_id": "in.(" + ",".join(chunk) + ")",
+                "limit": str(FILL_MAX_ROWS),
+            })
+        except (SubscriptionError, requests.RequestException) as exc:
+            logger.warning("current values for %d device(s) could not be filled from "
+                           "telemetry_latest: %s", len(chunk), getattr(exc, "detail", exc))
+            failed.update(chunk)
+            continue
+        with _values_lock:
+            for row in rows:
+                sid, name = row.get("asset_id"), row.get("metric_name")
+                if name not in missing.get(sid, ()):
+                    continue
+                datatype = (births.get(sid) or {}).get(name) or catalog.get(name)
+                _values.setdefault(sid, {}).setdefault(name, {
+                    "value": _stored_value(row, datatype),
+                    "timestamp": A.to_rfc3339_utc(row.get("time")),
+                })
+        if len(rows) < FILL_MAX_ROWS:
+            with _filled_lock:
+                _filled.update(chunk)
+    return failed
+
+
+def _current_value(objects, space: dict, element_id: str, unfilled=frozenset()):
+    """
+    The bare {value, quality, timestamp} for one object, or None if it is not in the space.
+    `unfilled`: devices whose `telemetry_latest` read failed, so what the cache lacks is Bad.
+    """
     obj = objects.get(element_id)
     if obj is None:
         return None
@@ -1594,14 +1897,18 @@ def _current_value(objects, space: dict, element_id: str):
     # function correct if it is ever called with a `space` that did not come through that path.
     gateways_by_sid = space.get("_gateways_by_sid") or {g["sparkplug_id"]: g for g in space["gateways"]}
     if element_id in gateways_by_sid:
-        return A.gateway_value(gateways_by_sid[element_id])
+        return A.gateway_value(_effective_gateway(gateways_by_sid[element_id]))
     devices_by_sid = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
     if element_id in devices_by_sid:
-        return A.device_value(devices_by_sid[element_id], metrics_for(element_id))
+        device, gateway = _live_rows(space, devices_by_sid[element_id])
+        return A.device_value(device, metrics_for(element_id), gateway,
+                              unavailable=element_id in unfilled)
     # A metric: `<sparkplug_id>/<metric name>`, split at the first `/`.
     sid, _, name = element_id.partition("/")
     if name and sid in devices_by_sid:
-        return A.device_metric_value(devices_by_sid[sid], element_id, metrics_for(sid).get(name))
+        device, gateway = _live_rows(space, devices_by_sid[sid])
+        return A.device_metric_value(device, element_id, metrics_for(sid).get(name), gateway,
+                                     unavailable=sid in unfilled)
     # A location's value is what its type declares. Counts are of devices (or cells), never of
     # children: a cell's children include its gateways, an area's its cells and area-wide assets.
     if element_id == A.SITE_ELEMENT_ID:
@@ -1624,17 +1931,24 @@ def h_objects_value(req: "Handler") -> None:
     PostgREST reads made with the caller's own token, so an element the caller cannot see is simply
     absent from `objects` and reports as not found -- indistinguishable from one that does not
     exist. The MQTT cache is only ever consulted for an id that survived that step, which is what
-    stops it becoming a way to read every device on the site.
+    stops it becoming a way to read every device on the site. What the cache lacks for a device
+    named here is read once from `telemetry_latest` as the caller (`_fill_from_historian`).
     """
     body = req._body()
     wanted = _require_element_ids(body)
     max_depth = _max_depth(body)
-    space = _load_address_space(req._pg())
+    pg = req._pg()
+    space = _load_address_space(pg)
     objects = _build_objects(space)
+    # A device's components are its own metrics, so the devices named here are all a read reaches.
+    devices = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
+    unfilled = _fill_from_historian(
+        pg, space, objects, {eid.partition("/")[0] for eid in wanted} & set(devices)
+    )
 
     results, partial = [], _Partial()
     for eid in wanted:
-        vqt = _current_value(objects, space, eid)
+        vqt = _current_value(objects, space, eid, unfilled)
         if vqt is None:
             results.append(_not_found(eid, "object"))
             continue
@@ -1650,7 +1964,7 @@ def h_objects_value(req: "Handler") -> None:
             budget = -1 if max_depth == 0 else max_depth - 1
             components = {}
             for child in partial.components(result, _component_ids(objects, eid, budget)):
-                child_vqt = _current_value(objects, space, child)
+                child_vqt = _current_value(objects, space, child, unfilled)
                 if child_vqt:
                     components[child] = {
                         "value": child_vqt["value"],
@@ -1747,10 +2061,10 @@ def _sample_value(row: dict):
 
 
 def _vqt(value, time) -> dict:
-    """One history entry. Quality is Good when there is a value, else GoodNoData."""
+    """One history entry: a stored sample, so Good with a value and GoodNoData without."""
     return {
         "value": value,
-        "quality": "Good" if value is not None else "GoodNoData",
+        "quality": A.stored_sample_quality(value is not None),
         "timestamp": A.to_rfc3339_utc(time),
     }
 
@@ -2491,13 +2805,22 @@ def on_message(client, userdata, msg):  # noqa: ARG001
             logger.debug("undecodable payload on %s; ignoring", msg.topic)
             return
 
-        if msg_type == "NBIRTH":
-            register_birth_aliases(group_id, edge_node_id, metrics, reset=True)
+        if msg_type in ("NBIRTH", "NDATA", "NDEATH") and not device_id:
+            if msg_type == "NBIRTH":
+                register_birth_aliases(group_id, edge_node_id, metrics, reset=True)
+            _on_node_message(group_id, msg_type, edge_node_id, metrics)
+            return
+        if not device_id:
+            return
+        if msg_type == "DDEATH":
+            _on_device_death(device_id, edge_node_id)
             return
         if msg_type == "DBIRTH":
             register_birth_aliases(group_id, edge_node_id, metrics, device_id=device_id)
-        if msg_type not in ("DBIRTH", "DDATA") or not device_id:
+        if msg_type not in ("DBIRTH", "DDATA"):
             return
+        # Before the values are staged, so a birth's VQTs carry the device's new status.
+        _hear_device(device_id, edge_node_id, "ONLINE" if msg_type == "DBIRTH" else None, time.time())
 
         named = {}
         for metric in metrics:
@@ -2512,8 +2835,8 @@ def on_message(client, userdata, msg):  # noqa: ARG001
             value = metric_value(group_id, edge_node_id, device_id, name, metric)
             record_value(device_id, name, value, metric["timestamp"])
             named[name] = {"value": value, "timestamp": metric["timestamp"]}
-        if named and device_id in registry.monitored_element_ids():
-            _stage_and_push(device_id, metrics_for(device_id))
+        if named and device_id in _watched_prefixes():
+            _stage_and_push(device_id, metrics_for(device_id), named)
     except Exception:  # noqa: BLE001
         logger.exception("failed to handle %s", msg.topic)
 

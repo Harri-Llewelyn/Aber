@@ -158,8 +158,8 @@ SYNTHETIC_TYPES = [
         "schema": {
             "type": "object",
             "properties": {
-                # An open label: ONLINE, OFFLINE, an enrolment state, or a status the gateway
-                # reports itself, and UNKNOWN when none is stored.
+                # An open label, as the gateway_status view derives it: ONLINE, OFFLINE, STALE,
+                # an enrolment state, or a status the gateway reports itself.
                 "status": {"type": "string"},
                 "sparkplugGroup": {"type": "string"},
                 "lastHeartbeat": {"type": ["string", "null"]},
@@ -439,14 +439,83 @@ def _namespace_display_name(uri: str) -> str:
     return uri
 
 
-def _quality_for_device(device: dict, has_value: bool) -> str:
+# The gateway_status view's rule (ensure_gateway_status_view() in 0001), held to it by a test: an
+# enrolment state stands, then OFFLINE, then a gateway with no heartbeat keeps its status, and one
+# not heard from for longer than GATEWAY_STALE_SECONDS is STALE. The view compares exactly.
+GATEWAY_STALE_SECONDS = 90
+GATEWAY_ENROLMENT_STATUSES = ("PENDING_ENROLLMENT", "AWAITING_BIRTH")
+# A gateway in one of these holds every value behind it: the devices' values are not current.
+GATEWAY_DOWN_STATUSES = ("OFFLINE", "STALE")
+UNKNOWN_STATUS = "UNKNOWN"
+
+# Worst last. A device map's quality is the worst among the metrics it holds.
+QUALITY_RANK = {"Good": 0, "GoodNoData": 1, "Uncertain": 2, "Bad": 3}
+
+
+def instant(value) -> Optional[datetime]:
+    """An aware UTC datetime from a datetime or an ISO 8601 string, or None when it is neither."""
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            dt = datetime.fromisoformat(_normalise_fractional_seconds(value))
+        except ValueError:
+            return None
+    else:
+        return None
+    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+
+
+def gateway_live_status(gateway: dict, now: Optional[float] = None) -> str:
+    """The view's `live_status` for a gateway row, upper-cased; UNKNOWN when no status is stored."""
+    status = gateway.get("status")
+    if not status:
+        return UNKNOWN_STATUS
+    if status in GATEWAY_ENROLMENT_STATUSES or status == "OFFLINE":
+        return status
+    heartbeat = instant(gateway.get("last_heartbeat"))
+    if heartbeat is None:
+        return status.upper()
+    age = (now if now is not None else datetime.now(timezone.utc).timestamp()) - heartbeat.timestamp()
+    return "STALE" if age > GATEWAY_STALE_SECONDS else status.upper()
+
+
+def source_is_down(device: dict, gateway: Optional[dict] = None, now: Optional[float] = None) -> bool:
+    """
+    Whether a device's values can only be held ones: it is quarantined or OFFLINE, or its gateway
+    is OFFLINE or STALE. A status that is not stored (None) is not a fault.
+    """
     if device.get("is_quarantined"):
-        # The device is publishing but we have refused to trust its identity. Not Bad -- the readings
-        # may be perfectly good -- but explicitly not vouched for.
-        return "Uncertain"
-    if not has_value:
-        return "GoodNoData"
-    return "Good"
+        return True
+    if (device.get("status") or "").upper() == "OFFLINE":
+        return True
+    return gateway is not None and gateway_live_status(gateway, now) in GATEWAY_DOWN_STATUSES
+
+
+def value_quality(device: dict, gateway: Optional[dict], has_value: bool,
+                  now: Optional[float] = None) -> str:
+    """
+    The quality of a device's or a metric's value: the one rule for reads, staging and history.
+    A source that is down makes a held value Uncertain and no value Bad; otherwise a value is Good
+    and no value GoodNoData. README.md -> "Address space" has the table and the guide's words.
+    """
+    if source_is_down(device, gateway, now):
+        return "Uncertain" if has_value else "Bad"
+    return "Good" if has_value else "GoodNoData"
+
+
+def worst_quality(*qualities: str) -> str:
+    return max(qualities, key=QUALITY_RANK.__getitem__)
+
+
+# What a stored telemetry row came from: ingestion writes DDATA only for a device that is not
+# quarantined, so every stored sample was published by a trusted, live source.
+STORED_SAMPLE_SOURCE = {"is_quarantined": False, "status": "ONLINE"}
+
+
+def stored_sample_quality(has_value: bool) -> str:
+    """A history entry's quality: `value_quality` for a sample ingestion stored."""
+    return value_quality(STORED_SAMPLE_SOURCE, None, has_value)
 
 
 def device_object(
@@ -823,26 +892,25 @@ def devices_below(objects: Dict[str, dict], element_id: str, device_ids) -> int:
     return count
 
 
-def gateway_value(gateway: dict) -> dict:
+def gateway_value(gateway: dict, now: Optional[float] = None) -> dict:
     """
-    A gateway's value is its stored `gateways.status`, upper-cased, or UNKNOWN when none is stored.
-    The staleness the `gateway_status` view derives from `last_heartbeat` is not applied here.
-
-    STALE is `Uncertain`, not `Bad`: the gateway has not been heard from inside the threshold, which
-    is a statement about our knowledge rather than about the equipment. `Bad` would assert a fault
-    nobody has observed.
+    A gateway's value is its live status as the `gateway_status` view derives it, STALE included,
+    and `Good` whenever that is known: an OFFLINE seen through NDEATH is a fact, not a doubt. It is
+    the devices behind it whose values go stale. No stored status is GoodNoData with no value.
     """
-    status = (gateway.get("status") or "UNKNOWN").upper()
-    quality = "Uncertain" if status in ("STALE", "UNKNOWN", "OFFLINE") else "Good"
+    status = gateway_live_status(gateway, now)
+    heartbeat = gateway.get("last_heartbeat")
+    if status == UNKNOWN_STATUS:
+        return value_envelope(gateway["sparkplug_id"], None, "GoodNoData", heartbeat or _now_iso())
     return value_envelope(
         gateway["sparkplug_id"],
         {
             "status": status,
             "sparkplugGroup": gateway.get("sparkplug_group") or "",
-            "lastHeartbeat": to_rfc3339_utc(gateway.get("last_heartbeat")),
+            "lastHeartbeat": to_rfc3339_utc(heartbeat),
         },
-        quality,
-        gateway.get("last_heartbeat") or _now_iso(),
+        "Good",
+        heartbeat or _now_iso(),
     )
 
 
@@ -850,28 +918,50 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def device_value(device: dict, metrics: Dict[str, dict]) -> dict:
+def _newest(timestamps) -> Optional[str]:
+    """The latest of these timestamps as instants, not as text; unparseable ones are passed over."""
+    dated = [(instant(t), t) for t in timestamps if t]
+    dated = [(when, t) for when, t in dated if when is not None]
+    return max(dated)[1] if dated else None
+
+
+def device_value(device: dict, metrics: Dict[str, dict], gateway: Optional[dict] = None, *,
+                 unavailable: bool = False, now: Optional[float] = None) -> dict:
     """
     A device's value is the map of its latest metric values.
 
     Each metric is also a component with a value of its own (`device_metric_value`), but the map
     stays the device's value: its ObjectType is its schemas, whose `properties` are the metric
-    names, and one read at the default depth returns the whole device.
+    names, and one read at the default depth returns the whole device. Its quality is the worst
+    among the metrics it holds, which is `value_quality` for a held value; `unavailable` means a
+    metric could not be read, so a map is at best Uncertain. The timestamp is the newest sample's,
+    else the device's last status change (`_status_changed_at`), else the current time.
     """
-    if not metrics:
-        return value_envelope(device["sparkplug_id"], None, _quality_for_device(device, False), None)
-    value = {name: entry.get("value") for name, entry in metrics.items()}
-    latest = max((entry.get("timestamp") or "" for entry in metrics.values()), default=None)
+    value = {name: entry.get("value") for name, entry in metrics.items()} or None
+    quality = value_quality(device, gateway, value is not None, now)
+    if unavailable:
+        quality = worst_quality(quality, "Uncertain" if value is not None else "Bad")
+    latest = _newest(entry.get("timestamp") for entry in metrics.values())
     return value_envelope(
-        device["sparkplug_id"], value, _quality_for_device(device, True), latest or None
+        device["sparkplug_id"], value, quality,
+        latest or device.get("_status_changed_at") or _now_iso(),
     )
 
 
-def device_metric_value(device: dict, element_id: str, entry: Optional[dict]) -> dict:
+def device_metric_value(device: dict, element_id: str, entry: Optional[dict],
+                        gateway: Optional[dict] = None, *, unavailable: bool = False,
+                        now: Optional[float] = None) -> dict:
     """
-    One metric's value: its cache `entry`, with its device's quality. A null value is GoodNoData,
-    never Uncertain, and the timestamp is never null: the sample's, else the current time.
+    One metric's value: its cache `entry`, with `value_quality` for its device and gateway. A
+    metric that could not be read (`unavailable`) and has no value is Bad. The timestamp is the
+    sample's, else the device's last status change, else the current time.
     """
     value = entry.get("value") if entry else None
-    quality = _quality_for_device(device, True) if value is not None else "GoodNoData"
-    return value_envelope(element_id, value, quality, (entry or {}).get("timestamp") or _now_iso())
+    if unavailable and value is None:
+        quality = "Bad"
+    else:
+        quality = value_quality(device, gateway, value is not None, now)
+    return value_envelope(
+        element_id, value, quality,
+        (entry or {}).get("timestamp") or device.get("_status_changed_at") or _now_iso(),
+    )
