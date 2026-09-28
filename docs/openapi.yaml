@@ -1845,10 +1845,9 @@ paths:
         `is_quarantined`, `first_dbirth_at`), the device's `gateway_id` data path and its
         `schema_id` binding are all refused, by name, at insert time.
 
-        **The `schemas` lane proposes an act rather than a column edit.** Its `entity_id` is a
-        **draft** schema and its patch is exactly `{"publish": true}`; approving calls
-        `publish_schema_version()`, which archives the predecessor and repoints every attached
-        device in the same transaction.
+        **A lane is open while `proposable_columns()` answers for it**, which it does for the five
+        `entity_type` values below. `schemas` is refused: archived migration 0090 withdrew that
+        lane, and rows filed before then still carry it.
       requestBody:
         required: true
         content:
@@ -1857,24 +1856,26 @@ paths:
               type: object
               required: [entity_type, entity_id, patch]
               properties:
-                entity_type: { type: string, enum: [devices, device_nameplate, schemas] }
-                entity_id: { type: string, format: uuid, description: 'The device. Both lanes are keyed by one.' }
+                entity_type: { type: string, enum: [areas, cells, device_nameplate, devices, gateways] }
+                entity_id: { type: string, format: uuid, description: 'The target row: the device for `devices` and `device_nameplate`, otherwise the area, cell or gateway. It must exist and not be archived.' }
                 patch: { type: object, description: 'Column -> new value. A patch, not a row snapshot.' }
                 rationale: { type: string }
       responses:
         '201': { description: Filed. }
+        '400': { description: 'The lane is not proposable, or the patch names a column the lane does not admit.' }
         '403': { description: 'Caller lacks `proposal:create`, or named somebody else as the proposer.' }
-        '409': { description: 'An open proposal against this asset by this person already exists.' }
+        '409': { description: 'An open proposal against this asset by this person already exists, or the target is absent or archived.' }
 
   /rest/v1/rpc/approve_proposal:
     post:
       tags: [Registry]
       summary: Approve a proposal, which is to apply it
       description: |
-        **The lane names the approver.** `may_decide_proposal()` admits an Administrator or a
-        Shopfloor_Manager to the asset lanes, and an Administrator alone to the `schemas` lane —
-        `0069` withdrew `schema:manage` from that role. Re-checked **server-side** rather than
-        taken from the caller. The patch is re-validated against the allowlist and applied in the same
+        **The lane names the approver.** `may_decide_proposal()` resolves what the target table's
+        own write policy resolves: an Administrator or a Shopfloor_Manager for `devices`,
+        `device_nameplate` and `areas`, and `cell:manage` or `gateway:manage` for `cells` and
+        `gateways`. A withdrawn lane, `schemas` among them, is decidable by nobody. Re-checked
+        **server-side** rather than taken from the caller. The patch is re-validated against the allowlist and applied in the same
         transaction, so every CHECK, foreign key and trigger on the target runs now — **an invalid
         change cannot be approved**, it aborts rather than becoming an audit record of something
         that did not happen.
