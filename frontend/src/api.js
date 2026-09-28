@@ -1132,6 +1132,18 @@ const apiMethods = {
     };
   },
 
+  /** The ids of the newest `count` backups, in backup_prunable()'s order: the retention floor. */
+  newestBackupIds: async (count) => {
+    const { data, error } = await supabase
+      .from('backups')
+      .select('id')
+      .order('taken_at', { ascending: false })
+      .order('stamp', { ascending: false })
+      .limit(count);
+    if (error) throw new Error(error.message || 'Could not read backups');
+    return (data || []).map(b => b.id);
+  },
+
   /** The backup that is queued or running, or null. At most one, by a partial unique index. */
   activeBackupJob: async () => {
     const { data, error } = await supabase

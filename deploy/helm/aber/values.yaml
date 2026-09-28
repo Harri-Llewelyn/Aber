@@ -1441,7 +1441,9 @@ backup:
   schedule: "30 2 * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  # Dumps older than this are pruned by the same Job that writes them.
+  # Days a scheduled backup is kept. The backup service never prunes the newest three backups,
+  # whatever their age, so failures longer than the window leave the last good ones; a requested
+  # backup is pinned until released. The CronJob prunes only after a dump succeeds. 0: no pruning.
   retentionDays: 14
   # Also archive the 3D model objects from supabase-storage's PVC. The pg_dumps capture
   # `devices.model_3d_path` but not the bytes it points at. Off by default because the PVC is

@@ -6,8 +6,9 @@ queue a backup, and no PostgREST role can call the service's gates; a backup an 
 for is taken -- both dumps, the storage objects, the forge, the broker's document and, with TLS
 on, the internal CA, each with the digest the row records, and a manifest restore-databases.sh
 can read; the thread records who asked and that the service wrote it; a request nobody has
-claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; and
-a RUNNING job no service is running is failed, so a restored database does not refuse backups.
+claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; a
+RUNNING job no service is running is failed, so a restored database does not refuse backups; and a
+failed job is followed by a prune that leaves the newest three backups alone.
 
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
 cancel test stops the service container for a few seconds. Skips without the keys.
@@ -16,6 +17,7 @@ cancel test stops the service container for a few seconds. Skips without the key
 """
 import json
 import os
+import re
 import sys
 import time
 import unittest
@@ -29,6 +31,9 @@ import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
 OPERATOR_EMAIL = os.getenv("ABER_OPERATOR_EMAIL", "operator@aber.local")
 NOTE = "test_backup_service.py"
+# A job with this note fails at backup_finalise(), refused by a trigger test_07 installs.
+FAILING_NOTE = "test_backup_service.py: a failing job"
+STAMP = re.compile(r"^\d{8}T\d{6}Z$")
 # A backup of a developer stack takes well under a minute; a poll of fifteen seconds precedes it.
 BACKUP_TIMEOUT_SECONDS = int(os.getenv("BACKUP_TIMEOUT_SECONDS", "300"))
 
@@ -275,6 +280,72 @@ class BackupServiceTests(unittest.TestCase):
         status, cancelled = rpc("cancel_backup_job", {"p_job_id": new_job}, self.admin)
         if status != 200 or not cancelled:
             self.wait_for_idle()
+
+    def test_07_a_failed_job_prunes_nothing_inside_the_floor(self):
+        # Four scheduled backups older than any window, then a job that fails at its last step.
+        # The service prunes after the failure, and backup_prunable() never hands it the newest
+        # three rows. How many of the four are among those depends on the backups the stack already
+        # has; the floor's arithmetic on old rows is test_backup_health.py's, and this is that the
+        # failure path prunes and leaves the floor alone.
+        self.wait_for_idle()
+        fakes = [f"2001010{i}T000000Z" for i in range(1, 5)]
+        for age, stamp in enumerate(fakes):
+            service("sh", "-c", f"mkdir -p /backups/{stamp} && echo floor > /backups/{stamp}/marker")
+            psql(
+                "INSERT INTO public.backups (stamp, origin, note, location, taken_at) "
+                f"VALUES ('{stamp}', 'scheduled', '{NOTE}', '/backups/{stamp}', now() - interval '{400 + age} days')"
+            )
+        floor = psql("SELECT stamp || ' ' || location FROM public.backups ORDER BY taken_at DESC, stamp DESC LIMIT 3").splitlines()
+        floor = dict(line.split(" ", 1) for line in floor)
+        doomed = [s for s in fakes if s not in floor]
+        orphans_before = self.unrecorded_directories()
+
+        # The failure: backup_finalise() refused, after the files were written and renamed.
+        psql(
+            "CREATE OR REPLACE FUNCTION public.test_backup_service_refuse() RETURNS trigger "
+            "LANGUAGE plpgsql AS $$ BEGIN IF NEW.note = '" + FAILING_NOTE + "' THEN "
+            "RAISE EXCEPTION 'test_backup_service.py refused this backup'; END IF; RETURN NEW; END $$"
+        )
+        psql(
+            "CREATE OR REPLACE TRIGGER test_backup_service_refuse BEFORE INSERT ON public.backups "
+            "FOR EACH ROW EXECUTE FUNCTION public.test_backup_service_refuse()"
+        )
+        try:
+            status, job_id = rpc("request_backup", {"p_note": FAILING_NOTE}, self.admin)
+            self.assertEqual(status, 200, job_id)
+            deadline = time.time() + BACKUP_TIMEOUT_SECONDS
+            while time.time() < deadline:
+                job = query(f"/backup_jobs?id=eq.{job_id}&select=status,error", self.admin)[0]
+                if job["status"] in ("COMPLETED", "FAILED", "CANCELLED"):
+                    break
+                time.sleep(3)
+            self.assertEqual(job["status"], "FAILED", job)
+            self.assertIn("refused this backup", job["error"])
+
+            # The prune follows the failure in the same poll.
+            deadline = time.time() + 60
+            while time.time() < deadline and doomed:
+                if psql(f"SELECT count(*) FROM public.backups WHERE stamp IN ({', '.join(repr(s) for s in doomed)})") == "0":
+                    break
+                time.sleep(3)
+        finally:
+            psql("DROP TRIGGER IF EXISTS test_backup_service_refuse ON public.backups")
+            psql("DROP FUNCTION IF EXISTS public.test_backup_service_refuse()")
+
+        for stamp, location in floor.items():
+            self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{stamp}'"), "1", f"{stamp} is in the floor and was pruned")
+            self.assertEqual(service("sh", "-c", f"test -d '{location}' && echo present || echo absent").strip(), "present", location)
+        for stamp in doomed:
+            self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{stamp}'"), "0", f"{stamp} is outside the floor and was not pruned after the failure")
+            self.assertEqual(service("sh", "-c", f"test -d /backups/{stamp} && echo present || echo absent").strip(), "absent")
+        # And the failed job's own directory went with it.
+        self.assertLessEqual(self.unrecorded_directories(), orphans_before)
+
+    @staticmethod
+    def unrecorded_directories():
+        """Stamp-named directories on the volume that no backups row names."""
+        on_disk = {name for name in service("ls", "-1", "/backups").split() if STAMP.match(name)}
+        return on_disk - set(psql("SELECT stamp FROM public.backups").split())
 
 
 if __name__ == "__main__":

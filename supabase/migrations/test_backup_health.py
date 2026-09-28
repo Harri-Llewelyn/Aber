@@ -13,6 +13,9 @@ would fail quietly:
 - anon and authenticated cannot read it. It runs as its owner, past backup_jobs' Administrator-only
   RLS, so a grant to either would publish the backup history to every signed-in user.
 
+And the retention floor (0017): `backup_prunable()` never returns any of the newest three backups,
+pinned or not, so a run of failures longer than the window cannot prune the last good one.
+
 Every write is rolled back. Runs against the Supabase database, not the historian:
 
     python supabase/migrations/test_backup_health.py
@@ -122,6 +125,73 @@ class TestBackupHealth(unittest.TestCase):
         self.assertTrue(self.cur.fetchone()[0])
         self.cur.execute("SELECT has_table_privilege('grafana_reader', 'public.backup_jobs', 'SELECT')")
         self.assertFalse(self.cur.fetchone()[0])
+
+
+class TestRetentionFloor(unittest.TestCase):
+    """backup_prunable() never returns any of the newest three backups (0017)."""
+
+    WINDOW_DAYS = 14
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = get_connection()
+        cls.conn.autocommit = False
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def setUp(self):
+        self.cur = self.conn.cursor()
+        self.cur.execute("DELETE FROM public.backups")
+
+    def tearDown(self):
+        self.cur.close()
+        self.conn.rollback()
+
+    def backup(self, stamp, days_ago, pinned=False):
+        self.cur.execute(
+            """
+            INSERT INTO public.backups (stamp, origin, location, pinned, taken_at)
+            VALUES (%s, %s, '/backups/' || %s, %s, now() - make_interval(days => %s))
+            """,
+            (stamp, "requested" if pinned else "scheduled", stamp, pinned, days_ago),
+        )
+
+    def prunable(self, days=WINDOW_DAYS):
+        self.cur.execute("SELECT public.backup_prunable(%s)", (days,))
+        return [row["stamp"] for row in self.cur.fetchone()[0]]
+
+    def test_four_past_the_window_return_only_the_oldest(self):
+        # Two weeks and more of failures: nothing newer than these four exists.
+        for i, days in enumerate((20, 21, 22, 23)):
+            self.backup(f"2026010{i + 1}T023000Z", days)
+        self.assertEqual(self.prunable(), ["20260104T023000Z"])
+
+    def test_three_past_the_window_are_all_kept(self):
+        for i, days in enumerate((30, 31, 32)):
+            self.backup(f"2026010{i + 1}T023000Z", days)
+        self.assertEqual(self.prunable(), [])
+
+    def test_newer_backups_fill_the_floor_first(self):
+        self.backup("20260110T023000Z", 1)
+        self.backup("20260109T023000Z", 2)
+        for i, days in enumerate((20, 21, 22)):
+            self.backup(f"2026010{i + 1}T023000Z", days)
+        # The floor is the two recent ones and the newest old one; oldest first.
+        self.assertEqual(self.prunable(), ["20260103T023000Z", "20260102T023000Z"])
+
+    def test_a_pinned_backup_counts_toward_the_floor(self):
+        self.backup("20260110T023000Z", 10, pinned=True)
+        for i, days in enumerate((20, 21, 22, 23)):
+            self.backup(f"2026010{i + 1}T023000Z", days)
+        # Pinned and inside the window, and still one of the three: only two old ones share the floor.
+        self.assertEqual(self.prunable(), ["20260104T023000Z", "20260103T023000Z"])
+
+    def test_zero_days_still_disables_pruning(self):
+        for i, days in enumerate((20, 21, 22, 23, 24)):
+            self.backup(f"2026010{i + 1}T023000Z", days)
+        self.assertEqual(self.prunable(0), [])
 
 
 if __name__ == "__main__":

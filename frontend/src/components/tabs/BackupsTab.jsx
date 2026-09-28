@@ -8,6 +8,7 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { HelpTip } from '../common/HelpTip'
 import { IconAlertTriangle, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
 import { formatBytes } from '../../utils/coldStorage'
+import { readSetting } from '../../config'
 
 /**
  * How old the last successful backup may be before the page says backups have stopped: the nightly
@@ -15,6 +16,12 @@ import { formatBytes } from '../../utils/coldStorage'
  * needs this changed. check-docs-drift.mjs holds it equal to the Backup Stale alert rule.
  */
 export const BACKUP_STALE_HOURS = 36
+
+/**
+ * How many of the newest backups the retention prune never removes, whatever their age.
+ * check-docs-drift.mjs holds it equal to the floor in backup_prunable().
+ */
+export const BACKUP_RETENTION_FLOOR = 3
 
 /** Runs per page of the list; "Show more" adds another page. */
 const PAGE_SIZE = 30
@@ -46,6 +53,7 @@ export function BackupsTab({ showToast }) {
   const [error, setError] = useState(null)
   const [asking, setAsking] = useState(false)
   const [releaseFor, setReleaseFor] = useState(null)
+  const [floorIds, setFloorIds] = useState(() => new Set())
   const lastCall = useRef(0)
 
   const [cancelPending, runCancel] = usePendingAction()
@@ -53,10 +61,12 @@ export function BackupsTab({ showToast }) {
 
   const refresh = useCallback(async () => {
     const call = ++lastCall.current
-    const [page, active, sum] = await Promise.all([
+    const [page, active, sum, floor] = await Promise.all([
       api.listBackupRuns({ statuses: FILTERS[filter].statuses, limit }),
       api.activeBackupJob(),
-      api.backupRunSummary()
+      api.backupRunSummary(),
+      // Soft: without it the Retention cells say what they said before the floor existed.
+      api.newestBackupIds(BACKUP_RETENTION_FLOOR).catch(() => [])
     ])
     // A response for an earlier filter or page size that lands after a later one is dropped.
     if (call !== lastCall.current) return
@@ -64,6 +74,7 @@ export function BackupsTab({ showToast }) {
     setMore(page.more)
     setActiveJob(active)
     setSummary(sum)
+    setFloorIds(new Set(floor))
     setError(null)
   }, [filter, limit])
 
@@ -123,6 +134,7 @@ export function BackupsTab({ showToast }) {
 
   // No job row at all is a stack that has never run the backup service: the empty state, no warning.
   const neverRun = !summary?.firstRecordedAt
+  const retentionDays = configuredRetentionDays()
 
   return (
     <div className="page-layout">
@@ -133,7 +145,7 @@ export function BackupsTab({ showToast }) {
               Backups
               <HelpTip
                 label="About backups"
-                text="Every backup run, newest first, and why any failed. A backup holds both databases, the 3D models and the forge. A requested one is kept until released; scheduled ones follow the retention window."
+                text="Every backup run, newest first, and why any failed. A requested backup is kept until released. Scheduled ones follow the retention window, but the newest three backups are always kept."
               />
             </h3>
             {/* The primary action in the header, where every card keeps its. Disabled rather than
@@ -201,7 +213,14 @@ export function BackupsTab({ showToast }) {
                       </thead>
                       <tbody>
                         {runs.map(run => (
-                          <RunRow key={run.id} run={run} releasing={pendingKey === run.backup?.id} onRelease={setReleaseFor} />
+                          <RunRow
+                            key={run.id}
+                            run={run}
+                            inFloor={!!run.backup && floorIds.has(run.backup.id)}
+                            retentionDays={retentionDays}
+                            releasing={pendingKey === run.backup?.id}
+                            onRelease={setReleaseFor}
+                          />
                         ))}
                       </tbody>
                     </table>
@@ -231,7 +250,7 @@ export function BackupsTab({ showToast }) {
 
       {releaseFor && (
         <ConfirmModal
-          message={`Release the backup from ${formatWhen(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window.`}
+          message={`Release the backup from ${formatWhen(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window and not one of the newest ${floorWord}.`}
           confirmLabel="Release"
           pendingLabel="Releasing…"
           confirmClassName="btn btn-primary"
@@ -343,7 +362,7 @@ const ERROR_SHOWN = 200
  * One finished run. A completed run shows its backup while the files exist; once the retention
  * window has pruned them the run stays, saying so. A failed run shows the service's reason.
  */
-function RunRow({ run, releasing, onRelease }) {
+function RunRow({ run, inFloor, retentionDays, releasing, onRelease }) {
   const b = run.backup
   const badge = STATUS_BADGES[run.status] || { className: 'badge badge-neutral', label: run.status }
   // Taken for a backup (its data is as of the start); ended for a run that produced none.
@@ -382,13 +401,7 @@ function RunRow({ run, releasing, onRelease }) {
         <>
           <td>{formatBytes(b.size_bytes)}</td>
           <td title={componentDetail(b.components)}>{componentSummary(b.components)}</td>
-          <td>
-            {b.pinned
-              ? <span className="badge badge-info" title="The retention window does not apply until this backup is released">Pinned</span>
-              : b.released_at
-                ? <span style={{ color: 'var(--text-muted)' }}>Released {formatWhen(b.released_at)}</span>
-                : <span style={{ color: 'var(--text-muted)' }}>Retention window</span>}
-          </td>
+          <td><RetentionCell backup={b} kept={keptBecause(b, { inFloor, retentionDays })} retentionDays={retentionDays} /></td>
         </>
       ) : (
         <td colSpan={3}>{outcome}</td>
@@ -408,6 +421,46 @@ function RunRow({ run, releasing, onRelease }) {
       </td>
     </tr>
   )
+}
+
+/** backup.retentionDays as the chart hands it to the page, or null when it was not supplied. */
+function configuredRetentionDays() {
+  const days = Number.parseInt(readSetting('VITE_BACKUP_RETENTION_DAYS', ''), 10)
+  return Number.isFinite(days) ? days : null
+}
+
+const NUMBER_WORDS = ['no', 'one', 'two', 'three', 'four', 'five']
+const floorWord = NUMBER_WORDS[BACKUP_RETENTION_FLOOR] || String(BACKUP_RETENTION_FLOOR)
+
+/**
+ * Why an unpinned backup the window has passed is still on the volume: 'floor' when it is one of
+ * the newest BACKUP_RETENTION_FLOOR, 'off' when retention is disabled, otherwise null. Null too
+ * when the page does not know the window.
+ */
+export function keptBecause(backup, { inFloor, retentionDays, now = Date.now() }) {
+  if (!backup || backup.pinned || retentionDays == null) return null
+  if (retentionDays <= 0) return 'off'
+  const pastWindow = now - new Date(backup.taken_at).getTime() > retentionDays * 24 * 60 * 60 * 1000
+  return pastWindow && inFloor ? 'floor' : null
+}
+
+function RetentionCell({ backup, kept, retentionDays }) {
+  const muted = { color: 'var(--text-muted)' }
+  if (backup.pinned) {
+    return <span className="badge badge-info" title="The retention window does not apply until this backup is released">Pinned</span>
+  }
+  if (kept === 'floor') {
+    return (
+      <span style={muted} title={`Older than the ${retentionDays}-day retention window. The prune never removes the newest ${floorWord} backups, so this one stays until newer backups succeed.`}>
+        Kept: one of the newest {floorWord}
+      </span>
+    )
+  }
+  if (kept === 'off') {
+    return <span style={muted} title="backup.retentionDays is 0, so the service prunes nothing">Kept: pruning is off</span>
+  }
+  if (backup.released_at) return <span style={muted}>Released {formatWhen(backup.released_at)}</span>
+  return <span style={muted}>Retention window</span>
 }
 
 function runTimes(run) {

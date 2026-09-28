@@ -347,6 +347,8 @@ async function takeBackup(job) {
   }, null, 2) + '\n');
 
   renameSync(partialDir, finalDir);
+  // From here a failure removes the renamed directory: a finalise that throws leaves no row for it.
+  current.partialDir = finalDir;
   const total = components.reduce((n, c) => n + c.size_bytes, 0);
   const backupId = db.finalise(job.id, stamp, finalDir, components, total);
   log(`  ok ${stamp}: ${components.length} component(s), ${total} bytes, backups row ${backupId}`);
@@ -364,7 +366,9 @@ function abandon(reason) {
 }
 
 // Retention: a scheduled backup older than the window is deleted and the row forgotten only after
-// the files are gone; a requested one is pinned until an Administrator releases it.
+// the files are gone; a requested one is pinned until an Administrator releases it, and
+// backup_prunable() never returns the newest three. Runs after a failed job too: when the failure
+// was a full volume, the prune is what lets the next run succeed.
 function prune() {
   let rows;
   try { rows = db.prunable(RETENTION_DAYS); } catch (err) { log(`prune: ${err.message}`); return; }
