@@ -1282,6 +1282,79 @@ class TestRegistrationRequests(unittest.TestCase):
         self.assertEqual(self.outcomes(results), [(["x"], False, 400)])
 
 
+class TestSubscriptionIdsAreChecked(unittest.TestCase):
+    """
+    A `subscriptionId` that is not a string is a 400, and so is a `subscriptionIds` that is not an
+    array; a non-string entry in one fails its own item, at its position. Each used to reach a dict
+    lookup and answer 500, or be iterated character by character.
+    """
+
+    BAD = (["x"], 5, {"a": 1}, True)
+
+    def setUp(self):
+        self._saved = i3x_service.registry
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        self.sub = self.registry.create("c", principal="p")
+
+    def tearDown(self):
+        i3x_service.registry = self._saved
+
+    def call(self, handler, **fields):
+        req = FakeRequest(body={"clientId": "c", **fields})
+        req.caller = i3x_service.Caller("p", None)
+        handler(req)
+        return req.result
+
+    @staticmethod
+    def outcomes(results):
+        return [(r["subscriptionId"], r["success"], (r.get("responseDetail") or {}).get("status"))
+                for r in results]
+
+    def test_a_non_string_subscription_id_is_a_400(self):
+        for handler in (i3x_service.h_sub_register, i3x_service.h_sub_unregister,
+                        i3x_service.h_sub_sync, i3x_service.h_sub_stream):
+            for bad in self.BAD:
+                with self.subTest(handler=handler.__name__, subscriptionId=bad):
+                    with self.assertRaises(i3x_service.Problem) as caught:
+                        self.call(handler, subscriptionId=bad)
+                    self.assertEqual(caught.exception.status, 400)
+                    self.assertIn("subscriptionId", caught.exception.detail)
+
+    def test_an_absent_or_null_subscription_id_is_still_a_404(self):
+        for fields in ({}, {"subscriptionId": None}):
+            with self.subTest(fields=fields):
+                with self.assertRaises(SubscriptionError) as caught:
+                    self.call(i3x_service.h_sub_sync, **fields)
+                self.assertEqual(caught.exception.status, 404)
+
+    def test_a_non_string_entry_fails_its_own_item_in_place(self):
+        sid = self.sub.subscription_id
+        ids = [sid, ["x"], "nope", 5, sid]
+        self.assertEqual(self.outcomes(self.call(i3x_service.h_sub_list, subscriptionIds=ids)),
+                         [(sid, True, None), (["x"], False, 400), ("nope", False, 404),
+                          (5, False, 400), (sid, True, None)])
+        # The second delete of the same id finds nothing, and says so at its own place.
+        self.assertEqual(self.outcomes(self.call(i3x_service.h_sub_delete, subscriptionIds=ids)),
+                         [(sid, True, None), (["x"], False, 400), ("nope", False, 404),
+                          (5, False, 400), (sid, False, 404)])
+        self.assertEqual(self.registry.count(), 0)
+
+    def test_subscription_ids_that_are_not_an_array_are_a_400(self):
+        for handler in (i3x_service.h_sub_list, i3x_service.h_sub_delete):
+            for bad in (self.sub.subscription_id, "", {"a": 1}, 5, True):
+                with self.subTest(handler=handler.__name__, subscriptionIds=bad):
+                    with self.assertRaises(i3x_service.Problem) as caught:
+                        self.call(handler, subscriptionIds=bad)
+                    self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(self.registry.count(), 1, "a string of ids deleted something")
+
+    def test_absent_or_null_subscription_ids_list_nothing(self):
+        for fields in ({}, {"subscriptionIds": None}, {"subscriptionIds": []}):
+            with self.subTest(fields=fields):
+                self.assertEqual(self.call(i3x_service.h_sub_list, **fields), [])
+
+
 class TestRfc3339(unittest.TestCase):
     """
     i3X pins timestamps to RFC 3339 UTC with a literal `Z`. `to_rfc3339_utc` is the only place that

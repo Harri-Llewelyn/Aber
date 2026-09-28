@@ -2072,10 +2072,14 @@ def h_update_refused(req: Handler) -> None:
 
 # -- subscriptions ----------------------------------------------------------------------------
 def _owned_subscription(req: Handler, client_id: str, body: dict):
-    """The subscription named in the body, if this clientId AND this principal own it; else 404."""
-    return registry.get_owned(
-        client_id, body.get("subscriptionId") or "", principal=req.caller.principal
-    )
+    """
+    The subscription named in the body, if this clientId AND this principal own it; else 404, as
+    for an absent or null id. Any other `subscriptionId` that is not a string is a 400.
+    """
+    subscription_id = body.get("subscriptionId")
+    if subscription_id is not None and not isinstance(subscription_id, str):
+        raise Problem(400, "Bad Request", "subscriptionId must be a string.")
+    return registry.get_owned(client_id, subscription_id or "", principal=req.caller.principal)
 
 
 def _visibility(space: dict) -> tuple:
@@ -2161,39 +2165,60 @@ def h_sub_create(req: Handler) -> None:
     )
 
 
+def _per_subscription(body: dict, apply) -> List[dict]:
+    """
+    One result per entry of a list or delete request's `subscriptionIds`, at its position: a 400
+    for an entry that is not a string, else what `apply` returns for it. Absent or null is none; any
+    other value but an array is a 400 for the request, never iterated character by character.
+    """
+    ids = body.get("subscriptionIds")
+    if ids is None:
+        return []
+    if not isinstance(ids, list):
+        raise Problem(400, "Bad Request", "subscriptionIds must be an array.")
+    failures = [
+        None if isinstance(sid, str) else _malformed_item("subscriptionId", sid, "a string")
+        for sid in ids
+    ]
+    return _in_place(ids, failures, apply)
+
+
 def h_sub_list(req: Handler) -> None:
     """Each named subscription, with every object it monitors at its first registration's depth."""
     body = req._body()
     client_id = _require_client_id(body)
+    principal = req.caller.principal
     req._bulk(
-        registry.list_owned(
-            client_id, body.get("subscriptionIds") or [], principal=req.caller.principal
-        )
+        _per_subscription(body, lambda ids: registry.list_owned(client_id, ids, principal=principal))
     )
 
 
 def h_sub_delete(req: Handler) -> None:
     body = req._body()
     client_id = _require_client_id(body)
-    results = []
-    for sid in body.get("subscriptionIds") or []:
-        try:
-            registry.delete(client_id, sid, principal=req.caller.principal)
-        except SubscriptionError as exc:
-            results.append(
-                {
-                    "success": False,
-                    "subscriptionId": sid,
-                    "responseDetail": {
-                        "title": exc.title,
-                        "status": exc.status,
-                        "detail": exc.detail,
-                    },
-                }
-            )
-        else:
-            results.append({"success": True, "subscriptionId": sid, "result": None})
-    req._bulk(results)
+
+    def delete(ids: list) -> List[dict]:
+        results = []
+        for sid in ids:
+            try:
+                registry.delete(client_id, sid, principal=req.caller.principal)
+            except SubscriptionError as exc:
+                results.append(
+                    {
+                        "success": False,
+                        "subscriptionId": sid,
+                        "responseDetail": {
+                            "title": exc.title,
+                            "status": exc.status,
+                            "detail": exc.detail,
+                        },
+                    }
+                )
+            else:
+                results.append({"success": True, "subscriptionId": sid, "result": None})
+        return results
+
+    req._bulk(_per_subscription(body, delete))
 
 
 def _registration_entries(body: dict) -> list:
@@ -2214,33 +2239,44 @@ def _registration_entries(body: dict) -> list:
     return [e.get("elementId") if isinstance(e, dict) else e for e in raw]
 
 
-def _per_item(element_ids: list, known: dict, apply) -> List[dict]:
+def _malformed_item(field: str, value, must_be: str) -> dict:
+    """A bulk item's 400, echoing the value as sent."""
+    return {
+        "success": False,
+        field: value,
+        "responseDetail": {
+            "title": "Bad Request",
+            "status": 400,
+            "detail": f"{field} must be {must_be}.",
+        },
+    }
+
+
+def _in_place(items: list, failures: List[Optional[dict]], apply) -> List[dict]:
     """
-    One result per requested id, at its own position: a 400 for an id that is not a non-empty
-    string, a 404 for one not in the caller's space, else what `apply` returns for it. `apply` takes
-    the valid ids in order and returns one result each. Paired by index, never by id, so a repeated
-    id keeps each of its places.
+    `failures` with each None replaced by what `apply` returns for the item at that index. `apply`
+    takes the remaining items in order and returns one result each. Paired by index, never by value,
+    so a repeated item keeps each of its places.
     """
-    results: List[Optional[dict]] = []
-    for eid in element_ids:
-        if not isinstance(eid, str) or not eid:
-            results.append(
-                {
-                    "success": False,
-                    "elementId": eid,
-                    "responseDetail": {
-                        "title": "Bad Request",
-                        "status": 400,
-                        "detail": "elementId must be a non-empty string.",
-                    },
-                }
-            )
-        else:
-            results.append(None if eid in known else _not_found(eid, "object"))
-    valid = [i for i, result in enumerate(results) if result is None]
-    for i, result in zip(valid, apply([element_ids[i] for i in valid])):
+    valid = [i for i, failure in enumerate(failures) if failure is None]
+    results = list(failures)
+    for i, result in zip(valid, apply([items[i] for i in valid])):
         results[i] = result
     return results
+
+
+def _per_item(element_ids: list, known: dict, apply) -> List[dict]:
+    """
+    One result per requested elementId, at its position: a 400 for one that is not a non-empty
+    string, a 404 for one not in the caller's space, else what `apply` returns for it.
+    """
+    failures = [
+        _malformed_item("elementId", eid, "a non-empty string")
+        if not isinstance(eid, str) or not eid
+        else None if eid in known else _not_found(eid, "object")
+        for eid in element_ids
+    ]
+    return _in_place(element_ids, failures, apply)
 
 
 def h_sub_register(req: Handler) -> None:

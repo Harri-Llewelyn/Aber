@@ -719,10 +719,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: Subscriptions owned by this client.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is not yours, or does not exist, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/delete:
@@ -743,10 +748,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: One result per id; unknown or unowned ids are per-item failures.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is unknown or not yours, including one deleted earlier in the same request, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/register:
@@ -811,7 +821,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
         '400':
-          description: '`maxDepth` not an integer of 0 or more, `elementIds` (or `objects`) not an array, or more entries than the server accepts.'
+          description: '`maxDepth` not an integer of 0 or more, `elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -857,7 +867,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
         '400':
-          description: '`elementIds` (or `objects`) not an array, or more entries than the server accepts.'
+          description: '`elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -921,6 +931,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
         '409':
@@ -979,6 +994,11 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
         '429':
@@ -1018,7 +1038,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     SubscriptionNotFound:
-      description: 'No such subscription for this `clientId` and this token''s principal — including after a restart, since subscription state is in memory.'
+      description: 'No such subscription for this `clientId` and this token''s principal, or no `subscriptionId` given — including after a restart, since subscription state is in memory.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }

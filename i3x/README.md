@@ -365,7 +365,9 @@ is read for its `elementId` only. Registering an object already registered succe
 nothing, so the first depth stands and `/subscriptions/list` reports it; unregister first to change
 it. Results pair with requests by position, so a repeated elementId keeps each of its places. An
 elementId that is not a non-empty string fails its own item with a 400, and one the caller cannot
-see with a 404.
+see with a 404. `/subscriptions/list` and `/delete` pair `subscriptionIds` the same way, an entry
+that is not a string failing its own item with a 400. A `subscriptionId` that is not a string, or
+`subscriptionIds` that is not an array, is a 400 for the whole request.
 
 | Registered | Receives updates for |
 | :--- | :--- |
