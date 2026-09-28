@@ -159,6 +159,10 @@ class JsonValuesAgreeWithI3x(unittest.TestCase):
         self.assertEqual(metric.WhichOneof("value"), "long_value")
         self.assertEqual(self.reads(metric), -5)
 
+    def test_a_null_name_is_an_alias_only_metric(self):
+        metric = parse([{"name": None, "alias": 7, "datatype": 10, "double_value": 1.5}]).metrics[0]
+        self.assertEqual((metric.name, metric.alias, metric.double_value), ("", 7, 1.5))
+
     def test_long_and_float_values_are_read(self):
         payload = parse([
             {"name": "Bytes", "datatype": 8, "long_value": 2**40},

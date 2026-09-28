@@ -2915,7 +2915,8 @@ def parse_sparkplug_payload(msg):
                 metric = sparkplug_b_pb2.Payload.Metric()
                 try:
                     field, value, datatype = json_metric_value(m)
-                    metric.name = m.get('name', '')
+                    # A null name is an alias-only metric, as i3X reads it.
+                    metric.name = m.get('name') or ''
                     # Carried through so the fallback is not silently alias-blind. Assigning the
                     # field is what makes HasField('alias') true, which resolve_metric_name() tests.
                     if m.get('alias') is not None:
