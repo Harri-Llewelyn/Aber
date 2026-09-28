@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
@@ -18,7 +18,7 @@ import {
   STANDARDS, STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL, sameSemanticIdPair, storedSemanticIdPair
 } from '../../utils/standards'
 import {
-  mtconnectSuggestion, vocabularySuggestion, suggestionForMetric
+  mtconnectSuggestion, vocabularySuggestion, suggestionForMetric, semanticIdCandidates
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
@@ -93,6 +93,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [isoVocabulary, setIsoVocabulary]     = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
   const [s223Vocabulary, setS223Vocabulary] = useState([])
+  // IDTA template elements, which the semantic id picker offers beside the vocabularies.
+  const [templateElements, setTemplateElements] = useState([])
+  const [referenceLoaded, setReferenceLoaded] = useState(false)
   const [loading, setLoading]         = useState(true)
   const [showAddMetric, setShowAddMetric] = useState(false)
   // The metric name is composed from its MTConnect parts: component (group), optional instance,
@@ -124,24 +127,44 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     setShowAddMetric(v => !v)
   }
 
+  // Re-read after every change this page makes.
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [cat, grp, sch, voc, iso, opc, s223] = await Promise.all([
+      const [cat, grp, sch] = await Promise.all([
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/metric-groups'),
         api.get('/api/v1/schemas'),
-        api.get('/api/v1/mtconnect-vocabulary'),
-        api.get('/api/v1/iso22400-vocabulary'),
-        api.get('/api/v1/opcua-vocabulary'),
-        api.get('/api/v1/ashrae223-vocabulary'),
       ])
-      setCatalog(cat); setGroups(grp); setSchemas(sch); setVocabulary(voc)
-      setIsoVocabulary(iso); setOpcuaVocabulary(opc); setS223Vocabulary(s223)
+      setCatalog(cat); setGroups(grp); setSchemas(sch)
     } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Reference data nothing here writes, so one read per table per visit: the type pickers and the
+  // semantic id picker both search what these return, in the browser.
+  useEffect(() => {
+    let current = true
+    Promise.all([
+      api.get('/api/v1/mtconnect-vocabulary'),
+      api.get('/api/v1/iso22400-vocabulary'),
+      api.get('/api/v1/opcua-vocabulary'),
+      api.get('/api/v1/ashrae223-vocabulary'),
+      api.get('/api/v1/idta-submodel-templates'),
+    ]).then(([voc, iso, opc, s223, templates]) => {
+      if (!current) return
+      setVocabulary(voc); setIsoVocabulary(iso); setOpcuaVocabulary(opc); setS223Vocabulary(s223)
+      setTemplateElements(templates); setReferenceLoaded(true)
+    })
+    return () => { current = false }
+  }, [])
+
+  // Everything the semantic id picker offers, built once per read rather than on each keystroke.
+  const semanticIdChoices = useMemo(() => semanticIdCandidates({
+    mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, ashrae223: s223Vocabulary,
+    templates: templateElements
+  }), [vocabulary, isoVocabulary, opcuaVocabulary, s223Vocabulary, templateElements])
 
   /**
    * Turn a suggested group name into the two fields the picker needs. A vocabulary can suggest a
@@ -197,10 +220,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   /**
    * Arrival from the Vocabulary page's Use action. The handover carries identifiers and is resolved
    * here, because the rules that turn a vocabulary row into a metric live in applyPrefill and
-   * nowhere else. Waits for the vocabularies to load, and clears the handover once applied.
+   * nowhere else. Waits for the vocabularies and the groups to load, and clears the handover once
+   * applied.
    */
   useEffect(() => {
-    if (!pendingVocabularyEntry || loading) return
+    if (!pendingVocabularyEntry || loading || !referenceLoaded) return
     const entry = pendingVocabularyEntry
 
     if (entry.standard === STANDARDS.MTCONNECT && entry.type) {
@@ -218,7 +242,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
     onConsumeVocabularyEntry?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingVocabularyEntry, loading, isoVocabulary, opcuaVocabulary, s223Vocabulary])
+  }, [pendingVocabularyEntry, loading, referenceLoaded, isoVocabulary, opcuaVocabulary, s223Vocabulary])
 
   /** Selecting an entry in the type picker prefills everything that entry determines. */
   const handleTypeChange = (value) => {
@@ -857,6 +881,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 semanticId={shownSemanticId.semanticId}
                 semanticIdType={shownSemanticId.semanticIdType}
                 suggestion={semanticIdSuggestion}
+                candidates={semanticIdChoices}
+                ownStandard={effectiveStandard}
                 onChange={handleSemanticIdChange}
                 style={{ margin: 0, flex: '3 1 420px' }}
               />
@@ -1050,6 +1076,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           suggestion={suggestionForMetric(editTarget, {
             mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, ashrae223: s223Vocabulary
           })}
+          candidates={semanticIdChoices}
           onConfirm={handleEditSemanticId}
           onCancel={() => setEditTarget(null)}
         />

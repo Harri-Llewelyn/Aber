@@ -12,9 +12,12 @@ import { usePendingAction } from '../../hooks/usePendingAction'
  * and datatype are shown and not offered: devices publish them. It is also the confirmation, so it
  * says how many schemas model the metric, as DeprecateMetricModal does, because every shell
  * exported from one of them carries the new id. `suggestion` is the pair Add Metric would suggest
- * for the metric's standard and type (utils/semanticIdSources.js), which Use suggested restores.
+ * for the metric's standard and type, which Use suggested restores; `candidates` feed the field's
+ * vocabulary search (both from utils/semanticIdSources.js).
  */
-export function EditMetricSemanticIdModal({ metric, usageCount, suggestion = null, onConfirm, onCancel }) {
+export function EditMetricSemanticIdModal({
+  metric, usageCount, suggestion = null, candidates = null, onConfirm, onCancel
+}) {
   const [saving, runSave] = usePendingAction()
 
   // Escape closes through the shared stack. Inert mid-flight; see ConfirmModal.
@@ -50,6 +53,8 @@ export function EditMetricSemanticIdModal({ metric, usageCount, suggestion = nul
           semanticId={pair.semanticId}
           semanticIdType={pair.semanticIdType}
           suggestion={suggestion}
+          candidates={candidates}
+          ownStandard={metric.standard || ''}
           onChange={setPair}
         />
 

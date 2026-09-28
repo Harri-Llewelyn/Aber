@@ -77,6 +77,17 @@ const ASHRAE223_VOCABULARY = [
   }
 ]
 
+// A slice of idta_submodel_templates: the Digital Nameplate identifies most elements by IEC CDD IRDI
+// and a few by IRI, and records which.
+const NAMEPLATE = {
+  template_id: 'https://admin-shell.io/idta/nameplate/3/0/Nameplate', template_name: 'Digital Nameplate', template_version: '3.0'
+}
+const TEMPLATE_ELEMENTS = [
+  { ...NAMEPLATE, id_short: 'ManufacturerName', semantic_id: '0112/2///61987#ABA565#009', semantic_id_type: 'IRDI', description: 'Legal name of the manufacturer.' },
+  { ...NAMEPLATE, id_short: 'SerialNumber', semantic_id: '0112/2///61987#ABA951#009', semantic_id_type: 'IRDI', description: 'Serial number of this instance.' },
+  { ...NAMEPLATE, id_short: 'UniqueFacilityIdentifier', semantic_id: 'https://admin-shell.io/idta/nameplate/3/0/UniqueFacilityIdentifier', semantic_id_type: 'IRI', description: 'Facility the product was made in.' }
+]
+
 const routes = {
   '/api/v1/schemas': [],
   '/api/v1/metric-catalog': CATALOG,
@@ -92,6 +103,7 @@ const routes = {
   '/api/v1/iso22400-vocabulary': ISO_VOCABULARY,
   '/api/v1/opcua-vocabulary': OPCUA_VOCABULARY,
   '/api/v1/ashrae223-vocabulary': ASHRAE223_VOCABULARY,
+  '/api/v1/idta-submodel-templates': TEMPLATE_ELEMENTS,
   '/api/v1/gateways': [],
   '/api/v1/devices': []
 }
@@ -511,6 +523,23 @@ describe('Edit Metric — correcting a semantic id', () => {
 
     expect(modal.queryByRole('button', { name: 'Use suggested' })).toBeNull()
     expect(modal.queryByText('· suggested')).toBeNull()
+  })
+
+  it('points a metric at a nameplate element chosen from the search, not typed', async () => {
+    api.put.mockResolvedValue({ id: 'm3' })
+    await setup()
+    const modal = openEdit('Controller/FIRMWARE')
+    fireEvent.click(modal.getByRole('button', { name: 'Search vocabularies' }))
+    fireEvent.change(modal.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: 'serial' } })
+    fireEvent.click(within(modal.getByRole('list', { name: 'Matching concepts' })).getAllByRole('button')[0])
+
+    expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRDI')
+    expect(modal.getByRole('note').textContent).toMatch(/SerialNumber comes from IDTA Digital Nameplate 3\.0/)
+    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/api/v1/metric-catalog/m3', {
+      semantic_id: '0112/2///61987#ABA951#009', semantic_id_type: 'IRDI'
+    }))
   })
 })
 
@@ -1117,6 +1146,121 @@ describe('Metric builder — the suggested semantic id', () => {
       '/api/v1/metric-catalog',
       expect.objectContaining({ name: 'VIBRATION_RMS', standard: '', semantic_id: '', semantic_id_type: '' })
     ))
+  })
+})
+
+/**
+ * Every concept the platform holds an id for can be chosen rather than typed: the four vocabularies
+ * and the IDTA template elements, which the AAS exporter matches by semantic id, so a typo there
+ * fails silently.
+ */
+describe('Metric builder — choosing a semantic id from the vocabularies', () => {
+  const MANUFACTURER_NAME = '0112/2///61987#ABA565#009'
+  const openSearch = () => fireEvent.click(screen.getByRole('button', { name: 'Search vocabularies' }))
+  const search = (text) =>
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: text } })
+  const options = () => within(screen.getByRole('list', { name: 'Matching concepts' })).getAllByRole('button')
+  const typePicker = () => screen.getByTitle(/MTConnect data item type/)
+
+  it('lists matches from every source with their standard and id', async () => {
+    await openForm()
+    openSearch()
+    search('manufacturer')
+
+    const listed = options().map(o => o.textContent)
+    expect(listed.some(t => t.includes('ManufacturerName') && t.includes('IDTA Digital Nameplate 3.0') && t.includes(MANUFACTURER_NAME))).toBe(true)
+    expect(listed.some(t => t.includes('Manufacturer') && t.includes('OPC UA') && t.includes('http://opcfoundation.org/UA/Machinery/Manufacturer'))).toBe(true)
+  })
+
+  it('sets the id and the reference type the template records, and closes', async () => {
+    await openForm()
+    openSearch()
+    search('ManufacturerName')
+    fireEvent.click(options()[0])
+
+    expect(semanticIdInput().value).toBe(MANUFACTURER_NAME)
+    expect(referenceTypeSelect().value).toBe('IRDI')
+    expect(screen.queryByRole('textbox', { name: 'Search the vocabularies and templates' })).toBeNull()
+  })
+
+  it('says what a cross-standard choice costs, and keeps the metric MTConnect', async () => {
+    await openForm()
+    api.post.mockResolvedValue({})
+    fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
+    openSearch()
+    expect(screen.getByText(/A metric carries one semantic id: another standard's concept replaces the MTConnect one/)).toBeTruthy()
+    search('ManufacturerName')
+    fireEvent.click(options()[0])
+
+    expect(screen.getByRole('note').textContent)
+      .toMatch(/ManufacturerName comes from IDTA Digital Nameplate 3\.0\. A metric carries\s+one semantic id, so it replaces any MTConnect id; the metric stays MTConnect/)
+    expect(useSuggestedButton()).toBeTruthy()
+    fireEvent.click(addMetricButton())
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog',
+      expect.objectContaining({
+        name: 'ANGLE', standard: 'MTConnect', semantic_id: MANUFACTURER_NAME, semantic_id_type: 'IRDI'
+      })
+    ))
+  })
+
+  it('makes no cost note for the metric\'s own concept, which is its suggestion', async () => {
+    await openForm()
+    fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
+    fireEvent.change(semanticIdInput(), { target: { value: '' } })
+    openSearch()
+    search('ANGLE')
+    fireEvent.click(options()[0])
+
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
+    expect(screen.getByText('· suggested')).toBeTruthy()
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  it('maps a Custom metric to a standard concept without minting one', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: '' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g. VIBRATION_RMS'), { target: { value: 'VIBRATION_RMS' } })
+    openSearch()
+    search('availability')
+    fireEvent.click(options()[0])
+
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/iso22400/AVAILABILITY')
+    expect(referenceTypeSelect().value).toBe('IRI')
+    // A local extension has no standard of its own for the choice to replace.
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  it('leaves out 223P relations, which name no concept a metric measures', async () => {
+    await openForm()
+    openSearch()
+    search('hasProperty')
+
+    expect(screen.queryByRole('list', { name: 'Matching concepts' })).toBeNull()
+    expect(screen.getByText(/Nothing matches “hasProperty”/)).toBeTruthy()
+  })
+
+  it('keeps free text: an id no source holds is typed as before', async () => {
+    await openForm()
+    openSearch()
+    fireEvent.click(screen.getByRole('button', { name: 'Close search' }))
+    fireEvent.change(semanticIdInput(), { target: { value: 'urn:example:torque' } })
+
+    expect(semanticIdInput().value).toBe('urn:example:torque')
+    expect(referenceTypeSelect().value).toBe('IRI')
+  })
+
+  it('reads each reference table once per visit, not again after a change to the catalog', async () => {
+    await openForm()
+    api.post.mockResolvedValue({})
+    fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
+    fireEvent.click(addMetricButton())
+    await waitFor(() => expect(api.get.mock.calls.filter(([p]) => p === '/api/v1/metric-catalog').length).toBe(2))
+
+    for (const table of ['/api/v1/mtconnect-vocabulary', '/api/v1/idta-submodel-templates']) {
+      expect(api.get.mock.calls.filter(([p]) => p === table)).toHaveLength(1)
+    }
   })
 })
 

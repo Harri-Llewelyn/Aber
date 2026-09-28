@@ -1651,6 +1651,56 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .semantic-id-actions .btn { padding: 2px 8px; font-size: 12px; }
 
+/* The search under the field. The list scrolls rather than growing the form or the dialog. */
+.semantic-id-picker {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+.semantic-id-picker-list {
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.semantic-id-picker-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.semantic-id-picker-option:hover,
+.semantic-id-picker-option:focus-visible { background: var(--bg-glass); }
+.semantic-id-picker-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.semantic-id-picker-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.semantic-id-picker-id {
+  font-size: 11px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.semantic-id-picker-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

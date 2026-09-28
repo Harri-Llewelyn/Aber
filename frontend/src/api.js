@@ -2026,6 +2026,18 @@ const apiMethods = {
       }));
     }
 
+    if (path.startsWith('/api/v1/idta-submodel-templates')) {
+      // Reference data (seeded by 0002_seed_data.sql), read-only to the app: each IDTA template
+      // element with the id and reference type the template issues for it, for the semantic id picker.
+      const { data, error } = await supabase
+        .from('idta_submodel_templates')
+        .select('template_id, template_name, template_version, id_short, semantic_id, semantic_id_type, description')
+        .order('template_id', { ascending: true })
+        .order('ordinal', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
     // Checked before /metric-catalog: startsWith on the shorter path would otherwise not match,
     // but keeping the more specific route first makes the ordering intent explicit.
     if (path.startsWith('/api/v1/metric-groups')) {
