@@ -34,7 +34,7 @@ const SERVICES = [
   svc('API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088'),
   svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
   svc('Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883'),
-  svc('Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880'),
+  svc('Node-RED (Host-Run Gateways)', 'EDGE_NODE', 'http://localhost:1880'),
   svc('Sparkplug B Ingestion Engine', 'INGESTION', 'mqtt://mosquitto:1883/spBv1.0/#'),
   svc('Supabase API Gateway (Envoy)', 'API_GATEWAY', 'http://127.0.0.1:54321'),
   svc('Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1'),
@@ -116,7 +116,7 @@ describe('DirectoryTab service groups', () => {
 
     expect(namesIn(APPS)).toEqual([
       'Grafana Dashboards',
-      'Node-RED (Virtual Edge Gateway Simulator)',
+      'Node-RED (Host-Run Gateways)',
       'Supabase Studio',
       'API Reference (Swagger UI)'
     ])
@@ -221,7 +221,7 @@ describe('DirectoryTab service groups', () => {
     })
 
     it('treats a container hostname as unopenable even though it is http', async () => {
-      /* The case a scheme test alone gets wrong: `node-exporter` resolves on the compose network
+      /* The case a scheme test alone gets wrong: `node-exporter` resolves on the cluster network
          and nowhere else, so a link would produce a failed tab that reads as the service being
          down. */
       expect(isBrowsableEndpoint('http://node-exporter:9100/metrics')).toBe(false)

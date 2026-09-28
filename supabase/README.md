@@ -4474,6 +4474,22 @@ skipping. The rename is guarded on the new name being free, so a service an oper
 under it by hand is kept. The anon key's vault description in `0002` no longer names Kong either;
 the seed rewrites the three revocation secrets on every boot, so that needed no migration.
 
+## The Directory names Node-RED for what it runs (`0024`)
+
+The Node-RED row was seeded as *Node-RED (Virtual Edge Gateway Simulator)*, from when the stack
+shipped a demonstration simulator. That simulator is retired and `deployment` replaced
+`is_virtual`; what the platform's Node-RED runs now is the host-run gateways, so `0002` seeds
+*Node-RED (Host-Run Gateways)*. The seed inserts `ON CONFLICT (id) DO NOTHING`, so `0024` renames
+the row on a database that holds the old name, only while it holds exactly that name and only while
+the new one is free. Nothing joins on this name: `directory_liveness_job_map()` does not map
+Node-RED, and the public-URL update keys on the row's id.
+
+The same pass renamed the vault secret the revocation and sweep calls pass the gateway's key
+check with, from `supabase_anon_key` to `supabase_publishable_key`, since the legacy anon key is
+retired and the secret holds the publishable key. `0002` rewrites that secret from db-init's
+variable on every boot, so the rename is the old name joining the list it deletes first; there
+is no stored value to carry across and no migration.
+
 ## The Directory observes both databases (`0127`)
 
 Both databases read `UNKNOWN` on the Directory page, and the map was right to say so: nothing

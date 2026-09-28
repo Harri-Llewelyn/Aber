@@ -2350,10 +2350,10 @@ COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data
 -- before the first probe says "not yet known" rather than asserting health nobody checked.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
--- ON CONFLICT (id), not (service_name), for this row alone: a database seeded before 0016 holds
--- this id under the OLD name, and a name-targeted clause does not catch a primary-key collision
--- -- the insert would raise on every boot instead of being skipped. 0016 then does the rename.
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880', 'UNKNOWN', NULL, NULL)
+-- ON CONFLICT (id), not (service_name): a database seeded earlier holds this id under an OLD name,
+-- and a name-targeted clause does not catch a primary-key collision -- the insert would raise on
+-- every boot instead of being skipped. 0024 then does the rename.
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Host-Run Gateways)', 'EDGE_NODE', 'http://localhost:1880', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
@@ -2361,8 +2361,8 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
--- ON CONFLICT (id) for this row too: a database from before 0096 holds the id under the old name
--- 'Supabase API Gateway (Kong)'. 0096 then does the rename.
+-- ON CONFLICT (id) for this row too: a database from before archived migration 0096 holds the id
+-- under the old name 'Supabase API Gateway (Kong)'. 0000 then does the rename.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000007', 'Supabase API Gateway (Envoy)', 'API_GATEWAY', 'http://127.0.0.1:54321', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000008', 'Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1', 'UNKNOWN', NULL, NULL)
@@ -8400,9 +8400,9 @@ UPDATE public.webhook_endpoints
 \else
 \set supabase_functions_url 'http://supabase-envoy:8000/functions/v1'
 \endif
-\if :{?supabase_anon_key}
+\if :{?supabase_publishable_key}
 \else
-\set supabase_anon_key ''
+\set supabase_publishable_key ''
 \endif
 \if :{?gateway_revoke_secret}
 \else
@@ -8414,7 +8414,7 @@ UPDATE public.webhook_endpoints
 \endif
 
 SELECT set_config('aber.fn_url',      :'supabase_functions_url', false);
-SELECT set_config('aber.anon_key',    :'supabase_anon_key', false);
+SELECT set_config('aber.publishable_key', :'supabase_publishable_key', false);
 SELECT set_config('aber.revoke_key',  :'gateway_revoke_secret', false);
 SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false);
 
@@ -8425,45 +8425,46 @@ SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false);
 -- not be readable by `anon` or `authenticated`:
 --
 --   supabase_functions_url        where the gateway serves /functions/v1 on this target
---   supabase_anon_key             gets past the gateway's key filter and proves nothing else.
---                                 The name is the role, not the format: it holds whichever key
---                                 format the deployment registered (db-init passes the
---                                 publishable key where one exists), and is not renamed because
---                                 nothing in SQL parses it.
+--   supabase_publishable_key      gets past the gateway's key filter and proves nothing else
 --   gateway_revoke_secret         what actually authorises the revocation, checked by the function
 --   forge_sweep_secret            what authorises the forge sweep (0099), checked by forge-sweep
+--
+-- All four are rewritten from db-init's variables on every boot, so the publishable key's secret
+-- was renamed from `supabase_anon_key` by deleting the old name here: there is no stored value to
+-- carry across.
 DO $vault$
 DECLARE
   v_url    text := btrim(coalesce(current_setting('aber.fn_url', true), ''));
-  v_anon   text := btrim(coalesce(current_setting('aber.anon_key', true), ''));
+  v_key    text := btrim(coalesce(current_setting('aber.publishable_key', true), ''));
   v_secret text := btrim(coalesce(current_setting('aber.revoke_key', true), ''));
   v_sweep  text := btrim(coalesce(current_setting('aber.sweep_key', true), ''));
   v_id     uuid;
 BEGIN
-  IF v_secret = '' OR v_anon = '' THEN
+  IF v_secret = '' OR v_key = '' THEN
     RAISE NOTICE
-      '0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT '
-      'on this stack. Archiving will not revoke, and the sweep will do nothing.';
+      '0038: GATEWAY_REVOKE_SECRET or SUPABASE_PUBLISHABLE_KEY is unset; credential revocation is '
+      'INERT on this stack. Archiving will not revoke, and the sweep will do nothing.';
   END IF;
-  IF v_sweep = '' OR v_anon = '' THEN
+  IF v_sweep = '' OR v_key = '' THEN
     RAISE NOTICE
-      '0099: FORGE_SWEEP_SECRET or SUPABASE_ANON_KEY is unset; the forge sweep is INERT on this '
-      'stack. A revoked login keeps its forge team membership until it next passes the door.';
+      '0099: FORGE_SWEEP_SECRET or SUPABASE_PUBLISHABLE_KEY is unset; the forge sweep is INERT on '
+      'this stack. A revoked login keeps its forge team membership until it next passes the door.';
   END IF;
 
   -- REPLACED, NOT MERGED. A rotated value must overwrite the stored one and vault.create_secret
-  -- refuses a duplicate name, so the old row goes first. Same shape 0006 uses.
+  -- refuses a duplicate name, so the old row goes first. Same shape 0006 uses. The retired name
+  -- `supabase_anon_key` goes with them and is not written again.
   FOR v_id IN SELECT id FROM vault.secrets
-               WHERE name IN ('supabase_functions_url', 'supabase_anon_key', 'gateway_revoke_secret',
-                              'forge_sweep_secret')
+               WHERE name IN ('supabase_functions_url', 'supabase_publishable_key', 'gateway_revoke_secret',
+                              'forge_sweep_secret', 'supabase_anon_key')
   LOOP
     DELETE FROM vault.secrets WHERE id = v_id;
   END LOOP;
 
   PERFORM vault.create_secret(v_url, 'supabase_functions_url',
     'Base URL of the edge function router on this target, read by revoke_gateway_credential().');
-  PERFORM vault.create_secret(v_anon, 'supabase_anon_key',
-    'Anon key, used only to pass the gateway key check on the revocation call. Not authorisation.');
+  PERFORM vault.create_secret(v_key, 'supabase_publishable_key',
+    'Publishable key, used only to pass the gateway key check on the revocation and sweep calls. Not authorisation.');
   PERFORM vault.create_secret(v_secret, 'gateway_revoke_secret',
     'Shared secret the revoke-gateway-credential function verifies. This is the authorisation.');
   PERFORM vault.create_secret(v_sweep, 'forge_sweep_secret',

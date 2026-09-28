@@ -54,7 +54,7 @@ cron writer, and AAS is an **adapter on the way out**, not an adopted metamodel.
 ```mermaid
 flowchart TB
     subgraph Edge ["Edge & Physical Shopfloor"]
-        NR["Node-RED Gateway Simulator<br/>(Port 1880)"]
+        NR["Node-RED host-run gateways<br/>(Port 1880)"]
         DEV["Remote Sparkplug B Gateways"]
     end
 

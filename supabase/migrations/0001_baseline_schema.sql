@@ -7387,7 +7387,7 @@ CREATE OR REPLACE FUNCTION public.revoke_gateway_credential(p_sparkplug_id text)
     AS $_$
 DECLARE
   v_url    text;
-  v_anon   text;
+  v_key    text;
   v_secret text;
 BEGIN
   IF p_sparkplug_id IS NULL OR p_sparkplug_id !~ '^gwy[0-9a-f]{21}$' THEN
@@ -7395,13 +7395,13 @@ BEGIN
   END IF;
 
   SELECT decrypted_secret INTO v_url    FROM vault.decrypted_secrets WHERE name = 'supabase_functions_url';
-  SELECT decrypted_secret INTO v_anon   FROM vault.decrypted_secrets WHERE name = 'supabase_anon_key';
+  SELECT decrypted_secret INTO v_key    FROM vault.decrypted_secrets WHERE name = 'supabase_publishable_key';
   SELECT decrypted_secret INTO v_secret FROM vault.decrypted_secrets WHERE name = 'gateway_revoke_secret';
 
   -- A STACK WITH NOTHING CONFIGURED DOES NOTHING rather than sending a bare "Bearer ". The call
   -- would answer 401 or 503 either way; not making it keeps the failure legible as "not
   -- configured" rather than as "rejected". Same reasoning as 0006's webhook signer.
-  IF coalesce(v_url,'') = '' OR coalesce(v_anon,'') = '' OR coalesce(v_secret,'') = '' THEN
+  IF coalesce(v_url,'') = '' OR coalesce(v_key,'') = '' OR coalesce(v_secret,'') = '' THEN
     RETURN false;
   END IF;
 
@@ -7412,8 +7412,8 @@ BEGIN
     url     := rtrim(v_url, '/') || '/revoke-gateway-credential',
     headers := jsonb_build_object(
                  'Content-Type',    'application/json',
-                 'apikey',          v_anon,
-                 'Authorization',   'Bearer ' || v_anon,
+                 'apikey',          v_key,
+                 'Authorization',   'Bearer ' || v_key,
                  'x-revoke-secret', v_secret),
     body    := jsonb_build_object('sparkplug_id', p_sparkplug_id)
   );
@@ -8193,16 +8193,16 @@ CREATE OR REPLACE FUNCTION public.sweep_forge() RETURNS boolean
     AS $$
 DECLARE
   v_url    text;
-  v_anon   text;
+  v_key    text;
   v_secret text;
 BEGIN
   SELECT decrypted_secret INTO v_url    FROM vault.decrypted_secrets WHERE name = 'supabase_functions_url';
-  SELECT decrypted_secret INTO v_anon   FROM vault.decrypted_secrets WHERE name = 'supabase_anon_key';
+  SELECT decrypted_secret INTO v_key    FROM vault.decrypted_secrets WHERE name = 'supabase_publishable_key';
   SELECT decrypted_secret INTO v_secret FROM vault.decrypted_secrets WHERE name = 'forge_sweep_secret';
 
   -- Nothing configured does nothing, rather than sending a bare "Bearer ": the call would answer
   -- 401 or 503 either way, and not making it keeps "not configured" legible as such.
-  IF coalesce(v_url, '') = '' OR coalesce(v_anon, '') = '' OR coalesce(v_secret, '') = '' THEN
+  IF coalesce(v_url, '') = '' OR coalesce(v_key, '') = '' OR coalesce(v_secret, '') = '' THEN
     RETURN false;
   END IF;
 
@@ -8212,8 +8212,8 @@ BEGIN
     url     := rtrim(v_url, '/') || '/forge-sweep',
     headers := jsonb_build_object(
                  'Content-Type',   'application/json',
-                 'apikey',         v_anon,
-                 'Authorization',  'Bearer ' || v_anon,
+                 'apikey',         v_key,
+                 'Authorization',  'Bearer ' || v_key,
                  'x-sweep-secret', v_secret),
     body    := '{}'::jsonb,
     timeout_milliseconds := 60000
