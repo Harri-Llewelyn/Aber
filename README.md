@@ -257,11 +257,11 @@ deliberately unreachable from a browser, so the alternative to a four-column fun
 grant on the two tables that decide who is who — and `0043` adds
 `record_service_token_issued()`, which writes a **`TOKEN_MINTED`** row for a long-lived JWT and
 refuses two things outright: a subject that can sign in, and any expiry beyond
-`service_token_max_days()` — **90 days, because these tokens cannot be revoked** and the expiry is
-the only bound that exists — and `0044` adds `create_service_principal()`, which creates a machine
-identity the way `0034` does (`id` alone, so it has no email, no password and no identity provider)
-and accepts **only a read-only role**, since a privileged machine identity becomes an unrevocable
-write credential the moment a token is signed for it — and `0045` scopes `digital_thread_page()`'s
+`service_token_max_days()` — **90 days**, because a revocation (`0074`) reaches PostgREST alone and
+the expiry is the only bound on every other service — and `0044` adds `create_service_principal()`,
+which creates a machine identity the way `0034` does (`id` alone, so it has no email, no password
+and no identity provider) and accepted **only a read-only role** while no token could be revoked;
+what a machine may hold now is under [Machine identities](#machine-identities) — and `0045` scopes `digital_thread_page()`'s
 **deleted-asset filter to the three types that have a table behind them**: `0039` derived it as an
 anti-join against cells, gateways and devices and deliberately did not narrow it by entity type, so
 `service_principals` rows answered *"absent from all three"* and **the audit trail this feature
