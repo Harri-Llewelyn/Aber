@@ -196,17 +196,73 @@ LIVE = TOKEN is not None and DEVICE_ID is not None
 SKIP_REASON = "no reachable stack, or the AAS fixture could not be provisioned"
 
 
-def evaluate_aas_export_authorization(user: dict | None, auth_header: str | None) -> tuple[int, str]:
-    """Python mirror of the authorization ladder in index.ts, same shape as the sibling tests."""
+TS_INDEX = REPO_ROOT / "supabase" / "functions" / "aas-export" / "index.ts"
+MIGRATIONS_DIR = REPO_ROOT / "supabase" / "migrations"
+
+
+def export_gate() -> tuple[list, str]:
+    """index.ts's ALLOWED_ROLES and BUNDLE_PERMISSION, read from its source so the mirror cannot drift."""
+    text = TS_INDEX.read_text(encoding="utf-8")
+    roles = re.search(r"const ALLOWED_ROLES = \[([^\]]*)\]", text)
+    permission = re.search(r'const BUNDLE_PERMISSION = "([^"]+)"', text)
+    if not (roles and permission):
+        raise AssertionError(f"ALLOWED_ROLES or BUNDLE_PERMISSION not found in {TS_INDEX}")
+    return re.findall(r'"([A-Za-z_]+)"', roles.group(1)), permission.group(1)
+
+
+def seeded_role_permissions() -> dict:
+    """Role name -> the permission names 0002 grants it. role_permissions is written by no one else."""
+    text = (MIGRATIONS_DIR / "0002_seed_data.sql").read_text(encoding="utf-8")
+    roles = dict(re.findall(r"INSERT INTO public\.roles VALUES \((\d+), '([A-Za-z_]+)'", text))
+    permissions = dict(re.findall(
+        r"INSERT INTO public\.permissions VALUES \('([0-9a-f-]{36})', '([a-z_:]+)'", text))
+    granted = {name: set() for name in roles.values()}
+    for role_id, permission_id in re.findall(
+            r"INSERT INTO public\.role_permissions VALUES \((\d+), '([0-9a-f-]{36})'\)", text):
+        granted[roles[role_id]].add(permissions[permission_id])
+    return granted
+
+
+def roles_a_policy_admits(policy: str) -> set:
+    """
+    The roles the latest definition of a SELECT policy admits, across the live migrations in
+    filename order: those its has_role() names, and those holding a permission its has_authority()
+    names.
+    """
+    definition = None
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"CREATE POLICY {policy} ON "):
+                definition = line
+    if definition is None:
+        raise AssertionError(f"no CREATE POLICY {policy} in {MIGRATIONS_DIR}")
+
+    def named(fn):
+        return {value for array in re.findall(fn + r"\(ARRAY\[([^\]]*)\]", definition)
+                for value in re.findall(r"'([A-Za-z_:]+)'::text", array)}
+
+    by_permission = {role for role, held in seeded_role_permissions().items()
+                     if held & named("has_authority")}
+    return named("has_role") | by_permission
+
+
+def evaluate_aas_export_authorization(user: dict | None, auth_header: str | None,
+                                      fmt: str = "json") -> tuple[int, str]:
+    """
+    Python mirror of the authorization ladder in index.ts, same shape as the sibling tests. The
+    role list and the bundle's permission are index.ts's own; who holds the permission is the seed's.
+    """
     if not auth_header:
         return 401, "Missing Authorization header"
     if not user:
         return 401, "Invalid user token"
     role = (user.get("app_metadata") or {}).get("role") or None
     # Wider than approve-quarantine on purpose: an export is a read.
-    allowed = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"]
+    allowed, bundle_permission = export_gate()
     if not role or role not in allowed:
         return 403, "Forbidden: Insufficient privileges"
+    if fmt == "bundle" and bundle_permission not in seeded_role_permissions().get(role, set()):
+        return 403, "Forbidden: the bundle carries this device's Digital Thread"
     return 200, "Authorized"
 
 
@@ -641,9 +697,47 @@ class TestAasExportAuthorization(unittest.TestCase):
 
     def test_read_roles_are_allowed(self):
         for role in ("Administrator", "Shopfloor_Manager", "Operator", "Auditor"):
+            for fmt in ("json", "aasx"):
+                status, _ = evaluate_aas_export_authorization(
+                    {"app_metadata": {"role": role}}, "Bearer x", fmt)
+                self.assertEqual(status, 200, f"{role} should be allowed to export {fmt}")
+
+    def test_the_bundle_refuses_an_operator(self):
+        # The bundle carries the device's thread, which the asset lane's policy closes to Operator.
+        status, message = evaluate_aas_export_authorization(
+            {"app_metadata": {"role": "Operator"}}, "Bearer x", "bundle")
+        self.assertEqual(status, 403)
+        self.assertIn("Digital Thread", message)
+
+    def test_the_bundle_admits_the_roles_that_read_the_thread_and_the_exports(self):
+        for role in ("Administrator", "Shopfloor_Manager", "Auditor"):
             status, _ = evaluate_aas_export_authorization(
-                {"app_metadata": {"role": role}}, "Bearer x")
-            self.assertEqual(status, 200, f"{role} should be allowed to export")
+                {"app_metadata": {"role": role}}, "Bearer x", "bundle")
+            self.assertEqual(status, 200, f"{role} should be allowed to take a bundle")
+
+    def test_the_bundle_permission_is_held_by_the_roles_both_policies_admit(self):
+        """
+        The function gates on one permission; the rule is the roles that may read the thread's
+        asset lane AND the export records the thread repeats. A migration that grants the
+        permission to another role, or narrows either policy, fails here.
+        """
+        _, permission = export_gate()
+        holders = {role for role, held in seeded_role_permissions().items() if permission in held}
+        both = (roles_a_policy_admits("digital_thread_select_asset")
+                & roles_a_policy_admits("asset_exports_select_privileged"))
+        self.assertEqual(holders, both)
+        self.assertEqual(holders, {"Administrator", "Shopfloor_Manager", "Auditor"})
+
+    def test_the_refusal_names_the_thread_and_comes_before_the_service_key(self):
+        text = TS_INDEX.read_text(encoding="utf-8")
+        gate = text.index('format === "bundle" && !(await callerHolds(supabaseUser, BUNDLE_PERMISSION))')
+        self.assertIn("Digital Thread", text[gate:gate + 400])
+        self.assertLess(gate, text.index("serviceRoleClient(supabaseUrl"))
+
+    def test_the_thread_part_is_read_as_the_caller(self):
+        text = TS_INDEX.read_text(encoding="utf-8")
+        self.assertIn("loadThread(supabaseUser,", text)
+        self.assertNotIn("loadThread(supabaseAdmin", text)
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)
@@ -1352,6 +1446,34 @@ def run_bundle_helpers(script: str) -> dict:
     return json.loads(completed.stdout)
 
 
+def run_thread_loader() -> list:
+    """
+    Run bundle.ts's own loadThread() in Node against a client that records every call made on it,
+    and return those calls. The query is what decides which rows the part can hold.
+    """
+    source = TS_BUNDLE.read_text(encoding="utf-8")
+    loader = re.search(r"^export async function loadThread\(.*?^\}", source, re.S | re.M)
+    if not loader:
+        raise AssertionError(f"loadThread() not found in {TS_BUNDLE}")
+    harness = loader.group(0) + """
+const calls = [];
+const query = new Proxy({}, { get: (_, name) => (...args) => {
+  calls.push([name, ...args]);
+  return name === "limit" ? Promise.resolve({ data: [], error: null }) : query;
+} });
+const client = { from: (table) => { calls.push(["from", table]); return query; } };
+loadThread(client, "dev-1", 5).then(() => console.log(JSON.stringify(calls)));
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "thread_harness.ts"
+        path.write_text(harness, encoding="utf-8")
+        completed = subprocess.run(
+            [shutil.which("node"), "--experimental-strip-types", str(path)],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+    return json.loads(completed.stdout)
+
+
 @unittest.skipIf(shutil.which("node") is None, "node is not on PATH")
 class TestBundleHelpers(unittest.TestCase):
     """The pure functions the bundle is assembled from, run against fixed inputs."""
@@ -1488,6 +1610,15 @@ console.log(JSON.stringify({
         self.assertTrue(m["telemetry"]["raw"]["truncated"])
         self.assertFalse(m["telemetry"]["hourly"]["truncated"])
 
+    # -- loadThread: the asset lane of one device, whoever asks ----------------------------------
+    def test_the_thread_loader_asks_for_the_asset_lane_only(self):
+        # An Administrator or an Auditor may read the security lane too; the part never holds it.
+        calls = run_thread_loader()
+        self.assertEqual(calls[0], ["from", "digital_thread"])
+        filters = [c[1:] for c in calls if c[0] == "eq"]
+        self.assertIn(["entity_id", "dev-1"], filters)
+        self.assertIn(["audit_domain", "asset"], filters)
+
 
 @unittest.skipUnless(LIVE, SKIP_REASON)
 class TestAssetBundle(unittest.TestCase):
@@ -1614,6 +1745,91 @@ class TestAssetBundle(unittest.TestCase):
         rows = self.rest_get(f"/digital_thread?entity_id=eq.{DEVICE_ID}&action=eq.EXPORTED&select=action,entity_type,new_data")
         self.assertTrue(rows, "no EXPORTED row for the device")
         self.assertTrue(any((r.get("new_data") or {}).get("object_key") == self.bundle["object_key"] for r in rows), rows)
+
+    def test_the_thread_part_holds_the_asset_lane_only(self):
+        # Taken as an Administrator, who may read the security lane as well.
+        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
+        self.assertEqual({row.get("audit_domain") for row in thread}, {"asset"})
+
+
+DEMO_PASSWORD_FOR_ROLES = os.getenv("ABER_DEMO_PASSWORD", DEMO_PASSWORD)
+
+
+def sign_in_as(email: str) -> str | None:
+    try:
+        status, data, _ = post_json(
+            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+            {"email": email, "password": DEMO_PASSWORD_FOR_ROLES},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}"},
+        )
+        return data.get("access_token") if status == 200 else None
+    except Exception:
+        return None
+
+
+def take_bundle(token: str) -> tuple[int, bytes, dict]:
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/functions/v1/aas-export?format=bundle",
+        data=json.dumps({"device_id": DEVICE_ID}).encode(), method="POST",
+    )
+    for key, value in {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}",
+                       "Content-Type": "application/json"}.items():
+        req.add_header(key, value)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as res:
+            return res.status, res.read(), lower_headers(res.headers)
+    except urllib.error.HTTPError as err:
+        return err.code, err.read(), lower_headers(err.headers)
+
+
+@unittest.skipUnless(LIVE, SKIP_REASON)
+class TestAssetBundleByRole(unittest.TestCase):
+    """
+    The bundle is for the roles that may read what it holds. A Shopfloor_Manager takes one whose
+    thread is the asset lane; an Operator is refused the bundle and still gets the shell. Signs in
+    as the seeded demo accounts, and skips where they do not exist.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.manager = sign_in_as("manager@aber.local")
+        cls.operator = sign_in_as("operator@aber.local")
+        if not (cls.manager and cls.operator):
+            raise unittest.SkipTest("the seeded manager and operator accounts could not sign in")
+        cls.status, cls.payload, cls.headers = take_bundle(cls.manager)
+        cls.bundle = json.loads(cls.headers.get("x-aas-stats", "{}")).get("bundle", {})
+
+    @classmethod
+    def tearDownClass(cls):
+        # As the Administrator: the bucket's delete policy admits that role alone.
+        key, bucket = cls.bundle.get("object_key"), cls.bundle.get("bucket")
+        if not (cls.bundle.get("stored") and key and bucket):
+            return
+        req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{key}", method="DELETE")
+        req.add_header("apikey", PUBLISHABLE_KEY)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        try:
+            urllib.request.urlopen(req, timeout=30).read()
+        except urllib.error.URLError as err:  # pragma: no cover - reported, never silently skipped
+            print(f"[test_aas_export] bundle object {key} not removed: {err}")
+
+    def test_a_shopfloor_manager_takes_a_bundle_of_the_asset_lane(self):
+        self.assertEqual(self.status, 200, self.payload[:300])
+        thread = json.loads(zipfile.ZipFile(io.BytesIO(self.payload)).read("aasx/files/aber/digital-thread.json"))
+        self.assertTrue(thread, "the fixture's own creation is on the thread")
+        self.assertEqual({row.get("audit_domain") for row in thread}, {"asset"})
+
+    def test_an_operator_is_refused_the_bundle_with_a_reason(self):
+        status, body, _ = take_bundle(self.operator)
+        self.assertEqual(status, 403, body[:300])
+        self.assertIn("Digital Thread", json.loads(body).get("error", ""))
+
+    def test_an_operator_still_takes_the_shell(self):
+        status, body, _ = post_json(
+            f"{SUPABASE_URL}/functions/v1/aas-export", {"device_id": DEVICE_ID},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {self.operator}"},
+        )
+        self.assertEqual(status, 200, body)
 
 
 if __name__ == "__main__":

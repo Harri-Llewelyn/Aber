@@ -3001,7 +3001,7 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | Function | Roles | Notes |
 | :--- | :--- | :--- |
 | [`approve-quarantine`](functions/approve-quarantine) | `Administrator`, `Shopfloor_Manager` | Calls the atomic approval RPC |
-| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read |
+| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `digital_thread:read`, because it carries the thread |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; since `deploy-nodered` was retired this is the sole enforcement point for `gitops:manage` |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
@@ -4033,6 +4033,21 @@ failure does not fail the export: the file is still returned, the response says 
 and the page says to keep the file. Every export is an `EXPORTED` row on the thread, written by a
 trigger on the insert. Readable by the three roles the bucket admits (Administrator,
 Shopfloor_Manager, Auditor), and the export itself is offered to `archive:manage`.
+
+**The bundle is for the roles that may read what it holds.** Its thread part names who changed
+what, with the values from before each change, and every earlier export of the device with its
+taker's email: rows `digital_thread_select_asset` and `asset_exports_select_privileged` close to
+an Operator. It was first built with the plain export's role list, so an Operator could download
+what RLS refused them everywhere else (#527). `format=bundle` now also asks `has_authority()` for
+`digital_thread:read`, as the caller, and a caller without it gets `403` naming the thread; JSON
+and AASX keep the four-role list. The permission rather than a second role list, because it is
+one name the Devices page already gates View Digital Thread on and now gates Export Bundle on too,
+and `role_permissions`, written only by the seed, decides who holds it: today exactly the three
+roles both policies admit. `test_aas_export.py` reads the seed and the two policies and fails if
+the holders and that intersection ever differ. The thread part is read through the caller's client,
+as the cold catalogue already was, so RLS decides its rows and the part no longer depends on the
+service key; `loadThread()` also filters on `audit_domain = 'asset'`, so a bundle taken by an
+Administrator or an Auditor, who may read the security lane, never carries a row from it.
 
 ### A machine has a name an operator gave it (`0125`)
 
