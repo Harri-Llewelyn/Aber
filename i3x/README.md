@@ -178,7 +178,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | POST | `/objects/value` | From the MQTT cache, gated on a PostgREST read |
 | POST | `/objects/history` | From TimescaleDB; `startTime`/`endTime` **required** |
 | POST | `/subscriptions` | + `/list`, `/delete`, `/register`, `/unregister` |
-| POST | `/subscriptions/sync` | MUST. 206 on queue overflow |
+| POST | `/subscriptions/sync` | MUST. 206 on queue overflow, or when elements left the caller's view |
 | POST | `/subscriptions/stream` | MAY. SSE, **one stream per subscription** |
 | PUT | `/objects/value`, `/objects/history` | **405** — see below |
 
