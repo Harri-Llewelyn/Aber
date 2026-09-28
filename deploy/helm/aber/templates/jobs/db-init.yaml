@@ -300,7 +300,7 @@ spec:
                     -v bi_reader_password="$BI_READER_PASSWORD" \
                     -v ts_fdw_user="${FDW_READER_PASSWORD:+fdw_reader}" \
                     -v ts_fdw_password="$FDW_READER_PASSWORD" \
-                    -v supabase_functions_url="http://{{ include "aber.fullname" . }}-supabase-envoy:8000/functions/v1" \
+                    -v supabase_functions_url="{{ include "aber.supabase.internalUrl" . }}/functions/v1" \
                     -v supabase_anon_key="$SUPABASE_PUBLISHABLE_KEY" \
                     -v gateway_revoke_secret="$GATEWAY_REVOKE_SECRET" \
                     -v forge_sweep_secret="$FORGE_SWEEP_SECRET" \
