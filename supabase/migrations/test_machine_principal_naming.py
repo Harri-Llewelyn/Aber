@@ -391,6 +391,82 @@ class AMachineMayVersionASchema(MachineBase):
         self.assertEqual(self.cur.rowcount, 0)
 
 
+class AMachineIsFiledAsAServiceWhateverItDeclares(MachineBase):
+    """
+    0020: log_digital_thread_event() believes an X-Aber-Actor header only from the caller it
+    describes. PostgREST exposes the header as the request.headers GUC, which is what is set here.
+    """
+
+    INGESTOR = "b0000000-0000-4000-8000-000000000002"
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.seed_schema()
+        self.writer = self.machine("Declaring writer", ("schema:manage",))
+
+    def declare(self, value):
+        self.cur.execute('SET LOCAL "request.headers" = %s;', (json.dumps({"x-aber-actor": value}),))
+
+    def filed_as(self, draft_id):
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT changed_by::text, actor_source FROM public.digital_thread "
+            "WHERE entity_type = 'schemas' AND entity_id = %s AND action = 'INSERT';",
+            (draft_id,),
+        )
+        return self.cur.fetchone()
+
+    def cell_filed_as(self):
+        """Insert a cell in the session as it stands, and read how its audit row was filed."""
+        cell = str(uuid.uuid4())
+        self.cur.execute("INSERT INTO public.cells (id, name) VALUES (%s, %s);",
+                         (cell, f"Declared {cell[:8]}"))
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT actor_source FROM public.digital_thread "
+            "WHERE entity_type = 'cells' AND entity_id = %s AND action = 'INSERT';",
+            (cell,),
+        )
+        return self.cur.fetchone()["actor_source"]
+
+    def test_a_machine_is_a_service_whatever_it_declares(self):
+        for value in ("migration", "ingestion", "service", "user", "a-cron-job"):
+            with self.subTest(header=value):
+                # Each fork undone, so the root has no draft for the next value to collide with.
+                self.cur.execute("SAVEPOINT declared;")
+                try:
+                    self.as_user(self.writer)
+                    self.declare(value)
+                    self.cur.execute("SELECT public.fork_schema(%s) AS draft;", (self.root,))
+                    draft = self.cur.fetchone()["draft"]
+                    self.assertEqual(self.filed_as(draft["id"]),
+                                     {"changed_by": self.writer, "actor_source": "service"})
+                finally:
+                    self.cur.execute("ROLLBACK TO SAVEPOINT declared;")
+
+    def test_the_ingestion_principal_is_still_believed(self):
+        # The daemon's own identity and header, as ingestion.py sends them.
+        self.cur.execute('SET LOCAL "request.jwt.claims" = %s;',
+                         (json.dumps({"sub": self.INGESTOR}),))
+        self.declare("ingestion")
+        self.assertEqual(self.cell_filed_as(), "ingestion")
+
+    def test_the_service_key_cannot_claim_a_migration(self):
+        # A JWT with no `sub`, as the edge functions' service-role client sends.
+        self.cur.execute("SET LOCAL ROLE service_role;")
+        self.cur.execute('SET LOCAL "request.jwt.claims" = %s;',
+                         (json.dumps({"role": "service_role"}),))
+        self.declare("migration")
+        self.assertEqual(self.cell_filed_as(), "service")
+
+    def test_the_owner_session_with_no_token_may(self):
+        # No JWT at all: the owner's session, here acting as service_role, which on its own would
+        # be filed as a service.
+        self.cur.execute("SET LOCAL ROLE service_role;")
+        self.declare("migration")
+        self.assertEqual(self.cell_filed_as(), "migration")
+
+
 class AMachineProposesAndAPersonDecides(MachineBase):
     """proposal:create reaches a machine through the change_proposals INSERT policy; deciding does not."""
 

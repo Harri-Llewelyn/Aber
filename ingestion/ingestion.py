@@ -158,7 +158,7 @@ try:
     from supabase import create_client
     if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
         # Names the daemon as the actor behind its writes; log_digital_thread_event() reads it from
-        # the `request.headers` GUC and accepts only 'ingestion' / 'service' / 'migration'.
+        # the `request.headers` GUC and believes 'ingestion' only from Service_Ingestor's token.
         # Set on the PostgREST session: ClientOptions(headers=...) raises in supabase-py 2.x.
         supabase_client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
         try:

@@ -1310,6 +1310,33 @@ it is, while `changed_by` still receives the principal. The row improved as well
 an ingestion write records `'ingestion'` **and** names the identity, where it used to record
 `'ingestion'` and `NULL`.
 
+### A header is believed only from the caller it describes (`0020`)
+
+**The header was a claim anyone could make.** For a caller that is not a person, the trigger took
+`actor_source` from `X-Aber-Actor` and accepted `ingestion`, `service` and `migration` from anyone;
+only `user` was refused. That was harmless while machine identities could not write. `0013` let
+them hold `schema:manage` and `proposal:create`, and a machine sending `X-Aber-Actor: migration`
+then had its own `fork_schema()` INSERT filed as a migration. `changed_by` still named it, but the
+thread's lanes and filters read `actor_source`, and a reviewer scanning for machine activity would
+not have found that row.
+
+Each value is now believed only from the caller it describes:
+
+| Declared | Believed when | Otherwise |
+| :--- | :--- | :--- |
+| `ingestion` | `is_ingestion_caller()`: the token names `Service_Ingestor` | the rules below |
+| `migration` | the owner's own session (`postgres` or `supabase_admin`) with no JWT at all, which a PostgREST request never is | the rules below |
+| `service` | any caller that is not a person | — |
+| anything else, or nothing | — | a machine identity is `service`; any other caller falls to its effective role, as before |
+
+**A machine identity is `service` whatever it sends**, because its `sub` names it in `changed_by`
+and no other label describes it. The service-role key, which carries a JWT with no `sub`, can no
+longer claim `migration` either. Nothing in the stack sent that value: the daemon sends
+`ingestion` under its own identity, and the edge functions and scripts send `service`.
+`test_machine_principal_naming.py` sends each value as a machine and finds every row filed as
+`service`, and checks that the daemon's identity and the owner's tokenless session are still
+believed.
+
 ### Reading past the first page (`0077`)
 
 **The page had a cap and no way to say so.** `digital_thread_page()` has returned `truncated`

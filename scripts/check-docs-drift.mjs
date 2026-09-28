@@ -689,6 +689,10 @@ function edgeFunctionNames() {
     // 0013 keeps all five arms and rewrites the comments on the cell and gateway lanes, which said
     // they resolve what the tables' own policies resolve.
     'public.may_decide_proposal': '0013 restates what the cell and gateway lanes check and why no machine reaches them; the baseline holds the pre-0013 comments',
+
+    // 0020 believes each X-Aber-Actor value only from the caller it describes, and files a machine
+    // identity as 'service' whatever it declares. The same signature and return type.
+    'public.log_digital_thread_event': '0020 ties each declared actor_source to its caller; the baseline accepts ingestion, service and migration from anyone',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
