@@ -105,13 +105,15 @@ export function opcuaSections(vocabulary) {
 /**
  * The Add Metric form state a data point implies. The instance is left empty, since which axis is
  * the part the specification cannot know. Deeper path segments are dropped: only the first is
- * load-bearing for grouping.
+ * load-bearing for grouping. `companionSpec` travels with the name because two specifications can
+ * define the same browse name.
  */
 export function opcuaPrefill(entry) {
   if (!entry) return null
   return {
     group: suggestedGroup(entry),
     type: entry.name,
+    companionSpec: entry.companion_spec || '',
     units: entry.unit || '',
     datatype: sparkplugDatatypeFor(entry.datatype),
     category: categoryFor(entry.datatype),

@@ -818,6 +818,81 @@ describe('Metric builder — vocabulary prefill', () => {
   })
 })
 
+/**
+ * Two companion specifications can define one browse name: the seed has Manufacturer, Mass and
+ * PowerOnDuration twice each. The API orders by spec, so a lookup by name alone finds Machinery's
+ * Manufacturer whichever was chosen.
+ */
+describe('Metric builder — OPC UA points that share a browse name', () => {
+  const AM_MANUFACTURER = {
+    name: 'Manufacturer', companion_spec: 'OPC 40540 Additive Manufacturing',
+    node_id: 'nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;s=FeedstockType/Manufacturer',
+    datatype: 'String', unit: null, description: 'Manufacturer of the feedstock.',
+    semantic_id: 'http://opcfoundation.org/UA/AdditiveManufacturing/Manufacturer'
+  }
+  const AM_KEY = 'OPC 40540 Additive Manufacturing::Manufacturer'
+  const groupSelect = () => screen.getByTitle(/The category this metric belongs to/)
+  const dataPointSelect = () => screen.getByTitle(/OPC UA companion specification data point/)
+
+  // FeedstockType is registered, so the prefill selects it as a group rather than typing it new.
+  const mockVocabularies = () => api.get.mockImplementation((path) => Promise.resolve(
+    path.startsWith('/api/v1/opcua-vocabulary') ? [...OPCUA_VOCABULARY, AM_MANUFACTURER]
+      : path.startsWith('/api/v1/metric-groups')
+        ? [...routes['/api/v1/metric-groups'], { group_uuid: 'g7', name: 'FeedstockType', standard: 'OPC UA' }]
+        : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+
+  const chooseSecondManufacturer = async () => {
+    mockVocabularies()
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'OPC UA' } })
+    fireEvent.change(dataPointSelect(), { target: { value: AM_KEY } })
+  }
+
+  it('shows the second specification\'s point as the one chosen', async () => {
+    await chooseSecondManufacturer()
+
+    expect(dataPointSelect().value).toBe(AM_KEY)
+    expect(within(namePreview()).getByText('FeedstockType/Manufacturer')).toBeTruthy()
+    expect(semanticIdInput().value).toBe(AM_MANUFACTURER.semantic_id)
+  })
+
+  it('keeps the point and its suggested id when the group is set back to the point\'s own', async () => {
+    await chooseSecondManufacturer()
+    fireEvent.change(groupSelect(), { target: { value: '' } })
+    fireEvent.change(groupSelect(), { target: { value: 'FeedstockType' } })
+
+    expect(dataPointSelect().value).toBe(AM_KEY)
+    expect(within(namePreview()).getByText('FeedstockType/Manufacturer')).toBeTruthy()
+    expect(semanticIdInput().value).toBe(AM_MANUFACTURER.semantic_id)
+    expect(screen.getByText('· suggested')).toBeTruthy()
+  })
+
+  it('clears the point when the group is the other specification\'s', async () => {
+    // Machine is where Machinery's Manufacturer files, not the feedstock's.
+    await chooseSecondManufacturer()
+    fireEvent.change(groupSelect(), { target: { value: 'Machine' } })
+
+    expect(dataPointSelect().value).toBe('')
+    expect(semanticIdInput().value).toBe('')
+  })
+
+  it('arrives from the Vocabulary page on the second specification\'s point', async () => {
+    mockVocabularies()
+    render(
+      <MetricsTab
+        showToast={vi.fn()}
+        hasPermission={() => true}
+        pendingVocabularyEntry={{ standard: 'OPC UA', companionSpec: 'OPC 40540 Additive Manufacturing', name: 'Manufacturer' }}
+        onConsumeVocabularyEntry={vi.fn()}
+      />
+    )
+    await waitForCatalog()
+
+    await waitFor(() => expect(dataPointSelect().value).toBe(AM_KEY))
+    expect(semanticIdInput().value).toBe(AM_MANUFACTURER.semantic_id)
+  })
+})
+
 // 223P is the one vocabulary that names things rather than readings, so its prefill can say which
 // concept and which semantic id but not how the value is encoded. Before #455 that undefined
 // datatype was posted as-is (a NOT NULL violation the screen contradicted by showing "Double") and

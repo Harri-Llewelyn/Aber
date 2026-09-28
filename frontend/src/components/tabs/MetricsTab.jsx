@@ -53,6 +53,9 @@ const BLANK_METRIC = {
   standard: STANDARDS.MTCONNECT,
   group: '', newGroup: '', instance: '', type: '', customType: '',
   subType: '', units: '', datatype: 10, description: '',
+  // The chosen OPC UA point's companion specification. Two specifications can define one browse
+  // name, so `type` alone does not find the row.
+  companionSpec: '',
   // AAS semanticId. The field shows the suggestion (derived from the MTConnect data item type, or
   // `vocabSemanticId`, the id the chosen ISO 22400, OPC UA or 223P row carries) until the operator
   // types or picks their own pair, which `semanticIdOwn` holds; null means follow the suggestion.
@@ -191,6 +194,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       ...groupFields(prefill.group),
       standard: prefill.standard,
       type: prefill.type,
+      companionSpec: prefill.companionSpec || '',
       customType: '',
       // A KPI, an OPC UA data point and a 223P concept are all whole concepts; none has an
       // MTConnect subType.
@@ -211,7 +215,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // operator.
   const handleUseVocabularyType = (typeName) => {
     setNewMetric(m => ({
-      ...m, standard: STANDARDS.MTCONNECT, type: typeName, customType: '',
+      ...m, standard: STANDARDS.MTCONNECT, type: typeName, companionSpec: '', customType: '',
       vocabSemanticId: '', semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn)
     }))
     setShowAddMetric(true)
@@ -261,9 +265,18 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     }
     // An MTConnect type, or a vocabulary picker set back to empty: no row's id applies any more.
     setNewMetric(m => ({
-      ...m, type: value, vocabSemanticId: '', semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn)
+      ...m, type: value, companionSpec: '', vocabSemanticId: '',
+      semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn)
     }))
   }
+
+  /**
+   * The chosen OPC UA data point, found by specification and name together: by name alone, a name
+   * two specifications define finds whichever the API ordered first.
+   */
+  const chosenDataPoint = newMetric.standard === STANDARDS.OPCUA && newMetric.type
+    ? dataPointByName(opcuaVocabulary, newMetric.companionSpec, newMetric.type)
+    : null
 
   /**
    * Changing the group can hide the selected OPC UA data point, since that picker filters by group.
@@ -276,7 +289,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       newMetric.standard === STANDARDS.OPCUA &&
       newMetric.type &&
       value && value !== NEW_GROUP &&
-      suggestedGroup(dataPointByName(opcuaVocabulary, null, newMetric.type)) !== value
+      suggestedGroup(chosenDataPoint) !== value
 
     setNewMetric(m => ({
       ...m,
@@ -284,6 +297,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       ...(orphaned
         ? {
             type: '',
+            companionSpec: '',
             units: '',
             datatype: '',
             vocabCategory: '',
@@ -313,7 +327,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       standard: value,
       group: keepGroup ? m.group : '',
       newGroup: keepGroup ? m.newGroup : '',
-      type: '', customType: '', subType: '', units: '',
+      type: '', companionSpec: '', customType: '', subType: '', units: '',
       vocabCategory: '', vocabSemanticId: '', semanticIdOwn: null
     }))
   }
@@ -752,8 +766,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   <label className="form-label">Data Point</label>
                   <select
                     className="form-control"
-                    value={newMetric.type
-                      ? `${(dataPointByName(opcuaVocabulary, null, newMetric.type)?.companion_spec) || ''}${OPCUA_KEY_SEP}${newMetric.type}`
+                    value={chosenDataPoint
+                      ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
                       : ''}
                     onChange={e => handleTypeChange(e.target.value)}
                     title="The OPC UA companion specification data point. Selecting one fills in its group from the browse path, its datatype and its semantic id."
