@@ -554,7 +554,9 @@ def metric(name, semantic_id, datatype, units=None, description=None, standard="
 
 # One shell's rows, as loadDeviceRecord() returns them: two metrics sharing an MTConnect concept
 # with different descriptions, a KPI whose deprecated predecessor shares its id, an operator's
-# IRDI, a local extension, an unmapped metric, two nameplate elements and a schema with an id.
+# IRDI, a local extension an operator mapped to a concept of their own (the seed mints none), an
+# unmapped metric, two nameplate elements and a schema with an id.
+LOCAL_CONCEPT = "urn:example:plant:safety-interlock"
 SHELL_RECORD = {
     "device": {"id": "d1", "sparkplug_id": "dev1", "name": "Mill 1", "status": "ONLINE",
                "connection_method": "MQTT / Sparkplug B"},
@@ -569,8 +571,7 @@ SHELL_RECORD = {
         metric("OEE/PERFORMANCE", ISO + "EFFECTIVENESS", 10, "PERCENT", "ISO 22400 performance ratio",
                standard="ISO 22400", deprecated=True),
         metric("Spindle/TORQUE", "0173-1#02-AAO677#002", 10, "NEWTON_METER", None),
-        metric("safety_interlock", "https://aber.local/semantics/local/safety_interlock", 11, None,
-               "Safety interlock present", standard=None),
+        metric("safety_interlock", LOCAL_CONCEPT, 11, None, "Safety interlock present", standard=None),
         metric("Custom/UNMAPPED", None, 10, None, None, standard=None),
         metric("SERIAL_NUMBER", MTC + "SERIAL_NUMBER", 12, None, "Manufacturer serial number"),
     ],
@@ -653,7 +654,7 @@ class TestConceptDescriptions(unittest.TestCase):
     def test_a_value_without_a_unit_is_not_a_measure(self):
         self.assertEqual(self.content(MTC + "EXECUTION")["dataType"], "STRING")
         self.assertNotIn("unit", self.content(MTC + "EXECUTION"))
-        self.assertEqual(self.content("https://aber.local/semantics/local/safety_interlock")["dataType"], "BOOLEAN")
+        self.assertEqual(self.content(LOCAL_CONCEPT)["dataType"], "BOOLEAN")
 
     def test_an_irdi_takes_its_name_from_the_metric_or_the_template(self):
         self.assertEqual(self.by_id["0173-1#02-AAO677#002"]["idShort"], "Spindle_TORQUE")

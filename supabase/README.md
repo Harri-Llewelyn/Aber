@@ -461,6 +461,30 @@ Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate a
 `fork_schema()` copies from its parent, is edited in the draft editor and saved with the draft.
 `log_digital_thread_event()` already records both as UPDATEs, so neither needed a trigger change.
 
+### A local extension carries no minted id (`0016_a_local_extension_carries_no_minted_id.sql`)
+
+**No id is minted for a local extension (#516).** `0002` seeded `safety_interlock` and
+`max_temp_threshold` with `https://aber.local/semantics/local/<name>`. Nothing outside the
+installation resolves either IRI, so neither named a concept, and on every fresh stack the schema
+builder marked both as mapped, the AAS export left them out of `unmapped_semantic_ids`, and the
+Metrics page's "—" cell for an unmapped metric never appeared (#547). `0002` now seeds both with
+no id and no type.
+
+`0016` clears a database seeded earlier. `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, so
+the seed alone cannot. It clears the id and its type together, and only while a metric's id is
+still exactly the one minted for it, so an id an Administrator has set since stays. Its self-check
+asserts that neither metric still holds its minted id, which is its own work; a replay matches
+nothing.
+
+**The clear is on the Digital Thread as the platform's own act.** It is an UPDATE on
+`metric_catalog`, whose audit trigger `0010` attaches earlier in the chain, so each clear is an
+`UPDATE` row in the asset lane with `actor_source = 'migration'`, `changed_by` NULL, and the
+minted id in `old_data`. Nothing else was needed: db-init applies the chain as `postgres`, which
+`log_digital_thread_event()` files as `migration`. `test_metric_catalog_seed.py` puts the minted
+ids back in a rolled-back transaction and holds `0016` to clearing them, recording both clears that
+way, keeping an id an Administrator set, writing nothing on a replay, and naming a metric its
+self-check finds.
+
 ### Metric name format (0007)
 
 Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics

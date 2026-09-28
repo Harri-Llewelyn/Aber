@@ -12,8 +12,9 @@ does not exist, in an artefact handed to a customer, until something notices.
 So the assertions below are about PROVENANCE as much as presence: every seeded row must carry a
 semantic id that is still resolvable in the vocabulary table it came from. A vocabulary re-key or
 a renamed concept would otherwise leave the catalog quietly pointing at nothing. The suite also
-holds each group to one standard, every name to the metric-name format, and the immutability
-trigger to freezing name and datatype while semantic_id and permitted_values stay correctable.
+holds each group to one standard, every name to the metric-name format, the immutability
+trigger to freezing name and datatype while semantic_id and permitted_values stay correctable, and
+the two local extensions to carrying no id minted for them (0016).
 
 Replaying the seed is not tested here: `npm run test:db -- --with-history` and
 check-migration-idempotency replay the whole chain.
@@ -324,6 +325,110 @@ class TestReferenceTypesAreIriAndIrdi(SeedTestCase):
         hint = error.diag.message_hint or ""
         self.assertIn("IRI", hint)
         self.assertIn("IRDI", hint)
+
+
+class TestLocalExtensionsCarryNoMintedId(SeedTestCase):
+    """
+    No id is minted for a local extension: an `aber.local` id resolves nowhere and names no concept.
+    0002 seeds the two with none, and 0016 clears the ids an earlier seed gave them, but only while
+    each is still exactly the minted one. Each probe runs in its own transaction and is rolled back.
+    """
+
+    MIGRATION_0016 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "0016_a_local_extension_carries_no_minted_id.sql")
+    MINTED = {
+        "safety_interlock": "https://aber.local/semantics/local/safety_interlock",
+        "max_temp_threshold": "https://aber.local/semantics/local/max_temp_threshold",
+    }
+
+    def migration_sql(self):
+        with open(self.MIGRATION_0016, encoding="utf-8") as f:
+            return f.read()
+
+    def in_transaction(self, work):
+        conn = connect()
+        conn.autocommit = False
+        try:
+            with conn.cursor() as cur:
+                return work(cur)
+        finally:
+            conn.rollback()
+            conn.close()
+
+    @staticmethod
+    def ids(cur):
+        cur.execute("SELECT name, semantic_id, semantic_id_type FROM public.metric_catalog"
+                    " WHERE name IN ('safety_interlock', 'max_temp_threshold') ORDER BY name")
+        return {name: (sid, kind) for name, sid, kind in cur.fetchall()}
+
+    def mint(self, cur, name, semantic_id=None):
+        cur.execute("UPDATE public.metric_catalog SET semantic_id = %s, semantic_id_type = 'IRI'"
+                    " WHERE name = %s", (semantic_id or self.MINTED[name], name))
+
+    def test_the_seed_gives_neither_an_id(self):
+        self.assertEqual(self.in_transaction(self.ids), {
+            "max_temp_threshold": (None, None), "safety_interlock": (None, None),
+        })
+
+    def test_an_earlier_seed_s_ids_are_cleared_and_the_thread_records_it(self):
+        def probe(cur):
+            for name in self.MINTED:
+                self.mint(cur, name)
+            cur.execute(self.migration_sql())
+            rows = []
+            for name, minted in self.MINTED.items():
+                cur.execute(
+                    "SELECT t.actor_source, t.audit_domain, t.changed_by"
+                    "  FROM public.digital_thread t JOIN public.metric_catalog c ON c.id = t.entity_id"
+                    " WHERE t.entity_type = 'metric_catalog' AND t.action = 'UPDATE' AND c.name = %s"
+                    "   AND t.old_data ->> 'semantic_id' = %s AND t.new_data ->> 'semantic_id' IS NULL",
+                    (name, minted),
+                )
+                rows.append((name, cur.fetchall()))
+            return self.ids(cur), rows
+
+        ids, thread = self.in_transaction(probe)
+        self.assertEqual(ids, {"max_temp_threshold": (None, None), "safety_interlock": (None, None)})
+        for name, rows in thread:
+            with self.subTest(name=name):
+                # The platform's own act: no person, and in the lane every reader of the catalog sees.
+                self.assertEqual(rows, [("migration", "asset", None)])
+
+    def test_an_id_an_administrator_set_stays(self):
+        def probe(cur):
+            self.mint(cur, "safety_interlock", "urn:example:plant:safety-interlock")
+            self.mint(cur, "max_temp_threshold")
+            cur.execute(self.migration_sql())
+            return self.ids(cur)
+
+        ids = self.in_transaction(probe)
+        self.assertEqual(ids["safety_interlock"], ("urn:example:plant:safety-interlock", "IRI"))
+        self.assertEqual(ids["max_temp_threshold"], (None, None))
+
+    def test_a_replay_writes_nothing(self):
+        def probe(cur):
+            cur.execute("SELECT count(*) FROM public.digital_thread WHERE entity_type = 'metric_catalog'")
+            before = cur.fetchone()[0]
+            cur.execute(self.migration_sql())
+            cur.execute(self.migration_sql())
+            cur.execute("SELECT count(*) FROM public.digital_thread WHERE entity_type = 'metric_catalog'")
+            return before, cur.fetchone()[0], self.ids(cur)
+
+        before, after, ids = self.in_transaction(probe)
+        self.assertEqual(after, before)
+        self.assertEqual(ids, {"max_temp_threshold": (None, None), "safety_interlock": (None, None)})
+
+    def test_the_self_check_names_a_metric_still_holding_its_minted_id(self):
+        sql = self.migration_sql()
+        self_check = sql[sql.index("-- Self-check"):]
+
+        def provoke(cur):
+            self.mint(cur, "max_temp_threshold")
+            with self.assertRaises(psycopg2.errors.RaiseException) as raised:
+                cur.execute(self_check)
+            return raised.exception
+
+        self.assertIn("max_temp_threshold", str(self.in_transaction(provoke)))
 
 
 class TestProvenanceResolves(SeedTestCase):
