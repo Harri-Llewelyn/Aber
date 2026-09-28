@@ -1686,9 +1686,9 @@ would expect.
 npm run dev:test          # validate.py, then the stack lane
 ```
 
-> **`validate.py` needs `SUPABASE_SERVICE_ROLE_KEY`**, which `dev:test` reads out of the release
-> Secret. Without it the script seeds nothing and fails ~12 of 20 checks in a way that reads like a
-> schema fault, with the real cause one line up: `Service role key: MISSING`. Its own host and port
+> **`validate.py` needs `SUPABASE_SECRET_KEY`**, which `dev:test` reads out of the release
+> Secret. Without it the script seeds nothing and fails most of its checks in a way that reads like a
+> schema fault, with the real cause in its banner: `Secret key   : MISSING`. Its own host and port
 > defaults are the port-forwards' addresses, so nothing else is set.
 
 **In-cluster, as a Job in the namespace:**

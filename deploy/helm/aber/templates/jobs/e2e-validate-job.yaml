@@ -11,7 +11,7 @@ names do not resolve outside the cluster.
 
 NOT A `helm test` HOOK, unlike test-fdw: this suite seeds and deletes fixtures, drives real MQTT
 traffic and takes minutes, so `helm test` stays the cheap gate anyone can run against a live stack.
-Gated on `e2e.enabled`. It is the same 20 checks `npm run dev:test` runs from the host.
+Gated on `e2e.enabled`. It is the same checks `npm run dev:test` runs from the host.
 =================================================================================================
 */}}
 apiVersion: batch/v1
