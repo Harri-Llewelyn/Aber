@@ -158,7 +158,9 @@ SYNTHETIC_TYPES = [
         "schema": {
             "type": "object",
             "properties": {
-                "status": {"type": "string", "enum": ["ONLINE", "OFFLINE", "STALE", "UNKNOWN"]},
+                # An open label: ONLINE, OFFLINE, an enrolment state, or a status the gateway
+                # reports itself, and UNKNOWN when none is stored.
+                "status": {"type": "string"},
                 "sparkplugGroup": {"type": "string"},
                 "lastHeartbeat": {"type": ["string", "null"]},
             },
@@ -823,7 +825,8 @@ def devices_below(objects: Dict[str, dict], element_id: str, device_ids) -> int:
 
 def gateway_value(gateway: dict) -> dict:
     """
-    A gateway's value is its liveness, derived the same way `gateway_status` derives it.
+    A gateway's value is its stored `gateways.status`, upper-cased, or UNKNOWN when none is stored.
+    The staleness the `gateway_status` view derives from `last_heartbeat` is not applied here.
 
     STALE is `Uncertain`, not `Bad`: the gateway has not been heard from inside the threshold, which
     is a statement about our knowledge rather than about the equipment. `Bad` would assert a fault
