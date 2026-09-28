@@ -4196,7 +4196,7 @@ signal the runbook's rotation waits on (`docs/remote-gateways.md` §8).
 `flow-sync.mjs` refuses a `flows.json` it cannot deploy, and that refusal happens on the appliance,
 after an administrator has approved and merged the change. A file uploaded through the forge's own
 web UI met no check before that. **`main` on every gateway repository now requires the commit
-status `acs/flow-shape`**, and the platform posts it.
+status `aber/flow-shape`**, and the platform posts it.
 
 **No Actions runner, which is the part worth stating.** The obvious reading of "required status
 check" is CI, and CI on the forge means enabling Gitea Actions -- a runner that executes whatever a
@@ -4231,8 +4231,12 @@ needed `**` for the same reach.
 
 **Reconciled, not only created.** `ensureBranchProtection()` adds the context to a repository that
 predates it, keeping whatever else `main` already requires, so the fifteen-minute sweep brings an
-older gateway up without anybody visiting it. `test_forge_events.py` covers the four answers and
-that a proposal moves no column; `test_forge_sweep.py` covers the reconcile.
+older gateway up without anybody visiting it. It also removes the context's name from before the
+rename to Aber, `acs/flow-shape`: nothing posts that name any more, so a rule that kept requiring it
+beside the new one would refuse every merge. A proposal whose head was checked under the old name
+carries no status under the new one until its next push. `test_forge_events.py` covers the four
+answers and that a proposal moves no column; `test_forge_sweep.py` covers the reconcile and the
+rename.
 
 ### A gateway that needs code of its own (`0106`)
 

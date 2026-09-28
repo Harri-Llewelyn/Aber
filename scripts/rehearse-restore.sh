@@ -261,7 +261,7 @@ SQL
     esac
     case "$(forge GET "/repos/$FORGE_ORGANISATION/$REHEARSAL_REPOSITORY/branch_protections/main")" in
       200) log "  'main' already protected" ;;
-      404) [ "$(forge POST "/repos/$FORGE_ORGANISATION/$REHEARSAL_REPOSITORY/branch_protections" '{"branch_name":"main","enable_push":false,"required_approvals":1,"block_on_rejected_reviews":true,"dismiss_stale_approvals":true,"enable_status_check":true,"status_check_contexts":["acs/flow-shape"]}')" = "201" ] \
+      404) [ "$(forge POST "/repos/$FORGE_ORGANISATION/$REHEARSAL_REPOSITORY/branch_protections" '{"branch_name":"main","enable_push":false,"required_approvals":1,"block_on_rejected_reviews":true,"dismiss_stale_approvals":true,"enable_status_check":true,"status_check_contexts":["aber/flow-shape"]}')" = "201" ] \
              || { cat /tmp/forge.json >&2; die "could not protect 'main' on '$REHEARSAL_REPOSITORY'"; }
            log "  protected 'main'" ;;
       *)   cat /tmp/forge.json >&2; die "could not read the branch protection on '$REHEARSAL_REPOSITORY'" ;;
@@ -526,7 +526,7 @@ cmd_assert() {
       || die "'main' on the restored repository has no commit -- the repository tree did not come back with the database"
     [ "$(forge GET "/repos/$FORGE_ORGANISATION/$REHEARSAL_REPOSITORY/branch_protections/main")" = "200" ] \
       || die "the branch protection on '$REHEARSAL_REPOSITORY' did not survive the restore"
-    [ "$(jq '.enable_push == false and (.status_check_contexts | index("acs/flow-shape") != null)' /tmp/forge.json)" = "true" ] \
+    [ "$(jq '.enable_push == false and (.status_check_contexts | index("aber/flow-shape") != null)' /tmp/forge.json)" = "true" ] \
       || die "'main' on the restored repository admits pushes or lost its status check"
     [ -n "$(forge_host_key_sha256)" ] || die "the restored forge publishes no SSH host key"
     log "  ok"

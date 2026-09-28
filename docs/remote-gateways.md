@@ -713,7 +713,7 @@ by mistake is now caught in the forge rather than on the appliance, below.
 
 ### The forge checks the shape before you can merge it
 
-`main` on every gateway repository requires the status **`acs/flow-shape`**. The platform posts it:
+`main` on every gateway repository requires the status **`aber/flow-shape`**. The platform posts it:
 every push to a proposal branch is delivered to `forge-events`, which reads the `flows.json` at
 that commit and applies the same two checks the appliance's puller applies. A red check means the
 merge button is refused, with *"Not all required status checks successful"*.

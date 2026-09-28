@@ -4,7 +4,7 @@
  *     node --test scripts/lib/flow-shape.test.mjs
  *
  * A `flows.json` is checked twice on its way to an appliance: `forge-events` checks the pushed
- * commit and posts the `acs/flow-shape` status that `main` requires, and `flow-sync.mjs` checks
+ * commit and posts the `aber/flow-shape` status that `main` requires, and `flow-sync.mjs` checks
  * the committed file again on the appliance before deploying it. They are in two files because
  * they run in two places -- an edge worker and a container on somebody else's hardware -- and
  * neither can import the other.
