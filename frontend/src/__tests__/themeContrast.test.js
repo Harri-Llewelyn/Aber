@@ -86,6 +86,11 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ? tint([255, 255, 255], 0.04, base)
     : tint([0, 0, 0], 0.02, base)
 
+  /** --accent-dim composited onto a ground: the fill .badge-info and .dt-badge-operational paint. */
+  const accentDim = (base) => themeName === 'dark'
+    ? tint([0, 212, 255], 0.15, base)
+    : tint([2, 132, 199], 0.12, base)
+
   const cases = [
     // [label, foreground token, background, threshold]
     ['--text-primary on card',       '--text-primary', card,      AA_TEXT],
@@ -157,6 +162,14 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     // colours themselves are not legible as text -- see the negative guard below.
     ['sharepoint badge label',         '--text-primary', tint([0,120,212], 0.15, surface),  AA_TEXT],
     ['drive badge label',              '--text-primary', tint([15,157,88], 0.15, surface),  AA_TEXT],
+    // Badges labelled in the accent on an accent tint, at 12px. --accent measured 3.51:1 on
+    // --accent-dim in light, so the label is --accent-text; pending and provisioned tint cyan.
+    ['info badge label',               '--accent-text',  accentDim(card),                   AA_TEXT],
+    ['info badge label on hover',      '--accent-text',  accentDim(glass(card)),            AA_TEXT],
+    ['operational badge in the drawer','--accent-text',  accentDim(surface),                AA_TEXT],
+    ['pending badge label',            '--accent-text',  tint([0,212,255], 0.15, card),     AA_TEXT],
+    ['pending badge label on hover',   '--accent-text',  tint([0,212,255], 0.15, glass(card)), AA_TEXT],
+    ['provisioned badge label',        '--accent-text',  tint([0,212,255], 0.07, card),     AA_TEXT],
   ]
 
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {
@@ -243,6 +256,17 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
       ).not.toMatch(/^#(000000|0b0e14|0f172a)$/)
     }
   })
+})
+
+/** The cases above measure --accent-text; this holds the four badges to it rather than to --accent. */
+describe('accent badges', () => {
+  it.each(['.badge-info', '.badge-pending', '.badge-provisioned', '.dt-badge-operational'])(
+    '%s labels in --accent-text', (selector) => {
+      const rule = APP_CSS.match(new RegExp(`\\n\\${selector}\\s*\\{([^}]*)\\}`))
+      expect(rule, `no rule for ${selector} in App.css`).toBeTruthy()
+      expect(rule[1]).toMatch(/(^|[;{\s])color:\s*var\(--accent-text\)/)
+    }
+  )
 })
 
 /**
