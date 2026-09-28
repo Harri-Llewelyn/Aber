@@ -88,6 +88,11 @@ VAL_SCHEMA_METRICS = ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller
 VAL_UNMODELLED_METRIC = "Environmental/HUMIDITY_RELATIVE"
 VAL_KPI_METRIC = "OEE/AVAILABILITY"
 VAL_KPI_SCHEMA_METRICS = [VAL_KPI_METRIC]
+# The registered device's birth certificate: its schema's metrics, the unmodelled one, and the KPI
+# only the second attached submodel models (check 6e). Sent by step 7, and again before check 12.
+VAL_KNOWN_BIRTH = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
+                   "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2,
+                   VAL_KPI_METRIC: 0.92}
 
 # The plant check 12 compares with the Directory: an area with the cell filed in it, a gateway serving
 # the whole area, and two devices with two metrics each. A carries one schema, whose semantic id its
@@ -880,7 +885,11 @@ def seed_supabase():
     print(f"  Gateway  {VAL_GW_NAME}     -> {SEEDED.get('gateway_id')}")
     print(f"  Device   {VAL_KNOWN_DEVICE} -> {SEEDED.get('known_id')}")
 
-def run_simulation():
+def connect_publisher(capture=True):
+    """
+    A connected broker session as the seeded gateway, its network loop running, or None when the
+    broker cannot be reached. `capture` subscribes to the NCMD and STATE topics checks 9 and 15 read.
+    """
     print("Connecting validation publisher to MQTT broker...")
     # MQTT 5, matching the daemon and the i3X server: the validator stands in for a physical edge
     # node and must speak what the fleet speaks. paho 1.6.1's v1 callback API is unchanged.
@@ -922,12 +931,12 @@ def run_simulation():
     def on_ncmd(_client, _userdata, msg):
         CAPTURED_NCMD.append((msg.topic, msg.payload))
 
-    client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
-
     def on_state(_client, _userdata, msg):
         CAPTURED_STATE.append((msg.topic, msg.payload, msg.retain))
 
-    client.message_callback_add("spBv1.0/STATE/#", on_state)
+    if capture:
+        client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
+        client.message_callback_add("spBv1.0/STATE/#", on_state)
     # The CONNACK return code is the point: paho's connect() completes the TCP handshake and
     # returns, and the broker's verdict on the credential arrives in this callback and nowhere else.
     # A callback that ignored it made a rejected login indistinguishable from a good one, with the
@@ -938,7 +947,7 @@ def run_simulation():
     # is a ReasonCodes under v5; `== 0` still holds and it prints as its reason string.
     def on_connect(c, _userdata, _flags, rc, properties=None):
         connack.append(rc)
-        if rc == 0:
+        if rc == 0 and capture:
             c.subscribe("spBv1.0/+/NCMD/+")
             # The primary host's birth certificate is RETAINED, so it arrives on subscribe rather
             # than being waited for. A gateway does exactly this to learn, at connect, whether its
@@ -959,7 +968,7 @@ def run_simulation():
 
     if not connected:
         print("Failed to connect to MQTT broker.")
-        return
+        return None
 
     client.loop_start()
 
@@ -992,6 +1001,13 @@ def run_simulation():
             "  means the two have diverged -- restart the broker (kubectl rollout restart\n"
             "  deploy/mosquitto) after confirming the Secret."
         )
+    return client
+
+
+def run_simulation():
+    client = connect_publisher()
+    if client is None:
+        return
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     gw = SEEDED.get("gateway_id") or VAL_GW_NAME
@@ -1035,11 +1051,7 @@ def run_simulation():
     # twice, identically: the daemon must record the declared set the first time and write nothing
     # the second, since log_digital_thread_event() fires on every UPDATE to `devices`.
     print(f"\n--- DBIRTH from registered device declaring an unmodelled metric: {VAL_UNMODELLED_METRIC} ---")
-    birth_metrics = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
-                     "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2,
-                     # Modelled only by the second attached submodel -- see check 6e.
-                     VAL_KPI_METRIC: 0.92}
-    publish("DBIRTH", SEEDED["known_id"], birth_metrics)
+    publish("DBIRTH", SEEDED["known_id"], VAL_KNOWN_BIRTH)
 
     if supabase_client and SEEDED.get("known_uuid"):
         res = supabase_client.table("devices").select("last_birth_metrics_at").eq(
@@ -1049,7 +1061,7 @@ def run_simulation():
 
     print("\n--- Identical DBIRTH again: the declared set is unchanged, so nothing must be written ---")
     time.sleep(6)  # outlast the daemon's 5s device-resolution cache
-    publish("DBIRTH", SEEDED["known_id"], birth_metrics)
+    publish("DBIRTH", SEEDED["known_id"], VAL_KNOWN_BIRTH)
 
     # 8. The acceptance test for the whole change: rename the device, then publish again.
     #    Telemetry must continue landing on the same series.
@@ -1147,6 +1159,30 @@ def run_simulation():
     client.loop_stop()
     client.disconnect()
     record_ingested_devices()
+
+
+def freshen_the_plant():
+    """
+    Just before check 12: a node heartbeat from the seeded gateway, and step 7's birth again from
+    the registered device. i3X holds a device's values Uncertain once its gateway has not beaten
+    for 90 s or the device is OFFLINE, and the simulation's last node message is minutes old by
+    then. Only a DBIRTH sets a device ONLINE; this one declares the same set, so it rewrites
+    nothing else.
+    """
+    client = connect_publisher(capture=False)
+    if client is None:
+        return
+    gw = SEEDED.get("gateway_id") or VAL_GW_NAME
+    at_ms = int(time.time() * 1000)
+    print(f"\n--- Before the i3X checks: NDATA from {gw}, and DBIRTH from {SEEDED.get('known_id')} ---")
+    # A node payload with no metrics: a plain heartbeat.
+    client.publish(f"spBv1.0/{VAL_GROUP}/NDATA/{gw}", make_node_birth_payload({}, at_ms))
+    if SEEDED.get("known_id"):
+        client.publish(f"spBv1.0/{VAL_GROUP}/DBIRTH/{gw}/{SEEDED['known_id']}",
+                       make_sparkplug_payload(SEEDED["known_id"], VAL_KNOWN_BIRTH, at_ms))
+    time.sleep(2)
+    client.loop_stop()
+    client.disconnect()
 
 
 def record_ingested_devices():
@@ -2701,6 +2737,7 @@ def verify_results():
 
     # 12. The i3X server, against the Directory: see verify_i3x().
     try:
+        freshen_the_plant()
         if not verify_i3x(token):
             passed = False
     except Exception as e:
