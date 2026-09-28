@@ -430,8 +430,9 @@ sh scripts/wait-for-ingestion-consuming.sh
 # validate.py and the whole stack lane, through port-forwards, with the credentials read out of
 # the release Secret. What CI runs.
 npm run dev:test
-# validate.py alone: the filter matches no stack suite. Its check 12 is the live i3X check, which
-# compares what the server says about a seeded plant with the Directory (i3x/README.md -> Testing).
+# validate.py alone: the filter matches no stack suite. Its checks 12 and 17 are the live i3X
+# checks: what the server says about a seeded plant against the Directory, then its quality and
+# subscriptions against what the run publishes (i3x/README.md -> Testing).
 npm run dev:test -- --filter=i3x
 ```
 
@@ -632,8 +633,9 @@ Three suites have a second half elsewhere, and both halves must move together:
 the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
 [`i3x/README.md`](../i3x/README.md). The i3X server has a third check besides those two: `validate.py`'s
-check 12 compares its answers about a seeded plant with the Directory's, the meaning neither the
-conformance suite nor the unit suite can see.
+checks 12 and 17 compare its answers about a seeded plant with the Directory's, and its quality and
+subscriptions with what the run publishes, the meaning neither the conformance suite nor the unit
+suite can see.
 
 CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
 

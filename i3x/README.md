@@ -12,10 +12,13 @@ eXchange) server over this stack's existing model.
   cannot provoke, SUB-07 and SUB-13 among them ([Testing](#testing)). Not *Full 1.0 Compliance*,
   deliberately: that requires the optional Update methods, which this server refuses
   ([Writes](#writes-are-refused)).
-- **Aber's live checks: `ingestion/validate.py` checks 12a–12z pass.** They seed a plant through
-  the Directory and compare what this server says about it with what the Directory holds:
-  placement, types, metric components, values and counts, history, authentication, input
-  validation, and a subscription's withdrawal ([Testing](#testing) lists each).
+- **Aber's live checks: `ingestion/validate.py` checks 12a–12z and 17a–17g pass.** They seed a
+  plant through the Directory and compare what this server says about it with what the Directory
+  holds: placement, types, metric components, values and counts, history, authentication, input
+  validation and a subscription's withdrawal (12). Then they publish as its gateway and subscribe to
+  it: quality against the Directory's liveness, what each registration receives by its depth, and a
+  device's and a gateway's death and birth reaching a subscriber (17). [Testing](#testing) lists
+  each.
 
 A rule of the guide that neither exercises is covered by the unit suite, `test_i3x_service.py`, or
 not at all.
@@ -700,7 +703,7 @@ node bin/i3x-test.js run http://localhost:8090/v1 --token "$TOKEN"
 python i3x/test_i3x_service.py
 
 # Ours, live: what the server says about a plant, against what the Directory holds for it.
-# validate.py's check 12; the filter matches no stack suite, so only validate.py runs.
+# validate.py's checks 12 and 17; the filter matches no stack suite, so only validate.py runs.
 npm run dev:test -- --filter=i3x
 ```
 
@@ -751,15 +754,32 @@ with the Directory's:
 
 12a–12f are older: read-only, fail-closed, a single root, live values, and values scoped by RLS.
 
-Just before check 12, `freshen_the_plant()` sends an NDATA from the seeded gateway and step 7's
-DBIRTH again from the registered device. A value is `Good` only while its gateway has beaten
+Check 17 runs after check 15. It publishes as the seeded gateway and subscribes as the
+administrator, so it can assert quality and what each registration receives:
+
+| Check | Asserts |
+| :--- | :--- |
+| 17a | each seeded gateway's status is `gateway_status.live_status`, upper-cased; a quarantined device is `Uncertain` with a value and `Bad` without (#497) |
+| 17b | `/objects/value` at `maxDepth: 0` over every object: no null timestamp, and no null value paired with `Good` or `Uncertain` (#497, #498) |
+| 17c | the registered device's stored history is `Good` (#497) |
+| 17d | `[device, "i3x:nope", device]` answers ok, 404, ok; a repeat registration keeps the first depth; a non-string elementId is a per-item 400; `maxDepth: "0"` and a non-string `subscriptionId` are 400s (#499) |
+| 17e | one DDATA reaches the device at `maxDepth: 0` with its metric in one batch, the device at 1 as its map only, the metric registered alone as itself, and its cell not at all (#499) |
+| 17f | a subscriber on the device receives its values `Uncertain` on DDEATH and `Good` on DBIRTH (#497, #499) |
+| 17g | the gateway's NDEATH reaches its subscriber as `OFFLINE` and `Good`, and holds the device `Uncertain`; NBIRTH and DBIRTH bring both back to `Good`. Runs last (#497, #499) |
+
+Each deletes its subscriptions and brings back what it killed in a `finally`.
+
+Just before checks 12 and 17, `freshen_the_plant()` sends an NDATA from the seeded gateway and step
+7's DBIRTH again from the registered device. A value is `Good` only while its gateway has beaten
 within 90 s and its device is `ONLINE`, and only a birth sets a device `ONLINE`.
 
 **Adding an assertion.** Each is a function in `validate.py` that takes the shared `I3xContext` (the
 token, `/info`, every object with its metadata, the Directory's resolved location per seeded device,
 `/objecttypes` on first use) and returns `(True | False | None, detail)`, `None` being a skip. List it
-in `I3X_CHECKS`, and raise the outcome count `ingestion/README.md` claims (`check-docs-drift` check
-7). The letters stop at 12z, so the next group takes a new number. Seed what it needs in
+in `I3X_CHECKS`, or in `I3X_LIVE_CHECKS` if it publishes or subscribes, and raise the outcome count
+`ingestion/README.md` claims (`check-docs-drift` check 7). 12's letters stop at 12z, and 17 took the
+next number. Check 17's context also carries `publisher`, a broker session as the seeded gateway,
+and `subscriptions`, which `i3x_unsubscribe()` deletes. Seed what it needs in
 `seed_supabase()` or `run_simulation()`, under a `SEEDED` key whose table is in `SEEDED_TABLES`: the
 cleanup deletes by those keys. Expected values come from the Directory or from what the run published
 (`plant_a_samples`), not from literals. A check that changes a row runs last and restores it.
