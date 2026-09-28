@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Creates the platform's storage buckets through the Storage REST API, idempotently, on every upgrade
-// (the storage-init hook Job). Not a SQL migration: storage.buckets is owned by storage-api, whose
+// (the storage-init hook Job), and moves a renamed bucket's objects into its new name. Not a SQL
+// migration: storage.buckets is owned by storage-api, whose
 // own migrations run after ours, and the image's stub of it cannot mark a bucket public. The RLS
 // policies on the objects are supabase/storage-policies.sql; the two must agree on bucket names, and
 // check-docs-drift holds them and the README's table together. Reasoning: supabase/README.md,
