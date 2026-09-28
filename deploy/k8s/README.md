@@ -1487,9 +1487,11 @@ the root filesystem is an overlay the exporter excludes, so Root Disk Used is bl
   host restart left the WAL holding 40,173 series against 12,965 in Prometheus, and Alloy reached
   92% of its 768Mi limit. Each setting targets one source:
   - A pod's series carry the pod's name as `instance`, not its IP. A restart gives every pod a new
-    address, and an address in `instance` re-mints every series.
-  - The WAL is truncated every 30 minutes rather than every two hours, so the series a rollout
-    leaves behind leave memory sooner.
+    address, so an address in `instance` re-mints every series. A pod that keeps its name keeps its
+    series: the StatefulSet pods and Alloy's own, which a restart only restarts in place.
+  - The WAL is truncated every 30 minutes rather than every two hours. A restart that replaces a
+    Deployment's pods, as a k3d node restart does, and every rollout, still mint new series under
+    the new pod names. The truncation bounds how long the old ones stay in memory.
   - Grafana's embedded API server, storage and access-control families, and its one-per-toggle
     info series, are dropped. They were 1,843 of 13,888 series, and no dashboard or rule reads them.
 
