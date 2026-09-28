@@ -1998,6 +1998,26 @@ are facts, and `may_decide_proposal()`'s three premises. `test_machine_principal
 the machine: it forks and publishes, files a proposal it cannot decide, reads one lane and not the
 other, and is refused before its write once revoked.
 
+### Whoever decides a machine's proposal can read its name (`0022`)
+
+**The person deciding saw eight hex characters.** The Approvals page names a proposer by the email
+its token carried, and a machine identity has none. The name an Administrator gave the machine is
+in `machine_principals`, which only Administrator and Auditor read, so a Shopfloor_Manager deciding
+a cell proposal a scheduler filed saw `b0000000` and had to ask who that was.
+
+`list_proposer_names()` returns the name of each machine that filed a proposal the caller may
+decide. It filters by `may_decide_proposal()` on each proposal's lane, the gate `approve_proposal()`
+decides by, so a caller who decides nothing gets no rows. It does not restate that gate's
+permissions: `check-docs-drift.mjs` 11f holds that only the three deciding functions consult
+`cell:manage` and `gateway:manage`, which is why a machine is refused them.
+**`machine_principals` is not widened**: a policy admitting every decider would hand them every
+machine's name and purpose, where this answers only for machines whose proposals they decide. It
+lists proposals of every status, because the Decided list names the proposer as well. A person
+has no row, since the proposal already carries their email, and nor does a pinned identity, which
+has no name; the page keeps the uuid's first eight characters for that case and marks a named
+proposer as a machine. `test_machine_principal_naming.py` checks a Shopfloor_Manager gets the name
+and an Operator, an Auditor and the machine itself get nothing.
+
 ### A person has a name the dashboard can read (`0116`)
 
 **The audit trail could not say who.** `log_role_assignment()` keys a role-assignment row by

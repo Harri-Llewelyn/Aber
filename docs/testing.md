@@ -395,7 +395,10 @@ python supabase/migrations/test_service_principal_revocation.py
 # (0013): every permission is allowed or refused with its own reason, and each allowed grant is
 # exercised AS THE MACHINE -- it forks and publishes a schema, files a proposal only a person can
 # decide, reads the asset lane and never the security lane -- and a revoked identity or token is
-# refused before its write runs, the way PostgREST runs auth_pre_request() first.
+# refused before its write runs, the way PostgREST runs auth_pre_request() first. A machine's write
+# is filed as 'service' whatever X-Aber-Actor header it sends (0020), while the ingestion principal
+# and the owner's tokenless session are still believed. Whoever may decide a machine's proposal
+# reads its name through list_proposer_names() (0022); an Operator or Auditor gets nothing.
 python supabase/migrations/test_machine_principal_naming.py
 # The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
 # PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a

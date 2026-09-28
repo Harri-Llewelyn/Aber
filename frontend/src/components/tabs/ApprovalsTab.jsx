@@ -99,10 +99,9 @@ export function keyLabel(key) {
 }
 
 /**
- * Whether this session may decide this lane, mirroring `may_decide_proposal()`. The live lanes are
- * gated on `cell:manage`, `gateway:manage` and `link:manage`, held by exactly these two roles
- * today; the withdrawn schema lane is false for everybody. A mirror that is allowed to be wrong:
- * the database decides again on every call.
+ * Whether this session may decide this lane, mirroring `may_decide_proposal()`. Every live lane
+ * resolves to these two roles for a person; the withdrawn schema lane is false for everybody. A
+ * mirror that is allowed to be wrong: the database decides again on every call.
  */
 export function canDecide(entityType, userRole) {
   if (entityType === 'schemas') return false
@@ -215,13 +214,21 @@ function StatusBadge({ status }) {
 
 /**
  * The proposer. `proposed_by_email` is stamped from the signed access token on INSERT, so it is
- * evidence rather than a typed name; the uuid is the fallback, because a token without an email is
- * a real state.
+ * evidence rather than a typed name. A machine identity has no email; `machineName` is the name an
+ * Administrator gave it, from `list_proposer_names()`. The uuid is the fallback for a principal
+ * with neither.
  */
-function ActorLabel({ id, email, currentUserId }) {
+export function ActorLabel({ id, email, machineName, currentUserId }) {
   if (!id) return <span className="context-field-empty">—</span>
   if (id === currentUserId) return <strong>you</strong>
   if (email) return <span title={id}>{email}</span>
+  if (machineName) {
+    return (
+      <span title={`A machine identity, ${id}`}>
+        {machineName} <span className="badge badge-neutral">machine</span>
+      </span>
+    )
+  }
   return <span className="mono" title={id}>{String(id).slice(0, 8)}</span>
 }
 
@@ -337,8 +344,8 @@ function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
     <div className="table-wrap">
       <table>
         <thead>
-          {/* No Proposed by column: a uuid resolves to nobody at a glance, and the drawer names the
-              proposer by email. Status and time are two columns because they are two facts. */}
+          {/* No Proposed by column: the drawer names the proposer, by email or machine name. Status
+              and time are two columns because they are two facts. */}
           <tr>
             <th title="The asset or schema this proposal is about">Subject</th>
             <th title="Which lane, and therefore who may decide it">Change</th>
@@ -397,9 +404,10 @@ export function filterProposals(rows, lane, query) {
   return rows.filter(p => {
     if (lane !== 'all' && p.entity_type !== lane) return false
     if (!needle) return true
-    // The fields somebody remembers about a request: subject, reason, rationale, proposer email,
-    // and the id.
-    return [p.target_label, p.decision_reason, p.rationale, p.proposed_by_email, p.entity_id]
+    // The fields somebody remembers about a request: subject, reason, rationale, the proposer's
+    // email or machine name, and the id.
+    return [p.target_label, p.decision_reason, p.rationale, p.proposed_by_email,
+      p.proposed_by_machine_name, p.entity_id]
       .some(v => String(v || '').toLowerCase().includes(needle))
   })
 }
@@ -697,8 +705,11 @@ export function ApprovalsTab({
           {
             label: 'Proposed by',
             value: <ActorLabel id={selected.proposed_by} email={selected.proposed_by_email}
+                               machineName={selected.proposed_by_machine_name}
                                currentUserId={currentUserId} />,
-            title: 'Taken from the signed access token when the proposal was filed, not from a form.'
+            title: selected.proposed_by_email || !selected.proposed_by_machine_name
+              ? 'Taken from the signed access token when the proposal was filed, not from a form.'
+              : 'The name an Administrator gave this machine identity on the Access Control page.'
           },
           {
             // BOTH READINGS, and the relative one is the parenthetical: this panel is where

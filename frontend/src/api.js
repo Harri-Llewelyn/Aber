@@ -2213,7 +2213,7 @@ const apiMethods = {
         .filter(r => r.entity_type === 'schemas')
         .map(r => r.entity_id))];
 
-      const [devicesRes, nameplatesRes, schemasRes] = await Promise.all([
+      const [devicesRes, nameplatesRes, schemasRes, proposersRes] = await Promise.all([
         deviceIds.length
           ? supabase.from('devices')
               .select('id,name,description,asset_type,connection_method,cell_id,location_scope,model_3d_path,is_archived')
@@ -2225,12 +2225,16 @@ const apiMethods = {
         schemaIds.length
           ? supabase.from('schemas').select('id,schema_name,version,status,parent_schema_id')
               .in('id', schemaIds)
-          : Promise.resolve({ data: [] })
+          : Promise.resolve({ data: [] }),
+        // The machines behind the proposals this caller may decide (0022); empty for anyone else.
+        // An error leaves the proposer as its uuid rather than failing the queue.
+        Promise.resolve(supabase.rpc('list_proposer_names')).catch(() => ({ data: [] }))
       ]);
 
       const devices = new Map((devicesRes.data || []).map(d => [d.id, d]));
       const nameplates = new Map((nameplatesRes.data || []).map(n => [n.device_id, n]));
       const schemas = new Map((schemasRes.data || []).map(s => [s.id, s]));
+      const machineNames = new Map((proposersRes?.data || []).map(m => [m.principal_id, m.name]));
 
       return rows.map(r => {
         // `current` is what the patch would change FROM, so the page can show a diff rather than
@@ -2257,7 +2261,10 @@ const apiMethods = {
           targetMissing = !sc;
         }
 
-        return { ...r, target_label: targetLabel, target_missing: targetMissing, current };
+        return {
+          ...r, target_label: targetLabel, target_missing: targetMissing, current,
+          proposed_by_machine_name: machineNames.get(r.proposed_by) || null
+        };
       });
     }
 

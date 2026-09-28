@@ -528,7 +528,9 @@ further one from the **Access Control** page (`0125`): a name, a purpose and per
 fixed menu, then its first token shown once. Such an identity reaches the database only, never the
 broker. **Machines propose, people decide** (`0013`): the menu is four reads and two writes, filing
 change proposals and versioning schemas, and `create_machine_principal()` refuses a machine device
-writes, quarantine and proposal decisions, and access control, each with its reason.
+writes, quarantine and proposal decisions, and access control, each with its reason. The Digital
+Thread files a machine's writes as a service's whatever it declares (`0020`), and the person
+deciding its proposal sees it by name (`0022`).
 
 **The ingestion daemon does not hold `SUPABASE_SERVICE_ROLE_KEY`.** It used to, and that was the one
 credential whose compromise no policy written anywhere else could contain, sitting in the process

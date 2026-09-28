@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   ApprovalsTab,
+  ActorLabel,
   canDecide,
   diffRows,
   refusalFor,
@@ -527,6 +528,64 @@ describe('the columns say one thing each', () => {
     await screen.findAllByTestId('proposal-row')
     fireEvent.change(screen.getByTitle(/filter decided proposals/i), {
       target: { value: 'ops.person' }
+    })
+    expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
+  })
+})
+
+
+describe('a machine proposer is named, and marked as a machine', () => {
+  // A machine identity has no email for its token to carry; `list_proposer_names()` gives the
+  // person deciding its proposal the name an Administrator gave it.
+  const MACHINE_ID = 'b1000000-0000-4000-8000-000000000009'
+
+  it('shows the name with a machine mark', () => {
+    render(<ActorLabel id={MACHINE_ID} machineName="Line 3 scheduler" currentUserId={MANAGER_ID} />)
+    expect(screen.getByText('Line 3 scheduler')).toBeInTheDocument()
+    expect(screen.getByText('machine')).toBeInTheDocument()
+    expect(screen.queryByText(MACHINE_ID.slice(0, 8))).toBeNull()
+  })
+
+  it('keeps the eight characters for a principal with no name and no email', () => {
+    render(<ActorLabel id={MACHINE_ID} machineName={null} currentUserId={MANAGER_ID} />)
+    expect(screen.getByText(MACHINE_ID.slice(0, 8))).toBeInTheDocument()
+    expect(screen.queryByText('machine')).toBeNull()
+  })
+
+  it('names a person by email, with no machine mark', () => {
+    render(<ActorLabel id={OPERATOR_ID} email="ops.person@aber.test" currentUserId={MANAGER_ID} />)
+    expect(screen.getByText('ops.person@aber.test')).toBeInTheDocument()
+    expect(screen.queryByText('machine')).toBeNull()
+  })
+
+  it('still says "you" and a dash where it always did', () => {
+    const { container } = render(<ActorLabel id={null} />)
+    expect(container.textContent).toBe('—')
+    render(<ActorLabel id={MANAGER_ID} machineName="Not me" currentUserId={MANAGER_ID} />)
+    expect(screen.getByText('you')).toBeInTheDocument()
+  })
+
+  it('names the machine in the drawer of the proposal it filed', async () => {
+    mockLoad([deviceProposal({
+      entity_type: 'cells', proposed_by: MACHINE_ID, proposed_by_email: null,
+      proposed_by_machine_name: 'Line 3 scheduler'
+    })])
+    renderTab({ currentUserId: MANAGER_ID })
+    await selectRow()
+    expect(screen.getByText('Line 3 scheduler')).toBeInTheDocument()
+    expect(screen.getByText('machine')).toBeInTheDocument()
+  })
+
+  it('finds a proposal by the machine that filed it', async () => {
+    mockLoad([
+      deviceProposal({ id: 'p-machine', proposed_by: MACHINE_ID, proposed_by_email: null,
+                       proposed_by_machine_name: 'Line 3 scheduler' }),
+      deviceProposal({ id: 'p-person', entity_id: 'dev-2' })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    fireEvent.change(screen.getByTitle(/filter open proposals/i), {
+      target: { value: 'scheduler' }
     })
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
   })

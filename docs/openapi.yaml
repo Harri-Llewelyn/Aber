@@ -1950,6 +1950,30 @@ paths:
         '200': { description: Withdrawn. }
         '403': { description: Not the proposer. }
 
+  /rest/v1/rpc/list_proposer_names:
+    post:
+      tags: [Registry]
+      summary: The names of the machines behind the proposals you may decide
+      description: |
+        A machine identity has no email for a proposal to carry, and `machine_principals` is
+        readable by Administrator and Auditor only. This returns the name of each machine that
+        filed a proposal the caller may decide, by `may_decide_proposal()` on each proposal's
+        lane, the gate `approve_proposal` decides by. A caller who decides nothing gets an empty
+        array. A person, and a pinned identity with no name, has no row.
+      responses:
+        '200':
+          description: One row per machine proposer.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    principal_id: { type: string, format: uuid }
+                    name: { type: string }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/links:
     get:
       tags: [Registry]

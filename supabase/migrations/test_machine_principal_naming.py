@@ -3,7 +3,7 @@ A machine has a name an operator gave it (0125), and holds what a machine may (0
 
     python supabase/migrations/test_machine_principal_naming.py
 
-Requires the Supabase database (54322 by default) and 0013 applied; `npm run test:db` gives it a
+Requires the Supabase database (54322 by default) and 0022 applied; `npm run test:db` gives it a
 throwaway one.
 
 ---------------------------------------------------------------------------------------------
@@ -30,6 +30,9 @@ forks, publishes and discards; proposal:create files a proposal that only a pers
 digital_thread:read reads the asset lane and never the security lane; archive:manage reads the
 record of deleted assets. A revoked identity or token is refused before its write runs, the way
 PostgREST runs auth_pre_request() ahead of every request.
+
+A machine's write is filed as a service's whatever X-Aber-Actor header it sends (0020), and the
+person deciding its proposal can read its name (0022) without being able to read the name table.
 
 EVERY TEST ROLLS BACK. The fixtures are seeded inside the test's own transaction, and
 `SET LOCAL ROLE` scopes the impersonation to it, so nothing is committed and nothing needs
@@ -517,6 +520,77 @@ class AMachineProposesAndAPersonDecides(MachineBase):
         self.as_postgres()
         self.cur.execute("SELECT description FROM public.cells WHERE id = %s;", (self.cell,))
         self.assertEqual(self.cur.fetchone()["description"], "Moved by the planner")
+
+
+class WhoeverDecidesReadsTheMachinesName(MachineBase):
+    """
+    0022: list_proposer_names() names the machine behind each proposal the caller may decide, by
+    may_decide_proposal(). machine_principals itself stays closed to a Shopfloor_Manager.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.operator = self.person("Operator")
+        self.cell = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO public.cells (id, name) VALUES (%s, %s);",
+            (self.cell, f"Named proposer cell {self.cell[:8]}"),
+        )
+        self.planner = self.machine("Line 3 scheduler", ("proposal:create",))
+        self.idle = self.machine("Proposes nothing", ("proposal:create",))
+        self.propose(self.planner, {"description": "Moved by the scheduler"})
+
+    def propose(self, who, patch):
+        self.as_user(who)
+        self.cur.execute(
+            "INSERT INTO public.change_proposals (entity_type, entity_id, patch) "
+            "VALUES ('cells', %s, %s::jsonb) RETURNING id;",
+            (self.cell, json.dumps(patch)),
+        )
+        proposal = self.cur.fetchone()["id"]
+        self.as_postgres()
+        return proposal
+
+    def names_for(self, who):
+        self.as_user(who)
+        self.cur.execute("SELECT principal_id::text, name FROM public.list_proposer_names();")
+        names = {r["principal_id"]: r["name"] for r in self.cur.fetchall()}
+        self.as_postgres()
+        return names
+
+    def test_a_shopfloor_manager_reads_the_name_of_the_machine_that_proposed(self):
+        self.assertEqual(self.names_for(self.manager), {self.planner: "Line 3 scheduler"})
+
+    def test_a_decided_proposal_still_names_its_machine(self):
+        # The Decided list shows the proposer as well as the queue does.
+        self.cur.execute(
+            "SELECT id FROM public.change_proposals WHERE proposed_by = %s;", (self.planner,)
+        )
+        proposal = self.cur.fetchone()["id"]
+        self.as_user(self.manager)
+        self.cur.execute("SELECT public.reject_proposal(%s, 'not this week');", (proposal,))
+        self.as_postgres()
+        self.assertEqual(self.names_for(self.manager), {self.planner: "Line 3 scheduler"})
+
+    def test_an_operator_who_may_not_decide_gets_nothing(self):
+        self.assertEqual(self.names_for(self.operator), {})
+
+    def test_an_auditor_who_may_not_decide_gets_nothing(self):
+        # The Auditor reads machine_principals directly; this function answers for deciders only.
+        self.assertEqual(self.names_for(self.auditor), {})
+
+    def test_the_machine_itself_gets_nothing(self):
+        self.assertEqual(self.names_for(self.planner), {})
+
+    def test_a_person_who_proposed_has_no_row(self):
+        # A person is named by the email the proposal carries; only machines are listed.
+        self.propose(self.operator, {"description": "Moved by hand"})
+        self.assertEqual(set(self.names_for(self.manager)), {self.planner})
+
+    def test_anon_cannot_call_it(self):
+        self.cur.execute("SET LOCAL ROLE anon;")
+        self.refused(psycopg2.errors.InsufficientPrivilege,
+                     "SELECT * FROM public.list_proposer_names();")
 
 
 class AMachineReadsTheAssetLaneOnly(MachineBase):
