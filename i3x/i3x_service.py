@@ -1242,7 +1242,9 @@ class Handler(BaseHTTPRequestHandler):
         # Content-Encoding: gzip." A MUST, and the conformance suite has a dedicated check for it.
         if "gzip" in (self.headers.get("Accept-Encoding") or "").lower():
             buf = io.BytesIO()
-            with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+            # zlib's default level. GzipFile's own, 9, takes about five times as long on a large
+            # address space for a response only a fifth smaller.
+            with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
                 gz.write(raw)
             raw = buf.getvalue()
             headers["Content-Encoding"] = "gzip"

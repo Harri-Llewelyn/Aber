@@ -615,6 +615,14 @@ than minutes, and why `0` disables the cache outright.
   `false` rather than unknown. The DBIRTH *datatypes* are held only in this process: after a
   restart, a metric the catalog lacks is `UnknownType`, and its `schemaExtensions` fragment `{}`
   unless the catalog has its datatype, until the device births again.
+- **`GET /objects` has no paging**, because i3X 1.0 defines none. Measured on 2026-09-28 with
+  1,000 devices × 20 metrics (21,272 objects) on a development laptop:
+  - assembling the objects, which every object and value endpoint does per request, took 45–60
+    ms, against 4–6 ms for the same 1,072 non-metric objects before metrics were components;
+  - the unfiltered response is 4.9 MB, or 10.7 MB with `includeMetadata=true`, serialised in
+    35–60 ms;
+  - gzip at level 6 took 50–100 ms for 0.12–0.42 MB. Level 9, `GzipFile`'s default and what the
+    server used before, took 180–450 ms for 0.11–0.33 MB.
 - **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
   respect to a permission that has just been revoked. See
   [The address-space cache](#the-address-space-cache).
