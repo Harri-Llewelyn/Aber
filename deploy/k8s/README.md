@@ -1483,6 +1483,20 @@ the root filesystem is an overlay the exporter excludes, so Root Disk Used is bl
   two stores, Grafana to the stores, and Alloy to the API server on `networkPolicy.apiServerCidr`.
   An empty `apiServerCidr` leaves Alloy unable to discover anything: the DaemonSet is healthy, the
   dashboards are empty, and nothing logs a policy decision.
+- **Alloy's memory follows the series it holds, so three settings keep them few.** On 2026-09-28 a
+  host restart left the WAL holding 40,173 series against 12,965 in Prometheus, and Alloy reached
+  92% of its 768Mi limit. Each setting targets one source:
+  - A pod's series carry the pod's name as `instance`, not its IP. A restart gives every pod a new
+    address, so an address in `instance` re-mints every series. A pod that keeps its name keeps its
+    series: the StatefulSet pods and Alloy's own, which a restart only restarts in place.
+  - The WAL is truncated every 30 minutes rather than every two hours. A restart that replaces a
+    Deployment's pods, as a k3d node restart does, and every rollout, still mint new series under
+    the new pod names. The truncation bounds how long the old ones stay in memory.
+  - Grafana's embedded API server, storage and access-control families, and its one-per-toggle
+    info series, are dropped. They were 1,843 of 13,888 series, and no dashboard or rule reads them.
+
+  Alloy sets its own `GOMEMLIMIT` at 90% of the limit. The rest of its working set is its own
+  mapped binary (about 170 MiB) and page cache, which is why the limit is 768Mi.
 - **Mosquitto's metrics are prefixed `broker_`, not `mosquitto_`.** Alerts and dashboards written
   against the latter match nothing and render as empty panels rather than as errors.
 - **Grafana is inside the thing being monitored.** A `supabase-db` failure takes the Factory+
