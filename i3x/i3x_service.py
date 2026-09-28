@@ -98,9 +98,9 @@ SUBSCRIPTION_QUEUE_LIMIT = int(os.getenv("I3X_SUBSCRIPTION_QUEUE_LIMIT", "10000"
 MAX_SUBSCRIPTIONS_PER_PRINCIPAL = int(os.getenv("I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL", "20"))
 MAX_SUBSCRIPTIONS = int(os.getenv("I3X_MAX_SUBSCRIPTIONS", "500"))
 MAX_STREAMS = int(os.getenv("I3X_MAX_STREAMS", "50"))
-# The most stored rows one history series reads, and so returns: a metric's samples, or the rows
-# behind a device's map snapshots. A request's `limit` may ask for fewer. A series cut short is
-# answered 206, naming the instant it stops at.
+# The most stored rows one history series reads, and the most values it returns, a device's map of
+# N metrics counting N. A request's `limit` may ask for fewer. A series cut short is answered 206,
+# naming the instant it stops at.
 HISTORY_MAX_ROWS = int(os.getenv("I3X_HISTORY_MAX_ROWS", "10000"))
 # The most HasComponent descendants one value or history request returns under `components`,
 # summed over its elementIds. Past it the rest are left out and the answer is a 206.
@@ -1508,8 +1508,8 @@ def h_objects_value(req: "Handler") -> None:
     req._bulk(results, detail=partial.detail(results))
 
 
-# RFC 3339 `date-time` in full: date, time, optional fraction and a REQUIRED offset. Matched with
-# fullmatch, so nothing after the offset reaches a PostgREST filter.
+# RFC 3339 `date-time` in full: date, time, optional fraction and a REQUIRED offset, matched whole.
+# PostgREST is only ever sent the parsed instant (`_pg_time`), never the caller's text.
 RFC3339 = re.compile(
     r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)",
     re.ASCII,
@@ -1558,7 +1558,7 @@ def _history_window(body: dict) -> tuple:
 
 
 def _pg_time(instant: datetime) -> str:
-    """An instant as these PostgREST filters take it: UTC, microseconds and `Z`, never a `+`."""
+    """An instant as these PostgREST filters take it: UTC to the microsecond, with `Z`."""
     return instant.astimezone(timezone.utc).replace(tzinfo=None).isoformat("T", "microseconds") + "Z"
 
 
@@ -1614,13 +1614,10 @@ def _cut(rows: List[dict], limit: int) -> tuple:
 
 def _snapshots(rows: List[dict], seeds: Dict[str, dict], budget: int) -> tuple:
     """
-    One map per instant in `rows` (newest first), holding every metric's newest value at that
-    instant. Sparkplug reports by exception, so each value is carried forward from its seed or
-    its last row until the metric's next row.
-
-    The newest maps holding at most `budget` values in all are returned, a map of N metrics
-    counting N, since instants times metrics can outgrow the rows read by far. Returns
-    (snapshots newest first, the newest instant left out or None).
+    One map per instant in `rows` (newest first) of every metric's newest value there, carried
+    forward from `seeds` since Sparkplug reports by exception. Only the newest maps holding at most
+    `budget` values in all are kept, a map of N metrics counting N. Returns (maps newest first, the
+    newest instant left out or None).
     """
     instants, i = [], len(rows)
     while i:
