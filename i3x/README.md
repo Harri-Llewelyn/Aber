@@ -702,6 +702,10 @@ with the Directory's:
 
 12a–12f are older: read-only, fail-closed, a single root, live values, and values scoped by RLS.
 
+Just before check 12, `freshen_the_plant()` sends an NDATA from the seeded gateway and step 7's
+DBIRTH again from the registered device. A value is `Good` only while its gateway has beaten
+within 90 s and its device is `ONLINE`, and only a birth sets a device `ONLINE`.
+
 **Adding an assertion.** Each is a function in `validate.py` that takes the shared `I3xContext` (the
 token, `/info`, every object with its metadata, the Directory's resolved location per seeded device,
 `/objecttypes` on first use) and returns `(True | False | None, detail)`, `None` being a skip. List it
