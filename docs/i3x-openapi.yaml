@@ -191,8 +191,8 @@ paths:
       summary: Every ObjectType
       description: |
         Rows from `schemas` — **a `schema_definition` already is a JSON Schema**, so there is
-        no translation step — plus the synthetic Site, Cell, Gateway and untyped-device types
-        that give the structural objects something to point at.
+        no translation step — plus the synthetic Site, Area, Cell, Lane, Unassigned, Gateway
+        and untyped-device types that give the structural objects something to point at.
 
         The metric types, always served so every metric's `typeElementId` resolves:
         * `i3x:type:metric:<name>` per `metric_catalog` row: a scalar schema from its Sparkplug
@@ -253,11 +253,15 @@ paths:
         `HasParent`/`HasChildren`, `HasComponent`/`ComponentOf`, and
         `ConnectsVia`/`ProvidesConnectivityFor` — each registered with its `reverseOf`.
 
-        The pairing that matters: **`parentId` is the cell, not the gateway.** A device here
-        has two parents — a cell (where it is) and a gateway (how its data arrives). i3X
-        gives an Object one parent, `HasParent` is organizational hierarchy, so the cell wins
-        and the data path becomes `ConnectsVia`/`ProvidesConnectivityFor`. Collapsing them
-        would make a host-run gateway unrepresentable.
+        The pairing that matters: **`parentId` is where the asset is, not the gateway.** A
+        device here has two parents — a place (its cell, else its area, else the site) and a
+        gateway (how its data arrives). i3X gives an Object one parent, `HasParent` is
+        organizational hierarchy, so the place wins and the data path becomes
+        `ConnectsVia`/`ProvidesConnectivityFor`. Collapsing them would make a host-run gateway
+        unrepresentable.
+
+        Location is `HasParent`/`HasChildren` only: the site, areas, cells and lanes compose
+        nothing. `HasComponent`/`ComponentOf` is kept for what a device's value is composed of.
       parameters:
         - name: namespaceUri
           in: query
@@ -307,18 +311,25 @@ paths:
       summary: Browse the address space
       description: |
         ```
-        i3x:site                          synthetic root — the only parentId: null
-        ├── <cell uuid>                   cells
-        │   ├── <gwy…>                    gateways in that cell
-        │   └── <dev…>                    devices whose RESOLVED cell is that cell
-        ├── i3x:unassigned                synthetic — assets with no resolved cell
-        └── <gwy…>                        site-wide gateways
+        i3x:site                          synthetic root, named by site.name — the only parentId: null
+        ├── <area uuid>                   areas
+        │   ├── <cell uuid>               cells filed in that area
+        │   │   ├── <gwy…>                gateways in that cell
+        │   │   └── <dev…>                devices whose RESOLVED cell is that cell
+        │   └── <gwy…> / <dev…>           area-wide gateways and devices
+        ├── <cell uuid>                   cells filed in no area, with their gateways and devices
+        ├── <gwy…> / <dev…>               site-wide gateways and devices
+        ├── i3x:lane:simulated            synthetic — behind a simulated gateway; only while non-empty
+        ├── i3x:lane:shadow               synthetic — behind a playback gateway; only while non-empty
+        └── i3x:unassigned                synthetic — assets nobody has placed
         ```
 
-        **Unassigned is synthetic, and deliberately so.** `parentId: null` means root, so a
-        device with no cell would otherwise become a second root. A synthetic object is
+        **Unassigned and the lanes are synthetic, and deliberately so.** `parentId: null` means
+        root, so an unplaced device would otherwise become a second root. A synthetic object is
         legitimate where a magic `cells` row is not: it has no table behind it, so it cannot
-        be edited, deleted, or swept by the pg_cron purge that runs past RLS.
+        be edited, deleted, or swept by the pg_cron purge that runs past RLS. Unassigned holds
+        only assets nobody has placed; a simulated or replayed asset is in its lane, which
+        claims no place.
       parameters:
         - name: root
           in: query
@@ -927,7 +938,7 @@ components:
       type: object
       properties:
         elementId: { type: string, example: i3x:type:cell }
-        displayName: { type: string, example: Factory Cell }
+        displayName: { type: string, example: Cell }
         namespaceUri: { type: string, format: uri }
         sourceTypeId:
           type: string
@@ -976,7 +987,7 @@ components:
         parentId:
           type: string
           nullable: true
-          description: 'The **cell**, not the gateway. `null` only on `i3x:site`.'
+          description: 'Where the object is — its cell, area or lane, else the site — never its gateway. `null` only on `i3x:site`.'
         isComposition: { type: boolean }
         isExtended:
           type: boolean
@@ -1013,9 +1024,9 @@ components:
         relationships:
           type: object
           description: |
-            Edge lists keyed by relationship type. `HasComponent` is carried **alongside**
-            `HasChildren`, not instead of it — they answer different questions: `HasChildren`
-            is the browse hierarchy, `HasComponent` is what `maxDepth > 1` descends.
+            Edge lists keyed by relationship type. `HasParent`/`HasChildren` is the location
+            tree and is never descended by a value query; `HasComponent` is composition, what
+            `maxDepth > 1` descends, and no location object carries it.
           additionalProperties:
             type: array
             items: { type: string }
@@ -1031,8 +1042,9 @@ components:
           description: |
             For a device, an object of metric name to latest value, `null` when quality is
             `GoodNoData`. Every other object sends exactly what its ObjectType declares: the site
-            `{cellCount, deviceCount}`, a cell or Unassigned `{deviceCount, description}`, a
-            gateway `{status, sparkplugGroup, lastHeartbeat}`. Counts are of devices only.
+            `{cellCount, deviceCount}`, an area `{cellCount, deviceCount, description}`, a cell,
+            lane or Unassigned `{deviceCount, description}`, a gateway `{status, sparkplugGroup,
+            lastHeartbeat}`. Counts are of devices or cells, never of children.
             A metric sends its latest value, a bare scalar.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }

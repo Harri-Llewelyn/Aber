@@ -768,18 +768,63 @@ class TestRfc3339(unittest.TestCase):
         self.assertTrue(env["timestamp"].endswith("Z"), env["timestamp"])
 
 
+SIMULATED_LANE = A.LANES[A.SOURCE_SIMULATED][0]
+SHADOW_LANE = A.LANES[A.SOURCE_SHADOW][0]
+# The types of the location tree's levels: HasParent/HasChildren only, never a composition.
+LOCATION_TYPES = {
+    A.SITE_TYPE_ID, A.AREA_TYPE_ID, A.CELL_TYPE_ID, A.LANE_TYPE_ID, A.UNASSIGNED_TYPE_ID,
+}
+
+
 def _representative_space() -> dict:
     """One object of every shape the address space builds, wired as i3x_service.py wires them."""
     objects = [
         A.device_object({"sparkplug_id": "dev-placed", "_gateway_sparkplug_id": "gwy-cell"}, "cell-1", None),
         A.device_object({"sparkplug_id": "dev-unplaced", "_gateway_sparkplug_id": None}, None, None),
-        A.gateway_object({"sparkplug_id": "gwy-cell", "cell_id": "cell-1"}, ["dev-placed"]),
-        A.gateway_object({"sparkplug_id": "gwy-site", "location_scope": "site_wide"}, []),
-        A.cell_object({"id": "cell-1", "name": "Cell 1"}, ["dev-placed", "gwy-cell"]),
+        A.device_object({"sparkplug_id": "dev-area-wide", "_gateway_sparkplug_id": None}, "area-1", None),
+        A.device_object({"sparkplug_id": "dev-site-wide", "_gateway_sparkplug_id": None}, A.SITE_ELEMENT_ID, None),
+        A.device_object({"sparkplug_id": "dev-unfiled", "_gateway_sparkplug_id": None}, "cell-unfiled", None),
+        A.device_object({"sparkplug_id": "dev-sim", "_gateway_sparkplug_id": "gwy-sim"}, SIMULATED_LANE, None),
+        A.device_object({"sparkplug_id": "dev-shadow", "_gateway_sparkplug_id": "gwy-shadow"}, SHADOW_LANE, None),
+        A.gateway_object({"sparkplug_id": "gwy-cell", "cell_id": "cell-1"}, ["dev-placed"], "cell-1"),
+        A.gateway_object({"sparkplug_id": "gwy-site", "location_scope": "site_wide"}, [], A.SITE_ELEMENT_ID),
+        A.gateway_object({"sparkplug_id": "gwy-area", "location_scope": "area_wide"}, [], "area-1"),
+        A.gateway_object({"sparkplug_id": "gwy-sim", "is_simulated": True}, ["dev-sim"], SIMULATED_LANE),
+        A.gateway_object({"sparkplug_id": "gwy-shadow", "is_shadow": True}, ["dev-shadow"], SHADOW_LANE),
+        A.cell_object({"id": "cell-1", "name": "Cell 1"}, ["dev-placed", "gwy-cell"], "area-1"),
+        A.cell_object({"id": "cell-unfiled", "name": "Unfiled"}, ["dev-unfiled"], A.SITE_ELEMENT_ID),
+        A.area_object({"id": "area-1", "name": "Area 1"}, ["cell-1", "dev-area-wide", "gwy-area"]),
+        A.lane_object(A.SOURCE_SIMULATED, ["dev-sim", "gwy-sim"]),
+        A.lane_object(A.SOURCE_SHADOW, ["dev-shadow", "gwy-shadow"]),
         A.unassigned_object(["dev-unplaced"]),
-        A.site_object(["cell-1", A.UNASSIGNED_ELEMENT_ID, "gwy-site"]),
+        A.site_object(
+            ["area-1", "cell-unfiled", "dev-site-wide", "gwy-site", SIMULATED_LANE, SHADOW_LANE,
+             A.UNASSIGNED_ELEMENT_ID],
+        ),
     ]
     return {o["elementId"]: o for o in objects}
+
+
+def _missing_inverses(objects: dict) -> list:
+    """Every edge whose target does not carry the registered inverse back, as sentences."""
+    inverse = {name: reverse for name, reverse, _ in A.RELATIONSHIP_TYPES}
+    missing = []
+    for element_id, obj in objects.items():
+        for rel, targets in (obj["metadata"]["relationships"] or {}).items():
+            if rel not in inverse:
+                missing.append(f"{rel} is emitted but not registered in RELATIONSHIP_TYPES")
+                continue
+            for target in targets:
+                if target not in objects:
+                    missing.append(f"{element_id} points at unknown object {target}")
+                    continue
+                back = (objects[target]["metadata"]["relationships"] or {}).get(inverse[rel], [])
+                if element_id not in back:
+                    missing.append(
+                        f"{element_id} -{rel}-> {target}, but {target} carries no "
+                        f"{inverse[rel]} back to it"
+                    )
+    return missing
 
 
 class TestAddressSpace(unittest.TestCase):
@@ -796,47 +841,32 @@ class TestAddressSpace(unittest.TestCase):
         emitted by nothing at all and every `HasComponent` edge in the space was one-way. Fixing
         only what it named would have moved the failure to whichever five edges it drew next.
 
-        This walks the whole graph instead, on a space carrying one of each shape: a placed device,
-        an unplaced one, a gateway in a cell, a site-wide gateway, a cell, Unassigned and the site.
+        This walks the whole graph instead, on a space carrying one of each shape: a device and a
+        gateway in a cell filed in an area, an area-wide and a site-wide one of each, a cell filed
+        in no area, a simulated and a shadow gateway with a device each in their lanes, an unplaced
+        device under Unassigned, and the site.
         """
-        objects = _representative_space()
-        inverse = {name: reverse for name, reverse, _ in A.RELATIONSHIP_TYPES}
-        missing = []
-        for element_id, obj in objects.items():
-            for rel, targets in (obj["metadata"]["relationships"] or {}).items():
-                self.assertIn(rel, inverse, f"{rel} is emitted but not registered in RELATIONSHIP_TYPES")
-                for target in targets:
-                    self.assertIn(target, objects, f"{element_id} points at unknown object {target}")
-                    back = (objects[target]["metadata"]["relationships"] or {}).get(inverse[rel], [])
-                    if element_id not in back:
-                        missing.append(
-                            f"{element_id} -{rel}-> {target}, but {target} carries no "
-                            f"{inverse[rel]} back to it"
-                        )
+        missing = _missing_inverses(_representative_space())
         self.assertEqual(missing, [], chr(10).join(missing))
 
-    def test_the_site_does_not_claim_unassigned_as_a_component(self):
+    def test_location_is_never_composition(self):
         """
-        The one deliberate asymmetry, and the reason it is safe: `HasComponent` is what a maxDepth
-        value query descends, Unassigned holds no value and publishes no components, so an edge to
-        it adds an empty node and no data. Naming it would also oblige a `ComponentOf` back, which
-        would assert a membership its own description denies.
+        The site, areas, cells, lanes and Unassigned organise; they compose nothing. A value query
+        never returns a `HasChildren` object, so none of them is `isComposition`, and no edge of
+        the composition pair touches one.
         """
-        site = A.site_object(["cell-1", A.UNASSIGNED_ELEMENT_ID, "gwy-site"])
-        rels = site["metadata"]["relationships"]
-        self.assertIn(A.UNASSIGNED_ELEMENT_ID, rels["HasChildren"], "still a child")
-        self.assertNotIn(A.UNASSIGNED_ELEMENT_ID, rels["HasComponent"], "but not a component")
-        self.assertEqual(rels["HasComponent"], ["cell-1", "gwy-site"])
-
-        unassigned = A.unassigned_object([])
-        self.assertEqual(unassigned["metadata"]["relationships"]["HasParent"], [A.SITE_ELEMENT_ID])
-        self.assertNotIn("ComponentOf", unassigned["metadata"]["relationships"])
-
-    def test_an_unplaced_device_is_a_component_of_nothing(self):
-        placed = A.device_object({"sparkplug_id": "dev1", "_gateway_sparkplug_id": None}, "cell-7", None)
-        self.assertEqual(placed["metadata"]["relationships"]["ComponentOf"], ["cell-7"])
-        unplaced = A.device_object({"sparkplug_id": "dev2", "_gateway_sparkplug_id": None}, None, None)
-        self.assertNotIn("ComponentOf", unplaced["metadata"]["relationships"])
+        objects = _representative_space()
+        locations = {e for e, o in objects.items() if o["typeElementId"] in LOCATION_TYPES}
+        self.assertEqual(len(locations), 7, sorted(locations))
+        for element_id, obj in objects.items():
+            rels = obj["metadata"]["relationships"]
+            with self.subTest(element_id=element_id):
+                if element_id in locations:
+                    self.assertFalse(obj["isComposition"])
+                    self.assertNotIn("HasComponent", rels)
+                    self.assertNotIn("ComponentOf", rels)
+                touched = set(rels.get("ComponentOf", [])) | set(rels.get("HasComponent", []))
+                self.assertFalse(touched & locations, "a composition edge reaches a location")
 
     def test_device_parent_is_the_cell_not_the_gateway(self):
         device = {"sparkplug_id": "dev1", "name": "Pump", "_gateway_sparkplug_id": "gwy1"}
@@ -888,6 +918,275 @@ class TestAddressSpace(unittest.TestCase):
         device = {"sparkplug_id": "dev1", "is_quarantined": True}
         env = A.device_value(device, {"m": {"value": 1.0, "timestamp": "2026-01-01T00:00:00Z"}})
         self.assertEqual(env["quality"], "Uncertain")
+
+
+AREA_NORTH = "44444444-4444-4444-4444-444444444444"
+AREA_ARCHIVED = "55555555-5555-5555-5555-555555555555"
+CELL_FILED = "66666666-6666-6666-6666-666666666666"
+CELL_UNFILED = "77777777-7777-7777-7777-777777777777"
+CELL_IN_ARCHIVED_AREA = "88888888-8888-8888-8888-888888888888"
+CELL_ARCHIVED = "99999999-9999-9999-9999-999999999999"
+
+
+def _location_rows(site_name="Aber Works") -> dict:
+    """
+    One asset for each way of being placed, and a place of each kind the caller cannot see: an
+    area and a cell that rows name but that the reads do not return, as when they are archived.
+    """
+    def located(device_id, source, cell=None, area=None):
+        return {"device_id": device_id, "location_source": source, "effective_cell_id": cell,
+                "effective_area_id": area}
+
+    return {
+        "areas": [{"id": AREA_NORTH, "name": "North", "description": "Assembly hall"}],
+        "cells": [
+            {"id": CELL_FILED, "name": "Filed", "description": None, "area_id": AREA_NORTH},
+            {"id": CELL_UNFILED, "name": "Unfiled", "description": "In no area", "area_id": None},
+            {"id": CELL_IN_ARCHIVED_AREA, "name": "Orphaned", "description": None,
+             "area_id": AREA_ARCHIVED},
+        ],
+        "system_settings": [
+            {"key": "site_map.min_pin_spacing", "value": 0.08},
+            {"key": "site.name", "value": site_name},
+        ],
+        "gateways": [
+            {"id": "g-cell", "sparkplug_id": "gwy-cell", "name": "In a cell", "cell_id": CELL_FILED,
+             "location_scope": "cell"},
+            {"id": "g-area", "sparkplug_id": "gwy-area", "name": "Area-wide",
+             "location_scope": "area_wide", "area_id": AREA_NORTH},
+            {"id": "g-site", "sparkplug_id": "gwy-site", "name": "Site-wide",
+             "location_scope": "site_wide"},
+            {"id": "g-sim", "sparkplug_id": "gwy-sim", "name": "Simulator", "location_scope": "cell",
+             "is_simulated": True},
+            {"id": "g-shadow", "sparkplug_id": "gwy-shadow", "name": "Playback",
+             "location_scope": "cell", "is_simulated": True, "is_shadow": True},
+            {"id": "g-none", "sparkplug_id": "gwy-none", "name": "Nowhere", "location_scope": "cell"},
+            {"id": "g-gone", "sparkplug_id": "gwy-gone", "name": "Archived area",
+             "location_scope": "area_wide", "area_id": AREA_ARCHIVED},
+        ],
+        "devices": [
+            {"id": "d-cell", "sparkplug_id": "dev-cell", "name": "Mill", "gateway_id": "g-cell"},
+            {"id": "d-unfiled", "sparkplug_id": "dev-unfiled", "name": "Press", "gateway_id": None,
+             "cell_id": CELL_UNFILED},
+            {"id": "d-area", "sparkplug_id": "dev-area", "name": "BMS", "gateway_id": "g-area",
+             "location_scope": "area_wide"},
+            {"id": "d-site", "sparkplug_id": "dev-site", "name": "Weather", "gateway_id": "g-site",
+             "location_scope": "site_wide"},
+            {"id": "d-sim", "sparkplug_id": "dev-sim", "name": "Sim", "gateway_id": "g-sim"},
+            {"id": "d-shadow", "sparkplug_id": "dev-shadow", "name": "Replay",
+             "gateway_id": "g-shadow"},
+            {"id": "d-none", "sparkplug_id": "dev-none", "name": "Nowhere", "gateway_id": None},
+            {"id": "d-gone", "sparkplug_id": "dev-gone", "name": "Archived cell",
+             "gateway_id": None, "cell_id": CELL_ARCHIVED},
+        ],
+        "device_locations": [
+            located("d-cell", "inherited", CELL_FILED, AREA_NORTH),
+            located("d-unfiled", "explicit", CELL_UNFILED),
+            located("d-area", "area_wide", area=AREA_NORTH),
+            located("d-site", "site_wide"),
+            located("d-sim", "simulated"),
+            located("d-shadow", "shadow"),
+            located("d-none", "unassigned"),
+            located("d-gone", "explicit", CELL_ARCHIVED, AREA_NORTH),
+        ],
+        "schemas": [],
+    }
+
+
+class TestTheLocationTree(unittest.TestCase):
+    """
+    Where every asset and place is filed: the site, its areas, their cells, the lanes and
+    Unassigned, built by `_build_objects` from the reads the migrations allow.
+    """
+
+    def built(self, rows=None):
+        pg = ColumnCheckingPostgrest(rows or _location_rows())
+        space = i3x_service._read_address_space(pg)
+        return space, i3x_service._build_objects(space)
+
+    def parents(self, objects):
+        return {e: o["parentId"] for e, o in objects.items()}
+
+    def test_each_asset_is_filed_at_the_level_it_occupies(self):
+        _, objects = self.built()
+        parents = self.parents(objects)
+        expected = {
+            # A cell's assets stay under their cell, whether or not the cell is filed in an area.
+            "dev-cell": CELL_FILED, "gwy-cell": CELL_FILED, "dev-unfiled": CELL_UNFILED,
+            "dev-area": AREA_NORTH, "gwy-area": AREA_NORTH,
+            "dev-site": A.SITE_ELEMENT_ID, "gwy-site": A.SITE_ELEMENT_ID,
+            "dev-sim": SIMULATED_LANE, "gwy-sim": SIMULATED_LANE,
+            "dev-shadow": SHADOW_LANE, "gwy-shadow": SHADOW_LANE,
+            "dev-none": A.UNASSIGNED_ELEMENT_ID, "gwy-none": A.UNASSIGNED_ELEMENT_ID,
+            # A place the caller cannot see is climbed past, not named and not Unassigned.
+            "dev-gone": AREA_NORTH, "gwy-gone": A.SITE_ELEMENT_ID,
+        }
+        self.assertEqual({e: parents[e] for e in expected}, expected)
+
+    def test_a_cell_sits_under_its_area_or_directly_under_the_site(self):
+        _, objects = self.built()
+        self.assertEqual(objects[AREA_NORTH]["parentId"], A.SITE_ELEMENT_ID)
+        self.assertEqual(objects[CELL_FILED]["parentId"], AREA_NORTH)
+        self.assertEqual(objects[CELL_UNFILED]["parentId"], A.SITE_ELEMENT_ID)
+        self.assertEqual(objects[CELL_IN_ARCHIVED_AREA]["parentId"], A.SITE_ELEMENT_ID)
+        self.assertNotIn(AREA_ARCHIVED, objects)
+        self.assertEqual(
+            objects[AREA_NORTH]["metadata"]["relationships"]["HasChildren"],
+            sorted([CELL_FILED, "dev-area", "gwy-area", "dev-gone"]),
+        )
+
+    def test_unassigned_holds_only_what_nobody_has_placed(self):
+        _, objects = self.built()
+        self.assertEqual(
+            objects[A.UNASSIGNED_ELEMENT_ID]["metadata"]["relationships"]["HasChildren"],
+            ["dev-none", "gwy-none"],
+        )
+
+    def test_the_built_tree_is_symmetric_and_has_one_root(self):
+        _, objects = self.built()
+        missing = _missing_inverses(objects)
+        self.assertEqual(missing, [], chr(10).join(missing))
+        self.assertEqual([e for e, o in objects.items() if o["parentId"] is None], [A.SITE_ELEMENT_ID])
+        unresolved = {e: p for e, p in self.parents(objects).items() if p and p not in objects}
+        self.assertEqual(unresolved, {})
+
+    def test_no_location_is_a_composition(self):
+        _, objects = self.built()
+        for element_id, obj in objects.items():
+            if obj["typeElementId"] not in LOCATION_TYPES:
+                continue
+            with self.subTest(element_id=element_id):
+                self.assertFalse(obj["isComposition"])
+                self.assertNotIn("HasComponent", obj["metadata"]["relationships"])
+
+    def test_a_lane_exists_only_while_something_is_in_it(self):
+        _, objects = self.built()
+        self.assertEqual(objects[SIMULATED_LANE]["typeElementId"], A.LANE_TYPE_ID)
+        self.assertEqual(objects[SHADOW_LANE]["displayName"], "Shadow")
+
+        rows = _location_rows()
+        rows["gateways"] = [g for g in rows["gateways"] if not g.get("is_simulated")]
+        rows["devices"] = [d for d in rows["devices"] if d["id"] not in ("d-sim", "d-shadow")]
+        _, objects = self.built(rows)
+        self.assertNotIn(SIMULATED_LANE, objects)
+        self.assertNotIn(SHADOW_LANE, objects)
+        site_children = objects[A.SITE_ELEMENT_ID]["metadata"]["relationships"]["HasChildren"]
+        self.assertNotIn(SIMULATED_LANE, site_children)
+        # Unassigned is the queue, so it stays even when empty.
+        self.assertIn(A.UNASSIGNED_ELEMENT_ID, site_children)
+
+    def test_the_root_is_named_by_the_site_setting(self):
+        _, objects = self.built()
+        self.assertEqual(objects[A.SITE_ELEMENT_ID]["displayName"], "Aber Works")
+        for unset in ("", "   ", None):
+            with self.subTest(site_name=unset):
+                _, objects = self.built(_location_rows(site_name=unset))
+                self.assertEqual(objects[A.SITE_ELEMENT_ID]["displayName"], "Site")
+
+        rows = _location_rows()
+        rows["system_settings"] = []
+        _, objects = self.built(rows)
+        self.assertEqual(objects[A.SITE_ELEMENT_ID]["displayName"], "Site")
+
+    def test_the_site_name_is_read_by_its_key_alone(self):
+        pg = ColumnCheckingPostgrest(_location_rows())
+        i3x_service._read_address_space(pg)
+        reads = [params for relation, params in pg.calls if relation == "system_settings"]
+        self.assertEqual(reads, [{"select": "key,value", "key": "eq.site.name"}])
+
+    def test_a_root_query_returns_the_named_site(self):
+        i3x_service._space_cache_clear()
+        self.addCleanup(i3x_service._space_cache_clear)
+        req = FakeRequest(path="/v1/objects?root=true", pg=ColumnCheckingPostgrest(_location_rows()))
+        i3x_service.h_objects(req)
+        self.assertEqual(
+            [(o["elementId"], o["displayName"]) for o in req.result],
+            [(A.SITE_ELEMENT_ID, "Aber Works")],
+        )
+
+    def test_location_values_count_devices_and_cells_not_children(self):
+        space, objects = self.built()
+
+        def value(element_id):
+            return i3x_service._current_value(objects, space, element_id)["value"]
+
+        # Every device in the area: area-wide, in its cell, and climbed from an archived cell.
+        self.assertEqual(
+            value(AREA_NORTH), {"cellCount": 1, "deviceCount": 3, "description": "Assembly hall"}
+        )
+        self.assertEqual(value(CELL_FILED), {"deviceCount": 1, "description": None})
+        self.assertEqual(value(CELL_IN_ARCHIVED_AREA), {"deviceCount": 0, "description": None})
+        self.assertEqual(value(SIMULATED_LANE)["deviceCount"], 1)
+        self.assertEqual(value(SHADOW_LANE)["deviceCount"], 1)
+        # Unassigned holds a gateway too, which is not a device.
+        self.assertEqual(value(A.UNASSIGNED_ELEMENT_ID)["deviceCount"], 1)
+        self.assertEqual(value(A.SITE_ELEMENT_ID), {"cellCount": 3, "deviceCount": 8})
+
+    def test_every_location_value_is_what_its_type_declares(self):
+        space, objects = self.built()
+        schemas = {t["elementId"]: t["schema"] for t in A.SYNTHETIC_TYPES}
+        json_types = {"number": (int, float), "string": (str,), "null": (type(None),)}
+        seen = set()
+        for element_id, obj in objects.items():
+            if obj["typeElementId"] not in LOCATION_TYPES:
+                continue
+            seen.add(obj["typeElementId"])
+            declared = schemas[obj["typeElementId"]]["properties"]
+            value = i3x_service._current_value(objects, space, element_id)["value"]
+            with self.subTest(element_id=element_id):
+                self.assertEqual(set(value), set(declared))
+                for key, spec in declared.items():
+                    allowed = spec["type"] if isinstance(spec["type"], list) else [spec["type"]]
+                    self.assertTrue(
+                        any(isinstance(value[key], json_types[t]) for t in allowed),
+                        f"{key} is {value[key]!r}, not {allowed}",
+                    )
+        self.assertEqual(seen, LOCATION_TYPES)
+
+    def test_placement_takes_the_lane_first_then_the_nearest_visible_place(self):
+        cells, areas = {"c"}, {"a"}
+        cases = [
+            (("shadow", "c", "a"), SHADOW_LANE),
+            (("simulated", None, None), SIMULATED_LANE),
+            (("explicit", "c", "a"), "c"),
+            (("inherited", "gone", "a"), "a"),
+            (("explicit", "gone", "gone"), A.SITE_ELEMENT_ID),
+            (("area_wide", None, "a"), "a"),
+            (("area_wide", None, "gone"), A.SITE_ELEMENT_ID),
+            (("site_wide", None, None), A.SITE_ELEMENT_ID),
+            (("unassigned", None, None), A.UNASSIGNED_ELEMENT_ID),
+            # No location row (or a denied view) names no place.
+            ((None, None, None), A.UNASSIGNED_ELEMENT_ID),
+        ]
+        for args, expected in cases:
+            with self.subTest(args=args):
+                self.assertEqual(A.placement(*args, cells, areas), expected)
+
+    def test_the_sources_placement_reads_are_the_views_labels(self):
+        # A label renamed in the view would otherwise file every lane device under Unassigned.
+        sql = "\n".join(
+            p.read_text(encoding="utf-8") for p in sorted(MIGRATIONS_DIR.glob("[0-9]*.sql"))
+        )
+        last = list(re.finditer(r"CREATE (?:OR REPLACE )?VIEW public\.device_locations\b", sql))[-1]
+        view = sql[last.start():sql.index(";", last.start())]
+        labels = set(re.findall(r"(?:THEN|ELSE) '([a-z_]+)'::text", view))
+        used = {A.SOURCE_SHADOW, A.SOURCE_SIMULATED, A.SOURCE_SITE_WIDE, A.SOURCE_AREA_WIDE,
+                A.SOURCE_EXPLICIT, A.SOURCE_UNASSIGNED}
+        self.assertLessEqual(used, labels)
+        self.assertEqual(set(A.LANES), {A.SOURCE_SHADOW, A.SOURCE_SIMULATED})
+
+    def test_a_gateway_is_placed_in_the_views_precedence(self):
+        cases = [
+            ({"is_shadow": True, "is_simulated": True}, "shadow"),
+            ({"is_simulated": True, "location_scope": "site_wide"}, "simulated"),
+            ({"location_scope": "site_wide"}, "site_wide"),
+            ({"location_scope": "area_wide", "area_id": "a"}, "area_wide"),
+            ({"location_scope": "cell", "cell_id": "c"}, "explicit"),
+            ({"location_scope": "cell"}, "unassigned"),
+        ]
+        for row, expected in cases:
+            with self.subTest(row=row):
+                self.assertEqual(A.gateway_location_source(row), expected)
 
 
 # -------------------------------------------------------------------------------------------------
@@ -1140,8 +1439,8 @@ class TestAddressSpaceReads(unittest.TestCase):
         i3x_service._read_address_space(pg)
         self.assertEqual(
             sorted(relation for relation, _ in pg.calls),
-            ["cells", "device_locations", "device_schemas", "devices", "gateways",
-             "metric_catalog", "schemas"],
+            ["areas", "cells", "device_locations", "device_schemas", "devices", "gateways",
+             "metric_catalog", "schemas", "system_settings"],
         )
 
     def test_the_history_read_names_real_columns(self):
@@ -1281,7 +1580,9 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
                 value = i3x_service._current_value(objects, space, element_id)["value"]
                 self.assertEqual(self.nonconformance(value, schemas[type_id]), [])
                 checked.add(type_id)
-        self.assertEqual(checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.GATEWAY_TYPE_ID})
+        self.assertEqual(
+            checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.UNASSIGNED_TYPE_ID, A.GATEWAY_TYPE_ID}
+        )
 
     def test_containers_count_devices_not_children(self):
         space, objects, _ = self.space()
@@ -1728,15 +2029,18 @@ class TestRequestValidation(unittest.TestCase):
                     i3x_service.Handler._body(req)
                 self.assertEqual(caught.exception.status, 400)
 
-    def test_max_depth_zero_still_reads_the_whole_composition(self):
+    def test_max_depth_zero_does_not_descend_the_location_tree(self):
+        # maxDepth follows HasComponent only. The site organises its cells and devices with
+        # HasChildren, so even an unbounded read returns the site's own value and nothing else.
         rows = _seeded_rows()
         req = FakeRequest(
             body={"elementIds": [A.SITE_ELEMENT_ID], "maxDepth": 0},
             pg=ColumnCheckingPostgrest(rows),
         )
         i3x_service.h_objects_value(req)
-        components = req.result[0]["result"]["components"]
-        self.assertIn("dev-explicit", components, "unbounded descends site -> cell -> device")
+        self.assertTrue(req.result[0]["success"])
+        self.assertFalse(req.result[0]["result"]["isComposition"])
+        self.assertNotIn("components", req.result[0]["result"])
 
 
 class TestMirroredConstants(unittest.TestCase):
