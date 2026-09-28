@@ -3,10 +3,22 @@
 A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information Interoperability
 eXchange) server over this stack's existing model.
 
-**Current verdict: `1.0 Compatible`** — 52 passed, 0 failed against CESMII's official 60-test
-conformance suite at `5010274f` (cesmii/i3X, 2026-06-18), the ref CI pins. That predates the
-Implementation Guide's 1.0 final of 2026-09-25, whose changes were editorial. Not *Full 1.0 Compliance*, and deliberately so: that requires the optional
-Update methods, which this server refuses (see [Writes](#writes-are-refused)).
+**What is verified, and by what.** Two results, each covering only what it tests:
+
+- **CESMII's conformance suite: `1.0 Compatible`**, 52 passed and 0 failed of its 60 tests at
+  `5010274f` (cesmii/i3X, 2026-06-18), the ref CI pins. That ref predates the Implementation Guide's
+  1.0 final of 2026-09-25, whose changes were editorial. The suite is written for any i3X server, so
+  it tests shape (envelopes, status codes, that every edge has its inverse), and it skips what it
+  cannot provoke, SUB-07 and SUB-13 among them ([Testing](#testing)). Not *Full 1.0 Compliance*,
+  deliberately: that requires the optional Update methods, which this server refuses
+  ([Writes](#writes-are-refused)).
+- **Aber's live checks: `ingestion/validate.py` checks 12a–12z pass.** They seed a plant through
+  the Directory and compare what this server says about it with what the Directory holds:
+  placement, types, metric components, values and counts, history, authentication, input
+  validation, and a subscription's withdrawal ([Testing](#testing) lists each).
+
+A rule of the guide that neither exercises is covered by the unit suite, `test_i3x_service.py`, or
+not at all.
 
 ---
 
@@ -343,6 +355,37 @@ Five rules are easy to get wrong and each fails quietly:
 A `/sync` also answers 206 when registered elements have left the caller's view, naming them; see
 [Security](#security).
 
+#### What a registration receives
+
+`maxDepth` sits at the top level of the `/subscriptions/register` body and applies to every
+elementId in that call, where the guide puts it: `1` (the default) is the object alone, `0` is
+unbounded, and N descends N−1 levels of `HasComponent`, as on `/objects/value`. It is validated as
+there, so anything but an integer of 0 or more is a 400 before anything is read. An `objects` entry
+is read for its `elementId` only. Registering an object already registered succeeds and changes
+nothing, so the first depth stands and `/subscriptions/list` reports it; unregister first to change
+it. Results pair with requests by position, so a repeated elementId keeps each of its places. An
+elementId that is not a non-empty string fails its own item with a 400, and one the caller cannot
+see with a 404.
+
+| Registered | Receives updates for |
+| :--- | :--- |
+| A device at `maxDepth: 1` | The device: its map of metrics |
+| A device at `maxDepth: 0`, or 2 or more | The device, and each of its metrics as `<device>/<metric>`, in one batch when both change |
+| A metric, `<device>/<metric>` | That metric only, whatever its depth |
+| A gateway | That gateway only (its NBIRTH and NDEATH). It composes nothing, so not its devices |
+| The site, an area, a cell, a lane or Unassigned | Nothing |
+
+**A metric's parent is read from its elementId.** The only composition is a device's metrics, and a
+`sparkplug_id` never contains `/`, so the device is the text before the first one. The MQTT thread
+therefore matches a change to its subscribers without reading the address space. What the owner may
+still see is checked at each delivery, as above.
+
+**Locations do not emit.** The site, areas, cells, lanes and Unassigned are `HasParent`/`HasChildren`
+only and compose nothing, so no depth reaches through them. Their own values are counts of what the
+Directory holds, which change only when the Directory does, and the MQTT thread that stages updates
+cannot see the Directory. Registering one succeeds and delivers nothing; read it with
+`/objects/value`.
+
 ### Writes are refused
 
 `PUT /objects/value` and `PUT /objects/history` answer **405**, and `GET /info` declares
@@ -599,10 +642,12 @@ npm run dev:test -- --filter=i3x
 on this server's first run, including a request-body bug that corrupted the *next* request on a
 keep-alive connection, which no test written from the same misunderstanding would have looked for.
 But it **skipped SUB-07 and SUB-13** on the live run ("no updates were observed on the subscription"):
-it can only test sync acknowledgement if the server happens to produce updates while it is watching.
-So the MUSTs that protect a client's unprocessed updates are covered by our unit tests, or nowhere.
-Queue overflow (10,000 batches) and TTL expiry are the same story — they need a controlled queue and
-an injectable clock.
+it can only test sync acknowledgement if an update arrives between its register and its sync, and
+the only way it provokes one is `PUT /objects/value`, which this server refuses. So they skip
+whenever nothing publishes in that window, and the MUSTs that protect a client's unprocessed updates
+are covered by our unit tests, or nowhere. Queue overflow (10,000 batches) and TTL expiry are the
+same story — they need a controlled queue and an injectable clock — and so is which subscriptions a
+change reaches, since the suite registers only at the default `maxDepth`.
 
 **What the live check adds.** The conformance suite tests shape: envelopes, status codes, that every
 edge has its inverse. It is written for any i3X server, so it cannot know where a device belongs, and
