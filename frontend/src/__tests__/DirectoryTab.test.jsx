@@ -225,7 +225,7 @@ describe('DirectoryTab service groups', () => {
          and nowhere else, so a link would produce a failed tab that reads as the service being
          down. */
       expect(isBrowsableEndpoint('http://node-exporter:9100/metrics')).toBe(false)
-      expect(isBrowsableEndpoint('http://supabase-kong:8000')).toBe(false)
+      expect(isBrowsableEndpoint('http://supabase-envoy:8000')).toBe(false)
     })
 
     it('treats localhost, an IP and a real domain as openable', async () => {

@@ -16,8 +16,8 @@ export interface AddressState {
   problem: string | null;
 }
 
-const IN_STACK_URL = /supabase-kong|127\.0\.0\.1|localhost|::1/;
-const IN_STACK_HOSTS = new Set(["mosquitto", "localhost", "127.0.0.1", "::1", "supabase-kong"]);
+const IN_STACK_URL = /supabase-envoy|127\.0\.0\.1|localhost|::1/;
+const IN_STACK_HOSTS = new Set(["mosquitto", "localhost", "127.0.0.1", "::1", "supabase-envoy"]);
 
 /** SUPABASE_PUBLIC_URL: where the appliance redeems its token and fetches from then on. */
 export function platformPublicUrl(): AddressState {

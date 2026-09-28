@@ -14,7 +14,7 @@ import { copyText } from '../common/CopyableId'
  */
 /**
  * Whether a browser can open this endpoint: an http(s) scheme and a host that is not a single-label
- * container name (`node-exporter`, `supabase-kong`). Erring towards copy: a copyable address costs
+ * container name (`node-exporter`, `supabase-envoy`). Erring towards copy: a copyable address costs
  * one paste, an unresolvable link costs a failed tab and a wrong conclusion.
  */
 export function isBrowsableEndpoint(url) {

@@ -89,9 +89,9 @@ const IMAGES = [
 const FORWARDS = [
   { local: 5433, service: 'timescaledb', remote: 5432, what: 'historian', relay: true },
   { local: 54322, service: 'supabase-db', remote: 5432, what: 'Supabase Postgres', relay: true },
-  { local: 54321, service: 'supabase-kong', remote: 8000, what: 'Supabase API (the gateway)' },
-  { local: 54323, service: 'supabase-kong', remote: 8001, what: 'Studio, behind the gateway login' },
-  { local: 3003, service: 'supabase-kong', remote: 8002, what: 'the forge, behind the gateway' },
+  { local: 54321, service: 'supabase-envoy', remote: 8000, what: 'Supabase API (the gateway)' },
+  { local: 54323, service: 'supabase-envoy', remote: 8001, what: 'Studio, behind the gateway login' },
+  { local: 3003, service: 'supabase-envoy', remote: 8002, what: 'the forge, behind the gateway' },
   // The forge over SSH, which the appliance suites push to with a deploy key: the k3d load
   // balancer publishes 22 on the cluster network only.
   { local: 2222, service: 'gitea', remote: 22, what: 'the forge over SSH' },
