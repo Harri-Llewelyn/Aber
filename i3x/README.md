@@ -616,14 +616,14 @@ than minutes, and why `0` disables the cache outright.
   raised on every conformance run and is otherwise rediscovered on each reading of the log.
 - **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH. A
   device that has never birthed reports `false` rather than unknown.
+- **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
+  respect to a permission that has just been revoked. See
+  [The address-space cache](#the-address-space-cache).
 - **History `quality` is `Good` for every stored value**, whatever state the device was in when it
   was stored (#497).
 - **History reads the raw hypertable only.** A range older than raw retention
   (`timescaledb.retention.retainFor`, 14 days in the chart) comes back empty, although the rollups
   still hold it (#505).
-- **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
-  respect to a permission that has just been revoked. See
-  [The address-space cache](#the-address-space-cache).
 - **Writes are not implemented, and that is a decision rather than a gap.** `PUT /objects/value`
   answers 405 and `/info` declares `update.current: false`. A server that does not implement the
   verb cannot be talked into it.
