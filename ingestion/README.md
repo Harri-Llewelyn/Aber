@@ -1737,9 +1737,10 @@ The write is deliberately forgiving of IO errors: a read-only or full filesystem
 heartbeat — which correctly reports unhealthy — rather than crash a daemon that is otherwise fine.
 `test_health_heartbeat.py` pins all of that, including the disconnected case.
 
-It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts 20
-outcomes covering quarantine, identity diagnostics, birth observation, multi-submodel conformance,
-digital-thread triggers, telemetry mapping, rename safety and quarantine gating.
+It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts the
+outcomes counted in the table above: quarantine, identity diagnostics, birth observation,
+multi-submodel conformance, digital-thread triggers, telemetry mapping, rename safety, quarantine
+gating, and what the i3X server answers (checks 12 and 17).
 
 **Every assertion is scoped to the run's own entities.** The stack always has audit rows, telemetry
 and devices from the demo simulator, so a check that queried a whole table and asserted "not empty"
