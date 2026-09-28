@@ -98,6 +98,17 @@ SUBSCRIPTION_QUEUE_LIMIT = int(os.getenv("I3X_SUBSCRIPTION_QUEUE_LIMIT", "10000"
 MAX_SUBSCRIPTIONS_PER_PRINCIPAL = int(os.getenv("I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL", "20"))
 MAX_SUBSCRIPTIONS = int(os.getenv("I3X_MAX_SUBSCRIPTIONS", "500"))
 MAX_STREAMS = int(os.getenv("I3X_MAX_STREAMS", "50"))
+# The most stored rows one history series reads, and the most values it returns, a device's map of
+# N metrics counting N. A request's `limit` may ask for fewer. A series cut short is answered 206,
+# naming the instant it stops at. Past about 6300, postgres_fdw no longer ships the LIMIT and each
+# read fetches its whole window (README.md -> History).
+HISTORY_MAX_ROWS = int(os.getenv("I3X_HISTORY_MAX_ROWS", "1000"))
+# The most rows the read just before a device's window asks for, whatever HISTORY_MAX_ROWS is. That
+# read has no lower time bound, so past the LIMIT postgres_fdw ships it would fetch every earlier row.
+HISTORY_SEED_MAX_ROWS = 1000
+# The most HasComponent descendants one value or history request returns under `components`,
+# summed over its elementIds. Past it the rest are left out and the answer is a 206.
+MAX_COMPONENTS = int(os.getenv("I3X_MAX_COMPONENTS", "10000"))
 REAPER_INTERVAL_SECONDS = int(os.getenv("I3X_REAPER_INTERVAL_SECONDS", "30"))
 # Comfortably inside the TTL, so an idle-but-connected client keeps its subscription alive.
 SSE_KEEPALIVE_SECONDS = float(os.getenv("I3X_SSE_KEEPALIVE_SECONDS", "15"))
@@ -1289,12 +1300,14 @@ class Handler(BaseHTTPRequestHandler):
             payload["responseDetail"] = detail
         self._send(status, payload)
 
-    def _bulk(self, results: List[dict]) -> None:
+    def _bulk(self, results: List[dict], detail: Optional[dict] = None) -> None:
         # A bulk response is 200 with per-item success, even when items failed: the request itself
         # succeeded. `success` at the top is the AND of the items, which is what the suite checks.
-        self._send(
-            200, {"success": all(r.get("success") for r in results), "results": results}
-        )
+        # `detail` is a server limit's 206 (`_Partial`), and its status becomes the response's.
+        payload = {"success": all(r.get("success") for r in results), "results": results}
+        if detail:
+            payload["responseDetail"] = detail
+        self._send(detail["status"] if detail else 200, payload)
 
     def _fail(self, status: int, title: str, detail: str) -> None:
         self._send(
@@ -1612,7 +1625,7 @@ def h_objects_value(req: "Handler") -> None:
     space = _load_address_space(req._pg())
     objects = _build_objects(space)
 
-    results = []
+    results, partial = [], _Partial()
     for eid in wanted:
         vqt = _current_value(objects, space, eid)
         if vqt is None:
@@ -1629,7 +1642,7 @@ def h_objects_value(req: "Handler") -> None:
             # maxDepth 0 means unbounded; anything above 1 descends that many levels.
             budget = -1 if max_depth == 0 else max_depth - 1
             components = {}
-            for child in _component_ids(objects, eid, budget):
+            for child in partial.components(result, _component_ids(objects, eid, budget)):
                 child_vqt = _current_value(objects, space, child)
                 if child_vqt:
                     components[child] = {
@@ -1639,87 +1652,370 @@ def h_objects_value(req: "Handler") -> None:
                     }
             result["components"] = components
         results.append({"success": True, "elementId": eid, "result": result})
-    req._bulk(results)
+    req._bulk(results, detail=partial.detail(results))
 
 
-RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}")
+# RFC 3339 `date-time` in full: date, time, optional fraction and a REQUIRED offset, matched whole.
+# PostgREST is only ever sent the parsed instant (`_pg_time`), never the caller's text.
+RFC3339 = re.compile(
+    r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)",
+    re.ASCII,
+)
 
 
-def _read_telemetry(pg: PostgrestClient, element_id: str, start, end, limit: int) -> List[dict]:
-    """One device's raw samples in [start, end], newest first."""
-    return pg.get(
-        "telemetry",
-        {
-            "select": "time,metric_name,val_double,val_string,val_bool",
-            "asset_id": "eq." + element_id,
-            "time": "gte." + str(start),
-            "and": "(time.lte." + str(end) + ")",
-            "order": "time.desc",
-            "limit": str(limit),
-        },
-    )
+def _rfc3339(text) -> Optional[datetime]:
+    """An RFC 3339 timestamp as an aware UTC datetime, or None when `text` is not one."""
+    match = RFC3339.fullmatch(text) if isinstance(text, str) else None
+    if match is None:
+        return None
+    date, clock, fraction, offset = match.groups()
+    offset = "+00:00" if offset in ("Z", "z") else offset
+    try:
+        # Rewritten to the one form `fromisoformat` reads on every Python: six digits and +HH:MM.
+        micros = (fraction or "")[:6].ljust(6, "0")
+        return datetime.fromisoformat(f"{date}T{clock}.{micros}{offset}").astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        # Month 13, hour 24, second 60, or an offset that moves year 1 or 9999 out of range.
+        return None
+
+
+def _history_window(body: dict) -> tuple:
+    """`startTime` and `endTime` as UTC datetimes: both required, both RFC 3339, start <= end."""
+    bounds = []
+    for name in ("startTime", "endTime"):
+        value = body.get(name)
+        if value is None or value == "":
+            raise Problem(400, "Bad Request", "startTime and endTime are required.")
+        instant = _rfc3339(value)
+        if instant is None:
+            raise Problem(
+                400,
+                "Bad Request",
+                f"{name} must be an RFC 3339 timestamp with an offset, such as "
+                f"2026-01-01T00:00:00Z; got {json.dumps(value)}.",
+            )
+        bounds.append(instant)
+    if bounds[0] > bounds[1]:
+        raise Problem(
+            400,
+            "Bad Request",
+            f"startTime {body['startTime']} is after endTime {body['endTime']}.",
+        )
+    return bounds[0], bounds[1]
+
+
+def _pg_time(instant: datetime) -> str:
+    """An instant as these PostgREST filters take it: UTC to the microsecond, with `Z`."""
+    return instant.astimezone(timezone.utc).replace(tzinfo=None).isoformat("T", "microseconds") + "Z"
+
+
+TELEMETRY_COLUMNS = "time,metric_name,val_double,val_string,val_bool"
+
+
+def _read_telemetry(pg: PostgrestClient, element_id: str, start, end, limit: int,
+                    metric: Optional[str] = None) -> List[dict]:
+    """
+    A device's stored rows in [start, end], or one metric's, newest first. `start` and `end` are
+    `_pg_time` strings. The upper bound goes in `and` because a params dict holds one `time` key.
+    """
+    params = {
+        "select": TELEMETRY_COLUMNS,
+        "asset_id": "eq." + element_id,
+        "time": "gte." + str(start),
+        "and": "(time.lte." + str(end) + ")",
+        "order": "time.desc",
+        "limit": str(limit),
+    }
+    if metric is not None:
+        params["metric_name"] = "eq." + metric
+    return pg.get("telemetry", params)
+
+
+def _sample_value(row: dict):
+    """A stored row's reading: whichever of its three typed columns is set."""
+    for column in ("val_double", "val_string", "val_bool"):
+        if row.get(column) is not None:
+            return row[column]
+    return None
+
+
+def _vqt(value, time) -> dict:
+    """One history entry. Quality is Good when there is a value, else GoodNoData."""
+    return {
+        "value": value,
+        "quality": "Good" if value is not None else "GoodNoData",
+        "timestamp": A.to_rfc3339_utc(time),
+    }
+
+
+def _cut(rows: List[dict], limit: int) -> tuple:
+    """
+    Rows read newest first, `limit` + 1 asked for. Past `limit`, the oldest instant is dropped
+    whole, since only some of its rows may be here. Returns (rows kept, instant cut at or None).
+    """
+    if len(rows) <= limit:
+        return rows, None
+    cut = rows[limit].get("time")
+    return [r for r in rows[:limit] if r.get("time") != cut], cut
+
+
+def _snapshots(rows: List[dict], seeds: Dict[str, dict], budget: int) -> tuple:
+    """
+    One map per instant in `rows` (newest first) of every metric's newest value there, carried
+    forward from `seeds` since Sparkplug reports by exception. Only the newest maps holding at most
+    `budget` values in all are kept, a map of N metrics counting N. Returns (maps newest first, the
+    newest instant left out or None).
+    """
+    instants, i = [], len(rows)
+    while i:
+        instant, group = rows[i - 1].get("time"), []
+        while i and rows[i - 1].get("time") == instant:
+            i -= 1
+            group.append(rows[i])
+        instants.append((instant, group))
+    known, sizes = set(seeds), []
+    for _, group in instants:
+        known.update(r["metric_name"] for r in group)
+        sizes.append(len(known))
+    first, total = len(instants), 0
+    while first and total + sizes[first - 1] <= budget:
+        first -= 1
+        total += sizes[first]
+    state, out = {name: _sample_value(row) for name, row in seeds.items()}, []
+    for position, (instant, group) in enumerate(instants):
+        for row in group:
+            state[row["metric_name"]] = _sample_value(row)
+        if position >= first:
+            out.append(_vqt(dict(sorted(state.items())), instant))
+    out.reverse()
+    return out, (instants[first - 1][0] if first else None)
+
+
+class _History:
+    """
+    One history request's series, each read at most once. A metric's is its stored samples; a
+    device's is a map snapshot per instant. README.md -> "History" states what each costs.
+    """
+
+    def __init__(self, pg: PostgrestClient, space: dict, start: datetime, end: datetime,
+                 rows: int, limit: str):
+        self.pg, self.rows, self.limit = pg, rows, limit
+        self.devices = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
+        self.start, self.window = start, (_pg_time(start), _pg_time(end))
+        self._device_cache: Dict[str, tuple] = {}
+        self._metric_cache: Dict[tuple, tuple] = {}
+
+    def series(self, element_id: str, component: bool = False) -> tuple:
+        """
+        (values newest first, notes on what cut them short). A metric reached as a component of
+        its device is sliced from the device's rows, so it matches the device's snapshots.
+        """
+        sid, slash, name = element_id.partition("/")
+        if slash and sid in self.devices:
+            if component and sid in self._device_cache:
+                rows, _, _, row_notes = self._device_cache[sid]
+                mine = [r for r in rows if r["metric_name"] == name]
+                return [_vqt(_sample_value(r), r.get("time")) for r in mine], row_notes
+            return self._metric(sid, name)
+        if element_id in self.devices:
+            _, snapshots, notes, _ = self._device(element_id)
+            return snapshots, notes
+        # Only devices and their metrics carry telemetry. Anything else has no series of its own,
+        # and inventing an aggregate would assert a measurement nobody took.
+        return [], []
+
+    def _cut_note(self, cut, unit: str = "rows") -> str:
+        instant = _rfc3339(cut)
+        return (
+            f"This series stops at {self.limit} {unit}: nothing at or before "
+            f"{_pg_time(instant) if instant else cut} was returned. Request it again with that "
+            f"endTime for the rest."
+        )
+
+    def _metric(self, sid: str, name: str) -> tuple:
+        """One read: the metric's rows in the window."""
+        if (sid, name) not in self._metric_cache:
+            rows = _read_telemetry(self.pg, sid, *self.window, self.rows + 1, metric=name)
+            kept, cut = _cut(rows, self.rows)
+            self._metric_cache[(sid, name)] = (
+                [_vqt(_sample_value(r), r.get("time")) for r in kept],
+                [self._cut_note(cut)] if cut is not None else [],
+            )
+        return self._metric_cache[(sid, name)]
+
+    def _device(self, sid: str) -> tuple:
+        """
+        At most three reads: the window's rows, and for the values metrics held before it,
+        `telemetry_latest` and the rows just before the window. Returns (rows kept, snapshots,
+        notes on the snapshots, notes on the rows), the last for components sliced from them.
+        """
+        if sid not in self._device_cache:
+            rows = _read_telemetry(self.pg, sid, *self.window, self.rows + 1)
+            kept, cut = _cut(rows, self.rows)
+            row_notes = [self._cut_note(cut)] if cut is not None else []
+            snapshots, notes = [], list(row_notes)
+            if kept:
+                # The seeds are each metric's value where the rows start: before startTime, or at
+                # the instant cut at, where the rows already read are that value.
+                seeds = {r["metric_name"]: r for r in rows[len(kept):]}
+                boundary = (_rfc3339(cut) or self.start) if cut is not None else self.start
+                missing = self._seed(sid, kept, seeds, boundary, inclusive=cut is not None)
+                snapshots, left_out = _snapshots(kept, seeds, self.rows)
+                if left_out is not None:
+                    notes = [self._cut_note(left_out, "values (a map of N metrics counts as N)")]
+                if missing:
+                    notes.append(
+                        f"{len(missing)} metric(s) changed here with no value in the "
+                        f"{self._seed_rows()} rows read before the window, and may have one "
+                        f"further back, so the snapshots leave them out until they change: "
+                        f"{', '.join(sorted(missing)[:5])}. Their own elementIds give their samples."
+                    )
+            self._device_cache[sid] = (kept, snapshots, notes, row_notes)
+        return self._device_cache[sid]
+
+    def _seed(self, sid: str, kept: List[dict], seeds: Dict[str, dict], boundary: datetime,
+              inclusive: bool) -> set:
+        """
+        Fill `seeds` with each metric's newest row before `boundary` (or at it, `inclusive`):
+        `telemetry_latest` for a metric quiet since, else one read of the rows just before it.
+        Returns the metrics that read may have stopped short of.
+        """
+        latest = self.pg.get(
+            "telemetry_latest", {"select": TELEMETRY_COLUMNS, "asset_id": "eq." + sid}
+        )
+        active = {r["metric_name"] for r in kept}
+        for row in latest:
+            if row["metric_name"] in seeds:
+                continue
+            instant = _rfc3339(row.get("time"))
+            if instant is not None and (instant < boundary or (inclusive and instant == boundary)):
+                seeds[row["metric_name"]] = row
+            else:
+                active.add(row["metric_name"])
+        active -= set(seeds)
+        if not active:
+            return set()
+        before = self.pg.get(
+            "telemetry",
+            {
+                "select": TELEMETRY_COLUMNS,
+                "asset_id": "eq." + sid,
+                "time": ("lte." if inclusive else "lt.") + _pg_time(boundary),
+                # No lower bound: postgres_fdw ships this WHERE, ORDER BY and LIMIT whole only
+                # while the LIMIT stays small, so nothing may be added to them.
+                "order": "time.desc",
+                "limit": str(self._seed_rows()),
+            },
+        )
+        for row in before:
+            if row["metric_name"] in active:
+                seeds.setdefault(row["metric_name"], row)
+        # A read that came back short reached the oldest row there is, so a metric it did not
+        # meet had no earlier value. A full one may have stopped before reaching it.
+        return (active - set(seeds)) if len(before) >= self._seed_rows() else set()
+
+    def _seed_rows(self) -> int:
+        return min(self.rows, HISTORY_SEED_MAX_ROWS)
+
+
+class _Partial:
+    """
+    What server limits cut from one bulk read: components past MAX_COMPONENTS, and history series
+    stopped at their row limit. Each item cut carries its own 206 `responseDetail` and the response
+    carries one naming them all, since a partial answer must never pass as a complete one.
+    """
+
+    TITLE = "Partial results returned"
+
+    def __init__(self):
+        self.room = MAX_COMPONENTS
+        # id(result) -> (result, notes). Holding the result keeps its id from being reused.
+        self.notes: Dict[int, tuple] = {}
+
+    def note(self, result: dict, text: str) -> None:
+        self.notes.setdefault(id(result), (result, []))[1].append(text)
+
+    def components(self, result: dict, children: list) -> list:
+        """The `children` that fit in what is left of MAX_COMPONENTS; a cut is noted on `result`."""
+        kept = children[: max(self.room, 0)]
+        self.room -= len(kept)
+        if len(kept) < len(children):
+            self.note(
+                result,
+                f"{len(children) - len(kept)} of {len(children)} components were left out: this "
+                f"server returns at most {MAX_COMPONENTS} per request (I3X_MAX_COMPONENTS). "
+                f"Request them by elementId.",
+            )
+        return kept
+
+    def detail(self, results: List[dict]) -> Optional[dict]:
+        """Attach each cut item's 206 and return the response's, or None when nothing was cut."""
+        cut = []
+        for item in results:
+            _, texts = self.notes.get(id(item.get("result")), (None, None))
+            if texts:
+                item["responseDetail"] = {
+                    "title": self.TITLE, "status": 206, "detail": " ".join(texts)
+                }
+                cut.append(item["elementId"])
+        if not cut:
+            return None
+        named = ", ".join(cut[:10]) + (f" and {len(cut) - 10} more" if len(cut) > 10 else "")
+        return {
+            "title": self.TITLE,
+            "status": 206,
+            "detail": f"A server limit cut {len(cut)} result(s) short: {named}. Each one's "
+                      f"responseDetail says where.",
+        }
 
 
 def h_objects_history(req: "Handler") -> None:
     """
     History comes from TimescaleDB through PostgREST, never from the value cache.
 
-    `public.telemetry` is a `postgres_fdw` projection, so this read crosses the wrapper and carries
+    `public.telemetry` is a `postgres_fdw` projection, so these reads cross the wrapper and carry
     the caller's token like every other read. startTime and endTime are REQUIRED: an unbounded
     history query over a hypertable is not a slow request, it is an availability incident, and the
-    spec makes both mandatory for that reason.
+    spec makes both mandatory for that reason. Every read is bounded in rows as well, and a series
+    cut short is a 206, never a complete-looking 200.
     """
     body = req._body()
     wanted = _require_element_ids(body)
-    start, end = body.get("startTime"), body.get("endTime")
-    if not start or not end:
-        raise Problem(400, "Bad Request", "startTime and endTime are required.")
-    if not RFC3339.match(str(start)) or not RFC3339.match(str(end)):
-        raise Problem(400, "Bad Request", "startTime and endTime must be valid RFC 3339 timestamps.")
-    limit = min(_int_field(body, "limit", 1000, 1), 10000)
+    start, end = _history_window(body)
+    # Not an i3X parameter: honoured below the server limit, never above it.
+    rows = min(_int_field(body, "limit", HISTORY_MAX_ROWS, 1), HISTORY_MAX_ROWS)
+    limit = (
+        f"this request's limit of {rows}" if rows < HISTORY_MAX_ROWS
+        else f"the server limit (I3X_HISTORY_MAX_ROWS) of {rows}"
+    )
     max_depth = _max_depth(body)
 
     pg = req._pg()
     space = _load_address_space(pg)
     objects = _build_objects(space)
-    device_sids = set(d["sparkplug_id"] for d in space["devices"])
+    history = _History(pg, space, start, end, rows, limit)
 
-    def samples_for(eid: str) -> list:
-        # Only devices carry telemetry. A cell has no series of its own, and an empty list is the
-        # honest answer -- inventing an aggregate would assert a measurement nobody took.
-        if eid not in device_sids:
-            return []
-        rows = _read_telemetry(pg, eid, start, end, limit)
-        out = []
-        for row in rows:
-            value = row.get("val_double")
-            if value is None:
-                value = row.get("val_string")
-            if value is None:
-                value = row.get("val_bool")
-            out.append(
-                {
-                    "value": value,
-                    "quality": "Good" if value is not None else "GoodNoData",
-                    "timestamp": A.to_rfc3339_utc(row.get("time")),
-                }
-            )
-        return out
-
-    results = []
+    results, partial = [], _Partial()
     for eid in wanted:
         obj = objects.get(eid)
         if obj is None:
             results.append(_not_found(eid, "object"))
             continue
+        result = {"isComposition": obj["isComposition"]}
         try:
-            result = {"isComposition": obj["isComposition"], "values": samples_for(eid)}
-            if obj["isComposition"] and (max_depth == 0 or max_depth > 1):
+            result["values"], notes = history.series(eid)
+            for text in notes:
+                partial.note(result, text)
+            if obj["isComposition"] and max_depth != 1:
+                # maxDepth 0 means unbounded; anything above 1 descends that many levels.
                 budget = -1 if max_depth == 0 else max_depth - 1
-                result["components"] = dict(
-                    (child, {"values": samples_for(child)})
-                    for child in _component_ids(objects, eid, budget)
-                )
+                components = {}
+                for child in partial.components(result, _component_ids(objects, eid, budget)):
+                    values, notes = history.series(child, component=True)
+                    components[child] = {"values": values}
+                    for text in notes:
+                        partial.note(result, f"{child}: {text}")
+                result["components"] = components
         except SubscriptionError as exc:
             results.append(
                 {
@@ -1734,7 +2030,7 @@ def h_objects_history(req: "Handler") -> None:
             )
             continue
         results.append({"success": True, "elementId": eid, "result": result})
-    req._bulk(results)
+    req._bulk(results, detail=partial.detail(results))
 
 
 def h_update_refused(req: Handler) -> None:
