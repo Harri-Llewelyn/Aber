@@ -2162,6 +2162,7 @@ def h_sub_create(req: Handler) -> None:
 
 
 def h_sub_list(req: Handler) -> None:
+    """Each named subscription, with every object it monitors at its first registration's depth."""
     body = req._body()
     client_id = _require_client_id(body)
     req._bulk(
@@ -2197,25 +2198,54 @@ def h_sub_delete(req: Handler) -> None:
 
 def _registration_entries(body: dict) -> list:
     """
-    The objects a subscription request wants registered, normalised and capped.
+    The elementId each entry of a register or unregister request names, in request order: a string
+    entry itself, or a dictionary entry's `elementId`. Not validated here, since a malformed id
+    fails only its own item (`_per_item`).
 
-    TWO ACCEPTED SHAPES: `objects` (dictionaries) or `elementIds` (strings). Capped through the
-    same helper the bulk READ endpoints use, and this is the path where the cap earns most: a
-    registration does not merely produce a response, it adds to the client's monitored set, which
-    outlives the request and is what every later poll is evaluated against.
+    TWO ACCEPTED SHAPES: `elementIds` (the guide's) or `objects`. Capped through the same helper the
+    bulk READ endpoints use, and this is the path where the cap earns most: a registration does not
+    merely produce a response, it adds to the client's monitored set, which outlives the request and
+    is what every later poll is evaluated against.
     """
     raw = body.get("objects") or body.get("elementIds") or []
     if not isinstance(raw, list):
         raise Problem(400, "Bad Request", "objects (or elementIds) must be an array.")
-    return [
-        {"elementId": e} if isinstance(e, str) else (e or {})
-        for e in _cap_bulk(raw, "objects" if body.get("objects") else "elementIds")
-    ]
+    _cap_bulk(raw, "objects" if body.get("objects") else "elementIds")
+    return [e.get("elementId") if isinstance(e, dict) else e for e in raw]
+
+
+def _per_item(element_ids: list, known: dict, apply) -> List[dict]:
+    """
+    One result per requested id, at its own position: a 400 for an id that is not a non-empty
+    string, a 404 for one not in the caller's space, else what `apply` returns for it. `apply` takes
+    the valid ids in order and returns one result each. Paired by index, never by id, so a repeated
+    id keeps each of its places.
+    """
+    results: List[Optional[dict]] = []
+    for eid in element_ids:
+        if not isinstance(eid, str) or not eid:
+            results.append(
+                {
+                    "success": False,
+                    "elementId": eid,
+                    "responseDetail": {
+                        "title": "Bad Request",
+                        "status": 400,
+                        "detail": "elementId must be a non-empty string.",
+                    },
+                }
+            )
+        else:
+            results.append(None if eid in known else _not_found(eid, "object"))
+    valid = [i for i, result in enumerate(results) if result is None]
+    for i, result in zip(valid, apply([element_ids[i] for i in valid])):
+        results[i] = result
+    return results
 
 
 def h_sub_register(req: Handler) -> None:
     """
-    Register objects, rejecting unknown ones PER ITEM.
+    Register objects at the body's top-level `maxDepth`, rejecting unknown ones PER ITEM.
 
     Registration is validated against the caller's own address space, not accepted blindly. Two
     reasons, and the second is the one that matters: an unknown elementId that registers
@@ -2226,43 +2256,20 @@ def h_sub_register(req: Handler) -> None:
     """
     body = req._body()
     client_id = _require_client_id(body)
+    element_ids = _registration_entries(body)
+    max_depth = _max_depth(body)
     sub = _owned_subscription(req, client_id, body)
-    entries = _registration_entries(body)
-    known = _build_objects(_load_address_space(req._pg())) if entries else {}
+    known = _build_objects(_load_address_space(req._pg())) if element_ids else {}
 
-    valid, results = [], []
-    for entry in entries:
-        eid = entry.get("elementId")
-        if not eid:
-            results.append(
-                {
-                    "success": False,
-                    "elementId": eid,
-                    "responseDetail": {
-                        "title": "Bad Request",
-                        "status": 400,
-                        "detail": "elementId is required.",
-                    },
-                }
-            )
-        elif eid not in known:
-            results.append(_not_found(eid, "object"))
-        else:
-            valid.append(entry)
-    registry.register(sub, valid)
-    results.extend(
-        {"success": True, "elementId": e["elementId"], "result": None} for e in valid
-    )
-    # Requested order, not valid-then-invalid: a client pairing responses positionally would
-    # otherwise mis-attribute every result in the batch.
-    order = {e.get("elementId"): i for i, e in enumerate(entries)}
-    results.sort(key=lambda r: order.get(r.get("elementId"), 0))
-    req._bulk(results)
+    def register(ids: list) -> List[dict]:
+        return registry.register(sub, [{"elementId": e, "maxDepth": max_depth} for e in ids])
+
+    req._bulk(_per_item(element_ids, known, register))
 
 
 def h_sub_unregister(req: Handler) -> None:
     """
-    Unregister objects, reporting unknown ones per item.
+    Unregister objects, reporting malformed and unknown ones per item.
 
     Removing something that was never registered is NOT an error -- the end state the client asked
     for is the end state it gets -- but an elementId that does not exist at all is, because it means
@@ -2271,22 +2278,10 @@ def h_sub_unregister(req: Handler) -> None:
     """
     body = req._body()
     client_id = _require_client_id(body)
+    element_ids = _registration_entries(body)
     sub = _owned_subscription(req, client_id, body)
-    entries = _registration_entries(body)
-    known = _build_objects(_load_address_space(req._pg())) if entries else {}
-
-    results, removable = [], []
-    for entry in entries:
-        eid = entry.get("elementId")
-        if not eid or eid not in known:
-            results.append(_not_found(eid or "", "object"))
-        else:
-            removable.append(eid)
-    registry.unregister(sub, removable)
-    results.extend({"success": True, "elementId": eid, "result": None} for eid in removable)
-    order = {e.get("elementId"): i for i, e in enumerate(entries)}
-    results.sort(key=lambda r: order.get(r.get("elementId"), 0))
-    req._bulk(results)
+    known = _build_objects(_load_address_space(req._pg())) if element_ids else {}
+    req._bulk(_per_item(element_ids, known, lambda ids: registry.unregister(sub, ids)))
 
 
 def h_sub_sync(req: Handler) -> None:
