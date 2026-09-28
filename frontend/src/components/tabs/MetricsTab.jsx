@@ -875,7 +875,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               </div>
 
               {/* The field Edit uses too. It shows the suggestion until the operator types or picks
-                  their own, and Use suggested brings it back. */}
+                  their own, and Use suggested brings it back. A line of its own: the row aligns to
+                  the bottom, so its search and note would otherwise drag the neighbours down. */}
               <SemanticIdField
                 idPrefix="metric-add"
                 subject="metric"
@@ -885,10 +886,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 candidates={semanticIdChoices}
                 ownStandard={effectiveStandard}
                 onChange={handleSemanticIdChange}
-                style={{ margin: 0, flex: '3 1 420px' }}
+                style={{ margin: 0, flex: '1 1 100%' }}
               />
 
-              <button className={`btn btn-primary btn-sm ${!canAddMetric ? 'btn-disabled' : ''}`} disabled={!canAddMetric} onClick={handleAddMetric} title="Add this metric to the catalog">
+              <button className={`btn btn-primary btn-sm ${!canAddMetric ? 'btn-disabled' : ''}`} style={{ marginLeft: 'auto' }} disabled={!canAddMetric} onClick={handleAddMetric} title="Add this metric to the catalog">
                 Add
               </button>
             </div>
