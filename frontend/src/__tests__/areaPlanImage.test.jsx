@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { FloorPlan } from '../components/common/FloorPlan'
+import { AreaPlan } from '../components/common/AreaPlan'
 
 /**
  * A stored plan the browser will not draw. The download succeeds, so the only signal is the
@@ -11,23 +11,23 @@ import { FloorPlan } from '../components/common/FloorPlan'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, loadFloorPlanUrl: vi.fn().mockResolvedValue('blob:plan-1') }
+  return { ...actual, loadAreaPlanUrl: vi.fn().mockResolvedValue('blob:plan-1') }
 })
 
 const area = { area_id: 'a', area_name: 'Assembly Hall', plan_path: 'a/plan-1.svg', plan_aspect: 1.5 }
 
-describe('FloorPlan with a plan the browser cannot draw', () => {
+describe('AreaPlan with a plan the browser cannot draw', () => {
   it('shows the outline and the reason once the image errors', async () => {
-    render(<FloorPlan area={area} />)
-    const plan = document.querySelector('.floor-plan')
+    render(<AreaPlan area={area} />)
+    const plan = document.querySelector('.area-plan')
     expect(plan.style.getPropertyValue('--plan-aspect')).toBe('1.5')
-    await waitFor(() => expect(document.querySelector('.floor-plan-image')).not.toBeNull())
+    await waitFor(() => expect(document.querySelector('.area-plan-image')).not.toBeNull())
     expect(plan.dataset.plan).toBe('uploaded')
 
-    fireEvent.error(document.querySelector('.floor-plan-image'))
+    fireEvent.error(document.querySelector('.area-plan-image'))
 
-    expect(document.querySelector('.floor-plan-image')).toBeNull()
-    expect(document.querySelector('.floor-plan-outline')).not.toBeNull()
+    expect(document.querySelector('.area-plan-image')).toBeNull()
+    expect(document.querySelector('.area-plan-outline')).not.toBeNull()
     expect(plan.dataset.plan).toBe('unavailable')
     expect(screen.getByText(/browser cannot draw this plan/)).toBeInTheDocument()
   })

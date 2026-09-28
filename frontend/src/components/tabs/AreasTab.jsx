@@ -9,7 +9,7 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import {
   SCOPE_AREA_WIDE, SOURCE_AREA_WIDE, groupCellsByArea, groupDevicesByCell
 } from '../../utils/cellResolution'
-import { isPlaced } from '../../utils/floorPlans'
+import { isPlaced } from '../../utils/areaPlans'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
 import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
@@ -39,8 +39,8 @@ import {
  * and Gateways pages report their unfinished business, and the area rows are drop targets. The
  * banner is gone once the queue drains; a cell leaves its area from its own form on the Cells
  * page, or by being dragged onto another area. Devices are not filed here: a device's area is its
- * cell's, or its own when it is Area-Wide, which is set on the Devices page. An area's floor plan
- * is managed from its details panel.
+ * cell's, or its own when it is Area-Wide, which is set on the Devices page. An area's plan is
+ * managed from its details panel.
  */
 export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
   const [areas, setAreas]       = useState([])
@@ -343,7 +343,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 <tr>
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
                   <th title="The area's name — also the <area> segment of its uns/ topics">Area</th>
-                  <th title="Whether the area carries a floor plan for the Site Map to draw">Plan</th>
+                  <th title="Whether the area carries an area plan for the Site Map to draw">Plan</th>
                   <th title="Cells filed in this area">Cells</th>
                   <th title="Devices resolving to a cell in this area, plus its Area-Wide assets">Devices</th>
                 </tr>

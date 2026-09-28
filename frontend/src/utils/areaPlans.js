@@ -1,12 +1,12 @@
 /**
- * Floor plans: the drawing an area carries, and the places cells take on it.
+ * Area plans: the drawing an area carries, and the places cells take on it.
  *
  * A place is two fractions of the plan's viewBox (`plan_x` across, `plan_y` down, 0..1), so it
  * survives the plan being redrawn at any size. Distances are measured in units of the plan's
  * shorter side, so one spacing setting means the same on a wide plan and a tall one. Mirror of
  * `public.plan_distance()` and `place_cell_in_its_area()` in
- * supabase/migrations/0098_a_cell_has_a_place_on_its_areas_plan.sql; the trigger is the authority
- * and the checks here only refuse earlier.
+ * supabase/migrations/0001_baseline_schema.sql; the trigger is the authority and the checks here
+ * only refuse earlier.
  */
 
 /** The outline drawn for an area with no plan: 4:3, as the default box in the database. */
@@ -17,10 +17,10 @@ export const DEFAULT_MIN_PIN_SPACING = 0.08
 export const MIN_PIN_SPACING_SETTING = 'site_map.min_pin_spacing'
 
 /** The bucket's limit, mirrored so an oversized file is refused before the upload. */
-export const FLOOR_PLAN_MAX_BYTES = 5 * 1024 * 1024
+export const AREA_PLAN_MAX_BYTES = 5 * 1024 * 1024
 
 /** Width over height of an area's plan, falling back to the default outline. */
-export function floorAspect(area) {
+export function planAspect(area) {
   const aspect = Number(area?.plan_aspect)
   return Number.isFinite(aspect) && aspect > 0 ? aspect : DEFAULT_PLAN_ASPECT
 }
@@ -131,7 +131,7 @@ export function readSvgPlan(text) {
   }
   const rounded = Number(aspect.toFixed(4))
   if (rounded < PLAN_ASPECT_MIN || rounded > PLAN_ASPECT_MAX) {
-    return { problem: `The plan's proportions (${Number(aspect.toPrecision(3))} wide for every 1 tall) are beyond what a floor can hold (${PLAN_ASPECT_MIN} to ${PLAN_ASPECT_MAX}).` }
+    return { problem: `The plan's proportions (${Number(aspect.toPrecision(3))} wide for every 1 tall) are beyond what an area plan can hold (${PLAN_ASPECT_MIN} to ${PLAN_ASPECT_MAX}).` }
   }
   return { aspect: rounded }
 }
@@ -150,6 +150,6 @@ function parseLength(value) {
 }
 
 /** Where an area's plan is stored: one folder per area, so the policy can name the area. */
-export function floorPlanPath(area, stamp = Date.now()) {
+export function areaPlanPath(area, stamp = Date.now()) {
   return `${area.area_id ?? area.id}/plan-${stamp}.svg`
 }

@@ -6,7 +6,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
-import { FloorPlacementPicker } from '../components/common/FloorPlacementPicker'
+import { CellPlacementPicker } from '../components/common/CellPlacementPicker'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -38,7 +38,7 @@ beforeEach(() => {
 
 /** A plan 400 wide and 300 tall at the origin, so a click at (200, 150) is the middle. */
 const sizePlan = () => {
-  const plan = document.querySelector('.floor-plan')
+  const plan = document.querySelector('.area-plan')
   plan.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 })
   return plan
 }
@@ -65,10 +65,10 @@ describe('CellsTab places a cell on its area plan', () => {
   it('shows the plan to click once an area is chosen, and not before', async () => {
     await renderCells()
     fireEvent.click(screen.getByRole('button', { name: /New Cell/ }))
-    expect(document.querySelector('.floor-plan')).toBeNull()
+    expect(document.querySelector('.area-plan')).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Area'), { target: { value: 'area-1' } })
-    expect(document.querySelector('.floor-plan-interactive')).toBeTruthy()
+    expect(document.querySelector('.area-plan-interactive')).toBeTruthy()
     // The cells already in the area are drawn so the operator can see them.
     expect(screen.getByTitle('Bay 1 — already in this area')).toBeInTheDocument()
   })
@@ -77,7 +77,7 @@ describe('CellsTab places a cell on its area plan', () => {
     await renderCells()
     fireEvent.click(screen.getByRole('button', { name: /New Cell/ }))
     fireEvent.change(screen.getByLabelText('Area'), { target: { value: 'area-2' } })
-    expect(document.querySelector('.floor-plan').dataset.plan).toBe('outline')
+    expect(document.querySelector('.area-plan').dataset.plan).toBe('outline')
   })
 
   it('places the cell where the plan is clicked and saves the fractions with the area', async () => {
@@ -119,7 +119,7 @@ describe('CellsTab places a cell on its area plan', () => {
     expect(screen.getByText(/Not placed/)).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Area'), { target: { value: '' } })
-    expect(document.querySelector('.floor-plan')).toBeNull()
+    expect(document.querySelector('.area-plan')).toBeNull()
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
     expect(api.put).toHaveBeenCalledWith('/api/v1/cells/cell-1', expect.objectContaining({
@@ -139,15 +139,15 @@ describe('CellsTab places a cell on its area plan', () => {
   })
 })
 
-describe('FloorPlacementPicker on its own', () => {
+describe('CellPlacementPicker on its own', () => {
   it('asks for an area before it will draw anything', () => {
-    render(<FloorPlacementPicker area={null} cells={[]} onChange={vi.fn()} />)
+    render(<CellPlacementPicker area={null} cells={[]} onChange={vi.fn()} />)
     expect(screen.getByText(/File the cell into an area/)).toBeInTheDocument()
   })
 
   it('ignores the cell being edited when measuring the spacing', () => {
     const onChange = vi.fn()
-    render(<FloorPlacementPicker area={area} cells={cells} cellId="cell-1" value={{ x: 0.5, y: 0.5 }} onChange={onChange} />)
+    render(<CellPlacementPicker area={area} cells={cells} cellId="cell-1" value={{ x: 0.5, y: 0.5 }} onChange={onChange} />)
     const plan = sizePlan()
     fireEvent.click(plan, { clientX: 204, clientY: 150 })
     expect(onChange).toHaveBeenCalledWith({ x: 0.51, y: 0.5 })
@@ -156,7 +156,7 @@ describe('FloorPlacementPicker on its own', () => {
 
   it('does not place through a click on a pin', () => {
     const onChange = vi.fn()
-    render(<FloorPlacementPicker area={area} cells={cells} cellId="cell-9" value={null} onChange={onChange} />)
+    render(<CellPlacementPicker area={area} cells={cells} cellId="cell-9" value={null} onChange={onChange} />)
     fireEvent.click(screen.getByTitle('Bay 1 — already in this area'))
     expect(onChange).not.toHaveBeenCalled()
   })

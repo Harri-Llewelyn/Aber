@@ -343,7 +343,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
               : '') +
             (confirmPurge.entity_type === 'area'
               ? ' Its cells are kept and become unfiled' +
-                (confirmPurge.plan_path ? '; its floor plan is deleted' : '') +
+                (confirmPurge.plan_path ? '; its area plan is deleted' : '') +
                 '. It is refused while an Area-Wide asset still names it — move that asset first.'
               : '') +
             (confirmPurge.entity_type === 'device'

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_PLAN_ASPECT,
-  floorAspect,
+  planAspect,
   isPlaced,
   planDistance,
   nearestConflict,
@@ -11,8 +11,8 @@ import {
   svgAspectFromText,
   readSvgPlan,
   decodeSvgBytes,
-  floorPlanPath
-} from '../utils/floorPlans';
+  areaPlanPath
+} from '../utils/areaPlans';
 
 /**
  * The plan and place arithmetic the Site Map, the Cells form and the Areas panel share. The
@@ -22,9 +22,9 @@ import {
 
 describe('plans', () => {
   it('falls back to the default outline aspect with no plan', () => {
-    expect(floorAspect({ plan_aspect: null })).toBe(DEFAULT_PLAN_ASPECT);
-    expect(floorAspect({ plan_aspect: '1.5' })).toBe(1.5);
-    expect(floorAspect(undefined)).toBe(DEFAULT_PLAN_ASPECT);
+    expect(planAspect({ plan_aspect: null })).toBe(DEFAULT_PLAN_ASPECT);
+    expect(planAspect({ plan_aspect: '1.5' })).toBe(1.5);
+    expect(planAspect(undefined)).toBe(DEFAULT_PLAN_ASPECT);
   });
 });
 
@@ -128,7 +128,7 @@ describe('plan files', () => {
   });
 
   it('files a plan under its area, with a fresh name per upload', () => {
-    expect(floorPlanPath({ area_id: 'A' }, 123)).toBe('A/plan-123.svg');
-    expect(floorPlanPath({ id: 'A' }, 123)).toBe('A/plan-123.svg');
+    expect(areaPlanPath({ area_id: 'A' }, 123)).toBe('A/plan-123.svg');
+    expect(areaPlanPath({ id: 'A' }, 123)).toBe('A/plan-123.svg');
   });
 });

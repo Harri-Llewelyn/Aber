@@ -141,20 +141,20 @@ describe('shopfloor legend categories', () => {
 describe('alerting cell pin', () => {
   it('is green with an online device and no alert', async () => {
     renderMap({ devices: [device()] })
-    expect((await pin()).className).toMatch(/floor-pin-normal/)
+    expect((await pin()).className).toMatch(/area-plan-pin-normal/)
   })
 
   it('turns red, with a pulse, when Grafana has an alert on a device in the cell', async () => {
     renderMap({ devices: [device()], activeAlerts: [alert()] })
     const el = await pin()
-    expect(el.className).toMatch(/floor-pin-alert/)
+    expect(el.className).toMatch(/area-plan-pin-alert/)
     // Never colour alone: the title says the state in words.
     expect(el.getAttribute('title')).toMatch(/Alert firing/)
   })
 
   it('does not go red for an alert on an archived device', async () => {
     renderMap({ devices: [device({ is_archived: true })], activeAlerts: [alert({ severity: 'critical' })] })
-    expect((await pin()).className).not.toMatch(/floor-pin-alert/)
+    expect((await pin()).className).not.toMatch(/area-plan-pin-alert/)
   })
 })
 

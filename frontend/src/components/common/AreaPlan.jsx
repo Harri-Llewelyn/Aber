@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { loadFloorPlanUrl } from '../../api'
-import { floorAspect, planFractionsFromEvent } from '../../utils/floorPlans'
+import { loadAreaPlanUrl } from '../../api'
+import { planAspect, planFractionsFromEvent } from '../../utils/areaPlans'
 
 /**
  * An area's plan, at the plan's own aspect ratio, with pins placed over it by fraction. The plan
@@ -10,14 +10,14 @@ import { floorAspect, planFractionsFromEvent } from '../../utils/floorPlans'
  */
 
 /** The blob URL for an area's plan, or null while loading or when the area has none. */
-export function useFloorPlanUrl(area) {
+export function useAreaPlanUrl(area) {
   const path = area?.plan_path || null
   const [state, setState] = useState({ path: null, url: null, error: null })
 
   useEffect(() => {
     let alive = true
     if (!path) { setState({ path: null, url: null, error: null }); return undefined }
-    loadFloorPlanUrl(path)
+    loadAreaPlanUrl(path)
       .then(url => { if (alive) setState({ path, url, error: null }) })
       .catch(err => { if (alive) setState({ path, url: null, error: err.message }) })
     return () => { alive = false }
@@ -26,9 +26,9 @@ export function useFloorPlanUrl(area) {
   return state.path === path ? state : { path, url: null, error: null }
 }
 
-export function FloorPlan({ area, onPlaceClick, children, className = '', title, compact = false }) {
-  const aspect = floorAspect(area)
-  const { url, error } = useFloorPlanUrl(area)
+export function AreaPlan({ area, onPlaceClick, children, className = '', title, compact = false }) {
+  const aspect = planAspect(area)
+  const { url, error } = useAreaPlanUrl(area)
   const hasPlan = !!area?.plan_path
   // The blob URL the browser refused to draw, if any: a file it cannot render fires error, not load.
   const [undrawable, setUndrawable] = useState(null)
@@ -38,14 +38,14 @@ export function FloorPlan({ area, onPlaceClick, children, className = '', title,
   const handleClick = (e) => {
     if (!onPlaceClick) return
     // A click on a pin is the pin's, not a placement.
-    if (e.target.closest('.floor-pin')) return
+    if (e.target.closest('.area-plan-pin')) return
     const place = planFractionsFromEvent(e, e.currentTarget)
     if (place) onPlaceClick(place)
   }
 
   return (
     <div
-      className={`floor-plan${onPlaceClick ? ' floor-plan-interactive' : ''}${compact ? ' floor-plan-compact' : ''}${className ? ' ' + className : ''}`}
+      className={`area-plan${onPlaceClick ? ' area-plan-interactive' : ''}${compact ? ' area-plan-compact' : ''}${className ? ' ' + className : ''}`}
       style={{ aspectRatio: String(aspect), '--plan-aspect': aspect }}
       onClick={handleClick}
       title={title}
@@ -53,7 +53,7 @@ export function FloorPlan({ area, onPlaceClick, children, className = '', title,
       data-plan={hasPlan ? (unavailable ? 'unavailable' : 'uploaded') : 'outline'}
     >
       {hasPlan && url && !broken ? (
-        <img className="floor-plan-image" src={url} alt="" draggable={false} onError={() => setUndrawable(url)} />
+        <img className="area-plan-image" src={url} alt="" draggable={false} onError={() => setUndrawable(url)} />
       ) : (
         <DefaultOutline aspect={aspect} compact={compact} unavailable={hasPlan ? unavailable : null} />
       )}
@@ -72,12 +72,12 @@ function DefaultOutline({ aspect, compact, unavailable }) {
   for (let y = step; y < h; y += step) lines.push(<line key={`y${y}`} className="outline-grid" x1={0} y1={y} x2={w} y2={y} />)
   return (
     <>
-      <svg className="floor-plan-outline" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
+      <svg className="area-plan-outline" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
         {lines}
         <rect className="outline-frame" x={4} y={4} width={w - 8} height={h - 8} rx={6} />
       </svg>
       {!compact && (
-        <span className="floor-plan-caption">
+        <span className="area-plan-caption">
           {unavailable || 'No plan uploaded — the default outline'}
         </span>
       )}
@@ -90,11 +90,11 @@ function DefaultOutline({ aspect, compact, unavailable }) {
  * tile rollup (normal, attention, idle), `alert` when Grafana has raised one against a device
  * here, or `muted` for a pin that is context rather than the subject.
  */
-export function FloorPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, hideLabel = false, iconSize = null }) {
+export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, hideLabel = false, iconSize = null }) {
   return (
     <button
       type="button"
-      className={`floor-pin floor-pin-${status}${selected ? ' floor-pin-selected' : ''}${small ? ' floor-pin-small' : ''}`}
+      className={`area-plan-pin area-plan-pin-${status}${selected ? ' area-plan-pin-selected' : ''}${small ? ' area-plan-pin-small' : ''}`}
       style={{ left: `${Number(x) * 100}%`, top: `${Number(y) * 100}%` }}
       onClick={onClick ? (e) => { e.stopPropagation(); onClick(e) } : undefined}
       title={title || label}
@@ -102,8 +102,8 @@ export function FloorPin({ x, y, status = 'idle', Icon, label, title, selected =
       aria-pressed={onClick ? selected : undefined}
       data-status={status}
     >
-      <span className="floor-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>
-      {!hideLabel && <span className="floor-pin-label">{label}</span>}
+      <span className="area-plan-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>
+      {!hideLabel && <span className="area-plan-pin-label">{label}</span>}
     </button>
   )
 }
