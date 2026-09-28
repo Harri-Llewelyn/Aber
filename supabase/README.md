@@ -390,7 +390,8 @@ gateway as `STALE`.
 and the only insert path is the operator-facing form behind `POST /api/v1/metric-catalog`. Good
 property — but it means a mixed-standard fleet is registered by hand, one form at a time, and
 `name` is UNIQUE and IMMUTABLE, so the first row to claim a name owns it permanently along with
-whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export.
+whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export, and the
+`semantic_id` into i3X as the `sourceTypeId` and namespace of the metric's type.
 
 `0018` front-runs that for the demonstrator's metric set. Three properties worth knowing:
 
@@ -5105,9 +5106,10 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 7. Frontend mirror module plus unit tests; check whether `scripts/check-docs-drift.mjs` or
    `scripts/check-mirror-drift.mjs` needs a new pair.
 8. `docs/openapi.yaml` updated if any endpoint shape changes.
-9. **No i3X namespace.** i3X namespaces group types and every type there is local, so a
-   vocabulary is not listed by `GET /namespaces` (#459, [`../i3x/README.md`](../i3x/README.md#address-space)).
-   Do not add a per-standard namespace table back.
+9. **i3X namespaces follow the semantic ids.** A metric's i3X type is its catalog row, in the
+   namespace its semantic id is defined in (`metric_type_namespace` in `i3x/address_space.py`,
+   [`../i3x/README.md`](../i3x/README.md#address-space)). Ids under a new authority are local
+   there until it gains a case, and `GET /namespaces` lists a namespace only while a type uses it.
 
 ---
 

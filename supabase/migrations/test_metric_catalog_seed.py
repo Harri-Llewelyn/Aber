@@ -5,9 +5,9 @@ OPC UA, ASHRAE 223P and ISO 22400 metrics under their groups, read from a migrat
     python supabase/migrations/test_metric_catalog_seed.py
 
 WHAT IS ACTUALLY AT RISK HERE. `metric_catalog.name` is UNIQUE and IMMUTABLE, and the `standard`
-and `semantic_id` a row is created with flow into the AAS export. A row seeded with the wrong
-semantic id does not fail anywhere -- it asserts an interoperability that does not exist, in an
-artefact handed to a customer, until something notices.
+and `semantic_id` a row is created with flow into the AAS export and the i3X metric types. A row
+seeded with the wrong semantic id does not fail anywhere -- it asserts an interoperability that
+does not exist, in an artefact handed to a customer, until something notices.
 
 So the assertions below are about PROVENANCE as much as presence: every seeded row must carry a
 semantic id that is still resolvable in the vocabulary table it came from. A vocabulary re-key or

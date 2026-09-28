@@ -291,11 +291,10 @@ def _load_address_space(pg: PostgrestClient) -> dict:
 
 def _read_address_space(pg: PostgrestClient) -> dict:
     """
-    Read the whole visible address space in five queries.
+    Read the whole visible address space, one query per relation rather than one per object.
 
-    Five reads rather than one per object -- cells, gateways, devices, device_locations and schemas:
-    the object graph needs cross-references (a cell's children, a gateway's devices) that no single
-    embed expresses, so everything is joined in memory here.
+    The object graph needs cross-references (a cell's children, a gateway's devices, a device's
+    schemas) that no single embed expresses, so everything is joined in memory here.
 
     UNCACHED. Every caller should go through `_load_address_space()`; this is the cold read behind
     it, separated so the cache has something to call and so a test can measure the difference.
@@ -344,12 +343,27 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         {"select": "id,schema_name,description,schema_definition,semantic_id,version,status,"
                    "change_description"},
     )
+    # Every schema attached to a device, as the dashboard, the AAS exporter and ingestion read it:
+    # device_submodels rows, else the legacy devices.schema_id.
+    attached = _read_relation(pg, "device_schemas", {"select": "device_id,schema_id"})
+    # A metric's catalog row is its type on every device that carries it.
+    catalog = _read_relation(
+        pg,
+        "metric_catalog",
+        {"select": "name,datatype,description,units,standard,semantic_id,deprecated",
+         "order": "name"},
+    )
+    schemas_by_device: Dict[str, List[str]] = {}
+    for row in attached:
+        schemas_by_device.setdefault(row["device_id"], []).append(row["schema_id"])
     return {
         "cells": cells,
         "gateways": gateways,
         "devices": devices,
         "locations": {row["device_id"]: row for row in locations},
         "schemas": schemas,
+        "device_schemas": schemas_by_device,
+        "metric_catalog": catalog,
     }
 
 
@@ -401,10 +415,80 @@ def _modelled_metrics(schema_definition) -> set:
     return names
 
 
+def _attached_schemas(space: dict) -> Dict[str, tuple]:
+    """Each live device's attached schema ids that this caller can read: sorted, no repeats."""
+    readable = {s["id"] for s in space["schemas"]}
+    attached = space.get("device_schemas") or {}
+    out = {}
+    for device in space.get("devices", []):
+        ids = tuple(sorted({i for i in attached.get(device["id"], ()) if i in readable}))
+        if ids:
+            out[device["id"]] = ids
+    return out
+
+
+def _device_type(schemas: List[dict]) -> tuple:
+    """(typeElementId, the one schema, the sourceTypeId of a type synthesized for several)."""
+    if len(schemas) > 1:
+        type_id = A.schema_set_type_id(s["id"] for s in schemas)
+        return type_id, None, type_id
+    if schemas:
+        return schemas[0]["id"], schemas[0], None
+    return None, None, None
+
+
+def _birth_datatypes() -> Dict[str, Dict[str, int]]:
+    """Each device's metric datatypes as its DBIRTH declared them, since this process started."""
+    by_device: Dict[str, Dict[str, int]] = {}
+    with _alias_lock:
+        for names in _name_datatypes.values():
+            for device_id, typed in names.items():
+                if device_id:
+                    by_device.setdefault(device_id, {}).update(typed)
+    return by_device
+
+
+def _component_names(names) -> list:
+    """The metric names that are components, sorted: no identity metric, no unaddressable name."""
+    return sorted(n for n in names if n not in IDENTITY_METRICS and A.metric_name_is_addressable(n))
+
+
+def _device_metrics(device: dict, declared: list, modelled: set, modelled_names: list,
+                    catalog: dict, catalog_types: dict, births: dict) -> tuple:
+    """
+    A device's metric objects, and the inferred fragment of each metric it declares beyond its
+    schemas. The components are every modelled metric, published or not, and every metric its last
+    DBIRTH declared (`declared`, identity metrics already out); `modelled_names` is the first set,
+    sorted. A metric the catalog lacks is typed by its DBIRTH datatype, known only for births seen
+    here.
+    """
+    sid = device["sparkplug_id"]
+    beyond = {n for n in declared if n not in modelled}
+    names = _component_names(beyond.union(modelled_names)) if beyond else modelled_names
+    datatypes = births.get(sid) or {}
+    metrics = [
+        A.metric_object(
+            sid, name, catalog_types.get(name) or A.fallback_metric_type(datatypes.get(name))
+        )
+        for name in names
+    ]
+    extensions = {
+        name: A.scalar_schema(datatypes.get(name) or (catalog.get(name) or {}).get("datatype"))
+        for name in sorted(beyond)
+    }
+    return metrics, extensions
+
+
 def _build_objects(space: dict) -> Dict[str, dict]:
     """Assemble every Object, keyed by elementId."""
     schemas_by_id = {s["id"]: s for s in space["schemas"]}
     gateways_by_id = {g["id"]: g for g in space["gateways"]}
+    attached = _attached_schemas(space)
+    catalog = {row["name"]: row for row in space.get("metric_catalog", [])}
+    catalog_types = {name: A.metric_type_from_catalog(row) for name, row in catalog.items()}
+    births = _birth_datatypes()
+    # Per distinct set of schemas: the metrics they model, and those that are components, sorted.
+    modelled_by_set: Dict[tuple, tuple] = {}
 
     devices_by_gateway: Dict[str, List[str]] = {}
     children_by_cell: Dict[str, List[str]] = {}
@@ -414,13 +498,22 @@ def _build_objects(space: dict) -> Dict[str, dict]:
     for device in space["devices"]:
         gateway = gateways_by_id.get(device.get("gateway_id"))
         device["_gateway_sparkplug_id"] = gateway["sparkplug_id"] if gateway else None
-        schema = schemas_by_id.get(device.get("schema_id"))
-        device["_is_extended"] = A.is_extended(
-            device.get("last_birth_metrics") or [],
-            _modelled_metrics(schema.get("schema_definition")) if schema else set(),
+        schema_ids = attached.get(device["id"], ())
+        if schema_ids not in modelled_by_set:
+            modelled = set().union(
+                *(_modelled_metrics(schemas_by_id[i].get("schema_definition")) for i in schema_ids)
+            )
+            modelled_by_set[schema_ids] = (modelled, _component_names(modelled))
+        modelled, modelled_names = modelled_by_set[schema_ids]
+        declared = [n for n in device.get("last_birth_metrics") or () if n not in IDENTITY_METRICS]
+        device["_is_extended"] = A.is_extended(declared, modelled)
+        metrics, extensions = _device_metrics(
+            device, declared, modelled, modelled_names, catalog, catalog_types, births
         )
+        type_id, schema, source_type_id = _device_type([schemas_by_id[i] for i in schema_ids])
         cell_id = (space["locations"].get(device["id"]) or {}).get("effective_cell_id")
-        obj = A.device_object(device, cell_id, device.get("schema_id"), schema)
+        obj = A.device_object(device, cell_id, type_id, schema, source_type_id=source_type_id,
+                              metric_ids=[m["elementId"] for m in metrics], extensions=extensions)
         objects[obj["elementId"]] = obj
         if cell_id:
             children_by_cell.setdefault(cell_id, []).append(obj["elementId"])
@@ -428,6 +521,8 @@ def _build_objects(space: dict) -> Dict[str, dict]:
             unassigned.append(obj["elementId"])
         if gateway:
             devices_by_gateway.setdefault(gateway["sparkplug_id"], []).append(obj["elementId"])
+        for metric in metrics:
+            objects[metric["elementId"]] = metric
 
     for gateway in space["gateways"]:
         obj = A.gateway_object(gateway, devices_by_gateway.get(gateway["sparkplug_id"], []))
@@ -467,9 +562,18 @@ def _build_objects(space: dict) -> Dict[str, dict]:
 
 
 def _build_types(space: dict) -> List[dict]:
-    types = list(A.SYNTHETIC_TYPES)
+    """
+    Every type an object can name: the synthetic ones, one per schema and per catalog metric, the
+    metric fallbacks, and one per distinct set of schemas some device carries.
+    """
+    types = list(A.SYNTHETIC_TYPES) + list(A.METRIC_FALLBACK_TYPES)
+    schemas_by_id = {}
     for schema in space["schemas"]:
         types.append(A.object_type_from_schema(schema))
+        schemas_by_id[schema["id"]] = schema
+    types.extend(A.metric_type_from_catalog(row) for row in space.get("metric_catalog", []))
+    for ids in sorted({ids for ids in _attached_schemas(space).values() if len(ids) > 1}):
+        types.append(A.schema_set_type([schemas_by_id[i] for i in ids]))
     return types
 
 
@@ -1145,7 +1249,9 @@ class Handler(BaseHTTPRequestHandler):
         # Content-Encoding: gzip." A MUST, and the conformance suite has a dedicated check for it.
         if "gzip" in (self.headers.get("Accept-Encoding") or "").lower():
             buf = io.BytesIO()
-            with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+            # zlib's default level. GzipFile's own, 9, takes about five times as long on a large
+            # address space for a response only a fifth smaller.
+            with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
                 gz.write(raw)
             raw = buf.getvalue()
             headers["Content-Encoding"] = "gzip"
@@ -1259,8 +1365,7 @@ def h_info(req: Handler) -> None:
 
 
 def h_namespaces(req: Handler) -> None:
-    req._bearer()
-    req._ok(A.namespaces())
+    req._ok(A.namespaces(_build_types(_load_address_space(req._pg()))))
 
 
 def _in_namespace(req: Handler, types: List[dict]) -> List[dict]:
@@ -1454,6 +1559,10 @@ def _current_value(objects, space: dict, element_id: str):
     devices_by_sid = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
     if element_id in devices_by_sid:
         return A.device_value(devices_by_sid[element_id], metrics_for(element_id))
+    # A metric: `<sparkplug_id>/<metric name>`, split at the first `/`.
+    sid, _, name = element_id.partition("/")
+    if name and sid in devices_by_sid:
+        return A.device_metric_value(devices_by_sid[sid], element_id, metrics_for(sid).get(name))
     # A container's value is what its type declares. Counts are of devices, never of children:
     # a cell's children include its gateways, and the site's are cells and Unassigned.
     if element_id == A.SITE_ELEMENT_ID:

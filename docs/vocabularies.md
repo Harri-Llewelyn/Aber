@@ -349,10 +349,12 @@ filing it in `opcua_vocabulary` would misstate its provenance.
 7. Frontend mirror module plus unit tests; check whether `scripts/check-docs-drift.mjs` or
    `scripts/check-mirror-drift.mjs` needs a new pair.
 8. `docs/openapi.yaml` updated if any endpoint shape changes.
-9. **No i3X namespace.** i3X namespaces group types, and every type served there is local, so
-   `GET /namespaces` lists no vocabulary ([`i3x/README.md`](../i3x/README.md#address-space), #459).
-   A per-standard namespace table was tried and advertised URIs no type carried; do not add one
-   back. `TestNamespaces` in `i3x/test_i3x_service.py` fails if an advertised URI is unused.
+9. **i3X namespaces follow the semantic ids.** A metric's i3X type is its catalog row, in the
+   namespace its semantic id is defined in: local for the ids minted here, the standard's own with
+   `?projection=i3X` for OPC UA and ASHRAE 223P (`metric_type_namespace` in
+   `i3x/address_space.py`, [`i3x/README.md`](../i3x/README.md#address-space)). Ids under a new
+   authority are local there until it gains a case. `TestNamespaces` in `i3x/test_i3x_service.py`
+   fails if an advertised URI is unused, or a standard's own is advertised without the suffix.
 
 ## Settled decisions worth not relitigating
 
