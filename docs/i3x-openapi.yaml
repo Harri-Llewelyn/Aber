@@ -158,10 +158,16 @@ paths:
       tags: [Discovery]
       summary: Namespaces in use
       description: |
-        The local namespace, which every ObjectType belongs to, and the relationship namespace.
-        **No vocabulary is listed:** a schema is a type written here even when its metrics come
-        from MTConnect or OPC UA, and a namespace no type belongs to would promise a client
-        types it never meets.
+        Exactly the namespaces the served types belong to: the local one, the relationship
+        namespace, and each one a metric type takes from its catalog row's semantic id.
+
+        MTConnect and ISO 22400 ids are minted here, so their namespaces are local
+        (`https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400`).
+        An OPC UA or ASHRAE 223P id is the standard's own, and a scalar type adapted from it is an
+        in-exact implementation of that namespace, marked as the i3X guide asks with a
+        `projection` suffix: `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
+        `http://data.ashrae.org/standard223?projection=i3X`. A namespace no served type
+        belongs to is never listed.
       responses:
         '200':
           description: Namespaces this address space draws on.
@@ -187,6 +193,16 @@ paths:
         Rows from `schemas` — **a `schema_definition` already is a JSON Schema**, so there is
         no translation step — plus the synthetic Site, Area, Cell, Lane, Unassigned, Gateway
         and untyped-device types that give the structural objects something to point at.
+
+        The metric types, always served so every metric's `typeElementId` resolves:
+        * `i3x:type:metric:<name>` per `metric_catalog` row: a scalar schema from its Sparkplug
+          datatype, with `description` and the unit as `x-unit`, and its semantic id as
+          `sourceTypeId`;
+        * `i3x:type:sparkplug:<datatype>` for a metric the catalog lacks, by its DBIRTH datatype;
+        * `UnknownType` (`i3x:type:unknown`), schema `{}`, when no datatype is known.
+
+        And `i3x:type:schemas:<ids sorted, joined by +>` for each distinct set of schemas
+        attached to a device: `allOf` over their definitions, inlined.
       parameters:
         - name: namespaceUri
           in: query
@@ -419,6 +435,13 @@ paths:
         gateway is `Uncertain`; a metric that has never been published is `GoodNoData` with
         no value; anything else is `Good`. A `quality` column on the hypertable would be a
         stored verdict that goes stale the moment the gateway does.
+
+        **A device and its metrics.** A device's value is the map of its metrics' latest
+        values. Each metric is also an object, `<sparkplug_id>/<metric name>`, and a component
+        of the device, whose value is a bare scalar: its latest sample, or `null` with
+        `GoodNoData` timestamped at the read when it has none. So `maxDepth: 1` on a device
+        returns the map, and `maxDepth: 0` or `2` adds each metric's own value under
+        `components`.
       requestBody:
         required: true
         content:
@@ -447,10 +470,17 @@ paths:
                   - success: true
                     elementId: dev220000000000400080000
                     result:
-                      isComposition: false
+                      isComposition: true
                       value:
                         Systems/TEMPERATURE: 37.13
                         Controller/EXECUTION: ACTIVE
+                      quality: Good
+                      timestamp: '2026-08-10T13:06:29.423Z'
+                  - success: true
+                    elementId: dev220000000000400080000/Systems/TEMPERATURE
+                    result:
+                      isComposition: false
+                      value: 37.13
                       quality: Good
                       timestamp: '2026-08-10T13:06:29.423Z'
         '400':
@@ -912,11 +942,21 @@ components:
         namespaceUri: { type: string, format: uri }
         sourceTypeId:
           type: string
-          description: The platform's own `semantic_id`, or the synthetic type's name.
+          description: |
+            The platform's own `semantic_id` (a schema's, or a catalog metric's), else its name;
+            a synthetic type's or Sparkplug datatype's name; or, for a set of schemas, the type's
+            own id, since no source namespace defines the combination.
         version: { type: string, example: 1.0.0 }
         schema:
           type: object
-          description: '`schemas.schema_definition` verbatim — it already is a JSON Schema, so nothing is translated.'
+          description: |
+            `schemas.schema_definition` verbatim — it already is a JSON Schema, so nothing is
+            translated. A metric type's is a scalar such as `{"type": "number", "x-unit":
+            "CELSIUS"}`; `UnknownType`'s is `{}`; a set of schemas' is `{"type": "object",
+            "allOf": [...]}` over their definitions.
+        related:
+          type: object
+          description: 'Only on a type synthesized for a set of schemas: `{relationshipType: InheritsFrom, types: [<schema ids>]}`, the schemas it is a kind of.'
 
     RelationshipType:
       type: object
@@ -939,7 +979,8 @@ components:
           description: |
             The platform's `sparkplug_id` — immutable and on the wire. i3X requires an
             elementId that is unique *and persistent*, which `name` is not: it is a freely
-            editable display label.
+            editable display label. A metric's is `<sparkplug_id>/<metric name>`; a
+            `sparkplug_id` never contains `/`, so the first `/` splits it.
           example: dev220000000000400080000
         displayName: { type: string, example: Sim_CNC_Mill_01 }
         typeElementId: { type: string }
@@ -953,7 +994,8 @@ components:
           description: |
             Whether the object publishes beyond its type. Derived from `last_birth_metrics`,
             so it reflects the most recent DBIRTH — a device that has never birthed reports
-            `false` rather than unknown.
+            `false` rather than unknown — judged against every schema attached to the device.
+            `metadata.schemaExtensions` names what is beyond them.
         metadata:
           $ref: '#/components/schemas/ObjectMetadata'
 
@@ -965,10 +1007,20 @@ components:
         typeNamespaceUri: { type: string, format: uri }
         sourceTypeId:
           type: string
-          description: "The same as its ObjectType's: a schema's `semantic_id`, else its name; `Device` for a device with no schema."
-        quarantined:
-          type: boolean
-          description: 'Present in the directory but its telemetry is being dropped. Drives `quality: Uncertain`.'
+          description: "The same as its ObjectType's: a schema's `semantic_id`, else its name; the synthesized type's id for a device with several schemas; `Device` for a device with none. A metric's is its catalog row's `semantic_id`, else its name, or its Sparkplug datatype's name or `UnknownType` when the catalog lacks it."
+        schemaExtensions:
+          type: object
+          description: 'Only when `isExtended` is true: each metric the device declared beyond its schemas, with a JSON Schema fragment from its DBIRTH datatype, or `{}` when none is known.'
+          additionalProperties: { type: object }
+          example:
+            Environmental/HUMIDITY_RELATIVE: { type: number }
+        system:
+          type: object
+          description: 'Vendor keys, on a device. i3X requires it whenever `isExtended` is true; a device always sends it.'
+          properties:
+            quarantined:
+              type: boolean
+              description: 'Present in the directory but its telemetry is being dropped. Drives `quality: Uncertain`.'
         relationships:
           type: object
           description: |
@@ -993,6 +1045,7 @@ components:
             `{cellCount, deviceCount}`, an area `{cellCount, deviceCount, description}`, a cell,
             lane or Unassigned `{deviceCount, description}`, a gateway `{status, sparkplugGroup,
             lastHeartbeat}`. Counts are of devices or cells, never of children.
+            A metric sends its latest value, a bare scalar.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }
         components:

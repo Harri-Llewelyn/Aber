@@ -1439,8 +1439,8 @@ class TestAddressSpaceReads(unittest.TestCase):
         i3x_service._read_address_space(pg)
         self.assertEqual(
             sorted(relation for relation, _ in pg.calls),
-            ["areas", "cells", "device_locations", "devices", "gateways", "schemas",
-             "system_settings"],
+            ["areas", "cells", "device_locations", "device_schemas", "devices", "gateways",
+             "metric_catalog", "schemas", "system_settings"],
         )
 
     def test_the_history_read_names_real_columns(self):
@@ -1517,6 +1517,11 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
         ]
         rows["devices"][0]["schema_id"] = "s-semantic"
         rows["devices"][1]["schema_id"] = "s-local"
+        # The view's legacy arm: each device's devices.schema_id, since neither has submodels.
+        rows["device_schemas"] = [
+            {"device_id": "d-explicit", "schema_id": "s-semantic"},
+            {"device_id": "d-inherits", "schema_id": "s-local"},
+        ]
         rows["gateways"].append(
             {"id": "g2", "sparkplug_id": "gwy-site", "name": "Site-wide",
              "location_scope": "site_wide", "status": "ONLINE", "sparkplug_group": "Aber",
@@ -1600,6 +1605,366 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
         vqt = i3x_service._current_value(objects, space, "gwy-site")
         self.assertEqual(vqt["value"]["lastHeartbeat"], "2026-08-07T19:14:11.112Z")
         self.assertEqual(vqt["value"]["lastHeartbeat"], vqt["timestamp"])
+
+
+MILL, OEE = "s-mill", "s-oee"
+MTCONNECT = "https://aber.local/semantics/mtconnect/v2.0"
+
+
+def _metric_rows() -> dict:
+    """
+    Five devices in one cell: one schema; two schemas, twice, attached in opposite orders; one
+    schema and two metrics beyond it, quarantined; and neither a schema nor a birth.
+    """
+    devices = [
+        {"id": "d-one", "sparkplug_id": "dev-one", "name": "One", "gateway_id": "g1",
+         "schema_id": MILL, "last_birth_metrics": ["Axes/X/POSITION", "Asset_ID"]},
+        {"id": "d-two", "sparkplug_id": "dev-two", "name": "Two", "gateway_id": "g1",
+         "schema_id": MILL, "last_birth_metrics": ["Axes/X/POSITION", "OEE/AVAILABILITY"]},
+        {"id": "d-three", "sparkplug_id": "dev-three", "name": "Three", "gateway_id": "g1"},
+        {"id": "d-ext", "sparkplug_id": "dev-ext", "name": "Extended", "gateway_id": "g1",
+         "schema_id": MILL, "is_quarantined": True,
+         "last_birth_metrics": ["Axes/X/POSITION", "Environmental/HUMIDITY", "Vendor/COUNT"]},
+        {"id": "d-bare", "sparkplug_id": "dev-bare", "name": "Bare", "gateway_id": None},
+    ]
+    return {
+        "cells": [{"id": CELL_A, "name": "Cell A", "description": None}],
+        "gateways": [{"id": "g1", "sparkplug_id": "gwy-1", "name": "Gateway", "cell_id": CELL_A}],
+        "devices": devices,
+        "device_locations": [
+            {"device_id": d["id"], "effective_cell_id": CELL_A, "effective_area_id": None}
+            for d in devices
+        ],
+        "schemas": [
+            {"id": MILL, "schema_name": "Mill",
+             "semantic_id": "https://admin-shell.io/idta/example/Mill/1/0",
+             "schema_definition": {
+                 "type": "object",
+                 "properties": {"Axes/X/POSITION": {"type": "number"},
+                                "Controller/EXECUTION": {"type": "string"}},
+                 "required": ["Axes/X/POSITION"]}},
+            {"id": OEE, "schema_name": "OEE", "semantic_id": None,
+             "schema_definition": {"type": "object",
+                                   "properties": {"OEE/AVAILABILITY": {"type": "number"}}}},
+        ],
+        "device_schemas": [
+            {"device_id": "d-one", "schema_id": MILL},
+            {"device_id": "d-two", "schema_id": MILL},
+            {"device_id": "d-two", "schema_id": OEE},
+            {"device_id": "d-three", "schema_id": OEE},
+            {"device_id": "d-three", "schema_id": MILL},
+            {"device_id": "d-ext", "schema_id": MILL},
+        ],
+        "metric_catalog": [
+            {"name": "Axes/X/POSITION", "datatype": 10, "description": "Linear position of X",
+             "units": "MILLIMETER", "standard": "MTConnect", "deprecated": False,
+             "semantic_id": MTCONNECT + "/DataItemType/POSITION"},
+            {"name": "Controller/EXECUTION", "datatype": 12, "description": None, "units": None,
+             "standard": "MTConnect", "deprecated": False,
+             "semantic_id": MTCONNECT + "/DataItemType/EXECUTION"},
+            {"name": "OEE/AVAILABILITY", "datatype": 10, "description": None, "units": "PERCENT",
+             "standard": "ISO 22400", "deprecated": False,
+             "semantic_id": "https://aber.local/semantics/iso22400/AVAILABILITY"},
+        ],
+    }
+
+
+class _MetricSpace(unittest.TestCase):
+    """The space `_metric_rows()` reads to, with dev-ext's DBIRTH seen and two samples cached."""
+
+    def setUp(self):
+        for table in ("_values", "_alias_map", "_alias_datatypes", "_name_datatypes"):
+            getattr(i3x_service, table).clear()
+        i3x_service._space_cache_clear()
+        i3x_service.register_birth_aliases(
+            "Aber", "gwy-1", [{"name": "Environmental/HUMIDITY", "datatype": 10}],
+            device_id="dev-ext",
+        )
+        i3x_service.record_value(
+            "dev-one", "Axes/X/POSITION", 12.5, "2026-09-28T10:00:00.123+00:00"
+        )
+        i3x_service.record_value("dev-ext", "Axes/X/POSITION", 3.0, "2026-09-28T10:00:01Z")
+
+    def tearDown(self):
+        for table in ("_values", "_alias_map", "_alias_datatypes", "_name_datatypes"):
+            getattr(i3x_service, table).clear()
+        i3x_service._space_cache_clear()
+
+    def space(self, rows=None):
+        space = i3x_service._read_address_space(ColumnCheckingPostgrest(rows or _metric_rows()))
+        return space, i3x_service._build_objects(space), i3x_service._build_types(space)
+
+    def value(self, element_id):
+        space, objects, _ = self.space()
+        return i3x_service._current_value(objects, space, element_id)
+
+
+class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
+    """
+    Each metric is a leaf Object, `<sparkplug_id>/<metric name>`, whose parent is its device and
+    whose only edge is `ComponentOf`; the device is a composition of them and keeps its map as its
+    own value. The pattern of CESMII's reference server (`pump-101`).
+    """
+
+    COMPONENTS = {
+        "dev-one": ["Axes/X/POSITION", "Controller/EXECUTION"],
+        "dev-two": ["Axes/X/POSITION", "Controller/EXECUTION", "OEE/AVAILABILITY"],
+        "dev-three": ["Axes/X/POSITION", "Controller/EXECUTION", "OEE/AVAILABILITY"],
+        "dev-ext": ["Axes/X/POSITION", "Controller/EXECUTION", "Environmental/HUMIDITY",
+                    "Vendor/COUNT"],
+    }
+
+    def test_a_device_is_a_composition_of_every_modelled_and_declared_metric(self):
+        _, objects, _ = self.space()
+        for sid, names in self.COMPONENTS.items():
+            with self.subTest(device=sid):
+                device = objects[sid]
+                self.assertTrue(device["isComposition"])
+                self.assertEqual(device["metadata"]["relationships"]["HasComponent"],
+                                 [f"{sid}/{name}" for name in names])
+                for name in names:
+                    self.assertIn(f"{sid}/{name}", objects)
+        self.assertNotIn("dev-one/Asset_ID", objects, "identity metrics are wire plumbing")
+        bare = objects["dev-bare"]
+        self.assertFalse(bare["isComposition"], "no components, so not a composition")
+        self.assertNotIn("HasComponent", bare["metadata"]["relationships"])
+
+    def test_a_metric_is_a_leaf_whose_only_edge_is_to_its_device(self):
+        _, objects, _ = self.space()
+        metrics = {eid: o for eid, o in objects.items() if "/" in eid}
+        self.assertEqual(len(metrics), sum(len(n) for n in self.COMPONENTS.values()))
+        children = set()
+        for obj in objects.values():
+            children.update(obj["metadata"]["relationships"].get("HasChildren", []))
+        for element_id, metric in metrics.items():
+            sid, _, name = element_id.partition("/")
+            with self.subTest(element_id=element_id):
+                self.assertEqual(metric["parentId"], sid)
+                self.assertEqual(metric["displayName"], name)
+                self.assertEqual(metric["metadata"]["relationships"], {"ComponentOf": [sid]})
+                self.assertFalse(metric["isComposition"])
+                self.assertFalse(metric["isExtended"])
+                self.assertNotIn(element_id, children, "HasChildren never reaches a metric")
+
+    def test_every_edge_has_its_inverse_with_metrics_in_the_space(self):
+        _, objects, _ = self.space()
+        inverse = {name: reverse for name, reverse, _ in A.RELATIONSHIP_TYPES}
+        missing = []
+        for element_id, obj in objects.items():
+            for rel, targets in obj["metadata"]["relationships"].items():
+                for target in targets:
+                    back = objects[target]["metadata"]["relationships"].get(inverse[rel], [])
+                    if element_id not in back:
+                        missing.append(f"{element_id} -{rel}-> {target} has no {inverse[rel]} back")
+        self.assertEqual(missing, [], chr(10).join(missing))
+
+    def test_a_metrics_value_is_its_latest_sample(self):
+        vqt = self.value("dev-one/Axes/X/POSITION")
+        self.assertEqual(vqt["elementId"], "dev-one/Axes/X/POSITION")
+        self.assertEqual((vqt["value"], vqt["quality"]), (12.5, "Good"))
+        self.assertEqual(vqt["timestamp"], "2026-09-28T10:00:00.123Z")
+
+    def test_a_modelled_metric_never_published_is_good_no_data_now(self):
+        before = time.time()
+        vqt = self.value("dev-one/Controller/EXECUTION")
+        self.assertEqual((vqt["value"], vqt["quality"]), (None, "GoodNoData"))
+        # The guide forbids a null timestamp; with no sample, it is the time of the read.
+        stamp = vqt["timestamp"]
+        self.assertTrue(stamp.endswith("Z"), stamp)
+        parsed = A.datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+        self.assertLessEqual(abs(parsed - before), 5)
+
+    def test_a_quarantined_devices_metrics_are_uncertain_only_with_a_value(self):
+        self.assertEqual(self.value("dev-ext/Axes/X/POSITION")["quality"], "Uncertain")
+        # A null value is never Uncertain: the guide allows only Bad or GoodNoData with it.
+        silent = self.value("dev-ext/Environmental/HUMIDITY")
+        self.assertEqual((silent["value"], silent["quality"]), (None, "GoodNoData"))
+
+    def test_the_device_keeps_its_map_as_its_own_value(self):
+        rows = _metric_rows()
+        for depth, components in ((1, None), (2, True), (0, True)):
+            with self.subTest(maxDepth=depth):
+                i3x_service._space_cache_clear()
+                req = FakeRequest(body={"elementIds": ["dev-one"], "maxDepth": depth},
+                                  pg=ColumnCheckingPostgrest(rows))
+                i3x_service.h_objects_value(req)
+                result = req.result[0]["result"]
+                self.assertTrue(result["isComposition"])
+                self.assertEqual(result["value"], {"Axes/X/POSITION": 12.5})
+                if components is None:
+                    self.assertNotIn("components", result)
+                    continue
+                self.assertEqual(sorted(result["components"]),
+                                 ["dev-one/Axes/X/POSITION", "dev-one/Controller/EXECUTION"])
+                self.assertEqual(result["components"]["dev-one/Axes/X/POSITION"]["value"], 12.5)
+
+    def test_a_catalog_metric_is_typed_by_its_catalog_row(self):
+        _, objects, types = self.space()
+        types = {t["elementId"]: t for t in types}
+        metric = objects["dev-one/Axes/X/POSITION"]
+        self.assertEqual(metric["typeElementId"], "i3x:type:metric:Axes/X/POSITION")
+        self.assertEqual(metric["metadata"]["typeNamespaceUri"], MTCONNECT)
+        self.assertEqual(metric["metadata"]["sourceTypeId"], MTCONNECT + "/DataItemType/POSITION")
+        position = types[metric["typeElementId"]]
+        self.assertEqual(position["schema"], {"type": "number", "x-unit": "MILLIMETER",
+                                              "description": "Linear position of X"})
+        self.assertEqual(position["namespaceUri"], MTCONNECT)
+        execution = types[objects["dev-one/Controller/EXECUTION"]["typeElementId"]]
+        self.assertEqual(execution["schema"], {"type": "string"})
+        # Every device carrying the metric shares the one type.
+        self.assertEqual(objects["dev-two/Axes/X/POSITION"]["typeElementId"],
+                         metric["typeElementId"])
+
+    def test_an_uncatalogued_metric_takes_its_birth_datatype_else_unknown_type(self):
+        _, objects, types = self.space()
+        types = {t["elementId"]: t for t in types}
+        humidity = objects["dev-ext/Environmental/HUMIDITY"]
+        self.assertEqual(humidity["typeElementId"], "i3x:type:sparkplug:Double")
+        self.assertEqual(types[humidity["typeElementId"]]["schema"], {"type": "number"})
+        # No catalog row and no DBIRTH seen since startup: nothing says what it is.
+        count = objects["dev-ext/Vendor/COUNT"]
+        self.assertEqual(count["typeElementId"], A.UNKNOWN_TYPE_ID)
+        self.assertEqual(types[A.UNKNOWN_TYPE_ID]["displayName"], "UnknownType")
+
+    def test_every_object_names_a_served_type_and_says_what_it_says(self):
+        space, objects, types = self.space()
+        types = {t["elementId"]: t for t in types}
+        json_types = TestObjectsMatchTheirTypes.JSON_TYPES
+        for element_id, obj in objects.items():
+            with self.subTest(element_id=element_id):
+                served = types[obj["typeElementId"]]
+                self.assertEqual(obj["metadata"]["sourceTypeId"], served["sourceTypeId"])
+                self.assertEqual(obj["metadata"]["typeNamespaceUri"], served["namespaceUri"])
+                if "/" not in element_id:
+                    continue
+                value = i3x_service._current_value(objects, space, element_id)["value"]
+                if value is not None and "type" in served["schema"]:
+                    self.assertTrue(json_types[served["schema"]["type"]](value), (value, served))
+
+    def test_element_ids_are_unique_across_objects_and_types(self):
+        _, objects, types = self.space()
+        ids = list(objects) + [t["elementId"] for t in types]
+        ids += [r["elementId"] for r in A.relationship_types()]
+        self.assertEqual(len(ids), len(set(ids)))
+        for element_id in ids:
+            with self.subTest(element_id=element_id):
+                self.assertEqual(element_id, element_id.strip())
+                self.assertIsNone(re.search(r"[\x00-\x1f\x7f]", element_id))
+
+    def test_a_name_that_cannot_be_an_element_id_is_not_a_component(self):
+        rows = _metric_rows()
+        rows["devices"][0]["last_birth_metrics"] = ["Axes/X/POSITION", " padded", "bell\x07"]
+        _, objects, _ = self.space(rows)
+        self.assertEqual(objects["dev-one"]["metadata"]["relationships"]["HasComponent"],
+                         ["dev-one/Axes/X/POSITION", "dev-one/Controller/EXECUTION"])
+        # It is still published beyond the schema, so still an extension.
+        self.assertIn(" padded", objects["dev-one"]["metadata"]["schemaExtensions"])
+
+    def test_a_metric_can_be_registered_and_its_history_asked_for(self):
+        rows = _metric_rows()
+        rows["telemetry"] = []
+        metric = "dev-one/Axes/X/POSITION"
+        sub = i3x_service.registry.create("client-metrics", "", principal="p-metrics")
+        try:
+            req = FakeRequest(body={"clientId": "client-metrics",
+                                    "subscriptionId": sub.subscription_id,
+                                    "elementIds": [metric]},
+                              pg=ColumnCheckingPostgrest(rows))
+            req.caller = i3x_service.Caller("p-metrics", None)
+            i3x_service.h_sub_register(req)
+            self.assertEqual(req.result, [{"success": True, "elementId": metric, "result": None}])
+            i3x_service.h_sub_sync(req)
+            self.assertEqual(req.status, 200)
+        finally:
+            i3x_service.registry.delete("client-metrics", sub.subscription_id,
+                                        principal="p-metrics")
+        req = FakeRequest(body={"elementIds": [metric, "dev-one"], "maxDepth": 0,
+                                "startTime": "2026-09-28T00:00:00Z",
+                                "endTime": "2026-09-29T00:00:00Z"},
+                          pg=ColumnCheckingPostgrest(rows))
+        i3x_service.h_objects_history(req)
+        self.assertTrue(all(item["success"] for item in req.result), req.result)
+        self.assertEqual(req.result[0]["result"]["values"], [])
+
+    def test_get_namespaces_lists_the_ones_the_metric_types_use(self):
+        req = FakeRequest(pg=ColumnCheckingPostgrest(_metric_rows()))
+        i3x_service.h_namespaces(req)
+        self.assertEqual(
+            [n["uri"] for n in req.result],
+            [A.NS_LOCAL, A.NS_RELATIONSHIPS, "https://aber.local/semantics/iso22400", MTCONNECT],
+        )
+
+
+class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
+    """
+    A device is typed by every schema the `device_schemas` view attaches, not by the legacy
+    `devices.schema_id` alone: one schema is its type; several are one synthesized `allOf` type per
+    distinct set. `isExtended` is computed against their union.
+    """
+
+    def test_one_schema_is_the_devices_type(self):
+        _, objects, _ = self.space()
+        self.assertEqual(objects["dev-one"]["typeElementId"], MILL)
+        self.assertEqual(objects["dev-one"]["metadata"]["sourceTypeId"],
+                         "https://admin-shell.io/idta/example/Mill/1/0")
+
+    def test_several_schemas_are_one_type_per_set_whatever_the_order(self):
+        _, objects, types = self.space()
+        type_id = A.schema_set_type_id([OEE, MILL])
+        self.assertEqual(type_id, A.SCHEMA_SET_TYPE_PREFIX + MILL + "+" + OEE)
+        self.assertEqual(objects["dev-two"]["typeElementId"], type_id)
+        self.assertEqual(objects["dev-three"]["typeElementId"], type_id)
+        served = [t for t in types if t["elementId"] == type_id]
+        self.assertEqual(len(served), 1, "one type for the set, not one per device")
+        rows = {s["id"]: s for s in _metric_rows()["schemas"]}
+        self.assertEqual(served[0]["schema"], {
+            "type": "object",
+            "allOf": [rows[MILL]["schema_definition"], rows[OEE]["schema_definition"]],
+        })
+        self.assertEqual(served[0]["displayName"], "Mill + OEE")
+        self.assertEqual(served[0]["related"],
+                         {"relationshipType": "InheritsFrom", "types": [MILL, OEE]})
+        self.assertEqual(objects["dev-two"]["metadata"]["sourceTypeId"], served[0]["sourceTypeId"])
+
+    def test_is_extended_is_computed_against_every_attached_schema(self):
+        _, objects, _ = self.space()
+        rows = _metric_rows()
+        declared = rows["devices"][1]["last_birth_metrics"]
+        mill_alone = i3x_service._modelled_metrics(rows["schemas"][0]["schema_definition"])
+        self.assertTrue(A.is_extended(declared, mill_alone), "the premise: Mill alone misses one")
+        self.assertFalse(objects["dev-two"]["isExtended"])
+        self.assertNotIn("schemaExtensions", objects["dev-two"]["metadata"])
+
+    def test_an_extended_device_names_what_it_publishes_beyond_its_schemas(self):
+        _, objects, _ = self.space()
+        device = objects["dev-ext"]
+        self.assertTrue(device["isExtended"])
+        # From the DBIRTH datatype; `{}` where none was seen and the catalog has no row.
+        self.assertEqual(device["metadata"]["schemaExtensions"],
+                         {"Environmental/HUMIDITY": {"type": "number"}, "Vendor/COUNT": {}})
+        self.assertEqual(device["metadata"]["system"], {"quarantined": True})
+        self.assertNotIn("quarantined", device["metadata"], "a vendor key belongs in system")
+
+    def test_schema_extensions_are_sent_exactly_when_the_device_is_extended(self):
+        _, objects, _ = self.space()
+        for sid in ("dev-one", "dev-two", "dev-three", "dev-ext", "dev-bare"):
+            with self.subTest(device=sid):
+                device = objects[sid]
+                extensions = device["metadata"].get("schemaExtensions")
+                self.assertEqual(device["isExtended"], bool(extensions), extensions)
+        # dev-one's last birth declared Asset_ID, which is identity, not a metric beyond the model.
+        self.assertFalse(objects["dev-one"]["isExtended"])
+
+    def test_every_device_carries_its_vendor_keys_in_system(self):
+        _, objects, _ = self.space()
+        for sid in ("dev-one", "dev-two", "dev-bare"):
+            with self.subTest(device=sid):
+                self.assertEqual(objects[sid]["metadata"]["system"], {"quarantined": False})
+
+    def test_a_device_with_no_schema_is_the_unmodelled_device(self):
+        _, objects, _ = self.space()
+        self.assertEqual(objects["dev-bare"]["typeElementId"], A.UNTYPED_DEVICE_TYPE_ID)
+        self.assertFalse(objects["dev-bare"]["isExtended"])
 
 
 class TestRequestValidation(unittest.TestCase):
@@ -1897,14 +2262,13 @@ class TestSparkplugValues(unittest.TestCase):
 
 class TestNamespaces(unittest.TestCase):
     """
-    GET /namespaces lists the namespaces the served types belong to, and only those (#459).
+    GET /namespaces lists the namespaces the served types belong to, and only those.
 
     i3X groups ObjectTypes and RelationshipTypes into namespaces, and an Object reaches one through
-    its type (`typeNamespaceUri`), so a client reads the list as the set it will meet there. It
-    used to add one URI per `metric_catalog.standard` -- MTConnect's under mtconnect.org, which
-    the semantic ids disclaim -- that no type or object carried. The space includes a device typed
-    by a schema whose metrics come from standards, the case that once looked like a reason to
-    advertise them.
+    its type (`typeNamespaceUri`), so a client reads the list as the set it will meet there. A
+    schema's type is local. A metric's type is its catalog row, in the namespace its semantic id is
+    defined in, so the space carries a metric from each standard, one with an id under another
+    authority, and one with none.
     """
 
     SCHEMA = {
@@ -1913,13 +2277,38 @@ class TestNamespaces(unittest.TestCase):
         "schema_definition": {"properties": {"Axes/X/POSITION": {}, "OEE/OEE": {}}},
         "semantic_id": "https://admin-shell.io/idta/example/1/0",
     }
+    MACHINERY = "http://opcfoundation.org/UA/Machinery/"
+    # Catalog name -> (semantic id, the namespace its type belongs to).
+    CATALOG = {
+        "Axes/X/POSITION": ("https://aber.local/semantics/mtconnect/v2.0/DataItemType/POSITION",
+                            "https://aber.local/semantics/mtconnect/v2.0"),
+        "OEE/OEE": ("https://aber.local/semantics/iso22400/OEE",
+                    "https://aber.local/semantics/iso22400"),
+        "Machine/OperatingMode": (MACHINERY + "MachineryOperationMode",
+                                  MACHINERY + "?projection=i3X"),
+        "Energy/Pressure": (MACHINERY + "Energy/Pressure", MACHINERY + "Energy/?projection=i3X"),
+        "BMS/ZONE_TEMPERATURE": ("http://data.ashrae.org/standard223#TemperatureSensor",
+                                 "http://data.ashrae.org/standard223?projection=i3X"),
+        "Vendor/READING": ("https://example.com/ns/reading", A.NS_LOCAL),
+        "Local/READING": (None, A.NS_LOCAL),
+    }
+
+    def rows(self):
+        return [{"name": name, "datatype": 10, "semantic_id": semantic_id}
+                for name, (semantic_id, _) in self.CATALOG.items()]
 
     def served(self):
-        types = i3x_service._build_types({"schemas": [self.SCHEMA]})
+        types = i3x_service._build_types({"schemas": [self.SCHEMA], "metric_catalog": self.rows()})
         objects = dict(_representative_space())
         typed = A.device_object({"sparkplug_id": "dev-typed", "_gateway_sparkplug_id": None}, None, "schema-1")
         objects[typed["elementId"]] = typed
+        for row in self.rows():
+            metric = A.metric_object("dev-typed", row["name"], A.metric_type_from_catalog(row))
+            objects[metric["elementId"]] = metric
         return types, A.relationship_types(), objects
+
+    def advertised(self):
+        return A.namespaces(self.served()[0])
 
     def used(self):
         types, relationships, objects = self.served()
@@ -1931,15 +2320,16 @@ class TestNamespaces(unittest.TestCase):
 
     def test_every_advertised_namespace_is_one_a_type_belongs_to(self):
         used = self.used()
-        for namespace in A.namespaces():
+        for namespace in self.advertised():
             self.assertIn(
                 namespace["uri"], used,
                 f"{namespace['uri']} is advertised but no type or object carries it",
             )
 
     def test_every_namespace_a_type_belongs_to_is_advertised(self):
-        advertised = {n["uri"] for n in A.namespaces()}
+        advertised = {n["uri"] for n in self.advertised()}
         self.assertLessEqual(self.used(), advertised)
+        self.assertEqual(len(advertised), len(self.advertised()), "a namespace is listed twice")
 
     def test_an_objects_type_namespace_is_its_types(self):
         types, _, objects = self.served()
@@ -1950,10 +2340,68 @@ class TestNamespaces(unittest.TestCase):
                     obj["metadata"]["typeNamespaceUri"], by_id[obj["typeElementId"]],
                 )
 
-    def test_nothing_is_advertised_under_a_standards_bodys_authority(self):
-        # A local type under mtconnect.org or opcfoundation.org would claim that body defined it.
-        for namespace in A.namespaces():
-            self.assertTrue(namespace["uri"].startswith("https://aber.local/"), namespace["uri"])
+    def test_a_metric_type_is_in_the_namespace_its_semantic_id_is_defined_in(self):
+        types = {t["elementId"]: t for t in self.served()[0]}
+        for name, (semantic_id, namespace) in self.CATALOG.items():
+            with self.subTest(name=name):
+                metric_type = types[A.metric_type_id(name)]
+                self.assertEqual(metric_type["namespaceUri"], namespace)
+                self.assertEqual(metric_type["sourceTypeId"], semantic_id or name)
+
+    def test_a_standards_own_namespace_is_only_advertised_as_a_projection(self):
+        # A type adapted from a standard is not that standard's: under the body's authority, the
+        # guide's `?projection=` suffix says so. A bare mtconnect.org or opcfoundation.org URI
+        # would claim the body defined it.
+        for namespace in self.advertised():
+            uri = namespace["uri"]
+            with self.subTest(uri=uri):
+                self.assertTrue(
+                    uri.startswith("https://aber.local/") or uri.endswith("?projection=i3X"), uri
+                )
+                self.assertNotEqual(namespace["displayName"], uri, "no display name")
+
+    def test_with_no_catalog_only_the_two_local_namespaces_are_listed(self):
+        types = i3x_service._build_types({"schemas": [self.SCHEMA]})
+        self.assertEqual([n["uri"] for n in A.namespaces(types)], [A.NS_LOCAL, A.NS_RELATIONSHIPS])
+
+    # Vocabulary table -> the namespace its concepts land in; None is an OPC UA row's own
+    # companion spec, read from its NodeId's `nsu=`.
+    VOCABULARIES = {
+        "mtconnect_vocabulary": "https://aber.local/semantics/mtconnect/v2.0",
+        "iso22400_vocabulary": "https://aber.local/semantics/iso22400",
+        "opcua_vocabulary": None,
+        "ashrae223_vocabulary": "http://data.ashrae.org/standard223?projection=i3X",
+    }
+
+    def test_every_seeded_concept_lands_in_its_standards_namespace(self):
+        """Every semantic id a vocabulary can hand a catalog row, from the applied migrations."""
+        row = re.compile(
+            r"^INSERT INTO public\.(\w+_vocabulary) VALUES \((.*)'((?:[^']|'')*)'\);?\s*$", re.M
+        )
+        seen = dict.fromkeys(self.VOCABULARIES, 0)
+        for path in sorted(MIGRATIONS_DIR.glob("[0-9]*.sql")):
+            for table, values, semantic_id in row.findall(path.read_text(encoding="utf-8")):
+                expected = self.VOCABULARIES[table]
+                if expected is None:
+                    expected = re.search(r"'nsu=([^;']+);", values).group(1) + A.PROJECTION_SUFFIX
+                if A.metric_type_namespace(semantic_id) != expected:
+                    self.fail(f"{table}: {semantic_id} lands in "
+                              f"{A.metric_type_namespace(semantic_id)}, not {expected}")
+                seen[table] += 1
+        for table, count in seen.items():
+            self.assertGreater(count, 5, f"read no {table} rows: the seed's shape changed")
+
+    def test_the_local_namespaces_are_where_the_dashboard_mints_ids(self):
+        standards = Path(__file__).resolve().parents[1] / "frontend/src/utils/standards.js"
+        constants = dict(re.findall(
+            r"^export const (\w+_NAMESPACE) = [`']([^`']+)[`']",
+            standards.read_text(encoding="utf-8"),
+            re.M,
+        ))
+        base = constants["LOCAL_SEMANTIC_NAMESPACE"]
+        minted = {constants[name].replace("${LOCAL_SEMANTIC_NAMESPACE}", base)
+                  for name in ("MTCONNECT_SEMANTIC_NAMESPACE", "ISO22400_SEMANTIC_NAMESPACE")}
+        self.assertEqual(set(A._LOCAL_STANDARD_NAMESPACES), minted)
 
 
 class TestNamespaceFilter(unittest.TestCase):
@@ -1971,8 +2419,12 @@ class TestNamespaceFilter(unittest.TestCase):
         self.assertEqual(req.status, 200)
         return req.result
 
+    # With no schemas or catalog rows, the local types are the synthetic ones and the metric
+    # fallbacks, which are always served.
+    LOCAL_TYPES = len(A.SYNTHETIC_TYPES) + len(A.METRIC_FALLBACK_TYPES)
+
     def test_no_filter_returns_every_type(self):
-        self.assertEqual(len(self.served(i3x_service.h_objecttypes)), len(A.SYNTHETIC_TYPES))
+        self.assertEqual(len(self.served(i3x_service.h_objecttypes)), self.LOCAL_TYPES)
         self.assertEqual(
             len(self.served(i3x_service.h_relationshiptypes)), len(A.RELATIONSHIP_TYPES)
         )
@@ -1980,7 +2432,7 @@ class TestNamespaceFilter(unittest.TestCase):
     def test_each_namespace_returns_only_its_own_types(self):
         encoded = "?namespaceUri=https%3A%2F%2Faber.local%2Fi3x"
         object_types = self.served(i3x_service.h_objecttypes, encoded)
-        self.assertEqual(len(object_types), len(A.SYNTHETIC_TYPES))
+        self.assertEqual(len(object_types), self.LOCAL_TYPES)
         self.assertEqual(self.served(i3x_service.h_relationshiptypes, encoded), [])
 
         relationships = self.served(

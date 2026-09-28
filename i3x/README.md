@@ -17,12 +17,12 @@ worth adopting:
 
 | i3X concept | Already exists here as |
 | :--- | :--- |
-| ObjectType (a JSON Schema) | `schemas.schema_definition` — **the same thing**, no translation |
-| `elementId` (unique, persistent) | `sparkplug_id` |
+| ObjectType (a JSON Schema) | `schemas.schema_definition` — **the same thing**, no translation; a metric's is its `metric_catalog` row |
+| `elementId` (unique, persistent) | `sparkplug_id`; a metric's is `<sparkplug_id>/<metric name>`, the key of `telemetry` |
 | `displayName` (human-readable when practical) | `name` |
 | `isExtended` (publishes beyond its type) | Unmodelled, derived by `deviceTags.js` |
-| `sourceTypeId` | `schemas.semantic_id`, else the schema name |
-| Namespace, `typeNamespaceUri` | two local namespaces, for types and for relationships ([Address space](#address-space)) |
+| `sourceTypeId` | `schemas.semantic_id`, else the schema name; a metric type's catalog `semantic_id` |
+| Namespace, `typeNamespaceUri` | the local namespace, the relationships', and each standard a metric type comes from ([Address space](#address-space)) |
 | `quality` | derived at read time, like `gateway_status` |
 
 **i3X introduces no new type system.** That was the stated reason for rejecting native AAS Submodel
@@ -104,7 +104,7 @@ i3x:site                          (synthetic root, named by site.name — the on
 └── i3x:unassigned                (synthetic — assets nobody has placed)
 ```
 
-Six mappings that are decisions rather than mechanics:
+The mappings that are decisions rather than mechanics:
 
 - **`parentId` is where the asset is, not the gateway.** i3X gives an Object one parent; a device
   here has two (a place — where it is; a gateway — how its data arrives). `HasParent` is
@@ -135,12 +135,47 @@ Six mappings that are decisions rather than mechanics:
   emitted by nothing for as long as the service existed — the conformance suite samples only the
   first five edges, and it took fixing the three checks queued ahead of it in CI for those five to
   include one that exposed this. `test_every_edge_has_its_inverse` walks the whole graph instead.
-- **Every type is local, so `GET /namespaces` lists two.** i3X groups ObjectTypes and
-  RelationshipTypes into namespaces and reaches an Object's through its type. A schema is a JSON
-  Schema written here even when its metrics come from MTConnect or OPC UA, so its type belongs to
-  the local namespace, and the relationships have their own. A vocabulary is where a metric's
-  semantic id comes from, not a namespace any type belongs to: listing one would promise a client
-  types it never meets (#459). `test_i3x_service.py` holds the list to the namespaces in use.
+- **A schema's type is local; a metric's type is in the namespace of its semantic id.** i3X
+  groups ObjectTypes and RelationshipTypes into namespaces and reaches an Object's through its
+  type. A schema is a JSON Schema written here even when its metrics come from MTConnect or OPC UA,
+  so its type is local, as are the synthetic types; the relationships have their own namespace. A
+  metric's type is its `metric_catalog` row, whose semantic id says where the concept is defined:
+  - MTConnect and ISO 22400 ids are minted here, so their namespaces are local:
+    `https://aber.local/semantics/mtconnect/v2.0` and `https://aber.local/semantics/iso22400`.
+  - An OPC UA id is `<companion spec namespace><BrowseName>` and an ASHRAE 223P id is the
+    ontology's own. A scalar type adapted from one is an in-exact implementation of that
+    namespace, which the guide marks with a `projection` suffix:
+    `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
+    `http://data.ashrae.org/standard223?projection=i3X`. The bare URI would claim the standard
+    defined the type.
+  - An id under any other authority, or none, is local, and so are the per-datatype metric types
+    and `UnknownType`.
+
+  `GET /namespaces` lists exactly the namespaces the served types use; `test_i3x_service.py`
+  holds it to that.
+- **Each metric is a leaf component of its device.** Its elementId is `<sparkplug_id>/<metric
+  name>`, split at the first `/` since a `sparkplug_id` never contains one. As in CESMII's
+  reference server (`pump-101`), its `parentId` is the device and its only edge is `ComponentOf`,
+  so no `HasChildren` walk reaches it. The device is `isComposition: true`, with `HasComponent`
+  to every metric its schemas model, published or not, and every metric its last DBIRTH
+  declared, identity metrics aside. It keeps its map as its own value: `maxDepth: 1` returns the
+  whole device in one read, and `maxDepth: 0` adds each metric's own value under `components`. A
+  metric's value is its latest sample with its device's quality; one never published is
+  `GoodNoData`, timestamped at the read. There is no metric-group level, because `Controller`
+  and `Controller/EXECUTION` can both be metrics.
+
+  A metric's type is its catalog row, `i3x:type:metric:<name>`: a scalar schema from its
+  Sparkplug datatype, with the row's description and its unit as `x-unit`. A metric the catalog
+  lacks takes `i3x:type:sparkplug:<datatype>` from its DBIRTH datatype, else `UnknownType`.
+  `UnknownType`'s schema is `{}`, not the guide's `{"type": "object"}`: a metric's value is a
+  bare scalar, and a value must conform to its type (the suite's QRY-03).
+- **A device is typed by every schema attached to it**, read from the `device_schemas` view as
+  the dashboard, the AAS exporter and ingestion read it, not from `devices.schema_id` alone. One
+  schema is its type. Several are one synthesized type per distinct set,
+  `i3x:type:schemas:<ids sorted, joined by +>`, whose schema is `allOf` over their definitions,
+  inlined. `isExtended` is judged against the union of what they model. When it is true,
+  `metadata.schemaExtensions` gives each metric beyond them a JSON Schema fragment from its DBIRTH
+  datatype. Vendor keys, `quarantined` among them, are under `metadata.system`.
 - **`quality` is derived at read time.** Quarantined or stale → `Uncertain`; never published →
   `GoodNoData` with no value. A `quality` column on the hypertable would be a stored verdict that
   goes stale the moment the gateway does.
@@ -152,10 +187,12 @@ and is placed by its own columns in the view's order. The root's `displayName` i
 setting the UNS bridge publishes under, and `Site` while it is empty; the setting is not sensitive,
 so every authenticated caller reads it. An object's
 `metadata.sourceTypeId` is its type's: a device's is its schema's `semantic_id`, else the schema's
-name, and `Device` when it has no schema. The site, areas, cells, lanes and Unassigned have values
-too, and each sends exactly the properties its synthetic type declares; `deviceCount` counts
-devices, not children, so a cell's gateways and an area's cells are not in it, and an area's counts
-every device in it, area-wide or in one of its cells.
+name; the synthesized type's id when it has several schemas; and `Device` when it has none. A
+metric's is its catalog row's `semantic_id`, else the metric's name, and one the catalog lacks
+carries its Sparkplug datatype's name or `UnknownType`. The site, areas, cells, lanes and
+Unassigned have values too, and each sends exactly the properties its synthetic type declares;
+`deviceCount` counts devices, not children, so a cell's gateways and an area's cells are not in
+it, and an area's counts every device in it, area-wide or in one of its cells.
 
 **A failed read is an error, never an empty answer.** A read behind the address space that
 PostgREST answers with a 400 or a 5xx is a 502 naming the relation and carrying PostgREST's
@@ -172,8 +209,8 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | Method | Path | Notes |
 | :--- | :--- | :--- |
 | GET | `/info` | **Unauthenticated.** Capabilities + health |
-| GET | `/namespaces` | The two every type belongs to: local and relationships |
-| GET | `/objecttypes` | `schemas` rows + synthetic Site/Area/Cell/Lane/Unassigned/Gateway types. `?namespaceUri=` |
+| GET | `/namespaces` | Those the served types use: local, relationships, and each metric type's standard |
+| GET | `/objecttypes` | `schemas` rows + synthetic Site/Area/Cell/Lane/Unassigned/Gateway types + a type per catalog metric, per Sparkplug datatype and per set of schemas, and `UnknownType`. `?namespaceUri=` |
 | POST | `/objecttypes/query` | |
 | GET | `/relationshiptypes` | Six types, all registered with their `reverseOf`. `?namespaceUri=` |
 | POST | `/relationshiptypes/query` | |
@@ -592,8 +629,19 @@ than minutes, and why `0` disables the cache outright.
 
   So this advisory is noise on the target it fires against. It is recorded here because it is
   raised on every conformance run and is otherwise rediscovered on each reading of the log.
-- **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH. A
-  device that has never birthed reports `false` rather than unknown.
+- **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH,
+  judged against every schema attached to the device. A device that has never birthed reports
+  `false` rather than unknown. The DBIRTH *datatypes* are held only in this process: after a
+  restart, a metric the catalog lacks is `UnknownType`, and its `schemaExtensions` fragment `{}`
+  unless the catalog has its datatype, until the device births again.
+- **`GET /objects` has no paging**, because i3X 1.0 defines none. Measured on 2026-09-28 with
+  1,000 devices × 20 metrics (21,272 objects) on a development laptop:
+  - assembling the objects, which every object and value endpoint does per request, took 45–60
+    ms, against 4–6 ms for the same 1,072 non-metric objects before metrics were components;
+  - the unfiltered response is 4.9 MB, or 10.7 MB with `includeMetadata=true`, serialised in
+    35–60 ms;
+  - gzip at level 6 took 50–100 ms for 0.12–0.42 MB. Level 9, `GzipFile`'s default and what the
+    server used before, took 180–450 ms for 0.11–0.33 MB.
 - **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
   respect to a permission that has just been revoked. See
   [The address-space cache](#the-address-space-cache).

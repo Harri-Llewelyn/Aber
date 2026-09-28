@@ -234,12 +234,16 @@ def relationship_types() -> List[dict]:
     ]
 
 
-def namespaces() -> List[dict]:
-    """The namespaces the served types belong to: ObjectTypes in NS_LOCAL, relationships in theirs."""
+def namespaces(object_types: Optional[List[dict]] = None) -> List[dict]:
+    """
+    The namespaces the served types belong to: the local one, the relationships', and each one a
+    metric type takes from its standard. Exactly those, so `object_types` is what is served.
+    """
+    standards = {t["namespaceUri"] for t in object_types or []} - {NS_LOCAL, NS_RELATIONSHIPS}
     return [
         {"uri": NS_LOCAL, "displayName": "Aber Local"},
         {"uri": NS_RELATIONSHIPS, "displayName": "Aber Relationships"},
-    ]
+    ] + [{"uri": uri, "displayName": _namespace_display_name(uri)} for uri in sorted(standards)]
 
 
 def schema_source_type_id(row: dict) -> str:
@@ -250,26 +254,187 @@ def schema_source_type_id(row: dict) -> str:
     return row.get("semantic_id") or row.get("schema_name") or row["id"]
 
 
-def object_type_from_schema(row: dict) -> dict:
-    """A `schemas` row is an ObjectType with no translation -- its definition IS JSON Schema."""
+def _schema_definition(row: dict) -> dict:
     definition = row.get("schema_definition")
     if not isinstance(definition, dict):
         # A schema whose definition is unreadable is reported as an object with unknown properties
         # rather than dropped. "Has a model we cannot parse" and "has no model" are different
         # findings, the same distinction deviceTags.js makes for Unmodelled.
         definition = {"type": "object", "additionalProperties": True}
+    return definition
+
+
+def object_type_from_schema(row: dict) -> dict:
+    """A `schemas` row is an ObjectType with no translation -- its definition IS JSON Schema."""
     return {
         "elementId": row["id"],
         "displayName": row.get("schema_name") or row["id"],
         "namespaceUri": NS_LOCAL,
         "sourceTypeId": schema_source_type_id(row),
         "version": str(row.get("version") or "1"),
-        "schema": definition,
+        "schema": _schema_definition(row),
         "metadata": {
             "description": row.get("description") or row.get("change_description") or None,
             "status": row.get("status"),
         },
     }
+
+
+SCHEMA_SET_TYPE_PREFIX = "i3x:type:schemas:"
+
+
+def schema_set_type_id(schema_ids) -> str:
+    """The type of a device with several schemas, named by their sorted ids so any order agrees."""
+    return SCHEMA_SET_TYPE_PREFIX + "+".join(sorted(schema_ids))
+
+
+def schema_set_type(rows: List[dict]) -> dict:
+    """
+    The type of every device carrying exactly these schemas: a kind of each, so `allOf` over their
+    definitions, inlined rather than referenced. `sourceTypeId` is its own id: no source namespace
+    defines the combination.
+    """
+    ordered = sorted(rows, key=lambda row: row["id"])
+    type_id = schema_set_type_id(row["id"] for row in ordered)
+    names = [row.get("schema_name") or row["id"] for row in ordered]
+    return {
+        "elementId": type_id,
+        "displayName": " + ".join(names),
+        "namespaceUri": NS_LOCAL,
+        "sourceTypeId": type_id,
+        "version": "1.0.0",
+        "schema": {"type": "object", "allOf": [_schema_definition(row) for row in ordered]},
+        "related": {"relationshipType": "InheritsFrom", "types": [row["id"] for row in ordered]},
+        "metadata": {
+            "description": "Every schema attached to the device: " + ", ".join(names) + ".",
+            "status": None,
+        },
+    }
+
+
+# -------------------------------------------------------------------------------------------------
+# Metric types. A catalog row is the type of that metric on every device; a metric the catalog does
+# not hold is typed by the Sparkplug datatype its DBIRTH declared, or UnknownType.
+# -------------------------------------------------------------------------------------------------
+METRIC_TYPE_PREFIX = "i3x:type:metric:"
+SPARKPLUG_TYPE_PREFIX = "i3x:type:sparkplug:"
+UNKNOWN_TYPE_ID = "i3x:type:unknown"
+
+# Sparkplug B datatype code -> (name, JSON type of the value this server serves). DateTime is served
+# as epoch milliseconds. A code not listed has no scalar form here.
+SPARKPLUG_SCALARS = {
+    1: ("Int8", "integer"), 2: ("Int16", "integer"), 3: ("Int32", "integer"),
+    4: ("Int64", "integer"), 5: ("UInt8", "integer"), 6: ("UInt16", "integer"),
+    7: ("UInt32", "integer"), 8: ("UInt64", "integer"), 9: ("Float", "number"),
+    10: ("Double", "number"), 11: ("Boolean", "boolean"), 12: ("String", "string"),
+    13: ("DateTime", "integer"), 14: ("Text", "string"), 15: ("UUID", "string"),
+}
+
+# Always served, so every metric's typeElementId resolves. UnknownType's schema is `{}` rather than
+# the guide's `{"type": "object"}`: a metric's value is a bare scalar and must conform to its type.
+UNKNOWN_TYPE = {
+    "elementId": UNKNOWN_TYPE_ID,
+    "displayName": "UnknownType",
+    "namespaceUri": NS_LOCAL,
+    "sourceTypeId": "UnknownType",
+    "version": "1.0.0",
+    "schema": {},
+}
+_SPARKPLUG_TYPES = {
+    code: {
+        "elementId": SPARKPLUG_TYPE_PREFIX + name,
+        "displayName": "Sparkplug " + name,
+        "namespaceUri": NS_LOCAL,
+        "sourceTypeId": name,
+        "version": "1.0.0",
+        "schema": {"type": json_type},
+    }
+    for code, (name, json_type) in SPARKPLUG_SCALARS.items()
+}
+METRIC_FALLBACK_TYPES = [_SPARKPLUG_TYPES[code] for code in sorted(_SPARKPLUG_TYPES)]
+METRIC_FALLBACK_TYPES.append(UNKNOWN_TYPE)
+
+# The namespaces a metric's semantic id can be defined in. MTConnect and ISO 22400 ids are minted
+# here, so theirs are local. OPC UA and ASHRAE 223P ids are the standard's own, and a scalar type
+# adapted from one is an in-exact implementation, which the guide marks with `?projection=i3X`.
+PROJECTION_SUFFIX = "?projection=i3X"
+_LOCAL_STANDARD_NAMESPACES = {
+    "https://aber.local/semantics/mtconnect/v2.0": "MTConnect 2.0 (Aber ids)",
+    "https://aber.local/semantics/iso22400": "ISO 22400 (Aber ids)",
+}
+_OPCUA_NAMESPACE_ROOT = "http://opcfoundation.org/UA/"
+_ASHRAE_223P_NAMESPACE = "http://data.ashrae.org/standard223#"
+_ASHRAE_223P_PROJECTION = "http://data.ashrae.org/standard223" + PROJECTION_SUFFIX
+
+
+def metric_type_namespace(semantic_id) -> str:
+    """
+    The namespace a catalog metric's semantic id is defined in, and so its type's. An OPC UA id is
+    `<companion spec namespace><BrowseName>`, so the namespace is the id up to its last `/`. An id
+    under any other authority, or none, is local: never a namespace in someone else's name.
+    """
+    if not isinstance(semantic_id, str) or not semantic_id:
+        return NS_LOCAL
+    for uri in _LOCAL_STANDARD_NAMESPACES:
+        if semantic_id.startswith(uri + "/"):
+            return uri
+    if semantic_id.startswith(_OPCUA_NAMESPACE_ROOT) and not any(c in semantic_id for c in "?#"):
+        return semantic_id[: semantic_id.rindex("/") + 1] + PROJECTION_SUFFIX
+    if semantic_id.startswith(_ASHRAE_223P_NAMESPACE):
+        return _ASHRAE_223P_PROJECTION
+    return NS_LOCAL
+
+
+def scalar_schema(datatype) -> dict:
+    """The JSON Schema of a value served for this Sparkplug datatype; `{}` when it has no scalar."""
+    scalar = SPARKPLUG_SCALARS.get(datatype)
+    return {"type": scalar[1]} if scalar else {}
+
+
+def metric_type_id(name: str) -> str:
+    """A catalog metric's type: its name is unique and immutable, so the id is persistent."""
+    return METRIC_TYPE_PREFIX + name
+
+
+def metric_type_from_catalog(row: dict) -> dict:
+    """
+    A `metric_catalog` row is the type of that metric on every device: a scalar derived from its
+    datatype, annotated with its description and unit, with its semantic id as `sourceTypeId`.
+    """
+    schema = scalar_schema(row.get("datatype"))
+    if row.get("description"):
+        schema["description"] = row["description"]
+    if row.get("units"):
+        schema["x-unit"] = row["units"]
+    return {
+        "elementId": metric_type_id(row["name"]),
+        "displayName": row["name"],
+        "namespaceUri": metric_type_namespace(row.get("semantic_id")),
+        "sourceTypeId": row.get("semantic_id") or row["name"],
+        "version": "1.0.0",
+        "schema": schema,
+        "metadata": {
+            "description": row.get("description"),
+            "standard": row.get("standard"),
+            "deprecated": bool(row.get("deprecated")),
+        },
+    }
+
+
+def fallback_metric_type(datatype) -> dict:
+    """The type of a metric no catalog row describes, from the datatype its DBIRTH declared."""
+    return _SPARKPLUG_TYPES.get(datatype, UNKNOWN_TYPE)
+
+
+def _namespace_display_name(uri: str) -> str:
+    if uri in _LOCAL_STANDARD_NAMESPACES:
+        return _LOCAL_STANDARD_NAMESPACES[uri]
+    if uri == _ASHRAE_223P_PROJECTION:
+        return "ASHRAE 223P (i3X projection)"
+    if uri.startswith(_OPCUA_NAMESPACE_ROOT) and uri.endswith(PROJECTION_SUFFIX):
+        spec = uri[len(_OPCUA_NAMESPACE_ROOT): -len(PROJECTION_SUFFIX)].strip("/")
+        return f"OPC UA {spec or 'base'} (i3X projection)"
+    return uri
 
 
 def _quality_for_device(device: dict, has_value: bool) -> str:
@@ -287,18 +452,24 @@ def device_object(
     parent_id: Optional[str],
     schema_id: Optional[str],
     schema: Optional[dict] = None,
+    *,
+    source_type_id: Optional[str] = None,
+    metric_ids: Optional[List[str]] = None,
+    extensions: Optional[Dict[str, dict]] = None,
 ) -> dict:
     """
     Project a `devices` row (joined with its resolved location) onto an i3X Object.
 
-    `schema` is the row `schema_id` names, when the caller can see it; the object's `sourceTypeId`
-    is its type's, so it comes from there.
+    `schema_id` is its type: its one schema, or the type of its set of schemas. The object's
+    `sourceTypeId` is its type's: `schema`'s when it has one, else `source_type_id`. `metric_ids`
+    are its components, and `extensions` the fragment of each metric no attached schema models.
     """
     element_id = device["sparkplug_id"]
-    if schema:
-        source_type_id = schema_source_type_id(schema)
-    else:
-        source_type_id = schema_id or _SYNTHETIC_SOURCE_TYPE_IDS[UNTYPED_DEVICE_TYPE_ID]
+    if source_type_id is None:
+        if schema:
+            source_type_id = schema_source_type_id(schema)
+        else:
+            source_type_id = schema_id or _SYNTHETIC_SOURCE_TYPE_IDS[UNTYPED_DEVICE_TYPE_ID]
     gateway_sid = device.get("_gateway_sparkplug_id")
     relationships = {}
     # Where `placement` filed it; None is Unassigned. Location is HasParent only, never ComponentOf.
@@ -306,23 +477,65 @@ def device_object(
     relationships["HasParent"] = [parent]
     if gateway_sid:
         relationships["ConnectsVia"] = [gateway_sid]
+    if metric_ids:
+        relationships["HasComponent"] = sorted(metric_ids)
+    # The i3X term for "publishes beyond its model", which is the Unmodelled concept exactly.
+    # Derived, never stored -- see `is_extended`.
+    extended = bool(device.get("_is_extended"))
+    metadata = {
+        "description": device.get("description"),
+        "typeNamespaceUri": NS_LOCAL,
+        "sourceTypeId": source_type_id,
+        "relationships": relationships,
+    }
+    if extended:
+        metadata["schemaExtensions"] = dict(extensions or {})
+    # Vendor keys, which i3X requires here whenever the object is extended.
+    metadata["system"] = {"quarantined": bool(device.get("is_quarantined"))}
     return {
         "elementId": element_id,
         "displayName": device.get("name") or element_id,
         "typeElementId": schema_id or UNTYPED_DEVICE_TYPE_ID,
         "parentId": parent,
-        # A device is a component of its cell in the composition sense: deleting the cell does not
-        # delete the device (ON DELETE SET NULL), so this is an aggregation, not a composition.
+        # A composition of its metrics, each a leaf component. Its own value stays their map.
+        "isComposition": bool(metric_ids),
+        "isExtended": extended,
+        "metadata": metadata,
+    }
+
+
+def metric_element_id(device_sid: str, name: str) -> str:
+    """A metric's elementId. A sparkplug_id never contains `/`, so the first `/` splits it back."""
+    return f"{device_sid}/{name}"
+
+
+_UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def metric_name_is_addressable(name) -> bool:
+    """Whether `<device>/<name>` is a valid elementId: no surrounding whitespace, all printable."""
+    if not isinstance(name, str) or not name or name != name.strip():
+        return False
+    return not _UNPRINTABLE.search(name)
+
+
+def metric_object(device_sid: str, name: str, metric_type: dict) -> dict:
+    """
+    One metric of a device, a leaf component. As in CESMII's reference server, its parent is the
+    device and its only edge is `ComponentOf`, so an organisational (`HasChildren`) walk never
+    reaches it.
+    """
+    return {
+        "elementId": metric_element_id(device_sid, name),
+        "displayName": name,
+        "typeElementId": metric_type["elementId"],
+        "parentId": device_sid,
         "isComposition": False,
-        # The i3X term for "publishes beyond its model", which is the Unmodelled concept exactly.
-        # Derived, never stored -- see `is_extended`.
-        "isExtended": bool(device.get("_is_extended")),
+        "isExtended": False,
         "metadata": {
-            "description": device.get("description"),
-            "typeNamespaceUri": NS_LOCAL,
-            "sourceTypeId": source_type_id,
-            "relationships": relationships,
-            "quarantined": bool(device.get("is_quarantined")),
+            "typeNamespaceUri": metric_type["namespaceUri"],
+            "sourceTypeId": metric_type["sourceTypeId"],
+            "relationships": {"ComponentOf": [device_sid]},
         },
     }
 
@@ -474,6 +687,7 @@ def unassigned_object(child_ids: List[str]) -> dict:
 def is_extended(declared_metrics, modelled_metrics) -> bool:
     """
     i3X `isExtended` is Unmodelled: the object publishes beyond the type that describes it.
+    `modelled_metrics` is the union across every schema attached to the device.
 
     Derived by subtraction at read time, exactly as `deviceTags.js` does it -- so editing a schema
     reclassifies its devices on the next request rather than at their next birth, which may be weeks
@@ -645,9 +859,9 @@ def device_value(device: dict, metrics: Dict[str, dict]) -> dict:
     """
     A device's value is the map of its latest metric values.
 
-    Composite rather than one-object-per-metric, because the device's ObjectType is its schema and
-    that schema's `properties` are the metric names. Flattening each metric into its own Object would
-    invent an elementId per metric that appears nowhere on the wire and in no table.
+    Each metric is also a component with a value of its own (`device_metric_value`), but the map
+    stays the device's value: its ObjectType is its schemas, whose `properties` are the metric
+    names, and one read at the default depth returns the whole device.
     """
     if not metrics:
         return value_envelope(device["sparkplug_id"], None, _quality_for_device(device, False), None)
@@ -656,3 +870,13 @@ def device_value(device: dict, metrics: Dict[str, dict]) -> dict:
     return value_envelope(
         device["sparkplug_id"], value, _quality_for_device(device, True), latest or None
     )
+
+
+def device_metric_value(device: dict, element_id: str, entry: Optional[dict]) -> dict:
+    """
+    One metric's value: its cache `entry`, with its device's quality. A null value is GoodNoData,
+    never Uncertain, and the timestamp is never null: the sample's, else the current time.
+    """
+    value = entry.get("value") if entry else None
+    quality = _quality_for_device(device, True) if value is not None else "GoodNoData"
+    return value_envelope(element_id, value, quality, (entry or {}).get("timestamp") or _now_iso())
