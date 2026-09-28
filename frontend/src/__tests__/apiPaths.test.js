@@ -74,6 +74,7 @@ describe('API Path Coverage Test', () => {
     '/api/v1/mtconnect-vocabulary',
     '/api/v1/iso22400-vocabulary',
     '/api/v1/opcua-vocabulary',
+    '/api/v1/idta-submodel-templates',
     '/api/v1/directory',
     '/api/v1/stats',
     '/api/v1/telemetry?limit=500',

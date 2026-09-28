@@ -1963,7 +1963,8 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/mtconnect-vocabulary')) {
       // Reference data (generated; seeded by 0002_seed_data.sql), read-only to the app. Returned
-      // flat and bucketed by the caller -- it is ~600 short rows, fetched once per Schemas visit.
+      // flat and bucketed by the caller -- it is ~600 short rows, read once per visit to the Metrics
+      // or Vocabulary page.
       const { data, error } = await supabase
         .from('mtconnect_vocabulary')
         .select('*')
@@ -2028,6 +2029,18 @@ const apiMethods = {
       }));
     }
 
+    if (path.startsWith('/api/v1/idta-submodel-templates')) {
+      // Reference data (seeded by 0002_seed_data.sql), read-only to the app: each IDTA template
+      // element with the id and reference type the template issues for it, for the semantic id picker.
+      const { data, error } = await supabase
+        .from('idta_submodel_templates')
+        .select('template_id, template_name, template_version, id_short, semantic_id, semantic_id_type, description')
+        .order('template_id', { ascending: true })
+        .order('ordinal', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
     // Checked before /metric-catalog: startsWith on the shorter path would otherwise not match,
     // but keeping the more specific route first makes the ordering intent explicit.
     if (path.startsWith('/api/v1/metric-groups')) {
@@ -2050,7 +2063,7 @@ const apiMethods = {
       return (data || []).map(m => ({
         metric_uuid: m.id,
         name: m.name,
-        // Generated column: the first dotted segment of the name, NULL when there isn't one.
+        // Generated column: the name's first `/`-separated segment, NULL when there isn't one.
         // See utils/metricGroup.js, which mirrors the derivation.
         metric_group: m.metric_group ?? null,
         datatype: m.datatype,
@@ -2061,7 +2074,7 @@ const apiMethods = {
         sub_type: m.sub_type ?? null,
         standard: m.standard ?? null,
         // AAS (IEC 63278) semanticId -- see 0001_baseline_schema.sql. NULL means unmapped, which is a
-        // legitimate state: MTConnect publishes no per-type identifier, so those stay NULL.
+        // legitimate state for a local extension: no vocabulary names it.
         semantic_id: m.semantic_id ?? null,
         semantic_id_type: m.semantic_id_type ?? null,
         description: m.description,

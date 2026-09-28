@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
@@ -15,15 +15,18 @@ import {
   typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS
 } from '../../utils/mtconnect'
 import {
-  STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, followSemanticIdType,
-  LOCAL_EXTENSION_LABEL, mtconnectSemanticId, DEFAULT_SEMANTIC_ID_TYPE
+  STANDARDS, STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL, sameSemanticIdPair, storedSemanticIdPair
 } from '../../utils/standards'
+import {
+  mtconnectSuggestion, vocabularySuggestion, suggestionForMetric, semanticIdCandidates
+} from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
 import {
   conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
 } from '../../utils/ashrae223'
 import CopyableId from '../common/CopyableId'
+import { SemanticIdField } from '../common/SemanticIdField'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconX, IconRefreshCw,
   IconPencil
@@ -50,13 +53,24 @@ const BLANK_METRIC = {
   standard: STANDARDS.MTCONNECT,
   group: '', newGroup: '', instance: '', type: '', customType: '',
   subType: '', units: '', datatype: 10, description: '',
-  // AAS semanticId. ISO 22400 and OPC UA take theirs from the vocabulary row; MTConnect derives one
-  // from the data item type. `semanticIdManual` records that the operator has taken the field over.
-  semanticId: '', semanticIdType: '', semanticIdManual: false,
+  // The chosen OPC UA point's companion specification. Two specifications can define one browse
+  // name, so `type` alone does not find the row.
+  companionSpec: '',
+  // AAS semanticId. The field shows the suggestion (derived from the MTConnect data item type, or
+  // `vocabSemanticId`, the id the chosen ISO 22400, OPC UA or 223P row carries) until the operator
+  // types or picks their own pair, which `semanticIdOwn` holds; null means follow the suggestion.
+  vocabSemanticId: '', semanticIdOwn: null,
   // Only set for standards whose vocabulary states it. MTConnect derives it from the data item
   // type instead, so this stays blank there and effectiveCategory falls back to the derivation.
   vocabCategory: ''
 }
+
+/**
+ * The operator's own semantic id across a change of type. A typed or picked id is kept, with Use
+ * suggested one click away; a blank one gives way to the new type's suggestion, so touching the
+ * field before choosing a type cannot leave the form suggesting nothing.
+ */
+const keepTypedSemanticId = (own) => (own && own.semanticId.trim() !== '' ? own : null)
 
 /**
  * The metric catalog as a page of its own: the vocabulary of metrics every schema is built from.
@@ -82,6 +96,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [isoVocabulary, setIsoVocabulary]     = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
   const [s223Vocabulary, setS223Vocabulary] = useState([])
+  // IDTA template elements, which the semantic id picker offers beside the vocabularies.
+  const [templateElements, setTemplateElements] = useState([])
+  const [referenceLoaded, setReferenceLoaded] = useState(false)
   const [loading, setLoading]         = useState(true)
   const [showAddMetric, setShowAddMetric] = useState(false)
   // The metric name is composed from its MTConnect parts: component (group), optional instance,
@@ -113,24 +130,44 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     setShowAddMetric(v => !v)
   }
 
+  // Re-read after every change this page makes.
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [cat, grp, sch, voc, iso, opc, s223] = await Promise.all([
+      const [cat, grp, sch] = await Promise.all([
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/metric-groups'),
         api.get('/api/v1/schemas'),
-        api.get('/api/v1/mtconnect-vocabulary'),
-        api.get('/api/v1/iso22400-vocabulary'),
-        api.get('/api/v1/opcua-vocabulary'),
-        api.get('/api/v1/ashrae223-vocabulary'),
       ])
-      setCatalog(cat); setGroups(grp); setSchemas(sch); setVocabulary(voc)
-      setIsoVocabulary(iso); setOpcuaVocabulary(opc); setS223Vocabulary(s223)
+      setCatalog(cat); setGroups(grp); setSchemas(sch)
     } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Reference data nothing here writes, so one read per table per visit: the type pickers and the
+  // semantic id picker both search what these return, in the browser.
+  useEffect(() => {
+    let current = true
+    Promise.all([
+      api.get('/api/v1/mtconnect-vocabulary'),
+      api.get('/api/v1/iso22400-vocabulary'),
+      api.get('/api/v1/opcua-vocabulary'),
+      api.get('/api/v1/ashrae223-vocabulary'),
+      api.get('/api/v1/idta-submodel-templates'),
+    ]).then(([voc, iso, opc, s223, templates]) => {
+      if (!current) return
+      setVocabulary(voc); setIsoVocabulary(iso); setOpcuaVocabulary(opc); setS223Vocabulary(s223)
+      setTemplateElements(templates); setReferenceLoaded(true)
+    })
+    return () => { current = false }
+  }, [])
+
+  // Everything the semantic id picker offers, built once per read rather than on each keystroke.
+  const semanticIdChoices = useMemo(() => semanticIdCandidates({
+    mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, ashrae223: s223Vocabulary,
+    templates: templateElements
+  }), [vocabulary, isoVocabulary, opcuaVocabulary, s223Vocabulary, templateElements])
 
   /**
    * Turn a suggested group name into the two fields the picker needs. A vocabulary can suggest a
@@ -157,6 +194,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       ...groupFields(prefill.group),
       standard: prefill.standard,
       type: prefill.type,
+      companionSpec: prefill.companionSpec || '',
       customType: '',
       // A KPI, an OPC UA data point and a 223P concept are all whole concepts; none has an
       // MTConnect subType.
@@ -164,10 +202,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       units: prefill.units || '',
       datatype: prefill.datatype,
       vocabCategory: prefill.category || '',
-      semanticId: prefill.semanticId,
-      semanticIdType: prefill.semanticId ? inferSemanticIdType(prefill.semanticId) : '',
-      // The vocabulary's id is authoritative for these two standards, so it is not re-derived.
-      semanticIdManual: !!prefill.semanticId,
+      vocabSemanticId: prefill.semanticId || '',
+      semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn),
       // Only fill a description that is still empty, so the vocabulary's blurb never overwrites
       // something the operator has already written.
       description: m.description || prefill.description || ''
@@ -178,17 +214,21 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // Opens the Add Metric form with the type chosen, leaving the component and instance to the
   // operator.
   const handleUseVocabularyType = (typeName) => {
-    setNewMetric(m => ({ ...m, standard: STANDARDS.MTCONNECT, type: typeName, customType: '' }))
+    setNewMetric(m => ({
+      ...m, standard: STANDARDS.MTCONNECT, type: typeName, companionSpec: '', customType: '',
+      vocabSemanticId: '', semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn)
+    }))
     setShowAddMetric(true)
   }
 
   /**
    * Arrival from the Vocabulary page's Use action. The handover carries identifiers and is resolved
    * here, because the rules that turn a vocabulary row into a metric live in applyPrefill and
-   * nowhere else. Waits for the vocabularies to load, and clears the handover once applied.
+   * nowhere else. Waits for the vocabularies and the groups to load, and clears the handover once
+   * applied.
    */
   useEffect(() => {
-    if (!pendingVocabularyEntry || loading) return
+    if (!pendingVocabularyEntry || loading || !referenceLoaded) return
     const entry = pendingVocabularyEntry
 
     if (entry.standard === STANDARDS.MTCONNECT && entry.type) {
@@ -206,7 +246,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
     onConsumeVocabularyEntry?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingVocabularyEntry, loading, isoVocabulary, opcuaVocabulary, s223Vocabulary])
+  }, [pendingVocabularyEntry, loading, referenceLoaded, isoVocabulary, opcuaVocabulary, s223Vocabulary])
 
   /** Selecting an entry in the type picker prefills everything that entry determines. */
   const handleTypeChange = (value) => {
@@ -223,8 +263,20 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       const concept = conceptByName(s223Vocabulary, value)
       if (concept) return applyPrefill(ashrae223Prefill(concept))
     }
-    setNewMetric(m => ({ ...m, type: value }))
+    // An MTConnect type, or a vocabulary picker set back to empty: no row's id applies any more.
+    setNewMetric(m => ({
+      ...m, type: value, companionSpec: '', vocabSemanticId: '',
+      semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn)
+    }))
   }
+
+  /**
+   * The chosen OPC UA data point, found by specification and name together: by name alone, a name
+   * two specifications define finds whichever the API ordered first.
+   */
+  const chosenDataPoint = newMetric.standard === STANDARDS.OPCUA && newMetric.type
+    ? dataPointByName(opcuaVocabulary, newMetric.companionSpec, newMetric.type)
+    : null
 
   /**
    * Changing the group can hide the selected OPC UA data point, since that picker filters by group.
@@ -237,7 +289,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       newMetric.standard === STANDARDS.OPCUA &&
       newMetric.type &&
       value && value !== NEW_GROUP &&
-      suggestedGroup(dataPointByName(opcuaVocabulary, null, newMetric.type)) !== value
+      suggestedGroup(chosenDataPoint) !== value
 
     setNewMetric(m => ({
       ...m,
@@ -245,12 +297,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       ...(orphaned
         ? {
             type: '',
+            companionSpec: '',
             units: '',
             datatype: '',
             vocabCategory: '',
-            semanticId: '',
-            semanticIdType: '',
-            semanticIdManual: false
+            vocabSemanticId: '',
+            semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn)
           }
         : {})
     }))
@@ -275,8 +327,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       standard: value,
       group: keepGroup ? m.group : '',
       newGroup: keepGroup ? m.newGroup : '',
-      type: '', customType: '', subType: '', units: '',
-      vocabCategory: '', semanticId: '', semanticIdType: '', semanticIdManual: false
+      type: '', companionSpec: '', customType: '', subType: '', units: '',
+      vocabCategory: '', vocabSemanticId: '', semanticIdOwn: null
     }))
   }
 
@@ -299,7 +351,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         sub_type: newMetric.subType,
         units: unitsApply ? newMetric.units : '',
         standard: effectiveStandard,
-        // AAS alignment. Blank is legitimate: MTConnect publishes no per-type identifier.
+        // AAS alignment. Blank is legitimate for a local extension, which no vocabulary names, and
+        // nothing is minted for one.
         semantic_id: semanticIdValue,
         semantic_id_type: semanticIdTypeValue,
         description: newMetric.description
@@ -378,7 +431,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const activeCatalog = catalog.filter(m => !m.deprecated).filter(matchesCatalogSearch)
   // Its own card, unfiltered: the search box belongs to the catalog card above it.
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
-  // Grouped by the first dotted segment of the name; ungrouped metrics fall into a trailing bucket.
+  // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
   // `superseded_by` is a uuid; the Deprecated Metrics card and the restore modal show the name.
   const metricById = new Map(catalog.map(m => [m.metric_uuid, m]))
@@ -465,15 +518,29 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     effectiveType,
     isMTConnect ? newMetric.subType : ''
   )
-  // MTConnect metrics get their data item type's vocabulary id (utils/standards.js), so every
-  // metric of one type shares a concept (#457). It follows the type until the operator types their
-  // own. A custom type is a local extension with no vocabulary id, so it derives nothing.
-  const derivedSemanticId =
-    isMTConnect && !usingCustomType && effectiveType !== '' ? mtconnectSemanticId(effectiveType) : ''
-  const semanticIdValue = (newMetric.semanticIdManual ? newMetric.semanticId : derivedSemanticId).trim()
-  const semanticIdTypeValue = newMetric.semanticIdManual
-    ? newMetric.semanticIdType
-    : (semanticIdValue ? DEFAULT_SEMANTIC_ID_TYPE : '')
+  // What the metric's own standard gives it: an MTConnect metric its data item type's id, shared by
+  // every metric of that type; the others the chosen vocabulary row's id. A custom type or a Custom
+  // metric is a local extension and gets none.
+  const semanticIdSuggestion = isMTConnect
+    ? (usingCustomType ? null : mtconnectSuggestion(effectiveType))
+    : vocabularySuggestion(newMetric.standard, effectiveType, newMetric.vocabSemanticId)
+  const shownSemanticId = newMetric.semanticIdOwn || {
+    semanticId: semanticIdSuggestion?.semanticId || '',
+    semanticIdType: semanticIdSuggestion?.semanticIdType || ''
+  }
+  const { semanticId: semanticIdValue, semanticIdType: semanticIdTypeValue } =
+    storedSemanticIdPair(shownSemanticId.semanticId, shownSemanticId.semanticIdType)
+
+  /**
+   * The field's pair becomes the operator's own, unless it is the suggestion: Use suggested lands
+   * here, and the form then follows the suggestion again. A blank id carries no type.
+   */
+  const handleSemanticIdChange = (pair) => setNewMetric(m => ({
+    ...m,
+    semanticIdOwn: semanticIdSuggestion && sameSemanticIdPair(pair, semanticIdSuggestion)
+      ? null
+      : { semanticId: pair.semanticId, semanticIdType: pair.semanticId.trim() ? pair.semanticIdType : '' }
+  }))
 
   // Shown only once there is a type to compose a name from: before that the name is legitimately
   // half-built, and complaining about it would be scolding the operator mid-keystroke.
@@ -483,10 +550,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     effectiveType !== '' &&
     isValidMetricName(composedName) &&
     datatypeChosen &&
-    (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '') &&
-    // A type without a value would export as an AAS Reference with no key. Rejected here rather
-    // than nulled on the way out, so the operator sees the field they left half-filled.
-    (semanticIdValue !== '' || semanticIdTypeValue === '')
+    (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '')
 
   /**
    * Edit, on both cards: a deprecated metric still carries its id into the schemas that model it.
@@ -538,7 +602,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               label={`semantic id${m.semantic_id_type ? ` (${m.semantic_id_type})` : ''}`}
               onNotify={showToast}
             />
-          : <span style={{ color: 'var(--text-dim)' }} title="Not mapped to a standard concept. Legitimate for MTConnect metrics, which have no published per-type identifier.">—</span>}
+          : <span style={{ color: 'var(--text-dim)' }} title="Not mapped to a standard concept. Legitimate for a local extension, which no vocabulary names. Edit can map any metric, and suggests its standard's id.">—</span>}
       </td>
       <td style={{ color: 'var(--text-muted)' }}>{m.description || '—'}</td>
     </>
@@ -702,8 +766,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   <label className="form-label">Data Point</label>
                   <select
                     className="form-control"
-                    value={newMetric.type
-                      ? `${(dataPointByName(opcuaVocabulary, null, newMetric.type)?.companion_spec) || ''}${OPCUA_KEY_SEP}${newMetric.type}`
+                    value={chosenDataPoint
+                      ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
                       : ''}
                     onChange={e => handleTypeChange(e.target.value)}
                     title="The OPC UA companion specification data point. Selecting one fills in its group from the browse path, its datatype and its semantic id."
@@ -824,60 +888,22 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 <input className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" />
               </div>
 
-              {/* Semantic ids: prefilled from the vocabulary for ISO 22400 and OPC UA, derived from
-                  the data item type for MTConnect, and editable in every case. */}
-              <div className="form-group" style={{ margin: 0, flex: '2 1 260px' }}>
-                <label className="form-label">
-                  Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span>
-                  {!newMetric.semanticIdManual && derivedSemanticId && (
-                    <span style={{ fontWeight: 400, color: 'var(--text-dim)', marginLeft: '5px' }} title="The data item type's id in this deployment's MTConnect namespace, shared by every metric of that type. Type to override.">
-                      · auto
-                    </span>
-                  )}
-                </label>
-                <input
-                  className="form-control mono"
-                  style={{ fontSize: '11px' }}
-                  value={semanticIdValue}
-                  onChange={e => {
-                    const value = e.target.value
-                    setNewMetric(m => ({
-                      ...m,
-                      semanticId: value,
-                      // Taking the field over stops the derivation, so it cannot overwrite a
-                      // hand-entered crosswalk on the next keystroke.
-                      semanticIdManual: true,
-                      // Follows the guess while the shown type agrees with it and clears with the
-                      // id; a type chosen against the guess is kept.
-                      semanticIdType: followSemanticIdType(semanticIdValue, semanticIdTypeValue, value)
-                    }))
-                  }}
-                  placeholder="e.g. http://opcfoundation.org/UA/Robotics/ActualPosition"
-                  title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures. Unlike the name, an Administrator can correct it later with Edit."
-                />
-              </div>
+              {/* The field Edit uses too. It shows the suggestion until the operator types or picks
+                  their own, and Use suggested brings it back. A line of its own: the row aligns to
+                  the bottom, so its search and note would otherwise drag the neighbours down. */}
+              <SemanticIdField
+                idPrefix="metric-add"
+                subject="metric"
+                semanticId={shownSemanticId.semanticId}
+                semanticIdType={shownSemanticId.semanticIdType}
+                suggestion={semanticIdSuggestion}
+                candidates={semanticIdChoices}
+                ownStandard={effectiveStandard}
+                onChange={handleSemanticIdChange}
+                style={{ margin: 0, flex: '1 1 100%' }}
+              />
 
-              <div className="form-group" style={{ margin: 0, flex: '0 1 140px' }}>
-                <label className="form-label">Reference Type</label>
-                <select
-                  className="form-control"
-                  value={semanticIdTypeValue}
-                  onChange={e => setNewMetric(m => ({
-                    ...m,
-                    semanticIdType: e.target.value,
-                    // Choosing a type adopts the id currently shown, rather than leaving the type
-                    // attached to a value the derivation could still change underneath it.
-                    semanticIdManual: true,
-                    semanticId: m.semanticIdManual ? m.semanticId : semanticIdValue
-                  }))}
-                  title="Which kind of AAS Reference the semantic id is. IRI for a URL or URN, IRDI for an ECLASS or IEC CDD identifier."
-                >
-                  <option value="">— None —</option>
-                  {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-
-              <button className={`btn btn-primary btn-sm ${!canAddMetric ? 'btn-disabled' : ''}`} disabled={!canAddMetric} onClick={handleAddMetric} title="Add this metric to the catalog">
+              <button className={`btn btn-primary btn-sm ${!canAddMetric ? 'btn-disabled' : ''}`} style={{ marginLeft: 'auto' }} disabled={!canAddMetric} onClick={handleAddMetric} title="Add this metric to the catalog">
                 Add
               </button>
             </div>
@@ -899,7 +925,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 : <> Recorded as a <strong>local extension</strong>, with no standard provenance.</>}
               {semanticIdValue && (
                 <> Semantic id <span className="mono" style={{ color: 'var(--accent)' }}>{semanticIdValue}</span>
-                  {semanticIdTypeValue ? ` (${semanticIdTypeValue})` : ''} — correctable later with Edit, unlike the name.</>
+                  {semanticIdTypeValue ? ` (${semanticIdTypeValue})` : ''}; unlike the name, an Administrator can correct it later with Edit.</>
               )}
             </div>
 
@@ -916,13 +942,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <IconAlertTriangle size={12} />
                 <span>Choose a Sparkplug datatype. The vocabulary entry does not say how this value is encoded, and the datatype cannot be changed once the metric exists.</span>
-              </div>
-            )}
-
-            {semanticIdValue === '' && semanticIdTypeValue !== '' && (
-              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <IconAlertTriangle size={12} />
-                <span>A reference type needs an id to describe. Enter a semantic id, or set the type back to None.</span>
               </div>
             )}
 
@@ -1070,6 +1089,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         <EditMetricSemanticIdModal
           metric={editTarget}
           usageCount={usageCountFor(editTarget.name)}
+          suggestion={suggestionForMetric(editTarget, {
+            mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, ashrae223: s223Vocabulary
+          })}
+          candidates={semanticIdChoices}
           onConfirm={handleEditSemanticId}
           onCancel={() => setEditTarget(null)}
         />

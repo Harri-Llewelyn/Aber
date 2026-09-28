@@ -184,6 +184,10 @@ describe('opcuaPrefill', () => {
     expect(opcuaPrefill(vocabulary[0])).not.toHaveProperty('instance')
   })
 
+  it('carries the companion specification, which a browse name two specifications share needs', () => {
+    expect(opcuaPrefill(vocabulary[0]).companionSpec).toBe('OPC 40010 Robotics')
+  })
+
   it('returns null for nothing', () => {
     expect(opcuaPrefill(null)).toBeNull()
   })
