@@ -104,7 +104,7 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
 | Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
 | Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
-| Storage (models, captures, floor plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
+| Storage (models, captures, area plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
 | Backups | `backup.retentionDays` (14), on a 20 Gi volume | each backup includes the historian | see #403 |
 
 **The rollups dominate, and they are not compressed.** At S the 1-minute rollup alone reaches

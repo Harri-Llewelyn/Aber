@@ -4305,6 +4305,24 @@ COMMENT ON FUNCTION public.is_active_playback_capture(p_name text) IS 'True when
 
 --
 
+-- is_area_plan_path(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.is_area_plan_path(p_name text) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $_$
+  SELECT split_part(p_name, '/', 3) = ''
+     AND split_part(p_name, '/', 2) ~* '^[^/]+\.svg$'
+     AND EXISTS (
+       SELECT 1 FROM public.areas a
+        WHERE a.id::text = split_part(p_name, '/', 1)
+     )
+$_$;
+
+
+ALTER FUNCTION public.is_area_plan_path(p_name text) OWNER TO postgres;
+
+--
+
 -- is_capture_subject_prefix(text) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.is_capture_subject_prefix(p_folder text) RETURNS boolean
     LANGUAGE sql STABLE
@@ -4321,24 +4339,6 @@ ALTER FUNCTION public.is_capture_subject_prefix(p_folder text) OWNER TO postgres
 
 -- FUNCTION is_capture_subject_prefix(p_folder text) :: COMMENT
 COMMENT ON FUNCTION public.is_capture_subject_prefix(p_folder text) IS 'True when a storage folder names a real gateway or device. The prefix rule for broker-captures, which files by the SUBJECT RECORDED rather than by the gateway a capture plays back as.';
-
---
-
--- is_floor_plan_path(text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.is_floor_plan_path(p_name text) RETURNS boolean
-    LANGUAGE sql STABLE
-    SET search_path TO 'public'
-    AS $_$
-  SELECT split_part(p_name, '/', 3) = ''
-     AND split_part(p_name, '/', 2) ~* '^[^/]+\.svg$'
-     AND EXISTS (
-       SELECT 1 FROM public.areas a
-        WHERE a.id::text = split_part(p_name, '/', 1)
-     )
-$_$;
-
-
-ALTER FUNCTION public.is_floor_plan_path(p_name text) OWNER TO postgres;
 
 --
 
@@ -8639,7 +8639,7 @@ END $c$;
 --
 
 -- TABLE areas :: COMMENT
-COMMENT ON TABLE public.areas IS 'ISA-95 areas -- the buildings of the one site. A cell files into at most one area (cells.area_id); an area-wide asset names one directly. The name is a segment of every uns/ topic beneath it, so it cannot contain the MQTT separator or wildcards.';
+COMMENT ON TABLE public.areas IS 'ISA-95 areas -- the parts of the one site. A cell files into at most one area (cells.area_id); an area-wide asset names one directly. The name is a segment of every uns/ topic beneath it, so it cannot contain the MQTT separator or wildcards.';
 
 --
 
@@ -8654,7 +8654,7 @@ COMMENT ON COLUMN public.areas.icon IS 'Icon key for this area, rendered by the 
 --
 
 -- COLUMN areas.plan_path :: COMMENT
-COMMENT ON COLUMN public.areas.plan_path IS 'Object path of the area''s plan in the floor-plans bucket, <area_id>/<file>.svg, or NULL for the default outline. A path, never markup.';
+COMMENT ON COLUMN public.areas.plan_path IS 'Object path of the area''s plan in the area-plans bucket, <area_id>/<file>.svg, or NULL for the default outline. A path, never markup.';
 
 --
 
@@ -9569,12 +9569,12 @@ COMMENT ON COLUMN public.cells.icon IS 'Icon key for this cell, rendered by the 
 --
 
 -- COLUMN cells.area_id :: COMMENT
-COMMENT ON COLUMN public.cells.area_id IS 'The ISA-95 area (building) this cell is in; NULL is unfiled, which the Areas page lists as a queue. Devices and gateways in the cell derive their area from it and store none.';
+COMMENT ON COLUMN public.cells.area_id IS 'The ISA-95 area this cell is in; NULL is unfiled, which the Areas page lists as a queue. Devices and gateways in the cell derive their area from it and store none.';
 
 --
 
 -- COLUMN cells.description :: COMMENT
-COMMENT ON COLUMN public.cells.description IS 'Free text about the cell, shown as a help tip beside its name on the Overview map when present. Not a topic segment.';
+COMMENT ON COLUMN public.cells.description IS 'Free text about the cell, shown as a help tip beside its name on the Site Map when present. Not a topic segment.';
 
 --
 
@@ -16456,17 +16456,17 @@ GRANT ALL ON FUNCTION public.is_active_playback_capture(p_name text) TO authenti
 
 --
 
+-- FUNCTION is_area_plan_path(p_name text) :: ACL
+REVOKE ALL ON FUNCTION public.is_area_plan_path(p_name text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.is_area_plan_path(p_name text) TO service_role;
+GRANT ALL ON FUNCTION public.is_area_plan_path(p_name text) TO authenticated;
+
+--
+
 -- FUNCTION is_capture_subject_prefix(p_folder text) :: ACL
 REVOKE ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) TO service_role;
 GRANT ALL ON FUNCTION public.is_capture_subject_prefix(p_folder text) TO authenticated;
-
---
-
--- FUNCTION is_floor_plan_path(p_name text) :: ACL
-REVOKE ALL ON FUNCTION public.is_floor_plan_path(p_name text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.is_floor_plan_path(p_name text) TO service_role;
-GRANT ALL ON FUNCTION public.is_floor_plan_path(p_name text) TO authenticated;
 
 --
 
@@ -17462,8 +17462,8 @@ BEGIN
                'ingest_store_birth_parameters',
                'is_active_capture_object',
                'is_active_playback_capture',
+               'is_area_plan_path',
                'is_capture_subject_prefix',
-               'is_floor_plan_path',
                'is_ingestion_caller',
                'is_machine_principal',
                'is_playback_caller',
@@ -17615,8 +17615,8 @@ BEGIN
             'ingest_store_birth_parameters(text, jsonb, timestamp with time zone)',
             'is_active_capture_object(text)',
             'is_active_playback_capture(text)',
+            'is_area_plan_path(text)',
             'is_capture_subject_prefix(text)',
-            'is_floor_plan_path(text)',
             'is_ingestion_caller()',
             'is_machine_principal(uuid)',
             'is_playback_caller()',

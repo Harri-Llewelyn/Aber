@@ -2163,8 +2163,10 @@ other's replay.
   picker on the Cells page refuses the click first; the trigger is the authority, because an
   approved proposal writes the same columns.
 - **The plan is an object, never markup.** `areas.plan_path` names an object in the private
-  `floor-plans` bucket under `<area_id>/`; `is_floor_plan_path()` confines the bucket's write
-  policies to an area that exists. `plan_aspect` is read from the SVG at upload, because a place is
+  `area-plans` bucket under `<area_id>/`; `is_area_plan_path()` confines the bucket's write
+  policies to an area that exists. The bucket and the check were `floor-plans` and
+  `is_floor_plan_path()` until 1.0 ([Storage buckets](#storage-buckets-and-why-they-differ) has
+  how they moved). `plan_aspect` is read from the SVG at upload, because a place is
   a fraction and the aspect is what turns it back into a distance. The dashboard renders a plan
   through an `<img>` fed a blob URL, where an SVG's scripts, foreign objects and external
   references cannot run.
@@ -4954,12 +4956,12 @@ rotated in place.
 
 Four buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
 first two are opposites in the one setting that matters, and the reasoning belongs together rather
-than split across comment blocks in the policy file. `floor-plans` is the odd one out below.
+than split across comment blocks in the policy file. `area-plans` is the odd one out below.
 
 There is no bucket for cold telemetry: it leaves the cluster entirely, for a configured S3
 endpoint. See "Cold telemetry archival" above.
 
-| | `asset-3d-models` | `broker-captures` | `floor-plans` | `asset-exports` |
+| | `asset-3d-models` | `broker-captures` | `area-plans` | `asset-exports` |
 | :--- | :--- | :--- | :--- | :--- |
 | Public read | **yes** | **no** | **no** | **no** |
 | Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` |
@@ -4972,11 +4974,17 @@ an export that an `asset_exports` row records, so a hand-uploaded file would be 
 provenance sitting beside ones that have it. Deletes are Administrator-only because the row's
 tombstone points at the object — removing one is a decision about the record, not about disk.
 
-`floor-plans` is readable by every signed-in role because the Site Map is the page an Operator
+`area-plans` is readable by every signed-in role because the Site Map is the page an Operator
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
-bucket admits `image/svg+xml` only, and the dashboard never inlines it. The name survives the
-retirement of floors as a modelled level: one plan belongs to one area, and the drawing is still
-a floor plan.
+bucket admits `image/svg+xml` only, and the dashboard never inlines it.
+
+**It was `floor-plans` until 1.0.** The name first outlived the retirement of floors as a modelled
+level, on the grounds that the drawing was still a floor plan; it was renamed with every other
+identifier that still said floor, because after 1.0 a bucket name cannot change without an upgrade
+path. `storage-policies.sql` drops the four `floor_plans_*` policies and then
+`is_floor_plan_path()`, which the two write policies called, and `storage-init.mjs` moves the
+objects (below). `areas.plan_path` holds only the object key, `<area_id>/<file>.svg`, so no row
+changes.
 
 ### How `storage-init.mjs` creates them
 
@@ -5004,9 +5012,21 @@ current settings, a changed size limit takes effect on the next boot rather than
 dropped, and for the private buckets `public: false` is re-asserted. The buckets are created
 sequentially, not with `Promise.all`, so a failure part-way through names the bucket that failed.
 
+**A renamed bucket is moved, then deleted.** Nothing else removes a bucket: this script only
+creates and reconciles, and `storage-policies.sql` only replaces what it names, which is why the
+retired `gateway-backups` bucket had to be deleted from the dev cluster by hand. `RENAMED_BUCKETS`
+lists each old name with its new one. After every bucket above exists, the script lists the old
+bucket's objects folder by folder, moves each into the new bucket under the same key
+(`POST /object/move` with `destinationBucket`), and deletes the old bucket, which storage-api
+allows only once it is empty. A move that fails stops the Job before the delete, so the objects
+still unmoved stay where they were and the next upgrade picks them up. An old bucket that no longer
+exists is the settled state: the second run lists nothing, moves nothing and logs that it is gone.
+The only entry is `floor-plans` to `area-plans`. A restored backup that predates the rename brings
+`floor-plans` back, and the next upgrade moves it the same way.
+
 **The buckets are a list in code, not parameters.** They differ in the setting that matters most,
 whether they are public, and expressing that as an environment variable would leave "is this
-bucket public?" answerable only by reading a `.env` file. `asset-exports` and `floor-plans` are fixed names rather
+bucket public?" answerable only by reading a `.env` file. `asset-exports` and `area-plans` are fixed names rather
 than environment variables because `storage-policies.sql` and `frontend/src/api.js` name them
 too; a name that can be changed in one place is a bucket with no policies.
 
@@ -5044,7 +5064,7 @@ because anything but JSON is allowed; the uploader checks that the payload carri
 bound rather than the check. `.aasx` is a ZIP by construction and browsers disagree about what to
 call one, so both the generic and the ZIP types are admitted; the function sets the type itself
 and uploads as `service_role`, and the list is what keeps a hand-uploaded file from arriving as
-something a viewer would execute. Floor plans admit `image/svg+xml` exactly, with no fallback:
+something a viewer would execute. Area plans admit `image/svg+xml` exactly, with no fallback:
 every browser reports it, and the dashboard sets the type itself.
 
 **`asset-exports` is its own bucket, not the cold archive's.** They are not the same kind of
