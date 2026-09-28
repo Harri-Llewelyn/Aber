@@ -1072,8 +1072,8 @@ class FakeRequest:
     def _ok(self, result, status=200, detail=None):
         self.status, self.result = status, result
 
-    def _bulk(self, results):
-        self.status, self.result = 200, results
+    def _bulk(self, results, detail=None):
+        self.status, self.result, self.detail = (detail or {}).get("status", 200), results, detail
 
 
 class _FakeResponse:
@@ -1371,6 +1371,505 @@ class TestRequestValidation(unittest.TestCase):
         i3x_service.h_objects_value(req)
         components = req.result[0]["result"]["components"]
         self.assertIn("dev-explicit", components, "unbounded descends site -> cell -> device")
+
+
+# -------------------------------------------------------------------------------------------------
+# History: a metric's samples, a device's map snapshots, and a 206 whenever a limit cuts either.
+# -------------------------------------------------------------------------------------------------
+class TelemetryPostgrest(ColumnCheckingPostgrest):
+    """
+    ColumnCheckingPostgrest that also answers `telemetry` and `telemetry_latest` as PostgREST
+    would: filtered by asset, metric and time, ordered, limited, then projected onto `select`.
+    `telemetry_latest` is the newest telemetry row of each (asset, metric), as the view is.
+    """
+
+    def __init__(self, telemetry=(), rows=None):
+        super().__init__({**(rows or {}), "telemetry": list(telemetry)})
+
+    @staticmethod
+    def _instant(text):
+        from datetime import datetime
+
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+    def get(self, relation, params=None):
+        import operator
+
+        answer = super().get(relation, params)  # the column checks, and `calls`
+        if relation not in ("telemetry", "telemetry_latest"):
+            return answer
+        params = dict(params or {})
+        rows = list(self.rows["telemetry"])
+        if relation == "telemetry_latest":
+            newest = {}
+            for row in rows:
+                key = (row["asset_id"], row["metric_name"])
+                if key not in newest or self._instant(row["time"]) > self._instant(newest[key]["time"]):
+                    newest[key] = row
+            rows = list(newest.values())
+        filters = [
+            (column, *params[column].split(".", 1))
+            for column in ("asset_id", "metric_name", "time") if column in params
+        ]
+        for op, value in re.findall(r"time\.(\w+)\.([^,)]+)", params.get("and", "")):
+            filters.append(("time", op, value))
+        compare = {"eq": operator.eq, "lt": operator.lt, "lte": operator.le, "gte": operator.ge}
+
+        def keep(row):
+            for column, op, value in filters:
+                left, right = row[column], value
+                if column == "time":
+                    left, right = self._instant(left), self._instant(right)
+                if not compare[op](left, right):
+                    return False
+            return True
+
+        rows = [r for r in rows if keep(r)]
+        for part in reversed([p for p in params.get("order", "").split(",") if p]):
+            column, _, direction = part.partition(".")
+            rows.sort(
+                key=lambda r: self._instant(r["time"]) if column == "time" else r[column],
+                reverse=direction == "desc",
+            )
+        if "limit" in params:
+            rows = rows[: int(params["limit"])]
+        return [{c: row.get(c) for c in params["select"].split(",")} for row in rows]
+
+
+SID = "dev0000000000000000000a1"
+WINDOW = {"startTime": "2026-09-28T10:00:00Z", "endTime": "2026-09-28T11:00:00Z"}
+
+
+def _at(hhmm: str, day: str = "2026-09-28") -> str:
+    """A time as PostgREST writes a timestamptz."""
+    return f"{day}T{hhmm}:00+00:00"
+
+
+def _telemetry(*samples, sid=SID) -> list:
+    """Rows for `sid` from (time, metric, value), each value in the column its type selects."""
+    rows = []
+    for time_, metric, value in samples:
+        row = {"time": time_, "asset_id": sid, "metric_name": metric,
+               "val_double": None, "val_string": None, "val_bool": None}
+        if isinstance(value, bool):
+            row["val_bool"] = value
+        elif isinstance(value, str):
+            row["val_string"] = value
+        elif value is not None:
+            row["val_double"] = value
+        rows.append(row)
+    return rows
+
+
+def _device_space(*devices) -> tuple:
+    """
+    (space, objects) for devices given as (sparkplug_id, metric names), in the shape the address
+    space gives a metric: an Object `<sparkplug_id>/<name>` whose parent is its device and whose
+    only edge is ComponentOf it, while the device is a composition naming it under HasComponent.
+    Locations are HasChildren only.
+    """
+    objects = {"cell-1": {"elementId": "cell-1", "parentId": A.SITE_ELEMENT_ID, "isComposition": False,
+                          "metadata": {"relationships": {"HasChildren": [d for d, _ in devices]}}}}
+    for sid, metrics in devices:
+        ids = [f"{sid}/{name}" for name in metrics]
+        objects[sid] = {"elementId": sid, "parentId": "cell-1", "isComposition": True,
+                        "metadata": {"relationships": {"HasParent": ["cell-1"], "HasComponent": ids}}}
+        for element_id in ids:
+            objects[element_id] = {"elementId": element_id, "parentId": sid, "isComposition": False,
+                                   "metadata": {"relationships": {"ComponentOf": [sid]}}}
+    rows = [{"sparkplug_id": sid} for sid, _ in devices]
+    space = {"cells": [], "gateways": [], "devices": rows, "locations": {}, "schemas": [],
+             "_devices_by_sid": {r["sparkplug_id"]: r for r in rows}, "_gateways_by_sid": {}}
+    return space, objects
+
+
+class _HistoryCase(unittest.TestCase):
+    """Runs one history request over a synthetic address space and a TelemetryPostgrest."""
+
+    def setUp(self):
+        i3x_service._space_cache_clear()
+
+    def history(self, body, telemetry=(), devices=((SID, ("Temp",)),)):
+        space, objects = _device_space(*devices)
+        pg = TelemetryPostgrest(telemetry)
+        req = FakeRequest(body={**WINDOW, **body}, pg=pg)
+        with mock.patch.object(i3x_service, "_load_address_space", return_value=space), \
+                mock.patch.object(i3x_service, "_build_objects", return_value=objects):
+            i3x_service.h_objects_history(req)
+        return req, pg
+
+    def only(self, req) -> dict:
+        self.assertEqual(len(req.result), 1)
+        self.assertTrue(req.result[0]["success"], req.result[0])
+        return req.result[0]["result"]
+
+    def assertCut(self, req, element_id, *phrases):
+        """A 206 on the response naming `element_id`, and one on its item saying each phrase."""
+        self.assertEqual(req.status, 206)
+        self.assertEqual(req.detail["status"], 206)
+        self.assertEqual(req.detail["title"], "Partial results returned")
+        self.assertIn(element_id, req.detail["detail"])
+        item = next(i for i in req.result if i["elementId"] == element_id)
+        self.assertTrue(item["success"], "a partial result is still a result")
+        self.assertEqual(item["responseDetail"]["status"], 206)
+        for phrase in phrases:
+            self.assertIn(phrase, item["responseDetail"]["detail"])
+
+
+class TestHistoryWindow(_HistoryCase):
+    """startTime and endTime are parsed in full, and a window that ends before it starts is a 400."""
+
+    def refused(self, body):
+        with self.assertRaises(i3x_service.Problem) as caught:
+            i3x_service.h_objects_history(FakeRequest(body={"elementIds": [SID], **body}))
+        self.assertEqual(caught.exception.status, 400)
+        return caught.exception.detail
+
+    def test_rfc3339_is_read_in_full_and_as_utc(self):
+        from datetime import datetime, timezone
+
+        midnight = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        for text, expected in (
+            ("2026-01-01T00:00:00Z", midnight),
+            ("2026-01-01t00:00:00z", midnight),
+            ("2026-01-01T01:00:00+01:00", midnight),
+            ("2025-12-31T19:00:00-05:00", midnight),
+            ("2026-01-01T00:00:00-00:00", midnight),
+            ("2026-01-01T00:00:00.5Z", midnight.replace(microsecond=500000)),
+            ("2026-01-01T00:00:00.123456789Z", midnight.replace(microsecond=123456)),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(i3x_service._rfc3339(text), expected)
+        self.assertEqual(i3x_service._pg_time(midnight), "2026-01-01T00:00:00.000000Z")
+
+    def test_anything_else_is_a_400_before_any_read(self):
+        valid = WINDOW["startTime"]
+        for bad in (
+            "2026-01-01T00:00:00",  # no offset: a local time, which RFC 3339 does not allow
+            "2026-01-01",
+            "2026-01-01 00:00:00Z",
+            "2026-01-01T00:00:00Zjunk",
+            "2026-01-01T00:00:00Z),or(asset_id.neq.x",
+            "2026-13-01T00:00:00Z",
+            "2026-02-30T00:00:00Z",
+            "2026-01-01T24:00:00Z",
+            "2026-01-01T23:59:60Z",
+            "2026-01-01T00:00:00+05:99",
+            "2026-01-01T00:00:00+24:00",
+            "2026-01-01T00:00:00+0100",
+            "0001-01-01T00:00:00+01:00",
+            "２０２６-01-01T00:00:00Z",
+            "not-a-date",
+            1767225600,
+            True,
+            [],
+            {"t": 1},
+        ):
+            for name, body in (("startTime", {"startTime": bad, "endTime": valid}),
+                               ("endTime", {"startTime": valid, "endTime": bad})):
+                with self.subTest(field=name, value=bad):
+                    self.assertIn(name, self.refused(body))
+
+    def test_both_bounds_are_required(self):
+        for body in ({}, {"startTime": WINDOW["startTime"]}, {"endTime": WINDOW["endTime"]},
+                     {"startTime": "", "endTime": WINDOW["endTime"]}):
+            with self.subTest(body=body):
+                self.assertIn("required", self.refused(body))
+
+    def test_a_start_after_the_end_is_a_400_and_an_instant_is_a_window(self):
+        detail = self.refused({"startTime": "2026-09-28T11:00:00Z", "endTime": "2026-09-28T10:00:00Z"})
+        self.assertIn("after endTime", detail)
+        # The same instant written two ways is not reversed.
+        self.assertEqual(
+            i3x_service._history_window({"startTime": "2026-09-28T11:00:00+01:00",
+                                         "endTime": "2026-09-28T10:00:00Z"})[0],
+            i3x_service._rfc3339("2026-09-28T10:00:00Z"),
+        )
+
+    def test_the_filters_carry_the_parsed_instant_not_the_text(self):
+        req, pg = self.history({"elementIds": [f"{SID}/Temp"], "startTime": "2026-09-28T11:00:00+01:00",
+                                "endTime": "2026-09-28T11:00:00.5Z"})
+        self.assertEqual(req.status, 200)
+        _, params = pg.calls[-1]
+        self.assertEqual(params["time"], "gte.2026-09-28T10:00:00.000000Z")
+        self.assertEqual(params["and"], "(time.lte.2026-09-28T11:00:00.500000Z)")
+
+
+class TestHistorySeries(_HistoryCase):
+    """A metric's history is its samples; a device's is one map per instant; components follow."""
+
+    DEVICE = ((SID, ("Temp", "State", "Running", "Serial")),)
+    # Serial was set weeks ago; Temp and State last changed before the window; Temp changes again
+    # after it. Running has no value until 10:20.
+    ROWS = _telemetry(
+        (_at("00:00", "2026-09-01"), "Serial", "SN-1"),
+        (_at("09:50"), "Temp", 20.0),
+        (_at("09:55"), "State", "IDLE"),
+        (_at("10:10"), "Temp", 21.0),
+        (_at("10:20"), "State", "ACTIVE"),
+        (_at("10:20"), "Running", False),
+        (_at("10:30"), "Temp", 22.0),
+        (_at("11:30"), "Temp", 23.0),
+    )
+
+    def test_a_stored_row_becomes_a_scalar_vqt(self):
+        for row, value, quality in (
+            ({"val_double": 1.5}, 1.5, "Good"),
+            ({"val_double": 0.0}, 0.0, "Good"),
+            ({"val_string": ""}, "", "Good"),
+            ({"val_bool": False}, False, "Good"),
+            ({"val_double": 2.0, "val_string": "x"}, 2.0, "Good"),
+            ({}, None, "GoodNoData"),
+        ):
+            with self.subTest(row=row):
+                vqt = i3x_service._vqt(i3x_service._sample_value(row), "2026-09-28T10:10:00.12345+00:00")
+                self.assertEqual(vqt, {"value": value, "quality": quality,
+                                       "timestamp": "2026-09-28T10:10:00.123Z"})
+
+    def test_a_metric_is_one_read_of_its_own_samples(self):
+        req, pg = self.history({"elementIds": [f"{SID}/Temp"]}, self.ROWS, self.DEVICE)
+        result = self.only(req)
+        self.assertEqual(result, {"isComposition": False, "values": [
+            {"value": 22.0, "quality": "Good", "timestamp": "2026-09-28T10:30:00Z"},
+            {"value": 21.0, "quality": "Good", "timestamp": "2026-09-28T10:10:00Z"},
+        ]})
+        self.assertEqual(len(pg.calls), 1)
+        relation, params = pg.calls[0]
+        self.assertEqual((relation, params["asset_id"], params["metric_name"]),
+                         ("telemetry", f"eq.{SID}", "eq.Temp"))
+
+    def test_a_metric_id_splits_at_the_first_slash(self):
+        rows = _telemetry((_at("10:10"), "Controller/EXECUTION", "ACTIVE"), (_at("10:10"), "Temp", 1.0))
+        req, pg = self.history({"elementIds": [f"{SID}/Controller/EXECUTION"]}, rows,
+                               ((SID, ("Controller/EXECUTION", "Temp")),))
+        self.assertEqual([v["value"] for v in self.only(req)["values"]], ["ACTIVE"])
+        self.assertEqual(pg.calls[0][1]["metric_name"], "eq.Controller/EXECUTION")
+
+    def test_a_device_is_a_map_per_instant_carried_forward_from_before_the_window(self):
+        req, pg = self.history({"elementIds": [SID]}, self.ROWS, self.DEVICE)
+        result = self.only(req)
+        self.assertEqual(req.status, 200)
+        self.assertNotIn("components", result, "maxDepth 1 is the device's own value")
+        self.assertEqual([(v["timestamp"], v["value"]) for v in result["values"]], [
+            ("2026-09-28T10:30:00Z", {"Running": False, "Serial": "SN-1", "State": "ACTIVE", "Temp": 22.0}),
+            ("2026-09-28T10:20:00Z", {"Running": False, "Serial": "SN-1", "State": "ACTIVE", "Temp": 21.0}),
+            # Serial seeded from telemetry_latest, State from the rows before the window; Running
+            # has no value yet, so it is absent rather than invented.
+            ("2026-09-28T10:10:00Z", {"Serial": "SN-1", "State": "IDLE", "Temp": 21.0}),
+        ])
+        self.assertTrue(all(v["quality"] == "Good" for v in result["values"]))
+        # The window, the newest row per metric, and the rows just before the window.
+        self.assertEqual([relation for relation, _ in pg.calls], ["telemetry", "telemetry_latest", "telemetry"])
+        self.assertEqual(pg.calls[2][1]["time"], "lt.2026-09-28T10:00:00.000000Z")
+
+    def test_a_device_quiet_through_the_window_costs_one_read(self):
+        rows = _telemetry((_at("09:50"), "Temp", 20.0), (_at("11:30"), "Temp", 23.0))
+        req, pg = self.history({"elementIds": [SID]}, rows)
+        self.assertEqual(self.only(req)["values"], [])
+        self.assertEqual(len(pg.calls), 1)
+
+    def test_components_are_its_metrics_sliced_from_the_devices_own_rows(self):
+        for depth in (0, 2):
+            with self.subTest(maxDepth=depth):
+                req, pg = self.history({"elementIds": [SID], "maxDepth": depth}, self.ROWS, self.DEVICE)
+                result = self.only(req)
+                self.assertEqual(len(result["values"]), 3)
+                self.assertEqual(
+                    {k: [(v["timestamp"], v["value"]) for v in c["values"]]
+                     for k, c in result["components"].items()},
+                    {
+                        f"{SID}/Temp": [("2026-09-28T10:30:00Z", 22.0), ("2026-09-28T10:10:00Z", 21.0)],
+                        f"{SID}/State": [("2026-09-28T10:20:00Z", "ACTIVE")],
+                        f"{SID}/Running": [("2026-09-28T10:20:00Z", False)],
+                        f"{SID}/Serial": [],
+                    },
+                )
+                self.assertEqual(len(pg.calls), 3, "components add no reads")
+
+    def test_every_value_lies_inside_the_window(self):
+        req, _ = self.history({"elementIds": [SID, f"{SID}/Temp"], "maxDepth": 0}, self.ROWS, self.DEVICE)
+        stamps = [v["timestamp"] for item in req.result for v in item["result"]["values"]]
+        stamps += [v["timestamp"] for c in req.result[0]["result"]["components"].values() for v in c["values"]]
+        self.assertTrue(stamps)
+        for stamp in stamps:
+            self.assertTrue(WINDOW["startTime"] <= stamp <= WINDOW["endTime"], stamp)
+
+    def test_only_devices_and_their_metrics_have_series(self):
+        req, pg = self.history(
+            {"elementIds": ["cell-1", "nope", "cell-1/Temp", "dev0000000000000000000ff/Temp"]},
+            self.ROWS, self.DEVICE,
+        )
+        self.assertEqual(req.result[0]["result"], {"isComposition": False, "values": []})
+        for item in req.result[1:]:
+            with self.subTest(elementId=item["elementId"]):
+                self.assertFalse(item["success"])
+                self.assertEqual(item["responseDetail"]["status"], 404)
+        self.assertEqual(pg.calls, [])
+
+    def test_todays_address_space_answers_without_error(self):
+        # Read through _build_objects rather than the synthetic shape, so this holds whichever
+        # containers compose what.
+        rows = _telemetry((_at("10:10"), "Temp", 21.0), (_at("10:20"), "State", "ACTIVE"), sid="dev-explicit")
+        pg = TelemetryPostgrest(rows, _seeded_rows())
+        wanted = [A.SITE_ELEMENT_ID, CELL_A, A.UNASSIGNED_ELEMENT_ID, "gwy-1", "dev-explicit"]
+        req = FakeRequest(body={**WINDOW, "elementIds": wanted, "maxDepth": 0}, pg=pg)
+        i3x_service.h_objects_history(req)
+        self.assertEqual(req.status, 200)
+        self.assertTrue(all(item["success"] for item in req.result), req.result)
+        by_id = {item["elementId"]: item["result"]["values"] for item in req.result}
+        self.assertEqual([v["value"] for v in by_id["dev-explicit"]],
+                         [{"State": "ACTIVE", "Temp": 21.0}, {"Temp": 21.0}])
+        for element_id in wanted[:4]:
+            self.assertEqual(by_id[element_id], [], element_id)
+
+
+class TestHistoryIsNeverSilentlyCut(_HistoryCase):
+    """Whatever a limit cuts is a 206, on the item and on the response, naming where it stopped."""
+
+    TEMPS = _telemetry(*((_at(f"10:{m}0"), "Temp", float(m)) for m in range(1, 6)))
+
+    def test_a_metric_past_the_limit_names_where_it_stops(self):
+        req, pg = self.history({"elementIds": [f"{SID}/Temp"], "limit": 3}, self.TEMPS)
+        self.assertEqual([v["value"] for v in self.only(req)["values"]], [5.0, 4.0, 3.0])
+        self.assertCut(req, f"{SID}/Temp", "this request's limit of 3 rows",
+                       "nothing at or before 2026-09-28T10:20:00.000000Z")
+        self.assertEqual(pg.calls[0][1]["limit"], "4", "one row past the limit shows there is more")
+
+    def test_the_limit_field_lowers_the_server_limit_and_never_raises_it(self):
+        with mock.patch.object(i3x_service, "HISTORY_MAX_ROWS", 2):
+            req, pg = self.history({"elementIds": [f"{SID}/Temp"], "limit": 100}, self.TEMPS)
+            self.assertEqual(pg.calls[0][1]["limit"], "3")
+            self.assertCut(req, f"{SID}/Temp", "the server limit (I3X_HISTORY_MAX_ROWS) of 2 rows")
+            req, pg = self.history({"elementIds": [f"{SID}/Temp"]}, self.TEMPS)
+            self.assertEqual(len(self.only(req)["values"]), 2)
+            self.assertEqual(req.status, 206)
+
+    def test_an_answer_nothing_cut_is_a_plain_200(self):
+        req, _ = self.history({"elementIds": [f"{SID}/Temp", SID], "limit": 5, "maxDepth": 0}, self.TEMPS)
+        self.assertEqual(req.status, 200)
+        self.assertIsNone(req.detail)
+        self.assertTrue(all("responseDetail" not in item for item in req.result))
+
+    def test_a_device_cut_mid_instant_drops_that_instant_whole(self):
+        rows = _telemetry((_at("10:10"), "A", 1.0), (_at("10:10"), "B", "x"), (_at("10:20"), "A", 2.0),
+                          (_at("10:30"), "A", 3.0), (_at("10:40"), "A", 4.0))
+        req, pg = self.history({"elementIds": [SID], "limit": 4, "maxDepth": 0}, rows, ((SID, ("A", "B")),))
+        result = self.only(req)
+        # Five rows for a limit of four: 10:10 may be incomplete, so nothing of it is served, but
+        # its rows are still B's value at 10:20 onwards.
+        self.assertEqual([(v["timestamp"], v["value"]) for v in result["values"]], [
+            ("2026-09-28T10:40:00Z", {"A": 4.0, "B": "x"}),
+            ("2026-09-28T10:30:00Z", {"A": 3.0, "B": "x"}),
+        ])
+        self.assertEqual([v["value"] for v in result["components"][f"{SID}/A"]["values"]], [4.0, 3.0, 2.0])
+        self.assertEqual(result["components"][f"{SID}/B"]["values"], [])
+        # Four values, two maps of two: 10:20 did not fit.
+        self.assertCut(req, SID, "4 values (a map of N metrics counts as N)",
+                       "nothing at or before 2026-09-28T10:20:00.000000Z",
+                       f"{SID}/B: This series stops at this request's limit of 4 rows",
+                       "nothing at or before 2026-09-28T10:10:00.000000Z")
+        self.assertEqual([relation for relation, _ in pg.calls], ["telemetry", "telemetry_latest"])
+
+    def test_a_cut_window_seeds_from_the_instant_it_was_cut_at(self):
+        # Three rows read for a limit of two stop inside 10:10, before B's row there. B changes
+        # again after the window, so only the rows up to and including 10:10 hold its value.
+        rows = _telemetry((_at("10:10"), "A", 1.0), (_at("10:10"), "B", "b"), (_at("10:20"), "A", 2.0),
+                          (_at("10:30"), "A", 3.0), (_at("11:30"), "B", "later"))
+        req, pg = self.history({"elementIds": [SID], "limit": 2}, rows, ((SID, ("A", "B")),))
+        self.assertEqual([(v["timestamp"], v["value"]) for v in self.only(req)["values"]],
+                         [("2026-09-28T10:30:00Z", {"A": 3.0, "B": "b"})])
+        self.assertEqual(pg.calls[2][1]["time"], "lte.2026-09-28T10:10:00.000000Z")
+        self.assertCut(req, SID, "nothing at or before 2026-09-28T10:20:00.000000Z")
+
+    def test_a_wide_device_is_cut_by_the_values_it_returns(self):
+        rows = _telemetry((_at("09:00"), "Q1", 1.0), (_at("09:00"), "Q2", 2.0), (_at("09:00"), "Q3", 3.0),
+                          (_at("10:10"), "X", 1.0), (_at("10:20"), "X", 2.0), (_at("10:30"), "X", 3.0))
+        req, _ = self.history({"elementIds": [SID], "limit": 8}, rows, ((SID, ("Q1", "Q2", "Q3", "X")),))
+        values = self.only(req)["values"]
+        self.assertEqual([v["value"]["X"] for v in values], [3.0, 2.0], "two maps of four fit in eight")
+        self.assertEqual(values[0]["value"], {"Q1": 1.0, "Q2": 2.0, "Q3": 3.0, "X": 3.0})
+        self.assertCut(req, SID, "nothing at or before 2026-09-28T10:10:00.000000Z")
+
+    def test_a_seed_the_rows_before_the_window_may_not_reach_is_a_206(self):
+        # N changes every minute before the window, so five rows back do not reach Q's last value.
+        rows = _telemetry(*((_at(f"09:5{m}"), "N", float(m)) for m in range(10)),
+                          (_at("09:00"), "Q", "old"), (_at("10:05"), "N", 99.0), (_at("10:10"), "Q", "new"))
+        req, _ = self.history({"elementIds": [SID], "limit": 5}, rows, ((SID, ("N", "Q")),))
+        self.assertEqual([v["value"] for v in self.only(req)["values"]],
+                         [{"N": 99.0, "Q": "new"}, {"N": 99.0}])
+        self.assertCut(req, SID, "1 metric(s) changed here", ": Q.")
+
+    def test_the_206_reaches_the_wire_with_its_responseDetail(self):
+        import types
+
+        sent = []
+        handler = types.SimpleNamespace(_send=lambda status, payload: sent.append((status, payload)))
+        detail = {"title": "Partial results returned", "status": 206, "detail": "cut"}
+        i3x_service.Handler._bulk(handler, [{"success": True, "elementId": SID, "result": {}}], detail)
+        i3x_service.Handler._bulk(handler, [{"success": False, "elementId": "x"}])
+        self.assertEqual(sent[0], (206, {"success": True, "results": [{"success": True, "elementId": SID,
+                                                                       "result": {}}],
+                                         "responseDetail": detail}))
+        self.assertEqual(sent[1][0], 200)
+        self.assertNotIn("responseDetail", sent[1][1])
+
+
+class TestComponentLimit(_HistoryCase):
+    """A value or history read descends at most MAX_COMPONENTS objects, and says so when it stops."""
+
+    DEVICES = ((SID, ("A", "B", "C")), ("dev0000000000000000000b2", ("D", "E", "F")))
+
+    def values(self, body):
+        space, objects = _device_space(*self.DEVICES)
+        req = FakeRequest(body=body, pg=ColumnCheckingPostgrest())
+
+        def current(objects_, space_, element_id):
+            if element_id not in objects_:
+                return None
+            return {"value": 1.0, "quality": "Good", "timestamp": "2026-09-28T10:00:00Z"}
+
+        with mock.patch.object(i3x_service, "_load_address_space", return_value=space), \
+                mock.patch.object(i3x_service, "_build_objects", return_value=objects), \
+                mock.patch.object(i3x_service, "_current_value", side_effect=current):
+            i3x_service.h_objects_value(req)
+        return req
+
+    def test_a_value_read_past_the_limit_is_a_206_naming_what_was_left_out(self):
+        with mock.patch.object(i3x_service, "MAX_COMPONENTS", 2):
+            req = self.values({"elementIds": [SID], "maxDepth": 0})
+        self.assertEqual(list(req.result[0]["result"]["components"]), [f"{SID}/A", f"{SID}/B"])
+        self.assertEqual(req.status, 206)
+        self.assertIn(SID, req.detail["detail"])
+        self.assertIn("1 of 3 components were left out", req.result[0]["responseDetail"]["detail"])
+        self.assertIn("I3X_MAX_COMPONENTS", req.result[0]["responseDetail"]["detail"])
+
+    def test_the_limit_is_shared_by_the_whole_request(self):
+        other = self.DEVICES[1][0]
+        with mock.patch.object(i3x_service, "MAX_COMPONENTS", 4):
+            req = self.values({"elementIds": [SID, other], "maxDepth": 2})
+        first, second = req.result
+        self.assertEqual(len(first["result"]["components"]), 3)
+        self.assertNotIn("responseDetail", first)
+        self.assertEqual(list(second["result"]["components"]), [f"{other}/D"])
+        self.assertIn("2 of 3 components", second["responseDetail"]["detail"])
+        self.assertEqual(req.status, 206)
+
+    def test_within_the_limit_or_without_descent_is_a_200(self):
+        for body in ({"elementIds": [SID], "maxDepth": 0}, {"elementIds": [SID, SID], "maxDepth": 1}):
+            with self.subTest(body=body), mock.patch.object(i3x_service, "MAX_COMPONENTS", 3):
+                req = self.values(body)
+                self.assertEqual(req.status, 200)
+                self.assertIsNone(req.detail)
+
+    def test_a_history_read_past_the_limit_is_a_206_too(self):
+        rows = _telemetry((_at("10:10"), "A", 1.0), (_at("10:10"), "B", 2.0), (_at("10:10"), "C", 3.0))
+        with mock.patch.object(i3x_service, "MAX_COMPONENTS", 2):
+            req, _ = self.history({"elementIds": [SID], "maxDepth": 0}, rows, self.DEVICES)
+        result = self.only(req)
+        self.assertEqual(list(result["components"]), [f"{SID}/A", f"{SID}/B"])
+        self.assertEqual(result["values"], [{"value": {"A": 1.0, "B": 2.0, "C": 3.0}, "quality": "Good",
+                                             "timestamp": "2026-09-28T10:10:00Z"}])
+        self.assertCut(req, SID, "1 of 3 components were left out")
 
 
 class TestMirroredConstants(unittest.TestCase):
