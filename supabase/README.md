@@ -2851,6 +2851,23 @@ no inverse, so those stay refused and a new token must be minted.
 lock them out of PostgREST through a control built for machines — and out of the request that would
 undo it. `is_machine_principal()` is the guard.
 
+#### A call the planner can fold checks nobody (`0015_i3x_authenticates_with_a_call_the_planner_cannot_fold.sql`)
+
+i3X authenticates each request by calling one function through PostgREST as the caller, so the
+revocation arms above reach it. PostgreSQL checks EXECUTE on a function when a plan calls it, and
+PostgREST runs prepared statements from their generic plan on pooled connections. The probe was
+`service_token_max_days()`, SQL and `IMMUTABLE`, which the planner folds to the constant 90: a plan
+made for an `authenticated` request held no call left to check when an `anon` request reused it on
+the same connection. Measured on 2026-09-28 by `validate.py` check 12h: `not-a-token` passed 1
+request in 12 through the gateway. Proved in psql: `PREPARE` as `authenticated`, then `EXECUTE` as
+`anon`, returns 90 although `has_function_privilege('anon', …)` is false.
+
+`0015` adds `i3x_auth_probe()`: plpgsql, which the planner does not inline, and `STABLE`, which it
+does not fold, granted to `authenticated` and `service_role` only. The call stays in every plan, so
+its EXECUTE check runs on every execution. `service_token_max_days()` keeps its own job, the token
+ceiling, where folding is harmless. Check 32 of `scripts/check-docs-drift.mjs` holds the probe to
+plpgsql and not `IMMUTABLE`, and `test_service_token_revocation.py` replays the attack.
+
 #### A missing hook is a total outage that every health check calls healthy
 
 Worth knowing before anyone edits `PGRST_DB_PRE_REQUEST`. Measured against

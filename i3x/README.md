@@ -60,13 +60,21 @@ caller* first, then serve only the ids that came back. An element the caller can
 not found, indistinguishable from one that does not exist.
 
 **Every request except `GET /info` is authenticated before it is dispatched**, by one PostgREST
-call carrying the caller's `Authorization`: `rpc/service_token_max_days`, an immutable constant
-granted to `authenticated` and `service_role` and not to `anon`. PostgREST checks the signature and
-`exp`, and its pre-request hook `auth_pre_request()` refuses a revoked token or a revoked service
-principal. So a missing header, a string that is not a token, the publishable key, and an expired or
-revoked token each get a 401. A success is cached for at most 15 seconds, keyed by a SHA-256 of the
-header and never past the token's `exp`; a refusal is never cached. Check 32 of
-`check-docs-drift.mjs` holds that function to those grants.
+call carrying the caller's `Authorization`: `rpc/i3x_auth_probe`, a function granted to
+`authenticated` and `service_role` and not to `anon`. PostgREST checks the signature and `exp`, and
+its pre-request hook `auth_pre_request()` refuses a revoked token or a revoked service principal.
+So a missing header, a string that is not a token, the publishable key, and an expired or revoked
+token each get a 401. A success is cached for at most 15 seconds, keyed by a SHA-256 of the header
+and never past the token's `exp`; a refusal is never cached. Check 32 of `check-docs-drift.mjs`
+holds that function to those grants, and to being plpgsql and not `IMMUTABLE`.
+
+**The probe must be a call the planner keeps.** PostgREST runs prepared statements from their
+generic plan on pooled connections, and PostgreSQL checks EXECUTE on a function when a plan calls
+it. Until `0015` the probe was `service_token_max_days()`, SQL and `IMMUTABLE`, which the planner
+folds to the constant 90, so a plan made for an `authenticated` request held no call to check when
+an `anon` request reused it. Found by `validate.py` check 12h on 2026-09-28: `not-a-token` passed 1
+request in 12 through the gateway, and the routes that make no read as the caller then served it.
+Data reads stayed refused, because they read as the caller.
 
 What that guarantees:
 

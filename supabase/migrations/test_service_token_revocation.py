@@ -466,5 +466,55 @@ class ServiceTokenRevocation(unittest.TestCase):
             self.assertEqual(cur.fetchone()[0], 0)
 
 
+class I3xProbeIsCheckedOnEveryCall(unittest.TestCase):
+    """
+    i3X authenticates by calling `i3x_auth_probe()` as the caller, and PostgREST runs prepared
+    statements from their generic plan on pooled connections. The call must stay in that plan so
+    its EXECUTE check runs for whichever role executes it (supabase/README.md, "A call the planner
+    can fold checks nobody").
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = get_connection()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def tearDown(self):
+        self.conn.rollback()
+        with self.conn.cursor() as cur:
+            cur.execute("DEALLOCATE ALL;")
+        self.conn.commit()
+
+    def test_a_plan_made_for_authenticated_refuses_anon(self):
+        with self.conn.cursor() as cur:
+            cur.execute("SET LOCAL ROLE authenticated;")
+            cur.execute("PREPARE i3x_probe AS SELECT public.i3x_auth_probe();")
+            cur.execute("EXECUTE i3x_probe;")
+            self.assertIs(cur.fetchone()[0], True)
+            cur.execute("SET LOCAL ROLE anon;")
+            with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+                cur.execute("EXECUTE i3x_probe;")
+
+    def test_service_role_may_call_it(self):
+        with self.conn.cursor() as cur:
+            cur.execute("SET LOCAL ROLE service_role;")
+            cur.execute("SELECT public.i3x_auth_probe();")
+            self.assertIs(cur.fetchone()[0], True)
+
+    def test_it_is_plpgsql_and_not_immutable(self):
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT l.lanname, p.provolatile FROM pg_proc p"
+                " JOIN pg_language l ON l.oid = p.prolang"
+                " WHERE p.oid = 'public.i3x_auth_probe()'::regprocedure;"
+            )
+            language, volatility = cur.fetchone()
+        self.assertEqual(language, "plpgsql")
+        self.assertNotEqual(volatility, "i")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -872,10 +872,11 @@ def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller",
 # =================================================================================================
 # Every route but these is authenticated in `_dispatch` before its handler runs.
 UNAUTHENTICATED_ROUTES = frozenset({"GET /info"})
-# An IMMUTABLE constant granted to `authenticated` and `service_role`, not `anon`. Calling it as the
-# caller costs no table read and succeeds only when PostgREST accepts the token's signature and
-# `exp` and the pre-request hook `auth_pre_request()` finds neither its jti nor its sub revoked.
-AUTH_PROBE_PATH = "rpc/service_token_max_days"
+# Granted to `authenticated` and `service_role`, not `anon`. Calling it as the caller costs no table
+# read and succeeds only when PostgREST accepts the token's signature and `exp` and the pre-request
+# hook `auth_pre_request()` finds neither its jti nor its sub revoked. It must stay plpgsql and not
+# IMMUTABLE: a call the planner folds away skips its EXECUTE check in PostgREST's reused plans.
+AUTH_PROBE_PATH = "rpc/i3x_auth_probe"
 # A success is reused for at most this long, and never past the token's `exp`. A refusal is never
 # stored, and a fresh refusal evicts the stored success.
 AUTH_CACHE_SECONDS = 15.0
