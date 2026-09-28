@@ -417,7 +417,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const activeCatalog = catalog.filter(m => !m.deprecated).filter(matchesCatalogSearch)
   // Its own card, unfiltered: the search box belongs to the catalog card above it.
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
-  // Grouped by the first dotted segment of the name; ungrouped metrics fall into a trailing bucket.
+  // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
   // `superseded_by` is a uuid; the Deprecated Metrics card and the restore modal show the name.
   const metricById = new Map(catalog.map(m => [m.metric_uuid, m]))

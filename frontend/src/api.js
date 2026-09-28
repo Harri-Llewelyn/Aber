@@ -1961,7 +1961,8 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/mtconnect-vocabulary')) {
       // Reference data (generated; seeded by 0002_seed_data.sql), read-only to the app. Returned
-      // flat and bucketed by the caller -- it is ~600 short rows, fetched once per Schemas visit.
+      // flat and bucketed by the caller -- it is ~600 short rows, read once per visit to the Metrics
+      // or Vocabulary page.
       const { data, error } = await supabase
         .from('mtconnect_vocabulary')
         .select('*')
@@ -2060,7 +2061,7 @@ const apiMethods = {
       return (data || []).map(m => ({
         metric_uuid: m.id,
         name: m.name,
-        // Generated column: the first dotted segment of the name, NULL when there isn't one.
+        // Generated column: the name's first `/`-separated segment, NULL when there isn't one.
         // See utils/metricGroup.js, which mirrors the derivation.
         metric_group: m.metric_group ?? null,
         datatype: m.datatype,
