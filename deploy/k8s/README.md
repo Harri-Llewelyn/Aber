@@ -1683,7 +1683,7 @@ install and preserved thereafter (`resource-policy: keep` plus a `lookup` throug
 > used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
 > a correctly bound device. The roles in `mosquitto/dynsec-roles.json` now confine
-> `factoryplus_ingestion` (read plus NCMD only), `factoryplus_i3x` (read only), `factoryplus_monitor`
+> `aber_ingestion` (read plus NCMD only), `aber_i3x` (read only), `aber_monitor`
 > (`$SYS` only), the plugin's admin (`$CONTROL` only) and every gateway (its own edge node, through
 > a role generated for it). **The gateway usernames must be `sparkplug_id`s** — the chart fails the
 > render otherwise, because a friendly name authenticates perfectly and then has every publish

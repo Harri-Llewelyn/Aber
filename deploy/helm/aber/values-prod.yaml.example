@@ -125,13 +125,13 @@ secrets:
   #
   # mqttValidatorPassword is only needed with e2e.enabled -- leave it empty in production and no
   # account is created for it.
-  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionUser: aber_ingestion
   mqttIngestionPassword: ""
-  mqttI3xUser: factoryplus_i3x
+  mqttI3xUser: aber_i3x
   mqttI3xPassword: ""
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: ""
-  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorUser: aber_monitor
   mqttMonitorPassword: ""
   # openssl rand -hex 24. The account the credential service administers the broker's Dynamic
   # Security plugin as. REQUIRED: the broker's initContainer writes it on every start and exits

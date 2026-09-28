@@ -519,7 +519,7 @@ Two consequences worth stating on the front page; both are detailed in
 
 Five identities here are held by software rather than people, and each is narrow by construction:
 `Service_Ingestor`, `Service_Playback` and the MCP reader hold `telemetry:read` **as a grant of their
-own** rather than a person's role (`0080`), `factoryplus_i3x` reads the broker namespace and
+own** rather than a person's role (`0080`), `aber_i3x` reads the broker namespace and
 publishes nothing, and `gateway-credential-service` can add one broker account and do nothing else.
 The three database identities are `auth.users` rows with no email, no password and no identity
 provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening

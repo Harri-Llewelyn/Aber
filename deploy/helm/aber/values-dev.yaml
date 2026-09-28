@@ -67,13 +67,13 @@ secrets:
 
   # The platform principals; see values.yaml for why the validator's username is a sparkplug_id
   # and not free text. One shared password here only because this file is the CI fixture.
-  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionUser: aber_ingestion
   mqttIngestionPassword: aber123
-  mqttI3xUser: factoryplus_i3x
+  mqttI3xUser: aber_i3x
   mqttI3xPassword: aber123
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: aber123
-  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorUser: aber_monitor
   mqttMonitorPassword: aber123
   # The plugin's admin. Required: the broker's initContainer exits without it.
   mqttDynsecAdminUser: dynsec-admin

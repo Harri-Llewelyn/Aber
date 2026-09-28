@@ -172,7 +172,7 @@ describe('AccessControlTab', () => {
       clients: [
         { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false },
         { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
-        { username: 'factoryplus_ingestion', roles: ['ingestion'], disabled: false },
+        { username: 'aber_ingestion', roles: ['ingestion'], disabled: false },
       ],
       roles: [],
     })
@@ -335,9 +335,9 @@ describe('AccessControlTab', () => {
     api.listBrokerInventory.mockResolvedValue({
       clients: [
         { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false },
-        { username: 'factoryplus_monitor', roles: ['monitor'], disabled: false },
+        { username: 'aber_monitor', roles: ['monitor'], disabled: false },
         { username: 'dynsec-admin', roles: ['admin'], disabled: false },
-        { username: 'factoryplus_ingestion', roles: ['ingestion'], disabled: true },
+        { username: 'aber_ingestion', roles: ['ingestion'], disabled: true },
       ],
       roles: [],
     })
@@ -346,9 +346,9 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Broker accounts')).toBeTruthy())
     // Policy order, not alphabetical: ingestion, monitor, admin.
     const names = screen.getAllByRole('button', { name: /Copy MQTT username/ }).map(b => b.textContent)
-    expect(names).toEqual(['factoryplus_ingestion', 'factoryplus_monitor', 'dynsec-admin'])
+    expect(names).toEqual(['aber_ingestion', 'aber_monitor', 'dynsec-admin'])
     // Scoped to the row: the same purpose is printed beside the role in the table beneath.
-    const monitorRow = screen.getByRole('button', { name: /factoryplus_monitor/ }).closest('tr')
+    const monitorRow = screen.getByRole('button', { name: /aber_monitor/ }).closest('tr')
     expect(within(monitorRow).getByText(/The broker health probes and the metrics exporter/)).toBeTruthy()
     expect(screen.getByText('Disabled')).toBeTruthy()
     expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
@@ -630,7 +630,7 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listBrokerInventory.mockResolvedValue({
       clients: [
-        { username: 'factoryplus_monitor', roles: ['monitor'], disabled: false },
+        { username: 'aber_monitor', roles: ['monitor'], disabled: false },
       ],
       roles: [
         { rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] },

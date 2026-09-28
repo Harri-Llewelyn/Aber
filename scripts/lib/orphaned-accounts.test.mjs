@@ -5,7 +5,7 @@
  *
  * THE FILTER IS THE SAFETY PROPERTY, and it is why these two functions are exported rather than
  * inlined. `scripts/revoke-orphaned-broker-accounts.mjs` disables every account it selects. The
- * broker's client list also holds `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor`
+ * broker's client list also holds `aber_ingestion`, `aber_i3x`, `aber_monitor`
  * and the plugin's admin -- platform accounts with no `gateways` row and no prospect of one -- so a
  * sweep keyed naively on "has no gateway row" would disable the ingestion daemon's own credential
  * and stop the stack ingesting anything. From the script whose subject is tidying up.
@@ -19,10 +19,10 @@ const client = (username, extra = {}) => ({ username, roles: [], disabled: false
 
 const CLIENTS = [
   client('dynsec-admin'),
-  client('factoryplus_ingestion'),
-  client('factoryplus_i3x'),
+  client('aber_ingestion'),
+  client('aber_i3x'),
   client('gwy120000000000400080000'),
-  client('factoryplus_monitor'),
+  client('aber_monitor'),
   client('gwy2a71a14de1b04971bfbb5'),
 ];
 
@@ -32,7 +32,7 @@ test('platform service accounts are never candidates', () => {
   // Named individually, because the cost of each one being swept is different and specific:
   // ingestion stops writing telemetry, i3X stops answering, monitoring goes blind, and nothing
   // can be issued or revoked without the admin.
-  for (const service of ['dynsec-admin', 'factoryplus_ingestion', 'factoryplus_i3x', 'factoryplus_monitor']) {
+  for (const service of ['dynsec-admin', 'aber_ingestion', 'aber_i3x', 'aber_monitor']) {
     assert.ok(!accounts.includes(service), `${service} was selectable`);
   }
 });

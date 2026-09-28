@@ -1850,7 +1850,7 @@ here rather than left on a checklist.
 | `Service_Ingestor` (`0046`) | `telemetry:read` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
 | `Service_Playback` (`0056`) | `telemetry:read` | Nothing directly. The `playback_*` gates, each checking `is_playback_caller()` |
 | MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `digital_thread` |
-| `factoryplus_i3x` | broker account | Reads the namespace, publishes nothing |
+| `aber_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Adds one broker account and nothing else |
 
 The three database identities are `auth.users` rows with **no email, no password and no identity
@@ -2749,7 +2749,7 @@ leak for one junk account per gateway ever deleted.
   `scripts/revoke-orphaned-broker-accounts.mjs` reads the broker's client list, subtracts every
   gateway row (archived included — those belong to the trigger and the sweep), and disables what is
   left through `revoke_gateway_credential()`. Dry run by default. It considers only enabled
-  `gwy` + 21 hex character accounts, so it can never select `factoryplus_ingestion` and stop the
+  `gwy` + 21 hex character accounts, so it can never select `aber_ingestion` and stop the
   stack ingesting. The Access Control page lists the same accounts under *Accounts with no gateway*.
 
 ### What the inventory still cannot see

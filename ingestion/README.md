@@ -1339,7 +1339,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | The in-cluster Service name |
-| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
+| `MQTT_USER` / `MQTT_PASSWORD` | `aber_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
