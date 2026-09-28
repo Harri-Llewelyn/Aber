@@ -196,7 +196,7 @@ archived `0006` Node-RED SSO, archived `0007` metric-name format, archived `0008
 group, archived `0009` withdraws residual `anon` function grants, archived `0010` telemetry
 rollups and latest-value view, archived `0011` IDTA Digital Nameplate and per-device nameplate
 data, archived `0012` permitted values of a
-discrete metric, archived `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
+discrete metric, archived `0013` ASHRAE 223P vocabulary, archived `0014` repoints locally-minted semantic
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
 one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
