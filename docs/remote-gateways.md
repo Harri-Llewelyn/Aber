@@ -304,8 +304,8 @@ perfectly and then connects to nothing — the hardest version of this failure t
 
 | Variable | What breaks if it is in-stack |
 | :--- | :--- |
-| `SUPABASE_PUBLIC_URL` | `gateway-bundle` answers `503` and mints no token. `supabase-kong`, `localhost` and loopback addresses are all refused. |
-| `MQTT_PUBLIC_HOST` | `enroll-gateway` answers `503` **without consuming the token**. `mosquitto`, `supabase-kong`, `localhost` and loopback addresses are refused. |
+| `SUPABASE_PUBLIC_URL` | `gateway-bundle` answers `503` and mints no token. `supabase-envoy`, `localhost` and loopback addresses are all refused. |
+| `MQTT_PUBLIC_HOST` | `enroll-gateway` answers `503` **without consuming the token**. `mosquitto`, `supabase-envoy`, `localhost` and loopback addresses are refused. |
 
 Both name the same machine. The chart derives both from `global.publicBaseDomain`, which
 `npm run setup` asks for (`--domain=<base>` answers it from a script; blank keeps the loopback

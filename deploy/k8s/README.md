@@ -456,12 +456,12 @@ Eight subdomains, all on one Ingress, all derived from `global.publicBaseDomain`
 | Host | Backend |
 |---|---|
 | `app.<domain>` | `frontend:3000` |
-| `api.<domain>` | `supabase-kong:8000` |
+| `api.<domain>` | `supabase-envoy:8000` |
 | `nodered.<domain>` | `node-red:1880` |
 | `grafana.<domain>` | `grafana:3000` |
-| `studio.<domain>` | `supabase-kong:8001` (the gateway's studio listener — **off by default**) |
+| `studio.<domain>` | `supabase-envoy:8001` (the gateway's studio listener — **off by default**) |
 | `docs.<domain>` | `swagger-ui:8080` |
-| `git.<domain>` | `supabase-kong:8002` (the gateway's forge listener; never `gitea:3000`) |
+| `git.<domain>` | `supabase-envoy:8002` (the gateway's forge listener; never `gitea:3000`) |
 | `mqtt.<domain>` | `mosquitto:9001` (WebSockets) |
 | — | `mosquitto-external:1883` (LoadBalancer) |
 | — | `<release>-ingress-gitea-ssh:22` (LoadBalancer; `gitea.ssh.external`) |
@@ -487,7 +487,7 @@ helm upgrade ... --set ingress.routes.docs=false
 ```
 
 **`studio` goes the other way: it is off by default and turning it on is the deliberate act.** The
-route publishes `supabase-kong:8001` — the gateway's studio listener, which runs an OAuth flow
+route publishes `supabase-envoy:8001` — the gateway's studio listener, which runs an OAuth flow
 against this stack's own GoTrue and admits `Administrator` alone — and never `supabase-studio:3000`,
 which is a database console with no login of its own, running as the database owner. The
 NetworkPolicy follows the same shape: the ingress controller may reach the gateway on `8001`, the
@@ -783,7 +783,7 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 | Component | Status |
 |---|---|
 | `timescaledb`, `supabase-db` StatefulSets | deployed |
-| `supabase-kong`, `supabase-auth`, `supabase-rest` | deployed |
+| `supabase-envoy`, `supabase-auth`, `supabase-rest` | deployed |
 | `realtime-dev` Service + `supabase-realtime` Deployment | deployed |
 | `supabase-storage`, `supabase-functions` | deployed |
 | `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
@@ -1335,7 +1335,7 @@ Two need more:
 
 ```bash
 # The gateway's API keys are substituted by an initContainer:
-kubectl -n aber rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-envoy
 # The OAuth client secrets are HASHED INTO auth.oauth_clients by db-init:
 helm upgrade ...   # re-runs the post-upgrade hook
 ```
@@ -1545,7 +1545,7 @@ Also available, all documented above: **broker TLS on 8883**, the **internal CA*
 
 ### Service names are not release-prefixed, and must not be
 
-`timescaledb`, `supabase-db`, `mosquitto`, `supabase-kong` — the names every in-cluster URL in
+`timescaledb`, `supabase-db`, `mosquitto`, `supabase-envoy` — the names every in-cluster URL in
 `grafana.ini`, `settings.js` and the edge-function environment carries, so each
 resolves unchanged. Prefixing them would break all of that and buy
 nothing: **two releases in one namespace is not supported** (they would contend for the MQTT host
@@ -1603,7 +1603,7 @@ not even be able to see (`existingSecret`). After rotating `SUPABASE_ANON_KEY` o
 `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```bash
-kubectl -n aber rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-envoy
 ```
 
 ### The init hooks are safe to re-run, and that is load-bearing
@@ -1707,7 +1707,7 @@ it in values and upgrade.
 
 The two browser-facing URLs are set with `GF_*` environment variables rather than in the file:
 `GF_SERVER_ROOT_URL` and `GF_AUTH_GENERIC_OAUTH_AUTH_URL`. `token_url` and `api_url` inside the
-file are in-cluster (`http://supabase-kong:8000`) and are correct untouched.
+file are in-cluster (`http://supabase-envoy:8000`) and are correct untouched.
 
 Its datasource is rendered by an initContainer, same as the gateway's config and for the same reason — with
 `existingSecret` the chart cannot see the password, and Helm would substitute an empty string. That

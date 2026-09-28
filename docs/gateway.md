@@ -8,10 +8,8 @@ listeners: the API on 8000, Studio's login on 8001 and the forge's login on 8002
 documented with [Studio's door](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
 and [the forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094)).
 
-**The Service is named `supabase-kong`.** Every in-cluster consumer carries
-`http://supabase-kong:8000`, Kubernetes has no Service aliasing, and the name is not worth an edit
-to fifteen files. The Deployment and its pod labels are `supabase-envoy`; NetworkPolicy and the
-ServiceMonitor select on those.
+The Deployment, its pod labels and its Service are all `supabase-envoy`, and every in-cluster
+consumer reaches the gateway as `http://supabase-envoy:8000`.
 
 ## The API keys
 
@@ -119,7 +117,7 @@ cover the keys, which come from the Secret: rotating one needs
 
 ```bash
 node scripts/check-gateway-surface.mjs                      # static: placeholders, no committed key
-kubectl -n aber port-forward svc/supabase-kong 18080:8000
+kubectl -n aber port-forward svc/supabase-envoy 18080:8000
 SUPABASE_PUBLISHABLE_KEY=$(kubectl -n aber get secret aber-secrets \
   -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d) \
   node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
@@ -149,6 +147,18 @@ service-role JWTs were accepted alongside the new pair while every consumer move
 and Kong deleted from the chart on 2026-09-13, before any deployment existed. The migration
 protocol and its findings are in this file's git history under its former name,
 `docs/gateway-migration.md`.
+
+Envoy kept the Kong Service's name, `supabase-kong`, until 2026-09-28. It adopted the name at
+promotion because Kubernetes has no Service aliasing, and a decision of 2026-09-11 kept it for two
+reasons: Kong could be switched back on, and every consumer's URL kept working without an edit.
+The first ended when Kong was deleted. The second was a saving, not a reason for the name, and
+after 1.0 a Service rename breaks every values override and out-of-chart client that names it. So
+before 1.0 the Service took its workload's name, `supabase-envoy`, like every other Service here
+([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)). That superseded the decision of
+2026-09-11, and it removed the scaffolding that let the chart and CI read either name: the
+`supabaseEnvoy.serviceName` value, the NetworkPolicy's Service-to-component bridge, and CI's
+derived gateway name. What the rename asks of a site is in
+[`upgrades.md`](upgrades.md#what-10-renames-and-what-each-rename-asks-of-a-site).
 
 ### What Kong taught
 

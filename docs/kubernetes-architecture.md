@@ -53,8 +53,8 @@ Compose's lack of templating and disappear entirely under Helm.
 ### Guiding principle: keep the names
 
 **Kubernetes Service names must be identical to the Compose service names** (`supabase-db`,
-`supabase-kong`, `supabase-rest`, `mosquitto`, `timescaledb`, …). In-cluster DNS then resolves
-`http://supabase-kong:8000` inside the namespace exactly as Docker's embedded DNS does, and every
+`supabase-envoy`, `supabase-rest`, `mosquitto`, `timescaledb`, …). In-cluster DNS then resolves
+`http://supabase-envoy:8000` inside the namespace exactly as Docker's embedded DNS does, and every
 compose-internal URL already in `grafana.ini`, the gateway config, `settings.js` and the edge-function
 environment keeps working with **no change**. The diff between the two topologies collapses to the
 host-facing URLs, which is where it genuinely belongs.
@@ -516,8 +516,8 @@ load-bearing in one more place.
 
 ### 4.2 Stateless services
 
-`supabase-auth`, `supabase-rest`, `supabase-kong`, `supabase-functions`, `supabase-meta`,
-`supabase-studio`, `swagger-ui` → plain Deployments. `supabase-rest`, `supabase-kong` and
+`supabase-auth`, `supabase-rest`, `supabase-envoy`, `supabase-functions`, `supabase-meta`,
+`supabase-studio`, `swagger-ui` → plain Deployments. `supabase-rest`, `supabase-envoy` and
 `supabase-functions` are the horizontally scalable ones and are the HPA candidates
 (§10.2); the rest stay at 1.
 
@@ -789,10 +789,10 @@ Compose port layout 1:1:
 | Host | Backend | Compose equivalent |
 |---|---|---|
 | `app.<domain>` | frontend | `:3000` |
-| `api.<domain>` | supabase-kong | `:54321` |
+| `api.<domain>` | supabase-envoy | `:54321` |
 | `nodered.<domain>` | node-red | `:1880` |
 | `grafana.<domain>` | grafana | `:3002` |
-| `studio.<domain>` | supabase-kong `:8001` — the gateway's studio listener, off by default | `:54323` |
+| `studio.<domain>` | supabase-envoy `:8001` — the gateway's studio listener, off by default | `:54323` |
 | `docs.<domain>` | swagger-ui | `:8088` |
 
 Path-based routing on a single host is possible but fragile here: Grafana needs
@@ -1090,7 +1090,7 @@ Postgres** via `pg_net`, which is not a shape a service-tier policy anticipates 
 normally egress leaves. pg_net has no retries, ordering or DLQ, so a blocked request is simply
 lost, and nothing surfaces it.
 
-**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-kong:8000`
+**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-envoy:8000`
 and to the edge runtime, and to Node-RED's webhook receiver. Write these allows **in the same
 change** as the default-deny, never as a follow-up — and add a validation check that fires a
 quarantine event and asserts the webhook arrived, or the gap is invisible until an operator notices
@@ -1309,7 +1309,7 @@ checked here before it is changed.
 ### 12.1 Names and labels
 
 **Service names are not prefixed.** Every in-cluster URL the stack carries (`grafana.ini`,
-`settings.js`, the edge-function environment) resolves a component name: `supabase-kong:8000`,
+`settings.js`, the edge-function environment) resolves a component name: `supabase-envoy:8000`,
 `timescaledb:5432`, `mosquitto:1883`. The release-qualified `aber.fullname` is for objects nothing
 addresses by name from inside the stack (Secrets, ConfigMaps, Jobs). Two releases in one namespace
 is therefore not a supported configuration; two namespaces is.
@@ -1581,11 +1581,11 @@ resolves every value from `process.env` at load time, so a value present when th
 written and absent when it is read makes the settings look wrong on every boot and get rewritten
 forever, silently, because an unloadable `settings.js` is already handled as "replace it".
 
-**The gateway's component label is not its Service name.** Promotion works by the Envoy Service
-adopting the name `supabase-kong`, so every consumer's URL keeps resolving, but NetworkPolicy and
-ServiceMonitor select pod labels, which the adopted name does not touch; hard-coding
-`supabase-kong` there left the policy denying every flow to the gateway and the scrape selecting
-nothing, both presenting as the gateway being down.
+**A Service carries its component's name, the gateway's included.** NetworkPolicy and the
+ServiceMonitors select pod labels, not Service names, and the ingress-controller policy selects the
+published backends by their Service names, so a Service named apart from its component leaves the
+gateway denied every flow and unscraped while it reports healthy. The gateway's Service carried
+Kong's name until 2026-09-28; `docs/gateway.md`, *History*, records why and why that ended.
 
 **The SSH ingress rule emits no `from` at its default rather than `ipBlock: 0.0.0.0/0`.** A rule
 with no peers matches every source by definition, in every CNI; an ipBlock is matched against an
