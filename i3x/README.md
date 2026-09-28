@@ -91,29 +91,44 @@ check. It reports capabilities and nothing about the address space.
 ## Address space
 
 ```
-i3x:site                          (synthetic root — the only parentId: null)
-├── <cell uuid>                   cells
-│   ├── <gwy…>                    gateways in that cell
-│   └── <dev…>                    devices whose RESOLVED cell is that cell
-├── i3x:unassigned                (synthetic — assets with no resolved cell)
-└── <gwy…>                        site-wide gateways
+i3x:site                          (synthetic root, named by site.name — the only parentId: null)
+├── <area uuid>                   areas
+│   ├── <cell uuid>               cells filed in that area
+│   │   ├── <gwy…>                gateways in that cell
+│   │   └── <dev…>                devices whose RESOLVED cell is that cell
+│   └── <gwy…> / <dev…>           area-wide gateways and devices
+├── <cell uuid>                   cells filed in no area, with their gateways and devices
+├── <gwy…> / <dev…>               site-wide gateways and devices
+├── i3x:lane:simulated            (synthetic — behind a simulated gateway; only while non-empty)
+├── i3x:lane:shadow               (synthetic — behind a playback gateway; only while non-empty)
+└── i3x:unassigned                (synthetic — assets nobody has placed)
 ```
 
 Six mappings that are decisions rather than mechanics:
 
-- **`parentId` is the cell, not the gateway.** i3X gives an Object one parent; a device here has two
-  (a cell — where it is; a gateway — how its data arrives). `HasParent` is organizational hierarchy,
-  so the cell wins, and the data path becomes a `ConnectsVia` / `ProvidesConnectivityFor` pair.
-  Collapsing them would make a host-run gateway unrepresentable.
-- **Unassigned is synthetic.** `parentId: null` means root, so a device with no cell would otherwise
-  become a second root. A synthetic object is legitimate where a magic `cells` row is not: it has no
-  table behind it, so it cannot be edited, deleted, or swept by the pg_cron purge that runs past RLS.
-- **`HasComponent` is carried alongside `HasChildren`**, not instead of it. They answer different
-  questions — `HasChildren` is the browse hierarchy, `HasComponent` is what `maxDepth > 1` descends.
-  **Unassigned is a child of the site but not a component of it.** It holds no value and publishes
-  no components, so a depth query that descended into it would add an empty node and stop; and
-  since `ComponentOf` is this edge's inverse, naming it would oblige a back edge asserting a
-  membership the object's own description denies. Cells and site-wide gateways are components.
+- **`parentId` is where the asset is, not the gateway.** i3X gives an Object one parent; a device
+  here has two (a place — where it is; a gateway — how its data arrives). `HasParent` is
+  organizational hierarchy, so the place wins, and the data path becomes a `ConnectsVia` /
+  `ProvidesConnectivityFor` pair. Collapsing them would make a host-run gateway unrepresentable.
+  The place is the most specific one the caller can see — its cell, else its area, else the site —
+  so an asset whose cell or area is archived climbs a level rather than naming an absent object.
+- **Unassigned and the lanes are synthetic.** `parentId: null` means root, so an unplaced device
+  would otherwise become a second root. A synthetic object is legitimate where a magic `cells` row
+  is not: it has no table behind it, so it cannot be edited, deleted, or swept by the pg_cron purge
+  that runs past RLS. **Unassigned holds only assets nobody has placed.** A site-wide or area-wide
+  asset is filed at its own level, and one behind a simulated or playback gateway goes to the
+  Simulated or Shadow lane, which `device_locations` resolves before any place: a lane is a fact
+  about the gateway, typed `Lane` rather than `Cell` so it claims no place, and it exists only while
+  something is in it. A cell filed in no area sits directly under the site with its assets: a
+  shorter path, not an invented area. The UNS bridge skips such a device as `cell_unfiled` because a
+  topic cannot have a gap; a tree can, and moving its devices to Unassigned would hide the cell
+  that was chosen for them.
+- **Location is `HasParent`/`HasChildren` only.** The site, areas, cells, lanes and Unassigned
+  carry `HasChildren`, `isComposition: false` and no `HasComponent`. A cell organises its devices
+  rather than being made of them (deleting it sets their `cell_id` to NULL), and the guide never
+  returns a `HasChildren` object in a value response, so `maxDepth` does not descend the location
+  tree. They were once components too, so an unbounded read of the site returned every device.
+  `HasComponent` is kept for what a device's value is composed of.
 - **Every edge is stored in both directions**, which i3X requires as a MUST (EXP-20) so a client can
   discover the graph from any node. `ComponentOf` was declared as `HasComponent`'s inverse and
   emitted by nothing for as long as the service existed — the conformance suite samples only the
@@ -129,13 +144,17 @@ Six mappings that are decisions rather than mechanics:
   `GoodNoData` with no value. A `quality` column on the hypertable would be a stored verdict that
   goes stale the moment the gateway does.
 
-A device's cell is `effective_cell_id` from the `device_locations` view, keyed by `device_id`,
-so an explicit cell and one inherited from the gateway resolve the way the Directory resolves
-them. `effective_area_id` is read with it and not yet projected. An object's
+A device's place is what the `device_locations` view resolves, keyed by `device_id`: its lane
+(`location_source`), else `effective_cell_id`, else `effective_area_id`, so an explicit cell and one
+inherited from the gateway resolve the way the Directory resolves them. A gateway inherits nothing
+and is placed by its own columns in the view's order. The root's `displayName` is the `site.name`
+setting the UNS bridge publishes under, and `Site` while it is empty; the setting is not sensitive,
+so every authenticated caller reads it. An object's
 `metadata.sourceTypeId` is its type's: a device's is its schema's `semantic_id`, else the schema's
-name, and `Device` when it has no schema. The site, a cell and Unassigned have values too, and each
-sends exactly the properties its synthetic type declares; `deviceCount` counts devices, not
-children, so a cell's gateways and the site's cells are not in it.
+name, and `Device` when it has no schema. The site, areas, cells, lanes and Unassigned have values
+too, and each sends exactly the properties its synthetic type declares; `deviceCount` counts
+devices, not children, so a cell's gateways and an area's cells are not in it, and an area's counts
+every device in it, area-wide or in one of its cells.
 
 **A failed read is an error, never an empty answer.** A read behind the address space that
 PostgREST answers with a 400 or a 5xx is a 502 naming the relation and carrying PostgREST's
@@ -153,7 +172,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | :--- | :--- | :--- |
 | GET | `/info` | **Unauthenticated.** Capabilities + health |
 | GET | `/namespaces` | The two every type belongs to: local and relationships |
-| GET | `/objecttypes` | `schemas` rows + synthetic Site/Cell/Gateway types. `?namespaceUri=` |
+| GET | `/objecttypes` | `schemas` rows + synthetic Site/Area/Cell/Lane/Gateway types. `?namespaceUri=` |
 | POST | `/objecttypes/query` | |
 | GET | `/relationshiptypes` | Six types, all registered with their `reverseOf`. `?namespaceUri=` |
 | POST | `/relationshiptypes/query` | |

@@ -284,11 +284,11 @@ def _load_address_space(pg: PostgrestClient) -> dict:
 
 def _read_address_space(pg: PostgrestClient) -> dict:
     """
-    Read the whole visible address space in five queries.
+    Read the whole visible address space, one query per relation.
 
-    Five reads rather than one per object -- cells, gateways, devices, device_locations and schemas:
-    the object graph needs cross-references (a cell's children, a gateway's devices) that no single
-    embed expresses, so everything is joined in memory here.
+    One read per relation rather than one per object: the object graph needs cross-references (a
+    cell's children, an area's cells, a gateway's devices) that no single embed expresses, so
+    everything is joined in memory here.
 
     UNCACHED. Every caller should go through `_load_address_space()`; this is the cold read behind
     it, separated so the cache has something to call and so a test can measure the difference.
@@ -303,14 +303,21 @@ def _read_address_space(pg: PostgrestClient) -> dict:
     # publishes no values, so every one of them would read as GoodNoData forever.
     live = "eq.false"
     cells = _read_relation(
-        pg, "cells", {"select": "id,name,description", "is_archived": live, "order": "name"}
+        pg, "cells", {"select": "id,name,description,area_id", "is_archived": live, "order": "name"}
+    )
+    areas = _read_relation(
+        pg, "areas", {"select": "id,name,description", "is_archived": live, "order": "name"}
+    )
+    # The root's displayName. Not a sensitive setting, so every authenticated caller may read it.
+    settings = _read_relation(
+        pg, "system_settings", {"select": "key,value", "key": "eq." + A.SITE_NAME_SETTING}
     )
     gateways = _read_relation(
         pg,
         "gateways",
         {
-            "select": "id,sparkplug_id,name,cell_id,location_scope,sparkplug_group,status,"
-            "last_heartbeat",
+            "select": "id,sparkplug_id,name,cell_id,area_id,location_scope,is_simulated,is_shadow,"
+            "sparkplug_group,status,last_heartbeat",
             "is_archived": live,
         },
     )
@@ -323,12 +330,12 @@ def _read_address_space(pg: PostgrestClient) -> dict:
             "is_archived": live,
         },
     )
-    # The resolved cell and area per device, keyed by `device_id`. A view because that resolution
-    # must not be re-implemented per consumer; `effective_area_id` is carried for the Area level.
+    # The resolved lane, cell and area per device, keyed by `device_id`. A view because that
+    # resolution must not be re-implemented per consumer.
     locations = _read_relation(
         pg,
         "device_locations",
-        {"select": "device_id,effective_cell_id,effective_area_id"},
+        {"select": "device_id,location_source,effective_cell_id,effective_area_id"},
         denied_is_empty=True,
     )
     schemas = _read_relation(
@@ -339,6 +346,11 @@ def _read_address_space(pg: PostgrestClient) -> dict:
     )
     return {
         "cells": cells,
+        "areas": areas,
+        # Matched on the key as well as filtered by it, so no other setting can name the root.
+        "site_name": next(
+            (row.get("value") for row in settings if row.get("key") == A.SITE_NAME_SETTING), None
+        ),
         "gateways": gateways,
         "devices": devices,
         "locations": {row["device_id"]: row for row in locations},
@@ -398,10 +410,14 @@ def _build_objects(space: dict) -> Dict[str, dict]:
     """Assemble every Object, keyed by elementId."""
     schemas_by_id = {s["id"]: s for s in space["schemas"]}
     gateways_by_id = {g["id"]: g for g in space["gateways"]}
+    # The places this caller can see. `A.placement` files an asset only under one of these.
+    areas = space.get("areas") or []
+    area_ids = {a["id"] for a in areas}
+    cell_ids = {c["id"] for c in space["cells"]}
 
     devices_by_gateway: Dict[str, List[str]] = {}
-    children_by_cell: Dict[str, List[str]] = {}
-    unassigned: List[str] = []
+    # Every level of the location tree: parent elementId -> the elementIds filed under it.
+    children: Dict[str, List[str]] = {}
     objects: Dict[str, dict] = {}
 
     for device in space["devices"]:
@@ -412,36 +428,47 @@ def _build_objects(space: dict) -> Dict[str, dict]:
             device.get("last_birth_metrics") or [],
             _modelled_metrics(schema.get("schema_definition")) if schema else set(),
         )
-        cell_id = (space["locations"].get(device["id"]) or {}).get("effective_cell_id")
-        obj = A.device_object(device, cell_id, device.get("schema_id"), schema)
+        location = space["locations"].get(device["id"]) or {}
+        parent = A.placement(
+            location.get("location_source"), location.get("effective_cell_id"),
+            location.get("effective_area_id"), cell_ids, area_ids,
+        )
+        obj = A.device_object(device, parent, device.get("schema_id"), schema)
         objects[obj["elementId"]] = obj
-        if cell_id:
-            children_by_cell.setdefault(cell_id, []).append(obj["elementId"])
-        else:
-            unassigned.append(obj["elementId"])
+        children.setdefault(parent, []).append(obj["elementId"])
         if gateway:
             devices_by_gateway.setdefault(gateway["sparkplug_id"], []).append(obj["elementId"])
 
     for gateway in space["gateways"]:
-        obj = A.gateway_object(gateway, devices_by_gateway.get(gateway["sparkplug_id"], []))
+        # Gateways inherit nothing, so each is placed by its own columns rather than by the view.
+        parent = A.placement(
+            A.gateway_location_source(gateway), gateway.get("cell_id"), gateway.get("area_id"),
+            cell_ids, area_ids,
+        )
+        obj = A.gateway_object(gateway, devices_by_gateway.get(gateway["sparkplug_id"], []), parent)
         objects[obj["elementId"]] = obj
-        if obj["parentId"] == A.UNASSIGNED_ELEMENT_ID:
-            unassigned.append(obj["elementId"])
-        elif obj["parentId"] != A.SITE_ELEMENT_ID:
-            children_by_cell.setdefault(obj["parentId"], []).append(obj["elementId"])
+        children.setdefault(parent, []).append(obj["elementId"])
 
-    cell_ids = []
+    # The containers, leaves first. A cell filed in no visible area sits directly under the site,
+    # and a lane exists only while something is in it.
     for cell in space["cells"]:
-        obj = A.cell_object(cell, children_by_cell.get(cell["id"], []))
-        objects[obj["elementId"]] = obj
-        cell_ids.append(obj["elementId"])
-
-    site_children = list(cell_ids) + [A.UNASSIGNED_ELEMENT_ID]
-    site_children += [
-        g["sparkplug_id"] for g in space["gateways"] if g.get("location_scope") == "site_wide"
-    ]
-    objects[A.UNASSIGNED_ELEMENT_ID] = A.unassigned_object(unassigned)
-    objects[A.SITE_ELEMENT_ID] = A.site_object(site_children)
+        parent = cell["area_id"] if cell.get("area_id") in area_ids else A.SITE_ELEMENT_ID
+        objects[cell["id"]] = A.cell_object(cell, children.get(cell["id"], []), parent)
+        children.setdefault(parent, []).append(cell["id"])
+    for area in areas:
+        objects[area["id"]] = A.area_object(area, children.get(area["id"], []))
+        children.setdefault(A.SITE_ELEMENT_ID, []).append(area["id"])
+    for source, (lane_id, _name, _description) in A.LANES.items():
+        if children.get(lane_id):
+            objects[lane_id] = A.lane_object(source, children[lane_id])
+            children.setdefault(A.SITE_ELEMENT_ID, []).append(lane_id)
+    objects[A.UNASSIGNED_ELEMENT_ID] = A.unassigned_object(
+        children.get(A.UNASSIGNED_ELEMENT_ID, [])
+    )
+    children.setdefault(A.SITE_ELEMENT_ID, []).append(A.UNASSIGNED_ELEMENT_ID)
+    objects[A.SITE_ELEMENT_ID] = A.site_object(
+        children[A.SITE_ELEMENT_ID], space.get("site_name")
+    )
 
     # ---------------------------------------------------------------------------------------------
     # THE VALUE-PATH INDEXES, BUILT ONCE HERE RATHER THAN PER LOOKUP.
@@ -1445,12 +1472,18 @@ def _current_value(objects, space: dict, element_id: str):
     devices_by_sid = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
     if element_id in devices_by_sid:
         return A.device_value(devices_by_sid[element_id], metrics_for(element_id))
-    # A container's value is what its type declares. Counts are of devices, never of children:
-    # a cell's children include its gateways, and the site's are cells and Unassigned.
+    # A location's value is what its type declares. Counts are of devices (or cells), never of
+    # children: a cell's children include its gateways, an area's its cells and area-wide assets.
     if element_id == A.SITE_ELEMENT_ID:
         return A.site_value(len(space["cells"]), len(devices_by_sid))
-    rels = (obj.get("metadata") or {}).get("relationships") or {}
-    return A.cell_value(obj, sum(1 for c in rels.get("HasChildren", []) if c in devices_by_sid))
+    devices = A.devices_below(objects, element_id, devices_by_sid)
+    if obj["typeElementId"] == A.AREA_TYPE_ID:
+        children = ((obj.get("metadata") or {}).get("relationships") or {}).get("HasChildren", [])
+        cells = sum(1 for c in children if objects.get(c, {}).get("typeElementId") == A.CELL_TYPE_ID)
+        return A.area_value(obj, cells, devices)
+    if obj["typeElementId"] == A.LANE_TYPE_ID:
+        return A.lane_value(obj, devices)
+    return A.cell_value(obj, devices)
 
 
 def h_objects_value(req: "Handler") -> None:

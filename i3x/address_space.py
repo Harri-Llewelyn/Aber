@@ -6,10 +6,12 @@ ObjectTypes ARE JSON Schema and `schemas.schema_definition` already stores JSON 
 row is an ObjectType with no translation at all.
 
 The mappings that are decisions rather than mechanics -- elementId is `sparkplug_id` and displayName
-is `name`, so renaming an asset does not move it here; `parentId` is the CELL and the data path is a
-separate relationship pair; Unassigned is a SYNTHETIC object with no table behind it; `HasComponent`
-is carried alongside `HasChildren` and Unassigned is a child but not a component; and `quality` is
-derived at READ TIME, never stored -- are set out in README.md -> "Address space".
+is `name`, so renaming an asset does not move it here; `parentId` is WHERE an asset is (its cell,
+else its area, else the site) and the data path is a separate relationship pair; location is
+`HasParent`/`HasChildren` only, and `HasComponent` is kept for the metrics a device's value is
+composed of; Unassigned and the Simulated and Shadow lanes are SYNTHETIC objects with no table behind
+them; and `quality` is derived at READ TIME, never stored -- are set out in README.md -> "Address
+space".
 
 EVERY READ HERE GOES THROUGH PostgREST AS THE CALLER. There is no service-role key in this process
 (see `PostgrestClient`), which is what makes the i3X address space obey the same RLS as the
@@ -26,6 +28,36 @@ from typing import Dict, List, Optional
 # or a UUID.
 SITE_ELEMENT_ID = "i3x:site"
 UNASSIGNED_ELEMENT_ID = "i3x:unassigned"
+# The root's displayName is this `system_settings` key's value, the one the UNS bridge publishes
+# under; the fallback stands in while it is empty.
+SITE_NAME_SETTING = "site.name"
+SITE_FALLBACK_NAME = "Site"
+
+# `device_locations.location_source` values placement reads. Kept in step with the view and with
+# ingestion/uns_publish.py's SOURCE_* constants.
+SOURCE_SHADOW = "shadow"
+SOURCE_SIMULATED = "simulated"
+SOURCE_SITE_WIDE = "site_wide"
+SOURCE_AREA_WIDE = "area_wide"
+SOURCE_EXPLICIT = "explicit"
+SOURCE_UNASSIGNED = "unassigned"
+
+# One synthetic parent per lane: (elementId, displayName, description). A lane is a fact about the
+# gateway, not a place, and exists in the space only while something is in it.
+LANES = {
+    SOURCE_SIMULATED: (
+        "i3x:lane:simulated",
+        "Simulated",
+        "Assets behind a simulated gateway: their telemetry is generated rather than observed. "
+        "Synthetic, and not a place: such an asset cannot be filed in a cell.",
+    ),
+    SOURCE_SHADOW: (
+        "i3x:lane:shadow",
+        "Shadow",
+        "Replay lanes behind a playback gateway: recorded captures of real machines, republished. "
+        "Synthetic, and not a place: such an asset cannot be filed in a cell.",
+    ),
+}
 
 # Namespaces. i3X groups TYPES into namespaces, and every type served here is this deployment's own:
 # a schema is a JSON Schema authored here even when every metric it names comes from a standard.
@@ -35,11 +67,14 @@ UNASSIGNED_ELEMENT_ID = "i3x:unassigned"
 NS_LOCAL = "https://aber.local/i3x"
 NS_RELATIONSHIPS = "https://aber.local/i3x/relationships"
 
-# Synthetic ObjectTypes for the three levels that have no `schemas` row. Cells and gateways are
+# Synthetic ObjectTypes for the levels that have no `schemas` row. Areas, cells and gateways are
 # infrastructure, not modelled equipment; giving them a real schema row would put them in the
-# registry the Schemas tab manages, where an operator could version or archive them.
+# registry the Schemas tab manages, where an operator could version or archive them. A lane (and
+# Unassigned) is a grouping that claims no place, so it is not typed as a cell.
 SITE_TYPE_ID = "i3x:type:site"
+AREA_TYPE_ID = "i3x:type:area"
 CELL_TYPE_ID = "i3x:type:cell"
+LANE_TYPE_ID = "i3x:type:lane"
 GATEWAY_TYPE_ID = "i3x:type:gateway"
 UNTYPED_DEVICE_TYPE_ID = "i3x:type:device"
 
@@ -56,10 +91,39 @@ SYNTHETIC_TYPES = [
         },
     },
     {
+        "elementId": AREA_TYPE_ID,
+        "displayName": "Area",
+        "namespaceUri": NS_LOCAL,
+        "sourceTypeId": "Area",
+        "version": "1.0.0",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "cellCount": {"type": "number"},
+                "deviceCount": {"type": "number"},
+                "description": {"type": ["string", "null"]},
+            },
+        },
+    },
+    {
         "elementId": CELL_TYPE_ID,
-        "displayName": "Factory Cell",
+        "displayName": "Cell",
         "namespaceUri": NS_LOCAL,
         "sourceTypeId": "Cell",
+        "version": "1.0.0",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "deviceCount": {"type": "number"},
+                "description": {"type": ["string", "null"]},
+            },
+        },
+    },
+    {
+        "elementId": LANE_TYPE_ID,
+        "displayName": "Lane",
+        "namespaceUri": NS_LOCAL,
+        "sourceTypeId": "Lane",
         "version": "1.0.0",
         "schema": {
             "type": "object",
@@ -103,22 +167,28 @@ _SYNTHETIC_SOURCE_TYPE_IDS = {t["elementId"]: t["sourceTypeId"] for t in SYNTHET
 # suite checks that following a relationship and then its reverse returns you to where you started,
 # and a one-way registration fails that.
 RELATIONSHIP_TYPES = [
-    ("HasParent", "HasChildren", "Organizational parent in the site hierarchy."),
-    ("HasChildren", "HasParent", "Organizational children in the site hierarchy."),
+    (
+        "HasParent",
+        "HasChildren",
+        "Organizational parent: where this object is. An asset's is its cell, else its area, else "
+        "the site; a simulated or replayed asset's is its lane; one nobody has placed is under "
+        "Unassigned. Location is never composition.",
+    ),
+    (
+        "HasChildren",
+        "HasParent",
+        "Organizational children: the areas, cells, lanes and assets filed under this object. Each "
+        "is independently valued, and a value query never returns them, whatever its maxDepth.",
+    ),
     (
         "HasComponent",
         "ComponentOf",
-        "Members of a composition. Carried ALONGSIDE HasChildren rather than instead of it, because "
-        "the two answer different questions: HasChildren is the browse hierarchy, HasComponent is "
-        "what `maxDepth > 1` on a value query descends. Only objects with `isComposition: true` "
-        "publish it -- Unassigned is a queue, not a composition, so it has children and no "
-        "components. IT IS NOT A TARGET OF ONE EITHER: the site names its cells and its site-wide "
-        "gateways as components and leaves Unassigned out, because `ComponentOf` is this edge's "
-        "inverse and a back edge from Unassigned would assert a membership its own description "
-        "denies. Every other HasComponent edge DOES carry its ComponentOf -- EXP-20 requires it, "
-        "and for a long time nothing emitted one at all.",
+        "The metrics a device's value is composed of. Each is an Object of its own, so one metric "
+        "can be read or subscribed to alone, and a value query with maxDepth > 1 returns them under "
+        "`components`. Only a device publishes it: the site, areas, cells and lanes organise their "
+        "children and compose nothing.",
     ),
-    ("ComponentOf", "HasComponent", "The composition this object is a member of."),
+    ("ComponentOf", "HasComponent", "The device whose value this metric is part of."),
     (
         "ConnectsVia",
         "ProvidesConnectivityFor",
@@ -198,7 +268,7 @@ def _quality_for_device(device: dict, has_value: bool) -> str:
 
 def device_object(
     device: dict,
-    effective_cell_id: Optional[str],
+    parent_id: Optional[str],
     schema_id: Optional[str],
     schema: Optional[dict] = None,
 ) -> dict:
@@ -215,13 +285,9 @@ def device_object(
         source_type_id = schema_id or _SYNTHETIC_SOURCE_TYPE_IDS[UNTYPED_DEVICE_TYPE_ID]
     gateway_sid = device.get("_gateway_sparkplug_id")
     relationships = {}
-    parent = effective_cell_id or UNASSIGNED_ELEMENT_ID
+    # Where `placement` filed it; None is Unassigned. Location is HasParent only, never ComponentOf.
+    parent = parent_id or UNASSIGNED_ELEMENT_ID
     relationships["HasParent"] = [parent]
-    # THE INVERSE OF THE CELL'S `HasComponent`, and it has to be emitted or EXP-20 fails: every
-    # forward edge MUST be traversable backwards. Not emitted under Unassigned, which publishes no
-    # `HasComponent` to be the inverse of -- see RELATIONSHIP_TYPES.
-    if parent != UNASSIGNED_ELEMENT_ID:
-        relationships["ComponentOf"] = [parent]
     if gateway_sid:
         relationships["ConnectsVia"] = [gateway_sid]
     return {
@@ -245,16 +311,54 @@ def device_object(
     }
 
 
-def gateway_object(gateway: dict, device_sids: List[str]) -> dict:
+def gateway_location_source(gateway: dict) -> str:
+    """
+    A gateway's `location_source`, read off its own row in the view's precedence: shadow, then
+    simulated, then its scope, then its cell. Gateways inherit nothing, so no view resolves it.
+    """
+    if gateway.get("is_shadow"):
+        return SOURCE_SHADOW
+    if gateway.get("is_simulated"):
+        return SOURCE_SIMULATED
+    scope = gateway.get("location_scope")
+    if scope in (SOURCE_SITE_WIDE, SOURCE_AREA_WIDE):
+        return scope
+    return SOURCE_EXPLICIT if gateway.get("cell_id") else SOURCE_UNASSIGNED
+
+
+def placement(
+    source: Optional[str],
+    cell_id: Optional[str],
+    area_id: Optional[str],
+    cell_ids,
+    area_ids,
+) -> str:
+    """
+    The elementId an asset is filed under: its lane, else the most specific place it names that is
+    in this address space (its cell, else its area, else the site), else Unassigned.
+
+    `source`, `cell_id` and `area_id` are what `device_locations` resolves for a device, or
+    `gateway_location_source` and the row's own columns for a gateway. A place missing from
+    `cell_ids` or `area_ids` (archived, or hidden by RLS) is climbed past rather than named, so
+    every parentId resolves. Only an asset that names no place at all is Unassigned.
+    """
+    lane = LANES.get(source)
+    if lane:
+        return lane[0]
+    if cell_id and cell_id in cell_ids:
+        return cell_id
+    if area_id and area_id in area_ids:
+        return area_id
+    if cell_id or area_id or source == SOURCE_SITE_WIDE:
+        return SITE_ELEMENT_ID
+    return UNASSIGNED_ELEMENT_ID
+
+
+def gateway_object(gateway: dict, device_sids: List[str], parent_id: Optional[str]) -> dict:
     element_id = gateway["sparkplug_id"]
-    parent = gateway.get("cell_id") or (
-        SITE_ELEMENT_ID if gateway.get("location_scope") == "site_wide" else UNASSIGNED_ELEMENT_ID
-    )
+    # Where `placement` filed it; None is Unassigned. Location is HasParent only, never ComponentOf.
+    parent = parent_id or UNASSIGNED_ELEMENT_ID
     relationships = {"HasParent": [parent]}
-    # As for a device: the inverse of whatever publishes `HasComponent` toward this gateway -- its
-    # cell, or the site itself when `location_scope` is site_wide. Unassigned publishes none.
-    if parent != UNASSIGNED_ELEMENT_ID:
-        relationships["ComponentOf"] = [parent]
     if device_sids:
         relationships["ProvidesConnectivityFor"] = sorted(device_sids)
     return {
@@ -273,95 +377,82 @@ def gateway_object(gateway: dict, device_sids: List[str]) -> dict:
     }
 
 
-def cell_object(cell: dict, child_ids: List[str]) -> dict:
-    relationships = {"HasParent": [SITE_ELEMENT_ID], "ComponentOf": [SITE_ELEMENT_ID]}
+def _location_object(
+    element_id: str,
+    display_name: str,
+    type_id: str,
+    parent_id: Optional[str],
+    child_ids: List[str],
+    description: Optional[str],
+) -> dict:
+    """
+    A level of the location tree: the site, an area, a cell, a lane or Unassigned.
+
+    `HasParent`/`HasChildren` only, and never a composition: its children are independently valued
+    and a value query does not return them at any maxDepth. `HasParent` always matches `parentId`,
+    which EXP-21 follows through `/objects/related`.
+    """
+    relationships = {}
+    if parent_id:
+        relationships["HasParent"] = [parent_id]
     if child_ids:
         relationships["HasChildren"] = sorted(child_ids)
-        # A cell IS a composition of the assets in it, so the same edge is also a component edge.
-        # `maxDepth > 1` on a value query descends HasComponent, not HasChildren.
-        relationships["HasComponent"] = sorted(child_ids)
     return {
-        "elementId": cell["id"],
-        "displayName": cell.get("name") or cell["id"],
-        "typeElementId": CELL_TYPE_ID,
-        "parentId": SITE_ELEMENT_ID,
-        "isComposition": True,
+        "elementId": element_id,
+        "displayName": display_name,
+        "typeElementId": type_id,
+        "parentId": parent_id,
+        "isComposition": False,
         "isExtended": False,
         "metadata": {
-            "description": cell.get("description"),
+            "description": description,
             "typeNamespaceUri": NS_LOCAL,
-            "sourceTypeId": "Cell",
+            "sourceTypeId": _SYNTHETIC_SOURCE_TYPE_IDS[type_id],
             "relationships": relationships,
         },
     }
 
 
-def _site_relationships(child_ids: List[str]) -> dict:
-    """
-    The site's edges, and the one asymmetry in them.
-
-    EVERY CHILD IS A CHILD; NOT EVERY CHILD IS A COMPONENT. `HasChildren` is the browse hierarchy
-    and takes all of them. `HasComponent` is what `maxDepth > 1` on a value query descends, and
-    Unassigned is left out of it: it is the ABSENCE of a location decision rather than a place, it
-    holds no value of its own, and it publishes no `HasComponent` of its own -- so a descent that
-    reaches it stops there, having added an empty node and nothing else. Cells and site-wide
-    gateways are real and stay.
-
-    This is also what makes the graph symmetric. `ComponentOf` is the declared inverse of
-    `HasComponent`, so naming Unassigned here would oblige it to carry a `ComponentOf` back --
-    asserting a membership the object's own description denies.
-    """
-    rels = {"HasChildren": sorted(child_ids)}
-    components = sorted(c for c in child_ids if c != UNASSIGNED_ELEMENT_ID)
-    if components:
-        rels["HasComponent"] = components
-    return rels
+def area_object(area: dict, child_ids: List[str]) -> dict:
+    """An area: its cells, and the area-wide assets filed on it directly."""
+    return _location_object(
+        area["id"], area.get("name") or area["id"], AREA_TYPE_ID, SITE_ELEMENT_ID, child_ids,
+        area.get("description"),
+    )
 
 
-def site_object(child_ids: List[str]) -> dict:
-    return {
-        "elementId": SITE_ELEMENT_ID,
-        "displayName": "Site",
-        "typeElementId": SITE_TYPE_ID,
-        # The only true root. i3X reads `parentId: null` as root, so there must be exactly one.
-        "parentId": None,
-        "isComposition": True,
-        "isExtended": False,
-        "metadata": {
-            "description": "Synthetic root of this deployment's address space.",
-            "typeNamespaceUri": NS_LOCAL,
-            "sourceTypeId": "Site",
-            "relationships": _site_relationships(child_ids),
-        },
-    }
+def cell_object(cell: dict, child_ids: List[str], parent_id: str) -> dict:
+    """A cell, under its area, or directly under the site when it is filed in no area."""
+    return _location_object(
+        cell["id"], cell.get("name") or cell["id"], CELL_TYPE_ID, parent_id, child_ids,
+        cell.get("description"),
+    )
+
+
+def lane_object(source: str, child_ids: List[str]) -> dict:
+    """The Simulated or Shadow lane, keyed by the `location_source` that fills it."""
+    element_id, display_name, description = LANES[source]
+    return _location_object(
+        element_id, display_name, LANE_TYPE_ID, SITE_ELEMENT_ID, child_ids, description
+    )
+
+
+def site_object(child_ids: List[str], name: Optional[str] = None) -> dict:
+    """The only root, named by the `site.name` setting. i3X reads `parentId: null` as root."""
+    display_name = name.strip() if isinstance(name, str) and name.strip() else SITE_FALLBACK_NAME
+    return _location_object(
+        SITE_ELEMENT_ID, display_name, SITE_TYPE_ID, None, child_ids,
+        "Synthetic root of this deployment's address space.",
+    )
 
 
 def unassigned_object(child_ids: List[str]) -> dict:
-    return {
-        "elementId": UNASSIGNED_ELEMENT_ID,
-        "displayName": "Unassigned",
-        "typeElementId": CELL_TYPE_ID,
-        "parentId": SITE_ELEMENT_ID,
-        # NOT a composition: nothing here owns its children, they are simply not placed yet.
-        "isComposition": False,
-        "isExtended": False,
-        "metadata": {
-            "description": (
-                "Assets with no resolved cell. Synthetic: this is the ABSENCE of a location "
-                "decision, not a place, which is why it is not a row in `cells`."
-            ),
-            "typeNamespaceUri": NS_LOCAL,
-            "sourceTypeId": "Cell",
-            # `HasParent` MUST be here: `parentId` above says the site is the parent, and a
-            # relationship graph that disagrees with `parentId` fails EXP-21 as well as EXP-20.
-            # Its absence is what the conformance suite reported. No `ComponentOf`, because the
-            # site deliberately does not name this queue among its components.
-            "relationships": {
-                "HasParent": [SITE_ELEMENT_ID],
-                "HasChildren": sorted(child_ids),
-            },
-        },
-    }
+    return _location_object(
+        UNASSIGNED_ELEMENT_ID, "Unassigned", LANE_TYPE_ID, SITE_ELEMENT_ID, child_ids,
+        "Assets nobody has placed: no cell, no area-wide or site-wide scope, and in no lane. "
+        "Synthetic: this is the ABSENCE of a location decision, not a place, which is why it is "
+        "not a row in `cells`.",
+    )
 
 
 def is_extended(declared_metrics, modelled_metrics) -> bool:
@@ -462,23 +553,50 @@ def site_value(cell_count: int, device_count: int) -> dict:
     The site's value: exactly the properties the Site type declares.
 
     EVERY OBJECT NEEDS A VALUE, not only the ones that publish telemetry. `POST /objects/value` is
-    how a client reads any object, and a composition with no value of its own cannot be the subject
-    of a `maxDepth > 1` query -- which is the only way to read a subtree in one call. Reporting
-    "no such element" for a cell that plainly exists in `/objects` is worse than reporting a count.
+    how a client reads any object, and reporting "no such element" for a cell that plainly exists in
+    `/objects` is worse than reporting a count.
     """
     return value_envelope(
         SITE_ELEMENT_ID, {"cellCount": cell_count, "deviceCount": device_count}, "Good", _now_iso()
     )
 
 
+def _location_value(obj: dict, counts: dict) -> dict:
+    """The counts a location type declares, then its description. Counts are of devices or cells."""
+    value = dict(counts)
+    value["description"] = (obj.get("metadata") or {}).get("description")
+    return value_envelope(obj["elementId"], value, "Good", _now_iso())
+
+
+def area_value(obj: dict, cell_count: int, device_count: int) -> dict:
+    """An area's value: the cells filed in it, and every device in it, area-wide or in a cell."""
+    return _location_value(obj, {"cellCount": cell_count, "deviceCount": device_count})
+
+
 def cell_value(obj: dict, device_count: int) -> dict:
-    """A cell's value, and Unassigned's, which shares the Cell type: its devices and description."""
-    return value_envelope(
-        obj["elementId"],
-        {"deviceCount": device_count, "description": (obj.get("metadata") or {}).get("description")},
-        "Good",
-        _now_iso(),
-    )
+    """A cell's value: its devices and description."""
+    return _location_value(obj, {"deviceCount": device_count})
+
+
+def lane_value(obj: dict, device_count: int) -> dict:
+    """A lane's value, and Unassigned's, which shares the Lane type: its devices and description."""
+    return _location_value(obj, {"deviceCount": device_count})
+
+
+def devices_below(objects: Dict[str, dict], element_id: str, device_ids) -> int:
+    """How many of `device_ids` sit anywhere under `element_id`, following HasChildren down."""
+    count, stack, seen = 0, [element_id], {element_id}
+    while stack:
+        rels = (objects.get(stack.pop(), {}).get("metadata") or {}).get("relationships") or {}
+        for child in rels.get("HasChildren", []):
+            if child in seen:
+                continue
+            seen.add(child)
+            if child in device_ids:
+                count += 1
+            else:
+                stack.append(child)
+    return count
 
 
 def gateway_value(gateway: dict) -> dict:
