@@ -53,7 +53,7 @@ const END_MARKER = '-- <<< END GENERATED mtconnect_vocabulary';
  *
  * The form matches 0032's SQL expression exactly, and both are mirrored by
  * `mtconnectVocabularySemanticId()` in `frontend/src/utils/standards.js`, which the Add Metric form
- * derives an MTConnect metric's id through (check-mirror-drift.mjs check 8):
+ * derives an MTConnect metric's id through (check-mirror-drift.mjs check 7):
  *
  *     https://aber.local/semantics/mtconnect/v2.0/<Kind>/<name>
  *

@@ -377,7 +377,7 @@ const compare = (mirror, label, jsValue, sqlValue) => {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 8. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
+// 7. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
 // for that data item type, and the id every MTConnect catalog row in the seed carries (#457). The
 // form's own function is run, so a change to the namespace or the kind segment on either side
 // fails here rather than as a form-created metric naming no concept.
@@ -405,7 +405,7 @@ const compare = (mirror, label, jsValue, sqlValue) => {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 7. The ASHRAE 223P metric group. The form's prefill (utils/ashrae223.js) and the seed must name the
+// 8. The ASHRAE 223P metric group. The form's prefill (utils/ashrae223.js) and the seed must name the
 // same one, and it must be the only group registered under the standard: they forked once (#456),
 // the form filing under `Building` while the seeded metrics sat under an unregistered `BMS`.
 // -------------------------------------------------------------------------------------------------

@@ -83,7 +83,7 @@ export function mtconnectSemanticId(dataItemType) {
 
 /**
  * The kind segment used by `mtconnect_vocabulary.semantic_id`. Mirrors KIND_SEGMENT in
- * scripts/generate-mtconnect-vocabulary.mjs; check-mirror-drift.mjs check 8 compares the result.
+ * scripts/generate-mtconnect-vocabulary.mjs; check-mirror-drift.mjs check 7 compares the result.
  */
 const VOCABULARY_KIND_SEGMENT = {
   DATA_ITEM_TYPE: 'DataItemType',
