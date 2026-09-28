@@ -542,24 +542,25 @@ difference being that here there is no rolling, by design.
 ### Why subscriptions are not made to survive
 
 Backing subscription state with Redis is the obvious fix and is deliberately not being done. The
-reasons are the four rules in [Subscriptions](#subscriptions) above: every one of them is a property
-that is easy to hold inside one process and becomes a distributed-systems problem outside it.
-`/sync` acknowledgement has to stay exact under concurrent access; overflow has to drop and report a
-*computable* gap atomically; "one stream per subscription" becomes cross-replica coordination to
-close the displaced stream cleanly; and the MQTT value cache would have to move too, or replicas
-would disagree about current values. That is a substantial amount of machinery, and a hard Redis
-dependency, added to a service whose entire design argument is that it is a thin read-side adapter
-that owns no data.
+reasons are the five rules in [Subscriptions](#subscriptions) above: each is easy to hold inside one
+process, and most become a distributed-systems problem outside it. `/sync` acknowledgement has to
+stay exact under concurrent access; overflow has to drop and report a *computable* gap atomically;
+"one stream per subscription" becomes cross-replica coordination to close the displaced stream
+cleanly; `/sync` has to know whether a stream is open on another replica; and the MQTT value cache
+would have to move too, or replicas would disagree about current values. That is a substantial
+amount of machinery, and a hard Redis dependency, added to a service whose entire design argument
+is that it is a thin read-side adapter that owns no data.
 
 The trade is only worth making against a real requirement. It is tracked separately, and this
 section is what it would have to improve on.
 
 ## The address-space cache
 
-Assembling the address space costs **five PostgREST reads**, and several endpoints load it two or
-three times in one request — `/types/{id}` builds types and then objects; the bulk value reads
-rebuild it per call. A conformance client polling in a loop was therefore spending 12–18 queries a
-tick rebuilding a graph that had not changed.
+Assembling the address space costs **five PostgREST reads**, and nearly every endpoint needs it:
+`/objecttypes` and `/objecttypes/query` build the types from it; the `/objects` endpoints,
+`/objects/value` and `/objects/history` the objects; and `/subscriptions/register`, `/unregister`,
+`/sync` and each stream check elementIds against it. A conformance client polling several of them
+in a loop was therefore spending 12–18 queries a tick rebuilding a graph that had not changed.
 
 It is now cached for `I3X_ADDRESS_SPACE_TTL_SECONDS`, **keyed by the caller's bearer token**.
 

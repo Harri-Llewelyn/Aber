@@ -6,7 +6,8 @@ info:
   description: |
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
     Interoperability eXchange) read-side view of this platform's asset model — **52 passed,
-    0 failed** against CESMII's official 60-test conformance suite.
+    0 failed** against CESMII's official 60-test conformance suite at `5010274f` (cesmii/i3X,
+    2026-06-18), the ref CI pins.
 
     ### This is a different service from the Platform API
 
@@ -748,6 +749,11 @@ paths:
               schema: { $ref: '#/components/schemas/Envelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
+        '409':
+          description: 'This subscription has an open stream. Close it before calling `/sync`: the stream has already delivered, and discarded, the queue a sync would acknowledge.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '502':
           description: 'Your address space could not be read to check what may be delivered. Nothing was acknowledged or delivered; retry.'
           content:

@@ -195,10 +195,9 @@ class PostgrestClient:
 """
 Short-TTL address-space cache, KEYED BY THE CALLER'S TOKEN.
 
-The address space was reassembled from scratch on every request -- five PostgREST reads, and
-several endpoints load it two or three times in one call (`/types/{id}` builds types and then
-objects; the bulk value reads rebuild it per request), so a single conformance client polling in a
-loop was costing 12-18 queries a tick. Fine for a demonstrator, wrong for anything watching.
+Assembling the space costs five PostgREST reads, and the type, object, value and history endpoints,
+registration and every subscription check need it, so a client polling in a loop would pay those
+reads on every call (README.md -> "The address-space cache").
 
 THE KEY IS THE TOKEN AND THAT IS NOT NEGOTIABLE. The space is deliberately assembled from reads
 made AS THE CALLER, so RLS decides what it contains -- a cache shared across identities would hand
