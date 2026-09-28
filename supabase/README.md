@@ -1639,6 +1639,27 @@ otherwise a reader would be told a row is missing and shown no way to reach it.
 The CSV export carries the number as `transaction_rows` beside `transaction_id`.
 `test_digital_thread_paging.py` covers the field; `digitalThreadCausation.test.jsx` the drawer.
 
+### An approval and the change it made are one act (`0021`)
+
+**Two of the thread's writers stamped no transaction.** `approve_proposal()` writes a
+`PROPOSAL_APPLIED` row naming both parties, and the target's audit trigger records the `UPDATE`
+the approval made. The trigger stamps `causation_id = txid_current()`; the `PROPOSAL_APPLIED`
+INSERT named no `causation_id`, and the column has no default. The drawer groups an event's rows
+by `causation_id` and the page counts them, so an approval read as a single-row act apart from
+the `UPDATE` it caused, and a search for the transaction id found only the `UPDATE`.
+`expire_open_proposals()` wrote `PROPOSAL_EXPIRED` the same way.
+
+Both now stamp `txid_current()` themselves, the way every other multi-row act in the chain links
+its rows: an explicit value in the INSERT, the same one the trigger writes in that transaction. No
+session variable carries it. An expiry run is one act, so the proposals one run closes share its
+id. Rows written before `0021` keep their NULL.
+
+`0021` also restates two COMMENTs that described withdrawn lanes: `validate_change_proposal()`'s
+said it refuses a schema-lane proposal whose target is "not a draft", a check archived migration
+0090 withdrew with the lane, and `approve_proposal()`'s described the link lanes archived migration
+0108 withdrew. `test_change_proposals.py` approves a proposal and finds both rows under one id, and
+`digital_thread_page()` counting them as two.
+
 
 ### The lane a Manager was offered and denied (`0120`)
 

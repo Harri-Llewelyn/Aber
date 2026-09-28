@@ -249,7 +249,9 @@ python supabase/migrations/test_user_roles_rls.py
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
 # nameplate. The rest cover the two properties a simplification would remove first -- that an
 # invalid patch aborts its own approval rather than becoming a record of something that did not
-# happen, and that both caps are in the database rather than in a disabled button.
+# happen, and that both caps are in the database rather than in a disabled button. An approval's
+# PROPOSAL_APPLIED row and the UPDATE it made share one causation_id, which the drawer's page
+# counts as one act, and an expiry run stamps its own (0021).
 python supabase/migrations/test_change_proposals.py
 # The Administrator / Shopfloor_Manager split (0069), in both halves: the grants diverged, AND the
 # withdrawal reaches Postgres. The second half is the one worth having -- no RLS policy reads

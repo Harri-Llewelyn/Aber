@@ -1881,9 +1881,10 @@ paths:
         that did not happen.
 
         Writes one `digital_thread` row naming both parties: `changed_by` is the approver,
-        `new_data.proposed_by` is who asked. On the nameplate lane `updated_by` is set to the
-        **proposer**, because a nameplate is an assertion about an asset and who made it is part
-        of the record.
+        `new_data.proposed_by` is who asked. It carries the same `causation_id` as the audit row
+        the change itself wrote, so the two read as one act. On the nameplate lane `updated_by` is
+        set to the **proposer**, because a nameplate is an assertion about an asset and who made it
+        is part of the record.
       requestBody:
         required: true
         content:
@@ -4163,8 +4164,10 @@ components:
           description: >-
             The transaction that wrote the row (`txid_current()`), so rows sharing it were written
             by one act. Unique only within this database: group by it, never keep it as a
-            reference. NULL on rows older than the column, and on `PROPOSAL_APPLIED` and
-            `PROPOSAL_EXPIRED` rows, whose writers do not set it.
+            reference. A `PROPOSAL_APPLIED` row shares it with the change that approval made, and
+            the `PROPOSAL_EXPIRED` rows one expiry run writes share that run's. NULL on rows older
+            than the column, and on `PROPOSAL_APPLIED` and `PROPOSAL_EXPIRED` rows written before
+            migration 0021.
         audit_domain:
           type: string
           enum: [asset, security]
