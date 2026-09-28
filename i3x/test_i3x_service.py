@@ -1590,6 +1590,60 @@ class TestSparkplugValues(unittest.TestCase):
         self.assertEqual(self.served(), {"a": -5, "b": -32768})
 
 
+class TestJsonValuesAgreeWithIngestion(unittest.TestCase):
+    """
+    A JSON payload is served as the historian stores it. Both services read a JSON metric through
+    `json_metric_value`, mirrored rather than imported (see TestMirroredConstants), and both suites
+    assert test-harness/fixtures/sparkplug-json-values.json through their own parser.
+    """
+
+    FIXTURE = Path(__file__).resolve().parents[1] / "test-harness" / "fixtures" / "sparkplug-json-values.json"
+    DEVICE = TestSparkplugValues.DEVICE
+
+    def setUp(self):
+        for table in ("_values", "_alias_map", "_alias_datatypes", "_name_datatypes"):
+            getattr(i3x_service, table).clear()
+
+    tearDown = setUp
+
+    @staticmethod
+    def _function(path):
+        import ast
+
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "json_metric_value":
+                body = node.body[1:] if ast.get_docstring(node) else node.body
+                return [ast.dump(node.args)] + [ast.dump(stmt) for stmt in body]
+        return None
+
+    def test_the_parser_is_the_same_code_in_both_services(self):
+        here = Path(__file__).resolve().parent
+        mine = self._function(here / "i3x_service.py")
+        self.assertIsNotNone(mine)
+        self.assertEqual(
+            mine, self._function(INGESTION_DIR / "ingestion.py"),
+            "json_metric_value has drifted between i3x_service.py and ingestion.py",
+        )
+
+    def test_every_case_is_served_as_the_fixture_says(self):
+        cases = json.loads(self.FIXTURE.read_text(encoding="utf-8"))["cases"]
+        self.assertGreater(len(cases), 10)
+        body = {"timestamp": 1790000000000, "metrics": [case["metric"] for case in cases]}
+        topic = "spBv1.0/Aber/DDATA/%s/%s" % (TestSparkplugValues.NODE, self.DEVICE)
+        i3x_service.on_message(None, None, _Message(topic, json.dumps(body).encode("utf-8")))
+        served = {name: entry["value"] for name, entry in i3x_service.metrics_for(self.DEVICE).items()}
+        for case in cases:
+            name = case["metric"]["name"]
+            with self.subTest(case=name):
+                if case.get("dropped"):
+                    self.assertNotIn(name, served)
+                else:
+                    self.assertEqual(served[name], case["reads"])
+                    self.assertEqual(type(served[name]) is bool, type(case["reads"]) is bool)
+
+
 class TestNamespaces(unittest.TestCase):
     """
     GET /namespaces lists the namespaces the served types belong to, and only those (#459).

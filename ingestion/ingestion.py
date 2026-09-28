@@ -2821,10 +2821,69 @@ def on_disconnect(client, userdata, rc, properties=None):
             "Under MQTT 3.1.1 this line could only have said 'unexpected'.", rc, int(rc.value)
         )
 
+# MIRRORED in i3x/i3x_service.py; test_i3x_service.py asserts the two copies agree, and both
+# suites read test-harness/fixtures/sparkplug-json-values.json.
+def json_metric_value(metric):
+    """
+    The (field, value, datatype) one JSON-encoded metric carries, as the protobuf encoding would
+    hold it: the first present of the six Sparkplug value keys, then a bare `value`, which is typed
+    by what it holds. An integer is stored as its two's complement in `int_value`, or `long_value`
+    when the key, a 64-bit datatype or its size needs 64 bits; a negative one with no datatype is
+    marked Int32 or Int64 so it reads back signed. A `float_value` is rounded to 32 bits.
+
+    (None, None, datatype) when no value key is present. ValueError when the value is not the JSON
+    type its key names or does not fit its field; the caller drops that metric, not its payload.
+    """
+    import struct
+
+    datatype = metric.get("datatype")
+    if not isinstance(datatype, int) or isinstance(datatype, bool) or not 0 <= datatype < 2**32:
+        datatype = None
+    for key in ("int_value", "long_value", "float_value", "double_value", "boolean_value",
+                "string_value", "value"):
+        value = metric.get(key)
+        if value is None:
+            continue
+        if key == "value" and (isinstance(value, bool) or not isinstance(value, int)):
+            key = {bool: "boolean_value", float: "double_value", str: "string_value"}.get(type(value))
+            if key is None:
+                raise ValueError("value %r is not a number, a boolean or a string" % (value,))
+        if key in ("int_value", "long_value", "value"):
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError("%s %r is not an integer" % (key, value))
+            wide = (key == "long_value" or datatype in (4, 8, 13)
+                    or (key == "value" and not -(2**31) <= value < 2**32))
+            bits = 64 if wide else 32
+            if not -(2 ** (bits - 1)) <= value < 2**bits:
+                raise ValueError("%s %d does not fit in %d bits" % (key, value, bits))
+            if value < 0 and datatype is None:
+                datatype = 4 if wide else 3
+            return ("long_value" if wide else "int_value"), value & ((1 << bits) - 1), datatype
+        if key in ("float_value", "double_value"):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError("%s %r is not a number" % (key, value))
+            if key == "float_value":
+                try:
+                    value = struct.unpack("<f", struct.pack("<f", value))[0]
+                except OverflowError:
+                    raise ValueError("float_value %r does not fit in 32 bits" % (value,)) from None
+            return key, float(value), datatype
+        if not isinstance(value, bool if key == "boolean_value" else str):
+            raise ValueError("%s %r is not a %s" % (key, value, key.split("_")[0]))
+        return key, value, datatype
+    return None, None, datatype
+
+# Throttle for metrics dropped from a JSON payload, keyed by topic: a publisher sending a bad value
+# sends it in every message.
+_json_metric_refused_warned = {}
+JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS = 300
+
 def parse_sparkplug_payload(msg):
     """
-    Decode a Sparkplug B payload, falling back to the JSON encoding used by the Node-RED
-    simulator flow. Returns None if the payload cannot be decoded.
+    Decode a Sparkplug B payload, falling back to the JSON encoding the gateway appliance's
+    Node-RED flow publishes. Returns None if the payload cannot be decoded.
     """
     payload = sparkplug_b_pb2.Payload()
     try:
@@ -2851,35 +2910,34 @@ def parse_sparkplug_payload(msg):
                 payload.seq = int(data['seq']) % 256
 
             for m in data.get('metrics', []):
-                metric = payload.metrics.add()
-                metric.name = m.get('name', '')
-                # Carried through so the fallback is not silently alias-blind. Assigning the field
-                # is what makes HasField('alias') true, which is what resolve_metric_name() tests.
-                if m.get('alias') is not None:
-                    metric.alias = int(m['alias'])
-                if 'string_value' in m and m['string_value'] is not None:
-                    metric.string_value = str(m['string_value'])
-                if 'double_value' in m and m['double_value'] is not None:
-                    metric.double_value = float(m['double_value'])
-                if 'boolean_value' in m and m['boolean_value'] is not None:
-                    metric.boolean_value = bool(m['boolean_value'])
-                if 'int_value' in m and m['int_value'] is not None:
-                    value = int(m['int_value'])
-                    # A negative JSON number is stored as the protobuf wire carries it, 32-bit two's
-                    # complement, and marked Int32 when it declares no datatype so it reads back
-                    # signed. capture.dict_to_payload() does the same.
-                    if -2 ** 31 <= value < 0:
-                        value &= 0xFFFFFFFF
-                        if m.get('datatype') is None:
-                            metric.datatype = 3
-                    metric.int_value = value
-                if 'datatype' in m and m['datatype'] is not None:
-                    metric.datatype = int(m['datatype'])
-                # The metric's own reading time, which the protobuf path already honours: a
-                # report-by-exception refresh or a batched reading is filed when it was taken.
-                ts = m.get('timestamp')
-                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
-                    metric.timestamp = int(ts)
+                # Built apart and appended whole, so a metric that cannot be held is dropped and
+                # logged while the rest of its payload lands.
+                metric = sparkplug_b_pb2.Payload.Metric()
+                try:
+                    field, value, datatype = json_metric_value(m)
+                    metric.name = m.get('name', '')
+                    # Carried through so the fallback is not silently alias-blind. Assigning the
+                    # field is what makes HasField('alias') true, which resolve_metric_name() tests.
+                    if m.get('alias') is not None:
+                        metric.alias = int(m['alias'])
+                    if field is not None:
+                        setattr(metric, field, value)
+                    if datatype is not None:
+                        metric.datatype = datatype
+                    # The metric's own reading time, which the protobuf path already honours: a
+                    # report-by-exception refresh or a batched reading is filed when it was taken.
+                    ts = m.get('timestamp')
+                    if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
+                        metric.timestamp = int(ts)
+                except (AttributeError, TypeError, ValueError) as err:
+                    if _throttled(_json_metric_refused_warned, msg.topic, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS):
+                        logger.warning(
+                            "Dropped a metric from the JSON payload on %s and kept the rest: %s. "
+                            "Metric: %.200r (further drops on this topic are not logged for %ds)",
+                            msg.topic, err, m, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS
+                        )
+                    continue
+                payload.metrics.add().CopyFrom(metric)
             return payload
         except Exception:
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)

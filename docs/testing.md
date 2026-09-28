@@ -38,7 +38,8 @@ python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 # The JSON encoding the appliance publishes: a metric's own timestamp survives the parse, so a
-# report-by-exception refresh or a batched reading is filed when it was taken.
+# report-by-exception refresh or a batched reading is filed when it was taken, and every value
+# reads as test-harness/fixtures/sparkplug-json-values.json says, which the i3X suite asserts too.
 python ingestion/test_json_payload.py
 python ingestion/test_mqtt_tls.py
 # The Directory's MQTT half. Mostly assertions about what it does NOT do: the publisher is

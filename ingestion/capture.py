@@ -196,7 +196,7 @@ def dict_to_payload(data):
             metric.int_value = value
         if m.get("long_value") is not None:
             value = int(m["long_value"])
-            # The same rule at 64 bits, for a hand-edited file; the daemon's JSON arm reads no long_value.
+            # The same rule at 64 bits.
             if -2 ** 63 <= value < 0:
                 value &= 0xFFFFFFFFFFFFFFFF
                 if m.get("datatype") is None:
