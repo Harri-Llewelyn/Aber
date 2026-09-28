@@ -1,10 +1,12 @@
 import os
+import re
 import ssl
 import sys
 import time
 import json
 import argparse
 import urllib.error
+import urllib.parse
 import urllib.request
 import psycopg2
 import paho.mqtt.client as mqtt
@@ -87,6 +89,31 @@ VAL_UNMODELLED_METRIC = "Environmental/HUMIDITY_RELATIVE"
 VAL_KPI_METRIC = "OEE/AVAILABILITY"
 VAL_KPI_SCHEMA_METRICS = [VAL_KPI_METRIC]
 
+# The plant check 12 compares with the Directory: an area with the cell filed in it, a gateway serving
+# the whole area, and two devices with two metrics each. A carries one schema, whose semantic id its
+# i3X object must name; B inherits nothing, sits in the cell by its own cell_id, and publishes a
+# signed Int32 below zero. Metrics are {name: (Sparkplug datatype, birth value, data value)}.
+VAL_AREA_NAME = "VALIDATE Area 1"
+VAL_AREA_GW_NAME = "VALIDATE_Area_Gateway_01"
+VAL_PLANT_A_DEVICE = "VALIDATE_Plant_Device_A"
+VAL_PLANT_B_DEVICE = "VALIDATE_Plant_Device_B"
+VAL_PLANT_SCHEMA_NAME = "VALIDATE_Schema_Plant"
+VAL_PLANT_SCHEMA_SEMANTIC_ID = "urn:aber:validate:plant-device"
+VAL_SIGNED_METRIC = "VALIDATE/SIGNED_INT32"
+VAL_SIGNED_DATA_VALUE = -42
+VAL_PLANT_METRICS = {
+    "plant_a": {"Systems/TEMPERATURE": (10, 20.5, 21.0), "Controller/EXECUTION": (12, "READY", "ACTIVE")},
+    "plant_b": {"Systems/TEMPERATURE": (10, 18.25, 18.5), VAL_SIGNED_METRIC: (3, -5, VAL_SIGNED_DATA_VALUE)},
+}
+# Plant device A's DATA after the first, a second apart: one metric alone, then the other, so its
+# history holds a value carried forward and a metric with two samples.
+VAL_PLANT_LATER = {"plant_a": ({"Controller/EXECUTION": "STOPPED"}, {"Systems/TEMPERATURE": 21.5})}
+# A device of its own for check 12z, which archives it: no other check may see it leave.
+VAL_WITHDRAWN_DEVICE = "VALIDATE_Withdrawn_Device_001"
+VAL_SUBSCRIPTION_CLIENT = "validate-withdrawal"
+# Never components of a device: wire plumbing, as i3x_service.IDENTITY_METRICS has it.
+IDENTITY_METRICS = {"Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID"}
+
 # A well-formed device id that is deliberately not registered: 'dev' + 21 hex = 24 characters.
 UNKNOWN_DEVICE_ID = "dev" + "f" * 21
 # The same id one character short -- the truncation case the format check exists to diagnose.
@@ -136,8 +163,35 @@ PRIMARY_HOST_ID = os.getenv("PRIMARY_HOST_ID", "").strip()
 # a physical third-party gateway can read.
 CAPTURED_STATE = []
 
-# Populated by seed_supabase(); the wire ids the daemon will resolve.
+# Populated by seed_supabase() and run_simulation(). `<key>_uuid` is a row's id, and for a gateway or a
+# device `<key>_id` is its sparkplug_id, which a device's historian rows are keyed by. The cleanup
+# deletes what this names, so every row a run creates goes in here, its key in SEEDED_TABLES.
 SEEDED = {}
+SEEDED_TABLES = {
+    "area": "areas",
+    "cell": "cells",
+    "gateway": "gateways",
+    "area_gateway": "gateways",
+    "known": "devices",
+    "legacy": "devices",
+    "mismatch": "devices",
+    "alias": "devices",
+    "plant_a": "devices",
+    "plant_b": "devices",
+    "withdrawn": "devices",
+    "quarantined": "devices",
+    "malformed": "devices",
+    "schema": "schemas",
+    "kpi_schema": "schemas",
+    "plant_schema": "schemas",
+}
+# Children before parents: a gateway or device naming an area refuses the area's DELETE.
+CLEANUP_ORDER = ("devices", "gateways", "cells", "areas", "schemas")
+
+
+def seeded_keys(table):
+    """The SEEDED keys naming a row of `table` that this run created."""
+    return [key for key, kind in SEEDED_TABLES.items() if kind == table and SEEDED.get(key + "_uuid")]
 
 supabase_client = None
 try:
@@ -394,72 +448,146 @@ def preflight_supabase_admin():
     return True
 
 def cleanup_validation_data():
+    """Delete this run's rows, and any an interrupted run left in the Directory. Returns what failed.
+
+    The Directory rows are the ones SEEDED names plus any still carrying a VALIDATE name; the
+    historian rows are those of exactly the devices among them. Each step runs whether or not the
+    one before it failed, so one failure leaves only its own rows behind.
+    """
     print("Cleaning up validation data...")
-    if supabase_client:
-        try:
-            # Audit rows are keyed by entity_id, and log_digital_thread_event() writes only
-            # 'devices' / 'gateways' / 'cells' into entity_type, so the ids have to be collected
-            # while the rows carrying the VALIDATE_ names still exist.
-            stale_ids = []
-            for table, column, value in (
-                ("devices", "name", "VALIDATE_%"),
-                ("gateways", "name", "VALIDATE_%"),
-                ("cells", "name", None),
-            ):
-                query = supabase_client.table(table).select("id")
-                query = query.eq(column, VAL_CELL_NAME) if value is None else query.like(column, value)
-                stale_ids += [row["id"] for row in (query.execute().data or []) if row.get("id")]
+    failures = []
+    rows = {table: set() for table in CLEANUP_ORDER}
+    for key, table in SEEDED_TABLES.items():
+        if SEEDED.get(key + "_uuid"):
+            rows[table].add(SEEDED[key + "_uuid"])
+    unknown = [k for k in SEEDED if k.endswith("_uuid") and k[: -len("_uuid")] not in SEEDED_TABLES]
+    if unknown:
+        failures.append(f"SEEDED names {unknown} with no table in SEEDED_TABLES, so they were not deleted")
+    asset_ids = {v for k, v in SEEDED.items()
+                 if k.endswith("_id") and SEEDED_TABLES.get(k[: -len("_id")]) == "devices" and v}
 
-            # Deleting the cell cascades to its gateways (gateways.cell_id ON DELETE CASCADE), so
-            # ordering matters here even though devices.gateway_id is only SET NULL.
-            supabase_client.table("devices").delete().like("name", "VALIDATE_%").execute()
-            supabase_client.table("gateways").delete().like("name", "VALIDATE_%").execute()
-            supabase_client.table("cells").delete().eq("name", VAL_CELL_NAME).execute()
-            # schema_name is UNIQUE, so a schema left behind by an aborted run would fail the
-            # next seed. devices.schema_id is ON DELETE SET NULL, so ordering does not matter.
-            supabase_client.table("schemas").delete().like("schema_name", "VALIDATE_%").execute()
+    if not supabase_client:
+        failures.append("no Supabase client, so no Directory row was deleted")
+    else:
+        # Rows an interrupted run left, found by name: cells.name, areas.name and schemas.schema_name
+        # are UNIQUE, so one left behind fails the next seed.
+        for table, column, pattern in (
+            ("devices", "name", "VALIDATE_%"),
+            ("gateways", "name", "VALIDATE_%"),
+            ("cells", "name", VAL_CELL_NAME),
+            ("areas", "name", VAL_AREA_NAME),
+            ("schemas", "schema_name", "VALIDATE_%"),
+        ):
+            try:
+                select = "id,sparkplug_id" if table == "devices" else "id"
+                query = supabase_client.table(table).select(select)
+                query = query.like(column, pattern) if "%" in pattern else query.eq(column, pattern)
+                for row in query.execute().data or []:
+                    rows[table].add(row["id"])
+                    if row.get("sparkplug_id"):
+                        asset_ids.add(row["sparkplug_id"])
+            except Exception as e:
+                failures.append(f"finding leftover {table}: {e}")
 
-            # Guarded: an empty `in_` list is not a no-op filter, and an unfiltered delete against
-            # digital_thread would wipe the whole audit history. Routed through the owner connection
-            # because the append-only trigger refuses DELETE for service_role, and kept out of the
-            # surrounding try's generic handler so a failure here is reported rather than printed
-            # among routine noise.
-            if stale_ids:
+        # A device's own sparkplug_id too, for a row SEEDED holds by id alone.
+        if rows["devices"]:
+            try:
+                found = supabase_client.table("devices").select("sparkplug_id").in_(
+                    "id", sorted(rows["devices"])).execute()
+                asset_ids.update(r["sparkplug_id"] for r in found.data or [] if r.get("sparkplug_id"))
+            except Exception as e:
+                failures.append(f"reading the devices' sparkplug_ids: {e}")
+
+        for table in CLEANUP_ORDER:
+            if rows[table]:
                 try:
-                    audit_conn = get_supabase_admin_connection()
-                    try:
-                        audit_conn.autocommit = True
-                        with audit_conn.cursor() as cur:
-                            cur.execute(
-                                "DELETE FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
-                                (stale_ids,),
-                            )
-                    finally:
-                        audit_conn.close()
-                except Exception as audit_err:
-                    print(f"❌ AUDIT CLEANUP FAILED: {len(stale_ids)} entity id(s) left behind in "
-                          f"public.digital_thread -- {audit_err}")
-                    print("   These rows are append-only and cannot be removed through PostgREST. "
-                          "Clear them with an owner connection, or the next run starts dirty.")
-        except Exception as e:
-            print(f"Supabase cleanup warning: {e}")
+                    supabase_client.table(table).delete().in_("id", sorted(rows[table])).execute()
+                except Exception as e:
+                    failures.append(f"deleting {len(rows[table])} row(s) from {table}: {e}")
 
+        # Birth parameters are keyed by sparkplug_id with no foreign key, so nothing cascades them.
+        if asset_ids:
+            try:
+                supabase_client.table("asset_config").delete().in_("asset_id", sorted(asset_ids)).execute()
+            except Exception as e:
+                failures.append(f"deleting asset_config rows: {e}")
+
+    # Audit rows last, since each DELETE above writes one. Through the owner connection because the
+    # append-only trigger refuses service_role; guarded because an empty list must not become an
+    # unfiltered DELETE of the whole audit history.
+    entity_ids = sorted(set().union(*rows.values()))
+    if entity_ids:
+        try:
+            audit_conn = get_supabase_admin_connection()
+            try:
+                audit_conn.autocommit = True
+                with audit_conn.cursor() as cur:
+                    cur.execute("DELETE FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
+                                (entity_ids,))
+            finally:
+                audit_conn.close()
+        except Exception as e:
+            failures.append(f"{len(entity_ids)} entity id(s) left in public.digital_thread, which only "
+                            f"an owner connection can clear: {e}")
+
+    failures += cleanup_historian(asset_ids)
+    return failures
+
+
+def cleanup_historian(asset_ids):
+    """Delete the historian rows of exactly these devices. Returns what failed.
+
+    One asset per statement, each its own transaction, the id a literal: TimescaleDB decompresses
+    only the compressed batches whose `asset_id` segment matches a constant, and caps what one
+    transaction may decompress. A subquery matches no segment, so it decompresses every batch in the
+    hypertable. See docs/testing.md, "What validate.py leaves behind".
+    """
+    if not asset_ids:
+        return []
+    failures = []
     try:
         conn = get_timescaledb_connection()
-        conn.autocommit = True
-        cur = conn.cursor()
-        # Telemetry is keyed by sparkplug_id, which is per-run (it comes from the seeded row's
-        # generated UUID), so the rows are found via the friendly name cached on `assets`.
-        cur.execute(
-            "DELETE FROM telemetry WHERE asset_id IN "
-            "(SELECT asset_id FROM assets WHERE asset_name LIKE 'VALIDATE_%');"
-        )
-        cur.execute("DELETE FROM assets WHERE asset_name LIKE 'VALIDATE_%';")
-        conn.close()
     except Exception as e:
-        print(f"TimescaleDB cleanup warning: {e}")
+        return [f"historian: no connection, so {len(asset_ids)} asset(s) keep their rows: {e}"]
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for asset_id in sorted(asset_ids):
+                try:
+                    cur.execute("DELETE FROM telemetry WHERE asset_id = %s", (asset_id,))
+                except Exception as e:
+                    failures.append(f"telemetry of {asset_id}: {e}")
+            # Run whatever happened above. The foreign key keeps an asset whose telemetry remains,
+            # and the query after it names each one kept.
+            ids = sorted(asset_ids)
+            try:
+                cur.execute(
+                    "DELETE FROM assets a WHERE a.asset_id = ANY(%s) "
+                    "AND NOT EXISTS (SELECT 1 FROM telemetry t WHERE t.asset_id = a.asset_id)",
+                    (ids,),
+                )
+            except Exception as e:
+                failures.append(f"assets: {e}")
+            cur.execute("SELECT asset_id FROM assets WHERE asset_id = ANY(%s)", (ids,))
+            kept = sorted(r[0] for r in cur.fetchall())
+            if kept:
+                failures.append(f"{len(kept)} historian asset(s) still hold rows: {', '.join(kept)}")
+    except Exception as e:
+        failures.append(f"historian: {e}")
+    finally:
+        conn.close()
+    return failures
 
-    print("Cleanup complete.")
+
+def report_cleanup(failures):
+    """Check 16: the end-of-run cleanup, reported as an outcome. Returns True when it passed."""
+    if not failures:
+        print("✅ 16. CLEANUP: this run's Directory, audit, birth-parameter and historian rows are gone.")
+        return True
+    print(f"❌ 16. CLEANUP FAIL: {len(failures)} step(s) left rows behind, and the next run inherits them.")
+    for failure in failures:
+        print(f"      -> {failure}")
+    return False
 
 def set_metric_value(metric, val):
     """Populate a Sparkplug metric's value and datatype from a Python value."""
@@ -554,14 +682,52 @@ def make_node_birth_payload(aliased_metrics, timestamp_ms):
 
     return payload.SerializeToString()
 
+
+def make_typed_payload(asset_id, typed_metrics, timestamp_ms, declare):
+    """A payload whose values travel in their Sparkplug datatype's field: {name: (datatype, value)}.
+    `declare` writes each datatype, as a birth must. DATA leaves them out, as Sparkplug recommends,
+    so a receiver has to take them from the birth; a signed integer is its two's complement.
+    """
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = timestamp_ms
+
+    m_asset = payload.metrics.add()
+    m_asset.name = "Asset_ID"
+    m_asset.string_value = asset_id
+    m_asset.datatype = 12
+
+    for name, (datatype, value) in typed_metrics.items():
+        m = payload.metrics.add()
+        m.name = name
+        m.timestamp = timestamp_ms
+        if declare:
+            m.datatype = datatype
+        if datatype in (1, 2, 3, 5, 6, 7):
+            m.int_value = value & 0xFFFFFFFF
+        elif datatype in (4, 8):
+            m.long_value = value & 0xFFFFFFFFFFFFFFFF
+        elif datatype == 10:
+            m.double_value = value
+        elif datatype == 11:
+            m.boolean_value = value
+        else:
+            m.string_value = value
+
+    return payload.SerializeToString()
+
+
 def seed_supabase():
     print("Seeding Supabase test metadata (cells, gateways, registered devices)...")
     if not supabase_client:
         print("Skipping Supabase seed: client unavailable")
         return
 
-    # Seed cell
-    c_res = supabase_client.table("cells").insert({"name": VAL_CELL_NAME}).execute()
+    # The area, and the cell filed in it.
+    a_res = supabase_client.table("areas").insert({"name": VAL_AREA_NAME}).execute()
+    SEEDED["area_uuid"] = a_res.data[0]["id"] if a_res.data else None
+    c_res = supabase_client.table("cells").insert(
+        {"name": VAL_CELL_NAME, "area_id": SEEDED["area_uuid"]}
+    ).execute()
     cell_id = c_res.data[0]["id"] if c_res.data else None
     # Kept on SEEDED so check 2 can scope itself to this run's entities: digital_thread is keyed
     # by entity_id, and the cell's id is otherwise not recoverable once the row is deleted.
@@ -590,13 +756,27 @@ def seed_supabase():
             f"VAL_GW_SPARKPLUG_ID have diverged."
         )
 
+    # A gateway serving the whole area rather than one cell. It never publishes.
+    ag_res = supabase_client.table("gateways").insert({
+        "name": VAL_AREA_GW_NAME,
+        "location_scope": "area_wide",
+        "area_id": SEEDED["area_uuid"],
+    }).execute()
+    area_gateway = ag_res.data[0] if ag_res.data else {}
+    SEEDED["area_gateway_uuid"] = area_gateway.get("id")
+    SEEDED["area_gateway_id"] = area_gateway.get("sparkplug_id")
+
     # Seed the registered devices. sparkplug_id is a generated column, so it comes back on the
-    # insert -- these are the ids the simulated gateways will publish under.
-    for label, key in (
-        (VAL_KNOWN_DEVICE, "known"),
-        (VAL_LEGACY_DEVICE, "legacy"),
-        (VAL_MISMATCH_DEVICE, "mismatch"),
-        (VAL_ALIAS_DEVICE, "alias"),
+    # insert -- these are the ids the simulated gateways will publish under. Plant device B names
+    # its cell itself; every other device inherits its gateway's.
+    for label, key, placement in (
+        (VAL_KNOWN_DEVICE, "known", {}),
+        (VAL_LEGACY_DEVICE, "legacy", {}),
+        (VAL_MISMATCH_DEVICE, "mismatch", {}),
+        (VAL_ALIAS_DEVICE, "alias", {}),
+        (VAL_PLANT_A_DEVICE, "plant_a", {}),
+        (VAL_PLANT_B_DEVICE, "plant_b", {"cell_id": cell_id}),
+        (VAL_WITHDRAWN_DEVICE, "withdrawn", {}),
     ):
         # NO `status`: the column defaults to OFFLINE, which is what a device the broker has never
         # heard from is. Seeding ONLINE was both untrue -- nothing had published yet -- and a weaker
@@ -605,7 +785,8 @@ def seed_supabase():
         res = supabase_client.table("devices").insert({
             "name": label,
             "gateway_id": SEEDED["gateway_uuid"],
-            "is_quarantined": False
+            "is_quarantined": False,
+            **placement,
         }).execute()
         row = res.data[0] if res.data else {}
         SEEDED[key + "_uuid"] = row.get("id")
@@ -662,6 +843,34 @@ def seed_supabase():
                     "device_id": SEEDED["known_uuid"],
                     "schema_id": SEEDED[schema_key],
                 }).execute()
+
+    # Plant device A's one schema, attached both ways as the known device's first is, so A has
+    # exactly one type whichever of the two a reader resolves. Its semantic id is what check 12j
+    # expects as the device's sourceTypeId.
+    p_res = supabase_client.table("schemas").insert({
+        "schema_name": VAL_PLANT_SCHEMA_NAME,
+        "description": "End-to-end validation plant device",
+        "status": "draft",
+        "semantic_id": VAL_PLANT_SCHEMA_SEMANTIC_ID,
+        "semantic_id_type": "IRI",
+        "schema_definition": {
+            "type": "object",
+            "properties": {
+                name: {"type": "number" if datatype == 10 else "string"}
+                for name, (datatype, _birth, _data) in VAL_PLANT_METRICS["plant_a"].items()
+            },
+            "required": sorted(VAL_PLANT_METRICS["plant_a"]),
+        },
+    }).execute()
+    SEEDED["plant_schema_uuid"] = p_res.data[0]["id"] if p_res.data else None
+    if SEEDED.get("plant_schema_uuid") and SEEDED.get("plant_a_uuid"):
+        supabase_client.table("devices").update(
+            {"schema_id": SEEDED["plant_schema_uuid"]}
+        ).eq("id", SEEDED["plant_a_uuid"]).execute()
+        supabase_client.table("device_submodels").insert({
+            "device_id": SEEDED["plant_a_uuid"],
+            "schema_id": SEEDED["plant_schema_uuid"],
+        }).execute()
 
     missing = [k for k, v in SEEDED.items() if not v]
     if missing:
@@ -910,8 +1119,943 @@ def run_simulation():
         time.sleep(3)
         SEEDED["ncmd_after_second"] = len(CAPTURED_NCMD)
 
+    # 11. The plant check 12 reads: each device births, then publishes, stamped with the wall clock
+    # rather than `now_ms` so no row collides with an earlier one on the historian's key. The DATA
+    # declares no datatypes, so reading the Int32 back negative takes the birth's declaration. Each
+    # DATA is recorded as `<key>_samples`, (ms, {name: value}), which the history checks read.
+    for key, metrics in VAL_PLANT_METRICS.items():
+        device_id = SEEDED.get(key + "_id")
+        if not device_id:
+            continue
+        print(f"\n--- DBIRTH then DDATA from plant device {key} ({device_id}) ---")
+        born_ms = int(time.time() * 1000)
+        birth = {name: (datatype, first) for name, (datatype, first, _then) in metrics.items()}
+        client.publish(f"spBv1.0/{VAL_GROUP}/DBIRTH/{gw}/{device_id}",
+                       make_typed_payload(device_id, birth, born_ms, declare=True))
+        time.sleep(2)
+        messages = [{name: then for name, (_datatype, _first, then) in metrics.items()}]
+        messages += list(VAL_PLANT_LATER.get(key, ()))
+        for offset, message in enumerate(messages, start=1):
+            at_ms = born_ms + 1000 * offset
+            typed = {name: (metrics[name][0], value) for name, value in message.items()}
+            client.publish(f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{device_id}",
+                           make_typed_payload(device_id, typed, at_ms, declare=False))
+            SEEDED.setdefault(key + "_samples", []).append((at_ms, dict(message)))
+            time.sleep(1)
+        time.sleep(1)
+
     client.loop_stop()
     client.disconnect()
+    record_ingested_devices()
+
+
+def record_ingested_devices():
+    """Put the rows ingestion created from this run's traffic in SEEDED, so the checks and the cleanup
+    name them by id: the unregistered device it quarantined, and the malformed one."""
+    if not supabase_client:
+        return
+    for key, wire_id in (("quarantined", UNKNOWN_DEVICE_ID), ("malformed", MALFORMED_DEVICE_ID)):
+        res = supabase_client.table("devices").select("id,sparkplug_id").eq(
+            "reported_identity", wire_id
+        ).order("created_at", desc=True).limit(1).execute()
+        row = res.data[0] if res.data else {}
+        SEEDED[key + "_uuid"] = row.get("id")
+        SEEDED[key + "_id"] = row.get("sparkplug_id")
+
+
+def sign_in_admin():
+    """An access token for the seeded administrator (supabase/seed.sql), or None and the reason."""
+    try:
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+            data=json.dumps({"email": "admin@aber.local", "password": "aber123"}).encode(),
+            headers={"apikey": SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())["access_token"], None
+    except Exception as err:
+        return None, err
+
+
+# =================================================================================================
+# Check 12: the i3X server, against the Directory
+# =================================================================================================
+# Not a conformance check: CESMII's suite covers the protocol and CI runs it. These assert what the
+# suite cannot know about this deployment: that the address space says what the Directory holds for
+# the plant this run seeded, and the server's own rules. Each assertion is a function taking an
+# I3xContext and returning (True | False | None for skipped, detail), listed in I3X_CHECKS.
+
+I3X_BASE_URL = os.getenv("I3X_BASE_URL", "http://localhost:8090").rstrip("/")
+# Every route i3x_service.ROUTES serves. check-docs-drift check 35 holds the two equal, so check 12h
+# cannot miss one.
+I3X_ROUTES = (
+    "GET /info",
+    "GET /namespaces",
+    "GET /objecttypes",
+    "POST /objecttypes/query",
+    "GET /relationshiptypes",
+    "POST /relationshiptypes/query",
+    "GET /objects",
+    "POST /objects/list",
+    "POST /objects/related",
+    "POST /objects/value",
+    "POST /objects/history",
+    "PUT /objects/value",
+    "PUT /objects/history",
+    "POST /subscriptions",
+    "POST /subscriptions/list",
+    "POST /subscriptions/delete",
+    "POST /subscriptions/register",
+    "POST /subscriptions/unregister",
+    "POST /subscriptions/sync",
+    "POST /subscriptions/stream",
+)
+I3X_UNAUTHENTICATED_ROUTES = ("GET /info",)
+I3X_SITE = "i3x:site"
+RFC3339_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+
+
+def i3x_request(method, path, token=None, body=None, authorization=None):
+    """One request to the i3X server: (HTTP status, parsed JSON or None), status 0 if unreachable.
+    `authorization` sends that header verbatim in place of the token's. Raw urllib, like check 11's
+    probe: the Supabase client would attach credentials that 12b and 12h need absent or wrong."""
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if authorization is not None:
+        headers["Authorization"] = authorization
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(f"{I3X_BASE_URL}/v1{path}", data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            status, raw = resp.status, resp.read()
+    except urllib.error.HTTPError as err:
+        status, raw = err.code, err.read()
+    except Exception as err:
+        return 0, {"error": str(err)}
+    try:
+        return status, json.loads(raw)
+    except ValueError:
+        return status, None
+
+
+def i3x_bulk(path, token, body):
+    """A bulk POST's results by elementId: each item's `result`, or None where it failed."""
+    status, answer = i3x_request("POST", path, token, body)
+    results = answer.get("results") if status == 200 and isinstance(answer, dict) else None
+    return {r.get("elementId"): (r.get("result") if r.get("success") else None) for r in results or []}
+
+
+def i3x_value(token, element_id):
+    """The current value of one object: {value, quality, timestamp, ...}, or None."""
+    return i3x_bulk("/objects/value", token, {"elementIds": [element_id]}).get(element_id)
+
+
+class I3xContext:
+    """What check 12's assertions share, read once: the caller's token, /info's result, every object
+    with its metadata, and the Directory's resolved location for each device this run seeded."""
+
+    def __init__(self, token, info):
+        self.token = token
+        self.info = info
+        self.objects_status, answer = i3x_request("GET", "/objects?includeMetadata=true", token)
+        result = answer.get("result") if isinstance(answer, dict) else None
+        self.objects = {o.get("elementId"): o for o in result or [] if isinstance(o, dict)}
+        uuids = [SEEDED[key + "_uuid"] for key in seeded_keys("devices")]
+        rows = []
+        if uuids and supabase_client:
+            rows = supabase_client.table("device_locations").select(
+                "device_id,effective_cell_id,effective_area_id"
+            ).in_("device_id", uuids).execute().data or []
+        self.locations = {row["device_id"]: row for row in rows}
+        self._types = None
+
+    def object(self, element_id):
+        return self.objects.get(element_id)
+
+    def types(self):
+        """GET /objecttypes by elementId, read once."""
+        if self._types is None:
+            status, answer = i3x_request("GET", "/objecttypes", self.token)
+            result = answer.get("result") if status == 200 and isinstance(answer, dict) else None
+            self._types = {t.get("elementId"): t for t in result or [] if isinstance(t, dict)}
+        return self._types
+
+    def effective_cell(self, key):
+        """The cell device_locations resolves for the device SEEDED names by `key`."""
+        return (self.locations.get(SEEDED.get(key + "_uuid")) or {}).get("effective_cell_id")
+
+
+def check_i3x_read_only(ctx):
+    # Update is declared false AND unimplemented: a client trusting the flag and one probing the verb
+    # must agree.
+    caps = (ctx.info.get("capabilities") or {}).get("update") or {}
+    status, _ = i3x_request("PUT", "/objects/value", ctx.token, {})
+    if caps.get("current") is False and status == 405:
+        return True, "update.current is false and PUT /objects/value answers 405 -- the flag and the verb agree"
+    return False, (f"capabilities.update.current={caps.get('current')}, PUT /objects/value returned "
+                   f"{status}. Expected false and 405.")
+
+
+def check_i3x_fail_closed(ctx):
+    status, _ = i3x_request("GET", "/objects")
+    if status == 401:
+        return True, "an unauthenticated /objects read answers 401"
+    return False, f"unauthenticated /objects returned {status}, expected 401."
+
+
+def check_i3x_address_space(ctx):
+    # The seeded device names no cell of its own, so its parent is its gateway's cell.
+    known, cell = SEEDED.get("known_id"), SEEDED.get("cell_uuid")
+    device = ctx.object(known)
+    if device and device.get("parentId") == cell:
+        return True, f"{known} is present, parented to its gateway's cell {cell}"
+    if device:
+        gateways = {eid for eid, o in ctx.objects.items() if o.get("typeElementId") == "i3x:type:gateway"}
+        wrong = ("its gateway: HasParent is organizational hierarchy, and the data path belongs on "
+                 "ConnectsVia" if device.get("parentId") in gateways else "not the resolved cell")
+        return False, f"the device's parentId is {device.get('parentId')}, {wrong}. Expected {cell}."
+    return False, f"{known} is not in /objects ({len(ctx.objects)} objects, HTTP {ctx.objects_status})."
+
+
+def check_i3x_single_root(ctx):
+    # `parentId: null` means root in i3X, which is why Unassigned hangs off the site.
+    roots = sorted(eid for eid, o in ctx.objects.items() if o.get("parentId") is None)
+    if roots == [I3X_SITE]:
+        return True, f"exactly one object has a null parentId ({I3X_SITE})"
+    return False, f"roots are {roots}, expected ['{I3X_SITE}']."
+
+
+def check_i3x_live_values(ctx):
+    # Values come from MQTT, not the database: a metric this run published is served.
+    value = i3x_value(ctx.token, SEEDED.get("known_id")) or {}
+    metrics = value.get("value") if isinstance(value.get("value"), dict) else {}
+    if metrics:
+        return True, (f"{len(metrics)} metric(s) served from the MQTT cache (quality "
+                      f"{value.get('quality')}), e.g. {sorted(metrics)[:3]}")
+    return False, f"no current value for {SEEDED.get('known_id')}: {value}"
+
+
+def check_i3x_values_rls_scoped(ctx):
+    # The value cache has no policy of its own, so a caller the data layer refuses must get nothing.
+    known = SEEDED.get("known_id")
+    status, answer = i3x_request("POST", "/objects/value", body={"elementIds": [known]},
+                                 authorization="Bearer not.a.valid.token")
+    leaked = status == 200 and known in json.dumps(answer) and '"value":' in json.dumps(answer)
+    if status in (401, 403) or (status == 200 and not leaked):
+        return True, f"a caller whose token the data layer rejects gets no values (HTTP {status})"
+    return False, (f"HTTP {status} returned live values to an unauthorised caller. The MQTT cache has "
+                   "no RLS of its own -- every value read must be gated on a PostgREST resolve made "
+                   "AS THE CALLER.")
+
+
+def check_i3x_parent_is_resolved_cell(ctx):
+    # Devices with no resolved cell are left out: where they sit follows the areas in the tree.
+    compared, unresolved, wrong = 0, [], []
+    for key in seeded_keys("devices"):
+        cell, element_id = ctx.effective_cell(key), SEEDED.get(key + "_id")
+        if cell is None:
+            unresolved.append(key)
+            continue
+        compared += 1
+        obj = ctx.object(element_id)
+        if obj is None:
+            wrong.append(f"{key} ({element_id}) is not in /objects")
+        elif obj.get("parentId") != cell:
+            wrong.append(f"{key} ({element_id}) has parentId {obj.get('parentId')}, resolved cell {cell}")
+    if wrong or not compared:
+        return False, "; ".join(wrong) or "no seeded device resolves to a cell, so nothing was compared"
+    left_out = f"; not compared, no resolved cell: {', '.join(unresolved)}" if unresolved else ""
+    return True, f"{compared} seeded device(s), each parented to its device_locations.effective_cell_id{left_out}"
+
+
+def check_i3x_refuses_a_non_token(ctx):
+    refused, wrong = 0, []
+    for route in I3X_ROUTES:
+        method, path = route.split(" ", 1)
+        status, _ = i3x_request(method, path, body=None if method == "GET" else {},
+                                authorization="not-a-token")
+        expected = 200 if route in I3X_UNAUTHENTICATED_ROUTES else 401
+        if status != expected:
+            wrong.append(f"{route} -> {status}, expected {expected}")
+        elif expected == 401:
+            refused += 1
+    if wrong:
+        return False, ("a header that is not a token got past authentication, where anything but 401 "
+                       "means it did. With `Authorization: not-a-token`: " + "; ".join(wrong))
+    return True, (f"`Authorization: not-a-token` answers 401 on all {refused} authenticated routes, and "
+                  f"{', '.join(I3X_UNAUTHENTICATED_ROUTES)} still answers")
+
+
+def check_i3x_namespace_filter(ctx):
+    compared, wrong = 0, []
+    for path in ("/objecttypes", "/relationshiptypes"):
+        status, answer = i3x_request("GET", path, ctx.token)
+        every = answer.get("result") if status == 200 and isinstance(answer, dict) else None
+        if not every:
+            wrong.append(f"GET {path} -> HTTP {status} with no types to filter")
+            continue
+        uris = sorted({t.get("namespaceUri") for t in every if isinstance(t.get("namespaceUri"), str)})
+        for uri in uris + ["urn:aber:validate:no-such-namespace"]:
+            status, answer = i3x_request("GET", f"{path}?namespaceUri={urllib.parse.quote(uri, safe='')}",
+                                         ctx.token)
+            got = answer.get("result") if status == 200 and isinstance(answer, dict) else None
+            want = sorted(t.get("elementId") for t in every if t.get("namespaceUri") == uri)
+            compared += 1
+            if got is None or sorted(t.get("elementId") for t in got) != want:
+                wrong.append(f"{path}?namespaceUri={uri} -> HTTP {status}, "
+                             f"{len(got) if got is not None else 'no'} type(s); expected {len(want)}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"{compared} filtered reads of /objecttypes and /relationshiptypes each return exactly "
+                  "the types in that namespace, and none for a namespace nothing uses")
+
+
+def check_i3x_source_type(ctx):
+    rows = supabase_client.table("schemas").select("semantic_id,schema_name").eq(
+        "id", SEEDED.get("plant_schema_uuid")).execute().data if supabase_client else None
+    if not rows:
+        return False, f"the seeded schema {VAL_PLANT_SCHEMA_NAME} is not in the Directory"
+    expected = rows[0].get("semantic_id") or rows[0].get("schema_name")
+    got = ((ctx.object(SEEDED.get("plant_a_id")) or {}).get("metadata") or {}).get("sourceTypeId")
+    if got == expected:
+        return True, f"{VAL_PLANT_A_DEVICE}'s sourceTypeId is its schema's semantic id, {expected}"
+    return False, (f"{VAL_PLANT_A_DEVICE}'s metadata.sourceTypeId is {got!r}; expected its schema's "
+                   f"{expected!r} (the semantic_id, else the schema_name).")
+
+
+def check_i3x_container_values(ctx):
+    # A container's value counts devices, never its children: the cell's children include a gateway.
+    cell = SEEDED.get("cell_uuid")
+    values = i3x_bulk("/objects/value", ctx.token, {"elementIds": [I3X_SITE, cell]})
+    site = (values.get(I3X_SITE) or {}).get("value") or {}
+    in_cell = (values.get(cell) or {}).get("value") or {}
+    # `is_archived=eq.false`, the filter i3X reads with, so a NULL counts on neither side.
+    live = supabase_client.table("devices").select("id", count="exact").eq(
+        "is_archived", "false").limit(1).execute().count
+    cells = supabase_client.table("cells").select("id", count="exact").eq(
+        "is_archived", "false").limit(1).execute().count
+    located = [r["device_id"] for r in supabase_client.table("device_locations").select(
+        "device_id").eq("effective_cell_id", cell).execute().data or []]
+    live_in_cell = len(supabase_client.table("devices").select("id").in_("id", located).eq(
+        "is_archived", "false").execute().data or []) if located else 0
+    expected = {"site deviceCount": live, "site cellCount": cells, "cell deviceCount": live_in_cell}
+    got = {"site deviceCount": site.get("deviceCount"), "site cellCount": site.get("cellCount"),
+           "cell deviceCount": in_cell.get("deviceCount")}
+    if got == expected:
+        return True, (f"the site counts {live} device(s) in {cells} cell(s), and the seeded cell its "
+                      f"{live_in_cell} device(s) without its gateway, as the Directory does")
+    return False, f"i3X reports {got}; the Directory holds {expected}."
+
+
+def check_i3x_invalid_input(ctx):
+    known = SEEDED.get("known_id")
+    # A window that is valid in every other respect, so each 400 can only be the field under test.
+    end = int(time.time())
+    window = {"startTime": datetime.fromtimestamp(end - 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "endTime": datetime.fromtimestamp(end, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    probes = (
+        ("/objects/value", {"maxDepth": "deep"}),
+        ("/objects/value", {"maxDepth": -1}),
+        ("/objects/history", {**window, "limit": "many"}),
+        ("/objects/history", {**window, "limit": 0}),
+    )
+    wrong = []
+    for path, fields in probes:
+        status, _ = i3x_request("POST", path, ctx.token, {"elementIds": [known], **fields})
+        if status != 400:
+            shown = {k: v for k, v in fields.items() if k in ("maxDepth", "limit")}
+            wrong.append(f"{path} {json.dumps(shown)} -> {status}")
+    if wrong:
+        return False, "expected 400 for each: " + "; ".join(wrong)
+    return True, f"a non-integer or out-of-range maxDepth or limit answers 400, all {len(probes)} probes"
+
+
+def expected_platform_version():
+    """The chart's appVersion, and where it was read: ABER_PLATFORM_VERSION where the chart sets it,
+    else this checkout's Chart.yaml, which is what the dev loop installs."""
+    version = os.getenv("ABER_PLATFORM_VERSION", "").strip()
+    if version:
+        return version, "ABER_PLATFORM_VERSION"
+    chart = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "helm", "aber", "Chart.yaml")
+    try:
+        with open(chart, encoding="utf-8") as f:
+            match = re.search(r'^appVersion:\s*"?([^"\s]+)"?\s*$', f.read(), re.M)
+    except OSError:
+        return None, None
+    return (match.group(1), "deploy/helm/aber/Chart.yaml") if match else (None, None)
+
+
+def check_i3x_server_version(ctx):
+    expected, source = expected_platform_version()
+    got = ctx.info.get("serverVersion")
+    if expected is None:
+        return None, "no ABER_PLATFORM_VERSION and no Chart.yaml beside this script to compare with"
+    if got == expected:
+        return True, f"serverVersion {got} is the chart's appVersion ({source})"
+    return False, (f"serverVersion is {got!r} and the chart's appVersion {expected!r} ({source}). The "
+                   "chart passes it as I3X_SERVER_VERSION; `dev` is a process started without it.")
+
+
+def check_i3x_heartbeat_in_utc(ctx):
+    gateway = SEEDED.get("gateway_id")
+    value = (i3x_value(ctx.token, gateway) or {}).get("value") or {}
+    beat = value.get("lastHeartbeat")
+    if isinstance(beat, str) and RFC3339_UTC.match(beat):
+        return True, f"{gateway}'s value carries lastHeartbeat {beat}"
+    if beat is None:
+        return False, f"{gateway}'s value has no lastHeartbeat, though this run's NBIRTH records one"
+    return False, f"lastHeartbeat is {beat!r}; every i3X timestamp is RFC 3339 in UTC, ending in Z."
+
+
+def check_i3x_signed_integers(ctx):
+    device = SEEDED.get("plant_b_id")
+    value = (i3x_value(ctx.token, device) or {}).get("value")
+    served = value.get(VAL_SIGNED_METRIC) if isinstance(value, dict) else None
+    stored = None
+    conn = get_timescaledb_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT val_double FROM telemetry WHERE asset_id = %s AND metric_name = %s "
+                        "ORDER BY time DESC LIMIT 1", (device, VAL_SIGNED_METRIC))
+            row = cur.fetchone()
+            stored = row[0] if row else None
+    finally:
+        conn.close()
+    if served == VAL_SIGNED_DATA_VALUE and stored == VAL_SIGNED_DATA_VALUE:
+        return True, (f"an Int32 published as {VAL_SIGNED_DATA_VALUE}, its datatype declared only at "
+                      f"birth, reads back {served} through /objects/value and the historian holds {stored:g}")
+    return False, (f"published {VAL_SIGNED_DATA_VALUE} as an Int32 declared at birth: i3X serves "
+                   f"{served!r} and the historian holds {stored!r}. "
+                   f"{VAL_SIGNED_DATA_VALUE & 0xFFFFFFFF} is its 32-bit pattern, unsigned.")
+
+
+MTCONNECT_NAMESPACE = "https://aber.local/semantics/mtconnect/v2.0"
+ISO22400_NAMESPACE = "https://aber.local/semantics/iso22400"
+SCHEMA_SET_TYPE_PREFIX = "i3x:type:schemas:"
+LOCATION_TYPES = ("i3x:type:site", "i3x:type:area", "i3x:type:cell", "i3x:type:lane",
+                  "i3x:type:unassigned")
+
+
+def relationships(obj):
+    return ((obj or {}).get("metadata") or {}).get("relationships") or {}
+
+
+def attached_schema_ids(key):
+    """The schemas the Directory attaches to a seeded device, through the device_schemas view."""
+    rows = supabase_client.table("device_schemas").select("schema_id").eq(
+        "device_id", SEEDED.get(key + "_uuid")).execute().data or []
+    return sorted({row["schema_id"] for row in rows if row.get("schema_id")})
+
+
+def expected_components(key):
+    """A seeded device's component metric names, as the Directory implies them: every metric its
+    schemas model and every one its last DBIRTH declared. Returns (names, modelled, declared)."""
+    uuid = SEEDED.get(key + "_uuid")
+    modelled = modelled_metrics_across(device_schema_definitions(uuid)) or set()
+    rows = supabase_client.table("devices").select("last_birth_metrics").eq("id", uuid).execute().data
+    declared = set((rows[0].get("last_birth_metrics") if rows else None) or []) - IDENTITY_METRICS
+    return sorted((modelled | declared) - IDENTITY_METRICS), modelled, declared
+
+
+def live_count(table, ids=None, **equal):
+    """How many rows of `table` are not archived, among `ids` if given, matching `equal`."""
+    query = supabase_client.table(table).select("id", count="exact").eq("is_archived", "false")
+    if ids is not None:
+        if not ids:
+            return 0
+        query = query.in_("id", list(ids))
+    for column, value in equal.items():
+        query = query.eq(column, value)
+    return query.limit(1).execute().count
+
+
+def iso_ms(ms):
+    return datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z")
+
+
+def epoch_ms(text):
+    """An RFC 3339 timestamp as epoch milliseconds, or None."""
+    try:
+        return round(datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def is_scalar(value):
+    return not isinstance(value, (dict, list))
+
+
+def plant_history():
+    """Plant device A's recorded DATA: (sparkplug_id, [(ms, {name: value})] oldest first, its two
+    metric names, and a window one second wider than the samples on each side)."""
+    samples = sorted(SEEDED.get("plant_a_samples") or [])
+    if not samples:
+        raise RuntimeError("plant device A published no DATA this run")
+    first, second = list(VAL_PLANT_METRICS["plant_a"])
+    window = {"startTime": iso_ms(samples[0][0] - 1000), "endTime": iso_ms(samples[-1][0] + 1000)}
+    return SEEDED.get("plant_a_id"), samples, first, second, window
+
+
+def check_i3x_device_typed_by_every_schema(ctx):
+    known = SEEDED.get("known_id")
+    obj = ctx.object(known) or {}
+    meta = obj.get("metadata") or {}
+    names, modelled, declared = expected_components("known")
+    ids = attached_schema_ids("known")
+    type_id = SCHEMA_SET_TYPE_PREFIX + "+".join(ids)
+    wrong = []
+    if len(ids) < 2:
+        wrong.append(f"the Directory attaches {len(ids)} schema(s) to it, so it has no set to be typed by")
+    if declared - modelled or obj.get("isExtended") is not False:
+        wrong.append(f"isExtended is {obj.get('isExtended')!r}, and across its schemas the Directory "
+                     f"leaves {sorted(declared - modelled)} of its declared metrics unmodelled")
+    if obj.get("isComposition") is not True:
+        wrong.append(f"isComposition is {obj.get('isComposition')!r}, expected true")
+    if obj.get("typeElementId") != type_id or meta.get("sourceTypeId") != type_id:
+        wrong.append(f"typeElementId {obj.get('typeElementId')!r} and sourceTypeId "
+                     f"{meta.get('sourceTypeId')!r}, expected {type_id}")
+    components = relationships(obj).get("HasComponent")
+    if components != [f"{known}/{name}" for name in names]:
+        wrong.append(f"HasComponent is {components}; expected {names} under {known}")
+    if meta.get("system") != {"quarantined": False} or "quarantined" in meta or "schemaExtensions" in meta:
+        wrong.append("metadata carries system " + json.dumps(meta.get("system")) + ", expected "
+                     "{\"quarantined\": false} with no top-level quarantined or schemaExtensions")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"{known} is typed by its {len(ids)} schemas ({type_id}), not extended, and composed "
+                  f"of the {len(names)} metrics they model or its birth declared")
+
+
+def check_i3x_metrics_are_components(ctx):
+    known = SEEDED.get("known_id")
+    names, _, _ = expected_components("known")
+    rows = supabase_client.table("metric_catalog").select("name,semantic_id").in_("name", names).execute()
+    catalog = {row["name"]: row for row in rows.data or []}
+    types = ctx.types()
+    wrong = []
+    for name in names:
+        obj = ctx.object(f"{known}/{name}")
+        if obj is None:
+            wrong.append(f"{known}/{name} is not in /objects")
+            continue
+        meta = obj.get("metadata") or {}
+        if (obj.get("parentId") != known or obj.get("isComposition") is not False
+                or meta.get("relationships") != {"ComponentOf": [known]}):
+            wrong.append(f"{name} has parentId {obj.get('parentId')}, isComposition "
+                         f"{obj.get('isComposition')} and relationships {meta.get('relationships')}")
+        type_id, row = obj.get("typeElementId") or "", catalog.get(name)
+        if row:
+            want = ("i3x:type:metric:" + name, row.get("semantic_id") or name,
+                    (types.get("i3x:type:metric:" + name) or {}).get("namespaceUri"))
+            got = (type_id, meta.get("sourceTypeId"), meta.get("typeNamespaceUri"))
+            if got != want:
+                wrong.append(f"{name} is typed {got}; its catalog row makes it {want}")
+        elif not type_id.startswith("i3x:type:sparkplug:") and type_id != "i3x:type:unknown":
+            wrong.append(f"{name} has no catalog row, so its type is its DBIRTH datatype's or "
+                         f"UnknownType; got {type_id}")
+    for name, namespace in (("Systems/TEMPERATURE", MTCONNECT_NAMESPACE), (VAL_KPI_METRIC, ISO22400_NAMESPACE)):
+        got = ((ctx.object(f"{known}/{name}") or {}).get("metadata") or {}).get("typeNamespaceUri")
+        if got != namespace:
+            wrong.append(f"{name}'s typeNamespaceUri is {got!r}, expected {namespace}")
+    metric_ids = {eid for eid in ctx.objects if "/" in eid}
+    holders = sorted(eid for eid, o in ctx.objects.items()
+                     if metric_ids & set(relationships(o).get("HasChildren", [])))
+    if holders:
+        wrong.append(f"metric ids appear under HasChildren of {holders}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"each of {known}'s {len(names)} metrics is a leaf with only ComponentOf, typed by "
+                  f"its catalog row ({len(catalog)}) or its datatype, and none is anyone's child")
+
+
+def check_i3x_types_and_namespaces(ctx):
+    ids = attached_schema_ids("known")
+    type_id = SCHEMA_SET_TYPE_PREFIX + "+".join(ids)
+    types = ctx.types()
+    wrong = []
+    synthesized = types.get(type_id)
+    if synthesized is None:
+        wrong.append(f"/objecttypes serves no {type_id}")
+    else:
+        schema = synthesized.get("schema") or {}
+        if schema.get("type") != "object" or len(schema.get("allOf") or []) != len(ids):
+            wrong.append(f"{type_id} has schema.type {schema.get('type')!r} and "
+                         f"{len(schema.get('allOf') or [])} allOf entries, expected object and {len(ids)}")
+        want = {"relationshipType": "InheritsFrom", "types": ids}
+        if synthesized.get("related") != want:
+            wrong.append(f"{type_id} is related {synthesized.get('related')}, expected {want}")
+    if (types.get("i3x:type:unknown") or {}).get("schema", None) != {}:
+        wrong.append(f"i3x:type:unknown is {types.get('i3x:type:unknown')}, expected schema {{}}")
+    status, answer = i3x_request("GET", "/namespaces", ctx.token)
+    listed = {n.get("uri") for n in (answer.get("result") if status == 200 else None) or []}
+    status, answer = i3x_request("GET", "/relationshiptypes", ctx.token)
+    rel_types = (answer.get("result") if status == 200 else None) or []
+    used = {t.get("namespaceUri") for t in types.values()} | {t.get("namespaceUri") for t in rel_types}
+    if listed != used:
+        wrong.append(f"/namespaces lists {sorted(listed - used)} that no type uses and omits "
+                     f"{sorted(used - listed)}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"{type_id} is allOf its {len(ids)} schemas and inherits from them, UnknownType's "
+                  f"schema is {{}}, and /namespaces lists exactly the {len(used)} the types use")
+
+
+def check_i3x_metric_values(ctx):
+    known = SEEDED.get("known_id")
+    names, _, _ = expected_components("known")
+    temperature = f"{known}/Systems/TEMPERATURE"
+    wrong = []
+    whole = i3x_bulk("/objects/value", ctx.token, {"elementIds": [known], "maxDepth": 0}).get(known) or {}
+    value, components = whole.get("value"), whole.get("components")
+    if not isinstance(value, dict) or not isinstance(components, dict):
+        wrong.append(f"maxDepth 0 on {known} gave value {type(value).__name__} and components "
+                     f"{type(components).__name__}")
+    else:
+        if set(components) != {f"{known}/{name}" for name in names}:
+            wrong.append(f"its components are {sorted(components)}, expected its {len(names)} metrics")
+        if (components.get(temperature) or {}).get("value") != value.get("Systems/TEMPERATURE"):
+            wrong.append(f"{temperature} is {(components.get(temperature) or {}).get('value')!r} as a "
+                         f"component and {value.get('Systems/TEMPERATURE')!r} in the device's map")
+        unzoned = sorted(eid for eid, c in components.items() if not str(c.get("timestamp")).endswith("Z"))
+        if unzoned:
+            wrong.append(f"component timestamps not in Z: {unzoned}")
+    alone = i3x_value(ctx.token, temperature) or {}
+    reading = alone.get("value")
+    if (alone.get("isComposition") is not False or isinstance(reading, bool)
+            or not isinstance(reading, (int, float)) or alone.get("quality") != "Good"):
+        wrong.append(f"{temperature} alone answers isComposition {alone.get('isComposition')!r}, value "
+                     f"{reading!r}, quality {alone.get('quality')!r}")
+    kpi = f"{known}/{VAL_KPI_METRIC}"
+    edges = i3x_bulk("/objects/related", ctx.token, {"elementIds": [kpi]}).get(kpi)
+    shape = [(e.get("sourceRelationship"), (e.get("object") or {}).get("elementId")) for e in edges or []]
+    if shape != [("ComponentOf", known)]:
+        wrong.append(f"{kpi}'s edges are {shape}, expected one ComponentOf to {known}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"maxDepth 0 returns {known}'s map with its {len(names)} metrics as components, one "
+                  f"metric reads alone as a Good scalar, and its only edge is ComponentOf")
+
+
+def check_i3x_location_tree(ctx):
+    objects, site = ctx.objects, I3X_SITE
+    area, cell, gateway = SEEDED.get("area_uuid"), SEEDED.get("cell_uuid"), SEEDED.get("area_gateway_id")
+    wrong = []
+    gw_rels = relationships(objects.get(gateway))
+    if (objects.get(gateway) or {}).get("parentId") != area or gw_rels.get("HasParent") != [area] \
+            or "ComponentOf" in gw_rels:
+        wrong.append(f"the area-wide gateway {gateway} has parentId "
+                     f"{(objects.get(gateway) or {}).get('parentId')} and relationships {gw_rels}")
+    area_obj, area_rels = objects.get(area) or {}, relationships(objects.get(area))
+    if (area_obj.get("typeElementId") != "i3x:type:area" or area_obj.get("parentId") != site
+            or not {gateway, cell} <= set(area_rels.get("HasChildren", []))):
+        wrong.append(f"the area {area} is typed {area_obj.get('typeElementId')} under "
+                     f"{area_obj.get('parentId')} with children {area_rels.get('HasChildren')}")
+    if (objects.get(cell) or {}).get("parentId") != area:
+        wrong.append(f"the cell's parentId is {(objects.get(cell) or {}).get('parentId')}, not its area")
+    if area not in relationships(objects.get(site)).get("HasChildren", []):
+        wrong.append("the site does not list the area among its children")
+    lanes = supabase_client.table("gateways").select("sparkplug_id,is_shadow,is_simulated").eq(
+        "is_archived", "false").or_("is_shadow.eq.true,is_simulated.eq.true").execute().data or []
+    for row in lanes:
+        lane = "i3x:lane:shadow" if row.get("is_shadow") else "i3x:lane:simulated"
+        lane_obj = objects.get(lane) or {}
+        if (objects.get(row["sparkplug_id"]) or {}).get("parentId") != lane:
+            wrong.append(f"gateway {row['sparkplug_id']} is not under {lane}")
+        if (lane_obj.get("typeElementId"), lane_obj.get("parentId")) != ("i3x:type:lane", site) or \
+                lane_obj.get("displayName") != ("Shadow" if row.get("is_shadow") else "Simulated"):
+            wrong.append(f"{lane} is {lane_obj.get('typeElementId')} under {lane_obj.get('parentId')}, "
+                         f"named {lane_obj.get('displayName')!r}")
+    if (objects.get("i3x:unassigned") or {}).get("typeElementId") != "i3x:type:unassigned":
+        wrong.append("i3x:unassigned is not typed i3x:type:unassigned")
+    places = {eid for eid, o in objects.items() if o.get("typeElementId") in LOCATION_TYPES}
+    composing = sorted(eid for eid in places
+                       if objects[eid].get("isComposition") is not False or "HasComponent" in relationships(objects[eid]))
+    if composing:
+        wrong.append(f"locations that compose: {composing}")
+    naming = sorted(eid for eid, o in objects.items() for rel in ("ComponentOf", "HasComponent")
+                    if places & set(relationships(o).get(rel, [])))
+    if naming:
+        wrong.append(f"objects with a component edge to a location: {naming}")
+    dangling = sorted(eid for eid, o in objects.items()
+                      if o.get("parentId") is not None and o.get("parentId") not in objects)
+    if dangling:
+        wrong.append(f"parentIds that resolve to nothing: {dangling}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"the area sits under the site with its cell and area-wide gateway, {len(lanes)} lane "
+                  f"gateway(s) sit in their lanes, {len(places)} locations compose nothing, and every "
+                  f"parentId resolves")
+
+
+def check_i3x_site_name(ctx):
+    status, answer = i3x_request("GET", "/objects?root=true", ctx.token)
+    roots = (answer.get("result") if status == 200 else None) or []
+    rows = supabase_client.table("system_settings").select("value").eq("key", "site.name").execute().data
+    setting = rows[0].get("value") if rows else None
+    expected = setting.strip() if isinstance(setting, str) and setting.strip() else "Site"
+    got = [(r.get("elementId"), r.get("displayName")) for r in roots]
+    if got == [(I3X_SITE, expected)]:
+        return True, f"the one root is {I3X_SITE}, named {expected!r} as site.name has it"
+    return False, f"roots are {got}; expected [({I3X_SITE!r}, {expected!r})] from site.name {setting!r}"
+
+
+def check_i3x_location_values(ctx):
+    area = SEEDED.get("area_uuid")
+    values = i3x_bulk("/objects/value", ctx.token, {"elementIds": [area, I3X_SITE], "maxDepth": 0})
+    area_value, site_value = values.get(area), values.get(I3X_SITE)
+    located = supabase_client.table("device_locations").select("device_id").eq(
+        "effective_area_id", area).execute().data or []
+    expected = {"cellCount": live_count("cells", area_id=area),
+                "deviceCount": live_count("devices", {r["device_id"] for r in located})}
+    wrong = []
+    if area_value is None:
+        wrong.append(f"the area {area} has no value")
+    else:
+        value = area_value.get("value") or {}
+        if (area_value.get("isComposition") is not False or area_value.get("quality") != "Good"
+                or "components" in area_value or set(value) != {"cellCount", "deviceCount", "description"}):
+            wrong.append(f"the area's value is {area_value}")
+        elif {k: value[k] for k in expected} != expected:
+            wrong.append(f"the area counts {value}; the Directory holds {expected}")
+    if site_value is None or "components" in site_value:
+        wrong.append(f"the site's value at maxDepth 0 is {site_value}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"the area counts {expected['cellCount']} cell(s) and {expected['deviceCount']} "
+                  f"device(s) as the Directory does, and neither it nor the site returns components")
+
+
+def check_i3x_history_names_its_metrics(ctx):
+    device, samples, first, second, window = plant_history()
+    low, high = epoch_ms(window["startTime"]), epoch_ms(window["endTime"])
+    wrong = []
+    status, answer = i3x_request("POST", "/objects/history", ctx.token,
+                                 {"elementIds": [f"{device}/{first}"], **window})
+    result = ((answer or {}).get("results") or [{}])[0].get("result") or {}
+    got = [v.get("value") for v in result.get("values") or []]
+    want = [message[first] for _ms, message in reversed(samples) if first in message]
+    if status != 200 or result.get("isComposition") is not False or got != want or not all(map(is_scalar, got)):
+        wrong.append(f"{first} alone: HTTP {status}, isComposition {result.get('isComposition')!r}, "
+                     f"values {got}, expected {want} newest first")
+    status, answer = i3x_request("POST", "/objects/history", ctx.token, {"elementIds": [device], **window})
+    maps = [v for v in ((((answer or {}).get("results") or [{}])[0].get("result") or {}).get("values") or [])]
+    state = {}
+    for _ms, message in samples:
+        state.update(message)
+    stamps = [epoch_ms(v.get("timestamp")) for v in maps]
+    if (status != 200 or len(maps) != len(samples) or not all(isinstance(v.get("value"), dict) for v in maps)
+            or (maps and {k: maps[0]["value"].get(k) for k in (first, second)} != {k: state[k] for k in (first, second)})
+            or not all(s is not None and low <= s <= high for s in stamps)):
+        wrong.append(f"the device: HTTP {status}, {len(maps)} value(s) for {len(samples)} published "
+                     f"instants, newest {maps[0] if maps else None}, expected {state}")
+    status, answer = i3x_request("POST", "/objects/history", ctx.token,
+                                 {"elementIds": [device], "maxDepth": 0, **window})
+    components = ((((answer or {}).get("results") or [{}])[0].get("result") or {}).get("components")) or {}
+    names, _, _ = expected_components("plant_a")
+    if set(components) != {f"{device}/{name}" for name in names} or not all(
+            isinstance(c.get("values"), list) and all(is_scalar(v.get("value")) for v in c["values"])
+            for c in components.values()):
+        wrong.append(f"maxDepth 0: HTTP {status}, components {sorted(components)}, expected one series of "
+                     f"scalars per metric of {names}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"a metric's history is its own scalars, the device's is one map per instant naming "
+                  f"its metrics, and maxDepth 0 adds each metric's series ({len(samples)} DATA published)")
+
+
+def check_i3x_history_carries_forward(ctx):
+    device, samples, first, second, window = plant_history()
+    # The first DATA without `first`, and the value `first` held before it.
+    for index, (ms, message) in enumerate(samples):
+        before = [m[first] for _t, m in samples[:index] if first in m]
+        if first not in message and before:
+            break
+    else:
+        return None, f"no DATA in this run's fixture omits {first}"
+    start = iso_ms((samples[index - 1][0] + ms) // 2)
+    status, answer = i3x_request("POST", "/objects/history", ctx.token,
+                                 {"elementIds": [device], "startTime": start, "endTime": window["endTime"]})
+    maps = (((answer or {}).get("results") or [{}])[0].get("result") or {}).get("values") or []
+    at = next((v.get("value") for v in maps if epoch_ms(v.get("timestamp")) == ms), None)
+    if status == 200 and isinstance(at, dict) and at.get(first) == before[-1]:
+        return True, (f"the map at {iso_ms(ms)}, where only {second} changed, carries {first} = "
+                      f"{before[-1]} from before the window's start")
+    return False, (f"history from {start}: HTTP {status}; the map at {iso_ms(ms)} is {at}, expected "
+                   f"{first} = {before[-1]} carried forward")
+
+
+def check_i3x_history_bounds(ctx):
+    device, samples, first, _second, window = plant_history()
+    series = [(ms, m[first]) for ms, m in reversed(samples) if first in m]
+    wrong = []
+    if len(series) < 2:
+        return False, f"{first} has {len(series)} sample(s) in the fixture; a cut needs two"
+    metric = f"{device}/{first}"
+    status, answer = i3x_request("POST", "/objects/history", ctx.token,
+                                 {"elementIds": [metric], "limit": 1, **window})
+    answer = answer or {}
+    item = (answer.get("results") or [{}])[0]
+    values = (item.get("result") or {}).get("values") or []
+    detail = (item.get("responseDetail") or {}).get("detail") or ""
+    cut = re.search(r"nothing at or before (\S+) was returned", detail)
+    if (status != 206 or (answer.get("responseDetail") or {}).get("status") != 206
+            or (answer.get("responseDetail") or {}).get("title") != "Partial results returned"
+            or item.get("success") is not True or (item.get("responseDetail") or {}).get("status") != 206
+            or [v.get("value") for v in values] != [series[0][1]] or cut is None):
+        wrong.append(f"limit 1: HTTP {status}, responseDetail {answer.get('responseDetail')}, item "
+                     f"{item.get('success')} {item.get('responseDetail')}, values {values}")
+    else:
+        status, answer = i3x_request("POST", "/objects/history", ctx.token,
+                                     {"elementIds": [metric], "limit": 1, "startTime": window["startTime"],
+                                      "endTime": cut.group(1)})
+        rest = (((answer or {}).get("results") or [{}])[0].get("result") or {}).get("values") or []
+        if status != 200 or [v.get("value") for v in rest] != [series[1][1]]:
+            wrong.append(f"again with endTime {cut.group(1)}: HTTP {status}, values {rest}, expected "
+                         f"[{series[1][1]!r}]")
+    for label, fields in (
+        ("startTime after endTime", {"startTime": window["endTime"], "endTime": window["startTime"]}),
+        ("a startTime that is not a timestamp", {"startTime": "2026-09-28T10:00:00Z),or(x",
+                                                 "endTime": window["endTime"]}),
+        ("a startTime with no offset", {"startTime": window["startTime"].rstrip("Z"),
+                                        "endTime": window["endTime"]}),
+    ):
+        status, _ = i3x_request("POST", "/objects/history", ctx.token, {"elementIds": [metric], **fields})
+        if status != 400:
+            wrong.append(f"{label} answered {status}, expected 400")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, ("a series cut by its limit is a 206 naming where to resume, resuming there returns "
+                  "the next value, and three malformed windows are each a 400")
+
+
+def check_i3x_subscription_follows_its_owner(ctx):
+    # Runs last: it archives the device, and restores it whatever happens.
+    device, uuid = SEEDED.get("withdrawn_id"), SEEDED.get("withdrawn_uuid")
+    client = {"clientId": VAL_SUBSCRIPTION_CLIENT}
+    status, answer = i3x_request("POST", "/subscriptions", ctx.token, client)
+    sub = ((answer or {}).get("result") or {}).get("subscriptionId")
+    if status != 200 or not sub:
+        return False, f"POST /subscriptions answered {status}: {answer}"
+    ids = {**client, "subscriptionId": sub}
+
+    def register():
+        status, answer = i3x_request("POST", "/subscriptions/register", ctx.token,
+                                     {**ids, "elementIds": [device]})
+        return status, ((answer or {}).get("results") or [{}])[0]
+
+    wrong, archived = [], False
+    try:
+        status, item = register()
+        sync_status, answer = i3x_request("POST", "/subscriptions/sync", ctx.token, ids)
+        if status != 200 or item.get("success") is not True or sync_status != 200 \
+                or "responseDetail" in (answer or {}):
+            wrong.append(f"before archiving: register HTTP {status} {item}, sync HTTP {sync_status} {answer}")
+        supabase_client.table("devices").update({"is_archived": True}).eq("id", uuid).execute()
+        archived = True
+        time.sleep(3)  # past I3X_ADDRESS_SPACE_TTL_SECONDS, so the next read is fresh
+        status, answer = i3x_request("POST", "/subscriptions/sync", ctx.token, ids)
+        detail = (answer or {}).get("responseDetail") or {}
+        delivered = [u.get("elementId") for batch in (answer or {}).get("result") or []
+                     for u in (batch.get("updates") or [])]
+        if (status != 206 or detail.get("title") != "Elements left this caller's view"
+                or device not in (detail.get("detail") or "") or device in delivered):
+            wrong.append(f"after archiving: sync HTTP {status}, responseDetail {detail}, delivered {delivered}")
+        status, answer = i3x_request("POST", "/subscriptions/list", ctx.token,
+                                     {**client, "subscriptionIds": [sub]})
+        entry = ((answer or {}).get("results") or [{}])[0].get("result") or {}
+        if status != 200 or entry.get("monitoredObjects") != []:
+            wrong.append(f"list: HTTP {status}, still monitoring {entry.get('monitoredObjects')}")
+        status, answer = i3x_request("POST", "/subscriptions/sync", ctx.token, ids)
+        if status != 200 or (answer or {}).get("result") != []:
+            wrong.append(f"the next sync: HTTP {status} {answer}, expected 200 with no updates")
+        status, item = register()
+        if item.get("success") is not False or (item.get("responseDetail") or {}).get("status") != 404:
+            wrong.append(f"registering it again: HTTP {status} {item}, expected a per-item 404")
+    finally:
+        if archived:
+            restored = supabase_client.table("devices").update({"is_archived": False}).eq(
+                "id", uuid).execute().data or [{}]
+            if restored[0].get("is_archived") is not False:
+                wrong.append(f"{device} could not be restored from the archive")
+        status, answer = i3x_request("POST", "/subscriptions/delete", ctx.token,
+                                     {**client, "subscriptionIds": [sub]})
+        if status != 200 or ((answer or {}).get("results") or [{}])[0].get("success") is not True:
+            wrong.append(f"deleting the subscription: HTTP {status} {answer}")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"archiving {device} withdrew it from its subscription with one 206 naming it, left "
+                  f"nothing monitored, and a second registration is a 404")
+
+
+# The order they run and print in. To add one: write a function beside these, list it here, and raise
+# the count ingestion/README.md claims (check-docs-drift check 7). The letters stop at 12z.
+I3X_CHECKS = (
+    ("12a. i3X READ-ONLY", check_i3x_read_only),
+    ("12b. i3X FAIL-CLOSED", check_i3x_fail_closed),
+    ("12c. i3X ADDRESS SPACE", check_i3x_address_space),
+    ("12d. i3X SINGLE ROOT", check_i3x_single_root),
+    ("12e. i3X LIVE VALUES", check_i3x_live_values),
+    ("12f. i3X VALUES ARE RLS-SCOPED", check_i3x_values_rls_scoped),
+    ("12g. i3X PARENT IS THE RESOLVED CELL", check_i3x_parent_is_resolved_cell),
+    ("12h. i3X REFUSES A NON-TOKEN", check_i3x_refuses_a_non_token),
+    ("12i. i3X NAMESPACE FILTER", check_i3x_namespace_filter),
+    ("12j. i3X SOURCE TYPE", check_i3x_source_type),
+    ("12k. i3X CONTAINER VALUES", check_i3x_container_values),
+    ("12l. i3X INVALID INPUT IS A 400", check_i3x_invalid_input),
+    ("12m. i3X SERVER VERSION", check_i3x_server_version),
+    ("12n. i3X HEARTBEAT IN UTC", check_i3x_heartbeat_in_utc),
+    ("12o. i3X SIGNED INTEGERS", check_i3x_signed_integers),
+    ("12p. i3X DEVICE TYPED BY EVERY SCHEMA", check_i3x_device_typed_by_every_schema),
+    ("12q. i3X METRICS ARE COMPONENTS", check_i3x_metrics_are_components),
+    ("12r. i3X TYPES AND NAMESPACES", check_i3x_types_and_namespaces),
+    ("12s. i3X METRIC VALUES", check_i3x_metric_values),
+    ("12t. i3X LOCATION TREE", check_i3x_location_tree),
+    ("12u. i3X SITE NAME", check_i3x_site_name),
+    ("12v. i3X LOCATION VALUES", check_i3x_location_values),
+    ("12w. i3X HISTORY NAMES ITS METRICS", check_i3x_history_names_its_metrics),
+    ("12x. i3X HISTORY CARRIES FORWARD", check_i3x_history_carries_forward),
+    ("12y. i3X HISTORY BOUNDS", check_i3x_history_bounds),
+    # Last: it archives a device.
+    ("12z. i3X SUBSCRIPTION FOLLOWS ITS OWNER", check_i3x_subscription_follows_its_owner),
+)
+
+
+def verify_i3x(token):
+    """Check 12 and its letters. Returns True when none failed."""
+    status, answer = i3x_request("GET", "/info")
+    info = answer.get("result", answer) if status == 200 and isinstance(answer, dict) else {}
+    if not info.get("specVersion"):
+        print(f"❌ 12.  i3X SERVER FAIL: /info returned HTTP {status} from {I3X_BASE_URL}. It MUST be "
+              "reachable with no credentials -- it is the capabilities document and the health check.")
+        return False
+    print(f"✅ 12.  i3X SERVER: /info answers unauthenticated, specVersion {info['specVersion']}, "
+          f"serverName {info.get('serverName')}")
+    if not token:
+        print("❌ 12.  i3X SERVER FAIL: no access token for the seeded administrator (see check 11c), "
+              "so nothing behind authentication was checked.")
+        return False
+
+    ctx = I3xContext(token, info)
+    passed = True
+    for label, check in I3X_CHECKS:
+        try:
+            ok, detail = check(ctx)
+        except Exception as err:
+            ok, detail = False, f"{type(err).__name__}: {err}"
+        if ok is None:
+            print(f"⚠️  {label}: skipped, {detail}")
+        elif ok:
+            print(f"✅ {label}: {detail}")
+        else:
+            print(f"❌ {label} FAIL: {detail}")
+            passed = False
+    return passed
+
 
 def verify_results():
     print("\n==========================================")
@@ -1461,6 +2605,9 @@ def verify_results():
             print(f"❌ 10. DEVICE WATCHDOG ERROR: {e}")
             passed = False
 
+    # One sign-in for everything behind authentication: checks 11c-11e and 12.
+    token, auth_err = sign_in_admin()
+
     # 11. Factory+ Directory adapter. These routes are exempt from the gateway's key-auth and the
     # edge function is the only thing in front of the data, so check 11b is the security assertion
     # for the whole surface. Probed with raw urllib rather than the Supabase client, which would
@@ -1497,18 +2644,7 @@ def verify_results():
             passed = False
 
         # 11c. And it must actually work for an authenticated caller.
-        anon = SUPABASE_PUBLISHABLE_KEY
-        token = None
-        try:
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-                data=json.dumps({"email": "admin@aber.local",
-                                 "password": "aber123"}).encode(),
-                headers={"apikey": anon, "Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                token = json.loads(resp.read())["access_token"]
-        except Exception as auth_err:
+        if auth_err:
             print(f"⚠️  11c. DIRECTORY AUTHENTICATED READ: skipped, could not sign in ({auth_err}).")
 
         if token:
@@ -1563,135 +2699,13 @@ def verify_results():
         print(f"❌ 11. DIRECTORY ERROR: could not probe {SUPABASE_URL}: {e}")
         passed = False
 
-
-    # 12. The i3X server. Deliberately not a conformance check: CESMII publishes a 60-test suite and
-    # CI runs it. What is asserted is what the suite cannot know, because it is a property of this
-    # deployment: the address space is scoped to the caller, not served from a service-role key;
-    # values are the live MQTT ones rather than a database read; `/info` is reachable with no
-    # credential and doubles as the container health probe; writes are refused.
+    # 12. The i3X server, against the Directory: see verify_i3x().
     try:
-        i3x_base = os.getenv("I3X_BASE_URL", "http://localhost:8090").rstrip("/") + "/v1"
-
-        def i3x(method, path, headers=None, body=None):
-            """Raw urllib, like check 11's probe -- the Supabase client would attach credentials
-            automatically, which is exactly what must be ABSENT for 12b and 12f."""
-            req = urllib.request.Request(
-                f"{i3x_base}{path}", method=method,
-                data=json.dumps(body).encode() if body is not None else None,
-                headers=headers or {},
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    return resp.status, resp.read().decode()
-            except urllib.error.HTTPError as err:
-                return err.code, err.read().decode()
-            except Exception as err:
-                return 0, str(err)
-
-        # 12. Unauthenticated /info -- a spec MUST, and the health probe the chart uses.
-        status, body = i3x("GET", "/info")
-        info = json.loads(body) if status == 200 else {}
-        result = info.get("result", info)
-        if status == 200 and result.get("specVersion"):
-            print(f"✅ 12.  i3X SERVER: /info answers unauthenticated, specVersion "
-                  f"{result['specVersion']}, serverName {result.get('serverName')}")
-        else:
-            print(f"❌ 12.  i3X SERVER FAIL: /info returned HTTP {status}. It MUST be reachable "
-                  "with no credentials -- it is the capabilities document and the health check.")
+        if not verify_i3x(token):
             passed = False
-
-        if status == 200:
-            # 12a. Update is declared false AND unimplemented. Two statements of one decision: a
-            # client that trusts the flag and a client that probes the verb must agree.
-            caps = result.get("capabilities", {}).get("update", {})
-            put_status, _ = i3x("PUT", "/objects/value",
-                                {"Authorization": f"Bearer {token}",
-                                 "Content-Type": "application/json"}, {})
-            if caps.get("current") is False and put_status == 405:
-                print("✅ 12a. i3X READ-ONLY: update.current is false and PUT /objects/value "
-                      "answers 405 -- the capability flag and the verb agree")
-            else:
-                print(f"❌ 12a. i3X READ-ONLY FAIL: capabilities.update.current="
-                      f"{caps.get('current')}, PUT /objects/value returned {put_status}. "
-                      "Expected false and 405.")
-                passed = False
-
-            # 12b. Anonymous reads are refused. /info is the ONLY open endpoint.
-            anon_status, _ = i3x("GET", "/objects")
-            if anon_status == 401:
-                print("✅ 12b. i3X FAIL-CLOSED: an unauthenticated /objects read answers 401")
-            else:
-                print(f"❌ 12b. i3X FAIL-CLOSED FAIL: unauthenticated /objects returned "
-                      f"{anon_status}, expected 401.")
-                passed = False
-
-            # 12c. The address space contains this run's device, parented to the cell the Directory
-            # resolves for it: the seeded gateway's, since the device names no cell of its own.
-            status, body = i3x("GET", "/objects", {"Authorization": f"Bearer {token}"})
-            objects = json.loads(body).get("result", []) if status == 200 else []
-            device = next((o for o in objects if o.get("elementId") == SEEDED["known_id"]), None)
-            gateway_ids = {o["elementId"] for o in objects
-                           if o.get("typeElementId") == "i3x:type:gateway"}
-            if device and device.get("parentId") == SEEDED["cell_uuid"]:
-                print(f"✅ 12c. i3X ADDRESS SPACE: {SEEDED['known_id']} is present, parented to "
-                      f"its gateway's cell {SEEDED['cell_uuid']}")
-            elif device:
-                wrong = ("its gateway: HasParent is organizational hierarchy, and the data path "
-                         "belongs on ConnectsVia"
-                         if device.get("parentId") in gateway_ids else "not the resolved cell")
-                print(f"❌ 12c. i3X ADDRESS SPACE FAIL: the device's parentId is {device['parentId']}, "
-                      f"{wrong}. Expected its gateway's cell {SEEDED['cell_uuid']}.")
-                passed = False
-            else:
-                print(f"❌ 12c. i3X ADDRESS SPACE FAIL: {SEEDED['known_id']} is not in /objects "
-                      f"({len(objects)} objects returned).")
-                passed = False
-
-            # 12d. Exactly one root: `parentId: null` means root in i3X, which is why Unassigned is
-            # a synthetic object under the site rather than a second root.
-            roots = [o["elementId"] for o in objects if o.get("parentId") is None]
-            if roots == ["i3x:site"]:
-                print("✅ 12d. i3X SINGLE ROOT: exactly one object has a null parentId (i3x:site)")
-            else:
-                print(f"❌ 12d. i3X SINGLE ROOT FAIL: roots are {roots}, expected ['i3x:site'].")
-                passed = False
-
-            # 12e. Values come from MQTT, not the database. Asserted by reading a metric this run
-            # published and checking the timestamp is recent rather than merely present.
-            status, body = i3x("POST", "/objects/value",
-                               {"Authorization": f"Bearer {token}",
-                                "Content-Type": "application/json"},
-                               {"elementIds": [SEEDED["known_id"]]})
-            results = json.loads(body).get("results", []) if status == 200 else []
-            value = (results[0].get("result") or {}) if results and results[0].get("success") else {}
-            metrics = value.get("value") if isinstance(value.get("value"), dict) else {}
-            if metrics:
-                print(f"✅ 12e. i3X LIVE VALUES: {len(metrics)} metric(s) served from the MQTT cache "
-                      f"(quality {value.get('quality')}), e.g. {sorted(metrics)[:3]}")
-            else:
-                print(f"❌ 12e. i3X LIVE VALUES FAIL: no current value for "
-                      f"{SEEDED['known_id']}. HTTP {status}, body {body[:200]}")
-                passed = False
-
-            # 12f. The RLS assertion. The value cache is a plain dict keyed by sparkplug_id with no
-            # notion of policy, so a caller whose token cannot see the device must be told "not
-            # found". Probed with a deliberately invalid token rather than a second user: it
-            # exercises the same code path without a second seeded identity.
-            status, body = i3x("POST", "/objects/value",
-                               {"Authorization": "Bearer not.a.valid.token",
-                                "Content-Type": "application/json"},
-                               {"elementIds": [SEEDED["known_id"]]})
-            leaked = SEEDED["known_id"] in body and '"value":' in body and status == 200
-            if status in (401, 403) or (status == 200 and not leaked):
-                print(f"✅ 12f. i3X VALUES ARE RLS-SCOPED: a caller whose token the data layer "
-                      f"rejects gets no values (HTTP {status})")
-            else:
-                print(f"❌ 12f. i3X VALUES ARE RLS-SCOPED FAIL: HTTP {status} returned live values "
-                      "to an unauthorised caller. The MQTT cache has no RLS of its own -- every "
-                      "value read must be gated on a PostgREST resolve made AS THE CALLER.")
-                passed = False
     except Exception as e:
-        print(f"⚠️  12.  i3X SERVER: skipped, could not reach {os.getenv('I3X_BASE_URL', 'http://localhost:8090')}: {e}")
+        print(f"❌ 12.  i3X SERVER ERROR: {type(e).__name__}: {e}")
+        passed = False
 
     # 13. The `anon` privilege baseline. `public.ensure_cron_job` is SECURITY DEFINER with no
     # authorisation check, and a pg_dump baseline records only positive grants, so a GRANT to `anon`
@@ -1869,13 +2883,16 @@ def verify_results():
                 print("✅ 15c. TIMESTAMP: a JSON number, as 3.0.0 requires (it pairs the birth "
                       "with the death certificate).")
 
+    return passed
+
+
+def print_verdict(passed):
     print("==========================================")
     if passed:
         print("🎉 END-TO-END VALIDATION PASSED SUCCESSFULLY!")
-        return True
     else:
         print("💥 END-TO-END VALIDATION FAILED!")
-        return False
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Supabase + TimescaleDB End-to-End Validation Script")
@@ -1904,17 +2921,26 @@ if __name__ == "__main__":
     print()
 
     if args.cleanup:
-        cleanup_validation_data()
-        sys.exit(0 if admin_ok else 1)
+        failures = cleanup_validation_data()
+        for failure in failures:
+            print(f"❌ CLEANUP: {failure}")
+        sys.exit(0 if (admin_ok and not failures) else 1)
 
     success = False
     try:
-        cleanup_validation_data()
+        # Rows an interrupted run left in the Directory. This run's own come out at check 16.
+        for failure in cleanup_validation_data():
+            print(f"⚠️  PRE-RUN CLEANUP: {failure}")
         seed_supabase()
         run_simulation()
         success = verify_results()
     finally:
-        if not args.keep_data:
-            cleanup_validation_data()
+        # 16. Reported as an outcome, before the verdict: a cleanup that fails leaves this run's rows
+        # for the next one, which then starts dirty.
+        if args.keep_data:
+            print("⚠️  16. CLEANUP: skipped, --keep-data. `validate.py --cleanup` removes the rows.")
+        else:
+            success = report_cleanup(cleanup_validation_data()) and success
+        print_verdict(success)
 
     sys.exit(0 if (success and admin_ok) else 1)

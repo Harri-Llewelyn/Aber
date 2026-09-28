@@ -11,7 +11,7 @@ names do not resolve outside the cluster.
 
 NOT A `helm test` HOOK, unlike test-fdw: this suite seeds and deletes fixtures, drives real MQTT
 traffic and takes minutes, so `helm test` stays the cheap gate anyone can run against a live stack.
-Gated on `e2e.enabled`. It is the same 20 checks `npm run dev:test` runs from the host.
+Gated on `e2e.enabled`. It is the same checks `npm run dev:test` runs from the host.
 =================================================================================================
 */}}
 apiVersion: batch/v1
@@ -201,6 +201,9 @@ spec:
             # validate.py publishes under this group, and the gateway row it seeds carries it.
             - name: SPARKPLUG_GROUP
               value: {{ include "aber.sparkplugGroup" . | quote }}
+            # Check 12m holds i3X's serverVersion to it.
+            - name: ABER_PLATFORM_VERSION
+              value: {{ .Chart.AppVersion | quote }}
             - name: SUPABASE_URL
               value: {{ include "aber.supabase.internalUrl" . | quote }}
             # WITHOUT THE SECRET KEY the script seeds nothing and fails about 12 of 20 checks in a

@@ -580,7 +580,7 @@ reachability one — check the scheme before re-minting the token.
 
 ## Testing
 
-Two suites, and neither substitutes for the other.
+Three suites, and none substitutes for another.
 
 ```bash
 # The arbiter: CESMII's own 60 tests. CI runs this against the k3d stack over a port-forward.
@@ -589,16 +589,66 @@ node bin/i3x-test.js run http://localhost:8090/v1 --token "$TOKEN"
 
 # Ours: the cases a live run cannot reach.
 python i3x/test_i3x_service.py
+
+# Ours, live: what the server says about a plant, against what the Directory holds for it.
+# validate.py's check 12; the filter matches no stack suite, so only validate.py runs.
+npm run dev:test -- --filter=i3x
 ```
 
-**Why both.** The suite is authoritative — it found eleven real MUST failures on this server's first
-run, including a request-body bug that corrupted the *next* request on a keep-alive connection, which
-no test written from the same misunderstanding would have looked for. But it **skipped SUB-07 and
-SUB-13** on the live run ("no updates were observed on the subscription"): it can only test sync
-acknowledgement if the server happens to produce updates while it is watching. So the MUSTs that
-protect a client's unprocessed updates are covered by our unit tests, or nowhere. Queue overflow
-(10,000 batches) and TTL expiry are the same story — they need a controlled queue and an injectable
-clock.
+**Why the suite and the unit tests.** The suite is authoritative — it found eleven real MUST failures
+on this server's first run, including a request-body bug that corrupted the *next* request on a
+keep-alive connection, which no test written from the same misunderstanding would have looked for.
+But it **skipped SUB-07 and SUB-13** on the live run ("no updates were observed on the subscription"):
+it can only test sync acknowledgement if the server happens to produce updates while it is watching.
+So the MUSTs that protect a client's unprocessed updates are covered by our unit tests, or nowhere.
+Queue overflow (10,000 batches) and TTL expiry are the same story — they need a controlled queue and
+an injectable clock.
+
+**What the live check adds.** The conformance suite tests shape: envelopes, status codes, that every
+edge has its inverse. It is written for any i3X server, so it cannot know where a device belongs, and
+it passed 52 of 52 while this server filed every device under Unassigned. The unit suite replaces
+PostgREST with fixtures. Neither reads what the server says about a real plant.
+
+`ingestion/validate.py` seeds one through the Directory's normal paths: an area with a cell filed in
+it, a gateway in the cell and one serving the whole area, two devices with two metrics each (one
+typed by a schema with a semantic id, one publishing an Int32 below zero), and the quarantined
+devices ingestion creates from its traffic. Check 12's letters then compare the server's answers
+with the Directory's:
+
+| Check | Asserts |
+| :--- | :--- |
+| 12c, 12g | every seeded device's `parentId` is its `device_locations.effective_cell_id` (#492) |
+| 12h | `Authorization: not-a-token` gets 401 on every route but `GET /info` (#493) |
+| 12i | `?namespaceUri=` filters `/objecttypes` and `/relationshiptypes` (#501) |
+| 12j | a device's `metadata.sourceTypeId` is its schema's semantic id (#501) |
+| 12k | the site and the cell count devices, as the Directory does (#501) |
+| 12l | a non-integer or out-of-range `maxDepth` or `limit` is a 400 (#501) |
+| 12m | `serverVersion` is the chart's appVersion (#501) |
+| 12n | a gateway value's `lastHeartbeat` ends in `Z` (#501) |
+| 12o | an Int32 published as −42 reads back −42 here and in the historian (#502) |
+| 12p | a device with two schemas is typed by their set, not extended, and composed of its metrics (#495, #509) |
+| 12q | each metric is a leaf with only `ComponentOf`, typed by its catalog row or its datatype, nobody's child (#495) |
+| 12r | the set's type is `allOf` its schemas, UnknownType is `{}`, `/namespaces` lists exactly the types' (#495, #459) |
+| 12s | `maxDepth: 0` returns the map and its metrics as components; a metric reads alone (#495) |
+| 12t | the area holds its cell and area-wide gateway, lanes hold their gateways, locations compose nothing (#496) |
+| 12u | the one root is named by `site.name` (#496) |
+| 12v | an area counts its cells and devices, as the Directory does, with no components (#496) |
+| 12w | history is a metric's scalars, or a device's maps naming its metrics (#500) |
+| 12x | a device's map carries forward a value set before the window (#500) |
+| 12y | a series cut by `limit` is a 206 naming where to resume; malformed windows are 400s (#500, #501) |
+| 12z | archiving a subscribed device withdraws it once, with a 206 (#518); runs last and restores it |
+
+12a–12f are older: read-only, fail-closed, a single root, live values, and values scoped by RLS.
+
+**Adding an assertion.** Each is a function in `validate.py` that takes the shared `I3xContext` (the
+token, `/info`, every object with its metadata, the Directory's resolved location per seeded device,
+`/objecttypes` on first use) and returns `(True | False | None, detail)`, `None` being a skip. List it
+in `I3X_CHECKS`, and raise the outcome count `ingestion/README.md` claims (`check-docs-drift` check
+7). The letters stop at 12z, so the next group takes a new number. Seed what it needs in
+`seed_supabase()` or `run_simulation()`, under a `SEEDED` key whose table is in `SEEDED_TABLES`: the
+cleanup deletes by those keys. Expected values come from the Directory or from what the run published
+(`plant_a_samples`), not from literals. A check that changes a row runs last and restores it.
+`I3X_ROUTES` is the route list 12h sweeps, held equal to `ROUTES` by check 35.
 
 ## Configuration
 
