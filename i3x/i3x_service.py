@@ -1576,7 +1576,7 @@ def _read_telemetry(pg: PostgrestClient, element_id: str, start, end, limit: int
         "asset_id": "eq." + element_id,
         "time": "gte." + str(start),
         "and": "(time.lte." + str(end) + ")",
-        "order": "time.desc,metric_name.asc",
+        "order": "time.desc",
         "limit": str(limit),
     }
     if metric is not None:
@@ -1754,7 +1754,9 @@ class _History:
                 "select": TELEMETRY_COLUMNS,
                 "asset_id": "eq." + sid,
                 "time": ("lte." if inclusive else "lt.") + _pg_time(boundary),
-                "order": "time.desc,metric_name.asc",
+                # No lower bound: postgres_fdw ships the WHERE and ORDER BY, so the local scan
+                # stops after one fetch of the remote cursor. Nothing else may be added to them.
+                "order": "time.desc",
                 "limit": str(self.rows),
             },
         )

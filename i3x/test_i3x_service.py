@@ -1661,6 +1661,8 @@ class TestHistorySeries(_HistoryCase):
         # The window, the newest row per metric, and the rows just before the window.
         self.assertEqual([relation for relation, _ in pg.calls], ["telemetry", "telemetry_latest", "telemetry"])
         self.assertEqual(pg.calls[2][1]["time"], "lt.2026-09-28T10:00:00.000000Z")
+        # Unbounded below, so only a filter and an order postgres_fdw ships keep it cheap.
+        self.assertEqual(pg.calls[2][1]["order"], "time.desc")
 
     def test_a_device_quiet_through_the_window_costs_one_read(self):
         rows = _telemetry((_at("09:50"), "Temp", 20.0), (_at("11:30"), "Temp", 23.0))
