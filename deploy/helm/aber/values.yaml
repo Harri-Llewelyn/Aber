@@ -429,7 +429,7 @@ realtime:
 # Browser-facing URLs
 #
 # In-cluster URLs are not configurable: the Service names are the ones every in-cluster URL
-# carries, so `http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` are constants. Each
+# carries, so `http://supabase-envoy:8000`, `timescaledb:5432` and `mosquitto:1883` are constants. Each
 # value below is derived from global.publicBaseDomain unless overridden.
 # ---------------------------------------------------------------------------------------------
 publicUrls:
@@ -498,8 +498,7 @@ supabaseRest:
     limits: { memory: 512Mi }
 
 # -----------------------------------------------------------------------------------------------
-# The gateway (Envoy; docs/gateway.md). Its Service is named `supabase-kong`, the name every
-# in-cluster consumer carries in `http://supabase-kong:8000`.
+# The gateway (Envoy; docs/gateway.md), reached in-cluster as `http://supabase-envoy:8000`.
 # -----------------------------------------------------------------------------------------------
 supabaseEnvoy:
   enabled: true
@@ -510,7 +509,6 @@ supabaseEnvoy:
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
-  serviceName: supabase-kong
   metrics:
     enabled: true
     # Envoy's admin listener serves /ready and /stats/prometheus. Unauthenticated; not on the
@@ -1429,7 +1427,7 @@ autoscaling:
   # Adding a single-writer component here fails the render rather than the cluster.
   components:
     - supabase-rest
-    - supabase-kong
+    - supabase-envoy
     - supabase-functions
     - frontend
 

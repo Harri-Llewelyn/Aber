@@ -63,7 +63,7 @@ spec:
       initContainers:
         {{/*
           Waits for the API gateway, which is how EVERY device lookup is made (SUPABASE_URL is
-          http://supabase-kong:8000).
+          http://supabase-envoy:8000).
 
           ORDERING ONLY. The property that makes an unresolvable lookup harmless lives in
           ingestion.py: an unreachable directory raises DirectoryUnavailable instead of resolving
@@ -71,7 +71,7 @@ spec:
           quarantine row, which persists and needs an operator to clear. Relying on start order
           for that would leave the same fault reachable any time the gateway restarts.
         */}}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (every device lookup is routed through it)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-envoy:8000/auth/v1/health" "describe" "supabase-envoy (every device lookup is routed through it)") | nindent 8 }}
         {{/*
           Waits for the historian's SCHEMA, not just for the server. The daemon writes to the
           `telemetry` hypertable on its first DDATA, and TimescaleDB's bootstrap scripts run only on

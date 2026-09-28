@@ -76,8 +76,7 @@ secrets:
   # ROTATION IS NOT AUTOMATIC EVEN WITH ESO. Most of these are read into a pod's environment at
   # START, so a refreshed Secret reaches nothing until the pod restarts. Two need more than that:
   #   * The gateway's API keys are substituted into its config by an initContainer, so rotating
-  #     them needs `kubectl rollout restart deployment/supabase-envoy`. The Service is still named
-  #     supabase-kong -- Envoy adopted the name at promotion so no consumer had to change.
+  #     them needs `kubectl rollout restart deployment/supabase-envoy`.
   #   * The Grafana and Node-RED OAuth client secrets are HASHED INTO auth.oauth_clients by the
   #     db-init hook, so rotating either needs a `helm upgrade` to re-run it -- and both halves must
   #     move together or the OAuth handshake fails with `invalid_credentials`.
@@ -424,9 +423,8 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
-  # `supabase-envoy`, not `supabase-kong`: the gateway Deployment carries the Envoy name
-  # even though the Service does not. Naming a workload the chart does not render is refused by
-  # hpas.yaml rather than rendering nothing.
+  # Naming a workload the chart does not render is refused by hpas.yaml rather than rendering
+  # nothing.
   components: [supabase-rest, supabase-envoy, supabase-functions, frontend]
 
 # THE ONLY RECOVERY PATH THIS STACK HAS: local-path is node-local with no replication, and neither
