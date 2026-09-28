@@ -214,7 +214,8 @@ because TimescaleDB refreshes only the buckets its invalidation log marks as cha
 real-time aggregation serves that bucket meanwhile. The 1h view refreshes on a five-minute
 schedule, not hourly: its `end_offset` still holds back the incomplete bucket, so this costs
 little and means a dashboard on the hourly rollup is never an hour stale. Rollup retention outlives
-raw: `retention.sql` drops raw chunks (90 days by default) while these keep shape, excursions and
+raw: `retention.sql` drops raw chunks (after 14 days by default, `timescaledb.retention.retainFor`)
+while these keep shape, excursions and
 state transitions far longer at a fraction of the size.
 
 **`telemetry_gapfill()` carries the last observation forward.** Under report-by-exception a metric
