@@ -1,9 +1,9 @@
 """
-A machine has a name an operator gave it (0125).
+A machine has a name an operator gave it (0125), and holds what a machine may (0013).
 
     python supabase/migrations/test_machine_principal_naming.py
 
-Requires the Supabase database (54322 by default) and 0125 applied; `npm run test:db` gives it a
+Requires the Supabase database (54322 by default) and 0013 applied; `npm run test:db` gives it a
 throwaway one.
 
 ---------------------------------------------------------------------------------------------
@@ -24,12 +24,20 @@ for nobody else. No write policy: the create function is the only write path at 
 `describe_machine_principal()` (0126) the only one after it -- Administrator only, rows that exist
 only, and every change a PRINCIPAL_DESCRIBED row carrying what it replaced.
 
+MACHINES PROPOSE, PEOPLE DECIDE (0013). Every permission is either on the allow-list or refused
+with its own reason. What an allowed grant opens is exercised as the machine itself: schema:manage
+forks, publishes and discards; proposal:create files a proposal that only a person can decide;
+digital_thread:read reads the asset lane and never the security lane; archive:manage reads the
+record of deleted assets. A revoked identity or token is refused before its write runs, the way
+PostgREST runs auth_pre_request() ahead of every request.
+
 EVERY TEST ROLLS BACK. The fixtures are seeded inside the test's own transaction, and
 `SET LOCAL ROLE` scopes the impersonation to it, so nothing is committed and nothing needs
 cleaning up. `is_machine_principal()` is "no email, no password, no identity provider", so the
 HUMAN fixtures carry an email or 0080's trigger would refuse them a role.
 """
 
+import json
 import os
 import unittest
 import uuid
@@ -44,7 +52,22 @@ DB_NAME = os.getenv("SUPABASE_DB_NAME", os.getenv("DB_NAME", "postgres"))
 DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
-ALLOWED = ("telemetry:read", "quarantine:view", "digital_thread:read")
+ALLOWED = ("telemetry:read", "quarantine:view", "digital_thread:read",
+           "archive:manage", "proposal:create", "schema:manage")
+
+# Every other permission, and the reason create_machine_principal() gives for refusing it.
+REFUSED = {
+    "device:manage": "device writes are made by people",
+    "quarantine:approve": "quarantine decisions are made by people",
+    "quarantine:reject": "quarantine decisions are made by people",
+    "cell:manage": "for a machine it would only decide change proposals, and deciding is a "
+                   "person's act: machines propose, people decide",
+    "gateway:manage": "for a machine it would only decide change proposals, and deciding is a "
+                      "person's act: machines propose, people decide",
+    "authz:manage": "access control stays with people",
+    "link:manage": "no check a machine passes consults it",
+    "gitops:manage": "no check a machine passes consults it",
+}
 
 
 def get_connection():
@@ -231,6 +254,332 @@ class WhatIsRefusedAndWhenNothingExists(NamingBase):
                 (machine,),
             )
         self.cur.execute("ROLLBACK TO SAVEPOINT attempt;")
+
+
+class EachRefusalGivesItsReason(NamingBase):
+    """0013: every permission is allowed or refused, and a refusal says which rule refused it."""
+
+    def _refusal(self, name, permissions):
+        self.cur.execute("SAVEPOINT attempt;")
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue) as ctx:
+            self.create(name, permissions)
+        self.cur.execute("ROLLBACK TO SAVEPOINT attempt;")
+        return ctx.exception.diag.message_primary
+
+    def test_every_permission_has_been_decided_for_machines(self):
+        self.cur.execute("SELECT name FROM public.permissions;")
+        names = {r["name"] for r in self.cur.fetchall()}
+        self.assertEqual(
+            sorted(names - set(ALLOWED) - set(REFUSED)), [],
+            "a permission nobody decided for machines: create_machine_principal() refuses it with "
+            "no stated reason until it is allowed or given one",
+        )
+        self.assertEqual(sorted(set(ALLOWED) | set(REFUSED)), sorted(names))
+
+    def test_each_refused_permission_gets_its_own_reason(self):
+        self.as_user(self.admin)
+        for perm, reason in REFUSED.items():
+            with self.subTest(permission=perm):
+                message = self._refusal(f"Wants {perm}", [perm])
+                self.assertIn("not grantable to a machine identity", message)
+                self.assertIn(f"{perm} ({reason}", message)
+                # The premise that stopped being true is not the reason any more.
+                self.assertNotIn("revoked", message)
+
+    def test_several_are_named_once_each_in_the_order_asked(self):
+        self.as_user(self.admin)
+        message = self._refusal(
+            "Mixed", ["telemetry:read", "cell:manage", "device:manage", "cell:manage"]
+        )
+        self.assertEqual(message.count("cell:manage ("), 1)
+        self.assertLess(message.index("cell:manage ("), message.index("device:manage ("))
+        self.assertNotIn("telemetry:read (", message)
+
+    def test_a_name_that_is_no_permission_says_so(self):
+        self.as_user(self.admin)
+        self.assertIn("telemetry:reed (no such permission)",
+                      self._refusal("Typo", ["telemetry:reed"]))
+
+    def test_all_six_are_granted_together(self):
+        self.as_user(self.admin)
+        principal = self.create("Holds all six", ALLOWED)["principal_id"]
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT p.name FROM public.principal_permissions pp "
+            "JOIN public.permissions p ON p.id = pp.permission_id WHERE pp.principal_id = %s;",
+            (principal,),
+        )
+        self.assertEqual(sorted(r["name"] for r in self.cur.fetchall()), sorted(ALLOWED))
+
+
+class MachineBase(NamingBase):
+    """A machine created by the Administrator fixture, acted as the way PostgREST does."""
+
+    def machine(self, name, permissions):
+        self.as_user(self.admin)
+        principal = str(self.create(name, permissions)["principal_id"])
+        self.as_postgres()
+        return principal
+
+    def seed_schema(self):
+        """An active v1 schema, seeded as the owner so the provenance trigger allows it."""
+        self.cur.execute(
+            "INSERT INTO public.schemas (schema_name, description, schema_definition) "
+            "VALUES (%s, 'machine principal fixture', '{\"type\": \"object\"}'::jsonb) "
+            "RETURNING id::text;",
+            (f"MACHINE_PRINCIPAL_{uuid.uuid4().hex[:12]}",),
+        )
+        return self.cur.fetchone()["id"]
+
+    def refused(self, errcls, sql, params=()):
+        self.cur.execute("SAVEPOINT attempt;")
+        with self.assertRaises(errcls) as ctx:
+            self.cur.execute(sql, params)
+        self.cur.execute("ROLLBACK TO SAVEPOINT attempt;")
+        return ctx.exception.diag.message_primary
+
+
+class AMachineMayVersionASchema(MachineBase):
+    """schema:manage reaches a machine through has_authority() in the three schema RPCs."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.seed_schema()
+        self.writer = self.machine("Schema sync", ("schema:manage",))
+        self.reader = self.machine("Schema reader", ("telemetry:read",))
+
+    def test_a_machine_holding_it_forks_publishes_and_discards(self):
+        self.as_user(self.writer)
+        self.cur.execute("SELECT public.fork_schema(%s, 'from the sync job') AS draft;", (self.root,))
+        draft = self.cur.fetchone()["draft"]
+        self.assertEqual(draft["status"], "draft")
+        self.cur.execute("SELECT public.publish_schema_version(%s) AS published;", (draft["id"],))
+        self.assertEqual(self.cur.fetchone()["published"]["schema"]["status"], "active")
+        self.cur.execute("SELECT public.fork_schema(%s) AS draft;", (draft["id"],))
+        second = self.cur.fetchone()["draft"]
+        self.cur.execute("SELECT public.discard_schema_draft(%s) AS discarded;", (second["id"],))
+        self.assertEqual(self.cur.fetchone()["discarded"]["discarded_schema_id"], second["id"])
+
+        # The thread names the machine and files the act as a service's, never as a person's.
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT changed_by::text, actor_source FROM public.digital_thread "
+            "WHERE entity_type = 'schemas' AND entity_id = %s AND action = 'INSERT';",
+            (draft["id"],),
+        )
+        self.assertEqual(self.cur.fetchone(), {"changed_by": self.writer, "actor_source": "service"})
+
+    def test_a_machine_without_it_is_refused_each_rpc(self):
+        self.as_user(self.reader)
+        for sql in ("SELECT public.fork_schema(%s);",
+                    "SELECT public.publish_schema_version(%s);",
+                    "SELECT public.discard_schema_draft(%s);"):
+            with self.subTest(sql=sql):
+                self.refused(psycopg2.errors.InsufficientPrivilege, sql, (self.root,))
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT count(*) AS n FROM public.schemas WHERE parent_schema_id = %s;", (self.root,)
+        )
+        self.assertEqual(self.cur.fetchone()["n"], 0)
+
+    def test_it_still_cannot_write_the_table_directly(self):
+        # The write policies on `schemas` name Administrator, which no machine holds.
+        self.as_user(self.writer)
+        self.cur.execute(
+            "UPDATE public.schemas SET description = 'edited' WHERE id = %s;", (self.root,)
+        )
+        self.assertEqual(self.cur.rowcount, 0)
+
+
+class AMachineProposesAndAPersonDecides(MachineBase):
+    """proposal:create reaches a machine through the change_proposals INSERT policy; deciding does not."""
+
+    def setUp(self):
+        super().setUp()
+        self.cell = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO public.cells (id, name) VALUES (%s, %s);",
+            (self.cell, f"Machine proposal cell {self.cell[:8]}"),
+        )
+        self.proposer = self.machine("Line planner", ("proposal:create",))
+        self.bystander = self.machine("Line reader", ("telemetry:read",))
+
+    def propose(self, who):
+        self.as_user(who)
+        self.cur.execute(
+            "INSERT INTO public.change_proposals (entity_type, entity_id, patch, rationale) "
+            "VALUES ('cells', %s, %s::jsonb, 'from the planner') RETURNING id;",
+            (self.cell, json.dumps({"description": "Moved by the planner"})),
+        )
+        return self.cur.fetchone()["id"]
+
+    def test_a_machine_holding_it_files_a_proposal(self):
+        proposal = self.propose(self.proposer)
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT proposed_by::text, status FROM public.change_proposals WHERE id = %s;",
+            (proposal,),
+        )
+        self.assertEqual(self.cur.fetchone(), {"proposed_by": self.proposer, "status": "open"})
+
+    def test_a_machine_without_it_is_refused(self):
+        self.cur.execute("SAVEPOINT attempt;")
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.propose(self.bystander)
+        self.cur.execute("ROLLBACK TO SAVEPOINT attempt;")
+
+    def test_the_machine_cannot_decide_it_and_a_person_can(self):
+        proposal = self.propose(self.proposer)
+        self.as_user(self.proposer)
+        self.refused(psycopg2.errors.InsufficientPrivilege,
+                     "SELECT public.approve_proposal(%s);", (proposal,))
+        self.refused(psycopg2.errors.InsufficientPrivilege,
+                     "SELECT public.reject_proposal(%s, 'no');", (proposal,))
+
+        self.as_user(self.manager)
+        self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
+        self.as_postgres()
+        self.cur.execute("SELECT description FROM public.cells WHERE id = %s;", (self.cell,))
+        self.assertEqual(self.cur.fetchone()["description"], "Moved by the planner")
+
+
+class AMachineReadsTheAssetLaneOnly(MachineBase):
+    """digital_thread:read opens the asset lane to a machine, never the security lane."""
+
+    def setUp(self):
+        super().setUp()
+        # Seeded as the owner; the audit_domain trigger files each by its entity type.
+        self.rows = {}
+        for entity_type in ("devices", "service_principals"):
+            self.cur.execute(
+                "INSERT INTO public.digital_thread (entity_type, entity_id, action, actor_source) "
+                "VALUES (%s, %s, 'UPDATE', 'service') RETURNING id, entity_id::text, audit_domain;",
+                (entity_type, str(uuid.uuid4())),
+            )
+            row = self.cur.fetchone()
+            self.rows[row["audit_domain"]] = row
+        self.assertEqual(sorted(self.rows), ["asset", "security"])
+        self.reader = self.machine("Thread reader", ("digital_thread:read",))
+        self.other = self.machine("No thread", ("telemetry:read",))
+
+    def visible(self, who):
+        self.as_user(who)
+        self.cur.execute(
+            "SELECT id FROM public.digital_thread WHERE id = ANY(%s);",
+            ([r["id"] for r in self.rows.values()],),
+        )
+        seen = {r["id"] for r in self.cur.fetchall()}
+        self.as_postgres()
+        return seen
+
+    def test_it_reads_the_asset_lane_and_not_the_security_lane(self):
+        self.assertEqual(self.visible(self.reader), {self.rows["asset"]["id"]})
+
+    def test_without_it_a_machine_reads_neither(self):
+        self.assertEqual(self.visible(self.other), set())
+
+    def test_the_paged_read_agrees(self):
+        # digital_thread_page() is SECURITY INVOKER, so the same policy decides what it returns.
+        self.as_user(self.reader)
+        self.cur.execute(
+            "SELECT public.digital_thread_page(p_limit => 50, p_include_purged => true, "
+            "p_entity_ids => %s::uuid[]) AS page;",
+            ([r["entity_id"] for r in self.rows.values()],),
+        )
+        events = self.cur.fetchone()["page"]["events"]
+        self.assertEqual([e["id"] for e in events], [self.rows["asset"]["id"]])
+
+
+class AMachineReadsTheRecordOfDeletedAssets(MachineBase):
+    """archive:manage reaches a machine through the retired_entities SELECT policy, and no further."""
+
+    def setUp(self):
+        super().setUp()
+        self.retired = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO public.retired_entities (entity_type, entity_id, name, old_data) "
+            "VALUES ('devices', %s, 'Retired press', '{}'::jsonb);",
+            (self.retired,),
+        )
+        self.archivist = self.machine("Archive mirror", ("archive:manage",))
+        self.other = self.machine("Not an archivist", ("telemetry:read",))
+
+    def seen_by(self, who):
+        self.as_user(who)
+        self.cur.execute(
+            "SELECT count(*) AS n FROM public.retired_entities WHERE entity_id = %s;",
+            (self.retired,),
+        )
+        n = self.cur.fetchone()["n"]
+        self.as_postgres()
+        return n
+
+    def test_it_reads_the_record_and_a_machine_without_it_does_not(self):
+        self.assertEqual(self.seen_by(self.archivist), 1)
+        self.assertEqual(self.seen_by(self.other), 0)
+
+
+class ARevokedMachineCannotWrite(MachineBase):
+    """
+    PostgREST runs auth_pre_request() before every request, in the request's transaction, and a
+    raise there aborts it. `request()` does the same, so a refusal here is a write that never ran.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.seed_schema()
+        self.writer = self.machine("Revocable writer", ("schema:manage",))
+
+    def request(self, sql, params=(), jti=None):
+        claims = {"sub": self.writer, **({"jti": jti} if jti else {})}
+        self.cur.execute("SET LOCAL ROLE authenticated;")
+        self.cur.execute('SET LOCAL "request.jwt.claims" = %s;', (json.dumps(claims),))
+        self.cur.execute("SELECT public.auth_pre_request();")
+        self.cur.execute(sql, params)
+        return self.cur.fetchone()
+
+    def fork_refused(self, jti=None):
+        self.cur.execute("SAVEPOINT attempt;")
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege) as ctx:
+            self.request("SELECT public.fork_schema(%s);", (self.root,), jti)
+        self.cur.execute("ROLLBACK TO SAVEPOINT attempt;")
+        return ctx.exception.diag.message_primary
+
+    def drafts(self):
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT count(*) AS n FROM public.schemas WHERE parent_schema_id = %s;", (self.root,)
+        )
+        return self.cur.fetchone()["n"]
+
+    def mint(self):
+        """A recorded token, as mint-service-token records one."""
+        jti = str(uuid.uuid4())
+        self.as_postgres()
+        self.cur.execute(
+            "SELECT public.record_service_token_issued(%s::uuid, %s, now() + interval '30 days');",
+            (self.writer, jti),
+        )
+        return jti
+
+    def test_before_revocation_the_write_runs(self):
+        self.request("SELECT public.fork_schema(%s);", (self.root,), self.mint())
+        self.assertEqual(self.drafts(), 1)
+
+    def test_a_revoked_identity_is_refused_before_its_write_runs(self):
+        self.as_user(self.admin)
+        self.cur.execute("SELECT public.revoke_service_principal(%s, 'decommissioned');", (self.writer,))
+        self.assertIn("identity has been revoked", self.fork_refused())
+        self.assertEqual(self.drafts(), 0)
+
+    def test_a_revoked_token_is_refused_and_another_still_works(self):
+        withdrawn, kept = self.mint(), self.mint()
+        self.as_user(self.admin)
+        self.cur.execute("SELECT public.revoke_service_token(%s);", (withdrawn,))
+        self.assertIn("token has been revoked", self.fork_refused(withdrawn))
+        self.assertEqual(self.drafts(), 0)
+        self.request("SELECT public.fork_schema(%s);", (self.root,), kept)
+        self.assertEqual(self.drafts(), 1)
 
 
 class TheOldFormIsGoneNotOverloaded(NamingBase):

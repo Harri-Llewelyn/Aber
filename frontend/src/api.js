@@ -901,11 +901,13 @@ const apiMethods = {
   /**
    * Create a machine identity that cannot sign in, with the name the page will list it by.
    *
-   * Through `create_machine_principal()` (0125), which is SECURITY DEFINER and checks has_role()
-   * itself. It takes permissions, not a role, from an allow-list (`telemetry:read`,
-   * `quarantine:view`, `digital_thread:read`), so widening `Operator` does not widen the identity.
-   * No token is issued here: the identity reaches nothing until `mintServiceToken()` signs one,
-   * which the page offers next.
+   * Through `create_machine_principal()` (0125, 0013), which is SECURITY DEFINER and checks
+   * has_role() itself. It takes permissions from an allow-list, not a role, so widening `Operator`
+   * does not widen the identity. Machines propose, people decide: four reads (`telemetry:read`,
+   * `quarantine:view`, `digital_thread:read`, `archive:manage`) and two writes
+   * (`proposal:create`, `schema:manage`). Anything else is refused, and the message thrown gives
+   * the reason. No token is issued here: the identity reaches nothing until `mintServiceToken()`
+   * signs one, which the page offers next.
    *
    * @returns {{ principal_id: string, permissions: string[] }} 0080's shape; the name is the
    *          caller's own argument

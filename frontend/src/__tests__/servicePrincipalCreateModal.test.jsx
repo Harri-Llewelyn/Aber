@@ -3,20 +3,62 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ServicePrincipalCreateModal } from '../components/modals/ServicePrincipalCreateModal'
-import { GRANTABLE_PERMISSIONS, describePrincipal } from '../utils/serviceIdentities'
+import { GRANTABLE_PERMISSIONS, describePrincipal, permissionReach } from '../utils/serviceIdentities'
 import { api } from '../api'
 
 vi.mock('../api', () => ({ api: { createServicePrincipal: vi.fn() } }))
 
 beforeEach(() => vi.clearAllMocks())
 
+/** The two grants a machine may hold that write. Every other entry on the menu reads. */
+const WRITES = ['proposal:create', 'schema:manage']
+
 describe('GRANTABLE_PERMISSIONS', () => {
   /**
    * The menu is the function's allow-list, and the build asserts the two agree; this pins the
-   * half a reader of the page sees. Order matters: it is the order the badges are listed in.
+   * half a reader of the page sees. Order matters: it is the order the badges are listed in, reads
+   * first, so the one ticked by default is a read.
    */
-  it('is the three read-only permissions create_machine_principal() allows', () => {
-    expect(GRANTABLE_PERMISSIONS).toEqual(['telemetry:read', 'quarantine:view', 'digital_thread:read'])
+  it('is the six permissions create_machine_principal() allows, reads first', () => {
+    expect(GRANTABLE_PERMISSIONS).toEqual([
+      'telemetry:read', 'quarantine:view', 'digital_thread:read', 'archive:manage',
+      'proposal:create', 'schema:manage',
+    ])
+  })
+
+  it('offers nothing that decides: no device write, quarantine or proposal decision, or access control', () => {
+    for (const refused of ['device:manage', 'quarantine:approve', 'quarantine:reject', 'cell:manage',
+      'gateway:manage', 'authz:manage', 'link:manage', 'gitops:manage']) {
+      expect(GRANTABLE_PERMISSIONS).not.toContain(refused)
+    }
+  })
+})
+
+describe('permissionReach', () => {
+  it('has a line of its own for every permission on the menu', () => {
+    for (const perm of GRANTABLE_PERMISSIONS) {
+      expect(permissionReach([perm])).not.toBe(`Holds ${perm}.`)
+    }
+  })
+
+  it('says a grant is a write first, and only for the two that write', () => {
+    for (const perm of GRANTABLE_PERMISSIONS) {
+      if (WRITES.includes(perm)) expect(permissionReach([perm])).toMatch(/^A write\./)
+      else expect(permissionReach([perm])).not.toMatch(/\bA write\b/)
+    }
+  })
+
+  it('says digital_thread:read stops short of the security lane', () => {
+    expect(permissionReach(['digital_thread:read'])).toMatch(/Not the security lane/)
+  })
+
+  it('says a proposal is decided by a person', () => {
+    expect(permissionReach(['proposal:create'])).toMatch(/machines propose, people decide/)
+  })
+
+  it('never says a token cannot be revoked', () => {
+    const all = permissionReach(GRANTABLE_PERMISSIONS)
+    expect(all).not.toMatch(/cannot be revoked|unrevocable/i)
   })
 })
 
@@ -64,7 +106,17 @@ describe('ServicePrincipalCreateModal', () => {
     const boxes = screen.getAllByRole('checkbox')
     expect(boxes.length).toBe(GRANTABLE_PERMISSIONS.length)
     for (const perm of GRANTABLE_PERMISSIONS) expect(screen.getByText(perm)).toBeTruthy()
-    expect(screen.getByText(/Cannot read the audit trail/)).toBeTruthy()
+    expect(screen.getByText(/records what the identity is for/)).toBeTruthy()
+    // Only the first, a read, is ticked when the dialog opens.
+    expect(boxes.map(b => b.checked)).toEqual(GRANTABLE_PERMISSIONS.map((_, i) => i === 0))
+  })
+
+  it('says where the menu stops and why, and no longer calls a token unrevocable', () => {
+    open()
+    const note = screen.getByText(/Machines propose, people decide: a machine may file proposals/)
+    expect(note.textContent).toMatch(/never write a device, decide a proposal or a quarantine/)
+    expect(note.textContent).toMatch(/Withdrawing the identity or a token refuses it at the API/)
+    expect(document.body.textContent).not.toMatch(/unrevocable|cannot be revoked/i)
   })
 
   it('cannot be submitted without a name', () => {
@@ -105,6 +157,22 @@ describe('ServicePrincipalCreateModal', () => {
     expect(props.onClose).toHaveBeenCalled()
     // No token was issued: the toast says so, because the next dialog is where one is.
     expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/holds no token yet/), 'success')
+  })
+
+  it('sends a write it was given, in menu order', async () => {
+    const created = { principal_id: 'c0000000-0000-4000-8000-00000000000a', permissions: ['telemetry:read', 'proposal:create', 'schema:manage'] }
+    api.createServicePrincipal.mockResolvedValue(created)
+    open()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Schema sync' } })
+    const boxes = screen.getAllByRole('checkbox')
+    fireEvent.click(boxes[GRANTABLE_PERMISSIONS.indexOf('schema:manage')])
+    fireEvent.click(boxes[GRANTABLE_PERMISSIONS.indexOf('proposal:create')])
+    fireEvent.click(screen.getByRole('button', { name: /Create Principal/i }))
+
+    await waitFor(() => expect(api.createServicePrincipal).toHaveBeenCalledWith(
+      'Schema sync', ['telemetry:read', 'proposal:create', 'schema:manage'], ''
+    ))
   })
 
   it('stays open with the message when the database refuses', async () => {

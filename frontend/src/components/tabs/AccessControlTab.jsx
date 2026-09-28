@@ -570,7 +570,7 @@ export function AccessControlTab({ showToast }) {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => setCreating(true)}
-                title="Create a database identity for a process that reads this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
+                title="Create a database identity for a process that uses this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
               >
                 <IconPlus size={13} /> New Principal
               </button>

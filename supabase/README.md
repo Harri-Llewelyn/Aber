@@ -933,7 +933,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | :--- | :--- | :--- |
 | `cells`, `gateways`, `devices`, `links`, `asset_config`, `device_submodels`, `directory_services` | `authenticated` | `Administrator`, `Shopfloor_Manager` |
 | `schemas`, `metric_catalog`, `metric_groups` | `authenticated` | `Administrator` — see below (`0069`) |
-| `digital_thread` (`asset` lane) | `Administrator`, `Shopfloor_Manager`, `Auditor` | **nobody** — see below |
+| `digital_thread` (`asset` lane) | `Administrator`, `Shopfloor_Manager`, `Auditor`, or a machine holding `digital_thread:read` (`0013`) | **nobody** — see below |
 | `digital_thread` (`security` lane) | `Administrator`, `Auditor` | **nobody** — see below (`0070`) |
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
@@ -1876,6 +1876,60 @@ own copy of every function on each boot with `CREATE OR REPLACE`, which cannot c
 Same name, different columns, and the chain aborts at file one on the *second* boot — after `0001`
 has dropped the FDW server with `CASCADE`. `scripts/check-docs-drift.mjs` asserts against exactly
 that and names the remedy.
+
+### Machines propose, people decide (`0013`)
+
+`create_machine_principal()` allows six permissions and refuses every other one with the reason
+that holds for it. A machine passes `has_authority()` and never `has_role()`, so what a grant opens
+for it is whatever consults that permission through `has_authority()`:
+
+| Permission | What it opens for a machine | The check that opens it |
+| :--- | :--- | :--- |
+| `telemetry:read` | Nothing it could not already read: the inventory and the `telemetry` view are open to every authenticated caller, so the grant records what the identity is for | `USING (true)` on the inventory tables; a grant on the view |
+| `quarantine:view` | Nothing, for the same reason: the queue is `devices` rows | `devices_select_authenticated` |
+| `digital_thread:read` | The thread's asset lane, and the record of deleted assets | `digital_thread_select_asset`, `retired_entities_select_privileged` |
+| `archive:manage` | The record of deleted assets. Archiving and restoring check the role pair, so no write | `retired_entities_select_privileged` |
+| `proposal:create` | **A write**: files change proposals, which a person decides | `change_proposals_insert_proposer` |
+| `schema:manage` | **A write**: forks, publishes and discards schema versions. The `schemas` write policies name `Administrator`, so not a direct edit | `fork_schema()`, `publish_schema_version()`, `discard_schema_draft()` |
+
+| Refused | Why |
+| :--- | :--- |
+| `device:manage` | Device writes are made by people |
+| `quarantine:approve`, `quarantine:reject` | Quarantine decisions are made by people |
+| `cell:manage`, `gateway:manage` | For a machine they would only decide proposals, through `may_decide_proposal()`, and deciding is a person's act |
+| `authz:manage` | Access control stays with people |
+| `link:manage`, `gitops:manage` | No check a machine passes consults them, so the grant would do nothing |
+
+**The old refusal rested on a premise that stopped being true.** It said a token signed for a
+principal cannot be revoked, so any write would be an unrevocable write credential.
+`revoke_service_token()` and `revoke_service_principal()` (`0074`, `0076`) made that false:
+`auth_pre_request()` refuses a withdrawn token or identity on every PostgREST request, and every
+check the two writes open is a database check reached through PostgREST. Storage, Realtime and the
+edge runtime still honour a withdrawn token until it expires, and none of them consults these
+permissions. `service_token_max_days()`'s COMMENT said the same thing and is restated.
+
+**`digital_thread:read` opened nothing on the thread for a machine.** Both lanes named roles, so a
+machine granted it read no thread rows while the page said it could; only `retired_entities`
+consulted it. The asset lane is now `has_role(Administrator, Shopfloor_Manager, Auditor) OR
+has_authority(digital_thread:read)`. For a person nothing moves, because those three roles are the
+ones that hold the permission. The security lane is unchanged.
+
+**`may_decide_proposal()` now says what its cell and gateway lanes check.** Its comments said they
+resolve what the tables' own policies resolve. `cells_update_privileged` and
+`gateways_update_privileged` name the role pair, and the lanes name `cell:manage` and
+`gateway:manage`. The permission stays. For a person the two agree, because the pair are the only
+roles holding both grants, and no machine can hold either. The role pair would give the same answer
+today and lose what `0090` wanted: withdrawing the grant closes the lane.
+
+**Two guards hold it.** `check-docs-drift.mjs` 11e keeps the page's menu equal to the allow-list.
+11f names, for each allowed permission, the policy or function it is meant to open, and requires
+that check's latest definition to consult it through `has_authority()`. "Consulted somewhere" would
+have passed `digital_thread:read` on `retired_entities` alone. `telemetry:read` and
+`quarantine:view` are stated as what they are: 11f asserts that what they describe is open to
+every authenticated caller and that nothing consults them. It also holds the refusal reasons that
+are facts, and `may_decide_proposal()`'s three premises. `test_machine_principal_naming.py` acts as
+the machine: it forks and publishes, files a proposal it cannot decide, reads one lane and not the
+other, and is refused before its write once revoked.
 
 ### A person has a name the dashboard can read (`0116`)
 
@@ -4002,7 +4056,8 @@ identities on both and an MQTT client is issued a broker account, not a principa
 **The menu is the allow-list, checked at build time.** `GRANTABLE_PERMISSIONS` in
 `serviceIdentities.js` is the keys of `PERMISSION_REACH`, and `check-docs-drift.mjs` (11e)
 asserts it equals `c_allowed` in the last migration that declares the function, so a permission
-added to one side without the other fails the build rather than the click. Check 11d is
+added to one side without the other fails the build rather than the click. What each entry
+reaches is held by 11f; see [Machines propose, people decide](#machines-propose-people-decide-0013). Check 11d is
 unchanged: it requires a registry entry for every id a migration pins, and a principal created at
 runtime has no id to write down ahead of time, which is what the table is for. The Digital Thread
 reads the same table to label the *Service identities* lane, so a principal created from the page
