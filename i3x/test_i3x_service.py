@@ -1722,15 +1722,15 @@ class TestMirroredConstants(unittest.TestCase):
     def _constants(self, path):
         import re
 
-        src = open(path, encoding="utf-8").read()
+        src = Path(path).read_text(encoding="utf-8")
         out = {}
-        for name in ("MAX_ALIASES_PER_NODE", "DEFAULT_SPARKPLUG_GROUP"):
+        for name in ("MAX_ALIASES_PER_NODE",):
             m = re.search(rf"^{name} = (.+)$", src, re.M)
             if not m:
                 continue
-            # The LAST quoted string on the line, not the first. Both files may write the constant
-            # either as a bare literal (`= "Aber"`) or as an override with a default
-            # (`= os.getenv("DEFAULT_SPARKPLUG_GROUP", "Aber")`), and in the second form the
+            # The LAST quoted string on the line, not the first. Either file may write the constant
+            # as a bare literal (`= "5000"`) or as an override with a default
+            # (`= int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))`), and in the second form the
             # first quoted string is the environment variable's NAME -- comparing that against the
             # other file's value fails on a pair that agrees perfectly.
             quoted = re.findall(r'"([^"]*)"', m.group(1))
@@ -1760,7 +1760,7 @@ class TestMirroredConstants(unittest.TestCase):
         import ast
 
         out = {}
-        for node in ast.parse(open(path, encoding="utf-8").read()).body:
+        for node in ast.parse(Path(path).read_text(encoding="utf-8")).body:
             if isinstance(node, ast.FunctionDef) and node.name == "sparkplug_integer_value":
                 body = node.body[1:] if ast.get_docstring(node) else node.body
                 out["function"] = [ast.dump(node.args)] + [ast.dump(stmt) for stmt in body]
@@ -1778,6 +1778,37 @@ class TestMirroredConstants(unittest.TestCase):
         self.assertEqual(
             mine, theirs, "sparkplug_integer_value has drifted between i3x_service.py and ingestion.py"
         )
+
+    @staticmethod
+    def _function(path, name, **names):
+        """
+        Top-level function `name` from `path`, compiled alone with `names` as its globals: its
+        behaviour, without importing the module.
+        """
+        import ast
+        import types
+
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+        module = compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec")
+        code = next(c for c in module.co_consts if isinstance(c, types.CodeType) and c.co_name == name)
+        return types.FunctionType(code, dict(names))
+
+    def test_alias_key_behaves_as_ingestions(self):
+        """
+        Both key the alias table on the (group, node) the topic names. i3X once put the site's
+        group in for a missing one, so each is run with that group set to a real name.
+        """
+        here = Path(__file__).resolve().parent
+        site = {"DEFAULT_SPARKPLUG_GROUP": "SiteGroup"}
+        mine = self._function(here / "i3x_service.py", "alias_key", **site)
+        theirs = self._function(INGESTION_DIR / "ingestion.py", "alias_key", **site)
+        for group, node in (("Aber", "gwy1"), ("", "gwy1"), (None, "gwy1"), ("Aber", None),
+                            (None, None), ("SiteGroup", "gwy1")):
+            with self.subTest(group=group, node=node):
+                self.assertEqual(mine(group, node), theirs(group, node))
+        self.assertNotEqual(mine(None, "gwy1"), mine("SiteGroup", "gwy1"),
+                            "a node with no group shares the site group's alias table")
 
 
 INGESTION_DIR = Path(__file__).resolve().parents[1] / "ingestion"

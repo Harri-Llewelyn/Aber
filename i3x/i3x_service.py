@@ -123,10 +123,6 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 # 1000 is far above any real client: the conformance suite's largest batch is a few dozen, and a
 # whole demonstrator address space is under a hundred elements.
 MAX_BULK_ELEMENT_IDS = int(os.getenv("I3X_MAX_BULK_ELEMENT_IDS", "1000"))
-# The site's Sparkplug group, for keying the address space when a topic carries none. Read as
-# SPARKPLUG_GROUP since 0131, which is the one name the chart, the daemon and the database share;
-# the chart never set the older DEFAULT_SPARKPLUG_GROUP, so nothing was relying on it.
-DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "")
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
 _values: Dict[str, Dict[str, dict]] = {}
@@ -482,8 +478,11 @@ def metrics_for(sparkplug_id: str) -> Dict[str, dict]:
 
 
 def alias_key(group_id, edge_node_id):
-    """Aliases are scoped to (group, edge node). MIRRORED FROM ingestion.py -- keep in step."""
-    return (group_id or DEFAULT_SPARKPLUG_GROUP, edge_node_id or "")
+    """
+    Aliases are scoped to the (group, edge node) the topic names; a missing group is "", never the
+    site's, which would merge two nodes' tables. MIRRORED FROM ingestion.py -- keep in step.
+    """
+    return (group_id or "", edge_node_id or "")
 
 
 def register_birth_aliases(group_id, edge_node_id, metrics, reset=False, device_id=None) -> None:

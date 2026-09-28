@@ -103,13 +103,6 @@ spec:
             # Reported by GET /info as `serverVersion`: the release, not the image tag override.
             - name: I3X_SERVER_VERSION
               value: {{ .Chart.AppVersion | quote }}
-            {{/*
-              The site's group, used to key the address space when a Sparkplug topic carries none.
-              The server read this from the environment before the chart set it, and fell back to
-              a literal on every deployment; 0131 makes it one value the whole stack agrees on.
-            */}}
-            - name: SPARKPLUG_GROUP
-              value: {{ include "aber.sparkplugGroup" . | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
           # GET /info is the health probe, and that is a design property rather than a convenience:
