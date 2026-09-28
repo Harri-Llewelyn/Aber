@@ -349,8 +349,8 @@ mosquitto:
     # ==========================================================================================
     # SET THIS TO THE BROKER'S EXTERNAL ADDRESS. Gateways dial the broker by IP, and a certificate
     # without an IP SAN fails verification on every one of them while the in-cluster clients --
-    # which use the name `mosquitto` -- verify perfectly. The stack reports healthy, the demo
-    # simulator keeps producing telemetry, and the fleet is silently off.
+    # which use the name `mosquitto` -- verify perfectly. The stack reports healthy, the host-run
+    # gateways keep producing telemetry, and the fleet is silently off.
     #
     #   kubectl -n aber get svc mosquitto-external \
     #     -o jsonpath='{.status.loadBalancer.ingress[0].ip}'

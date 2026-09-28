@@ -620,7 +620,7 @@ is:
 Gateways dial the broker **by IP address** — there is rarely plant DNS for it. A certificate carrying
 only `mosquitto` verifies perfectly from inside the cluster, which is where you will test it, and
 fails on every gateway with a hostname mismatch **the broker does not log**. The stack reports
-healthy, the demo simulator keeps producing telemetry, and the fleet is silently off.
+healthy, the host-run gateways keep producing telemetry, and the fleet is silently off.
 
 The chart refuses to render a LoadBalancer deployment whose certificate has no external identity at
 all. Get the address and put it in the SANs:

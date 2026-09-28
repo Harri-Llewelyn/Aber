@@ -7,8 +7,8 @@
  * effective area is its effective cell's, unless the device is area-wide and names one itself. The
  * site is one setting, not a column.
  *
- * Mirror of `public.device_locations` in supabase/migrations/0097_the_plant_gains_areas.sql; the
- * view is the authority. Field names are the view's own snake_case, so a row from the view and a
+ * Mirror of `public.device_locations` in supabase/migrations/0001_baseline_schema.sql; the view is
+ * the authority. Field names are the view's own snake_case, so a row from the view and a
  * row derived here are interchangeable.
  *
  * NULL cell_id means inherit. Unassigned is derived from the resolution running out of arms, never

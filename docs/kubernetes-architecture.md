@@ -1408,7 +1408,7 @@ false` with TLS off leaves the external Service with no ports, which the API ser
 `external.enabled: false`. TLS on with an external LoadBalancer and a certificate carrying nothing
 a gateway could match (no IP SAN, no operator-supplied DNS SAN) lets every in-cluster client verify
 perfectly while every gateway fails on a hostname mismatch the broker never logs: the stack reports
-healthy, the simulator keeps producing, and the fleet is off. Refused rather than warned about,
+healthy, the host-run gateways keep producing, and the fleet is off. Refused rather than warned about,
 because Helm has no non-fatal warning `helm template` would surface. `publicBaseDomain` alone does
 not satisfy it, since `mqtt.<domain>` is the WebSocket name and not the address a gateway dials;
 an IP SAN or an explicit DNS SAN does, so a deployment behind plant DNS is not blocked.

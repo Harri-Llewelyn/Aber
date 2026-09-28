@@ -1741,9 +1741,9 @@ It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads
 outcomes covering quarantine, identity diagnostics, birth observation, multi-submodel conformance,
 digital-thread triggers, telemetry mapping, rename safety and quarantine gating.
 
-**Every assertion is scoped to the run's own entities.** The stack always has audit rows, telemetry
-and devices from the demo simulator, so a check that queried a whole table and asserted "not empty"
-would pass regardless of whether anything was exercised.
+**Every assertion is scoped to the run's own entities.** A stack in use holds audit rows, telemetry
+and devices of its own, so a check that queried a whole table and asserted "not empty" would pass
+regardless of whether anything was exercised.
 
 Its cleanup uses a **direct owner connection** to Supabase Postgres for audit rows, because
 `public.digital_thread` is genuinely append-only — the trigger added in
