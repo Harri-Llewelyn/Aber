@@ -305,6 +305,342 @@ class TestSubscriptionsAuthenticateEveryRequest(unittest.TestCase):
         self.assertFalse(sub.stream_open)
 
 
+class TestASubscriptionDeliversOnlyWhatItsOwnerCanSee(unittest.TestCase):
+    """
+    What a subscription delivers is checked again, as its owner, at each /sync, at a stream's open
+    and on each keepalive tick, through the owner's own address-space read.
+
+    Registration used to be the only RLS decision on the value path, so a caller who lost sight of
+    a device kept receiving its values. Driven through a real HTTP server with the token probe
+    faked. `rows` is what the fake PostgREST returns; `hide()` takes a device out of it and expires
+    the cache, which is its owner losing the grant that let them read it.
+    """
+
+    DEVICE, OTHER = "dev-explicit", "dev-inherits"
+
+    def setUp(self):
+        self.alice = _jwt(sub="a1ice000-0000-4000-8000-000000000001", role="authenticated")
+        self.bob = _jwt(sub="b0b00000-0000-4000-8000-000000000002", role="authenticated")
+        self.rows = _seeded_rows()
+        self.reads = []
+        self.read_error = None
+        real_read = i3x_service._read_address_space
+
+        def read_as_caller(pg):
+            self.reads.append(pg.bearer)
+            if self.read_error is not None:
+                raise self.read_error
+            return real_read(ColumnCheckingPostgrest(self.rows, pg.bearer))
+
+        self._saved = (
+            i3x_service.registry, i3x_service._probe, i3x_service._read_address_space,
+            i3x_service.SSE_KEEPALIVE_SECONDS, i3x_service.ADDRESS_SPACE_TTL_SECONDS,
+        )
+        i3x_service._probe = lambda bearer: None
+        i3x_service._read_address_space = read_as_caller
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 60
+        # Each withdrawal logs at INFO; the tests assert on state instead.
+        self.addCleanup(i3x_service.logger.setLevel, i3x_service.logger.level)
+        i3x_service.logger.setLevel("WARNING")
+        self.registry = SubscriptionRegistry()
+        self.registry.on_stream_close = i3x_service._on_registry_stream_close
+        i3x_service.registry = self.registry
+        i3x_service._auth_cache.clear()
+        i3x_service._space_cache_clear()
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), i3x_service.Handler)
+        self.server.daemon_threads = True
+        threading.Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        ).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        (
+            i3x_service.registry, i3x_service._probe, i3x_service._read_address_space,
+            i3x_service.SSE_KEEPALIVE_SECONDS, i3x_service.ADDRESS_SPACE_TTL_SECONDS,
+        ) = self._saved
+        i3x_service._auth_cache.clear()
+        i3x_service._space_cache_clear()
+
+    # -- helpers -------------------------------------------------------------------------------
+    def call(self, path, auth, body):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        try:
+            conn.request("POST", "/v1" + path, body=json.dumps(body).encode("utf-8"),
+                         headers={"Content-Type": "application/json", "Authorization": auth})
+            resp = conn.getresponse()
+            raw = resp.read()
+            if resp.getheader("Content-Type") == "application/json":
+                return resp.status, json.loads(raw)
+            return resp.status, raw.decode("utf-8")
+        finally:
+            conn.close()
+
+    def create(self, auth):
+        status, payload = self.call("/subscriptions", auth, {"clientId": "c"})
+        self.assertEqual(status, 200, payload)
+        return payload["result"]["subscriptionId"]
+
+    def register(self, auth, sid, element_ids):
+        body = {"clientId": "c", "subscriptionId": sid, "elementIds": element_ids}
+        status, payload = self.call("/subscriptions/register", auth, body)
+        self.assertTrue(status == 200 and payload["success"], payload)
+
+    def sync(self, auth, sid, last=None):
+        body = {"clientId": "c", "subscriptionId": sid}
+        if last is not None:
+            body["lastSequenceNumber"] = last
+        return self.call("/subscriptions/sync", auth, body)
+
+    def subscription(self, auth, sid):
+        principal = i3x_service._authenticate(auth).principal
+        return self.registry.get_owned("c", sid, principal=principal)
+
+    def hide(self, sparkplug_id):
+        device = next(d for d in self.rows["devices"] if d["sparkplug_id"] == sparkplug_id)
+        self.rows["devices"].remove(device)
+        self.rows["device_locations"] = [
+            row for row in self.rows["device_locations"] if row["device_id"] != device["id"]
+        ]
+        i3x_service._space_cache_clear()
+
+    @staticmethod
+    def push(sparkplug_id, value):
+        i3x_service._stage_and_push(sparkplug_id, {"Temperature": {"value": value, "timestamp": None}})
+
+    @staticmethod
+    def delivered(batches):
+        return [(u["elementId"], u["value"]["Temperature"]) for b in batches for u in b["updates"]]
+
+    def stream(self, sub, bearer):
+        """`_serve_stream` on its own thread, ticking every 50 ms, over a real socket pair."""
+        i3x_service.SSE_KEEPALIVE_SECONDS = 0.05
+        client_end, server_end = socket.socketpair()
+        self.addCleanup(server_end.close)
+        self.addCleanup(client_end.close)
+        writer = _RecordingWriter()
+        req = _StreamRequest(server_end, writer)
+        backlog = self.registry.open_stream(sub)
+        thread = threading.Thread(
+            target=i3x_service._serve_stream,
+            args=(req, sub, backlog, bearer, i3x_service.Caller(sub.principal, None)),
+            daemon=True,
+        )
+        thread.start()
+        return req, writer, client_end, thread
+
+    @staticmethod
+    def wait_until(condition, timeout=10.0):
+        """For state another thread changes: polled, bounded, and never a bare sleep."""
+        deadline = time.monotonic() + timeout
+        while not condition():
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    # -- /sync ---------------------------------------------------------------------------------
+    def test_the_next_sync_withdraws_a_device_and_reports_it(self):
+        sid = self.create(self.alice)
+        self.register(self.alice, sid, [self.DEVICE, self.OTHER])
+        self.push(self.DEVICE, 1.0)
+        self.push(self.OTHER, 2.0)
+        self.hide(self.DEVICE)
+        self.push(self.DEVICE, 3.0)
+
+        status, payload = self.sync(self.alice, sid)
+        self.assertEqual(status, 206, payload)
+        self.assertEqual(self.delivered(payload["result"]), [(self.OTHER, 2.0)],
+                         "a value queued for a device its owner can no longer see was delivered")
+        detail = payload["responseDetail"]
+        self.assertEqual((detail["status"], detail["title"]), (206, "Elements left this caller's view"))
+        self.assertIn(self.DEVICE, detail["detail"])
+        self.assertNotIn(self.OTHER, detail["detail"])
+
+        self.push(self.DEVICE, 4.0)
+        self.push(self.OTHER, 5.0)
+        last = payload["result"][-1]["sequenceNumber"]
+        status, payload = self.sync(self.alice, sid, last)
+        self.assertEqual(status, 200, "the removal was reported twice")
+        self.assertEqual(self.delivered(payload["result"]), [(self.OTHER, 5.0)])
+        listed = self.call("/subscriptions/list", self.alice, {"clientId": "c", "subscriptionIds": [sid]})
+        monitored = listed[1]["results"][0]["result"]["monitoredObjects"]
+        self.assertEqual([m["elementId"] for m in monitored], [self.OTHER])
+
+    def test_a_metric_follows_its_device(self):
+        sid = self.create(self.alice)
+        sub = self.subscription(self.alice, sid)
+        # Registered directly: a metric is an Object only once metrics are components.
+        self.registry.register(sub, [{"elementId": self.DEVICE + "/Temperature"},
+                                     {"elementId": self.OTHER + "/Axes/X/POSITION"}])
+        visible = i3x_service._visible_to(self.alice)
+        self.assertTrue(visible(self.OTHER + "/Axes/X/POSITION"), "split at the first /")
+        self.assertTrue(visible("gwy-1"))
+        self.assertFalse(visible("gwy-1/Temperature"), "only a device's metric follows it")
+        self.assertFalse(visible("dev-nobody/Temperature"))
+
+        self.hide(self.DEVICE)
+        status, payload = self.sync(self.alice, sid)
+        self.assertEqual(status, 206, payload)
+        self.assertIn(self.DEVICE + "/Temperature", payload["responseDetail"]["detail"])
+        self.assertEqual(list(sub.monitored), [self.OTHER + "/Axes/X/POSITION"])
+
+    def test_a_check_costs_one_read_per_cache_ttl_per_caller(self):
+        sid = self.create(self.alice)
+        self.register(self.alice, sid, [self.DEVICE])
+        for _ in range(3):
+            self.assertEqual(self.sync(self.alice, sid)[0], 200)
+        theirs = self.create(self.bob)
+        self.register(self.bob, theirs, [self.OTHER])
+        self.assertEqual(self.sync(self.bob, theirs)[0], 200)
+        self.assertEqual(self.reads, [self.alice, self.bob])
+
+        i3x_service._space_cache_clear()
+        self.sync(self.alice, sid)
+        self.assertEqual(self.reads, [self.alice, self.bob, self.alice])
+
+    def test_a_subscription_holding_nothing_is_not_read_for(self):
+        sid = self.create(self.alice)
+        self.assertEqual(self.sync(self.alice, sid), (200, {"success": True, "result": []}))
+        self.assertEqual(self.reads, [])
+
+    def test_a_failed_read_acknowledges_delivers_and_withdraws_nothing(self):
+        sid = self.create(self.alice)
+        self.register(self.alice, sid, [self.DEVICE])
+        self.push(self.DEVICE, 1.0)
+        first = self.sync(self.alice, sid)[1]["result"][-1]["sequenceNumber"]
+        self.push(self.DEVICE, 2.0)
+        self.read_error = SubscriptionError(502, "Bad Gateway", "Reading devices: upstream down")
+        i3x_service._space_cache_clear()
+        status, payload = self.sync(self.alice, sid, first)
+        self.assertEqual(status, 502, payload)
+
+        self.read_error = None
+        status, payload = self.sync(self.alice, sid)
+        self.assertEqual(
+            (status, self.delivered(payload["result"])),
+            (200, [(self.DEVICE, 1.0), (self.DEVICE, 2.0)]),
+        )
+
+    # -- streams -------------------------------------------------------------------------------
+    def test_a_stream_tick_stops_a_device_that_left_the_view(self):
+        sid = self.create(self.alice)
+        self.register(self.alice, sid, [self.DEVICE, self.OTHER])
+        sub = self.subscription(self.alice, sid)
+        req, writer, client_end, thread = self.stream(sub, self.alice)
+        self.push(self.DEVICE, 1.0)
+        self.assertTrue(writer.wait_for('"Temperature": 1.0'), writer.text())
+
+        self.hide(self.DEVICE)
+        self.assertTrue(self.wait_until(lambda: self.DEVICE not in sub.monitored),
+                        "no tick withdrew the device")
+        self.push(self.DEVICE, 5.0)
+        self.push(self.OTHER, 6.0)
+        self.assertTrue(writer.wait_for('"Temperature": 6.0'), writer.text())
+        self.assertNotIn('"Temperature": 5.0', writer.text())
+        self.assertTrue(thread.is_alive(), "the stream ended while an element remained")
+
+        client_end.close()
+        thread.join(10)
+        status, payload = self.sync(self.alice, sid)
+        self.assertEqual(status, 206, "the next /sync did not report what the stream withdrew")
+        self.assertIn(self.DEVICE, payload["responseDetail"]["detail"])
+
+    def test_a_stream_whose_last_element_left_ends_cleanly(self):
+        sid = self.create(self.alice)
+        self.register(self.alice, sid, [self.DEVICE])
+        sub = self.subscription(self.alice, sid)
+        req, writer, _, thread = self.stream(sub, self.alice)
+
+        self.hide(self.DEVICE)
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "the stream outlived its last element")
+        self.assertTrue(writer.text().endswith("0\r\n\r\n"), "the stream was not ended cleanly")
+        self.assertFalse(req.close_connection)
+        self.assertFalse(sub.stream_open)
+
+        status, payload = self.sync(self.alice, sid)
+        self.assertEqual((status, payload["result"]), (206, []))
+        self.assertIn(self.DEVICE, payload["responseDetail"]["detail"])
+        self.assertEqual(self.sync(self.alice, sid), (200, {"success": True, "result": []}))
+
+    def test_a_stream_opened_after_the_last_element_left_ends_at_once(self):
+        sid = self.create(self.alice)
+        self.register(self.alice, sid, [self.DEVICE])
+        self.push(self.DEVICE, 1.0)
+        self.hide(self.DEVICE)
+
+        status, body = self.call("/subscriptions/stream", self.alice, {"clientId": "c", "subscriptionId": sid})
+        self.assertEqual((status, body), (200, ""), "the backlog of a withdrawn device was streamed")
+        status, payload = self.sync(self.alice, sid)
+        self.assertEqual((status, payload["result"]), (206, []))
+        self.assertIn(self.DEVICE, payload["responseDetail"]["detail"])
+
+
+class TestWithdrawingAnElement(unittest.TestCase):
+    """The registry's half: what `withdraw` removes and keeps, and how its report is held."""
+
+    @staticmethod
+    def queue(registry, sub):
+        batches, _ = registry.sync(sub)
+        return [(b["sequenceNumber"], [u["elementId"] for u in b["updates"]]) for b in batches]
+
+    def test_it_removes_the_element_and_its_queued_updates_only(self):
+        registry, _ = make_registry()
+        sub = registry.create("c")
+        registry.register(sub, [{"elementId": "a"}, {"elementId": "b"}])
+        stage(registry, "a")
+        stage(registry, "b")
+        registry.stage({eid: {"value": 1, "quality": "Good", "timestamp": None} for eid in ("a", "b")})
+
+        self.assertEqual(registry.withdraw(sub, lambda eid: eid != "b"), (["b"], False))
+        self.assertEqual(list(sub.monitored), ["a"])
+        # The batch left empty is gone, so its number is a gap; the mixed one keeps its number.
+        self.assertEqual(self.queue(registry, sub), [(1, ["a"]), (3, ["a"])])
+
+    def test_an_unregistered_elements_queued_updates_are_withheld_too(self):
+        registry, _ = make_registry()
+        sub = registry.create("c")
+        registry.register(sub, [{"elementId": "a"}, {"elementId": "b"}])
+        stage(registry, "b")
+        registry.unregister(sub, ["b"])
+        self.assertEqual(registry.withdraw(sub, lambda eid: eid != "b"), (["b"], False))
+        self.assertEqual(self.queue(registry, sub), [])
+
+    def test_emptied_means_this_call_removed_the_last_element(self):
+        registry, _ = make_registry()
+        sub = registry.create("c")
+        self.assertEqual(registry.withdraw(sub, lambda eid: False), ([], False))
+        registry.register(sub, [{"elementId": "a"}])
+        self.assertEqual(registry.withdraw(sub, lambda eid: False), (["a"], True))
+        self.assertEqual(registry.withdraw(sub, lambda eid: False), ([], False))
+
+    def test_the_report_is_held_until_taken_once(self):
+        registry, _ = make_registry()
+        sub = registry.create("c")
+        registry.register(sub, [{"elementId": "a"}, {"elementId": "b"}])
+        registry.withdraw(sub, lambda eid: eid != "a")
+        registry.withdraw(sub, lambda eid: False)
+        self.assertEqual(registry.take_withdrawn(sub), ["a", "b"])
+        self.assertEqual(registry.take_withdrawn(sub), [])
+
+        registry.register(sub, [{"elementId": "a"}])
+        registry.withdraw(sub, lambda eid: False)
+        registry.register(sub, [{"elementId": "a"}])
+        self.assertEqual(registry.take_withdrawn(sub), [], "a re-registered element was reported")
+
+    def test_overflow_and_a_withdrawal_share_one_detail(self):
+        detail = i3x_service._sync_detail(True, ["dev-a", "dev-b/Temperature"])
+        self.assertEqual(detail["status"], 206)
+        self.assertIn("queue overflow", detail["title"])
+        self.assertIn("left this caller's view", detail["title"])
+        self.assertIn(str(i3x_service.registry.queue_limit), detail["detail"])
+        self.assertIn("dev-a, dev-b/Temperature", detail["detail"])
+        self.assertIsNone(i3x_service._sync_detail(False, []))
+
+
 class TestSyncAcknowledgement(unittest.TestCase):
     """The MUSTs the live conformance run could not reach."""
 
@@ -2567,15 +2903,15 @@ class TestMirroredConstants(unittest.TestCase):
     def _constants(self, path):
         import re
 
-        src = open(path, encoding="utf-8").read()
+        src = Path(path).read_text(encoding="utf-8")
         out = {}
-        for name in ("MAX_ALIASES_PER_NODE", "DEFAULT_SPARKPLUG_GROUP"):
+        for name in ("MAX_ALIASES_PER_NODE",):
             m = re.search(rf"^{name} = (.+)$", src, re.M)
             if not m:
                 continue
-            # The LAST quoted string on the line, not the first. Both files may write the constant
-            # either as a bare literal (`= "Aber"`) or as an override with a default
-            # (`= os.getenv("DEFAULT_SPARKPLUG_GROUP", "Aber")`), and in the second form the
+            # The LAST quoted string on the line, not the first. Either file may write the constant
+            # as a bare literal (`= "5000"`) or as an override with a default
+            # (`= int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))`), and in the second form the
             # first quoted string is the environment variable's NAME -- comparing that against the
             # other file's value fails on a pair that agrees perfectly.
             quoted = re.findall(r'"([^"]*)"', m.group(1))
@@ -2605,7 +2941,7 @@ class TestMirroredConstants(unittest.TestCase):
         import ast
 
         out = {}
-        for node in ast.parse(open(path, encoding="utf-8").read()).body:
+        for node in ast.parse(Path(path).read_text(encoding="utf-8")).body:
             if isinstance(node, ast.FunctionDef) and node.name == "sparkplug_integer_value":
                 body = node.body[1:] if ast.get_docstring(node) else node.body
                 out["function"] = [ast.dump(node.args)] + [ast.dump(stmt) for stmt in body]
@@ -2623,6 +2959,37 @@ class TestMirroredConstants(unittest.TestCase):
         self.assertEqual(
             mine, theirs, "sparkplug_integer_value has drifted between i3x_service.py and ingestion.py"
         )
+
+    @staticmethod
+    def _function(path, name, **names):
+        """
+        Top-level function `name` from `path`, compiled alone with `names` as its globals: its
+        behaviour, without importing the module.
+        """
+        import ast
+        import types
+
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+        module = compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec")
+        code = next(c for c in module.co_consts if isinstance(c, types.CodeType) and c.co_name == name)
+        return types.FunctionType(code, dict(names))
+
+    def test_alias_key_behaves_as_ingestions(self):
+        """
+        Both key the alias table on the (group, node) the topic names. i3X once put the site's
+        group in for a missing one, so each is run with that group set to a real name.
+        """
+        here = Path(__file__).resolve().parent
+        site = {"DEFAULT_SPARKPLUG_GROUP": "SiteGroup"}
+        mine = self._function(here / "i3x_service.py", "alias_key", **site)
+        theirs = self._function(INGESTION_DIR / "ingestion.py", "alias_key", **site)
+        for group, node in (("Aber", "gwy1"), ("", "gwy1"), (None, "gwy1"), ("Aber", None),
+                            (None, None), ("SiteGroup", "gwy1")):
+            with self.subTest(group=group, node=node):
+                self.assertEqual(mine(group, node), theirs(group, node))
+        self.assertNotEqual(mine(None, "gwy1"), mine("SiteGroup", "gwy1"),
+                            "a node with no group shares the site group's alias table")
 
 
 INGESTION_DIR = Path(__file__).resolve().parents[1] / "ingestion"

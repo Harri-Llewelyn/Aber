@@ -60,13 +60,21 @@ caller* first, then serve only the ids that came back. An element the caller can
 not found, indistinguishable from one that does not exist.
 
 **Every request except `GET /info` is authenticated before it is dispatched**, by one PostgREST
-call carrying the caller's `Authorization`: `rpc/service_token_max_days`, an immutable constant
-granted to `authenticated` and `service_role` and not to `anon`. PostgREST checks the signature and
-`exp`, and its pre-request hook `auth_pre_request()` refuses a revoked token or a revoked service
-principal. So a missing header, a string that is not a token, the publishable key, and an expired or
-revoked token each get a 401. A success is cached for at most 15 seconds, keyed by a SHA-256 of the
-header and never past the token's `exp`; a refusal is never cached. Check 32 of
-`check-docs-drift.mjs` holds that function to those grants.
+call carrying the caller's `Authorization`: `rpc/i3x_auth_probe`, a function granted to
+`authenticated` and `service_role` and not to `anon`. PostgREST checks the signature and `exp`, and
+its pre-request hook `auth_pre_request()` refuses a revoked token or a revoked service principal.
+So a missing header, a string that is not a token, the publishable key, and an expired or revoked
+token each get a 401. A success is cached for at most 15 seconds, keyed by a SHA-256 of the header
+and never past the token's `exp`; a refusal is never cached. Check 32 of `check-docs-drift.mjs`
+holds that function to those grants, and to being plpgsql and not `IMMUTABLE`.
+
+**The probe must be a call the planner keeps.** PostgREST runs prepared statements from their
+generic plan on pooled connections, and PostgreSQL checks EXECUTE on a function when a plan calls
+it. Until `0015` the probe was `service_token_max_days()`, SQL and `IMMUTABLE`, which the planner
+folds to the constant 90, so a plan made for an `authenticated` request held no call to check when
+an `anon` request reused it. Found by `validate.py` check 12h on 2026-09-28: `not-a-token` passed 1
+request in 12 through the gateway, and the routes that make no read as the caller then served it.
+Data reads stayed refused, because they read as the caller.
 
 What that guarantees:
 
@@ -80,10 +88,25 @@ What that guarantees:
   subscription calls are refused within 15 seconds of the revocation, and at `exp`. An open stream
   re-checks its token, past the cache, on every 15-second keepalive tick, and ends cleanly when the
   check fails or `exp` arrives.
-- **Registration is not re-checked.** The monitored set is validated against the caller's address
-  space when elements are registered. A grant withdrawn later while the token stays valid (a user's
-  role removed) stops that caller's reads at once, but values for elements already registered keep
-  arriving on the subscription until it is deleted or expires, or the token fails the check.
+- **A subscription delivers only what its owner can still see.** Registration checks each elementId
+  against the caller's address space, and every delivery checks again as the owner: each `/sync`,
+  a stream's open and each 15-second keepalive tick. The check reads through the token-keyed
+  [address-space cache](#the-address-space-cache), so it costs at most one address-space read per
+  cache TTL per caller. An element the caller can no longer see is removed from the subscription
+  and its queued values are discarded, where an unregister keeps them as the guide asks; a metric,
+  `<device>/<metric>`, goes with its device. The next `/sync` answers 206 with a `responseDetail`
+  naming what was removed, even with nothing else to return, so a client can tell "left your view"
+  from "nothing changed". A stream ends cleanly when its last element leaves. A failed read fails
+  closed: `/sync` and a stream's open answer 502 and deliver nothing, and an open stream ends. The
+  window is the cache's few seconds, plus one tick on a stream.
+
+Today every inventory read is open to any authenticated caller (`devices_select_authenticated` and
+its siblings are `USING (true)`), so what leaves a view in practice is an archived or deleted
+element, and removing a role hides nothing yet. The check reads through RLS, so a narrower policy
+would be honoured as written. The broader option, not built, is to end a user's sessions when a
+role is removed (a GoTrue sign-out for that user): the token check would then fail within one
+interval and the user would be signed out everywhere, at the cost of changing how every role change
+works.
 
 `GET /info` is unauthenticated, because the spec requires it and because it doubles as the health
 check. It reports capabilities and nothing about the address space.
@@ -220,7 +243,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | POST | `/objects/value` | From the MQTT cache, gated on a PostgREST read |
 | POST | `/objects/history` | From TimescaleDB; `startTime`/`endTime` **required** |
 | POST | `/subscriptions` | + `/list`, `/delete`, `/register`, `/unregister` |
-| POST | `/subscriptions/sync` | MUST. 206 on queue overflow |
+| POST | `/subscriptions/sync` | MUST. 206 on queue overflow, or when elements left the caller's view |
 | POST | `/subscriptions/stream` | MAY. SSE, **one stream per subscription** |
 | PUT | `/objects/value`, `/objects/history` | **405** — see below |
 
@@ -316,6 +339,9 @@ Five rules are easy to get wrong and each fails quietly:
 5. **Sync and stream are mutually exclusive.** `/sync` must error while a stream is open, because
    the stream has already delivered — and discarded — the queue the sync caller is asking to
    acknowledge.
+
+A `/sync` also answers 206 when registered elements have left the caller's view, naming them; see
+[Security](#security).
 
 ### Writes are refused
 
@@ -635,24 +661,26 @@ difference being that here there is no rolling, by design.
 ### Why subscriptions are not made to survive
 
 Backing subscription state with Redis is the obvious fix and is deliberately not being done. The
-reasons are the four rules in [Subscriptions](#subscriptions) above: every one of them is a property
-that is easy to hold inside one process and becomes a distributed-systems problem outside it.
-`/sync` acknowledgement has to stay exact under concurrent access; overflow has to drop and report a
-*computable* gap atomically; "one stream per subscription" becomes cross-replica coordination to
-close the displaced stream cleanly; and the MQTT value cache would have to move too, or replicas
-would disagree about current values. That is a substantial amount of machinery, and a hard Redis
-dependency, added to a service whose entire design argument is that it is a thin read-side adapter
-that owns no data.
+reasons are the five rules in [Subscriptions](#subscriptions) above: each is easy to hold inside one
+process, and most become a distributed-systems problem outside it. `/sync` acknowledgement has to
+stay exact under concurrent access; overflow has to drop and report a *computable* gap atomically;
+"one stream per subscription" becomes cross-replica coordination to close the displaced stream
+cleanly; `/sync` has to know whether a stream is open on another replica; and the MQTT value cache
+would have to move too, or replicas would disagree about current values. That is a substantial
+amount of machinery, and a hard Redis dependency, added to a service whose entire design argument
+is that it is a thin read-side adapter that owns no data.
 
 The trade is only worth making against a real requirement. It is tracked separately, and this
 section is what it would have to improve on.
 
 ## The address-space cache
 
-Assembling the address space costs **five PostgREST reads**, and several endpoints load it two or
-three times in one request — `/types/{id}` builds types and then objects; the bulk value reads
-rebuild it per call. A conformance client polling in a loop was therefore spending 12–18 queries a
-tick rebuilding a graph that had not changed.
+Assembling the address space costs **a PostgREST read per relation it joins**, and nearly every
+endpoint needs it:
+`/objecttypes` and `/objecttypes/query` build the types from it; the `/objects` endpoints,
+`/objects/value` and `/objects/history` the objects; and `/subscriptions/register`, `/unregister`,
+`/sync` and each stream check elementIds against it. A conformance client polling several of them
+in a loop was therefore spending 12–18 queries a tick rebuilding a graph that had not changed.
 
 It is now cached for `I3X_ADDRESS_SPACE_TTL_SECONDS`, **keyed by the caller's bearer token**.
 

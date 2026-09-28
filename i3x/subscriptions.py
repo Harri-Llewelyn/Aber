@@ -18,6 +18,10 @@ quietly when got wrong (README.md -> "Subscriptions" says how):
      stream has already delivered -- and discarded -- the queue the sync caller is acknowledging.
 
 Sequence numbers are 64-bit unsigned and never reused within a subscription.
+
+What the owner may see is the transport's to decide; `withdraw()` applies its verdict, dropping the
+elements and queued updates it rejects and holding their ids until a `/sync` reports them
+(README.md -> "Security").
 """
 from __future__ import annotations
 
@@ -78,6 +82,9 @@ class Subscription:
         self.last_activity = now
         # Set when a batch is dropped, cleared once the client has been told via a 206.
         self.overflowed = False
+        # Elements withdrawn because the owner can no longer see them, in the order found, held
+        # until a `/sync` names them in its 206.
+        self.withdrawn: "OrderedDict[str, None]" = OrderedDict()
 
     def to_json(self) -> dict:
         return {
@@ -221,6 +228,8 @@ class SubscriptionRegistry:
                     continue
                 depth = entry.get("maxDepth", 1)
                 sub.monitored[element_id] = depth
+                # Registered again, so no longer news to report as withdrawn.
+                sub.withdrawn.pop(element_id, None)
                 results.append({"success": True, "elementId": element_id, "result": None})
             sub.last_activity = self._clock()
         return results
@@ -235,6 +244,50 @@ class SubscriptionRegistry:
                 results.append({"success": True, "elementId": element_id, "result": None})
             sub.last_activity = self._clock()
         return results
+
+    # -- visibility --------------------------------------------------------------------------
+
+    def has_elements(self, sub: Subscription) -> bool:
+        """Whether anything is monitored or queued, so a visibility check has something to judge."""
+        with self._lock:
+            return bool(sub.monitored or sub.batches)
+
+    def withdraw(self, sub: Subscription, visible: Callable[[str], bool]) -> tuple:
+        """
+        Drop each monitored element `visible` rejects, and each queued update for such an element,
+        registered or not. A batch left with no updates is removed, so its sequence number is a gap.
+
+        Returns (the ids dropped by this call, whether it removed the last monitored element). The
+        ids are also held until `take_withdrawn`. `visible` runs under the lock: no I/O in it.
+        """
+        with self._lock:
+            had_monitored = bool(sub.monitored)
+            dropped: "OrderedDict[str, None]" = OrderedDict()
+            for element_id in [e for e in sub.monitored if not visible(e)]:
+                del sub.monitored[element_id]
+                dropped[element_id] = None
+            kept: "deque[dict]" = deque()
+            for batch in sub.batches:
+                updates = []
+                for update in batch["updates"]:
+                    if visible(update["elementId"]):
+                        updates.append(update)
+                    else:
+                        dropped[update["elementId"]] = None
+                if len(updates) == len(batch["updates"]):
+                    kept.append(batch)
+                elif updates:
+                    kept.append(dict(batch, updates=updates))
+            sub.batches = kept
+            sub.withdrawn.update(dropped)
+            return list(dropped), had_monitored and not sub.monitored
+
+    def take_withdrawn(self, sub: Subscription) -> List[str]:
+        """The ids withdrawn since the last report, cleared because the caller is reporting them."""
+        with self._lock:
+            ids = list(sub.withdrawn)
+            sub.withdrawn.clear()
+            return ids
 
     # -- value staging -----------------------------------------------------------------------
 

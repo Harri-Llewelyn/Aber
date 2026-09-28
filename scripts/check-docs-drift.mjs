@@ -768,10 +768,12 @@ function edgeFunctionNames() {
 //
 // i3x_service.py authenticates every request but GET /info by calling AUTH_PROBE_PATH as the
 // caller. Revoked from `authenticated`, dropped or given an argument, it refuses every token;
-// callable by `anon`, it accepts the publishable key and any string that is not a token.
+// callable by `anon`, it accepts the publishable key and any string that is not a token. It must
+// be plpgsql and not IMMUTABLE: a call the planner inlines or folds is no longer in PostgREST's
+// reused plan, so its EXECUTE check is skipped for the next role that runs that plan.
 // -------------------------------------------------------------------------------------------------
 {
-  const probe = read('i3x/i3x_service.py').match(/^AUTH_PROBE_PATH = "rpc\/([a-z_]+)"$/m);
+  const probe = read('i3x/i3x_service.py').match(/^AUTH_PROBE_PATH = "rpc\/([a-z0-9_]+)"$/m);
   if (!probe) {
     fail('i3x/i3x_service.py: AUTH_PROBE_PATH is not an "rpc/<function>" literal, so check 32 cannot read it');
   } else {
@@ -786,6 +788,15 @@ function edgeFunctionNames() {
     const faults = [];
     if (!new RegExp(`CREATE OR REPLACE FUNCTION ${sig}`).test(sql)) {
       faults.push(`no migration declares public.${fn}() with no arguments`);
+    }
+    // The last declaration's header, up to its body, is the definition the database ends with.
+    const headers = [...sql.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${sig}[^$]*?AS\\s*\\$`, 'g'))];
+    const header = headers.length ? headers[headers.length - 1][0] : '';
+    if (header && !/\bLANGUAGE\s+plpgsql\b/i.test(header)) {
+      faults.push(`public.${fn}() is not plpgsql, so the planner may inline it and skip its EXECUTE check`);
+    }
+    if (/\bIMMUTABLE\b/i.test(header)) {
+      faults.push(`public.${fn}() is IMMUTABLE, so the planner folds the call and skips its EXECUTE check`);
     }
     if (!new RegExp(`GRANT (ALL|EXECUTE) ON FUNCTION ${sig} TO [^;]*\\bauthenticated\\b`).test(sql)) {
       faults.push(`public.${fn}() is not granted to authenticated`);

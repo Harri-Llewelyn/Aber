@@ -134,10 +134,6 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 # 1000 is far above any real client: the conformance suite's largest batch is a few dozen, and a
 # whole demonstrator address space is under a hundred elements.
 MAX_BULK_ELEMENT_IDS = int(os.getenv("I3X_MAX_BULK_ELEMENT_IDS", "1000"))
-# The site's Sparkplug group, for keying the address space when a topic carries none. Read as
-# SPARKPLUG_GROUP since 0131, which is the one name the chart, the daemon and the database share;
-# the chart never set the older DEFAULT_SPARKPLUG_GROUP, so nothing was relying on it.
-DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "")
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
 _values: Dict[str, Dict[str, dict]] = {}
@@ -206,10 +202,9 @@ class PostgrestClient:
 """
 Short-TTL address-space cache, KEYED BY THE CALLER'S TOKEN.
 
-The address space was reassembled from scratch on every request -- five PostgREST reads, and
-several endpoints load it two or three times in one call (`/types/{id}` builds types and then
-objects; the bulk value reads rebuild it per request), so a single conformance client polling in a
-loop was costing 12-18 queries a tick. Fine for a demonstrator, wrong for anything watching.
+Assembling the space costs a PostgREST read per relation, and the type, object, value and history
+endpoints, registration and every subscription check need it, so a client polling in a loop would
+pay those reads on every call (README.md -> "The address-space cache").
 
 THE KEY IS THE TOKEN AND THAT IS NOT NEGOTIABLE. The space is deliberately assembled from reads
 made AS THE CALLER, so RLS decides what it contains -- a cache shared across identities would hand
@@ -278,7 +273,7 @@ def _load_address_space(pg: PostgrestClient) -> dict:
             # returned by a later branch that forgot to check the clock.
             del _space_cache[key]
 
-    # DELIBERATELY OUTSIDE THE LOCK. The read is five network round trips; holding the lock across
+    # DELIBERATELY OUTSIDE THE LOCK. The read is a round trip per relation; holding the lock across
     # it would serialise every caller in the process behind the slowest PostgREST response, which
     # is a worse property than the duplicate read that two simultaneous misses can now cause. A
     # duplicate read is wasteful; a global stall is an outage.
@@ -626,8 +621,11 @@ def metrics_for(sparkplug_id: str) -> Dict[str, dict]:
 
 
 def alias_key(group_id, edge_node_id):
-    """Aliases are scoped to (group, edge node). MIRRORED FROM ingestion.py -- keep in step."""
-    return (group_id or DEFAULT_SPARKPLUG_GROUP, edge_node_id or "")
+    """
+    Aliases are scoped to the (group, edge node) the topic names; a missing group is "", never the
+    site's, which would merge two nodes' tables. MIRRORED FROM ingestion.py -- keep in step.
+    """
+    return (group_id or "", edge_node_id or "")
 
 
 def register_birth_aliases(group_id, edge_node_id, metrics, reset=False, device_id=None) -> None:
@@ -914,14 +912,17 @@ def _on_registry_stream_close(sub) -> None:
 registry.on_stream_close = _on_registry_stream_close
 
 
-def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") -> None:
+def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller",
+                  emptied: bool = False) -> None:
     """
     Answer `/subscriptions/stream` on this handler thread, which is the only one that writes to it.
 
     It ends when the client disconnects, when another stream or a delete displaces it, when a write
-    cannot finish inside SSE_SEND_TIMEOUT_SECONDS, at the token's `exp`, or when the token fails
-    the re-check made on every keepalive tick. All but the first and third end cleanly, with the
-    terminating chunk, and only a clean end leaves the connection open for a next request.
+    cannot finish inside SSE_SEND_TIMEOUT_SECONDS, at the token's `exp`, when the token or the
+    owner's view fails the re-check made on every keepalive tick, or once the last monitored
+    element has left that view (`emptied`: already at open). All but the first and third end
+    cleanly, with the terminating chunk, and only a clean end leaves the connection open for a
+    next request.
 
     It sends the QUEUE, never the live value, because the queue is the one source of ordering.
     Delivered means discarded: SSE is at-most-once, so a later `/sync` must not re-deliver it.
@@ -958,6 +959,9 @@ def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") 
             for batch in batches:
                 if not channel.send(batch["updates"]):
                     return
+            if emptied:
+                channel.finish()
+                return
             # WAIT ON THE SOCKET, NOT ON THE CLOCK, so an abandoned stream frees this thread at
             # once rather than at the next keepalive (README.md -> "Subscriptions", rule 4). A
             # readable stream socket means EOF: the request body was consumed at dispatch.
@@ -973,24 +977,26 @@ def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") 
             if channel.close_requested.is_set() or time.monotonic() >= expires:
                 channel.finish()
                 return
-            batches = []
-            if channel.wake_socket in ready:
-                # Consumed before the drain, so a wake landing after the drain is not lost.
-                channel.consume_wakes()
-                batches = registry.drain(sub)
             if time.monotonic() >= next_tick:
-                # Bypasses the cache, so a revoked token loses its stream within one tick.
+                # The token bypasses its cache, so a revoked one loses its stream within one tick.
+                # The view is checked before this pass drains, so nothing it withdrew is sent.
                 try:
                     expires = _monotonic_deadline(_authenticate(bearer, fresh=True).expires_at)
-                except (Problem, requests.RequestException):
+                    emptied = _withdraw_hidden(sub, bearer)
+                except (Problem, SubscriptionError, requests.RequestException):
                     channel.finish()
                     return
                 # The reaper treats an open stream as activity. The comment frame still goes out
                 # when idle: intermediaries time out a silent connection.
                 registry.touch(sub)
-                if not channel.keepalive():
+                if not emptied and not channel.keepalive():
                     return
                 next_tick = time.monotonic() + SSE_KEEPALIVE_SECONDS
+            batches = []
+            if channel.wake_socket in ready:
+                # Consumed before the drain, so a wake landing after the drain is not lost.
+                channel.consume_wakes()
+                batches = registry.drain(sub)
     except OSError:
         # The headers could not be written: the client left before the stream began.
         pass
@@ -1009,10 +1015,11 @@ def _serve_stream(req, sub, backlog: List[dict], bearer: str, caller: "Caller") 
 # =================================================================================================
 # Every route but these is authenticated in `_dispatch` before its handler runs.
 UNAUTHENTICATED_ROUTES = frozenset({"GET /info"})
-# An IMMUTABLE constant granted to `authenticated` and `service_role`, not `anon`. Calling it as the
-# caller costs no table read and succeeds only when PostgREST accepts the token's signature and
-# `exp` and the pre-request hook `auth_pre_request()` finds neither its jti nor its sub revoked.
-AUTH_PROBE_PATH = "rpc/service_token_max_days"
+# Granted to `authenticated` and `service_role`, not `anon`. Calling it as the caller costs no table
+# read and succeeds only when PostgREST accepts the token's signature and `exp` and the pre-request
+# hook `auth_pre_request()` finds neither its jti nor its sub revoked. It must stay plpgsql and not
+# IMMUTABLE: a call the planner folds away skips its EXECUTE check in PostgREST's reused plans.
+AUTH_PROBE_PATH = "rpc/i3x_auth_probe"
 # A success is reused for at most this long, and never past the token's `exp`. A refusal is never
 # stored, and a fresh refusal evicts the stored success.
 AUTH_CACHE_SECONDS = 15.0
@@ -2071,6 +2078,74 @@ def _owned_subscription(req: Handler, client_id: str, body: dict):
     )
 
 
+def _visibility(space: dict) -> tuple:
+    """
+    (every elementId the space shows, its device ids). Memoised on the space like the value-path
+    indexes: a function of the space alone, so the one read serves every check for the cache TTL.
+    """
+    memo = space.get("_visibility")
+    if memo is None:
+        memo = space["_visibility"] = (
+            frozenset(_build_objects(space)),
+            frozenset(d["sparkplug_id"] for d in space["devices"]),
+        )
+    return memo
+
+
+def _visible_to(bearer: str):
+    """
+    Whether an elementId is in this caller's address space, read as the caller through the
+    token-keyed cache. `<sparkplug_id>/<metric>` is visible exactly when its device is: a
+    sparkplug_id never contains `/`, so the device is the text before the first one.
+    """
+    ids, devices = _visibility(_load_address_space(PostgrestClient(bearer)))
+
+    def visible(element_id: str) -> bool:
+        if element_id in ids:
+            return True
+        device, sep, _ = element_id.partition("/")
+        return bool(sep) and device in devices
+
+    return visible
+
+
+def _withdraw_hidden(sub, bearer: str) -> bool:
+    """
+    Withdraw the subscription's elements its owner can no longer see, with their queued values.
+    True when that removed its last monitored element. A failed read raises: nothing is withdrawn
+    and nothing may be delivered on it. A subscription holding nothing costs no read.
+    """
+    if not registry.has_elements(sub):
+        return False
+    dropped, emptied = registry.withdraw(sub, _visible_to(bearer))
+    if dropped:
+        logger.info(
+            "subscription %s: %d element(s) left its owner's view and were withdrawn",
+            sub.subscription_id, len(dropped),
+        )
+    return emptied
+
+
+def _sync_detail(overflowed: bool, withdrawn: List[str]) -> Optional[dict]:
+    """The 206 `responseDetail`: queue overflow, elements that left the caller's view, or both."""
+    overflow = (
+        f"Updates were dropped from the subscription queue. The server limit is "
+        f"{registry.queue_limit} batches."
+    )
+    left = (
+        "These elements are no longer visible to this caller, so they were removed from the "
+        "subscription and their queued updates were not delivered: " + ", ".join(withdrawn) + "."
+    )
+    if overflowed and withdrawn:
+        title = "Updates dropped due to queue overflow, and elements left this caller's view"
+        return {"title": title, "status": 206, "detail": f"{overflow} {left}"}
+    if overflowed:
+        return {"title": "Updates dropped due to queue overflow", "status": 206, "detail": overflow}
+    if withdrawn:
+        return {"title": "Elements left this caller's view", "status": 206, "detail": left}
+    return None
+
+
 def h_sub_create(req: Handler) -> None:
     body = req._body()
     client_id = _require_client_id(body)
@@ -2146,8 +2221,8 @@ def h_sub_register(req: Handler) -> None:
     reasons, and the second is the one that matters: an unknown elementId that registers
     "successfully" produces a subscription that will never emit anything, and the client has no way
     to tell that from a machine that is simply quiet -- it waits forever for a value that cannot
-    arrive. Validating here also means the monitored set can only ever contain ids this caller is
-    allowed to see, so the subscription cannot become a way around RLS on the value path.
+    arrive. Validating here, and again at each delivery (`_withdraw_hidden`), keeps the monitored
+    set to ids this caller may see, so the subscription cannot become a way around RLS.
     """
     body = req._body()
     client_id = _require_client_id(body)
@@ -2215,28 +2290,32 @@ def h_sub_unregister(req: Handler) -> None:
 
 
 def h_sub_sync(req: Handler) -> None:
+    """
+    Re-check the owner's view, acknowledge, and return the queue. 206 when updates overflowed or
+    elements left the caller's view since the last report; the second is reported even with no
+    batches to return, since the client measures no gap from it.
+    """
     body = req._body()
     client_id = _require_client_id(body)
     sub = _owned_subscription(req, client_id, body)
+    _withdraw_hidden(sub, req._bearer())
     batches, status = registry.sync(sub, body.get("lastSequenceNumber"))
-    detail = None
-    if status == 206:
-        detail = {
-            "title": "Updates dropped due to queue overflow",
-            "status": 206,
-            "detail": (
-                f"Updates were dropped from the subscription queue. The server limit is "
-                f"{registry.queue_limit} batches."
-            ),
-        }
-    req._ok(batches, status=status, detail=detail)
+    withdrawn = registry.take_withdrawn(sub)
+    req._ok(
+        batches,
+        status=206 if withdrawn else status,
+        detail=_sync_detail(status == 206, withdrawn),
+    )
 
 
 def h_sub_stream(req: Handler) -> None:
     body = req._body()
     client_id = _require_client_id(body)
     sub = _owned_subscription(req, client_id, body)
-    _serve_stream(req, sub, registry.open_stream(sub), req._bearer(), req.caller)
+    bearer = req._bearer()
+    # Before the backlog is drained, so a failed read leaves the queue where it was.
+    emptied = _withdraw_hidden(sub, bearer)
+    _serve_stream(req, sub, registry.open_stream(sub), bearer, req.caller, emptied)
 
 
 ROUTES = {
