@@ -191,9 +191,9 @@ class PostgrestClient:
 """
 Short-TTL address-space cache, KEYED BY THE CALLER'S TOKEN.
 
-Assembling the space costs five PostgREST reads, and the type, object, value and history endpoints,
-registration and every subscription check need it, so a client polling in a loop would pay those
-reads on every call (README.md -> "The address-space cache").
+Assembling the space costs a PostgREST read per relation, and the type, object, value and history
+endpoints, registration and every subscription check need it, so a client polling in a loop would
+pay those reads on every call (README.md -> "The address-space cache").
 
 THE KEY IS THE TOKEN AND THAT IS NOT NEGOTIABLE. The space is deliberately assembled from reads
 made AS THE CALLER, so RLS decides what it contains -- a cache shared across identities would hand
@@ -262,7 +262,7 @@ def _load_address_space(pg: PostgrestClient) -> dict:
             # returned by a later branch that forgot to check the clock.
             del _space_cache[key]
 
-    # DELIBERATELY OUTSIDE THE LOCK. The read is five network round trips; holding the lock across
+    # DELIBERATELY OUTSIDE THE LOCK. The read is a round trip per relation; holding the lock across
     # it would serialise every caller in the process behind the slowest PostgREST response, which
     # is a worse property than the duplicate read that two simultaneous misses can now cause. A
     # duplicate read is wasteful; a global stall is an outage.

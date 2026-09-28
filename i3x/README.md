@@ -564,7 +564,8 @@ section is what it would have to improve on.
 
 ## The address-space cache
 
-Assembling the address space costs **five PostgREST reads**, and nearly every endpoint needs it:
+Assembling the address space costs **a PostgREST read per relation it joins**, and nearly every
+endpoint needs it:
 `/objecttypes` and `/objecttypes/query` build the types from it; the `/objects` endpoints,
 `/objects/value` and `/objects/history` the objects; and `/subscriptions/register`, `/unregister`,
 `/sync` and each stream check elementIds against it. A conformance client polling several of them
