@@ -98,6 +98,10 @@ spec:
               value: {{ .Values.i3xService.maxSubscriptions | quote }}
             - name: I3X_MAX_STREAMS
               value: {{ .Values.i3xService.maxStreams | quote }}
+            - name: I3X_HISTORY_MAX_ROWS
+              value: {{ .Values.i3xService.historyMaxRows | quote }}
+            - name: I3X_MAX_COMPONENTS
+              value: {{ .Values.i3xService.maxComponents | quote }}
             - name: I3X_SERVER_NAME
               value: {{ .Values.i3xService.serverName | quote }}
             # Reported by GET /info as `serverVersion`: the release, not the image tag override.

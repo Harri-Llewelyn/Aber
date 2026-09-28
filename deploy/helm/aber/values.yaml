@@ -948,6 +948,13 @@ i3xService:
   maxSubscriptionsPerPrincipal: 20
   maxSubscriptions: 500
   maxStreams: 50
+  # The most stored rows one history series reads, and values it returns: a device's map of N
+  # metrics counts N. A request's `limit` may ask for fewer. A series cut short answers 206,
+  # naming the instant it stops at, and the client asks again with that endTime.
+  historyMaxRows: 10000
+  # The most HasComponent descendants one value or history request returns under `components`,
+  # summed over its elementIds. Past it the rest are left out and the answer is a 206.
+  maxComponents: 10000
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     # Sized for connection handling; the value cache and queues are bounded.

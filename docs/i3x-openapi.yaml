@@ -442,6 +442,20 @@ paths:
                         Controller/EXECUTION: ACTIVE
                       quality: Good
                       timestamp: '2026-08-10T13:06:29.423Z'
+        '206':
+          description: |
+            The components past `I3X_MAX_COMPONENTS` (default 10000), counted over the whole
+            request, were left out. Each item cut carries its own `responseDetail` with status
+            206 saying how many; the top-level one names every item cut. Request those
+            elementIds on their own for the rest.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BulkEnvelope'
+                  - type: object
+                    properties:
+                      responseDetail: { $ref: '#/components/schemas/ResponseDetail' }
         '400':
           description: '`elementIds` missing or not an array of strings, or `maxDepth` not an integer of 0 or more.'
           content:
@@ -469,13 +483,31 @@ paths:
       summary: Historical values
       description: |
         From the TimescaleDB hypertable through PostgREST, **never** from the value cache, so
-        this read carries the caller's token like every other.
+        these reads carry the caller's token like every other.
 
         `startTime` and `endTime` are **required**: an unbounded history query over a
-        hypertable is not a slow request, it is an availability incident.
+        hypertable is not a slow request, it is an availability incident. Both are RFC 3339
+        with an offset, parsed in full, and a start after the end is a 400.
 
-        Only devices carry telemetry. A cell has no series of its own and returns an empty
-        `values` — inventing an aggregate would assert a measurement nobody took.
+        What comes back depends on the element, newest first in every case:
+
+        * **A metric**, `<sparkplug_id>/<metric_name>` split at the first `/`: its stored
+          samples as scalar VQTs.
+        * **A device**: one map per instant at which any of its metrics changed, holding every
+          metric's newest value at that instant, the shape of its current value. Sparkplug
+          reports by exception, so values carry forward from before the window. A metric with
+          no value yet is absent from the map rather than invented.
+        * **Its components**, at `maxDepth` 0 or above 1: each metric's samples under
+          `components`, keyed by elementId and taken from the device's own rows.
+        * **Anything else** (the site, a cell, a gateway) has no series of its own and returns
+          an empty `values`. Inventing an aggregate would assert a measurement nobody took.
+
+        **Nothing is cut silently.** `I3X_HISTORY_MAX_ROWS` (default 10000) bounds each series:
+        the rows it reads and the values it returns, a device's map of N metrics counting N. A
+        series that stops short keeps its newest values and answers **206**. Its item's
+        `responseDetail` names the instant it stops at, and asking again with that instant as
+        `endTime` returns the rest. `I3X_MAX_COMPONENTS` bounds the components, as on
+        `/objects/value`.
       requestBody:
         required: true
         content:
@@ -487,22 +519,84 @@ paths:
                 elementIds:
                   type: array
                   items: { type: string }
-                startTime: { type: string, format: date-time, description: RFC 3339. Required. }
-                endTime: { type: string, format: date-time, description: RFC 3339. Required. }
+                startTime:
+                  type: string
+                  format: date-time
+                  description: 'RFC 3339 with `Z` or an offset. Required, and not after `endTime`.'
+                  example: '2026-09-28T10:00:00Z'
+                endTime:
+                  type: string
+                  format: date-time
+                  description: RFC 3339 with `Z` or an offset. Required. Inclusive.
+                  example: '2026-09-28T11:00:00Z'
                 limit:
                   type: integer
-                  default: 1000
                   minimum: 1
-                  description: 'Samples per element. A value above 10000 is served as 10000.'
-                maxDepth: { type: integer, default: 1, minimum: 0 }
+                  description: 'Not an i3X parameter. Values per series, at most `I3X_HISTORY_MAX_ROWS`: a larger value is served as that, and omitting it asks for that.'
+                maxDepth:
+                  type: integer
+                  default: 1
+                  minimum: 0
+                  description: '`1` is the element alone. `0` or above 1 adds a device''s metrics under `components`.'
       responses:
         '200':
-          description: Samples per requested id, newest first.
+          description: One `HistoryResult` per requested id, in request order.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+              example:
+                success: true
+                results:
+                  - success: true
+                    elementId: dev220000000000400080000
+                    result:
+                      isComposition: true
+                      values:
+                        - value: { Controller/EXECUTION: ACTIVE, Systems/TEMPERATURE: 37.4 }
+                          quality: Good
+                          timestamp: '2026-09-28T10:20:00Z'
+                        - value: { Controller/EXECUTION: READY, Systems/TEMPERATURE: 37.4 }
+                          quality: Good
+                          timestamp: '2026-09-28T10:10:00Z'
+                  - success: true
+                    elementId: dev220000000000400080000/Systems/TEMPERATURE
+                    result:
+                      isComposition: false
+                      values:
+                        - { value: 37.4, quality: Good, timestamp: '2026-09-28T10:10:00Z' }
+        '206':
+          description: |
+            A server limit cut at least one series or components list short. Each item cut is
+            still `success: true` and carries its own `responseDetail` with status 206 saying
+            where it stops; the top-level one names every item cut.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BulkEnvelope'
+                  - type: object
+                    properties:
+                      responseDetail: { $ref: '#/components/schemas/ResponseDetail' }
+              example:
+                success: true
+                results:
+                  - success: true
+                    elementId: dev220000000000400080000/Systems/TEMPERATURE
+                    result:
+                      isComposition: false
+                      values:
+                        - { value: 37.6, quality: Good, timestamp: '2026-09-28T10:50:00Z' }
+                        - { value: 37.5, quality: Good, timestamp: '2026-09-28T10:40:00Z' }
+                    responseDetail:
+                      title: Partial results returned
+                      status: 206
+                      detail: "This series stops at this request's limit of 2 rows: nothing at or before 2026-09-28T10:30:00.000000Z was returned. Request it again with that endTime for the rest."
+                responseDetail:
+                  title: Partial results returned
+                  status: 206
+                  detail: "A server limit cut 1 result(s) short: dev220000000000400080000/Systems/TEMPERATURE. Each one's responseDetail says where."
         '400':
-          description: '`elementIds` missing or not an array of strings, `startTime`/`endTime` absent or not RFC 3339, `limit` not a positive integer, or `maxDepth` not an integer of 0 or more.'
+          description: '`elementIds` missing or not an array of strings, `startTime`/`endTime` absent, not RFC 3339 or the start after the end, `limit` not a positive integer, or `maxDepth` not an integer of 0 or more.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -994,7 +1088,9 @@ components:
         isComposition: { type: boolean }
         values:
           type: array
-          description: Newest first. Empty for anything that is not a device.
+          description: |
+            Newest first, all inside the window. A metric's are scalars; a device's are maps of
+            metric name to value, one per instant a metric changed. Empty for anything else.
           items:
             type: object
             properties:
@@ -1003,6 +1099,7 @@ components:
               timestamp: { type: string, format: date-time }
         components:
           type: object
+          description: 'Present only when `maxDepth` is 0 or above 1. Keyed by elementId, each with its own `values`.'
           additionalProperties: { $ref: '#/components/schemas/HistoryResult' }
 
     Quality:

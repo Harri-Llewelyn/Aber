@@ -176,6 +176,46 @@ which swagger-ui serves in the same dropdown as the platform spec. It is a **sep
 from `docs/openapi.yaml` on purpose**: this server is not behind the gateway, takes no `apikey`, and
 `/v1/schema` already means something else there.
 
+### History
+
+`POST /objects/history` reads TimescaleDB as the caller, and what it returns depends on the element,
+newest first in every case:
+
+- **A metric**, `<sparkplug_id>/<metric_name>` split at the first `/`: its stored samples as scalar
+  VQTs. One read, on `(asset_id, metric_name)`.
+- **A device**: one map per instant at which any of its metrics changed, holding every metric's
+  newest value at that instant, which is the shape of its current value. Sparkplug reports by
+  exception, so each value is carried forward from before the window: `telemetry_latest` gives it
+  for a metric quiet since, and one read of the rows just before the window gives it for the rest.
+  A metric with no value yet is absent from the map rather than invented. That is at most three
+  reads (the window, `telemetry_latest`, the rows before it), and one for a device quiet through
+  the window.
+- **Its components**, at `maxDepth` 0 or above 1: each metric's samples under `components`, keyed
+  by elementId. They are sliced from the device's own rows, so they add no reads and agree with
+  its maps.
+- **Anything else** (the site, an area, a cell, a gateway) has no series of its own and returns an
+  empty `values`.
+
+**Nothing is cut silently.** `I3X_HISTORY_MAX_ROWS` bounds each series twice: the rows it reads,
+and the values it returns, where a device's map of N metrics counts N (instants times metrics can
+outgrow the rows read by far). `limit`, which is not an i3X parameter, may ask for fewer and never
+for more. A series that stops short keeps its newest values, drops a partly read instant whole, and
+answers **206**. Its item carries a `responseDetail` naming the instant it stops at, and the
+response carries one naming every item cut. Asking again with that instant as `endTime` returns the
+rest with no gap and no overlap. `I3X_MAX_COMPONENTS` bounds the components one value or history request returns,
+summed over its elementIds, and answers 206 the same way.
+
+A device is a 206 as well when a metric changed in the window and the read before the window did
+not reach its earlier value. A noisy metric can fill that read before a quiet one appears in it.
+The maps then leave the quiet metric out until it changes, and its own elementId gives its samples.
+
+`startTime` and `endTime` are RFC 3339 with `Z` or an offset, parsed in full. PostgREST is sent the
+parsed instant, never the text, and a start after the end is a 400. The read before the window has
+no lower time bound. It is the shape the AAS export pages with (`supabase/functions/_shared/aas/bundle.ts`):
+`postgres_fdw` pushes the `WHERE` and the `ORDER BY` to the historian, so the local scan stops after
+one fetch of the remote cursor. The reads run one after another, so a request naming N devices
+costs up to 3N.
+
 ### Subscriptions
 
 Five rules are easy to get wrong and each fails quietly:
@@ -474,6 +514,8 @@ clock.
 | `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `20` | Per token `sub`; past it, create answers 429 |
 | `I3X_MAX_SUBSCRIPTIONS` | `500` | On the server; past it, create answers 429 |
 | `I3X_MAX_STREAMS` | `50` | Open SSE streams; past it, stream answers 429 |
+| `I3X_HISTORY_MAX_ROWS` | `10000` | Rows one history series reads, and values it returns (a device's map of N metrics counts N); past it, 206 |
+| `I3X_MAX_COMPONENTS` | `10000` | Components one value or history request returns, summed over its elementIds; past it, 206 |
 | `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
 | `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
 | `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
@@ -574,6 +616,11 @@ than minutes, and why `0` disables the cache outright.
   raised on every conformance run and is otherwise rediscovered on each reading of the log.
 - **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH. A
   device that has never birthed reports `false` rather than unknown.
+- **History `quality` is `Good` for every stored value**, whatever state the device was in when it
+  was stored (#497).
+- **History reads the raw hypertable only.** A range older than raw retention
+  (`timescaledb.retention.retainFor`, 14 days in the chart) comes back empty, although the rollups
+  still hold it (#505).
 - **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
   respect to a permission that has just been revoked. See
   [The address-space cache](#the-address-space-cache).
