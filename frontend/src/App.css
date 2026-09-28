@@ -2293,8 +2293,8 @@ tbody tr:hover { background: var(--bg-glass); }
   gap: 6px;
 }
 
-/* The chips wrap in the tray, and scroll once there are many: the side column must not push the
-   plan below the fold. */
+/* The chips wrap in the tray, and scroll once there are many, so a long queue of unfiled cells
+   stays one short block under the areas. */
 .site-map-tray-group .context-device-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
 
 .chip-link.is-selected {
