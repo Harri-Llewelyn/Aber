@@ -425,6 +425,39 @@ sh scripts/wait-for-ingestion-consuming.sh
 # validate.py and the whole stack lane, through port-forwards, with the credentials read out of
 # the release Secret. What CI runs.
 npm run dev:test
+# validate.py alone: the filter matches no stack suite. Its check 12 is the live i3X check, which
+# compares what the server says about a seeded plant with the Directory (i3x/README.md -> Testing).
+npm run dev:test -- --filter=i3x
+```
+
+### What validate.py leaves behind
+
+Nothing, when its check 16 passes. The run deletes what it created: the Directory rows its `SEEDED`
+map names, plus any an interrupted run left under a VALIDATE name; their audit rows, through the owner
+connection because `digital_thread` is append-only for every API role; their birth parameters in
+`asset_config`; and in the historian, the telemetry and `assets` rows of exactly those devices. A
+step that fails fails check 16, and the steps after it still run.
+
+The historian half is **one DELETE per device, with its `sparkplug_id` as a literal**. TimescaleDB
+decompresses only the compressed batches whose `segmentby` columns (`asset_id, metric_name`, set in
+`timescaledb/retention.sql`) match a constant, and it caps what one transaction may decompress
+(`timescaledb.max_tuples_decompressed_per_dml_transaction`, 100,000). The cleanup this replaced chose
+its rows with a subquery, `asset_id IN (SELECT asset_id FROM assets WHERE asset_name LIKE
+'VALIDATE_%')`, which matches no segment. Measured on the dev cluster on 2026-09-28: 72 rows matched,
+and the DELETE had to decompress all 4,437,012 in the table. It failed at the cap, took the `assets`
+DELETE in the same `try` with it, and printed a warning after the verdict.
+
+**Rows earlier runs left** stay in the historian until they leave the raw window
+(`telemetry_raw_window`). To remove them sooner, run this as the historian's owner while no
+validate.py run is in progress (`kubectl -n aber exec -it timescaledb-0 -c timescaledb -- psql -U
+postgres`). `\gexec` runs each generated DELETE as its own statement, and psql's autocommit makes
+each its own transaction:
+
+```sql
+SELECT format('DELETE FROM telemetry WHERE asset_id = %L', asset_id)
+  FROM assets WHERE asset_name LIKE 'VALIDATE%' \gexec
+DELETE FROM assets a WHERE a.asset_name LIKE 'VALIDATE%'
+   AND NOT EXISTS (SELECT 1 FROM telemetry t WHERE t.asset_id = a.asset_id);
 ```
 
 ### An empty database cannot exercise an assertion about history
@@ -593,7 +626,9 @@ Three suites have a second half elsewhere, and both halves must move together:
 `test_modelled_metrics_contract.py` and `test_rbe_telemetry.py` each pair with a JavaScript suite in
 the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
-[`i3x/README.md`](../i3x/README.md).
+[`i3x/README.md`](../i3x/README.md). The i3X server has a third check besides those two: `validate.py`'s
+check 12 compares its answers about a seeded plant with the Directory's, the meaning neither the
+conformance suite nor the unit suite can see.
 
 CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
 
