@@ -190,7 +190,7 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 Every file in `supabase/migrations/` is applied by the `db-init` Job on every install and upgrade, and re-applied
 harmlessly each time. The schema baseline (`0001`) and seed data (`0002`) fold the incremental
 chain kept in [`supabase/migrations/archive/`](supabase/migrations/archive/README.md), whose
-numbers below `0015` now also name live migrations, so those say "archived". The chain is how
+lower numbers are reused by live migrations, so each of those says "archived". The chain is how
 the schema came to be: archived `0003` audit immutability, archived `0004`, archived `0005`,
 archived `0006` Node-RED SSO, archived `0007` metric-name format, archived `0008` Sparkplug
 group, archived `0009` withdraws residual `anon` function grants, archived `0010` telemetry
