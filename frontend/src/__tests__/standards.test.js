@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, DEFAULT_SEMANTIC_ID_TYPE,
-  inferSemanticIdType, followSemanticIdType, storedSemanticIdPair, standardLabel,
+  inferSemanticIdType, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair, standardLabel,
   LOCAL_EXTENSION_LABEL,
   LOCAL_SEMANTIC_NAMESPACE, MTCONNECT_SEMANTIC_NAMESPACE, ISO22400_SEMANTIC_NAMESPACE,
   mtconnectSemanticId, mtconnectVocabularySemanticId
@@ -113,6 +113,16 @@ describe('storedSemanticIdPair', () => {
     expect(storedSemanticIdPair('  urn:x  ', 'IRI')).toEqual({ semanticId: 'urn:x', semanticIdType: 'IRI' })
     expect(storedSemanticIdPair('', 'IRDI')).toEqual({ semanticId: '', semanticIdType: '' })
     expect(storedSemanticIdPair(null, null)).toEqual({ semanticId: '', semanticIdType: '' })
+  })
+})
+
+describe('sameSemanticIdPair', () => {
+  it('compares pairs as they would be stored', () => {
+    expect(sameSemanticIdPair({ semanticId: ' urn:x ', semanticIdType: 'IRI' }, { semanticId: 'urn:x', semanticIdType: 'IRI' })).toBe(true)
+    // A type on a blank id is not stored, so it does not make two blanks differ.
+    expect(sameSemanticIdPair({ semanticId: '', semanticIdType: 'IRDI' }, { semanticId: '', semanticIdType: '' })).toBe(true)
+    expect(sameSemanticIdPair({ semanticId: 'urn:x', semanticIdType: 'IRI' }, { semanticId: 'urn:x', semanticIdType: 'IRDI' })).toBe(false)
+    expect(sameSemanticIdPair(null, { semanticId: 'urn:x', semanticIdType: 'IRI' })).toBe(false)
   })
 })
 

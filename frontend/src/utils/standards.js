@@ -134,6 +134,13 @@ export function storedSemanticIdPair(semanticId, semanticIdType) {
   return { semanticId: id, semanticIdType: id ? (semanticIdType || '') : '' }
 }
 
+/** Whether two `{ semanticId, semanticIdType }` pairs would be stored as the same pair. */
+export function sameSemanticIdPair(a, b) {
+  const x = storedSemanticIdPair(a?.semanticId, a?.semanticIdType)
+  const y = storedSemanticIdPair(b?.semanticId, b?.semanticIdType)
+  return x.semanticId === y.semanticId && x.semanticIdType === y.semanticIdType
+}
+
 /**
  * The reference type to show once the semantic id changes from `previousId` to `nextId`. A blank id
  * has no type. A type that agreed with the guess for the previous id follows the new guess, so

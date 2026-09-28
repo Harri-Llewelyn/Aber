@@ -20,7 +20,11 @@ const CATALOG = [
 
 const VOCABULARY = [
   { kind: 'DATA_ITEM_TYPE', name: 'ANGLE', category: 'SAMPLE' },
+  { kind: 'DATA_ITEM_TYPE', name: 'ACCELERATION', category: 'SAMPLE' },
+  { kind: 'DATA_ITEM_TYPE', name: 'EXECUTION', category: 'EVENT' },
+  { kind: 'DATA_ITEM_TYPE', name: 'FIRMWARE', category: 'EVENT' },
   { kind: 'COMPONENT', name: 'Axes', category: null },
+  { kind: 'COMPONENT', name: 'Actuator', category: null },
   { kind: 'UNIT', name: 'MILLIMETER', category: null },
   { kind: 'UNIT', name: 'PERCENT', category: null }
 ]
@@ -78,6 +82,7 @@ const routes = {
   '/api/v1/metric-catalog': CATALOG,
   '/api/v1/metric-groups': [
     { group_uuid: 'g1', name: 'Axes', standard: 'MTConnect' },
+    { group_uuid: 'g6', name: 'Actuator', standard: 'MTConnect' },
     { group_uuid: 'g2', name: 'OEE', standard: 'ISO 22400' },
     { group_uuid: 'g3', name: 'Machine', standard: 'OPC UA' },
     { group_uuid: 'g4', name: 'Hydraulic', standard: null },
@@ -474,6 +479,39 @@ describe('Edit Metric — correcting a semantic id', () => {
     expect(document.querySelector('.modal')).toBeNull()
     expect(api.put).not.toHaveBeenCalled()
   })
+
+  it('marks a stored id that is the one Add Metric would suggest', async () => {
+    await setup()
+    const modal = openEdit('Controller/EXECUTION')
+
+    expect(modal.getByText('· suggested')).toBeTruthy()
+    expect(modal.queryByRole('button', { name: 'Use suggested' })).toBeNull()
+  })
+
+  it('puts back the id Add Metric would suggest for an unmapped MTConnect metric', async () => {
+    // Restoring a cleared id used to mean retyping the derived IRI by hand.
+    api.put.mockResolvedValue({ id: 'm3' })
+    await setup()
+    const modal = openEdit('Controller/FIRMWARE')
+    expect(modal.getByRole('textbox', { name: /Semantic ID/ }).value).toBe('')
+
+    fireEvent.click(modal.getByRole('button', { name: 'Use suggested' }))
+    expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRI')
+    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/api/v1/metric-catalog/m3', {
+      semantic_id: 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/FIRMWARE',
+      semantic_id_type: 'IRI'
+    }))
+  })
+
+  it('suggests nothing for a local extension', async () => {
+    await setup()
+    const modal = openEdit('safety_interlock')
+
+    expect(modal.queryByRole('button', { name: 'Use suggested' })).toBeNull()
+    expect(modal.queryByText('· suggested')).toBeNull()
+  })
 })
 
 describe('Metric Catalog — search', () => {
@@ -603,8 +641,10 @@ describe('Metric Catalog — Add Metric toggle', () => {
 // Multi-standard metric builder (MTConnect / ISO 22400 / OPC UA / ASHRAE 223P) and semantic ids
 
 const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
-const semanticIdInput = () => screen.getByPlaceholderText(/opcfoundation\.org\/UA\/Robotics\/ActualPosition/)
-const referenceTypeSelect = () => screen.getByTitle(/Which kind of AAS Reference the semantic id is\./)
+// The Add Metric form's SemanticIdField, the only one on the page while no dialog is open.
+const semanticIdInput = () => screen.getByRole('textbox', { name: /Semantic ID/ })
+const referenceTypeSelect = () => screen.getByRole('combobox', { name: 'Reference Type' })
+const useSuggestedButton = () => screen.queryByRole('button', { name: 'Use suggested' })
 const datatypeSelect = () => screen.getByTitle(/How the value is encoded on the wire/)
 const conceptSelect = () => screen.getByTitle(/The ASHRAE 223P concept this point is attached to/)
 const addMetricButton = () => screen.getByRole('button', { name: /^Add$/ })
@@ -836,16 +876,22 @@ describe('Metric builder — semantic id', () => {
     expect(referenceTypeSelect().value).toBe('IRI')
   })
 
-  it('refuses a reference type with no id to describe', async () => {
-    // It would export as an AAS Reference with a type and no key.
+  it('holds no reference type without an id, which would export as a Reference with no key', async () => {
     await openForm()
+    api.post.mockResolvedValue({})
     fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
-    // Clearing the auto-derived id is what produces the half-filled state now.
     fireEvent.change(semanticIdInput(), { target: { value: '' } })
-    fireEvent.change(referenceTypeSelect(), { target: { value: 'IRDI' } })
 
-    expect(screen.getByRole('button', { name: 'Add' }).disabled).toBe(true)
-    expect(screen.getByText(/A reference type needs an id to describe/)).toBeTruthy()
+    expect(referenceTypeSelect().disabled).toBe(true)
+    expect(referenceTypeSelect().value).toBe('')
+    // Forced past the disabled select, a type still does not attach to the blank id.
+    fireEvent.change(referenceTypeSelect(), { target: { value: 'IRDI' } })
+    fireEvent.click(addMetricButton())
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog',
+      expect.objectContaining({ name: 'ANGLE', semantic_id: '', semantic_id_type: '' })
+    ))
   })
 
   it('leaves a metric addable once it has an id', async () => {
@@ -861,9 +907,8 @@ describe('Metric builder — semantic id', () => {
 
   it('says an Administrator can correct the id later with Edit, not that anyone can', async () => {
     await openForm()
-    expect(semanticIdInput().title).toMatch(/an Administrator can correct it later with Edit/)
     fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
-    expect(namePreview().textContent).toMatch(/correctable later with Edit, unlike the name/)
+    expect(namePreview().textContent).toMatch(/unlike the name, an Administrator can correct it later with Edit/)
   })
 
   it('retypes a prefilled IRI as an IRDI when an IRDI replaces it', async () => {
@@ -951,6 +996,127 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
       { target: { value: 'OPC 40010 Robotics::ActualPosition' } }
     )
     expect(semanticIdInput().value).toBe('http://opcfoundation.org/UA/Robotics/ActualPosition')
+  })
+})
+
+/**
+ * The suggestion is what the metric's own standard gives it. It shows until the operator replaces
+ * it and Use suggested brings it back. The latch users hit: touching Reference Type or the field
+ * before choosing a type used to end the derivation until Cancel, so the form suggested nothing.
+ */
+describe('Metric builder — the suggested semantic id', () => {
+  const ACCELERATION_ID = 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ACCELERATION'
+  const ANGLE_ID = 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE'
+  const ECLASS = '0173-1#02-AAO677#002'
+  const groupSelect = () => screen.getByTitle(/The category this metric belongs to/)
+  const typePicker = () => screen.getByTitle(/MTConnect data item type/)
+  const chooseActuatorAcceleration = () => {
+    fireEvent.change(groupSelect(), { target: { value: 'Actuator' } })
+    fireEvent.change(typePicker(), { target: { value: 'ACCELERATION' } })
+  }
+
+  it('suggests the data item type id after IRI was chosen over an empty field', async () => {
+    await openForm()
+    // Disabled while the id is blank, so only a forced change reaches it now.
+    expect(referenceTypeSelect().disabled).toBe(true)
+    fireEvent.change(referenceTypeSelect(), { target: { value: 'IRI' } })
+    chooseActuatorAcceleration()
+
+    expect(semanticIdInput().value).toBe(ACCELERATION_ID)
+    expect(referenceTypeSelect().value).toBe('IRI')
+    expect(addMetricButton().disabled).toBe(false)
+  })
+
+  it('suggests it after a keystroke in the field that was then deleted', async () => {
+    await openForm()
+    fireEvent.change(semanticIdInput(), { target: { value: 'h' } })
+    fireEvent.change(semanticIdInput(), { target: { value: '' } })
+    chooseActuatorAcceleration()
+
+    expect(semanticIdInput().value).toBe(ACCELERATION_ID)
+  })
+
+  it('marks the suggestion while it is shown, with nothing to restore', async () => {
+    await openForm()
+    chooseActuatorAcceleration()
+
+    expect(screen.getByText('· suggested').title).toMatch(/ACCELERATION data item type's id/)
+    expect(useSuggestedButton()).toBeNull()
+  })
+
+  it('puts the suggestion back with Use suggested once the operator has replaced it', async () => {
+    await openForm()
+    chooseActuatorAcceleration()
+    fireEvent.change(semanticIdInput(), { target: { value: ECLASS } })
+    expect(screen.queryByText('· suggested')).toBeNull()
+
+    fireEvent.click(useSuggestedButton())
+
+    expect(semanticIdInput().value).toBe(ACCELERATION_ID)
+    expect(referenceTypeSelect().value).toBe('IRI')
+    expect(useSuggestedButton()).toBeNull()
+  })
+
+  it('offers Use suggested after the suggestion was cleared, which stays legitimate until then', async () => {
+    await openForm()
+    chooseActuatorAcceleration()
+    fireEvent.change(semanticIdInput(), { target: { value: '' } })
+
+    expect(addMetricButton().disabled).toBe(false)
+    fireEvent.click(useSuggestedButton())
+    expect(semanticIdInput().value).toBe(ACCELERATION_ID)
+  })
+
+  it('keeps a typed id across a change of type, and suggests the new type', async () => {
+    // A hand-entered crosswalk is never overwritten; the new type's id is one click away.
+    await openForm()
+    fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
+    fireEvent.change(semanticIdInput(), { target: { value: ECLASS } })
+    chooseActuatorAcceleration()
+
+    expect(semanticIdInput().value).toBe(ECLASS)
+    expect(referenceTypeSelect().value).toBe('IRDI')
+    fireEvent.click(useSuggestedButton())
+    expect(semanticIdInput().value).toBe(ACCELERATION_ID)
+  })
+
+  it('follows the type again once the suggestion is restored', async () => {
+    await openForm()
+    fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
+    fireEvent.change(semanticIdInput(), { target: { value: ECLASS } })
+    fireEvent.click(useSuggestedButton())
+    expect(semanticIdInput().value).toBe(ANGLE_ID)
+
+    fireEvent.change(typePicker(), { target: { value: 'ACCELERATION' } })
+    expect(semanticIdInput().value).toBe(ACCELERATION_ID)
+  })
+
+  it('restores the id an ISO 22400 KPI carries', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
+    fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'AVAILABILITY' } })
+    fireEvent.change(semanticIdInput(), { target: { value: 'urn:example:availability' } })
+
+    fireEvent.click(useSuggestedButton())
+    expect(semanticIdInput().value).toBe('https://aber.local/semantics/iso22400/AVAILABILITY')
+  })
+
+  it('suggests nothing for a Custom metric, and posts its blank id as blank', async () => {
+    // An invented id would only restate the name, and would hide the metric from the unmapped count.
+    await openForm()
+    api.post.mockResolvedValue({})
+    fireEvent.change(standardSelect(), { target: { value: '' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g. VIBRATION_RMS'), { target: { value: 'VIBRATION_RMS' } })
+
+    expect(semanticIdInput().value).toBe('')
+    expect(screen.queryByText('· suggested')).toBeNull()
+    expect(useSuggestedButton()).toBeNull()
+    fireEvent.click(addMetricButton())
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog',
+      expect.objectContaining({ name: 'VIBRATION_RMS', standard: '', semantic_id: '', semantic_id_type: '' })
+    ))
   })
 })
 

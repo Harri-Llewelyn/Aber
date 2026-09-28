@@ -11,9 +11,10 @@ import { usePendingAction } from '../../hooks/usePendingAction'
  * Correct a catalog metric's semantic id and reference type, the only columns it changes. The name
  * and datatype are shown and not offered: devices publish them. It is also the confirmation, so it
  * says how many schemas model the metric, as DeprecateMetricModal does, because every shell
- * exported from one of them carries the new id.
+ * exported from one of them carries the new id. `suggestion` is the pair Add Metric would suggest
+ * for the metric's standard and type (utils/semanticIdSources.js), which Use suggested restores.
  */
-export function EditMetricSemanticIdModal({ metric, usageCount, onConfirm, onCancel }) {
+export function EditMetricSemanticIdModal({ metric, usageCount, suggestion = null, onConfirm, onCancel }) {
   const [saving, runSave] = usePendingAction()
 
   // Escape closes through the shared stack. Inert mid-flight; see ConfirmModal.
@@ -48,6 +49,7 @@ export function EditMetricSemanticIdModal({ metric, usageCount, onConfirm, onCan
           subject="metric"
           semanticId={pair.semanticId}
           semanticIdType={pair.semanticIdType}
+          suggestion={suggestion}
           onChange={setPair}
         />
 

@@ -1,6 +1,8 @@
 import React from 'react'
 import { HelpTip } from './HelpTip'
-import { SEMANTIC_ID_TYPES, followSemanticIdType } from '../../utils/standards'
+import {
+  SEMANTIC_ID_TYPES, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair
+} from '../../utils/standards'
 
 /** What the id asserts, by what carries it. */
 const HELP = {
@@ -25,21 +27,30 @@ const LABEL = { marginBottom: 0 }
 
 /**
  * A semantic id and its AAS reference type as one field, shared by the Schema builder, a draft
- * schema and a catalog metric's Edit so the three cannot drift apart. `readOnly` shows the pair as
- * text. The type is empty and its select disabled while the id is blank: a type with no id exports
- * as a Reference with no key. `onChange` receives the next `{ semanticId, semanticIdType }`.
+ * schema, Add Metric and a catalog metric's Edit so they cannot drift apart. `readOnly` shows the
+ * pair as text. The type is empty and its select disabled while the id is blank: a type with no id
+ * exports as a Reference with no key. `onChange` receives the next `{ semanticId, semanticIdType }`.
+ *
+ * `suggestion` is the pair the subject's own standard gives it, `{ semanticId, semanticIdType,
+ * note }`. It is marked while the field shows it; once replaced, Use suggested hands it back
+ * through `onChange`. What the field shows stays the caller's decision.
  */
 export function SemanticIdField({
-  idPrefix, subject = 'schema', semanticId = '', semanticIdType = '', onChange, readOnly = false
+  idPrefix, subject = 'schema', semanticId = '', semanticIdType = '', onChange, readOnly = false,
+  suggestion = null, style
 }) {
   const idFor = `${idPrefix}-semantic-id`
   const typeFor = `${idPrefix}-semantic-id-type`
   const hasId = (semanticId || '').trim() !== ''
+  const suggested = storedSemanticIdPair(suggestion?.semanticId, suggestion?.semanticIdType)
+  const showingSuggestion =
+    suggested.semanticId !== '' && sameSemanticIdPair({ semanticId, semanticIdType }, suggested)
+  const canRestore = !readOnly && suggested.semanticId !== '' && !showingSuggestion
 
   // Each tip is a sibling of its label, never a child: a button inside a label answers to the
   // label's name too, and the control stops being the only thing that does.
   return (
-    <div className="form-group">
+    <div className="form-group" style={style}>
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 260px', minWidth: 0 }}>
           <div style={LABEL_ROW}>
@@ -51,6 +62,21 @@ export function SemanticIdField({
                 </label>
               )}
             <HelpTip text={HELP[subject]} label="What a semantic ID is for" />
+            {showingSuggestion && (
+              <span className="semantic-id-suggested" title={suggestion.note}>· suggested</span>
+            )}
+            {canRestore && (
+              <span className="semantic-id-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => onChange?.({ ...suggested })}
+                  title={`Put the suggested id back: ${suggested.semanticId}`}
+                >
+                  Use suggested
+                </button>
+              </span>
+            )}
           </div>
           {readOnly ? (
             <div className="mono" style={{ fontSize: '12px', wordBreak: 'break-all', color: hasId ? 'var(--text-primary)' : 'var(--text-dim)' }}>
