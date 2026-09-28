@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 # The synthetic objects. Prefixed so they cannot collide with a sparkplug_id (24 chars, `gwy`/`dev`)
@@ -455,13 +456,18 @@ QUALITY_RANK = {"Good": 0, "GoodNoData": 1, "Uncertain": 2, "Bad": 3}
 def instant(value) -> Optional[datetime]:
     """An aware UTC datetime from a datetime or an ISO 8601 string, or None when it is neither."""
     if isinstance(value, datetime):
-        dt = value
-    elif isinstance(value, str) and value.strip():
-        try:
-            dt = datetime.fromisoformat(_normalise_fractional_seconds(value))
-        except ValueError:
-            return None
-    else:
+        return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    if isinstance(value, str) and value.strip():
+        return _parse_instant(value)
+    return None
+
+
+# Bounded. The same cached sample times are read on every value request.
+@lru_cache(maxsize=1 << 16)
+def _parse_instant(text: str) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(_normalise_fractional_seconds(text))
+    except ValueError:
         return None
     return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
