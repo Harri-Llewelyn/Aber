@@ -485,16 +485,29 @@ with the Directory's:
 | 12m | `serverVersion` is the chart's appVersion (#501) |
 | 12n | a gateway value's `lastHeartbeat` ends in `Z` (#501) |
 | 12o | an Int32 published as −42 reads back −42 here and in the historian (#502) |
+| 12p | a device with two schemas is typed by their set, not extended, and composed of its metrics (#495, #509) |
+| 12q | each metric is a leaf with only `ComponentOf`, typed by its catalog row or its datatype, nobody's child (#495) |
+| 12r | the set's type is `allOf` its schemas, UnknownType is `{}`, `/namespaces` lists exactly the types' (#495, #459) |
+| 12s | `maxDepth: 0` returns the map and its metrics as components; a metric reads alone (#495) |
+| 12t | the area holds its cell and area-wide gateway, lanes hold their gateways, locations compose nothing (#496) |
+| 12u | the one root is named by `site.name` (#496) |
+| 12v | an area counts its cells and devices, as the Directory does, with no components (#496) |
+| 12w | history is a metric's scalars, or a device's maps naming its metrics (#500) |
+| 12x | a device's map carries forward a value set before the window (#500) |
+| 12y | a series cut by `limit` is a 206 naming where to resume; malformed windows are 400s (#500, #501) |
+| 12z | archiving a subscribed device withdraws it once, with a 206 (#518); runs last and restores it |
 
 12a–12f are older: read-only, fail-closed, a single root, live values, and values scoped by RLS.
 
 **Adding an assertion.** Each is a function in `validate.py` that takes the shared `I3xContext` (the
-token, `/info`, every object with its metadata, the Directory's resolved location per seeded device)
-and returns `(True | False | None, detail)`, `None` being a skip. Append it to `I3X_CHECKS` with the
-next free letter, and raise the outcome count `ingestion/README.md` claims (`check-docs-drift` check
-7). Seed what it needs in `seed_supabase()` or `run_simulation()`, under a `SEEDED` key whose table is
-in `SEEDED_TABLES`: the cleanup deletes by those keys. `I3X_ROUTES` is the route list 12h sweeps,
-held equal to `ROUTES` by check 35.
+token, `/info`, every object with its metadata, the Directory's resolved location per seeded device,
+`/objecttypes` on first use) and returns `(True | False | None, detail)`, `None` being a skip. List it
+in `I3X_CHECKS`, and raise the outcome count `ingestion/README.md` claims (`check-docs-drift` check
+7). The letters stop at 12z, so the next group takes a new number. Seed what it needs in
+`seed_supabase()` or `run_simulation()`, under a `SEEDED` key whose table is in `SEEDED_TABLES`: the
+cleanup deletes by those keys. Expected values come from the Directory or from what the run published
+(`plant_a_samples`), not from literals. A check that changes a row runs last and restores it.
+`I3X_ROUTES` is the route list 12h sweeps, held equal to `ROUTES` by check 35.
 
 ## Configuration
 
