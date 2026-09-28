@@ -334,7 +334,7 @@ of what arrived — and the shape is the one `parse_sparkplug_payload()` already
 fallback, so a hand-edit valid in the file is valid to the daemon.
 
 **Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
-Node-RED simulator flow publishes JSON, Remote gateways publish protobuf — and they enter the
+gateway appliance's flow publishes JSON, a standard Sparkplug B edge node protobuf — and they enter the
 daemon down different branches of `parse_sparkplug_payload()`. Replaying a JSON fleet as protobuf
 would mean a fault reproduced through this tool could be one the playback introduced, or one it
 silently repaired.
@@ -890,8 +890,18 @@ masked to its width and sign-extended, which accepts both encodings in use (an I
 `0xFFFFFFFB` from Tahu's Java encoder, `0xFB` from its Python one); unsigned types and DateTime
 (epoch milliseconds) are stored as they arrive. With no declared datatype the value is stored
 unsigned, as before, and counted in `aber_ingestion_integer_datatype_unknown_total`: guessing a
-width would corrupt an unsigned counter to repair a signed one. The JSON fallback writes a negative
-number as its 32-bit pattern, marked Int32 if undeclared. `i3x/i3x_service.py` mirrors all of this.
+width would corrupt an unsigned counter to repair a signed one. `i3x/i3x_service.py` mirrors all
+of this.
+
+**The JSON encoding reads into the same protobuf metric.** `json_metric_value()` takes the first of
+`int_value`, `long_value`, `float_value`, `double_value`, `boolean_value`, `string_value` and a bare
+`value`, which is typed by what it holds. An integer goes into `int_value` as its two's complement,
+or into `long_value` when the key, a 64-bit datatype (Int64, UInt64, DateTime) or its size needs 64
+bits; a negative one with no datatype is marked Int32 or Int64 so it reads back signed. A
+`float_value` is rounded to 32 bits, as the protobuf field would round it. A value that is not the
+JSON type its key names, or does not fit its field, drops that metric with a warning and the rest
+of the payload lands. i3X reads JSON through a mirrored copy of the function, and both suites
+assert `test-harness/fixtures/sparkplug-json-values.json`.
 
 Rows are keyed by **`sparkplug_id`**, never by name, so a rename never breaks a series. The
 `assets` dimension row is upserted on every write with the current display label.

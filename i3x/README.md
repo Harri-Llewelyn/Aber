@@ -551,13 +551,19 @@ consults; withdrawing the principal refuses every token that names it. What that
 - **This server** refuses it within 15 seconds, because it authenticates every request but
   `GET /info` through PostgREST ([Security](#security)). An open stream ends at its next
   15-second keepalive.
-- **Storage, Realtime and the edge runtime do not.** They check only the signature, and accept a
-  revoked token until it expires.
+- **Storage, Realtime, the edge runtime and Studio do not.** They check only the signature, and
+  accept a revoked token until it expires.
 
-So the expiry still bounds those three, which is why `--days` is a real decision: a token revoked
+So the expiry still bounds those four, which is why `--days` is a real decision: a token revoked
 after a laptop left the building still reaches them until it expires. **Do not rotate
 `SUPABASE_JWT_SECRET` to withdraw one token**: that invalidates every token in the stack, including
 the stack's own keys.
+
+**The script's closing lines print both halves on purpose.** Until archived migration 0074 made a
+single token revocable, they said there was no revocation short of rotating that secret, which is
+the advice that takes the whole stack down to withdraw one credential. They now print the `jti` and
+the `revoke_service_token()` call beside the services a revoked token still reaches: "revocable"
+without that qualifier would replace one wrong belief with another.
 
 ### Troubleshooting: `server_info` succeeding proves nothing about your token
 

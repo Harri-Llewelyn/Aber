@@ -97,5 +97,79 @@ class JsonSignedIntegers(unittest.TestCase):
         self.assertEqual(metric.int_value, 7)
 
 
+FIXTURE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "test-harness", "fixtures", "sparkplug-json-values.json"
+)
+
+
+class JsonValuesAgreeWithI3x(unittest.TestCase):
+    """
+    Every case in test-harness/fixtures/sparkplug-json-values.json, read through this parser. The
+    i3X server asserts the same file through decode_metrics(), so the historian stores what i3X
+    serves for the same JSON payload.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(FIXTURE, encoding="utf-8") as f:
+            cls.cases = json.load(f)["cases"]
+
+    def setUp(self):
+        ingestion._json_metric_refused_warned.clear()
+
+    @staticmethod
+    def reads(metric):
+        """The Sparkplug value the daemon takes from a metric: an integer through its datatype."""
+        which = metric.WhichOneof("value")
+        if which is None:
+            return None
+        raw = getattr(metric, which)
+        if which in ("int_value", "long_value"):
+            return ingestion.sparkplug_integer_value(ingestion._declared_datatype(metric), raw)
+        return raw
+
+    def test_the_fixture_is_not_empty(self):
+        self.assertGreater(len(self.cases), 10)
+        self.assertTrue(any(case.get("dropped") for case in self.cases))
+
+    def test_every_case_reads_as_the_fixture_says(self):
+        with self.assertLogs(ingestion.logger, "WARNING"):
+            payload = parse([case["metric"] for case in self.cases])
+        got = {metric.name: self.reads(metric) for metric in payload.metrics}
+        for case in self.cases:
+            name = case["metric"]["name"]
+            with self.subTest(case=name):
+                if case.get("dropped"):
+                    self.assertNotIn(name, got)
+                else:
+                    self.assertEqual(got[name], case["reads"])
+                    self.assertEqual(type(got[name]) is bool, type(case["reads"]) is bool)
+
+    def test_a_refused_metric_costs_only_itself_and_is_logged(self):
+        with self.assertLogs(ingestion.logger, "WARNING") as logs:
+            payload = parse([
+                {"name": "Too_Wide", "int_value": 2**32},
+                {"name": "Temperature", "datatype": 10, "double_value": 21.4},
+            ])
+        self.assertEqual([metric.name for metric in payload.metrics], ["Temperature"])
+        self.assertIn("Too_Wide", "\n".join(logs.output))
+
+    def test_a_negative_int64_is_stored_as_its_64_bit_pattern(self):
+        metric = parse([{"name": "Offset", "datatype": 4, "int_value": -5}]).metrics[0]
+        self.assertEqual(metric.WhichOneof("value"), "long_value")
+        self.assertEqual(self.reads(metric), -5)
+
+    def test_a_null_name_is_an_alias_only_metric(self):
+        metric = parse([{"name": None, "alias": 7, "datatype": 10, "double_value": 1.5}]).metrics[0]
+        self.assertEqual((metric.name, metric.alias, metric.double_value), ("", 7, 1.5))
+
+    def test_long_and_float_values_are_read(self):
+        payload = parse([
+            {"name": "Bytes", "datatype": 8, "long_value": 2**40},
+            {"name": "Ratio", "datatype": 9, "float_value": 0.5},
+        ])
+        self.assertEqual([self.reads(metric) for metric in payload.metrics], [2**40, 0.5])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

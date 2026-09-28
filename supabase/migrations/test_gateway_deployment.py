@@ -1,6 +1,6 @@
 """
 `gateways.deployment`: the constraints on it, and the view that has to be rebuilt when a gateways
-column moves.
+column moves. `gateways.status`: the CHECK 0014 adds.
 
     python supabase/migrations/test_gateway_deployment.py
 
@@ -110,6 +110,49 @@ class TestTheConstraints(DeploymentBase):
         with self.assertRaises(psycopg2.Error):
             self.cur.execute(
                 "UPDATE public.gateways SET deployment=NULL WHERE id=%s;", (gid,)
+            )
+
+
+class TestTheStatusIsALabel(DeploymentBase):
+    """
+    `gateways.status` is the fleet's word, so the CHECK closes only what no writer may store. It
+    agrees with the heartbeat gate: ingest_record_gateway_health() refuses the same values.
+    """
+
+    def refused(self, status):
+        """Whether the table refuses `status`, naming its CHECK. A savepoint keeps the test's transaction."""
+        self.cur.execute("SAVEPOINT status_probe;")
+        try:
+            self.insert(status=status)
+        except psycopg2.errors.CheckViolation as err:
+            self.cur.execute("ROLLBACK TO SAVEPOINT status_probe;")
+            self.assertIn("gateways_status_valid", str(err))
+            return True
+        self.cur.execute("RELEASE SAVEPOINT status_probe;")
+        return False
+
+    def test_the_platforms_states_and_the_fleets_words_are_stored(self):
+        for status in ("ONLINE", "OFFLINE", "PENDING_ENROLLMENT", "AWAITING_BIRTH", "MAINTENANCE",
+                       "Running", "X" * 32):
+            with self.subTest(status=status):
+                self.assertFalse(self.refused(status))
+
+    def test_what_no_writer_may_store_is_refused(self):
+        for status in ("", "   ", "X" * 33, "STALE", "stale", "Awaiting_Birth", "pending_enrollment"):
+            with self.subTest(status=status):
+                self.assertTrue(self.refused(status))
+
+    def test_the_heartbeat_gate_refuses_before_the_table_does(self):
+        # The gate's own message, not the CHECK's: the two hold the same rule. The claim is the
+        # ingestion principal's, which require_ingestion_caller() tests through auth.uid().
+        gid, _ = self.insert(status="ONLINE")
+        self.cur.execute(
+            "SELECT set_config('request.jwt.claims', %s, true);",
+            ('{"sub": "b0000000-0000-4000-8000-000000000002", "role": "authenticated"}',),
+        )
+        with self.assertRaises(psycopg2.errors.InvalidParameterValue):
+            self.cur.execute(
+                "SELECT public.ingest_record_gateway_health(%s::uuid, 'stale', now(), NULL);", (gid,)
             )
 
 

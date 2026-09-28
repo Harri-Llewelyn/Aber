@@ -765,7 +765,7 @@ paths:
       parameters:
         - { name: entity_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
         - { name: entity_type, in: query, schema: { type: string }, description: 'e.g. `eq.devices` or `eq.metric_catalog`; any `DigitalThreadEntry.entity_type`' }
-        - { name: action, in: query, schema: { type: string }, description: '`eq.INSERT` | `eq.UPDATE` | `eq.DELETE`' }
+        - { name: action, in: query, schema: { type: string }, description: 'e.g. `eq.UPDATE` or `eq.TOKEN_REVOKED`; any `DigitalThreadEntry.action`' }
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
         - $ref: '#/components/parameters/Limit'
@@ -1845,10 +1845,9 @@ paths:
         `is_quarantined`, `first_dbirth_at`), the device's `gateway_id` data path and its
         `schema_id` binding are all refused, by name, at insert time.
 
-        **The `schemas` lane proposes an act rather than a column edit.** Its `entity_id` is a
-        **draft** schema and its patch is exactly `{"publish": true}`; approving calls
-        `publish_schema_version()`, which archives the predecessor and repoints every attached
-        device in the same transaction.
+        **A lane is open while `proposable_columns()` answers for it**, which it does for the five
+        `entity_type` values below. `schemas` is refused: archived migration 0090 withdrew that
+        lane, and rows filed before then still carry it.
       requestBody:
         required: true
         content:
@@ -1857,24 +1856,26 @@ paths:
               type: object
               required: [entity_type, entity_id, patch]
               properties:
-                entity_type: { type: string, enum: [devices, device_nameplate, schemas] }
-                entity_id: { type: string, format: uuid, description: 'The device. Both lanes are keyed by one.' }
+                entity_type: { type: string, enum: [areas, cells, device_nameplate, devices, gateways] }
+                entity_id: { type: string, format: uuid, description: 'The target row: the device for `devices` and `device_nameplate`, otherwise the area, cell or gateway. It must exist and not be archived.' }
                 patch: { type: object, description: 'Column -> new value. A patch, not a row snapshot.' }
                 rationale: { type: string }
       responses:
         '201': { description: Filed. }
+        '400': { description: 'The lane is not proposable, or the patch names a column the lane does not admit.' }
         '403': { description: 'Caller lacks `proposal:create`, or named somebody else as the proposer.' }
-        '409': { description: 'An open proposal against this asset by this person already exists.' }
+        '409': { description: 'An open proposal against this asset by this person already exists, or the target is absent or archived.' }
 
   /rest/v1/rpc/approve_proposal:
     post:
       tags: [Registry]
       summary: Approve a proposal, which is to apply it
       description: |
-        **The lane names the approver.** `may_decide_proposal()` admits an Administrator or a
-        Shopfloor_Manager to the asset lanes, and an Administrator alone to the `schemas` lane —
-        `0069` withdrew `schema:manage` from that role. Re-checked **server-side** rather than
-        taken from the caller. The patch is re-validated against the allowlist and applied in the same
+        **The lane names the approver.** `may_decide_proposal()` resolves what the target table's
+        own write policy resolves: an Administrator or a Shopfloor_Manager for `devices`,
+        `device_nameplate` and `areas`, and `cell:manage` or `gateway:manage` for `cells` and
+        `gateways`. A withdrawn lane, `schemas` among them, is decidable by nobody. Re-checked
+        **server-side** rather than taken from the caller. The patch is re-validated against the allowlist and applied in the same
         transaction, so every CHECK, foreign key and trigger on the target runs now — **an invalid
         change cannot be approved**, it aborts rather than becoming an audit record of something
         that did not happen.
@@ -4140,11 +4141,37 @@ components:
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
             `device_links` rows.
         entity_id: { type: string, format: uuid }
-        action: { type: string, enum: [INSERT, UPDATE, DELETE] }
+        action:
+          type: string
+          enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, TOKEN_MINTED, TOKEN_REVOKED,
+                 PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
+                 PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED]
+          description: >-
+            What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
+            `DELETE`; every other action is written by the function that performs the act, such as
+            `TOKEN_REVOKED` by `revoke_service_token()`. A service principal's creation is an
+            `INSERT` written by `create_machine_principal()`.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
         actor_source: { type: string, nullable: true, enum: [user, ingestion, service, migration], description: 'The trigger accepts only the non-`user` values from a client header — a client asserting a human author is precisely the claim it must not be able to make.' }
+        causation_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            The transaction that wrote the row (`txid_current()`), so rows sharing it were written
+            by one act. Unique only within this database: group by it, never keep it as a
+            reference. NULL on rows older than the column, and on `PROPOSAL_APPLIED` and
+            `PROPOSAL_EXPIRED` rows, whose writers do not set it.
+        audit_domain:
+          type: string
+          enum: [asset, security]
+          description: >-
+            The lane, which decides who may read the row: `asset` is readable by Administrator,
+            Shopfloor_Manager and Auditor, `security` by Administrator and Auditor. Stamped by a
+            trigger from `audit_domain_for()`; a writer cannot supply it.
         recorded_at: { type: string, format: date-time }
 
     DirectoryService:

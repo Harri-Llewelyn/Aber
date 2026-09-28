@@ -70,6 +70,10 @@ const days = daysArg >= 0 ? Number(args[daysArg + 1]) : DEFAULT_DAYS;
 
 const principalArg = args.indexOf('--principal');
 const SUBJECT = principalArg >= 0 ? String(args[principalArg + 1] ?? '') : DEFAULT_SUBJECT;
+// Only the seeded MCP principal is known to be read-only; another may hold write permissions.
+const PRINCIPAL_LABEL = SUBJECT === DEFAULT_SUBJECT
+  ? `read-only principal ${SUBJECT} (telemetry:read)`
+  : `principal ${SUBJECT}`;
 
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(SUBJECT)) {
   console.error(`--principal must be a service principal's UUID, got '${SUBJECT}'.`);
@@ -227,21 +231,13 @@ if (asJson) {
       2
     )
   );
-  console.error(`\n# read-only principal ${SUBJECT}, valid until ${until} (jti ${jti})`);
+  console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until} (jti ${jti})`);
   console.error('# recorded in the Digital Thread as TOKEN_MINTED; revoke with revoke_service_token');
 } else {
   console.log(token);
-  console.error(`\n# read-only principal ${SUBJECT} (telemetry:read), valid until ${until}`);
-  // THESE TWO LINES SAID REVOCATION WAS IMPOSSIBLE, AND 0074 MADE THAT FALSE. They read: "There is
-  // no revocation short of rotating SUPABASE_JWT_SECRET, which invalidates every token in the
-  // stack." An operator who believed it would rotate the secret to withdraw one credential and take
-  // the whole stack down with it -- which is why this is corrected at the same time as the
-  // mechanism rather than left for the docs pass.
-  //
-  // THE SCOPE IS PART OF THE MESSAGE. `auth_pre_request()` is a PostgREST hook, so a revoked token
-  // still satisfies storage, realtime, the edge runtime and Studio, each of which verifies the
-  // signature for itself. Printing "revocable" without that qualifier would trade one wrong belief
-  // for another.
+  console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until}`);
+  // The revocation and its scope go together: auth_pre_request() is a PostgREST hook, so a revoked
+  // token still reaches every service that verifies the signature itself (i3x/README.md, "The token").
   console.error(`# Paste as I3X_TOKEN. jti ${jti} — revoke it against the API with`);
   console.error(`# SELECT revoke_service_token('${jti}'); storage, realtime and the edge`);
   console.error('# functions verify the signature only and will still accept it until it expires.');

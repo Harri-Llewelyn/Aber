@@ -51,6 +51,11 @@ export const DIGITAL_THREAD_ACTIONS = {
   // The pair is the question: "who was given what" is only half an answer without "and when was
   // it taken away".
   TOKEN_REVOKED:     'Token revoked',
+  // The service principal's own lifecycle, written by the functions that withdraw, reinstate and
+  // rename one. Its creation is an INSERT.
+  PRINCIPAL_REVOKED:    'Principal revoked',
+  PRINCIPAL_REINSTATED: 'Principal reinstated',
+  PRINCIPAL_DESCRIBED:  'Principal described',
   // An approval writes one row naming both parties, and is filterable because "what has been
   // approved lately" is a question this page answers. Rejected and withdrawn proposals are absent:
   // neither changed anything, and the proposal row carries the refusal.

@@ -196,7 +196,7 @@ def dict_to_payload(data):
             metric.int_value = value
         if m.get("long_value") is not None:
             value = int(m["long_value"])
-            # The same rule at 64 bits, for a hand-edited file; the daemon's JSON arm reads no long_value.
+            # The same rule at 64 bits.
             if -2 ** 63 <= value < 0:
                 value &= 0xFFFFFFFFFFFFFFFF
                 if m.get("datatype") is None:
@@ -215,10 +215,9 @@ def dict_to_payload_bytes(data):
 # ---------------------------------------------------------------------------------------------
 # Wire encodings
 # ---------------------------------------------------------------------------------------------
-# BOTH OF THESE ARE LIVE TRAFFIC ON THIS STACK, which is not obvious and cost a recording to find
-# out. `parse_sparkplug_payload()` falls back to JSON because the Node-RED simulator flow publishes
-# it, so a recorder that only understood protobuf skipped every single message from the seeded
-# fleet and then reported the fleet as idle.
+# BOTH OF THESE ARE LIVE TRAFFIC ON THIS STACK. `parse_sparkplug_payload()` falls back to JSON
+# because the gateway appliance's flow publishes it, and a standard Sparkplug B edge node publishes
+# protobuf, so a recorder that read only one would report the other's gateways as idle.
 ENCODING_PROTOBUF = "protobuf"
 ENCODING_JSON = "json"
 

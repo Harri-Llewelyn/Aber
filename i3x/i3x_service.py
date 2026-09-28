@@ -2358,16 +2358,72 @@ def _ms_to_iso(ms) -> Optional[str]:
         return None
 
 
+# MIRRORED FROM ingestion.py -- `test_i3x_service.py` asserts both copies agree, and both suites
+# read test-harness/fixtures/sparkplug-json-values.json.
+def json_metric_value(metric):
+    """
+    The (field, value, datatype) one JSON-encoded metric carries, as the protobuf encoding would
+    hold it: the first present of the six Sparkplug value keys, then a bare `value`, which is typed
+    by what it holds. An integer is stored as its two's complement in `int_value`, or `long_value`
+    when the key, a 64-bit datatype or its size needs 64 bits; a negative one with no datatype is
+    marked Int32 or Int64 so it reads back signed. A `float_value` is rounded to 32 bits.
+
+    (None, None, datatype) when no value key is present. ValueError when the value is not the JSON
+    type its key names or does not fit its field; the caller drops that metric, not its payload.
+    """
+    import struct
+
+    datatype = metric.get("datatype")
+    if not isinstance(datatype, int) or isinstance(datatype, bool) or not 0 <= datatype < 2**32:
+        datatype = None
+    for key in ("int_value", "long_value", "float_value", "double_value", "boolean_value",
+                "string_value", "value"):
+        value = metric.get(key)
+        if value is None:
+            continue
+        if key == "value" and (isinstance(value, bool) or not isinstance(value, int)):
+            key = {bool: "boolean_value", float: "double_value", str: "string_value"}.get(type(value))
+            if key is None:
+                raise ValueError("value %r is not a number, a boolean or a string" % (value,))
+        if key in ("int_value", "long_value", "value"):
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError("%s %r is not an integer" % (key, value))
+            wide = (key == "long_value" or datatype in (4, 8, 13)
+                    or (key == "value" and not -(2**31) <= value < 2**32))
+            bits = 64 if wide else 32
+            if not -(2 ** (bits - 1)) <= value < 2**bits:
+                raise ValueError("%s %d does not fit in %d bits" % (key, value, bits))
+            if value < 0 and datatype is None:
+                datatype = 4 if wide else 3
+            return ("long_value" if wide else "int_value"), value & ((1 << bits) - 1), datatype
+        if key in ("float_value", "double_value"):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError("%s %r is not a number" % (key, value))
+            if key == "float_value":
+                try:
+                    value = struct.unpack("<f", struct.pack("<f", value))[0]
+                except OverflowError:
+                    raise ValueError("float_value %r does not fit in 32 bits" % (value,)) from None
+            return key, float(value), datatype
+        if not isinstance(value, bool if key == "boolean_value" else str):
+            raise ValueError("%s %r is not a %s" % (key, value, key.split("_")[0]))
+        return key, value, datatype
+    return None, None, datatype
+
+
 def decode_metrics(raw: bytes) -> Optional[List[dict]]:
     """
     Decode a Sparkplug B payload to plain metric dicts, protobuf first and JSON second.
 
     THE JSON ARM IS NOT OPTIONAL, and its absence is not a decode warning -- it is total silence on
-    the value path. `node_red_flow.json`, which is what the demo stack and every E2E run publish
-    with, emits the JSON encoding; protobuf-only parsing raises `Wire format was corrupt` on every
-    single DDATA and the i3X server serves `GoodNoData` for a fleet that is publishing perfectly.
-    `ingestion.py::parse_sparkplug_payload` carries the same two arms for the same reason; keep them
-    in step.
+    the value path. The gateway appliance's Node-RED flow
+    (`forge/gateway-platform/appliance/flows.template.json`) publishes the JSON encoding;
+    protobuf-only parsing raises `Wire format was corrupt` on every single DDATA and the i3X server
+    serves `GoodNoData` for a fleet that is publishing perfectly. `ingestion.py`'s
+    `parse_sparkplug_payload` carries the same two arms, and both read a JSON metric through
+    `json_metric_value`.
 
     Returns None when neither arm decodes, which the caller treats as "not a Sparkplug payload" --
     `spBv1.0/STATE/...` birth certificates are plain text and legitimately land here.
@@ -2403,17 +2459,12 @@ def decode_metrics(raw: bytes) -> Optional[List[dict]]:
     payload_ts = data.get("timestamp")
     out = []
     for m in data.get("metrics") or []:
-        value, field = None, None
-        for key in ("double_value", "int_value", "string_value", "boolean_value", "value"):
-            if m.get(key) is not None:
-                value, field = m[key], key
-                break
-        datatype = m.get("datatype")
-        if not isinstance(datatype, int) or isinstance(datatype, bool):
-            datatype = None
-        # Marked Int32 as ingestion's JSON arm marks it, so an undeclared negative reads as itself.
-        if field == "int_value" and datatype is None and isinstance(value, int) and -(2**31) <= value < 0:
-            datatype = 3
+        # Ingestion drops the same metric and logs it; the rest of the payload is served.
+        try:
+            field, value, datatype = json_metric_value(m)
+        except (AttributeError, TypeError, ValueError) as err:
+            logger.debug("dropped a JSON metric: %s", err)
+            continue
         out.append(
             {
                 "name": m.get("name") or None,

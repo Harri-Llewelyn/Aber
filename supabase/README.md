@@ -892,6 +892,25 @@ the opposite direction when a column was removed.
 drops and recreates rather than replacing, which is also what re-applies the `COMMENT` and the
 grants — `DROP VIEW` discards both, which is why they live inside it.
 
+### A gateway's status is the fleet's word, within limits (`0014`)
+
+`gateways.status` is free text on purpose: a `Gateway_Status` metric names the gateway's own
+operating state, so `MAINTENANCE` or `DEGRADED` is as valid as the `ONLINE` and `OFFLINE` ingestion
+infers from the message type. The platform writes `PENDING_ENROLLMENT` (issuing a bundle) and
+`AWAITING_BIRTH` (`enroll-gateway`), and the column defaults to `OFFLINE`. `STALE` is derived by
+`gateway_status` at read time and never stored.
+
+`0014` adds `gateways_status_valid`, which refuses only what no writer may store: a blank status,
+one over 32 characters, `STALE` in any case, and the two lifecycle states spelt any way but the
+platform's, which the view, the dashboard and `platform_health` compare exactly. The heartbeat gate,
+`ingest_record_gateway_health()`, already refused the same values from a gateway; the constraint
+holds them for every other writer, a Manager's PATCH included.
+
+**A database that already holds such a status keeps it.** The constraint is not applied, a
+`WARNING` in the `db-init` log names each gateway and what it holds, and the first boot after they
+are corrected applies it. Nothing is rewritten, because which status was meant is the operator's
+call.
+
 ---
 
 ## Core Tables
