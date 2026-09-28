@@ -12,8 +12,8 @@
 --     dashboard and platform_health compare exactly.
 -- The three words are ingestion.py's RESERVED_GATEWAY_STATUSES.
 --
--- A row that already holds such a value is not rewritten. The constraint stays off, a WARNING
--- names each gateway, and the first boot after they are corrected adds it.
+-- A row that already holds such a value is not rewritten. The constraint is not applied, a
+-- WARNING names each gateway, and the first boot after they are corrected applies it.
 --
 -- Idempotent.
 -- =============================================================================================
@@ -27,17 +27,12 @@ DECLARE
   v_want constant text := 'CHECK (((btrim(status) <> ''''::text) AND (length(status) <= 32) AND ((upper(status) <> ALL (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text, ''STALE''::text])) OR (status = ANY (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text])))))';
   v_offenders text;
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'gateways_status_valid'
-                AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> v_want) THEN
-    ALTER TABLE public.gateways DROP CONSTRAINT gateways_status_valid;
-  END IF;
-
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'gateways_status_valid'
-                    AND conrelid = 'public.gateways'::regclass) THEN
-    -- The same predicate as the CHECK, asked first so a refused row is named rather than raised.
+                    AND conrelid = 'public.gateways'::regclass
+                    AND pg_get_constraintdef(oid) = v_want) THEN
+    -- The same predicate as the CHECK, asked first so a refused row is named rather than raised,
+    -- and so an older definition is replaced only once this one can hold.
     SELECT string_agg(format('%s (%s) holds %L', name, sparkplug_id, left(status, 40)), '; ' ORDER BY name)
       INTO v_offenders
       FROM public.gateways
@@ -47,20 +42,21 @@ BEGIN
 
     IF v_offenders IS NULL THEN
       ALTER TABLE public.gateways
+        DROP CONSTRAINT IF EXISTS gateways_status_valid,
         ADD CONSTRAINT gateways_status_valid
         CHECK (btrim(status) <> '' AND length(status) <= 32
                AND (upper(status) NOT IN ('PENDING_ENROLLMENT', 'AWAITING_BIRTH', 'STALE')
                     OR status IN ('PENDING_ENROLLMENT', 'AWAITING_BIRTH')));
     ELSE
-      RAISE WARNING '0014: gateways_status_valid was not added, because these gateways hold a status it refuses: %',
+      RAISE WARNING '0014: gateways_status_valid is not applied, because these gateways hold a status it refuses: %',
                     v_offenders
         USING HINT = 'Nothing was changed. Correct each status as the database owner (OFFLINE is what a '
                      'gateway that is not reporting holds, and its next heartbeat writes its own); the '
-                     'next boot adds the constraint.';
+                     'next boot applies the constraint.';
     END IF;
   END IF;
 
-  -- What this block did: unless the WARNING above named the gateways keeping it off, the CHECK is
+  -- What this block did: unless the WARNING above named the gateways holding it back, the CHECK is
   -- in place, validated, and defined as declared here.
   IF v_offenders IS NULL AND NOT EXISTS (
        SELECT 1 FROM pg_constraint

@@ -905,9 +905,10 @@ platform's, which the view, the dashboard and `platform_health` compare exactly.
 `ingest_record_gateway_health()`, already refused the same values from a gateway; the constraint
 holds them for every other writer, a Manager's PATCH included.
 
-**A database that already holds such a status keeps it.** The constraint is left off, a `WARNING`
-in the `db-init` log names each gateway and what it holds, and the first boot after they are
-corrected adds it. Nothing is rewritten, because which status was meant is the operator's call.
+**A database that already holds such a status keeps it.** The constraint is not applied, a
+`WARNING` in the `db-init` log names each gateway and what it holds, and the first boot after they
+are corrected applies it. Nothing is rewritten, because which status was meant is the operator's
+call.
 
 ---
 
