@@ -190,13 +190,13 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 Every file in `supabase/migrations/` is applied by the `db-init` Job on every install and upgrade, and re-applied
 harmlessly each time. The schema baseline (`0001`) and seed data (`0002`) fold the incremental
 chain kept in [`supabase/migrations/archive/`](supabase/migrations/archive/README.md), whose
-numbers below `0012` now also name live migrations, so those say "archived". The chain is how
+lower numbers are reused by live migrations, so each of those says "archived". The chain is how
 the schema came to be: archived `0003` audit immutability, archived `0004`, archived `0005`,
 archived `0006` Node-RED SSO, archived `0007` metric-name format, archived `0008` Sparkplug
 group, archived `0009` withdraws residual `anon` function grants, archived `0010` telemetry
 rollups and latest-value view, archived `0011` IDTA Digital Nameplate and per-device nameplate
-data, `0012` permitted values of a
-discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
+data, archived `0012` permitted values of a
+discrete metric, archived `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
 one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
@@ -524,9 +524,11 @@ publishes nothing, and `gateway-credential-service` can add one broker account a
 The three database identities are `auth.users` rows with no email, no password and no identity
 provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening
 `Operator` for the people who hold it cannot widen them by accident. An Administrator can create a
-further one from the **Access Control** page (`0125`): a name, a purpose and a set of read-only
-permissions from a fixed menu, then its first token shown once. Such an identity reaches the
-database only, never the broker.
+further one from the **Access Control** page (`0125`): a name, a purpose and permissions from a
+fixed menu, then its first token shown once. Such an identity reaches the database only, never the
+broker. **Machines propose, people decide** (`0013`): the menu is four reads and two writes, filing
+change proposals and versioning schemas, and `create_machine_principal()` refuses a machine device
+writes, quarantine and proposal decisions, and access control, each with its reason.
 
 **The ingestion daemon does not hold `SUPABASE_SERVICE_ROLE_KEY`.** It used to, and that was the one
 credential whose compromise no policy written anywhere else could contain, sitting in the process
@@ -592,8 +594,9 @@ Storage, Realtime, the edge runtime and Studio verify the HS256 signature for th
 no table, so a revoked token still opens those doors until its own `exp` — at most 90 days for a
 token naming a principal.
 
-**Accepted because** every write that matters goes through PostgREST and RLS, the other surfaces
-are read-side or gated by a separate login, and the ceiling bounds the exposure.
+**Accepted because** every write that matters goes through PostgREST and RLS, including the two a
+machine identity may hold, the other surfaces are read-side or gated by a separate login, and the
+ceiling bounds the exposure.
 
 **Revisit if** tokens are issued to parties outside the operating organisation, or if a write path
 that bypasses PostgREST is ever added.

@@ -388,7 +388,11 @@ python supabase/migrations/test_service_principal_revocation.py
 # overload whose extra arguments default makes every RPC call ambiguous). The name table reads for
 # Administrator and Auditor and for nobody else. describe_machine_principal() (0126) is the one
 # write path after creation: rows that exist only, an unchanged save writes nothing, and every
-# change is a PRINCIPAL_DESCRIBED row carrying what it replaced.
+# change is a PRINCIPAL_DESCRIBED row carrying what it replaced. Machines propose, people decide
+# (0013): every permission is allowed or refused with its own reason, and each allowed grant is
+# exercised AS THE MACHINE -- it forks and publishes a schema, files a proposal only a person can
+# decide, reads the asset lane and never the security lane -- and a revoked identity or token is
+# refused before its write runs, the way PostgREST runs auth_pre_request() first.
 python supabase/migrations/test_machine_principal_naming.py
 # The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
 # PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a

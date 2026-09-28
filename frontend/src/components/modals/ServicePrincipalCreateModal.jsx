@@ -15,7 +15,7 @@ const PURPOSE_MAX = 500
  * first token is shown once the way every other is. A principal left without a token is harmless,
  * and Withdraw covers it.
  *
- * The menu is `GRANTABLE_PERMISSIONS`, the same three the function allows; the build asserts the
+ * The menu is `GRANTABLE_PERMISSIONS`, exactly what the function allows; the build asserts the
  * two agree. Permissions and never a role: a role changes whenever somebody widens it for the
  * people who hold it.
  */
@@ -76,7 +76,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
 
         <div className="form-group" style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
           {/* The one fact a reader of this page needs before naming anything: which plane. */}
-          An identity for a process that reads this stack's <strong>database</strong> through the
+          An identity for a process that reaches this stack's <strong>database</strong> through the
           API: a reporting tool, an MCP client, a script. It cannot sign in, holds the permissions
           chosen here and nothing else, and <strong>does not reach the broker</strong> — an MQTT
           client is issued a broker account, not a principal.
@@ -138,10 +138,12 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
               </span>
             </label>
           ))}
-          {/* Why the menu is short, said where the reader is choosing. */}
+          {/* Why the menu stops where it does, said where the reader is choosing. */}
           <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
-            Read-only permissions only, never a role. A token, once signed, is revocable against the
-            API alone, so a write permission here would be an unrevocable write credential.
+            Permissions, never a role. Machines propose, people decide: a machine may file
+            proposals and version schemas, never write a device, decide a proposal or a quarantine,
+            or change who has access. Withdrawing the identity or a token refuses it at the API
+            from the next request.
           </div>
         </fieldset>
 

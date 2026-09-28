@@ -681,6 +681,14 @@ function edgeFunctionNames() {
     // 0010 files `metric_catalog` in the asset lane (#468), the same signature and return type.
     // The baseline's copy fails it closed to security and folds forward at the next squash.
     'public.audit_domain_for': '0010 adds metric_catalog to the asset lane; the baseline holds the pre-0010 form',
+
+    // 0013 widens the allow-list to the six a machine may hold and gives each refusal its own
+    // reason, the same signature and return type. The baseline refuses all but three reads.
+    'public.create_machine_principal': '0013 allows schema:manage, proposal:create and archive:manage and states why each other permission is refused; the baseline holds the pre-0013 form',
+
+    // 0013 keeps all five arms and rewrites the comments on the cell and gateway lanes, which said
+    // they resolve what the tables' own policies resolve.
+    'public.may_decide_proposal': '0013 restates what the cell and gateway lanes check and why no machine reaches them; the baseline holds the pre-0013 comments',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -1603,8 +1611,8 @@ function edgeFunctionNames() {
 
   if (!allowed) {
     fail(
-      'could not find c_allowed in any migration declaring create_machine_principal(). 0080 and ' +
-        '0125 each spell it `c_allowed CONSTANT text[] := ARRAY[...]` -- if that shape changed, ' +
+      'could not find c_allowed in any migration declaring create_machine_principal(). 0001 and ' +
+        '0013 each spell it `c_allowed CONSTANT text[] := ARRAY[...]` -- if that shape changed, ' +
         'this check needs to change with it rather than silently passing.'
     );
   } else if (!offered) {

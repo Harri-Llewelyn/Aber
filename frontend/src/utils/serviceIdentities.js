@@ -165,7 +165,7 @@ export function describePrincipal(principalId, row) {
       + 'almost certainly a fixture and can be removed.',
     mintedBy: null,
     // The generic mint command is right for an unknown principal: one nobody has documented is most
-    // likely one `create_service_principal()` made at runtime, and this is how a token for it is
+    // likely one `create_machine_principal()` made at runtime, and this is how a token for it is
     // issued.
     mintCommand: `${MCP_MINT_PREFIX} --principal {id}`,
   }
@@ -185,21 +185,31 @@ export function isMintableFromPage(meta) {
 }
 
 /**
- * What one permission reaches, in terms of this schema. Keyed on the permission name rather than
- * on a role, because machine identities hold permissions of their own rather than a person's
- * role.
+ * What one permission reaches for a machine, which passes `has_authority()` and never
+ * `has_role()`. A line that grants a write says so first. `scripts/check-docs-drift.mjs` (11f)
+ * holds each line to the policies and functions that decide it.
  */
 const PERMISSION_REACH = {
-  'telemetry:read': 'Read-only across the asset inventory and live telemetry. Cannot read the audit trail.',
-  'quarantine:view': 'Can see the onboarding quarantine queue, but cannot approve or reject anything in it.',
-  'digital_thread:read': 'Can read the Digital Thread — every attributed change anyone has made to this stack.',
+  'telemetry:read': 'Reads the asset inventory and telemetry. Any identity with a valid token can '
+    + 'read both, so this grant records what the identity is for rather than opening anything.',
+  'quarantine:view': 'Sees the onboarding quarantine queue, which any identity with a valid token '
+    + 'can read. It cannot approve or reject a device: quarantine decisions are made by people.',
+  'digital_thread:read': 'Reads the Digital Thread’s asset lane (every attributed change to the '
+    + 'shopfloor’s assets, schemas, metrics and proposals) and the record of deleted assets. Not '
+    + 'the security lane: credentials, tokens and role changes.',
+  'archive:manage': 'Reads the record of assets that were archived and then deleted. Archiving '
+    + 'and restoring check a person’s role, so this grants a machine no write.',
+  'proposal:create': 'A write. Files change proposals to devices, nameplates, areas, cells and '
+    + 'gateways. A person approves or rejects each: machines propose, people decide.',
+  'schema:manage': 'A write. Forks a schema into a draft, publishes a draft, which moves every '
+    + 'device on the version it replaces onto it, and discards a draft. It cannot edit a schema or '
+    + 'the metric catalog directly.',
 }
 
 /**
- * The permissions the page offers when creating a principal, in the order the menu lists them.
- * The same three `create_machine_principal()` allows and no others: the function refuses anything
- * else, and `scripts/check-docs-drift.mjs` asserts this list and the function's allow-list agree,
- * so a permission added to one side without the other fails the build rather than the click.
+ * The permissions the page offers when creating a principal, in the order the menu lists them:
+ * exactly what `create_machine_principal()` allows. `scripts/check-docs-drift.mjs` (11e) asserts
+ * the two agree, so a permission added to one side alone fails the build rather than the click.
  */
 export const GRANTABLE_PERMISSIONS = Object.keys(PERMISSION_REACH)
 
