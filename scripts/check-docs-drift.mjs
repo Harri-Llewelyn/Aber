@@ -1662,8 +1662,10 @@ function edgeFunctionNames() {
   const storageSql = { name: 'supabase/storage-policies.sql', sql: read('supabase/storage-policies.sql') };
 
   const uncommented = (text) => text.replace(/--[^\n]*/g, '');
+  const quoted = (list) => [...list.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  // Static patterns only: each has_authority(ARRAY[...]) call, as the permissions it names.
   const consults = (text, perm) =>
-    new RegExp(`has_authority\\(\\s*ARRAY\\[[^\\]]*'${perm}'`).test(uncommented(text));
+    [...uncommented(text).matchAll(/has_authority\(\s*ARRAY\[([^\]]*)\]/g)].some((m) => quoted(m[1]).includes(perm));
 
   // The last definition of every function, keyed by its signature: replay order makes it the one
   // that runs.
@@ -1786,8 +1788,8 @@ function edgeFunctionNames() {
       if (reach.grantedToAll) {
         const table = reach.grantedToAll;
         let granted = false;
-        for (const m of all.matchAll(new RegExp(`(GRANT|REVOKE)\\s+[^;]*?\\s+ON\\s+TABLE\\s+public\\.${table}\\s+(?:TO|FROM)\\s+([^;]+);`, 'g'))) {
-          if (/\bauthenticated\b/.test(m[2])) granted = m[1] === 'GRANT';
+        for (const m of all.matchAll(/(GRANT|REVOKE)\s+[^;]*?\s+ON\s+TABLE\s+public\.([a-z_0-9]+)\s+(?:TO|FROM)\s+([^;]+);/g)) {
+          if (m[2] === table && /\bauthenticated\b/.test(m[3])) granted = m[1] === 'GRANT';
         }
         if (!granted) bad(`${perm}'s reach line says a machine reads ${table}, which authenticated is no longer granted`);
       }
@@ -1810,7 +1812,12 @@ function edgeFunctionNames() {
       const by = consultedBy(perm);
       if (by.length) bad(`create_machine_principal() refuses ${perm} because no check a machine passes consults it, and ${by.join(', ')} now does; decide whether a machine may hold it, and restate the reason`);
     }
-    const decider = definitionsOf('may_decide_proposal').map((d) => d.text).join('\n');
+    // Each lane of may_decide_proposal() in force, as the predicate and the names it passes.
+    const lanes = new Map(
+      definitionsOf('may_decide_proposal').flatMap((d) =>
+        [...uncommented(d.text).matchAll(/WHEN\s+'([a-z_]+)'\s+THEN\s+public\.(has_role|has_authority)\(ARRAY\[([^\]]*)\]\)/g)]
+          .map((m) => [m[1], `${m[2]}:${quoted(m[3]).join(',')}`]))
+    );
     for (const [table, perm, kind] of [['cells', 'cell:manage', 'cell'], ['gateways', 'gateway:manage', 'gateway']]) {
       if (allowed.includes(perm)) {
         bad(`create_machine_principal() allows ${perm}, which lets a machine decide ${kind} proposals through may_decide_proposal(); machines propose, people decide`);
@@ -1818,7 +1825,7 @@ function edgeFunctionNames() {
       }
       const by = consultedBy(perm).filter((c) => !['approve_proposal()', 'reject_proposal()', 'may_decide_proposal()'].includes(c));
       if (by.length) bad(`create_machine_principal() refuses ${perm} because it would only let a machine decide proposals, and ${by.join(', ')} now consult(s) it too; restate the reason`);
-      if (!new RegExp(`WHEN\\s+'${table}'\\s+THEN\\s+public\\.has_authority\\(ARRAY\\['${perm}'\\]\\)`).test(uncommented(decider))) {
+      if (lanes.get(table) !== `has_authority:${perm}`) {
         bad(`may_decide_proposal()'s ${table} lane no longer consults ${perm}; restate the refusal reason in create_machine_principal() and this check`);
       }
       const named = roleArray(policies.get(`${table}.${table}_update_privileged`)?.text);
