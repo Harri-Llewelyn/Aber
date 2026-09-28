@@ -337,7 +337,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         sub_type: newMetric.subType,
         units: unitsApply ? newMetric.units : '',
         standard: effectiveStandard,
-        // AAS alignment. Blank is legitimate: MTConnect publishes no per-type identifier.
+        // AAS alignment. Blank is legitimate for a local extension, which no vocabulary names, and
+        // nothing is minted for one.
         semantic_id: semanticIdValue,
         semantic_id_type: semanticIdTypeValue,
         description: newMetric.description
@@ -587,7 +588,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               label={`semantic id${m.semantic_id_type ? ` (${m.semantic_id_type})` : ''}`}
               onNotify={showToast}
             />
-          : <span style={{ color: 'var(--text-dim)' }} title="Not mapped to a standard concept. Legitimate for MTConnect metrics, which have no published per-type identifier.">—</span>}
+          : <span style={{ color: 'var(--text-dim)' }} title="Not mapped to a standard concept. Legitimate for a local extension, which no vocabulary names. Edit can map any metric, and suggests its standard's id.">—</span>}
       </td>
       <td style={{ color: 'var(--text-muted)' }}>{m.description || '—'}</td>
     </>

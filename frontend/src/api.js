@@ -2071,7 +2071,7 @@ const apiMethods = {
         sub_type: m.sub_type ?? null,
         standard: m.standard ?? null,
         // AAS (IEC 63278) semanticId -- see 0001_baseline_schema.sql. NULL means unmapped, which is a
-        // legitimate state: MTConnect publishes no per-type identifier, so those stay NULL.
+        // legitimate state for a local extension: no vocabulary names it.
         semantic_id: m.semantic_id ?? null,
         semantic_id_type: m.semantic_id_type ?? null,
         description: m.description,
