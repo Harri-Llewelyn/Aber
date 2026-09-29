@@ -11,7 +11,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 76 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 77 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog, a device that publishes again |
@@ -1281,7 +1281,9 @@ records it. The sweep takes `ingest_mark_device_offline()`'s answer, so only a s
 row counts as a timeout. After a restart every OFFLINE row is the second case, which costs one
 rebirth request per node.
 
-`test_declared_metrics.py` (`TestADeviceThatPublishesAgain`) covers both cases.
+`test_declared_metrics.py` (`TestADeviceThatPublishesAgain`) covers both cases. `validate.py`
+check 10b publishes DDATA from the device check 10 timed out and expects it ONLINE; like check 10,
+it runs only when `DEVICE_OFFLINE_TIMEOUT_SECONDS` is 90 or less.
 
 ---
 

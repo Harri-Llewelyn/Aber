@@ -3018,6 +3018,34 @@ def verify_results():
                       "quiet period. The watchdog is rewriting an unchanged status and filling an "
                       "append-only table.")
                 passed = False
+
+            # 10b. The timeout rests on silence alone, so the device's next DDATA sets it ONLINE
+            # again without a birth.
+            publisher = connect_publisher(capture=False) if status == "OFFLINE" else None
+            if status == "OFFLINE" and publisher is None:
+                print("❌ 10b. DEVICE PUBLISHES AGAIN FAIL: could not connect to the broker as the "
+                      "seeded gateway, so nothing was published.")
+                passed = False
+            elif publisher is not None:
+                alias_dev = SEEDED["alias_id"]
+                gw = SEEDED.get("gateway_id") or VAL_GW_NAME
+                publisher.publish(f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{alias_dev}", make_sparkplug_payload(
+                    alias_dev, {"Systems/TEMPERATURE": 20.5}, int(time.time() * 1000)))
+                time.sleep(4)
+                publisher.loop_stop()
+                publisher.disconnect()
+                res = supabase_client.table("devices").select("status").eq(
+                    "id", SEEDED["alias_uuid"]
+                ).execute()
+                revived = res.data[0]["status"] if res.data else None
+                if revived == "ONLINE":
+                    print("✅ 10b. DEVICE PUBLISHES AGAIN: DDATA from the timed-out device set it "
+                          "ONLINE without a birth.")
+                else:
+                    print(f"❌ 10b. DEVICE PUBLISHES AGAIN FAIL: status is '{revived}' after DDATA "
+                          "from a device the watchdog timed out; expected ONLINE. The daemon's log "
+                          "says why under 'WATCHDOG' or 'has not been born since'.")
+                    passed = False
         except Exception as e:
             print(f"❌ 10. DEVICE WATCHDOG ERROR: {e}")
             passed = False
