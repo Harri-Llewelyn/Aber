@@ -121,6 +121,14 @@ by backup, reinstall and restore, and the restored database is what the rows bel
 | The dev cluster `k3d-acs-cymru` and the development credentials in `values-dev.yaml` (`sb_publishable_acscymru_dev_…`, `acscymru-ingest-writer`, `acscymrusecret`, …) | `k3d-aber`, `…aber…` | Development only. `k3d cluster delete acs-cymru`, then `npm run dev:up` creates `aber`. The Node-RED credential secret changed, so a dev cluster that keeps its volume needs `npm run dev:reset`. |
 | The Storage bucket `floor-plans`, its policies `floor_plans_*` and the path check `is_floor_plan_path()`; in the dashboard `FloorPlan.jsx`, `FloorPlacementPicker.jsx`, `utils/floorPlans.js`, the `.floor-plan*`, `.floor-pin*` and `.floor-placement*` classes, and `api.uploadFloorPlan`, `removeFloorPlan` and `loadFloorPlanUrl` | `area-plans`, `area_plans_*`, `is_area_plan_path()`; `AreaPlan.jsx`, `CellPlacementPicker.jsx`, `utils/areaPlans.js`, `.area-plan*`, `uploadAreaPlan`, `removeAreaPlan`, `loadAreaPlanUrl` | Nothing. `storage-policies.sql` replaces the four policies and drops the old check, and `storage-init.mjs` creates `area-plans`, moves every plan into it under the same key and deletes `floor-plans`. `areas.plan_path` holds only the key, so no row changes. A restored backup that still holds `floor-plans` is moved the same way by the next `helm upgrade`, and until then the Site Map draws the default outline and says the plan could not be loaded. A script of your own that read plans from `floor-plans` names `area-plans`. |
 
+**A development forge that already tagged `v0.1.0` holds other content under that tag.** The
+platform playbook has changed since a development forge first published it (the appliance flow's
+certificate note names `aber-gateway-converge`, for one), and a tag is never moved, so the forge
+sweep lists `platform/gateway-platform is tagged v0.1.0 at other content than this build ships`
+among its warnings until the version moves. Delete the tag as
+[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep) says, and the next sweep
+tags `main` again. The release bumps the version, so an upgrading site meets a new tag instead.
+
 Everything below is what that one command does and does not disturb.
 
 ---
