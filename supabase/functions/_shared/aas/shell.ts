@@ -24,9 +24,9 @@ export const HISTORIAN_ENDPOINT =
 
 /**
  * Public base for 3D model objects. `devices.model_3d_path` stores an object key, so the absolute
- * URL is composed here. It cannot be derived from SUPABASE_URL, which inside the compose network
- * resolves for nothing outside Docker, so it defaults to the published gateway address and is
- * overridden per deployment, like AAS_BASE_IRI.
+ * URL is composed here. It cannot be derived from SUPABASE_URL, which names an in-cluster Service
+ * that resolves for nothing outside the cluster, so it defaults to the published gateway address
+ * and is overridden per deployment, like AAS_BASE_IRI.
  */
 export const MODEL_PUBLIC_BASE = (
   Deno.env.get("AAS_MODEL_PUBLIC_BASE") ??

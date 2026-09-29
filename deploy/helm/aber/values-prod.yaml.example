@@ -125,13 +125,13 @@ secrets:
   #
   # mqttValidatorPassword is only needed with e2e.enabled -- leave it empty in production and no
   # account is created for it.
-  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionUser: aber_ingestion
   mqttIngestionPassword: ""
-  mqttI3xUser: factoryplus_i3x
+  mqttI3xUser: aber_i3x
   mqttI3xPassword: ""
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: ""
-  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorUser: aber_monitor
   mqttMonitorPassword: ""
   # openssl rand -hex 24. The account the credential service administers the broker's Dynamic
   # Security plugin as. REQUIRED: the broker's initContainer writes it on every start and exits
@@ -349,8 +349,8 @@ mosquitto:
     # ==========================================================================================
     # SET THIS TO THE BROKER'S EXTERNAL ADDRESS. Gateways dial the broker by IP, and a certificate
     # without an IP SAN fails verification on every one of them while the in-cluster clients --
-    # which use the name `mosquitto` -- verify perfectly. The stack reports healthy, the demo
-    # simulator keeps producing telemetry, and the fleet is silently off.
+    # which use the name `mosquitto` -- verify perfectly. The stack reports healthy, the host-run
+    # gateways keep producing telemetry, and the fleet is silently off.
     #
     #   kubectl -n aber get svc mosquitto-external \
     #     -o jsonpath='{.status.loadBalancer.ingress[0].ip}'

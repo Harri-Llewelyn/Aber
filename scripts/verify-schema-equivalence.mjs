@@ -117,7 +117,7 @@ const PSQL_VARS = {
   nodered_redirect_uri: 'http://localhost:1880/auth/strategy/callback',
   bi_reader_password: 'probe-bi-reader',
   supabase_functions_url: 'http://supabase-envoy:8000/functions/v1',
-  supabase_anon_key: 'probe-anon-key',
+  supabase_publishable_key: 'probe-publishable-key',
   gateway_revoke_secret: 'probe-revoke-secret',
   forge_sweep_secret: 'probe-sweep-secret',
 };

@@ -2195,8 +2195,6 @@ function edgeFunctionNames() {
 // Deliberately not listed, because renaming it is not cosmetic:
 //   * deploy/k8s/internal-ca.yaml `commonName: Factory+ Internal CA`: changing a cert-manager
 //     commonName re-mints the CA, which takes the whole fleet offline (docs/incidents.md).
-//   * `factoryplus_ingestion` / `factoryplus_i3x` / `factoryplus_monitor`: MQTT usernames in the
-//     broker's Dynamic Security document, which holds only hashes.
 // -------------------------------------------------------------------------------------------------
 {
   /** file -> why this file's prose is product identity rather than a framework reference. */

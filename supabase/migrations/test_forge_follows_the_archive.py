@@ -158,6 +158,15 @@ class ForgeFollowsTheArchive(unittest.TestCase):
         self.cur.execute("SELECT forge_archived_at FROM public.gateways WHERE id = %s;", (gid,))
         self.assertIsNone(self.cur.fetchone()[0])
 
+    def test_the_key_the_ask_carries_is_stored_under_its_current_name(self):
+        # sweep_forge() reads the publishable key from the vault by name, and 0002 rewrites it on
+        # every boot. The retired name must be gone, or a reader of the old name would still work
+        # on this database and fail on a fresh one.
+        self.cur.execute(
+            "SELECT name FROM vault.secrets WHERE name IN ('supabase_publishable_key', 'supabase_anon_key');"
+        )
+        self.assertEqual([r[0] for r in self.cur.fetchall()], ["supabase_publishable_key"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

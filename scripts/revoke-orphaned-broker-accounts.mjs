@@ -103,7 +103,7 @@ function brokerClients() {
 /**
  * GATEWAY ACCOUNTS THAT ARE STILL ENABLED, and the filter is the safety property of this script.
  *
- * `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor` and the plugin's admin are
+ * `aber_ingestion`, `aber_i3x`, `aber_monitor` and the plugin's admin are
  * platform accounts with no `gateways` row and no prospect of one, so a sweep keyed on "has no
  * gateway row" would disable the ingestion daemon's own credential and stop the stack ingesting
  * anything. Only `gwy` plus 21 hex characters is considered, which is the shape

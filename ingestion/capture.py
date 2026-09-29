@@ -66,7 +66,7 @@ MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 # FALLS BACK TO THE INGESTION PRINCIPAL'S OWN VARIABLES: the daemon reads MQTT_USER/MQTT_PASSWORD
 # inside its container, while a host-run tool is handed the MQTT_INGESTION_* names.
 RECORD_USER = os.getenv("MQTT_CAPTURE_USER") or os.getenv("MQTT_INGESTION_USER") \
-    or "factoryplus_ingestion"
+    or "aber_ingestion"
 RECORD_PASSWORD = (os.getenv("MQTT_CAPTURE_PASSWORD") or os.getenv("MQTT_INGESTION_PASSWORD")
                    or os.getenv("MQTT_PASSWORD") or "")
 
@@ -397,9 +397,7 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     with no broker and no clock, so the tests can assert it and `play --dry-run` can show it.
     Publishing is then a loop that cannot make a new decision.
     """
-    # A capture recorded before 1.0 carries the key under the platform's former name; the format
-    # is the same, so it is read under either.
-    version = capture.get("aber_capture_version", capture.get("acs_capture_version"))
+    version = capture.get("aber_capture_version")
     if version != CAPTURE_VERSION:
         raise CaptureError(
             "capture file is version %r, this tool reads version %d. Refusing to guess at the "

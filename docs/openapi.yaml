@@ -2802,7 +2802,7 @@ paths:
             text/plain:
               schema:
                 type: string
-              example: "ABER_SUPABASE_URL=https://api.plant.example\nACS_ENROLLMENT_TOKEN=...\n"
+              example: "ABER_SUPABASE_URL=https://api.plant.example\nABER_ENROLLMENT_TOKEN=...\n"
             application/zip:
               schema:
                 type: string

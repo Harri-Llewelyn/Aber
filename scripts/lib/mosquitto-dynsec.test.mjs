@@ -17,6 +17,7 @@ import { CredentialError } from './mosquitto-credentials.mjs';
 import {
   ADMIN_ROLE,
   GATEWAY_SHARED_ROLE,
+  RETIRED_PLATFORM_USERNAMES,
   clientFromPasswordEntry,
   controlArgv,
   controlPayload,
@@ -116,12 +117,12 @@ describe('clientFromPasswordEntry', () => {
 describe('importPasswordFile', () => {
   test('assigns roles by username and reports what it could not place', () => {
     const text = [
-      entry('factoryplus_ingestion'), entry(GW_A), entry('probe'), '', 'garbage-line', entry('gwy110000000000400080000'),
+      entry('aber_ingestion'), entry(GW_A), entry('probe'), '', 'garbage-line', entry('gwy110000000000400080000'),
     ].join('\n');
-    const platform = new Map([['factoryplus_ingestion', 'ingestion'], ['gwy110000000000400080000', null]]);
+    const platform = new Map([['aber_ingestion', 'ingestion'], ['gwy110000000000400080000', null]]);
     const { clients, unassigned, malformed } = importPasswordFile(text, platform);
     const byName = Object.fromEntries(clients.map((c) => [c.username, c]));
-    assert.deepEqual(byName.factoryplus_ingestion.roles, [{ rolename: 'ingestion' }]);
+    assert.deepEqual(byName.aber_ingestion.roles, [{ rolename: 'ingestion' }]);
     assert.deepEqual(byName[GW_A].roles.map((r) => r.rolename), gatewayRoleNames(GW_A));
     assert.deepEqual(byName.gwy110000000000400080000.roles.map((r) => r.rolename), gatewayRoleNames('gwy110000000000400080000'));
     assert.deepEqual(byName.probe.roles, []);
@@ -133,13 +134,13 @@ describe('importPasswordFile', () => {
 describe('reconcile', () => {
   const managed = [
     clientFromPasswordEntry(entry('admin'), [ADMIN_ROLE]),
-    clientFromPasswordEntry(entry('factoryplus_ingestion'), ['ingestion']),
-    clientFromPasswordEntry(entry('factoryplus_monitor'), ['monitor']),
+    clientFromPasswordEntry(entry('aber_ingestion'), ['ingestion']),
+    clientFromPasswordEntry(entry('aber_monitor'), ['monitor']),
   ];
 
   test('starts from nothing', () => {
     const { config, report } = reconcile(null, POLICY, managed);
-    assert.deepEqual(config.clients.map((c) => c.username), ['admin', 'factoryplus_ingestion', 'factoryplus_monitor']);
+    assert.deepEqual(config.clients.map((c) => c.username), ['admin', 'aber_ingestion', 'aber_monitor']);
     assert.deepEqual(config.roles.map((r) => r.rolename), POLICY.roles.map((r) => r.rolename));
     assert.deepEqual(config.defaultACLAccess, POLICY.defaultACLAccess);
     assert.deepEqual(report.kept, []);
@@ -151,7 +152,7 @@ describe('reconcile', () => {
         clientFromPasswordEntry(entry(GW_A, 'b2xkc2FsdHNhbHQ='), gatewayRoleNames(GW_A)),
         // A gateway whose stored role list is incomplete, as an import by hand might leave it.
         clientFromPasswordEntry(entry(GW_B), []),
-        { ...clientFromPasswordEntry(entry('factoryplus_ingestion', 'b2xkc2FsdHNhbHQ='), ['ingestion']) },
+        { ...clientFromPasswordEntry(entry('aber_ingestion', 'b2xkc2FsdHNhbHQ='), ['ingestion']) },
       ],
       roles: [{ rolename: `gateway-${GW_A}`, acls: [{ acltype: 'publishClientSend', topic: '#', allow: true }] }],
       groups: [{ groupname: 'hand-made', roles: [] }],
@@ -161,7 +162,7 @@ describe('reconcile', () => {
 
     assert.equal(byName[GW_A].salt, 'b2xkc2FsdHNhbHQ=', 'the gateway hash was replaced');
     assert.deepEqual(byName[GW_B].roles.map((r) => r.rolename), gatewayRoleNames(GW_B), 'roles were not ensured');
-    assert.equal(byName.factoryplus_ingestion.salt, 'c2FsdHNhbHRzYWx0', 'the managed principal was not replaced');
+    assert.equal(byName.aber_ingestion.salt, 'c2FsdHNhbHRzYWx0', 'the managed principal was not replaced');
 
     const roleA = config.roles.find((r) => r.rolename === `gateway-${GW_A}`);
     assert.deepEqual(roleA, gatewayRole(GW_A), 'a widened stored role survived the boot');
@@ -177,6 +178,34 @@ describe('reconcile', () => {
     assert.deepEqual(config.clients.find((c) => c.username === 'bi_reader'), bi);
     assert.ok(config.roles.some((r) => r.rolename === 'bi'));
     assert.deepEqual(report.unmanaged, ['bi_reader']);
+  });
+
+  test('removes the platform accounts from before the rename, and no other client', () => {
+    const old = (name, role) => clientFromPasswordEntry(entry(name), [role]);
+    const bi = { username: 'bi_reader', password: 'x', salt: 'y', iterations: 101, roles: [] };
+    const stored = {
+      clients: [
+        old('factoryplus_ingestion', 'ingestion'), old('factoryplus_i3x', 'i3x'), old('factoryplus_monitor', 'monitor'),
+        clientFromPasswordEntry(entry(GW_A), gatewayRoleNames(GW_A)), bi,
+      ],
+      roles: [],
+    };
+    const { config, report } = reconcile(stored, POLICY, managed);
+    assert.deepEqual(
+      config.clients.map((c) => c.username).sort(),
+      ['admin', 'aber_ingestion', 'aber_monitor', 'bi_reader', GW_A].sort(),
+    );
+    assert.deepEqual(report.retired.sort(), [...RETIRED_PLATFORM_USERNAMES].sort());
+    // The roles the old accounts held stay: the new accounts hold them, and no role is deleted.
+    for (const role of ['ingestion', 'i3x', 'monitor']) assert.ok(config.roles.some((r) => r.rolename === role), role);
+  });
+
+  test('keeps a retired username the environment still names as a principal', () => {
+    const pinned = [...managed, clientFromPasswordEntry(entry('factoryplus_i3x'), ['i3x'])];
+    const stored = { clients: [clientFromPasswordEntry(entry('factoryplus_i3x', 'b2xkc2FsdHNhbHQ='), ['i3x'])], roles: [] };
+    const { config, report } = reconcile(stored, POLICY, pinned);
+    assert.ok(config.clients.some((c) => c.username === 'factoryplus_i3x'));
+    assert.deepEqual(report.retired, []);
   });
 
   test('replaces a policy role the stored document had widened', () => {
@@ -267,7 +296,7 @@ describe('the control API', () => {
   });
 
   test('rolesFor names the role or the gateway pair', () => {
-    assert.deepEqual(rolesFor('ingestion', 'factoryplus_ingestion'), [{ rolename: 'ingestion' }]);
+    assert.deepEqual(rolesFor('ingestion', 'aber_ingestion'), [{ rolename: 'ingestion' }]);
     assert.deepEqual(rolesFor(null, GW_A).map((r) => r.rolename), gatewayRoleNames(GW_A));
   });
 });
@@ -330,7 +359,7 @@ describe('the primary host STATE grant', () => {
   });
 
   test('reconcile carries the grant through to the written document', () => {
-    const managed = [clientFromPasswordEntry(entry('factoryplus_ingestion'), rolesFor('ingestion', 'factoryplus_ingestion'))];
+    const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion', 'aber_ingestion'))];
     const { config } = reconcile(null, withPrimaryHostGrant(POLICY, 'Site-One'), managed);
     const ingestion = config.roles.find((r) => r.rolename === 'ingestion');
     assert.ok(ingestion.acls.some((a) => a.acltype === 'publishClientSend' && a.topic === 'spBv1.0/STATE/Site-One'));
@@ -398,7 +427,7 @@ describe('the Directory grant is derived from the site, not written in the polic
   });
 
   test('reconcile carries the grant through to the written document', () => {
-    const managed = [clientFromPasswordEntry(entry('factoryplus_ingestion'), rolesFor('ingestion', 'factoryplus_ingestion'))];
+    const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion', 'aber_ingestion'))];
     const { config } = reconcile(null, withDirectoryGrant(POLICY, 'Plant-7/Directory/v1'), managed);
     const ingestion = config.roles.find((r) => r.rolename === 'ingestion');
     assert.ok(ingestion.acls.some((a) => a.acltype === 'publishClientSend' && a.topic === 'Plant-7/Directory/v1/#'));

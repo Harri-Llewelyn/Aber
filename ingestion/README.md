@@ -1339,7 +1339,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | The in-cluster Service name |
-| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
+| `MQTT_USER` / `MQTT_PASSWORD` | `aber_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
@@ -1742,9 +1742,9 @@ outcomes counted in the table above: quarantine, identity diagnostics, birth obs
 multi-submodel conformance, digital-thread triggers, telemetry mapping, rename safety, quarantine
 gating, and what the i3X server answers (checks 12 and 17).
 
-**Every assertion is scoped to the run's own entities.** The stack always has audit rows, telemetry
-and devices from the demo simulator, so a check that queried a whole table and asserted "not empty"
-would pass regardless of whether anything was exercised.
+**Every assertion is scoped to the run's own entities.** A stack in use holds audit rows, telemetry
+and devices of its own, so a check that queried a whole table and asserted "not empty" would pass
+regardless of whether anything was exercised.
 
 Its cleanup uses a **direct owner connection** to Supabase Postgres for audit rows, because
 `public.digital_thread` is genuinely append-only — the trigger added in

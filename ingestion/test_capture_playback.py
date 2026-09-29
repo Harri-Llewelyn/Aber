@@ -356,13 +356,6 @@ class PlanTests(unittest.TestCase):
             self._plan(capture=bad)
         self.assertIn("99", str(ctx.exception))
 
-    def test_a_capture_recorded_before_the_rename_is_still_read(self):
-        # The key carried the platform's former name until 1.0; the format did not change, so a
-        # file a site recorded before then plays under either key.
-        old = capture_file()
-        old["acs_capture_version"] = old.pop("aber_capture_version")
-        self.assertTrue(self._plan(capture=old))
-
     def test_a_gateway_id_of_the_wrong_shape_is_refused(self):
         # sparkplug_id is a GENERATED column, so a friendly name cannot be one -- and passing it
         # through would be dropped by the broker rather than reported.

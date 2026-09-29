@@ -48,6 +48,8 @@ FORGE_SSH = os.getenv("GITEA_TEST_SSH", "")
 MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "aber_platform")
 MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "aber-platform-machine-account")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
+# The status main requires. Must agree with FLOW_SHAPE_CONTEXT in _shared/forge.ts.
+FLOW_SHAPE_CONTEXT = "aber/flow-shape"
 
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
@@ -225,7 +227,7 @@ class TestWhatIsRecorded(ForgeEventsBase):
         status, body = deliver(push(self.sparkplug_id, ref="refs/heads/tighten-poll"))
         self.assertEqual(status, 200, body)
         self.assertIn("checked", body)
-        self.assertEqual(body["checked"]["context"], "acs/flow-shape", body)
+        self.assertEqual(body["checked"]["context"], FLOW_SHAPE_CONTEXT, body)
         self.assertIsNone(self.head()["forge_head_sha"])
         self.assertIsNone(self.head()["forge_appliance_sha"])
 
@@ -336,7 +338,7 @@ class TestAProposal(ForgeEventsBase):
     THE CHECK THAT RUNS BEFORE A MERGE. A flows.json uploaded through the forge's own UI met no
     check until the appliance refused it, which is after an administrator had approved it. Now a
     push to any branch but main and appliance is delivered here, the file at that commit is read,
-    and the `acs/flow-shape` status main requires is posted -- so a credential file or a mangled
+    and the `aber/flow-shape` status main requires is posted -- so a credential file or a mangled
     export cannot be merged in the first place.
 
     THE REPOSITORY IS MADE BY HAND AND NOT ENROLLED, which is what makes the proposals possible.
@@ -386,18 +388,18 @@ class TestAProposal(ForgeEventsBase):
         return sha, body
 
     def flow_shape(self, sha):
-        """The acs/flow-shape status on a commit, or None if none was posted."""
+        """The aber/flow-shape status on a commit, or None if none was posted."""
         status, listed = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/statuses/{sha}")
         self.assertEqual(status, 200, listed)
-        ours = [st for st in listed if st.get("context") == "acs/flow-shape"]
+        ours = [st for st in listed if st.get("context") == FLOW_SHAPE_CONTEXT]
         return ours[0] if ours else None
 
     def test_a_well_formed_flow_is_marked_successful(self):
         sha, body = self.propose("tighten-poll", '[{"id":"aber-broker","type":"mqtt-broker"}]')
         self.assertEqual(body["checked"]["state"], "success", body)
-        self.assertEqual(body["checked"]["context"], "acs/flow-shape", body)
+        self.assertEqual(body["checked"]["context"], FLOW_SHAPE_CONTEXT, body)
         state = self.flow_shape(sha)
-        self.assertIsNotNone(state, "no acs/flow-shape status reached the forge")
+        self.assertIsNotNone(state, "no aber/flow-shape status reached the forge")
         self.assertEqual(state["status"], "success", state)
         # A proposal is not what the appliance deploys, so the row does not move for it.
         self.assertIsNone(self.head()["forge_head_sha"], "a proposal branch moved the gateway row")
@@ -414,7 +416,7 @@ class TestAProposal(ForgeEventsBase):
         sha, body = self.propose("paste-the-wrong-file", '{"aber-broker":{"user":"x","password":"y"}}')
         self.assertEqual(body["checked"]["state"], "failure", body)
         state = self.flow_shape(sha)
-        self.assertIsNotNone(state, "no acs/flow-shape status reached the forge")
+        self.assertIsNotNone(state, "no aber/flow-shape status reached the forge")
         self.assertEqual(state["status"], "failure", state)
         self.assertIn("array", state["description"], state)
 
@@ -535,7 +537,7 @@ class TestTheApplianceItself(ForgeEventsBase):
         # would refuse cannot be merged. Measured: a merge is refused 405 with no such status and
         # with a failing one, and succeeds on success.
         self.assertTrue(by_name["main"]["enable_status_check"], by_name["main"])
-        self.assertIn("acs/flow-shape", by_name["main"]["status_check_contexts"], by_name["main"])
+        self.assertIn(FLOW_SHAPE_CONTEXT, by_name["main"]["status_check_contexts"], by_name["main"])
 
         # The clone URL names the forge's own address (scp-like when SSH is on 22); from this host
         # the forward answers, for the same repository.

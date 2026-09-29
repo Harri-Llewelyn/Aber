@@ -36,6 +36,9 @@ spec:
     metadata:
       labels:
         {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Roll the server when its broker account is renamed; env from a Secret is read at start.
+        checksum/broker-account: {{ .Values.secrets.mqttI3xUser | default "" | sha256sum }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:

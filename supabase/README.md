@@ -1922,7 +1922,7 @@ here rather than left on a checklist.
 | `Service_Ingestor` (`0046`) | `telemetry:read` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
 | `Service_Playback` (`0056`) | `telemetry:read` | Nothing directly. The `playback_*` gates, each checking `is_playback_caller()` |
 | MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `digital_thread` |
-| `factoryplus_i3x` | broker account | Reads the namespace, publishes nothing |
+| `aber_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Adds one broker account and nothing else |
 
 The three database identities are `auth.users` rows with **no email, no password and no identity
@@ -2841,7 +2841,7 @@ leak for one junk account per gateway ever deleted.
   `scripts/revoke-orphaned-broker-accounts.mjs` reads the broker's client list, subtracts every
   gateway row (archived included — those belong to the trigger and the sweep), and disables what is
   left through `revoke_gateway_credential()`. Dry run by default. It considers only enabled
-  `gwy` + 21 hex character accounts, so it can never select `factoryplus_ingestion` and stop the
+  `gwy` + 21 hex character accounts, so it can never select `aber_ingestion` and stop the
   stack ingesting. The Access Control page lists the same accounts under *Accounts with no gateway*.
 
 ### What the inventory still cannot see
@@ -4303,7 +4303,7 @@ signal the runbook's rotation waits on (`docs/remote-gateways.md` §8).
 `flow-sync.mjs` refuses a `flows.json` it cannot deploy, and that refusal happens on the appliance,
 after an administrator has approved and merged the change. A file uploaded through the forge's own
 web UI met no check before that. **`main` on every gateway repository now requires the commit
-status `acs/flow-shape`**, and the platform posts it.
+status `aber/flow-shape`**, and the platform posts it.
 
 **No Actions runner, which is the part worth stating.** The obvious reading of "required status
 check" is CI, and CI on the forge means enabling Gitea Actions -- a runner that executes whatever a
@@ -4338,8 +4338,12 @@ needed `**` for the same reach.
 
 **Reconciled, not only created.** `ensureBranchProtection()` adds the context to a repository that
 predates it, keeping whatever else `main` already requires, so the fifteen-minute sweep brings an
-older gateway up without anybody visiting it. `test_forge_events.py` covers the four answers and
-that a proposal moves no column; `test_forge_sweep.py` covers the reconcile.
+older gateway up without anybody visiting it. It also removes the context's name from before the
+rename to Aber, `acs/flow-shape`: nothing posts that name any more, so a rule that kept requiring it
+beside the new one would refuse every merge. A proposal whose head was checked under the old name
+carries no status under the new one until its next push. `test_forge_events.py` covers the four
+answers and that a proposal moves no column; `test_forge_sweep.py` covers the reconcile and the
+rename.
 
 ### A gateway that needs code of its own (`0106`)
 
@@ -4576,6 +4580,22 @@ id under the old name, and a name-targeted clause raises on the primary key ever
 skipping. The rename is guarded on the new name being free, so a service an operator registered
 under it by hand is kept. The anon key's vault description in `0002` no longer names Kong either;
 the seed rewrites the three revocation secrets on every boot, so that needed no migration.
+
+## The Directory names Node-RED for what it runs (`0024`)
+
+The Node-RED row was seeded as *Node-RED (Virtual Edge Gateway Simulator)*, from when the stack
+shipped a demonstration simulator. That simulator is retired and `deployment` replaced
+`is_virtual`; what the platform's Node-RED runs now is the host-run gateways, so `0002` seeds
+*Node-RED (Host-Run Gateways)*. The seed inserts `ON CONFLICT (id) DO NOTHING`, so `0024` renames
+the row on a database that holds the old name, only while it holds exactly that name and only while
+the new one is free. Nothing joins on this name: `directory_liveness_job_map()` does not map
+Node-RED, and the public-URL update keys on the row's id.
+
+The same pass renamed the vault secret the revocation and sweep calls pass the gateway's key
+check with, from `supabase_anon_key` to `supabase_publishable_key`, since the legacy anon key is
+retired and the secret holds the publishable key. `0002` rewrites that secret from db-init's
+variable on every boot, so the rename is the old name joining the list it deletes first; there
+is no stored value to carry across and no migration.
 
 ## The Directory observes both databases (`0127`)
 

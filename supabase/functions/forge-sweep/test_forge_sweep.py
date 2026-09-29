@@ -9,7 +9,8 @@ the database WITHOUT passing the door again is taken out of their team by one sw
 again when the role returns; a gateway repository whose push webhook was deleted gets it back; a
 repository somebody made by hand in the organisation has `main` protected; a gateway repository
 whose `appliance` and `**` rules were deleted and whose `main` was opened to deploy keys gets all
-three back the way enrolment set them; a key somebody re-registered read-only is read-write again;
+three back the way enrolment set them; a `main` still requiring the shape check under its old name
+requires it under the current one; a key somebody re-registered read-only is read-write again;
 an archived gateway's key is removed and its repository is put into the forge's archive, read-only
 with every branch kept, and taken back out when the gateway is restored (#197); and the database's
 own sweep_forge() answers true, which is
@@ -60,6 +61,9 @@ SWEEP_SECRET = os.getenv("FORGE_SWEEP_SECRET", "")
 PLATFORM_ORGANISATION = "platform"
 PLATFORM_REPOSITORY = "gateway-platform"
 CUSTOM_EXAMPLE_REPOSITORY = "gateway-custom-example"
+FLOW_SHAPE_CONTEXT = "aber/flow-shape"
+# The shape check's name before the rename to Aber; the sweep removes it from a rule.
+RETIRED_FLOW_SHAPE_CONTEXT = "acs/flow-shape"
 
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
@@ -361,6 +365,31 @@ class TestRepositories(ForgeSweepBase):
         self.assertEqual(status, 200)
         self.assertFalse(catch_all["push_whitelist_deploy_keys"], catch_all)
         self.assertGreater(catch_all["priority"], appliance["priority"])
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertNotIn(self.repo, body["protected"], body)
+
+    def test_main_requires_the_shape_check_under_its_current_name_only(self):
+        """
+        The rule a repository enrolled before the rename to Aber carries: the shape check under its
+        old name, which nothing posts any more, so no proposal could ever be merged. The sweep
+        replaces it and keeps a context an administrator added.
+        """
+        self.enrol()
+        status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/main", method="PATCH",
+                          body={"enable_status_check": True,
+                                "status_check_contexts": [RETIRED_FLOW_SHAPE_CONTEXT, "site/extra-check"]})
+        self.assertEqual(status, 200)
+
+        # The forge's rule, not which sweep reports repairing it: one the database asked for can
+        # land first.
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        status, main = self.rule("main")
+        self.assertEqual(status, 200)
+        self.assertTrue(main["enable_status_check"], main)
+        self.assertEqual(sorted(main["status_check_contexts"]), sorted([FLOW_SHAPE_CONTEXT, "site/extra-check"]), main)
 
         status, body = sweep()
         self.assertEqual(status, 200, body)

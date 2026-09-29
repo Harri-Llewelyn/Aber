@@ -715,7 +715,7 @@ Service, so one would have no consumer and would only add a second way for the p
 
 - `nodered_data` → PVC, `replicas: 1`, `strategy: Recreate`. Node-RED is a single-writer runtime and
   persists editor sessions to `/data/.sessions.json` and the editor-user map to
-  `/data/.factoryplus-editor-users.json`; both must survive a restart or a live Administrator
+  `/data/.aber-editor-users.json`; both must survive a restart or a live Administrator
   silently degrades to a read-only editor.
 - `node-red-init` becomes an **initContainer built from the same image as the main container**. This
   is not tidiness: `settingsAreCorrect()` *evaluates* `settings.js`, which `require`s
@@ -1409,7 +1409,7 @@ false` with TLS off leaves the external Service with no ports, which the API ser
 `external.enabled: false`. TLS on with an external LoadBalancer and a certificate carrying nothing
 a gateway could match (no IP SAN, no operator-supplied DNS SAN) lets every in-cluster client verify
 perfectly while every gateway fails on a hostname mismatch the broker never logs: the stack reports
-healthy, the simulator keeps producing, and the fleet is off. Refused rather than warned about,
+healthy, the host-run gateways keep producing, and the fleet is off. Refused rather than warned about,
 because Helm has no non-fatal warning `helm template` would surface. `publicBaseDomain` alone does
 not satisfy it, since `mqtt.<domain>` is the WebSocket name and not the address a gateway dials;
 an IP SAN or an explicit DNS SAN does, so a deployment behind plant DNS is not blocked.

@@ -1,12 +1,11 @@
 // =================================================================================================
 // Spell checking -- what the EDITOR flags, and the vocabulary that stops it flagging the domain.
 //
-// WHY THIS FILE EXISTS. This repository comments heavily: over half of docker-compose.yml is prose,
-// and the same is true of the migrations, the Helm templates and the READMEs. That is a deliberate
-// choice made elsewhere, and this file is its cost. Without it the Code Spell Checker extension
-// reports ~850 problems in docker-compose.yml alone and several thousand across the tree, ALL of
-// them false positives -- which does not merely annoy, it hides the real ones. A checker nobody
-// believes is a checker nobody reads, and that is the state this file ends.
+// WHY THIS FILE EXISTS. This repository comments heavily: the migrations, the Helm chart and the
+// READMEs are largely prose. That is a deliberate choice made elsewhere, and this file is its cost.
+// Without it the Code Spell Checker extension reports several thousand problems across the tree,
+// ALL of them false positives -- which does not merely annoy, it hides the real ones. A checker
+// nobody believes is a checker nobody reads, and that is the state this file ends.
 //
 // NOTHING HERE SUPPRESSES A REAL MISSPELLING. At the time of writing there were none in this
 // repository's own prose. Three exist in text copied VERBATIM from ASHRAE 223P

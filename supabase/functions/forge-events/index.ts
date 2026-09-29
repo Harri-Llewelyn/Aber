@@ -17,7 +17,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * pass, since the edge runtime boots with VERIFY_JWT=false.
  *
  * A push to any OTHER branch is a proposal. Nothing on the gateway row moves, but the flows.json
- * at that commit is checked for shape and the `acs/flow-shape` status main requires is posted, so
+ * at that commit is checked for shape and the `aber/flow-shape` status main requires is posted, so
  * a file uploaded through the forge's own UI meets a check before an administrator merges it
  * rather than being refused on the appliance afterwards.
  *

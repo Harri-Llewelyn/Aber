@@ -551,7 +551,7 @@ export function AccessControlTab({ showToast }) {
 
         {section === 'services' && (<>
         {/* Service identities: two lists rather than one, because nothing holds an identity on both
-            planes. The ingestion daemon connects to the broker as `factoryplus_ingestion` and
+            planes. The ingestion daemon connects to the broker as `aber_ingestion` and
             reaches the database with the service-role key. */}
         {/* The same column rhythm as the credentials table: an identity, what it holds, what that
             reaches, where it comes from. */}

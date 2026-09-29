@@ -620,7 +620,7 @@ is:
 Gateways dial the broker **by IP address** — there is rarely plant DNS for it. A certificate carrying
 only `mosquitto` verifies perfectly from inside the cluster, which is where you will test it, and
 fails on every gateway with a hostname mismatch **the broker does not log**. The stack reports
-healthy, the demo simulator keeps producing telemetry, and the fleet is silently off.
+healthy, the host-run gateways keep producing telemetry, and the fleet is silently off.
 
 The chart refuses to render a LoadBalancer deployment whose certificate has no external identity at
 all. Get the address and put it in the SANs:
@@ -1444,14 +1444,14 @@ only chance to check the archive before the data stops existing.
 
 ```bash
 # 1. DETACH -- instant, and reversible with ATTACH until you drop it.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
 
 # 2. VERIFY -- copy it out, then confirm the object exists and is the size you expect.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
 #    ...then move it off the pod and into wherever your retained audit lives.
 
 # 3. DROP -- only once step 2's artefact has been checked.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
 ```
 
 > **`DETACH` alone does not free any space.** The table is still there, still on the PVC, just no
@@ -1705,7 +1705,7 @@ install and preserved thereafter (`resource-policy: keep` plus a `lookup` throug
 > used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
 > a correctly bound device. The roles in `mosquitto/dynsec-roles.json` now confine
-> `factoryplus_ingestion` (read plus NCMD only), `factoryplus_i3x` (read only), `factoryplus_monitor`
+> `aber_ingestion` (read plus NCMD only), `aber_i3x` (read only), `aber_monitor`
 > (`$SYS` only), the plugin's admin (`$CONTROL` only) and every gateway (its own edge node, through
 > a role generated for it). **The gateway usernames must be `sparkplug_id`s** — the chart fails the
 > render otherwise, because a friendly name authenticates perfectly and then has every publish

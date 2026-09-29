@@ -22,7 +22,7 @@ global:
   # only, no path. An origin missing here presents as a dashboard that logs in and shows empty
   # tables while the gateway reports 200.
   #   corsExtraOrigins:
-  #     - https://acs.example.com
+  #     - https://aber.example.com
   corsExtraOrigins: []
 
   # PVC storage class for every stateful component. `local-path` (k3s's provisioner) is
@@ -128,17 +128,17 @@ secrets:
   # Each password is independent.
 
   # Reads spBv1.0/#; publishes only rebirth NCMDs.
-  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionUser: aber_ingestion
   mqttIngestionPassword: ""
   # Read-only at the broker; the i3X server refuses writes in code too.
-  mqttI3xUser: factoryplus_i3x
+  mqttI3xUser: aber_i3x
   mqttI3xPassword: ""
   # ingestion/validate.py's gateway. A fixture: leave empty with e2e.enabled false.
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: ""
   # $SYS only, for the broker probes and the exporter sidecar. Required: without it the
   # healthcheck never passes.
-  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorUser: aber_monitor
   mqttMonitorPassword: ""
   # The account the credential service administers the broker's Dynamic Security plugin as:
   # $CONTROL/dynamic-security/# and nothing else. Required; the broker's initContainer writes it

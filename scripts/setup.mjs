@@ -7,7 +7,7 @@
  * deploy/helm/aber/values-local.yaml (gitignored) with every secret minted here:
  *
  *   npm run setup                        # asks one question on a terminal
- *   npm run setup -- --domain=acs.example.com
+ *   npm run setup -- --domain=aber.example.com
  *   helm upgrade --install aber deploy/helm/aber -n aber \
  *     -f deploy/helm/aber/values-local.yaml
  *

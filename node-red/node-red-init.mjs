@@ -41,8 +41,9 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off.
-const SETTINGS_VERSION = 6;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor-users
+// map renamed for Aber.
+const SETTINGS_VERSION = 7;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -90,9 +91,27 @@ const runtimeConfigPath = path.join(DATA_DIR, '.config.runtime.json');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// The two files under /data named for Factory+ before the rename to Aber are moved, not re-created:
+// a volume that lost its seed marker would be re-seeded blank over its flows, and one that lost the
+// editor-users map would drop every signed-in Administrator to a read-only editor. A failed move
+// stops the boot rather than risk either.
+const SEED_MARKER_NAME = '.aber-seeded';
+const EDITOR_USERS_NAME = '.aber-editor-users.json';
+for (const [legacy, current] of [
+  ['.factoryplus-seeded', SEED_MARKER_NAME],
+  ['.factoryplus-editor-users.json', EDITOR_USERS_NAME]
+]) {
+  const from = path.join(DATA_DIR, legacy);
+  const to = path.join(DATA_DIR, current);
+  if (fs.existsSync(from) && !fs.existsSync(to)) {
+    fs.renameSync(from, to);
+    console.log(`[node-red-init] moved ${from} to ${to}`);
+  }
+}
+
 // 1. Seed the flow definition: first run only. The guard is a marker file, not `flows.json`
 // existing, because the image ships a placeholder and Docker pre-populates a fresh volume from it.
-const SEED_MARKER = path.join(DATA_DIR, '.factoryplus-seeded');
+const SEED_MARKER = path.join(DATA_DIR, SEED_MARKER_NAME);
 const seededBefore = fs.existsSync(SEED_MARKER);
 const seededFlow = !seededBefore || forceSeed;
 
@@ -404,7 +423,7 @@ const CACHE_TTL_MS = 30000;
  */
 // path.posix, not path.join: this string is baked into a file that only ever runs inside the
 // container, but the generator can be run from Windows, where join() would emit a backslash path.
-const EDITOR_USERS_FILE = ${JSON.stringify(path.posix.join(DATA_DIR, '.factoryplus-editor-users.json'))};
+const EDITOR_USERS_FILE = ${JSON.stringify(path.posix.join(DATA_DIR, EDITOR_USERS_NAME))};
 const editorUsers = new Map();
 
 try {

@@ -78,7 +78,8 @@ const cfg = join(work, 'cfg');
 const dynsecDir = join(work, 'dynsec');
 const legacyDir = join(work, 'legacy');
 const brokenDir = join(work, 'broken');
-for (const d of [cfg, dynsecDir, legacyDir, brokenDir]) mkdirSync(d, { recursive: true });
+const retiredDir = join(work, 'retired');
+for (const d of [cfg, dynsecDir, legacyDir, brokenDir, retiredDir]) mkdirSync(d, { recursive: true });
 
 /**
  * The principals of the test broker. GATEWAY_A is the platform's validator gateway and arrives
@@ -93,14 +94,20 @@ const GATEWAY_C = 'gwy2a71a14de1b04971bfbb5';
 const ADMIN = 'dynsec-admin';
 const ACCOUNTS = {
   [ADMIN]: 'admin-secret-for-the-check-0001',
-  factoryplus_ingestion: 'ingestion-secret-0001',
-  factoryplus_i3x: 'i3x-secret-000000001',
-  factoryplus_monitor: 'monitor-secret-000001',
+  aber_ingestion: 'ingestion-secret-0001',
+  aber_i3x: 'i3x-secret-000000001',
+  aber_monitor: 'monitor-secret-000001',
   [GATEWAY_A]: 'gateway-a-secret-0001',
   [GATEWAY_B]: 'gateway-b-secret-0001',
   probe: 'probe-secret-00000001',
 };
 const IMPORTED = [GATEWAY_B, 'probe'];
+/**
+ * A platform account from before the rename to Aber, arriving through the legacy password file.
+ * Another, factoryplus_i3x, arrives through a stored document below. The reconcile must remove
+ * both, so neither can log in.
+ */
+const RETIRED = { factoryplus_ingestion: 'retired-ingestion-0001' };
 
 /**
  * The Sparkplug primary host id this check reconciles against, and a second one it never grants.
@@ -128,12 +135,12 @@ const INIT_ENV = {
   DYNSEC_REQUIRED_PRINCIPALS: 'INGESTION I3X VALIDATOR MONITOR',
   MQTT_DYNSEC_ADMIN_USER: ADMIN,
   MQTT_DYNSEC_ADMIN_PASSWORD: ACCOUNTS[ADMIN],
-  MQTT_INGESTION_USER: 'factoryplus_ingestion',
-  MQTT_INGESTION_PASSWORD: ACCOUNTS.factoryplus_ingestion,
-  MQTT_I3X_USER: 'factoryplus_i3x',
-  MQTT_I3X_PASSWORD: ACCOUNTS.factoryplus_i3x,
-  MQTT_MONITOR_USER: 'factoryplus_monitor',
-  MQTT_MONITOR_PASSWORD: ACCOUNTS.factoryplus_monitor,
+  MQTT_INGESTION_USER: 'aber_ingestion',
+  MQTT_INGESTION_PASSWORD: ACCOUNTS.aber_ingestion,
+  MQTT_I3X_USER: 'aber_i3x',
+  MQTT_I3X_PASSWORD: ACCOUNTS.aber_i3x,
+  MQTT_MONITOR_USER: 'aber_monitor',
+  MQTT_MONITOR_PASSWORD: ACCOUNTS.aber_monitor,
   MQTT_VALIDATOR_USER: GATEWAY_A,
   MQTT_VALIDATOR_PASSWORD: ACCOUNTS[GATEWAY_A],
   // Required by the reconcile, which derives the primary host's write grant from it rather than
@@ -250,8 +257,9 @@ try {
       throw new Error(`could not build gateway-credential/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`);
     }
 
-    const seed = IMPORTED.map((u, i) =>
-      `mosquitto_passwd -b ${i === 0 ? '-c ' : ''}/legacy/password_file ${u} ${ACCOUNTS[u]} && `).join('');
+    const seeded = [...IMPORTED.map((u) => [u, ACCOUNTS[u]]), ['factoryplus_ingestion', RETIRED.factoryplus_ingestion]];
+    const seed = seeded.map(([u, password], i) =>
+      `mosquitto_passwd -b ${i === 0 ? '-c ' : ''}/legacy/password_file ${u} ${password} && `).join('');
     const first = runInit({ preamble: seed });
     if (first.status !== 0) {
       throw new Error(`scripts/mosquitto-dynsec-init.mjs failed on first boot:\n         ${(first.stderr || first.stdout || '').trim().slice(0, 600)}`);
@@ -261,7 +269,8 @@ try {
     const doc = readDocument();
     const names = doc.clients.map((c) => c.username).sort();
     if (JSON.stringify(names) === JSON.stringify(EXPECTED_CLIENTS)) {
-      ok.push('the reconcile writes the admin, every platform principal and every imported account');
+      ok.push('the reconcile writes the admin, every platform principal and every imported account, '
+        + 'and no platform account from before the rename');
     } else {
       problems.push(`the reconciled document holds ${names.join(', ')}; expected ${EXPECTED_CLIENTS.join(', ')}`);
     }
@@ -299,6 +308,23 @@ try {
       ok.push('a second boot reconciles the existing document without losing or duplicating a client');
     } else {
       problems.push(`a second boot ${second.status === 0 ? 'changed the client set' : `failed: ${(second.stderr || '').trim().slice(0, 300)}`}`);
+    }
+
+    // A stored document from before the rename: the old i3X account beside the new one, as a
+    // `helm upgrade` finds it. The reconcile removes the old one and keeps everything else.
+    if (again) {
+      const current = again.clients.find((c) => c.username === 'aber_i3x');
+      const upgraded = { ...again, clients: [...again.clients, { ...current, username: 'factoryplus_i3x' }] };
+      writeFileSync(join(retiredDir, 'dynamic-security.json'), `${JSON.stringify(upgraded, null, '\t')}\n`);
+      const rerun = runInit({ outDir: retiredDir });
+      const after = rerun.status === 0 ? readDocument(retiredDir).clients.map((c) => c.username).sort() : null;
+      if (after && JSON.stringify(after) === JSON.stringify(EXPECTED_CLIENTS)) {
+        ok.push('a boot over a stored document removes a platform account from before the rename and keeps every other client');
+      } else {
+        problems.push(rerun.status === 0
+          ? `a boot over a document holding factoryplus_i3x left ${after.join(', ')}`
+          : `a boot over a document holding factoryplus_i3x failed: ${(rerun.stderr || '').trim().slice(0, 300)}`);
+      }
     }
 
     // A document that exists and cannot be parsed is the fleet's credentials in an unknown state;
@@ -359,6 +385,20 @@ try {
           `a client WITH valid credentials was refused on 1883: ${(authed.stderr || '').trim()}`
         );
       }
+
+      // The password-file account from before the rename was removed by the reconcile, so its
+      // password, which authenticated until then, must not.
+      const retired = docker([
+        'run', '--rm', '--network', `container:${r.name}`, IMAGE,
+        'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883',
+        '-u', 'factoryplus_ingestion', '-P', RETIRED.factoryplus_ingestion,
+        '-t', 'spBv1.0/Aber/NCMD/probe', '-m', 'x'
+      ]);
+      if (refusedConnect(retired)) {
+        ok.push('a platform account from before the rename is refused on CONNECT');
+      } else {
+        problems.push('factoryplus_ingestion still AUTHENTICATES; the reconcile must remove the retired platform accounts');
+      }
     }
 
     // 4. The roles confine each principal, asserted by delivery, not exit status. Publish as one
@@ -372,7 +412,7 @@ try {
        * as delivered.
        */
       const MARKER = 'FP-ACL-PROBE';
-      const delivers = (pubUser, topic, subUser = 'factoryplus_ingestion', subTopic = 'spBv1.0/#') => {
+      const delivers = (pubUser, topic, subUser = 'aber_ingestion', subTopic = 'spBv1.0/#') => {
         const out = `/tmp/acl-${Date.now()}.txt`;
         docker(['exec', '-d', r.name, 'sh', '-c',
           `mosquitto_sub -u ${subUser} -P ${ACCOUNTS[subUser]} -t '${subTopic}' -C 1 -W 5 > ${out} 2>&1`]);
@@ -412,37 +452,37 @@ try {
       );
       expect(
         'an imported account with no role authenticates and reaches nothing (subscribe)',
-        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
+        (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
         false
       );
       expect(
         'the ingestion principal may NOT publish DDATA',
-        (delivers('factoryplus_ingestion', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('aber_ingestion', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal may NOT publish DBIRTH',
-        (delivers('factoryplus_ingestion', `spBv1.0/Aber/DBIRTH/${GATEWAY_A}/dev1`)),
+        (delivers('aber_ingestion', `spBv1.0/Aber/DBIRTH/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal MAY publish a rebirth NCMD (alias recovery depends on it)',
-        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
+        (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
         true
       );
       expect(
         'the i3X principal may publish NOTHING (it refuses writes in code; the broker agrees)',
-        (delivers('factoryplus_i3x', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
+        (delivers('aber_i3x', `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
         false
       );
       expect(
         'the monitoring principal may publish NOTHING',
-        (delivers('factoryplus_monitor', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('aber_monitor', `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the plugin\'s admin reads NOTHING under spBv1.0 (it speaks to the plugin and nothing else)',
-        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
+        (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
         false
       );
       // A gateway's own NCMD must reach it through the wildcard subscription the simulator flow and
@@ -451,13 +491,13 @@ try {
       // instead, rebirth recovery breaks silently.
       expect(
         'a gateway receives its own NCMD through a wildcard subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`,
+        (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         true
       );
       expect(
         'a gateway does NOT receive another edge node\'s NCMD through that same subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_B}`,
+        (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_B}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         false
       );
@@ -468,13 +508,13 @@ try {
       // be able to enumerate the site, and reading is silent.
       expect(
         'the ingestion principal MAY publish the Directory (it is the only writer)',
-        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
-          'factoryplus_ingestion', DIRECTORY_FILTER)),
+        (delivers('aber_ingestion', DIRECTORY_DOC,
+          'aber_ingestion', DIRECTORY_FILTER)),
         true
       );
       expect(
         'a gateway may NOT read the Directory (it would enumerate every asset on the site)',
-        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
+        (delivers('aber_ingestion', DIRECTORY_DOC,
           GATEWAY_A, DIRECTORY_FILTER)),
         false
       );
@@ -483,8 +523,8 @@ try {
       // check would notice it coming back.
       expect(
         'the i3X principal may NOT read the Directory (it reads it from the database)',
-        (delivers('factoryplus_ingestion', DIRECTORY_DOC,
-          'factoryplus_i3x', DIRECTORY_FILTER)),
+        (delivers('aber_ingestion', DIRECTORY_DOC,
+          'aber_i3x', DIRECTORY_FILTER)),
         false
       );
 
@@ -493,20 +533,20 @@ try {
       // reading the tree would read every machine's telemetry with one credential.
       expect(
         'the ingestion principal MAY publish the Unified Namespace (it is the only writer)',
-        (delivers('factoryplus_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
-          'factoryplus_ingestion', 'uns/#')),
+        (delivers('aber_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
+          'aber_ingestion', 'uns/#')),
         true
       );
       expect(
         'a gateway may NOT read the Unified Namespace (one credential would read the whole plant)',
-        (delivers('factoryplus_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
+        (delivers('aber_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
           GATEWAY_A, 'uns/#')),
         false
       );
       expect(
         'a gateway may NOT publish into the Unified Namespace (only decoded, verified readings belong there)',
         (delivers(GATEWAY_A, `uns/Aber/Site/Area/Cell/${GATEWAY_A}/Speed`,
-          'factoryplus_ingestion', 'uns/#')),
+          'aber_ingestion', 'uns/#')),
         false
       );
 
@@ -525,23 +565,23 @@ try {
       const stateTopic = `spBv1.0/STATE/${PRIMARY_HOST_ID}`;
       expect(
         'the ingestion principal MAY publish its own primary-host STATE',
-        (delivers('factoryplus_ingestion', stateTopic, 'factoryplus_ingestion', 'spBv1.0/STATE/#')),
+        (delivers('aber_ingestion', stateTopic, 'aber_ingestion', 'spBv1.0/STATE/#')),
         true
       );
       expect(
         'a gateway RECEIVES the primary-host STATE (this is what the read grant was always for)',
-        (delivers('factoryplus_ingestion', stateTopic, GATEWAY_A, 'spBv1.0/STATE/#')),
+        (delivers('aber_ingestion', stateTopic, GATEWAY_A, 'spBv1.0/STATE/#')),
         true
       );
       expect(
         'the ingestion principal may NOT publish STATE for another host id (the grant is one literal topic)',
-        (delivers('factoryplus_ingestion', `spBv1.0/STATE/${OTHER_HOST_ID}`,
-          'factoryplus_ingestion', 'spBv1.0/STATE/#')),
+        (delivers('aber_ingestion', `spBv1.0/STATE/${OTHER_HOST_ID}`,
+          'aber_ingestion', 'spBv1.0/STATE/#')),
         false
       );
       expect(
         'a gateway may NOT publish a primary-host STATE (a forgeable birth certificate is worse than none)',
-        (delivers(GATEWAY_A, stateTopic, 'factoryplus_ingestion', 'spBv1.0/STATE/#')),
+        (delivers(GATEWAY_A, stateTopic, 'aber_ingestion', 'spBv1.0/STATE/#')),
         false
       );
 
@@ -549,7 +589,7 @@ try {
       // probes authenticate as it, so losing this rule leaves the pod permanently NotReady.
       const sysRead = (user) => docker(['exec', r.name, 'mosquitto_sub', '-u', user,
         '-P', ACCOUNTS[user], '-t', '$SYS/broker/version', '-C', '1', '-W', '4']);
-      if ((sysRead('factoryplus_monitor').stdout || '').includes('mosquitto version')) {
+      if ((sysRead('aber_monitor').stdout || '').includes('mosquitto version')) {
         ok.push('the monitoring principal can read $SYS (the health probes depend on it)');
       } else {
         problems.push('the monitoring principal CANNOT read $SYS -- every readiness probe will fail and no workload waiting on the broker will start');
@@ -646,7 +686,7 @@ try {
           `mosquitto_sub -u ${GATEWAY_C} -P ${passwordC1} -t 'spBv1.0/+/NCMD/+' -W 60 > ${rotated} 2>&1; echo EXIT:$? >> ${rotated}`]);
         docker(['exec', r.name, 'sleep', '2']);
         docker(['exec', r.name, 'mosquitto_pub',
-          '-u', 'factoryplus_ingestion', '-P', ACCOUNTS.factoryplus_ingestion,
+          '-u', 'aber_ingestion', '-P', ACCOUNTS.aber_ingestion,
           '-t', `spBv1.0/Aber/NCMD/${GATEWAY_C}`, '-m', MARKER]);
         docker(['exec', r.name, 'sleep', '2']);
         const beforeRotation = docker(['exec', r.name, 'cat', rotated]).stdout || '';

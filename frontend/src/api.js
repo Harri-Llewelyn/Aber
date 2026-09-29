@@ -1344,8 +1344,7 @@ const apiMethods = {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('A capture is a JSON object. This file is not one.');
     }
-    // A capture recorded before 1.0 carries the key under the platform's former name.
-    const version = parsed.aber_capture_version ?? parsed.acs_capture_version;
+    const version = parsed.aber_capture_version;
     if (version === undefined) {
       // The likeliest wrong file in this dialog by a distance, since both are JSON and both are
       // things an engineer downloads from this same application.
