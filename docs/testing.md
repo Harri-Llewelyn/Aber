@@ -252,7 +252,9 @@ python supabase/migrations/test_user_roles_rls.py
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
 # nameplate. The rest cover the two properties a simplification would remove first -- that an
 # invalid patch aborts its own approval rather than becoming a record of something that did not
-# happen, and that both caps are in the database rather than in a disabled button.
+# happen, and that both caps are in the database rather than in a disabled button. An approval's
+# PROPOSAL_APPLIED row and the UPDATE it made share one causation_id, which the drawer's page
+# counts as one act, and an expiry run stamps its own (0021).
 python supabase/migrations/test_change_proposals.py
 # The Administrator / Shopfloor_Manager split (0069), in both halves: the grants diverged, AND the
 # withdrawal reaches Postgres. The second half is the one worth having -- no RLS policy reads
@@ -401,7 +403,10 @@ python supabase/migrations/test_service_principal_revocation.py
 # (0013): every permission is allowed or refused with its own reason, and each allowed grant is
 # exercised AS THE MACHINE -- it forks and publishes a schema, files a proposal only a person can
 # decide, reads the asset lane and never the security lane -- and a revoked identity or token is
-# refused before its write runs, the way PostgREST runs auth_pre_request() first.
+# refused before its write runs, the way PostgREST runs auth_pre_request() first. A machine's write
+# is filed as 'service' whatever X-Aber-Actor header it sends (0020), while the ingestion principal
+# and the owner's tokenless session are still believed. Whoever may decide a machine's proposal
+# reads its name through list_proposer_names() (0022); an Operator or Auditor gets nothing.
 python supabase/migrations/test_machine_principal_naming.py
 # The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
 # PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a

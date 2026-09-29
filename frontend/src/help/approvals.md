@@ -2,6 +2,8 @@
 
 One queue for every change somebody proposes but may not make themselves. An Operator proposes; an Administrator or Shopfloor_Manager approves — and approving is what performs the change. Nothing is written when a proposal is filed.
 
+A machine identity can propose too, if an Administrator gave it that permission. Its proposals name it by the name it was given, marked **machine**, and a person still decides them.
+
 ## What the controls do
 
 - **Propose a change** opens the composer. Pick what kind of change it is, pick the asset, fill in only the fields you want changed, and say why. A field you leave alone is not part of the proposal.

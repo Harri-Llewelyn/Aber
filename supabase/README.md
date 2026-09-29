@@ -1334,6 +1334,33 @@ it is, while `changed_by` still receives the principal. The row improved as well
 an ingestion write records `'ingestion'` **and** names the identity, where it used to record
 `'ingestion'` and `NULL`.
 
+### A header is believed only from the caller it describes (`0020`)
+
+**The header was a claim anyone could make.** For a caller that is not a person, the trigger took
+`actor_source` from `X-Aber-Actor` and accepted `ingestion`, `service` and `migration` from anyone;
+only `user` was refused. That was harmless while machine identities could not write. `0013` let
+them hold `schema:manage` and `proposal:create`, and a machine sending `X-Aber-Actor: migration`
+then had its own `fork_schema()` INSERT filed as a migration. `changed_by` still named it, but the
+thread's lanes and filters read `actor_source`, and a reviewer scanning for machine activity would
+not have found that row.
+
+Each value is now believed only from the caller it describes:
+
+| Declared | Believed when | Otherwise |
+| :--- | :--- | :--- |
+| `ingestion` | `is_ingestion_caller()`: the token names `Service_Ingestor` | the rules below |
+| `migration` | the owner's own session (`postgres` or `supabase_admin`) with no JWT at all, which a PostgREST request never is | the rules below |
+| `service` | any caller that is not a person | — |
+| anything else, or nothing | — | a machine identity is `service`; any other caller falls to its effective role, as before |
+
+**A machine identity is `service` whatever it sends**, because its `sub` names it in `changed_by`
+and no other label describes it. The service-role key, which carries a JWT with no `sub`, can no
+longer claim `migration` either. Nothing in the stack sent that value: the daemon sends
+`ingestion` under its own identity, and the edge functions and scripts send `service`.
+`test_machine_principal_naming.py` sends each value as a machine and finds every row filed as
+`service`, and checks that the daemon's identity and the owner's tokenless session are still
+believed.
+
 ### Reading past the first page (`0077`)
 
 **The page had a cap and no way to say so.** `digital_thread_page()` has returned `truncated`
@@ -1635,6 +1662,27 @@ otherwise a reader would be told a row is missing and shown no way to reach it.
 
 The CSV export carries the number as `transaction_rows` beside `transaction_id`.
 `test_digital_thread_paging.py` covers the field; `digitalThreadCausation.test.jsx` the drawer.
+
+### An approval and the change it made are one act (`0021`)
+
+**Two of the thread's writers stamped no transaction.** `approve_proposal()` writes a
+`PROPOSAL_APPLIED` row naming both parties, and the target's audit trigger records the `UPDATE`
+the approval made. The trigger stamps `causation_id = txid_current()`; the `PROPOSAL_APPLIED`
+INSERT named no `causation_id`, and the column has no default. The drawer groups an event's rows
+by `causation_id` and the page counts them, so an approval read as a single-row act apart from
+the `UPDATE` it caused, and a search for the transaction id found only the `UPDATE`.
+`expire_open_proposals()` wrote `PROPOSAL_EXPIRED` the same way.
+
+Both now stamp `txid_current()` themselves, the way every other multi-row act in the chain links
+its rows: an explicit value in the INSERT, the same one the trigger writes in that transaction. No
+session variable carries it. An expiry run is one act, so the proposals one run closes share its
+id. Rows written before `0021` keep their NULL.
+
+`0021` also restates two COMMENTs that described withdrawn lanes: `validate_change_proposal()`'s
+said it refuses a schema-lane proposal whose target is "not a draft", a check archived migration
+0090 withdrew with the lane, and `approve_proposal()`'s described the link lanes archived migration
+0108 withdrew. `test_change_proposals.py` approves a proposal and finds both rows under one id, and
+`digital_thread_page()` counting them as two.
 
 
 ### The lane a Manager was offered and denied (`0120`)
@@ -1973,6 +2021,26 @@ every authenticated caller and that nothing consults them. It also holds the ref
 are facts, and `may_decide_proposal()`'s three premises. `test_machine_principal_naming.py` acts as
 the machine: it forks and publishes, files a proposal it cannot decide, reads one lane and not the
 other, and is refused before its write once revoked.
+
+### Whoever decides a machine's proposal can read its name (`0022`)
+
+**The person deciding saw eight hex characters.** The Approvals page names a proposer by the email
+its token carried, and a machine identity has none. The name an Administrator gave the machine is
+in `machine_principals`, which only Administrator and Auditor read, so a Shopfloor_Manager deciding
+a cell proposal a scheduler filed saw `b0000000` and had to ask who that was.
+
+`list_proposer_names()` returns the name of each machine that filed a proposal the caller may
+decide. It filters by `may_decide_proposal()` on each proposal's lane, the gate `approve_proposal()`
+decides by, so a caller who decides nothing gets no rows. It does not restate that gate's
+permissions: `check-docs-drift.mjs` 11f holds that only the three deciding functions consult
+`cell:manage` and `gateway:manage`, which is why a machine is refused them.
+**`machine_principals` is not widened**: a policy admitting every decider would hand them every
+machine's name and purpose, where this answers only for machines whose proposals they decide. It
+lists proposals of every status, because the Decided list names the proposer as well. A person
+has no row, since the proposal already carries their email, and nor does a pinned identity, which
+has no name; the page keeps the uuid's first eight characters for that case and marks a named
+proposer as a machine. `test_machine_principal_naming.py` checks a Shopfloor_Manager gets the name
+and an Operator, an Auditor and the machine itself get nothing.
 
 ### A person has a name the dashboard can read (`0116`)
 

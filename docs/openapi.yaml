@@ -1881,9 +1881,10 @@ paths:
         that did not happen.
 
         Writes one `digital_thread` row naming both parties: `changed_by` is the approver,
-        `new_data.proposed_by` is who asked. On the nameplate lane `updated_by` is set to the
-        **proposer**, because a nameplate is an assertion about an asset and who made it is part
-        of the record.
+        `new_data.proposed_by` is who asked. It carries the same `causation_id` as the audit row
+        the change itself wrote, so the two read as one act. On the nameplate lane `updated_by` is
+        set to the **proposer**, because a nameplate is an assertion about an asset and who made it
+        is part of the record.
       requestBody:
         required: true
         content:
@@ -1948,6 +1949,30 @@ paths:
       responses:
         '200': { description: Withdrawn. }
         '403': { description: Not the proposer. }
+
+  /rest/v1/rpc/list_proposer_names:
+    post:
+      tags: [Registry]
+      summary: The names of the machines behind the proposals you may decide
+      description: |
+        A machine identity has no email for a proposal to carry, and `machine_principals` is
+        readable by Administrator and Auditor only. This returns the name of each machine that
+        filed a proposal the caller may decide, by `may_decide_proposal()` on each proposal's
+        lane, the gate `approve_proposal` decides by. A caller who decides nothing gets an empty
+        array. A person, and a pinned identity with no name, has no row.
+      responses:
+        '200':
+          description: One row per machine proposer.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    principal_id: { type: string, format: uuid }
+                    name: { type: string }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/links:
     get:
@@ -4158,7 +4183,7 @@ components:
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
-        actor_source: { type: string, nullable: true, enum: [user, ingestion, service, migration], description: 'The trigger accepts only the non-`user` values from a client header — a client asserting a human author is precisely the claim it must not be able to make.' }
+        actor_source: { type: string, nullable: true, enum: [user, ingestion, service, migration], description: 'A person is `user`. For any other caller the trigger believes an `X-Aber-Actor` header only from the caller it describes: `ingestion` from the ingestion principal, `migration` from the database owner''s session with no token, `service` from anyone else. A machine identity is `service` whatever it sends, and `user` is never taken from the header — a client asserting a human author is precisely the claim it must not be able to make.' }
         causation_id:
           type: integer
           format: int64
@@ -4166,8 +4191,10 @@ components:
           description: >-
             The transaction that wrote the row (`txid_current()`), so rows sharing it were written
             by one act. Unique only within this database: group by it, never keep it as a
-            reference. NULL on rows older than the column, and on `PROPOSAL_APPLIED` and
-            `PROPOSAL_EXPIRED` rows, whose writers do not set it.
+            reference. A `PROPOSAL_APPLIED` row shares it with the change that approval made, and
+            the `PROPOSAL_EXPIRED` rows one expiry run writes share that run's. NULL on rows older
+            than the column, and on `PROPOSAL_APPLIED` and `PROPOSAL_EXPIRED` rows written before
+            migration 0021.
         audit_domain:
           type: string
           enum: [asset, security]

@@ -694,6 +694,15 @@ function edgeFunctionNames() {
     // never prunable. 0018 adds each row's off-site copy to what it returns, so the prune deletes
     // the copy too. The baseline selects by age alone and folds forward at the next squash.
     'public.backup_prunable': '0017 never returns the newest three backups and 0018 adds each one\'s off-site copy; the baseline holds the pre-0017 form',
+
+    // 0020 believes each X-Aber-Actor value only from the caller it describes, and files a machine
+    // identity as 'service' whatever it declares. The same signature and return type.
+    'public.log_digital_thread_event': '0020 ties each declared actor_source to its caller; the baseline accepts ingestion, service and migration from anyone',
+
+    // 0021 stamps causation_id = txid_current() on the row each writes, as the audit trigger does
+    // on the target's row. The same signatures and return types.
+    'public.approve_proposal': '0021 stamps the PROPOSAL_APPLIED row with the approval\'s causation_id; the baseline leaves it NULL',
+    'public.expire_open_proposals': '0021 stamps each PROPOSAL_EXPIRED row with the run\'s causation_id; the baseline leaves it NULL',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

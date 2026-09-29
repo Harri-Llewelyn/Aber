@@ -523,6 +523,34 @@ class TestDeciding(ProposalCase):
             (proposal,))
         self.assertEqual(self.cur.fetchone(), ("applied", "PROPOSAL_APPLIED"))
 
+    def test_the_applied_row_and_the_change_share_a_causation_id(self):
+        # 0021. The drawer groups an event's rows by causation_id, so the approval and the UPDATE
+        # it made are one act only if both carry the approving transaction.
+        proposal = self.propose({"name": "One Act"})
+        as_user(self.cur, MANAGER)
+        self.cur.execute("SELECT public.approve_proposal(%s) ->> 'thread_id';", (proposal,))
+        thread_id = int(self.cur.fetchone()[0])
+        as_owner(self.cur)
+        self.cur.execute("SELECT causation_id FROM public.digital_thread WHERE id = %s;",
+                         (thread_id,))
+        causation = self.cur.fetchone()[0]
+        self.assertIsNotNone(causation, "the PROPOSAL_APPLIED row carries no causation_id")
+        self.cur.execute(
+            "SELECT entity_type, entity_id::text, action FROM public.digital_thread "
+            " WHERE causation_id = %s ORDER BY id;", (causation,))
+        self.assertEqual(self.cur.fetchall(), [("devices", DEVICE, "UPDATE"),
+                                               ("devices", DEVICE, "PROPOSAL_APPLIED")])
+
+        # And the page the drawer reads finds both under that id and counts them as one act. The
+        # digits can also match inside a uuid, so only the rows of this act are asserted on.
+        as_user(self.cur, MANAGER)
+        self.cur.execute(
+            "SELECT public.digital_thread_page(p_search => %s, p_entity_ids => %s::uuid[]) "
+            "  -> 'events';", (str(causation), [DEVICE]))
+        events = [e for e in self.cur.fetchone()[0] if e["causation_id"] == causation]
+        self.assertEqual(sorted(e["action"] for e in events), ["PROPOSAL_APPLIED", "UPDATE"])
+        self.assertEqual({e["transaction_rows"] for e in events}, {2})
+
     def test_a_decided_proposal_cannot_be_decided_again(self):
         proposal = self.propose({"name": "once"})
         as_user(self.cur, MANAGER)
@@ -1178,6 +1206,22 @@ class TestTheTimer(ProposalCase):
         self.assertEqual(actor_source, "service")
         self.assertIsNone(changed_by)
         self.assertEqual(domain, "asset")
+
+    def test_the_expiry_row_carries_the_runs_causation_id(self):
+        # 0021. One run is one act, so every row it writes carries that run's transaction.
+        proposal = self.propose({"name": "forgotten"})
+        as_owner(self.cur)
+        self.cur.execute("SELECT set_config('aber.proposal_transition','on',true);")
+        self.cur.execute(
+            "UPDATE public.change_proposals SET proposed_at = now() - interval '30 days' "
+            " WHERE id = %s;", (proposal,))
+        self.cur.execute("SELECT public.expire_open_proposals();")
+        self.cur.execute(
+            "SELECT causation_id, txid_current() FROM public.digital_thread "
+            " WHERE action = 'PROPOSAL_EXPIRED' AND entity_id = %s;", (proposal,))
+        causation, txid = self.cur.fetchone()
+        self.assertIsNotNone(causation, "the PROPOSAL_EXPIRED row carries no causation_id")
+        self.assertEqual(causation, txid)
 
     def test_the_timer_is_not_callable_by_a_person(self):
         as_user(self.cur, MANAGER)
