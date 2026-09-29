@@ -6,10 +6,11 @@ A machine identity can propose too, if an Administrator gave it that permission.
 
 ## What the controls do
 
-- **Propose a change** opens the composer. Pick what kind of change it is, pick the asset, fill in only the fields you want changed, and say why. A field you leave alone is not part of the proposal.
+- There is no form on this page. A change is asked for on the asset's own page: open the device, area, cell or gateway and use **Propose a Change**, which opens the same dialog that edits it. A nameplate change starts from the device's **Digital Nameplate…**. Change only what you want changed, and say why. A field you leave alone is not part of the proposal.
+- Selecting a proposal opens it beside the queue, with **What would change**: each field, its value now and the value proposed. A field already at the proposed value is marked **unchanged**. A subject that no longer exists is marked **MISSING**, and approving it fails rather than recreating anything.
 - **Approve** applies the change there and then, in one transaction, as you. **Reject** refuses it and requires a reason. **Withdraw** is your own proposal's exit, and only the person who filed it can use it.
-- **Edit** reopens your own proposal while it is still open, so you can add to it rather than filing a second one.
-- The fields the composer offers come from the database, not from this page. A field that is not offered is one no proposal may name.
+- **Add to this proposal** takes you to the asset's page with your open proposal loaded into its dialog, so you can add to it rather than filing a second one.
+- The database decides which fields a proposal may name, and checks again at approval. The dialog disables a field no proposal may name, and says why.
 
 ## What the states mean
 
@@ -26,19 +27,24 @@ A machine identity can propose too, if an Administrator gave it that permission.
 
 **A ceiling on how many proposals you can have open at once.** This one bounds how much is queued for reviewers. Decide or withdraw something before adding more. The number is a setting an Administrator owns.
 
-## Who can approve what
+## The lanes, and who decides them
 
-Not every lane has the same approver, and this is deliberate rather than an oversight.
+A proposal is filed in the lane for the kind of asset it changes, and names only the fields that lane lists.
 
-- **Device details** and **Device nameplate** — an Administrator or a Shopfloor_Manager.
-- **Schema publication** — an **Administrator only**. Publishing a schema decides what ingestion accepts as conformant across every device attached to it, which is a platform decision rather than a shopfloor one.
+- **Device details** — name, description, type, connection method, 3D model, and where it sits: cell, area and location scope.
+- **Device nameplate** — the Digital Nameplate: manufacturer, product designation and type, serial number, year of construction, date of manufacture, hardware, firmware and software versions, country of origin and product URI.
+- **Area details** — name, description and icon. The name is also a segment of every `uns/` topic beneath the area.
+- **Cell details** — name, description, Grafana dashboard, icon, and its area and place on the plan.
+- **Gateway details** — name, description, access URL, and where it sits: cell, area and location scope. Not what it is, such as its deployment, and not what the platform observed about its health.
 
-So a Shopfloor_Manager who approves nameplate edits all day will not see Approve on a schema proposal. That is the gate, not a fault.
+An Administrator or a Shopfloor_Manager decides every lane. A machine identity never does: it may propose, but nothing it can be granted lets it approve.
+
+Proposals from the withdrawn **Schema publication** lane still appear in the record. Nothing can be filed in it and nobody can decide one: whoever may create a schema draft may also publish it, on the Schemas page.
 
 ## What this page cannot do
 
 **It cannot approve something invalid.** Because the approval performs the write, every constraint on the target runs at that moment — so a proposal that would break a rule fails **at approval** and stays open, with the database's own explanation. That is deliberate: a queue that accepted a change it could not apply would record something that never happened.
 
-**It is not a way around a permission.** Proposing is a write to this queue and to nothing else. An Operator still cannot edit a device, a nameplate or a schema directly, and approving runs as the approver with their authority re-checked by the database — never as the proposer.
+**It is not a way around a permission.** Proposing is a write to this queue and to nothing else. An Operator still cannot edit a device, its nameplate, an area, a cell or a gateway directly, and approving runs as the approver with their authority re-checked by the database — never as the proposer.
 
-**It does not cover Node-RED flows yet.** A flow lives on the gateway rather than in a column here, and that lane is still to be built.
+**It does not cover Node-RED flows.** A gateway's flow lives in its own repository in the forge, and a change to it is a pull request that an administrator approves there. The Gateways page's help describes it.

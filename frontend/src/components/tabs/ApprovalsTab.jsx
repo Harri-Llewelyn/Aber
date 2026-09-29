@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { api } from '../../api'
-import { POLL_INTERVAL_MS, PERMISSION_UUIDS } from '../../constants'
+import { POLL_INTERVAL_MS, PERMISSION_UUIDS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -27,34 +27,11 @@ import { PageHeading } from '../common/PageHeading'
  * fallback below. The form for each lane is the asset's own Edit Details dialog.
  */
 export const LANES = [
-  {
-    id: 'devices',
-    label: 'Device details',
-    blurb: 'Name, description, type, connection and location.'
-  },
-  {
-    id: 'device_nameplate',
-    label: 'Device nameplate',
-    blurb: 'The IDTA Digital Nameplate a person asserts about a machine — manufacturer, serial, '
-      + 'versions.'
-  },
-  {
-    id: 'areas',
-    label: 'Area details',
-    blurb: 'An area’s name, its description and its icon. The name is also the <area> segment of '
-      + 'every uns/ topic beneath it.'
-  },
-  {
-    id: 'cells',
-    label: 'Cell details',
-    blurb: 'A cell’s name, its Grafana dashboard and its icon.'
-  },
-  {
-    id: 'gateways',
-    label: 'Gateway details',
-    blurb: 'Name, description, access URL and where the gateway sits. Not what it IS, and not what '
-      + 'the platform observed about its health.'
-  },
+  { id: 'devices', label: 'Device details' },
+  { id: 'device_nameplate', label: 'Device nameplate' },
+  { id: 'areas', label: 'Area details' },
+  { id: 'cells', label: 'Cell details' },
+  { id: 'gateways', label: 'Gateway details' },
   /* No link lanes. 0108 withdrew `cell_links`, `gateway_links` and `device_links`: no UI ever filed
      one, and a link is attached directly through `link:manage`. LANE_BY_ID falls back rather than
      filtering, so a decided row left over from before still renders under its raw lane name. */
@@ -347,7 +324,7 @@ function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
           {/* No Proposed by column: the drawer names the proposer, by email or machine name. Status
               and time are two columns because they are two facts. */}
           <tr>
-            <th title="The asset or schema this proposal is about">Subject</th>
+            <th title="The device, area, cell or gateway this proposal is about">Subject</th>
             <th title="Which lane, and therefore who may decide it">Change</th>
             <th title="The fields this proposal would change">Field(s) changed</th>
             <th title="Its current state">Status</th>
@@ -592,7 +569,14 @@ export function ApprovalsTab({
     ...(selected.applied_thread_id && onViewThread ? [{
       label: 'View in Digital Thread', icon: <IconHistory size={13} />,
       title: 'The audit row this approval wrote, naming both the proposer and the approver',
-      onClick: () => onViewThread(selected)
+      // Filtered to the subject's own kind: `digital_thread_page()` compares `entity_type` exactly,
+      // and the approval row is filed under the lane's table. A deleted subject's rows are purged,
+      // so the thread is asked to show those.
+      onClick: () => onViewThread({
+        id: selected.entity_id,
+        type: ENTITY_KIND_BY_TABLE[selected.entity_type] || '',
+        purged: Boolean(selected.target_missing)
+      })
     }] : []),
     ...(mine && selected.status === 'open' ? [
       /* Edit is a hand-over, not a dialog: the asset's page opens with Propose a Change seeded from
