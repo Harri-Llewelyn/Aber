@@ -631,9 +631,9 @@ function Dashboard({ session, onSignOut }) {
               initialSubject={proposalFocus?.subject || ''}
               onClearFocus={() => setProposalFocus(null)}
               onOpenSubject={openProposalSubject}
-              /* The proposal's target, not the proposal: the thread shows the machine's or schema's
-                 history with the approval in it. device_nameplate rows are keyed by the device id. */
-              onViewThread={p => viewThreadFor(p.entity_id, p.entity_type === 'schemas' ? 'SCHEMA' : 'DEVICE')} />}
+              /* The proposal's subject, not the proposal: the page names its kind and whether it
+                 was deleted, as the Archived Entities page does. */
+              onViewThread={t => viewThreadFor(t.id, t.type, t.purged)} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` is passed on because the page distinguishes read-only Auditor from the
                 roles that can record. */}

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { api } from '../../api'
-import { POLL_INTERVAL_MS, PERMISSION_UUIDS } from '../../constants'
+import { POLL_INTERVAL_MS, PERMISSION_UUIDS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -569,7 +569,14 @@ export function ApprovalsTab({
     ...(selected.applied_thread_id && onViewThread ? [{
       label: 'View in Digital Thread', icon: <IconHistory size={13} />,
       title: 'The audit row this approval wrote, naming both the proposer and the approver',
-      onClick: () => onViewThread(selected)
+      // Filtered to the subject's own kind: `digital_thread_page()` compares `entity_type` exactly,
+      // and the approval row is filed under the lane's table. A deleted subject's rows are purged,
+      // so the thread is asked to show those.
+      onClick: () => onViewThread({
+        id: selected.entity_id,
+        type: ENTITY_KIND_BY_TABLE[selected.entity_type] || '',
+        purged: Boolean(selected.target_missing)
+      })
     }] : []),
     ...(mine && selected.status === 'open' ? [
       /* Edit is a hand-over, not a dialog: the asset's page opens with Propose a Change seeded from
