@@ -1451,21 +1451,11 @@ backup:
   # and on a full or cordoned node it stays Pending. Check the first run completed. Prefer
   # Velero or a CSI snapshotter where available (supabaseStorage.podAnnotations).
   includeStorage: false
-  # pvc | s3
-  destination: pvc
+  # The backup PVC, the only place the CronJob writes. The off-site copy is the backup service's.
   persistence:
     size: 20Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  s3:
-    # destination: s3 only. The bucket must already exist.
-    bucket: ""
-    # e.g. https://s3.eu-west-2.amazonaws.com, or a MinIO endpoint.
-    endpoint: ""
-    region: ""
-    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are read from this Secret, kept out of the
-    # chart's own Secret because backup credentials have a different lifetime.
-    existingSecret: ""
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }
