@@ -1,7 +1,7 @@
 {{- include "aber.validate" . -}}
-Factory+ {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+Aber {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
 
-  PHASES 1-5 ARE INSTALLED: the whole stack bar in-cluster CI and hardening.
+  The shopfloor data platform. What this release runs:
 
 Data tier
   timescaledb        StatefulSet   {{ .Values.timescaledb.persistence.size }} on {{ .Values.timescaledb.persistence.storageClass | default .Values.global.storageClass }}

@@ -85,12 +85,14 @@ section moves with it. [`releases.md`](releases.md#major--1x--200) lists what mo
 
 ### What 1.0 renames, and what each rename asks of a site
 
-1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/Aber/issues/335)).
-Tiers 1 and 2 were prose and the chart; this is the third tier, the identifiers that exist outside
-the repository. Each row is a value a site already holds somewhere, and the right-hand column is
-what the site does about it. Nothing here is undone by `helm upgrade`, because no install below 1.0
-reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its data comes
-by backup, reinstall and restore, and the restored database is what the rows below meet.
+1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/Aber/issues/335)) and
+retires the names that outlived what they named
+([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)). The rows are the identifiers either
+one changes that exist outside the repository; the rename's first two tiers were prose and the
+chart, which no site holds. Each row is a value a site already holds somewhere, and the right-hand
+column is what the site does about it. Nothing here is undone by `helm upgrade`, because no install
+below 1.0 reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its
+data comes by backup, reinstall and restore, and the restored database is what the rows below meet.
 
 | Was | Is | What a site does |
 | :--- | :--- | :--- |
@@ -116,10 +118,20 @@ by backup, reinstall and restore, and the restored database is what the rows bel
 | Environment variables read by the scripts and the edge functions: `ACS_CYMRU_NAMESPACE`, `ACS_CYMRU_RELEASE`, `ACS_DEV_*`, `ACS_CA_URL`, `ACS_CA_PEM`, `ACS_PLATFORM_VERSION`, `ACS_INSTALLER_ALLOW_HTTP`, and the pods' mount paths under `/etc/acs-cymru`, `/var/lib/acs-cymru`, `/opt/acs-cymru` | `ABER_…`, `/etc/aber`, … | Nothing inside the cluster; the chart sets them. A shell profile that exported one of the names for the dev loop exports the new one. |
 | The platform's broker accounts `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor` (`secrets.mqttIngestionUser`, `mqttI3xUser`, `mqttMonitorUser`) | `aber_ingestion`, `aber_i3x`, `aber_monitor` | Nothing. The broker's boot reconcile creates the new accounts from the chart's passwords and removes the old ones, and the broker, the ingestion daemon and the i3X server restart onto them in the same upgrade. A values file that names an old username keeps that account. With `secrets.existingSecret` the old names stay until the Secret's `MQTT_*_USER` keys change; then restart `mosquitto`, `ingestion` and `i3x-service`. |
 | Node-RED's seed marker `/data/.factoryplus-seeded` and editor-users map `/data/.factoryplus-editor-users.json` | `/data/.aber-seeded`, `/data/.aber-editor-users.json` | Nothing. `node-red-init` moves each file on the first boot that finds it, before deciding whether to seed, so the flows and the editors' permissions stay; `settings.js` is rewritten once, at version 7, to read the new name. |
+| Node-RED's `tls-config` node `factoryplus-tls-config`, named *Factory+ internal CA*, which every broker node in `flows.json` points at while broker TLS is on | `aber-tls-config`, *Aber internal CA* | Nothing. `node-red-init` moves the node's id, every reference to it and its name on the first boot that finds it, and leaves the rest of `flows.json` byte for byte. A name somebody gave the node is kept. The CA it trusts keeps its common name, *Factory+ Internal CA*, because changing that re-mints the CA. |
 | The Directory entry *Node-RED (Virtual Edge Gateway Simulator)* | *Node-RED (Host-Run Gateways)* | Nothing. `0024` renames the row on the first boot, unless it was renamed by hand or another row already has the new name. |
 | The vault secret and psql variable `supabase_anon_key`, which held the publishable key | `supabase_publishable_key` | Nothing. `0002` rewrites the secret from db-init's variable on every boot and deletes the old name. A migration runner of your own that passes `-v supabase_anon_key=` passes the new name instead, or credential revocation and the forge sweep go inert. |
 | The dev cluster `k3d-acs-cymru` and the development credentials in `values-dev.yaml` (`sb_publishable_acscymru_dev_…`, `acscymru-ingest-writer`, `acscymrusecret`, …) | `k3d-aber`, `…aber…` | Development only. `k3d cluster delete acs-cymru`, then `npm run dev:up` creates `aber`. The Node-RED credential secret changed, so a dev cluster that keeps its volume needs `npm run dev:reset`. |
 | The Storage bucket `floor-plans`, its policies `floor_plans_*` and the path check `is_floor_plan_path()`; in the dashboard `FloorPlan.jsx`, `FloorPlacementPicker.jsx`, `utils/floorPlans.js`, the `.floor-plan*`, `.floor-pin*` and `.floor-placement*` classes, and `api.uploadFloorPlan`, `removeFloorPlan` and `loadFloorPlanUrl` | `area-plans`, `area_plans_*`, `is_area_plan_path()`; `AreaPlan.jsx`, `CellPlacementPicker.jsx`, `utils/areaPlans.js`, `.area-plan*`, `uploadAreaPlan`, `removeAreaPlan`, `loadAreaPlanUrl` | Nothing. `storage-policies.sql` replaces the four policies and drops the old check, and `storage-init.mjs` creates `area-plans`, moves every plan into it under the same key and deletes `floor-plans`. `areas.plan_path` holds only the key, so no row changes. A restored backup that still holds `floor-plans` is moved the same way by the next `helm upgrade`, and until then the Site Map draws the default outline and says the plan could not be loaded. A script of your own that read plans from `floor-plans` names `area-plans`. |
+
+**A development forge that already tagged `v0.1.0` holds other content under that tag.** The
+platform playbook has changed since a development forge first published it (the appliance flow's
+certificate note names `aber-gateway-converge`, for one), and a tag is never moved, so the forge
+sweep lists `platform/gateway-platform is tagged v0.1.0 at other content than this build ships`
+among its warnings until the version moves. Delete the tag as
+[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep)
+says, and the next sweep tags `main` again. The release bumps the version, so an upgrading site
+meets a new tag instead.
 
 Everything below is what that one command does and does not disturb.
 
@@ -257,7 +269,7 @@ entire recovery story.
 
 **Nothing in this platform pushes a flow to a plant appliance.** The dashboard's *"Sync Edge Flows
 via GitOps"* action and the `deploy-nodered` edge function both target
-`http://node-red:1880/flows` — the **central** Node-RED that runs the simulated shopfloor. A
+`http://node-red:1880/flows` — the **central** Node-RED, which runs the host-run gateways. A
 Remote gateway's Node-RED has no inbound path at all: it dials out to the broker on 8883 and
 nothing anywhere assumes traffic in the other direction.
 

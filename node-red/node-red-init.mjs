@@ -154,12 +154,38 @@ if (seededFlow) {
   );
 }
 
+// 1a. The broker's tls-config node was named for Factory+ before the rename to Aber. It is moved
+// in the file's text, so flows.json is otherwise byte-identical: the node's id and every reference
+// to it are the same whole JSON string. Only when the old id is present and the new one is not.
+const TLS_NODE_ID = 'aber-tls-config';
+const TLS_NODE_NAME = 'Aber internal CA';
+const LEGACY_TLS_NODE = { id: 'factoryplus-tls-config', name: 'Factory+ internal CA' };
+if (fs.existsSync(flowsPath)) {
+  const text = fs.readFileSync(flowsPath, 'utf8');
+  let nodes = [];
+  try { nodes = JSON.parse(text); } catch { /* read again below, where an unreadable flow stops the boot */ }
+  const legacy = Array.isArray(nodes) ? nodes.find((n) => n?.id === LEGACY_TLS_NODE.id) : undefined;
+  if (legacy && !nodes.some((n) => n?.id === TLS_NODE_ID)) {
+    const quoted = (s) => JSON.stringify(s);
+    const occurrences = text.split(quoted(LEGACY_TLS_NODE.id)).length - 1;
+    let moved = text.split(quoted(LEGACY_TLS_NODE.id)).join(quoted(TLS_NODE_ID));
+    // The name moves only while it is the one this script wrote and nothing else carries it.
+    if (legacy.name === LEGACY_TLS_NODE.name && moved.split(quoted(LEGACY_TLS_NODE.name)).length === 2) {
+      moved = moved.replace(quoted(LEGACY_TLS_NODE.name), () => quoted(TLS_NODE_NAME));
+    }
+    fs.writeFileSync(flowsPath, moved);
+    console.log(
+      `[node-red-init] moved tls-config node '${LEGACY_TLS_NODE.id}' to '${TLS_NODE_ID}' ` +
+        `(${occurrences - 1} reference(s) with it)`
+    );
+  }
+}
+
 // 1b. Reconcile the broker node's transport settings (host, port, TLS) on every boot: where the
 // broker is is deployment configuration, not user content. Writes a narrow set of keys, only when
 // they are explicitly configured. Must run before the credential section, which exits early on
 // volumes that hold credentials.
 const BROKER_NODE_ID = 'mqtt-broker-config';
-const TLS_NODE_ID = 'factoryplus-tls-config';
 
 const mqttTlsEnabled = /^(1|true|yes|on)$/i.test((process.env.MQTT_TLS_ENABLED || '').trim());
 const mqttTlsCaFile = (process.env.MQTT_TLS_CA_FILE || '').trim();
@@ -240,8 +266,9 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
       flow.push(tlsNode);
       changes.push(`added tls-config node '${TLS_NODE_ID}'`);
     }
-    Object.assign(tlsNode, {
-      name: 'Factory+ internal CA',
+    // Through setField, so a node that differs only here (a moved CA path) is still written.
+    for (const [key, value] of Object.entries({
+      name: TLS_NODE_NAME,
       // certType 'files' means cert/key/ca are paths read at deploy time. Stated explicitly because
       // 05-tls.js defaults it and a default change would silently reinterpret `ca`.
       certType: 'files',
@@ -254,7 +281,7 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
       verifyservercert: true,
       servername: '',
       alpnprotocol: ''
-    });
+    })) setField(tlsNode, key, value);
   };
 
   // The inverse of applyTls. Turning TLS off used to move the port and leave `usetls: true`, a TLS
@@ -343,7 +370,7 @@ const SETTINGS_JS = `/**
  *                          that deploy-nodered forwards from the operator who triggered it.
  *   httpNodeAuth        -- the http-in nodes (POST /hooks/quarantine). adminAuth does NOT
  *                          cover these: they mount under httpNodeRoot, a separate Express
- *                          mount (node-red/red.js:426), which is why the webhook stayed open
+ *                          mount (Node-RED's red.js:426), which is why the webhook stayed open
  *                          in every design that only set adminAuth.
  */
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
