@@ -963,11 +963,6 @@ function edgeFunctionNames() {
       + 'since the audit INSERT is a trigger on cells/gateways/devices. Not an endpoint in its '
       + 'own right: readers use the parent, where the RLS policies are, and 0079 revokes every '
       + 'application-role privilege on partitions precisely so that this name is unreachable',
-  audit_trail_partitioned:
-      'SCAFFOLDING, AND IT DOES NOT OUTLIVE ITS OWN TRANSACTION. 0079 builds the partitioned '
-      + 'table under this name, copies into it, then renames it to audit_trail inside one DO '
-      + 'block -- so no database ever has a relation called this. Listed only because this check '
-      + 'reads CREATE statements out of the migration text rather than the live catalogue',
   one_shot_migrations:
       'The ledger for migrations that must run EXACTLY ONCE rather than on every boot like the '
       + 'rest of the chain (0040). RLS on with no policy at all and the anon/authenticated grants '
@@ -983,9 +978,13 @@ function edgeFunctionNames() {
     [...spec.matchAll(/^ {2}(\/[^\s:]*):/gm)].map((m) => m[1])
   );
 
+  // Not 0000: it creates nothing that survives under the name it creates it with (its
+  // conversion's scaffolding is renamed or dropped before `0001` runs).
   let migrationSql = '';
   for (const f of readdirSync(join(REPO, 'supabase/migrations'))) {
-    if (f.endsWith('.sql')) migrationSql += readFileSync(join(REPO, 'supabase/migrations', f), 'utf8') + '\n';
+    if (f.endsWith('.sql') && !f.startsWith('0000_')) {
+      migrationSql += readFileSync(join(REPO, 'supabase/migrations', f), 'utf8') + '\n';
+    }
   }
   const relations = new Set(
     [...migrationSql.matchAll(
