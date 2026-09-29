@@ -28,6 +28,10 @@ spec:
   # suite is not idempotent mid-flight: a retry starting while fixtures from the previous attempt
   # exist reports collisions rather than the original failure.
   backoffLimit: 0
+  {{- if .Values.e2e.suspend }}
+  # Resumed by whoever set e2e.suspend; see values.yaml.
+  suspend: true
+  {{- end }}
   ttlSecondsAfterFinished: {{ .Values.e2e.ttlSecondsAfterFinished }}
   template:
     metadata:

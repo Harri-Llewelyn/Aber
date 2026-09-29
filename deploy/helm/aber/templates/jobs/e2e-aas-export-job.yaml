@@ -43,6 +43,10 @@ metadata:
 spec:
   # No retries -- see the note in e2e-validate-job.yaml.
   backoffLimit: 0
+  {{- if .Values.e2e.suspend }}
+  # Resumed by whoever set e2e.suspend; see values.yaml.
+  suspend: true
+  {{- end }}
   ttlSecondsAfterFinished: {{ .Values.e2e.ttlSecondsAfterFinished }}
   template:
     metadata:

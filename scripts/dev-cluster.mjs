@@ -17,8 +17,8 @@
  *           --only=a,b          build and import only these images (`up`)
  *           --no-tls            skip cert-manager, the broker's TLS listener and the databases' TLS (`up`)
  *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`); when `up`
- *                               upgrades a release and restarts rebuilt workloads, it re-creates
- *                               the Jobs once those have rolled out, so they test the new pods
+ *                               upgrades a release, the Jobs are created suspended and start once
+ *                               every workload has rolled out, so they test the new pods
  *           --no-validate       skip validate.py, run the lane only (`test`)
  *           --filter=<text>     only suites whose path contains the text (`test`)
  *           --no-dns-check      run the lane on a machine where the Ingress hosts do not resolve;
@@ -295,44 +295,36 @@ function importImages (version, only) {
 /**
  * A rebuilt image keeps its tag, and a running pod keeps the image it started with, so after an
  * import the workloads that run a rebuilt image are restarted. Without this a code change is
- * built, imported and silently not running. Returns how many were restarted.
+ * built, imported and silently not running.
  */
 function restartWorkloadsUsing (refs) {
   const r = kubectl('get', 'deploy,statefulset,daemonset', '-o', 'json')
-  if (!r.ok) return 0
+  if (!r.ok) return
   const workloads = JSON.parse(r.out).items.filter(w =>
     (w.spec.template.spec.containers || []).concat(w.spec.template.spec.initContainers || [])
       .some(ct => refs.includes(ct.image)))
-  if (!workloads.length) return 0
+  if (!workloads.length) return
   step(`restart the workloads running a rebuilt image`)
   for (const w of workloads) {
     const kind = w.kind.toLowerCase()
     console.log(`  ${kind}/${w.metadata.name}`)
     run('kubectl', ['-n', NS, 'rollout', 'restart', `${kind}/${w.metadata.name}`], { stdio: 'ignore' })
   }
-  return workloads.length
 }
 
 const E2E_JOBS = [`${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`]
 
 /**
- * The e2e Jobs are plain Jobs that helm creates during the upgrade, so they start against the pods
- * restartWorkloadsUsing() replaces afterwards. Called once those have rolled out: deletes the Jobs
- * with their pods and creates them again from the release's own manifest, so the chart's Jobs,
- * unchanged, run against the rebuilt pods.
+ * Starts the e2e Jobs an upgrade created suspended (e2e.suspend), once every workload has rolled
+ * out. Helm creates them during the upgrade and the rebuilt workloads restart after it; a run
+ * started then meets the old pods, and deleting it later does not undo what it did.
  */
-function recreateE2eJobs () {
-  step('re-create the e2e Jobs against the rebuilt workloads')
-  const manifest = capture('helm', ['get', 'manifest', RELEASE, '-n', NS], { maxBuffer: 64 * 1024 * 1024 })
-  if (!manifest.ok) die(`helm get manifest failed: ${manifest.err}`)
-  const jobs = manifest.out.split(/^---[ \t]*$/m).filter(doc =>
-    /^kind: Job$/m.test(doc) && E2E_JOBS.some(name => doc.includes(`\n  name: ${name}\n`)))
-  if (jobs.length !== E2E_JOBS.length) die(`the release manifest holds ${jobs.length} of the ${E2E_JOBS.length} e2e Jobs`)
-  // Foreground, so a half-run pod of the old Job is gone before the new one writes the same fixtures.
-  must('kubectl', ['-n', NS, 'delete', 'job', ...E2E_JOBS, '--ignore-not-found', '--cascade=foreground', '--wait=true'],
-    'the e2e Jobs could not be deleted')
-  must('kubectl', ['-n', NS, 'create', '-f', '-'], 'the e2e Jobs could not be created again',
-    { input: jobs.join('\n---\n'), stdio: ['pipe', 'inherit', 'inherit'] })
+function resumeE2eJobs () {
+  step('start the e2e Jobs, now that every workload has rolled out')
+  for (const job of E2E_JOBS) {
+    must('kubectl', ['-n', NS, 'patch', 'job', job, '--type=merge', '-p', '{"spec":{"suspend":false}}'],
+      `${job} could not be resumed`)
+  }
 }
 
 function assertImagesPresent (version) {
@@ -375,7 +367,7 @@ function keptSecret (key) {
   return releaseValues().secrets?.[key] || crypto.randomBytes(32).toString('hex')
 }
 
-async function installChart ({ tls, e2e }) {
+async function installChart ({ tls, e2e, holdE2e = false }) {
   const domain = option('domain') || 'localhost'
   step(`helm upgrade --install ${RELEASE} on ${domain} (${tls ? 'broker TLS on' : 'no TLS'}${e2e ? ', e2e Jobs on' : ''})`)
   must('node', ['scripts/sync-helm-chart-files.mjs'], 'the chart files are not mirrored')
@@ -414,6 +406,7 @@ async function installChart ({ tls, e2e }) {
     // domain; hostAliases point them at Traefik instead.
     const ip = capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik', '-o', 'jsonpath={.spec.clusterIP}']).out
     sets.push('--set', 'e2e.enabled=true', '--set', `e2e.ingressIp=${ip}`)
+    if (holdE2e) sets.push('--set', 'e2e.suspend=true')
     // Plain Jobs, not hooks, and a Job's pod template is immutable: a completed run left in place
     // makes the next upgrade fail with `field is immutable` the moment their spec changes.
     run('kubectl', ['-n', NS, 'delete', 'job', `${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`, '--ignore-not-found'])
@@ -743,15 +736,15 @@ async function up () {
     buildImages(version, only)
     importImages(version, only)
   }
-  // An install has no older pods for the Jobs to meet, so only an upgrade re-creates them.
-  const upgrading = capture('helm', ['status', RELEASE, '-n', NS]).ok
-  await installChart({ tls, e2e: flag('e2e') })
-  let restarted = 0
+  // An upgrade creates the e2e Jobs suspended, to start once the workloads have rolled out. An
+  // install has no older pods for them to meet, and creates them running, as CI's does.
+  const holdE2e = flag('e2e') && capture('helm', ['status', RELEASE, '-n', NS]).ok
+  await installChart({ tls, e2e: flag('e2e'), holdE2e })
   if (!flag('no-build')) {
-    restarted = restartWorkloadsUsing(IMAGES.filter(i => !only || only.includes(i.name)).map(i => `${IMG_NS}/${i.name}:${version}`))
+    restartWorkloadsUsing(IMAGES.filter(i => !only || only.includes(i.name)).map(i => `${IMG_NS}/${i.name}:${version}`))
   }
   await waitForStack()
-  if (flag('e2e') && upgrading && restarted) recreateE2eJobs()
+  if (holdE2e) resumeE2eJobs()
   helmTest()
   if (flag('e2e')) await waitForE2e()
   status()

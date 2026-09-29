@@ -190,10 +190,11 @@ backup service, taking storage and the forge too, and generates the forge
 sweep secret once; the stack lane exercises all of it. It applies Traefik's client-address setting from *Install* too, before cert-manager. `--no-tls` leaves the listener off,
 `--no-build` reuses the images already in the node, `--only=ingestion` rebuilds a subset, `--e2e`
 adds the in-cluster conformance Jobs. Helm creates those Jobs during the upgrade, before `up`
-restarts the workloads whose image it rebuilt under the same tag, so `up` deletes them and creates
-them again from the release's manifest once the restarted workloads have rolled out: on an
-existing stack they test the new pods, not the ones being replaced. A first install has no older
-pods, and its Jobs are left as helm created them.
+restarts the workloads whose image it rebuilt under the same tag, so on an upgrade `up` sets
+`e2e.suspend` and starts the Jobs only once every workload has rolled out: they test the new pods,
+not the ones being replaced. Deleting a run that started early would not be enough, because what it
+did stays done (a rebirth request starts the node's throttle, which a second run then meets). A
+first install has no older pods, and creates its Jobs running.
 
 The port-forwards carry the port numbers every host-side script and suite defaults to (`5433` for the historian,
 `54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
