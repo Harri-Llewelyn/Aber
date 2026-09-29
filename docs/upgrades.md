@@ -90,9 +90,9 @@ retires the names that outlived what they named
 ([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)). The rows are the identifiers either
 one changes that exist outside the repository; the rename's first two tiers were prose and the
 chart, which no site holds. Each row is a value a site already holds somewhere, and the right-hand
-column is what the site does about it. Nothing here is undone by `helm upgrade`, because no install below 1.0
-reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its data comes
-by backup, reinstall and restore, and the restored database is what the rows below meet.
+column is what the site does about it. Nothing here is undone by `helm upgrade`, because no install
+below 1.0 reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its
+data comes by backup, reinstall and restore, and the restored database is what the rows below meet.
 
 | Was | Is | What a site does |
 | :--- | :--- | :--- |
@@ -129,8 +129,9 @@ platform playbook has changed since a development forge first published it (the 
 certificate note names `aber-gateway-converge`, for one), and a tag is never moved, so the forge
 sweep lists `platform/gateway-platform is tagged v0.1.0 at other content than this build ships`
 among its warnings until the version moves. Delete the tag as
-[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep) says, and the next sweep
-tags `main` again. The release bumps the version, so an upgrading site meets a new tag instead.
+[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep)
+says, and the next sweep tags `main` again. The release bumps the version, so an upgrading site
+meets a new tag instead.
 
 Everything below is what that one command does and does not disturb.
 
