@@ -1028,9 +1028,14 @@ def run_simulation():
     print(f"\n--- DDATA from quarantined device: {UNKNOWN_DEVICE_ID} ---")
     publish("DDATA", UNKNOWN_DEVICE_ID, {"Systems/TEMPERATURE": 99.9, "Controller/EXECUTION": "STOPPED"})
 
-    # 3. DDATA for the registered device -> ingested, keyed by its sparkplug_id
-    print(f"\n--- DDATA from registered device: {VAL_KNOWN_DEVICE} ({SEEDED.get('known_id')}) ---")
-    publish("DDATA", SEEDED["known_id"], {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE", "Controller/EMERGENCY_STOP": "ARMED"})
+    # 3. DBIRTH then DDATA for the registered device -> ingested, keyed by its sparkplug_id. Born
+    #    first: DDATA from an OFFLINE device not born draws a rebirth request, and that would spend
+    #    the node's rate limit before check 9 asks for one. The birth declares a smaller set than
+    #    step 7's, so step 7's first birth is still a change.
+    print(f"\n--- DBIRTH then DDATA from registered device: {VAL_KNOWN_DEVICE} ({SEEDED.get('known_id')}) ---")
+    known_reading = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE", "Controller/EMERGENCY_STOP": "ARMED"}
+    publish("DBIRTH", SEEDED["known_id"], known_reading)
+    publish("DDATA", SEEDED["known_id"], known_reading)
 
     # 4. DBIRTH under a truncated id: quarantined with a message naming the length mismatch, which
     # is the point of the fixed 24-character format.
@@ -1168,8 +1173,8 @@ def freshen_the_plant():
     Just before checks 12 and 17: a node heartbeat from the seeded gateway, and step 7's birth
     again from the registered device. i3X holds a device's values Uncertain once its gateway has
     not beaten for 90 s or the device is OFFLINE, and the simulation's last node message is minutes
-    old by then. Only a DBIRTH sets a device ONLINE; this one declares the same set, so it rewrites
-    nothing else.
+    old by then. A DBIRTH sets a device ONLINE whatever took it OFFLINE; this one declares the same
+    set, so it rewrites nothing else.
     """
     client = connect_publisher(capture=False)
     if client is None:
@@ -3013,6 +3018,34 @@ def verify_results():
                       "quiet period. The watchdog is rewriting an unchanged status and filling an "
                       "append-only table.")
                 passed = False
+
+            # 10b. The timeout rests on silence alone, so the device's next DDATA sets it ONLINE
+            # again without a birth.
+            publisher = connect_publisher(capture=False) if status == "OFFLINE" else None
+            if status == "OFFLINE" and publisher is None:
+                print("❌ 10b. DEVICE PUBLISHES AGAIN FAIL: could not connect to the broker as the "
+                      "seeded gateway, so nothing was published.")
+                passed = False
+            elif publisher is not None:
+                alias_dev = SEEDED["alias_id"]
+                gw = SEEDED.get("gateway_id") or VAL_GW_NAME
+                publisher.publish(f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{alias_dev}", make_sparkplug_payload(
+                    alias_dev, {"Systems/TEMPERATURE": 20.5}, int(time.time() * 1000)))
+                time.sleep(4)
+                publisher.loop_stop()
+                publisher.disconnect()
+                res = supabase_client.table("devices").select("status").eq(
+                    "id", SEEDED["alias_uuid"]
+                ).execute()
+                revived = res.data[0]["status"] if res.data else None
+                if revived == "ONLINE":
+                    print("✅ 10b. DEVICE PUBLISHES AGAIN: DDATA from the timed-out device set it "
+                          "ONLINE without a birth.")
+                else:
+                    print(f"❌ 10b. DEVICE PUBLISHES AGAIN FAIL: status is '{revived}' after DDATA "
+                          "from a device the watchdog timed out; expected ONLINE. The daemon's log "
+                          "says why under 'WATCHDOG' or 'has not been born since'.")
+                    passed = False
         except Exception as e:
             print(f"❌ 10. DEVICE WATCHDOG ERROR: {e}")
             passed = False

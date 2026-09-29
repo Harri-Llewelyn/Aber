@@ -536,10 +536,19 @@ REBIRTH_METRIC_NAME = "Node Control/Rebirth"
 _last_seq = {}
 _seq_lock = threading.Lock()
 
-# Devices heard from in THIS process -- {device_uuid: {"at": monotonic, "name": label}}.
-# Deliberately in-memory and deliberately not seeded from the database: see stale_device_ids().
+# Devices heard from in THIS process -- {device_uuid: {"at": monotonic, "name": label, "node":
+# alias_key, "epoch": the node's _node_epoch then}}. Deliberately in-memory and deliberately not
+# seeded from the database: see stale_device_ids().
 _device_seen = {}
+# Devices this process has set OFFLINE and not heard born since, under the same lock. A watchdog
+# timeout keeps the device's _device_seen entry, which is what lets its DDATA set it ONLINE again;
+# anything else records {}. See accept_device_data().
+_device_offline = {}
 _device_seen_lock = threading.Lock()
+
+# Each edge node's NBIRTH and NDEATH count in this process, keyed like the alias table. Either ends
+# the births of the node's devices, so a device timed out before one must be born again.
+_node_epoch = {}
 
 # `status` and `identity_source` are read back so process_dbirth() can skip an UPDATE that
 # changes nothing. `devices` is REPLICA IDENTITY FULL and published to Realtime, so every
@@ -805,10 +814,9 @@ def request_node_rebirth(client, group_id, edge_node_id, force=False):
         logger.error("Could not publish a rebirth request to '%s': %s", topic, e)
         return False
 
+    # The caller logs why it asked.
     logger.warning(
-        "REBIRTH REQUESTED: published '%s' to '%s'. Its alias table is unknown, so DDATA metrics "
-        "carrying only an alias cannot be resolved until it re-births. Next request no sooner "
-        "than %ds.",
+        "REBIRTH REQUESTED: published '%s' to '%s'. Next request no sooner than %ds.",
         REBIRTH_METRIC_NAME, topic, REBIRTH_REQUEST_INTERVAL_SECONDS
     )
     return True
@@ -889,20 +897,111 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
 # -----------------------------------------------------------------------------
 # Device Liveness Watchdog
 # -----------------------------------------------------------------------------
-def mark_device_seen(device):
-    """Note that this device has just been heard from. In-memory only; writes nothing."""
+def mark_device_seen(device, group_id=None, edge_node_id=None):
+    """
+    Note that this device has just been heard from, and through which node. In-memory only.
+
+    Clears any OFFLINE this process recorded for it, so callers pass a birth, or DDATA that
+    accept_device_data() found live.
+    """
     if not device or not device.get("id"):
         return
+    node = alias_key(group_id, edge_node_id)
     with _device_seen_lock:
         _device_seen[device["id"]] = {
             "at": time.monotonic(),
             "name": device.get("name") or device.get("sparkplug_id") or device["id"],
+            "node": node,
+            "epoch": _node_epoch.get(node, 0),
         }
+        _device_offline.pop(device["id"], None)
 
 def forget_device_seen(device_id):
-    """Stop tracking a device -- it has died explicitly, or has just been flipped OFFLINE."""
+    """DDEATH: stop tracking the device, and hold its DDATA to wait for a birth."""
     with _device_seen_lock:
         _device_seen.pop(device_id, None)
+        _device_offline[device_id] = {}
+
+def time_out_device(device_id, moved):
+    """
+    Stop tracking a device the watchdog has just swept. `moved` is the gate's answer: only a sweep
+    that took the row from ONLINE to OFFLINE leaves the device for its DDATA to set ONLINE again.
+    """
+    with _device_seen_lock:
+        entry = _device_seen.pop(device_id, None)
+        _device_offline[device_id] = entry if moved and entry else {}
+
+def end_device_births(group_id, edge_node_id):
+    """NBIRTH or NDEATH: the node's devices must be born again before DDATA sets one ONLINE."""
+    node = alias_key(group_id, edge_node_id)
+    with _device_seen_lock:
+        _node_epoch[node] = _node_epoch.get(node, 0) + 1
+
+def accept_device_data(device, group_id, edge_node_id, client=None):
+    """
+    What an accepted DDATA says about its device's status. True when the device counts as ONLINE
+    and is tracked from here; False when it must be born first.
+
+    A device this process's watchdog timed out, whose node has neither born nor died since, is set
+    ONLINE again. Any other device held OFFLINE (a DDEATH, a node birth or death since, or an
+    OFFLINE row this process has not seen born) gets a rebirth request, rate limited per node, and
+    its DBIRTH sets it ONLINE. See ingestion/README.md -> "Device Liveness Watchdog".
+    """
+    device_id = device.get("id")
+    node = alias_key(group_id, edge_node_id)
+    with _device_seen_lock:
+        if not device_id or device_id in _device_seen:
+            return True
+        offline = _device_offline.get(device_id)
+        epoch = _node_epoch.get(node, 0)
+
+    if offline is None:
+        # New to this process, as after a restart, so the Directory row is all there is.
+        if device.get("status") != "OFFLINE":
+            return True
+        offline = {}
+
+    if offline and offline.get("node") == node and offline.get("epoch") == epoch:
+        return revive_device(device)
+
+    with _device_seen_lock:
+        # Held here, so a stale cached row cannot make the next DDATA look live.
+        _device_offline[device_id] = {}
+    if request_node_rebirth(client, group_id, edge_node_id):
+        logger.warning(
+            "DDATA from device '%s' (%s), which is OFFLINE and has not been born since. Its data "
+            "is stored; a rebirth of edge node '%s' has been requested so its DBIRTH can set it "
+            "ONLINE.", device.get("name"), device.get("sparkplug_id"), edge_node_id
+        )
+    return False
+
+def revive_device(device):
+    """
+    Set a device the watchdog timed out ONLINE again, as a birth would. True when written; after a
+    failure the device stays timed out, so its next DDATA retries.
+    """
+    if not supabase_client:
+        return False
+    try:
+        # NULL leaves a column alone: identity_source and first_dbirth_at are a birth's to write.
+        supabase_client.rpc("ingest_set_device_state", {
+            "p_device_id": device["id"],
+            "p_status": "ONLINE",
+            "p_identity_source": None,
+            "p_first_dbirth_at": None,
+        }).execute()
+    except Exception as e:
+        logger.error("Could not set device '%s' ONLINE after it published again: %s",
+                     device.get("name"), e)
+        return False
+    # The cached row, as process_dbirth() updates it.
+    device["status"] = "ONLINE"
+    count("device_state_writes")
+    logger.info(
+        "WATCHDOG: device '%s' (%s) is publishing again after its timeout; marked ONLINE.",
+        device.get("name"), device.get("sparkplug_id")
+    )
+    return True
 
 def stale_device_ids(now=None, timeout=None):
     """
@@ -928,7 +1027,7 @@ def sweep_stale_devices(now=None, timeout=None):
 
     Write-on-change: log_digital_thread_event() fires on every UPDATE to `devices`, so the gate
     refuses a no-op write and the device is dropped from tracking afterwards, giving one write per
-    quiet period.
+    quiet period. Its next DDATA may set it ONLINE again: see accept_device_data().
     """
     if not supabase_client:
         return []
@@ -936,8 +1035,9 @@ def sweep_stale_devices(now=None, timeout=None):
     written = []
     for device_id, name in stale_device_ids(now, timeout):
         try:
-            # The gate refuses a no-op write (`IS DISTINCT FROM 'OFFLINE'`); no filter is needed here.
-            supabase_client.rpc("ingest_mark_device_offline", {
+            # The gate refuses a no-op write (`IS DISTINCT FROM 'OFFLINE'`) and answers whether it
+            # moved the row, so no filter is needed here.
+            res = supabase_client.rpc("ingest_mark_device_offline", {
                 "p_device_id": device_id,
             }).execute()
             logger.warning(
@@ -951,7 +1051,7 @@ def sweep_stale_devices(now=None, timeout=None):
             # convince us the device was dealt with.
             logger.error("Watchdog could not mark device '%s' OFFLINE: %s", name, e)
             continue
-        forget_device_seen(device_id)
+        time_out_device(device_id, getattr(res, "data", None) is True)
 
     return written
 
@@ -1674,7 +1774,7 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         record_declared_metrics(device, payload)
 
         # A birth is evidence of life, quarantined or not, so the watchdog counts it.
-        mark_device_seen(device)
+        mark_device_seen(device, group_id, gateway_wire_id)
     except DirectoryUnavailable as e:
         # The directory went away part way through (after resolve_device() succeeded). Same counter
         # as the arm above: both lose a birth certificate; the log line says where.
@@ -1735,7 +1835,7 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
             "p_device_id": device["id"],
         }).execute()
         # An explicit death certificate is the authoritative answer, so the watchdog stops
-        # tracking this device rather than flipping it OFFLINE a second time later.
+        # tracking this device, and its DDATA waits for a birth.
         forget_device_seen(device["id"])
     except Exception as e:
         logger.error("Error applying DDEATH status update for '%s': %s", wire_id, e, exc_info=True)
@@ -2020,6 +2120,8 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # and before gateway resolution, for the same reason as in process_dbirth.
     if msg_type == "NBIRTH":
         register_birth_aliases(group_id, edge_node_id, payload, reset=True)
+    if msg_type in ("NBIRTH", "NDEATH"):
+        end_device_births(group_id, edge_node_id)
 
     if not supabase_client:
         logger.warning("Supabase client unavailable. Dropping %s heartbeat for edge node '%s'", msg_type, edge_node_id)
@@ -2542,8 +2644,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         return
 
     # After the binding check, not before: a message from a publisher we have just refused to
-    # believe is not evidence that the real device is alive.
-    mark_device_seen(device)
+    # believe is not evidence that the real device is alive. The data is stored either way.
+    if accept_device_data(device, group_id, gateway_wire_id, client):
+        mark_device_seen(device, group_id, gateway_wire_id)
 
     asset_id = device["sparkplug_id"]
     asset_name = device.get("name") or asset_id
