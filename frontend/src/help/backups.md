@@ -8,7 +8,7 @@ Take a backup of the whole platform without a shell, and see every backup run: w
 
 - **Take a backup** queues one now. The note is kept with the backup and is the thing to read when choosing which one to restore from, so say why it was taken.
 - **Cancel** withdraws a request the service has not yet claimed. A running backup cannot be cancelled; it finishes or fails.
-- **Release** lets the retention window apply to a backup that was taken on request. Nothing is deleted at that moment: the service prunes it on its next pass, and only once it is older than the window.
+- **Release** lets the retention window apply to a backup that was taken on request. Nothing is deleted at that moment: the service prunes it on its next pass, and only once it is older than the window and not one of the newest three.
 - **The filter** shows every run, or only the completed or only the failed ones. A cancelled run is listed under all runs only. The list shows the newest 30; **Show more** adds 30 older ones.
 
 ## Whether backups are working now
@@ -30,7 +30,7 @@ Every run the service has finished, newest first. Runs are never deleted, so the
 
 A **queued** backup that stays queued means no backup service is running: the `backup-service` Deployment is down. Cancel it or start the service; one backup runs at a time, so a queued one blocks the next.
 
-A backup taken **on request** is **pinned**: the retention window does not apply to it until it is released. A backup taken **on the schedule** is pruned once it is older than the window.
+A backup taken **on request** is **pinned**: the retention window does not apply to it until it is released. A backup taken **on the schedule** is pruned once it is older than the window, **except that the newest three backups are always kept**, whatever their age. While backups are failing those three are the last good ones, so a run of failures longer than the window cannot prune them. The Retention column says **Kept: one of the newest three** on a backup the window has passed and the floor is keeping.
 
 ## What this page does not do
 

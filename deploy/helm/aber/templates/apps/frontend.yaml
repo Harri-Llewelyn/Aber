@@ -54,6 +54,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   // menu compares them, so a browser on a page cached from before an upgrade -- or an image.tag
   // pinned away from appVersion -- says so instead of looking current.
   VITE_RELEASE_VERSION: %q,
+  // The window the backup service prunes by, so the Backups page can say why an older one is kept.
+  VITE_BACKUP_RETENTION_DAYS: %q,
 };
 `
   (include "aber.supabaseUrl" .)
@@ -65,7 +67,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   (include "aber.giteaUrl" .)
   .Values.supabaseStorage.bucket
   .Values.supabaseStorage.captureBucket
-  .Chart.AppVersion -}}
+  .Chart.AppVersion
+  (.Values.backup.retentionDays | toString) -}}
 ---
 {{/*
 =================================================================================================

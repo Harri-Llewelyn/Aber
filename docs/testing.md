@@ -193,8 +193,9 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 # service's gates; a requested backup is taken -- both dumps, the storage objects and the forge,
 # digests matching the row, a manifest restore-databases.sh reads -- and the thread names who asked
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
-# backup is released once. Takes a real backup and removes it afterwards; stops the service
-# container for a few seconds for the cancel case.
+# backup is released once; a job that fails is followed by a prune that leaves the newest three
+# backups alone (0017). Takes a real backup and removes it afterwards; stops the service container
+# for a few seconds for the cancel case, and fails one job with a trigger it drops afterwards.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
@@ -305,6 +306,7 @@ python supabase/migrations/test_directory_images.py
 # The Backup Stale rule's clock (0011). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
+# And the retention floor (0017): backup_prunable() never returns any of the newest three backups.
 python supabase/migrations/test_backup_health.py
 # Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
 # property is in the function body rather than in a grant, so a gate that stops working fails open

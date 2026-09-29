@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BackupsTab, BACKUP_STALE_HOURS } from '../components/tabs/BackupsTab'
+import { BackupsTab, BACKUP_STALE_HOURS, keptBecause } from '../components/tabs/BackupsTab'
 import { tabIsVisible, TABS, groupedNav } from '../App'
 
 /**
@@ -21,6 +21,7 @@ vi.mock('../api', async () => {
       listBackupRuns: vi.fn(),
       backupRunSummary: vi.fn(),
       activeBackupJob: vi.fn(),
+      newestBackupIds: vi.fn(),
       requestBackup: vi.fn(),
       cancelBackupJob: vi.fn(),
       releaseBackup: vi.fn()
@@ -99,6 +100,8 @@ beforeEach(() => {
   serveRuns(ALL)
   api.backupRunSummary.mockResolvedValue(HEALTHY)
   api.activeBackupJob.mockResolvedValue(null)
+  api.newestBackupIds.mockResolvedValue([])
+  delete globalThis.__ABER_CONFIG__
 })
 
 describe('the list of runs', () => {
@@ -159,6 +162,63 @@ describe('the list of runs', () => {
     renderTab()
     await screen.findByTestId('run-j-3')
     expect(screen.getAllByTestId(/^run-/).map(r => r.dataset.testid)).toEqual(['run-j-3', 'run-j-1', 'run-j-2', 'run-j-4', 'run-j-5'])
+  })
+})
+
+describe('the retention floor', () => {
+  const daysAgo = (d) => new Date(Date.now() - d * 24 * 60 * 60 * 1000).toISOString()
+  const scheduled = (id, days) => ({
+    ...SCHEDULED, id: `j-${id}`,
+    backup: { ...SCHEDULED.backup, id: `b-${id}`, stamp: `2026090${id}T023000Z`, taken_at: daysAgo(days) }
+  })
+
+  it('says a backup past the window is kept as one of the newest three', async () => {
+    globalThis.__ABER_CONFIG__ = { VITE_BACKUP_RETENTION_DAYS: '14' }
+    serveRuns([scheduled(1, 20), scheduled(2, 21), scheduled(3, 22), scheduled(4, 23)])
+    api.newestBackupIds.mockResolvedValue(['b-1', 'b-2', 'b-3'])
+    renderTab()
+    const kept = await screen.findByTestId('run-j-1')
+    await waitFor(() => expect(kept).toHaveTextContent('Kept: one of the newest three'))
+    expect(within(kept).getByTitle(/Older than the 14-day retention window/)).toBeInTheDocument()
+    expect(screen.getByTestId('run-j-3')).toHaveTextContent('Kept: one of the newest three')
+    // Past the window and outside the floor: the next prune takes it.
+    expect(screen.getByTestId('run-j-4')).toHaveTextContent('Retention window')
+    expect(api.newestBackupIds).toHaveBeenCalledWith(3)
+  })
+
+  it('says nothing about the floor for a backup still inside the window', async () => {
+    globalThis.__ABER_CONFIG__ = { VITE_BACKUP_RETENTION_DAYS: '14' }
+    serveRuns([scheduled(1, 2)])
+    api.newestBackupIds.mockResolvedValue(['b-1'])
+    renderTab()
+    const row = await screen.findByTestId('run-j-1')
+    expect(row).toHaveTextContent('Retention window')
+    expect(row).not.toHaveTextContent('Kept')
+  })
+
+  it('says nothing about the floor when the page was not told the window', async () => {
+    serveRuns([scheduled(1, 40)])
+    api.newestBackupIds.mockResolvedValue(['b-1'])
+    renderTab()
+    expect(await screen.findByTestId('run-j-1')).toHaveTextContent('Retention window')
+  })
+
+  it('still lists the runs when the floor cannot be read', async () => {
+    globalThis.__ABER_CONFIG__ = { VITE_BACKUP_RETENTION_DAYS: '14' }
+    serveRuns([scheduled(1, 40)])
+    api.newestBackupIds.mockRejectedValue(new Error('boom'))
+    renderTab()
+    expect(await screen.findByTestId('run-j-1')).toHaveTextContent('Retention window')
+    expect(screen.queryByText('boom')).toBeNull()
+  })
+
+  it('keeps Pinned for a pinned backup in the floor, and says when pruning is off', () => {
+    const old = { taken_at: daysAgo(40), pinned: false }
+    expect(keptBecause({ ...old, pinned: true }, { inFloor: true, retentionDays: 14 })).toBeNull()
+    expect(keptBecause(old, { inFloor: true, retentionDays: 14 })).toBe('floor')
+    expect(keptBecause(old, { inFloor: false, retentionDays: 14 })).toBeNull()
+    expect(keptBecause(old, { inFloor: false, retentionDays: 0 })).toBe('off')
+    expect(keptBecause(old, { inFloor: true, retentionDays: null })).toBeNull()
   })
 })
 

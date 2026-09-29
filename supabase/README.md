@@ -4788,6 +4788,25 @@ than `BACKUP_RETENTION_DAYS`; the files go first and `backup_forget()` removes t
 Administrator releases it on the page (`release_backup()`), because a backup taken before a risky
 change is the one a timer must not delete first. `0` disables pruning.
 
+**The newest three are never pruned (`0017`).** `backup_prunable()` used to select by age alone,
+and the service prunes after every job it claims, a failed one included. So a fortnight of failed
+backups (a `pg_dump` older than a server, or one component down and taking the all-or-nothing
+backup with it) deleted the last good scheduled backup on the day it passed the window, while
+Backup Stale was already firing. Now it never returns any of the newest three rows, pinned or not,
+whatever their age. Every `backups` row is a successful backup, so those are the newest three good
+ones; three rather than one, because the newest may be the one that is wrong. The floor is in the
+SQL rather than the service so it covers every caller: the prune after a job, the prune at start,
+and anything added later. It is a constant: a different number would be a new argument, which is a
+new function, dropped and re-granted by name.
+
+The service still prunes after a failure, deliberately. When the failure was a full volume,
+pruning is what lets the next run succeed, and the floor makes that safe; pruning only after a
+success is the obvious alternative and the wrong one. The CronJob and `backup-databases.sh` need no
+floor: both prune last in a script that stops at the first failure. The page's Retention column says
+**Kept: one of the newest three** on a backup the window has passed and the floor is keeping; it
+reads the window from `backup.retentionDays` through the frontend's runtime configuration, and
+`check-docs-drift.mjs` holds its `BACKUP_RETENTION_FLOOR` equal to the SQL's.
+
 **Every act is a thread row.** `BACKUP_REQUESTED`, `BACKUP_CANCELLED` and `BACKUP_RELEASED` as the
 user who did it; `BACKUP_TAKEN`, `BACKUP_FAILED` and `BACKUP_PRUNED` as `service`, with no user.
 `audit_domain_for()` files both entity types under `security` by its fail-closed default, which is
@@ -4947,9 +4966,10 @@ backup of half the stack as a backup.
 
 **The schedule is this process's.** At start it registers `enqueue_scheduled_backup()` with
 pg_cron on `BACKUP_SCHEDULE`, or removes the job when the schedule is empty, so a stack with no
-service queues nothing nobody will take. Retention is applied after every run: a scheduled backup
-older than `BACKUP_RETENTION_DAYS` is deleted and forgotten, the row only after the files are
-gone, and a prune can never remove a path outside the backup directory; a requested backup is
+service queues nothing nobody will take. Retention is applied after every run, failed ones
+included: a scheduled backup older than `BACKUP_RETENTION_DAYS` and not one of the newest three is
+deleted and forgotten, the row only after the files are gone, and a prune can never remove a path
+outside the backup directory; a requested backup is
 pinned until an Administrator releases it. A `RUNNING` job that no process is running is failed
 before each claim, not only at start: the service is one replica, so such a row is a previous
 process's, or it came back in a restore from a backup taken while that job ran, and left standing
