@@ -7,7 +7,8 @@ info:
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
     Interoperability eXchange) read-side view of this platform's asset model — **52 passed,
     0 failed** against CESMII's official 60-test conformance suite at `5010274f` (cesmii/i3X,
-    2026-06-18), the ref CI pins.
+    2026-06-18), the ref CI pins, which tests shape. What it says about a seeded plant is
+    checked against the Directory by `ingestion/validate.py` (checks 12 and 17).
 
     ### This is a different service from the Platform API
 
@@ -703,7 +704,7 @@ paths:
     post:
       tags: [Subscriptions]
       summary: List your subscriptions
-      description: 'Scoped to `clientId` and your token''s principal: an id that is not yours is a per-item 404, exactly as one that does not exist. Only the ids you name are listed. `monitoredObjects` is the set as of the last check of your view, made by each `/sync` and stream tick.'
+      description: 'Scoped to `clientId` and your token''s principal: an id that is not yours is a per-item 404, exactly as one that does not exist. Only the ids you name are listed. `monitoredObjects` is the set as of the last check of your view, made by each `/sync` and stream tick, each `{elementId, maxDepth}` with the depth of its first registration.'
       requestBody:
         required: true
         content:
@@ -718,10 +719,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: Subscriptions owned by this client.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is not yours, or does not exist, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/delete:
@@ -742,10 +748,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: One result per id; unknown or unowned ids are per-item failures.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is unknown or not yours, including one deleted earlier in the same request, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/register:
@@ -761,6 +772,24 @@ paths:
         Validating here also means the monitored set can only contain ids this caller may see,
         so a subscription cannot become a way around RLS on the value path. Each delivery checks
         again: see `/subscriptions/sync`.
+
+        **`maxDepth` applies to every elementId in the call.** What each registration then
+        receives:
+
+        | Registered | Receives updates for |
+        | :--- | :--- |
+        | A device at `maxDepth: 1` | The device: its map of metrics |
+        | A device at `maxDepth: 0`, or 2 or more | The device, and each of its metrics as `<device>/<metric>`, in one batch when both change |
+        | A metric, `<device>/<metric>` | That metric only |
+        | A gateway | That gateway only (its birth, its death, and a heartbeat that changes its live status), not its devices |
+        | The site, an area, a cell, a lane or Unassigned | Nothing: their values change only with the Directory, which is not staged |
+
+        **Registering an object again succeeds and changes nothing**, as the guide requires, so
+        its first `maxDepth` stands. Unregister it first to change the depth.
+
+        **Each device registered, or whose metric is, has what the server lacks for it filled
+        from the historian**, as `/objects/value` fills it, so the first map staged for it is
+        complete. A fill that fails does not fail the registration.
       requestBody:
         required: true
         content:
@@ -771,21 +800,35 @@ paths:
               properties:
                 clientId: { type: string }
                 subscriptionId: { type: string }
+                elementIds:
+                  type: array
+                  description: 'Objects to monitor. `objects` is accepted in its place.'
+                  items: { type: string }
                 objects:
                   type: array
-                  description: 'Objects to monitor. Accepts bare id strings or `{elementId}` objects; `elementIds` is accepted as an alias.'
+                  description: 'An alias of `elementIds`, taking bare id strings or `{elementId}` objects. Only `elementId` is read from an object.'
                   items:
                     oneOf:
                       - type: string
                       - type: object
                         properties:
                           elementId: { type: string }
+                maxDepth:
+                  type: integer
+                  minimum: 0
+                  default: 1
+                  description: '`1` is the object alone, `0` is unbounded, N descends N-1 levels of `HasComponent`, as on `/objects/value`. For every elementId in the call; register separately to use different depths.'
       responses:
         '200':
-          description: One result per entry, in request order.
+          description: 'One result per entry, at its position in the request, so a repeated elementId has a result at each place. An elementId that is not a non-empty string fails its own item with a 400, and one not in your address space with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`maxDepth` not an integer of 0 or more, `elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
 
@@ -808,8 +851,13 @@ paths:
               properties:
                 clientId: { type: string }
                 subscriptionId: { type: string }
+                elementIds:
+                  type: array
+                  description: 'Objects to stop monitoring. `objects` is accepted in its place.'
+                  items: { type: string }
                 objects:
                   type: array
+                  description: 'An alias of `elementIds`, taking bare id strings or `{elementId}` objects.'
                   items:
                     oneOf:
                       - type: string
@@ -818,10 +866,15 @@ paths:
                           elementId: { type: string }
       responses:
         '200':
-          description: One result per entry, in request order.
+          description: 'One result per entry, at its position in the request. An elementId that is not a non-empty string fails its own item with a 400, and one not in your address space with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
 
@@ -882,6 +935,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
         '409':
@@ -940,6 +998,11 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
         '429':
@@ -979,7 +1042,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     SubscriptionNotFound:
-      description: 'No such subscription for this `clientId` and this token''s principal — including after a restart, since subscription state is in memory.'
+      description: 'No such subscription for this `clientId` and this token''s principal, or no `subscriptionId` given — including after a restart, since subscription state is in memory.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -1237,6 +1300,7 @@ components:
           description: 'Increasing per subscription and never reused. A gap is updates that were dropped, by overflow or because their element left your view; the 206 that reports it says which.'
         updates:
           type: array
+          description: 'Each update names its own object: a registered one, or `<device>/<metric>` for a device registered at `maxDepth` 0 or 2 or more.'
           items:
             type: object
             properties:

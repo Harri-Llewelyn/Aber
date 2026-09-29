@@ -11,7 +11,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 68 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 76 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
@@ -1737,9 +1737,10 @@ The write is deliberately forgiving of IO errors: a read-only or full filesystem
 heartbeat — which correctly reports unhealthy — rather than crash a daemon that is otherwise fine.
 `test_health_heartbeat.py` pins all of that, including the disconnected case.
 
-It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts 20
-outcomes covering quarantine, identity diagnostics, birth observation, multi-submodel conformance,
-digital-thread triggers, telemetry mapping, rename safety and quarantine gating.
+It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts the
+outcomes counted in the table above: quarantine, identity diagnostics, birth observation,
+multi-submodel conformance, digital-thread triggers, telemetry mapping, rename safety, quarantine
+gating, and what the i3X server answers (checks 12 and 17).
 
 **Every assertion is scoped to the run's own entities.** The stack always has audit rows, telemetry
 and devices from the demo simulator, so a check that queried a whole table and asserted "not empty"

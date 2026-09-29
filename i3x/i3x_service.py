@@ -2386,10 +2386,14 @@ def h_update_refused(req: Handler) -> None:
 
 # -- subscriptions ----------------------------------------------------------------------------
 def _owned_subscription(req: Handler, client_id: str, body: dict):
-    """The subscription named in the body, if this clientId AND this principal own it; else 404."""
-    return registry.get_owned(
-        client_id, body.get("subscriptionId") or "", principal=req.caller.principal
-    )
+    """
+    The subscription named in the body, if this clientId AND this principal own it; else 404, as
+    for an absent or null id. Any other `subscriptionId` that is not a string is a 400.
+    """
+    subscription_id = body.get("subscriptionId")
+    if subscription_id is not None and not isinstance(subscription_id, str):
+        raise Problem(400, "Bad Request", "subscriptionId must be a string.")
+    return registry.get_owned(client_id, subscription_id or "", principal=req.caller.principal)
 
 
 def _visibility(space: dict) -> tuple:
@@ -2475,61 +2479,123 @@ def h_sub_create(req: Handler) -> None:
     )
 
 
+def _per_subscription(body: dict, apply) -> List[dict]:
+    """
+    One result per entry of a list or delete request's `subscriptionIds`, at its position: a 400
+    for an entry that is not a string, else what `apply` returns for it. Absent or null is none; any
+    other value but an array is a 400 for the request, never iterated character by character.
+    """
+    ids = body.get("subscriptionIds")
+    if ids is None:
+        return []
+    if not isinstance(ids, list):
+        raise Problem(400, "Bad Request", "subscriptionIds must be an array.")
+    failures = [
+        None if isinstance(sid, str) else _malformed_item("subscriptionId", sid, "a string")
+        for sid in ids
+    ]
+    return _in_place(ids, failures, apply)
+
+
 def h_sub_list(req: Handler) -> None:
+    """Each named subscription, with every object it monitors at its first registration's depth."""
     body = req._body()
     client_id = _require_client_id(body)
+    principal = req.caller.principal
     req._bulk(
-        registry.list_owned(
-            client_id, body.get("subscriptionIds") or [], principal=req.caller.principal
-        )
+        _per_subscription(body, lambda ids: registry.list_owned(client_id, ids, principal=principal))
     )
 
 
 def h_sub_delete(req: Handler) -> None:
     body = req._body()
     client_id = _require_client_id(body)
-    results = []
-    for sid in body.get("subscriptionIds") or []:
-        try:
-            registry.delete(client_id, sid, principal=req.caller.principal)
-        except SubscriptionError as exc:
-            results.append(
-                {
-                    "success": False,
-                    "subscriptionId": sid,
-                    "responseDetail": {
-                        "title": exc.title,
-                        "status": exc.status,
-                        "detail": exc.detail,
-                    },
-                }
-            )
-        else:
-            results.append({"success": True, "subscriptionId": sid, "result": None})
-    req._bulk(results)
+
+    def delete(ids: list) -> List[dict]:
+        results = []
+        for sid in ids:
+            try:
+                registry.delete(client_id, sid, principal=req.caller.principal)
+            except SubscriptionError as exc:
+                results.append(
+                    {
+                        "success": False,
+                        "subscriptionId": sid,
+                        "responseDetail": {
+                            "title": exc.title,
+                            "status": exc.status,
+                            "detail": exc.detail,
+                        },
+                    }
+                )
+            else:
+                results.append({"success": True, "subscriptionId": sid, "result": None})
+        return results
+
+    req._bulk(_per_subscription(body, delete))
 
 
 def _registration_entries(body: dict) -> list:
     """
-    The objects a subscription request wants registered, normalised and capped.
+    The elementId each entry of a register or unregister request names, in request order: a string
+    entry itself, or a dictionary entry's `elementId`. Not validated here, since a malformed id
+    fails only its own item (`_per_item`).
 
-    TWO ACCEPTED SHAPES: `objects` (dictionaries) or `elementIds` (strings). Capped through the
-    same helper the bulk READ endpoints use, and this is the path where the cap earns most: a
-    registration does not merely produce a response, it adds to the client's monitored set, which
-    outlives the request and is what every later poll is evaluated against.
+    TWO ACCEPTED SHAPES: `elementIds` (the guide's) or `objects`. Capped through the same helper the
+    bulk READ endpoints use, and this is the path where the cap earns most: a registration does not
+    merely produce a response, it adds to the client's monitored set, which outlives the request and
+    is what every later poll is evaluated against.
     """
     raw = body.get("objects") or body.get("elementIds") or []
     if not isinstance(raw, list):
         raise Problem(400, "Bad Request", "objects (or elementIds) must be an array.")
-    return [
-        {"elementId": e} if isinstance(e, str) else (e or {})
-        for e in _cap_bulk(raw, "objects" if body.get("objects") else "elementIds")
+    _cap_bulk(raw, "objects" if body.get("objects") else "elementIds")
+    return [e.get("elementId") if isinstance(e, dict) else e for e in raw]
+
+
+def _malformed_item(field: str, value, must_be: str) -> dict:
+    """A bulk item's 400, echoing the value as sent."""
+    return {
+        "success": False,
+        field: value,
+        "responseDetail": {
+            "title": "Bad Request",
+            "status": 400,
+            "detail": f"{field} must be {must_be}.",
+        },
+    }
+
+
+def _in_place(items: list, failures: List[Optional[dict]], apply) -> List[dict]:
+    """
+    `failures` with each None replaced by what `apply` returns for the item at that index. `apply`
+    takes the remaining items in order and returns one result each. Paired by index, never by value,
+    so a repeated item keeps each of its places.
+    """
+    valid = [i for i, failure in enumerate(failures) if failure is None]
+    results = list(failures)
+    for i, result in zip(valid, apply([items[i] for i in valid])):
+        results[i] = result
+    return results
+
+
+def _per_item(element_ids: list, known: dict, apply) -> List[dict]:
+    """
+    One result per requested elementId, at its position: a 400 for one that is not a non-empty
+    string, a 404 for one not in the caller's space, else what `apply` returns for it.
+    """
+    failures = [
+        _malformed_item("elementId", eid, "a non-empty string")
+        if not isinstance(eid, str) or not eid
+        else None if eid in known else _not_found(eid, "object")
+        for eid in element_ids
     ]
+    return _in_place(element_ids, failures, apply)
 
 
 def h_sub_register(req: Handler) -> None:
     """
-    Register objects, rejecting unknown ones PER ITEM.
+    Register objects at the body's top-level `maxDepth`, rejecting unknown ones PER ITEM.
 
     Registration is validated against the caller's own address space, not accepted blindly. Two
     reasons, and the second is the one that matters: an unknown elementId that registers
@@ -2540,43 +2606,42 @@ def h_sub_register(req: Handler) -> None:
     """
     body = req._body()
     client_id = _require_client_id(body)
+    element_ids = _registration_entries(body)
+    max_depth = _max_depth(body)
     sub = _owned_subscription(req, client_id, body)
-    entries = _registration_entries(body)
-    known = _build_objects(_load_address_space(req._pg())) if entries else {}
+    pg = req._pg() if element_ids else None
+    space = _load_address_space(pg) if pg else None
+    known = _build_objects(space) if space else {}
 
-    valid, results = [], []
-    for entry in entries:
-        eid = entry.get("elementId")
-        if not eid:
-            results.append(
-                {
-                    "success": False,
-                    "elementId": eid,
-                    "responseDetail": {
-                        "title": "Bad Request",
-                        "status": 400,
-                        "detail": "elementId is required.",
-                    },
-                }
-            )
-        elif eid not in known:
-            results.append(_not_found(eid, "object"))
-        else:
-            valid.append(entry)
-    registry.register(sub, valid)
-    results.extend(
-        {"success": True, "elementId": e["elementId"], "result": None} for e in valid
-    )
-    # Requested order, not valid-then-invalid: a client pairing responses positionally would
-    # otherwise mis-attribute every result in the batch.
-    order = {e.get("elementId"): i for i, e in enumerate(entries)}
-    results.sort(key=lambda r: order.get(r.get("elementId"), 0))
+    def register(ids: list) -> List[dict]:
+        return registry.register(sub, [{"elementId": e, "maxDepth": max_depth} for e in ids])
+
+    results = _per_item(element_ids, known, register)
+    if space:
+        _fill_registered(pg, space, known, [e for e, r in zip(element_ids, results) if r["success"]])
     req._bulk(results)
+
+
+def _fill_registered(pg: PostgrestClient, space: dict, objects, element_ids: list) -> None:
+    """
+    Fill what the value cache lacks for each device these registered ids name, a metric naming its
+    device, so the first map staged for a device no read has named since a restart is complete.
+    Bounded as a value read is (`_fill_from_historian`). A failure is logged and the registration
+    stands: those values stay missing until the device publishes them or a read fills them.
+    """
+    devices = space.get("_devices_by_sid") or {}
+    wanted = {element_id.partition("/")[0] for element_id in element_ids} & set(devices)
+    if not wanted:
+        return
+    try:
+        _fill_from_historian(pg, space, objects, wanted)
+    except Exception:  # noqa: BLE001
+        logger.exception("filling %d registered device(s) from telemetry_latest failed", len(wanted))
 
 
 def h_sub_unregister(req: Handler) -> None:
     """
-    Unregister objects, reporting unknown ones per item.
+    Unregister objects, reporting malformed and unknown ones per item.
 
     Removing something that was never registered is NOT an error -- the end state the client asked
     for is the end state it gets -- but an elementId that does not exist at all is, because it means
@@ -2585,22 +2650,10 @@ def h_sub_unregister(req: Handler) -> None:
     """
     body = req._body()
     client_id = _require_client_id(body)
+    element_ids = _registration_entries(body)
     sub = _owned_subscription(req, client_id, body)
-    entries = _registration_entries(body)
-    known = _build_objects(_load_address_space(req._pg())) if entries else {}
-
-    results, removable = [], []
-    for entry in entries:
-        eid = entry.get("elementId")
-        if not eid or eid not in known:
-            results.append(_not_found(eid or "", "object"))
-        else:
-            removable.append(eid)
-    registry.unregister(sub, removable)
-    results.extend({"success": True, "elementId": eid, "result": None} for eid in removable)
-    order = {e.get("elementId"): i for i, e in enumerate(entries)}
-    results.sort(key=lambda r: order.get(r.get("elementId"), 0))
-    req._bulk(results)
+    known = _build_objects(_load_address_space(req._pg())) if element_ids else {}
+    req._bulk(_per_item(element_ids, known, lambda ids: registry.unregister(sub, ids)))
 
 
 def h_sub_sync(req: Handler) -> None:

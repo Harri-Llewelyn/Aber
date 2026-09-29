@@ -1015,6 +1015,65 @@ class TestAStalledStreamStallsOnlyItself(unittest.TestCase):
         self.assertIsNone(req.connection.gettimeout(), "the send timeout outlived the stream")
 
 
+class TestAMessageReachesEachRegistration(unittest.TestCase):
+    """
+    The MQTT side and the registry together: `on_message` builds what some registration watches,
+    and the registry's depth rule decides which subscription each update reaches.
+    """
+
+    DEVICE, NODE = "dev-reach-499", "node-1"
+    METRIC = DEVICE + "/Temperature"
+
+    def setUp(self):
+        self._real_registry = i3x_service.registry
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        i3x_service._liveness_clear()
+        with i3x_service._values_lock:
+            i3x_service._values.pop(self.DEVICE, None)
+
+    def tearDown(self):
+        i3x_service.registry = self._real_registry
+        i3x_service._liveness_clear()
+        with i3x_service._values_lock:
+            i3x_service._values.pop(self.DEVICE, None)
+
+    def subscribe(self, element_id, depth=1):
+        sub = self.registry.create(f"client-{element_id}-{depth}")
+        self.registry.register(sub, [{"elementId": element_id, "maxDepth": depth}])
+        return sub
+
+    def delivered(self, sub):
+        """Each queued batch as [(elementId, quality)], then the queue acknowledged."""
+        batches, _ = self.registry.sync(sub)
+        self.registry.sync(sub, last_sequence_number=-1)
+        return [[(u["elementId"], u["quality"]) for u in b["updates"]] for b in batches]
+
+    def test_a_ddata_reaches_the_device_unbounded_and_the_metric_alone(self):
+        unbounded, shallow = self.subscribe(self.DEVICE, 0), self.subscribe(self.DEVICE, 1)
+        alone = self.subscribe(self.METRIC)
+        i3x_service.on_message(None, None, _ddata(self.DEVICE, 1.0))
+        ids = lambda sub: [[e for e, _ in batch] for batch in self.delivered(sub)]  # noqa: E731
+        self.assertEqual(ids(unbounded), [[self.DEVICE, self.METRIC]])
+        self.assertEqual(ids(shallow), [[self.DEVICE]])
+        self.assertEqual(ids(alone), [[self.METRIC]])
+
+    def test_an_ndeath_reaches_the_gateway_registration(self):
+        gateway, alone = self.subscribe(self.NODE, 0), self.subscribe(self.METRIC)
+        # The device's traffic is how the MQTT side learns which node it is behind.
+        i3x_service.on_message(None, None, _ddata(self.DEVICE, 1.0))
+        self.assertEqual(self.delivered(gateway), [], "a device's data reached its gateway")
+        self.delivered(alone)
+
+        i3x_service.on_message(None, None, _spb("NDEATH", node=self.NODE, group="TestGroup"))
+        batches, _ = self.registry.sync(gateway)
+        updates = [u for batch in batches for u in batch["updates"]]
+        self.assertEqual([(u["elementId"], u["value"]["status"], u["quality"]) for u in updates],
+                         [(self.NODE, "OFFLINE", "Good")])
+        # Its device's values are now held, so the metric registered alone hears that too.
+        self.assertEqual(self.delivered(alone), [[(self.METRIC, "Uncertain")]])
+
+
 class TestTtl(unittest.TestCase):
     def test_idle_subscription_is_reaped(self):
         registry, clock = make_registry(ttl_seconds=60)
@@ -1044,6 +1103,315 @@ class TestTtl(unittest.TestCase):
         registry.open_stream(sub)
         clock.advance(10_000)
         self.assertEqual(registry.reap(), [])
+
+
+class TestDeliveryFollowsDepth(unittest.TestCase):
+    """
+    Who receives a staged update. A metric `<device>/<name>` reaches subscriptions that registered
+    it, and those that registered its device at maxDepth 0 or 2 or more. Nothing else composes:
+    a gateway and a location receive only their own updates. Envelopes are built by hand here;
+    what gets staged, and when, is the MQTT side's.
+    """
+
+    DEVICE, GATEWAY = "dev-one", "gwy-1"
+    METRIC = DEVICE + "/Axes/X/POSITION"
+    OTHER_METRIC = DEVICE + "/Controller/EXECUTION"
+
+    @staticmethod
+    def vqt(element_id, value, quality="Good"):
+        return {"elementId": element_id, "value": value, "quality": quality,
+                "timestamp": "2026-09-28T10:00:00Z"}
+
+    def device_change(self):
+        """A DDATA's envelopes: the device's map, and the one metric that changed."""
+        return {self.DEVICE: self.vqt(self.DEVICE, {"Axes/X/POSITION": 1.5}),
+                self.METRIC: self.vqt(self.METRIC, 1.5)}
+
+    def gateway_change(self):
+        return {self.GATEWAY: self.vqt(self.GATEWAY, {"status": "OFFLINE"}, "Uncertain")}
+
+    def subscribe(self, element_id, depth=None):
+        sub = self.registry.create("c")
+        entry = {"elementId": element_id}
+        if depth is not None:
+            entry["maxDepth"] = depth
+        self.assertTrue(self.registry.register(sub, [entry])[0]["success"])
+        return sub
+
+    def delivered(self, sub):
+        """The elementIds of each queued batch, then the queue acknowledged."""
+        batches, _ = self.registry.sync(sub)
+        self.registry.sync(sub, last_sequence_number=-1)
+        return [[u["elementId"] for u in b["updates"]] for b in batches]
+
+    def setUp(self):
+        self.registry, _ = make_registry()
+
+    def test_a_component_reaches_its_device_registered_unbounded(self):
+        sub = self.subscribe(self.DEVICE, 0)
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(sub), [[self.DEVICE, self.METRIC]])
+
+    def test_a_component_reaches_its_device_registered_at_two_or_more(self):
+        for depth in (2, 3):
+            with self.subTest(maxDepth=depth):
+                sub = self.subscribe(self.DEVICE, depth)
+                self.registry.stage(self.device_change())
+                self.assertEqual(self.delivered(sub), [[self.DEVICE, self.METRIC]])
+
+    def test_a_component_does_not_reach_its_device_registered_at_one(self):
+        for depth in (1, None):
+            with self.subTest(maxDepth=depth):
+                sub = self.subscribe(self.DEVICE, depth)
+                self.registry.stage(self.device_change())
+                self.assertEqual(self.delivered(sub), [[self.DEVICE]])
+                self.registry.stage({self.METRIC: self.vqt(self.METRIC, 2.0)})
+                self.assertEqual(self.delivered(sub), [], "a component alone reached maxDepth 1")
+
+    def test_a_metric_registered_alone_receives_only_its_own_changes(self):
+        sub = self.subscribe(self.METRIC, 0)
+        self.registry.stage(self.device_change())
+        self.registry.stage({self.OTHER_METRIC: self.vqt(self.OTHER_METRIC, "ACTIVE")})
+        self.registry.stage({self.DEVICE: self.vqt(self.DEVICE, {})})
+        self.registry.stage(self.gateway_change())
+        self.assertEqual(self.delivered(sub), [[self.METRIC]])
+
+    def test_the_parent_is_the_text_before_the_first_slash(self):
+        sub = self.subscribe(self.DEVICE, 0)
+        near = "dev-one2/Axes/X/POSITION"
+        self.registry.stage({near: self.vqt(near, 1.0)})
+        self.assertEqual(self.delivered(sub), [], "a device whose id merely starts the same")
+        self.registry.stage({self.OTHER_METRIC: self.vqt(self.OTHER_METRIC, "ACTIVE")})
+        self.assertEqual(self.delivered(sub), [[self.OTHER_METRIC]])
+
+    def test_a_gateway_receives_its_own_envelope_and_composes_nothing(self):
+        gateway = self.subscribe(self.GATEWAY, 0)
+        device = self.subscribe(self.DEVICE, 0)
+        self.registry.stage(self.gateway_change())
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(gateway), [[self.GATEWAY]])
+        self.assertEqual(self.delivered(device), [[self.DEVICE, self.METRIC]])
+        batch = self.registry.stage(self.gateway_change())
+        self.assertEqual(batch, [], "no stream is open, so none is returned to wake")
+        updates = self.registry.sync(gateway)[0][0]["updates"]
+        self.assertEqual(updates, [self.gateway_change()[self.GATEWAY]])
+
+    def test_a_location_receives_nothing_from_below(self):
+        for element_id in (CELL_A, A.SITE_ELEMENT_ID, A.UNASSIGNED_ELEMENT_ID):
+            with self.subTest(location=element_id):
+                sub = self.subscribe(element_id, 0)
+                self.registry.stage(self.device_change())
+                self.registry.stage(self.gateway_change())
+                self.assertEqual(self.delivered(sub), [])
+
+    def test_an_update_is_delivered_once_to_a_subscription_holding_both(self):
+        sub = self.registry.create("c")
+        self.registry.register(sub, [{"elementId": self.DEVICE, "maxDepth": 0},
+                                     {"elementId": self.METRIC, "maxDepth": 1}])
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(sub), [[self.DEVICE, self.METRIC]])
+
+    def test_a_stream_is_woken_for_a_component_alone(self):
+        sub = self.subscribe(self.DEVICE, 0)
+        self.registry.open_stream(sub)
+        self.assertEqual(self.registry.stage({self.METRIC: self.vqt(self.METRIC, 2.0)}), [sub])
+        self.assertEqual(
+            [u["elementId"] for b in self.registry.drain(sub) for u in b["updates"]], [self.METRIC]
+        )
+
+    def test_a_repeat_registration_keeps_the_first_depth(self):
+        sub = self.subscribe(self.DEVICE, 1)
+        result = self.registry.register(sub, [{"elementId": self.DEVICE, "maxDepth": 0}])
+        self.assertEqual(result, [{"success": True, "elementId": self.DEVICE, "result": None}])
+        self.assertEqual(sub.to_json()["monitoredObjects"],
+                         [{"elementId": self.DEVICE, "maxDepth": 1}])
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(sub), [[self.DEVICE]])
+
+        # Unregistering first is how a client changes the depth.
+        self.registry.unregister(sub, [self.DEVICE])
+        self.registry.register(sub, [{"elementId": self.DEVICE, "maxDepth": 0}])
+        self.assertEqual(sub.monitored[self.DEVICE], 0)
+
+    def test_the_registry_refuses_a_non_string_id_per_entry(self):
+        sub = self.registry.create("c")
+        results = self.registry.register(
+            sub, [{"elementId": ["x"]}, {"elementId": 5}, {}, {"elementId": self.DEVICE}]
+        )
+        self.assertEqual([r["success"] for r in results], [False, False, False, True])
+        self.assertEqual({r["responseDetail"]["status"] for r in results[:3]}, {400})
+        self.assertEqual(list(sub.monitored), [self.DEVICE])
+
+
+class TestRegistrationRequests(unittest.TestCase):
+    """
+    `/subscriptions/register` and `/unregister` through their handlers, over `_metric_rows()`:
+    `maxDepth` read from the top level and validated, results paired with requests by position,
+    and a malformed elementId failing only its own item.
+    """
+
+    DEVICE, METRIC, UNKNOWN = "dev-one", "dev-one/Axes/X/POSITION", "dev-unknown"
+
+    def setUp(self):
+        self._saved = (i3x_service.registry, i3x_service.ADDRESS_SPACE_TTL_SECONDS)
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 0
+        self.sub = self.registry.create("c", principal="p")
+
+    def tearDown(self):
+        i3x_service.registry, i3x_service.ADDRESS_SPACE_TTL_SECONDS = self._saved
+
+    def call(self, handler, pg=True, **fields):
+        body = {"clientId": "c", "subscriptionId": self.sub.subscription_id, **fields}
+        req = FakeRequest(body=body, pg=ColumnCheckingPostgrest(_metric_rows()) if pg else None)
+        req.caller = i3x_service.Caller("p", None)
+        handler(req)
+        return req.result
+
+    def register(self, **fields):
+        return self.call(i3x_service.h_sub_register, **fields)
+
+    def listed(self):
+        req = FakeRequest(body={"clientId": "c", "subscriptionIds": [self.sub.subscription_id]})
+        req.caller = i3x_service.Caller("p", None)
+        i3x_service.h_sub_list(req)
+        return req.result[0]["result"]["monitoredObjects"]
+
+    @staticmethod
+    def outcomes(results):
+        return [(r["elementId"], r["success"], (r.get("responseDetail") or {}).get("status"))
+                for r in results]
+
+    def test_max_depth_is_read_from_the_top_level_and_listed(self):
+        self.register(elementIds=[self.DEVICE], maxDepth=0)
+        self.register(elementIds=[self.METRIC])
+        self.assertEqual(self.listed(), [{"elementId": self.DEVICE, "maxDepth": 0},
+                                         {"elementId": self.METRIC, "maxDepth": 1}])
+
+    def test_the_top_level_depth_applies_to_the_objects_form_too(self):
+        self.register(objects=[{"elementId": self.DEVICE, "maxDepth": 5}], maxDepth=2)
+        self.assertEqual(self.listed(), [{"elementId": self.DEVICE, "maxDepth": 2}])
+
+    def test_a_repeat_registration_succeeds_and_keeps_the_first_depth(self):
+        self.register(elementIds=[self.DEVICE], maxDepth=0)
+        results = self.register(elementIds=[self.DEVICE], maxDepth=1)
+        self.assertEqual(self.outcomes(results), [(self.DEVICE, True, None)])
+        self.assertEqual(self.listed(), [{"elementId": self.DEVICE, "maxDepth": 0}])
+
+    def test_an_invalid_max_depth_is_a_400_before_anything_is_read(self):
+        for bad in ("0", -1, True, 1.5, [0], {"n": 0}):
+            with self.subTest(maxDepth=bad):
+                with self.assertRaises(i3x_service.Problem) as caught:
+                    self.register(pg=False, elementIds=[self.DEVICE], maxDepth=bad)
+                self.assertEqual(caught.exception.status, 400)
+                self.assertIn("maxDepth", caught.exception.detail)
+        self.assertEqual(list(self.sub.monitored), [])
+
+    def test_results_pair_with_requests_by_position_when_an_id_repeats(self):
+        results = self.register(elementIds=[self.DEVICE, self.UNKNOWN, self.DEVICE])
+        self.assertEqual(self.outcomes(results), [(self.DEVICE, True, None),
+                                                  (self.UNKNOWN, False, 404),
+                                                  (self.DEVICE, True, None)])
+        results = self.call(i3x_service.h_sub_unregister,
+                            elementIds=[self.UNKNOWN, self.DEVICE, self.UNKNOWN, self.DEVICE])
+        self.assertEqual(self.outcomes(results), [(self.UNKNOWN, False, 404),
+                                                  (self.DEVICE, True, None),
+                                                  (self.UNKNOWN, False, 404),
+                                                  (self.DEVICE, True, None)])
+        self.assertEqual(list(self.sub.monitored), [])
+
+    def test_a_non_string_element_id_is_a_400_item_not_a_500(self):
+        bad = [["x"], 5, {"a": 1}, None, "", True]
+        for handler in (i3x_service.h_sub_register, i3x_service.h_sub_unregister):
+            for shape in ("elementIds", "objects"):
+                with self.subTest(handler=handler.__name__, shape=shape):
+                    entries = bad + [self.DEVICE]
+                    named = list(bad)
+                    if shape == "objects":
+                        entries = [{"elementId": e} for e in entries]
+                    else:
+                        # A dictionary entry names its own `elementId`, which this one lacks.
+                        named[2] = None
+                    results = self.call(handler, **{shape: entries})
+                    self.assertEqual(self.outcomes(results),
+                                     [(e, False, 400) for e in named] + [(self.DEVICE, True, None)])
+        # The body #499's comment reported as a 500.
+        results = self.register(objects=[{"elementId": ["x"]}])
+        self.assertEqual(self.outcomes(results), [(["x"], False, 400)])
+
+
+class TestSubscriptionIdsAreChecked(unittest.TestCase):
+    """
+    A `subscriptionId` that is not a string is a 400, and so is a `subscriptionIds` that is not an
+    array; a non-string entry in one fails its own item, at its position. Each used to reach a dict
+    lookup and answer 500, or be iterated character by character.
+    """
+
+    BAD = (["x"], 5, {"a": 1}, True)
+
+    def setUp(self):
+        self._saved = i3x_service.registry
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        self.sub = self.registry.create("c", principal="p")
+
+    def tearDown(self):
+        i3x_service.registry = self._saved
+
+    def call(self, handler, **fields):
+        req = FakeRequest(body={"clientId": "c", **fields})
+        req.caller = i3x_service.Caller("p", None)
+        handler(req)
+        return req.result
+
+    @staticmethod
+    def outcomes(results):
+        return [(r["subscriptionId"], r["success"], (r.get("responseDetail") or {}).get("status"))
+                for r in results]
+
+    def test_a_non_string_subscription_id_is_a_400(self):
+        for handler in (i3x_service.h_sub_register, i3x_service.h_sub_unregister,
+                        i3x_service.h_sub_sync, i3x_service.h_sub_stream):
+            for bad in self.BAD:
+                with self.subTest(handler=handler.__name__, subscriptionId=bad):
+                    with self.assertRaises(i3x_service.Problem) as caught:
+                        self.call(handler, subscriptionId=bad)
+                    self.assertEqual(caught.exception.status, 400)
+                    self.assertIn("subscriptionId", caught.exception.detail)
+
+    def test_an_absent_or_null_subscription_id_is_still_a_404(self):
+        for fields in ({}, {"subscriptionId": None}):
+            with self.subTest(fields=fields):
+                with self.assertRaises(SubscriptionError) as caught:
+                    self.call(i3x_service.h_sub_sync, **fields)
+                self.assertEqual(caught.exception.status, 404)
+
+    def test_a_non_string_entry_fails_its_own_item_in_place(self):
+        sid = self.sub.subscription_id
+        ids = [sid, ["x"], "nope", 5, sid]
+        self.assertEqual(self.outcomes(self.call(i3x_service.h_sub_list, subscriptionIds=ids)),
+                         [(sid, True, None), (["x"], False, 400), ("nope", False, 404),
+                          (5, False, 400), (sid, True, None)])
+        # The second delete of the same id finds nothing, and says so at its own place.
+        self.assertEqual(self.outcomes(self.call(i3x_service.h_sub_delete, subscriptionIds=ids)),
+                         [(sid, True, None), (["x"], False, 400), ("nope", False, 404),
+                          (5, False, 400), (sid, False, 404)])
+        self.assertEqual(self.registry.count(), 0)
+
+    def test_subscription_ids_that_are_not_an_array_are_a_400(self):
+        for handler in (i3x_service.h_sub_list, i3x_service.h_sub_delete):
+            for bad in (self.sub.subscription_id, "", {"a": 1}, 5, True):
+                with self.subTest(handler=handler.__name__, subscriptionIds=bad):
+                    with self.assertRaises(i3x_service.Problem) as caught:
+                        self.call(handler, subscriptionIds=bad)
+                    self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(self.registry.count(), 1, "a string of ids deleted something")
+
+    def test_absent_or_null_subscription_ids_list_nothing(self):
+        for fields in ({}, {"subscriptionIds": None}, {"subscriptionIds": []}):
+            with self.subTest(fields=fields):
+                self.assertEqual(self.call(i3x_service.h_sub_list, **fields), [])
 
 
 class TestRfc3339(unittest.TestCase):
@@ -2762,6 +3130,57 @@ class TestCurrentValuesAreFilledFromTheHistorian(_QualityCase):
         self.assertEqual((len(self.latest_reads(first)), len(self.latest_reads(second))), (1, 1))
 
 
+class TestARegistrationFillsFromTheHistorian(_QualityCase):
+    """
+    A registration fills what the cache lacks for each device it names, a metric naming its
+    device, as a value read does, so the first map staged for a device no read has named since a
+    restart is complete. A fill that fails leaves the registration standing.
+    """
+
+    DEV_TWO = TestCurrentValuesAreFilledFromTheHistorian.DEV_TWO
+    pg = TestCurrentValuesAreFilledFromTheHistorian.pg
+    latest_reads = TestCurrentValuesAreFilledFromTheHistorian.latest_reads
+
+    def register(self, pg, *element_ids):
+        i3x_service._space_cache_clear()
+        sub = i3x_service.registry.create("client-fill", principal="p-fill")
+        req = FakeRequest(body={"clientId": "client-fill", "subscriptionId": sub.subscription_id,
+                                "elementIds": list(element_ids)}, pg=pg)
+        req.caller = i3x_service.Caller("p-fill", None)
+        i3x_service.h_sub_register(req)
+        return [(r["elementId"], r["success"]) for r in req.result]
+
+    def test_registering_a_metric_fills_its_device_before_anything_is_staged(self):
+        pg = self.pg()
+        self.assertEqual(self.register(pg, "dev-two/OEE/AVAILABILITY"),
+                         [("dev-two/OEE/AVAILABILITY", True)])
+        self.assertEqual([r["asset_id"] for r in self.latest_reads(pg)], ["in.(dev-two)"])
+        i3x_service.on_message(None, None, _spb(
+            "DDATA", device="dev-two", metrics=[{"name": "OEE/AVAILABILITY", "value": 90.0}]))
+        # The map staged for the device holds the filled position, not only what was published.
+        self.assertEqual(self.last_staged()["dev-two"]["value"],
+                         {"Axes/X/POSITION": 7.0, "OEE/AVAILABILITY": 90.0})
+
+    def test_only_registered_devices_are_read_once_between_them(self):
+        pg = self.pg()
+        self.register(pg, "dev-one", "gwy-1", CELL_A, "dev-unknown", "dev-two/Axes/X/POSITION",
+                      "dev-two")
+        self.assertEqual([r["asset_id"] for r in self.latest_reads(pg)], ["in.(dev-one,dev-two)"])
+        nothing = self.pg()
+        self.register(nothing, "gwy-1", CELL_A)
+        self.assertEqual(self.latest_reads(nothing), [])
+
+    def test_a_failed_fill_leaves_the_registration_standing(self):
+        failing = self.pg(fail=SubscriptionError(502, "Bad Gateway", "historian down"))
+        with self.assertLogs(i3x_service.logger, "WARNING") as logged:
+            self.assertEqual(self.register(failing, "dev-two"), [("dev-two", True)])
+        self.assertIn("historian down", "\n".join(logged.output))
+        with mock.patch.object(i3x_service, "_fill_from_historian", side_effect=RuntimeError("x")), \
+                self.assertLogs(i3x_service.logger, "ERROR") as logged:
+            self.assertEqual(self.register(self.pg(), "dev-two"), [("dev-two", True)])
+        self.assertIn("filling 1 registered device(s)", "\n".join(logged.output))
+
+
 class LatestPostgrest(ColumnCheckingPostgrest):
     """
     ColumnCheckingPostgrest answering `telemetry_latest` from seeded `telemetry` rows as the view
@@ -4088,9 +4507,10 @@ class BulkElementIdsCapTest(unittest.TestCase):
                     i3x_service._registration_entries(body)
                 self.assertEqual(caught.exception.status, 400)
 
-        # And the ordinary case still passes through, normalised.
+        # And the ordinary case still passes through, as the id each entry names.
+        self.assertEqual(i3x_service._registration_entries({"elementIds": ["a"]}), ["a"])
         self.assertEqual(
-            i3x_service._registration_entries({"elementIds": ["a"]}), [{"elementId": "a"}]
+            i3x_service._registration_entries({"objects": [{"elementId": "a"}, "b"]}), ["a", "b"]
         )
 
     def test_only_the_two_sanctioned_helpers_read_elementIds(self):
