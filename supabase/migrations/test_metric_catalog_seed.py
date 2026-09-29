@@ -381,7 +381,10 @@ class TestLocalExtensionsCarryNoMintedId(SeedTestCase):
                     "SELECT t.actor_source, t.audit_domain, t.changed_by"
                     "  FROM public.digital_thread t JOIN public.metric_catalog c ON c.id = t.entity_id"
                     " WHERE t.entity_type = 'metric_catalog' AND t.action = 'UPDATE' AND c.name = %s"
-                    "   AND t.old_data ->> 'semantic_id' = %s AND t.new_data ->> 'semantic_id' IS NULL",
+                    "   AND t.old_data ->> 'semantic_id' = %s AND t.new_data ->> 'semantic_id' IS NULL"
+                    # This transaction's rows only: on a stack that booted from an earlier seed, the
+                    # chain's own 0016 has already recorded the same clearing once.
+                    "   AND t.causation_id = txid_current()",
                     (name, minted),
                 )
                 rows.append((name, cur.fetchall()))
