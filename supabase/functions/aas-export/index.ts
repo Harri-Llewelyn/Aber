@@ -8,10 +8,11 @@
  * same machine differently, and the bundle's parts in `../_shared/aas/bundle.ts`; what remains
  * here is the role ladder, the OPC packaging, and what to do when a bundled model cannot be
  * reached. The caller's JWT resolves their role, and the service-role client is used only after
- * that check; `aas-api` deliberately does not hold that key.
+ * that check; `aas-api` deliberately does not hold that key. A bundle's thread and cold catalogue
+ * are read as the caller.
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { strToU8 } from "fflate";
 import { zip } from "../_shared/zip.ts";
@@ -54,8 +55,24 @@ const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 // that hand a shell to a partner. Still an allow-list, so an unmapped role is refused.
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"];
 
+// A bundle carries the device's Digital Thread, so it also needs the permission that opens the
+// thread's asset lane. The Devices page gates its action on the same name; role_permissions
+// decides who holds it, and test_aas_export.py holds that to the roles asset_exports admits.
+const BUNDLE_PERMISSION = "digital_thread:read";
+
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: jsonHeaders });
+
+/** Asked of the database as the caller. A failed lookup is a refusal, as a failed role lookup is. */
+// deno-lint-ignore no-explicit-any -- the caller's client is created without a schema type
+async function callerHolds(client: SupabaseClient<any, any, any>, permission: string): Promise<boolean> {
+  const { data, error } = await client.rpc("has_authority", { allowed_permissions: [permission] });
+  if (error) {
+    console.error(`[aas-export] permission lookup for ${permission} failed: ${error.message}`);
+    return false;
+  }
+  return data === true;
+}
 
 /**
  * AAS Part 5 media type for an AASX package. The `+xml` suffix is correct: an AASX is an Open
@@ -191,6 +208,13 @@ export default async function handler(req: Request): Promise<Response> {
     }
     const format = requestedFormat;
 
+    if (format === "bundle" && !(await callerHolds(supabaseUser, BUNDLE_PERMISSION))) {
+      return json({
+        error: "Forbidden: the bundle carries this device's Digital Thread, which your role may not " +
+          "read. Export the AAS JSON or the AASX package instead.",
+      }, 403);
+    }
+
     const supabaseAdmin = serviceRoleClient(supabaseUrl, supabaseServiceRoleKey);
 
     const record = await loadDeviceRecord(supabaseAdmin, String(device_id));
@@ -291,11 +315,11 @@ export default async function handler(req: Request): Promise<Response> {
 
       // One historian scan at a time: concurrent range scans over the FDW are the load pattern
       // the telemetry export dialog avoids too. The thread and the horizons are the platform's
-      // own tables and run together.
+      // own tables and run together. The thread is read as the caller, so RLS decides its rows.
       const raw = await loadTelemetry(supabaseAdmin, "telemetry", sparkplugId, caps.telemetry);
       const hourly = await loadTelemetry(supabaseAdmin, "telemetry_1h", sparkplugId, caps.telemetry);
       const [thread, horizons] = await Promise.all([
-        loadThread(supabaseAdmin, String(device.id), caps.thread),
+        loadThread(supabaseUser, String(device.id), caps.thread),
         loadHorizons(supabaseAdmin).catch((err) => {
           console.warn(`[aas-export] horizons unavailable for the bundle: ${err instanceof Error ? err.message : String(err)}`);
           return {} as Record<string, string | null>;

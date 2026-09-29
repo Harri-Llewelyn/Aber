@@ -5,9 +5,12 @@ import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { TakeBackupModal } from '../modals/TakeBackupModal'
+import { BackupDestinationModal } from '../modals/BackupDestinationModal'
+import CopyableId from '../common/CopyableId'
 import { HelpTip } from '../common/HelpTip'
 import { IconAlertTriangle, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
 import { formatBytes } from '../../utils/coldStorage'
+import { readSetting } from '../../config'
 
 /**
  * How old the last successful backup may be before the page says backups have stopped: the nightly
@@ -15,6 +18,12 @@ import { formatBytes } from '../../utils/coldStorage'
  * needs this changed. check-docs-drift.mjs holds it equal to the Backup Stale alert rule.
  */
 export const BACKUP_STALE_HOURS = 36
+
+/**
+ * How many of the newest backups the retention prune never removes, whatever their age.
+ * check-docs-drift.mjs holds it equal to the floor in backup_prunable().
+ */
+export const BACKUP_RETENTION_FLOOR = 3
 
 /** Runs per page of the list; "Show more" adds another page. */
 const PAGE_SIZE = 30
@@ -46,6 +55,9 @@ export function BackupsTab({ showToast }) {
   const [error, setError] = useState(null)
   const [asking, setAsking] = useState(false)
   const [releaseFor, setReleaseFor] = useState(null)
+  const [floorIds, setFloorIds] = useState(() => new Set())
+  const [offsite, setOffsite] = useState(null)
+  const [editingDestination, setEditingDestination] = useState(false)
   const lastCall = useRef(0)
 
   const [cancelPending, runCancel] = usePendingAction()
@@ -53,10 +65,14 @@ export function BackupsTab({ showToast }) {
 
   const refresh = useCallback(async () => {
     const call = ++lastCall.current
-    const [page, active, sum] = await Promise.all([
+    const [page, active, sum, floor, destination] = await Promise.all([
       api.listBackupRuns({ statuses: FILTERS[filter].statuses, limit }),
       api.activeBackupJob(),
-      api.backupRunSummary()
+      api.backupRunSummary(),
+      // Soft: without it the Retention cells say what they said before the floor existed.
+      api.newestBackupIds(BACKUP_RETENTION_FLOOR).catch(() => []),
+      // Soft too: the list is worth showing without it, and the line above it then says nothing.
+      api.backupOffsiteDestination().catch(() => null)
     ])
     // A response for an earlier filter or page size that lands after a later one is dropped.
     if (call !== lastCall.current) return
@@ -64,6 +80,8 @@ export function BackupsTab({ showToast }) {
     setMore(page.more)
     setActiveJob(active)
     setSummary(sum)
+    setFloorIds(new Set(floor))
+    setOffsite(destination)
     setError(null)
   }, [filter, limit])
 
@@ -112,6 +130,23 @@ export function BackupsTab({ showToast }) {
     })
   }
 
+  const onSaveDestination = async ({ values, secret }) => {
+    await api.setBackupOffsiteDestination(Object.fromEntries(
+      Object.entries(values).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])
+    ))
+    if (secret) await api.setBackupOffsiteCredential(secret)
+    setEditingDestination(false)
+    showToast('Off-site destination saved. The service copies each backup on its next polls.', 'success')
+    await refresh()
+  }
+
+  const onRemoveDestination = async () => {
+    await api.clearBackupOffsiteDestination()
+    setEditingDestination(false)
+    showToast('Off-site destination removed. Copies already made stay in the bucket.', 'info')
+    await refresh()
+  }
+
   const onFilter = (value) => {
     setFilter(value)
     setLimit(PAGE_SIZE)
@@ -123,6 +158,7 @@ export function BackupsTab({ showToast }) {
 
   // No job row at all is a stack that has never run the backup service: the empty state, no warning.
   const neverRun = !summary?.firstRecordedAt
+  const retentionDays = configuredRetentionDays()
 
   return (
     <div className="page-layout">
@@ -133,7 +169,7 @@ export function BackupsTab({ showToast }) {
               Backups
               <HelpTip
                 label="About backups"
-                text="Every backup run, newest first, and why any failed. A backup holds both databases, the 3D models and the forge. A requested one is kept until released; scheduled ones follow the retention window."
+                text="Every backup run, newest first, and why any failed. A requested backup is kept until released. Scheduled ones follow the retention window, but the newest three backups are always kept."
               />
             </h3>
             {/* The primary action in the header, where every card keeps its. Disabled rather than
@@ -160,6 +196,7 @@ export function BackupsTab({ showToast }) {
 
             <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} />
             <CurrentState summary={summary} />
+            <OffsiteLine destination={offsite} onEdit={() => setEditingDestination(true)} showToast={showToast} />
 
             {neverRun ? (
               <div style={{ color: 'var(--text-dim)', fontSize: '12px', padding: '10px 0' }}>
@@ -196,12 +233,21 @@ export function BackupsTab({ showToast }) {
                           <th>Size</th>
                           <th>Holds</th>
                           <th>Retention</th>
+                          <th>Off site</th>
                           <th aria-label="Actions" />
                         </tr>
                       </thead>
                       <tbody>
                         {runs.map(run => (
-                          <RunRow key={run.id} run={run} releasing={pendingKey === run.backup?.id} onRelease={setReleaseFor} />
+                          <RunRow
+                            key={run.id}
+                            run={run}
+                            inFloor={!!run.backup && floorIds.has(run.backup.id)}
+                            offsiteBase={offsiteBase(offsite)}
+                            retentionDays={retentionDays}
+                            releasing={pendingKey === run.backup?.id}
+                            onRelease={setReleaseFor}
+                          />
                         ))}
                       </tbody>
                     </table>
@@ -225,13 +271,23 @@ export function BackupsTab({ showToast }) {
         </div>
       </div>
 
+      {editingDestination && (
+        <BackupDestinationModal
+          destination={offsite}
+          credentialSet={!!offsite?.credentialSet}
+          onSave={onSaveDestination}
+          onRemove={onRemoveDestination}
+          onClose={() => setEditingDestination(false)}
+        />
+      )}
+
       {asking && (
         <TakeBackupModal onConfirm={onRequest} onCancel={() => setAsking(false)} />
       )}
 
       {releaseFor && (
         <ConfirmModal
-          message={`Release the backup from ${formatWhen(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window.`}
+          message={`Release the backup from ${formatWhen(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window and not one of the newest ${floorWord}.`}
           confirmLabel="Release"
           pendingLabel="Releasing…"
           confirmClassName="btn btn-primary"
@@ -343,7 +399,7 @@ const ERROR_SHOWN = 200
  * One finished run. A completed run shows its backup while the files exist; once the retention
  * window has pruned them the run stays, saying so. A failed run shows the service's reason.
  */
-function RunRow({ run, releasing, onRelease }) {
+function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onRelease }) {
   const b = run.backup
   const badge = STATUS_BADGES[run.status] || { className: 'badge badge-neutral', label: run.status }
   // Taken for a backup (its data is as of the start); ended for a run that produced none.
@@ -382,16 +438,11 @@ function RunRow({ run, releasing, onRelease }) {
         <>
           <td>{formatBytes(b.size_bytes)}</td>
           <td title={componentDetail(b.components)}>{componentSummary(b.components)}</td>
-          <td>
-            {b.pinned
-              ? <span className="badge badge-info" title="The retention window does not apply until this backup is released">Pinned</span>
-              : b.released_at
-                ? <span style={{ color: 'var(--text-muted)' }}>Released {formatWhen(b.released_at)}</span>
-                : <span style={{ color: 'var(--text-muted)' }}>Retention window</span>}
-          </td>
+          <td><RetentionCell backup={b} kept={keptBecause(b, { inFloor, retentionDays })} retentionDays={retentionDays} /></td>
+          <td><OffsiteCell backup={b} base={base} /></td>
         </>
       ) : (
-        <td colSpan={3}>{outcome}</td>
+        <td colSpan={4}>{outcome}</td>
       )}
       <td style={{ textAlign: 'right' }}>
         {b?.pinned && (
@@ -408,6 +459,134 @@ function RunRow({ run, releasing, onRelease }) {
       </td>
     </tr>
   )
+}
+
+/** backup.retentionDays as the chart hands it to the page, or null when it was not supplied. */
+function configuredRetentionDays() {
+  const days = Number.parseInt(readSetting('VITE_BACKUP_RETENTION_DAYS', ''), 10)
+  return Number.isFinite(days) ? days : null
+}
+
+const NUMBER_WORDS = ['no', 'one', 'two', 'three', 'four', 'five']
+const floorWord = NUMBER_WORDS[BACKUP_RETENTION_FLOOR] || String(BACKUP_RETENTION_FLOOR)
+
+/**
+ * Why an unpinned backup the window has passed is still on the volume: 'floor' when it is one of
+ * the newest BACKUP_RETENTION_FLOOR, 'off' when retention is disabled, otherwise null. Null too
+ * when the page does not know the window.
+ */
+export function keptBecause(backup, { inFloor, retentionDays, now = Date.now() }) {
+  if (!backup || backup.pinned || retentionDays == null) return null
+  if (retentionDays <= 0) return 'off'
+  const pastWindow = now - new Date(backup.taken_at).getTime() > retentionDays * 24 * 60 * 60 * 1000
+  return pastWindow && inFloor ? 'floor' : null
+}
+
+function RetentionCell({ backup, kept, retentionDays }) {
+  const muted = { color: 'var(--text-muted)' }
+  if (backup.pinned) {
+    return <span className="badge badge-info" title="The retention window does not apply until this backup is released">Pinned</span>
+  }
+  if (kept === 'floor') {
+    return (
+      <span style={muted} title={`Older than the ${retentionDays}-day retention window. The prune never removes the newest ${floorWord} backups, so this one stays until newer backups succeed.`}>
+        Kept: one of the newest {floorWord}
+      </span>
+    )
+  }
+  if (kept === 'off') {
+    return <span style={muted} title="backup.retentionDays is 0, so the service prunes nothing">Kept: pruning is off</span>
+  }
+  if (backup.released_at) return <span style={muted}>Released {formatWhen(backup.released_at)}</span>
+  return <span style={muted}>Retention window</span>
+}
+
+/** The destination fields the service needs before it copies anything, in the dialog's words. */
+const OFFSITE_REQUIRED = [
+  ['endpoint', 'the endpoint'], ['region', 'the region'], ['bucket', 'the bucket'],
+  ['prefix', 'the key prefix'], ['access_key_id', 'the access key ID'], ['recipient', 'the encryption recipient']
+]
+
+/** What is still missing before the service copies anything, as backup_offsite_base() decides it. */
+export function offsiteMissing(destination) {
+  if (!destination) return []
+  const missing = OFFSITE_REQUIRED.filter(([k]) => !String(destination[k] || '').trim()).map(([, label]) => label)
+  if (!destination.credentialSet) missing.push('the secret access key')
+  return missing
+}
+
+/** Where copies go, <endpoint>/<bucket>/<prefix>/, the form offsite_location starts with. */
+export function offsiteBase(destination) {
+  if (!destination || offsiteMissing(destination).length) return null
+  return `${destination.endpoint.trim().replace(/\/+$/, '')}/${destination.bucket.trim()}/${destination.prefix.trim()}/`
+}
+
+/**
+ * The destination, or its absence, above the list. Unset is a warning rather than an error: the
+ * backups are good, and they share a disk with the data they protect.
+ */
+function OffsiteLine({ destination, onEdit, showToast }) {
+  if (!destination) return null
+  const base = offsiteBase(destination)
+  const missing = offsiteMissing(destination)
+  const untouched = missing.length === OFFSITE_REQUIRED.length + 1
+  return (
+    <div
+      className={base ? 'callout' : 'callout callout-warning'}
+      style={{ margin: '12px 0 0', ...(base ? { borderColor: 'var(--border)' } : {}) }}
+      data-testid="offsite-line"
+    >
+      {base
+        ? <IconHardDrive size={14} className="callout-icon" />
+        : <IconAlertTriangle size={14} className="callout-icon" />}
+      <div style={{ flex: 1, display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {base ? (
+          <>
+            <span>Every backup is copied, encrypted, to</span>
+            <CopyableId value={base} label="off-site destination" onNotify={showToast} />
+          </>
+        ) : untouched ? (
+          <span>
+            <strong>No off-site copy.</strong> Every backup is on the same disk as the data it
+            protects, so a lost disk or node takes both.
+          </span>
+        ) : (
+          <span>
+            <strong>The off-site copy cannot run.</strong> Still to set: {missing.join(', ')}.
+          </span>
+        )}
+      </div>
+      <button className="btn btn-sm" onClick={onEdit} title="Where every backup is copied, and the key it is encrypted to">
+        {base ? 'Change' : 'Set a destination'}
+      </button>
+    </div>
+  )
+}
+
+/** One backup's copy: where it is, why it is not there yet, or that nothing is configured. */
+function OffsiteCell({ backup, base }) {
+  const muted = { color: 'var(--text-muted)' }
+  if (backup.offsite_state === 'COPIED' && (!base || backup.offsite_location?.startsWith(base))) {
+    return (
+      <span className="badge badge-online" title={`${backup.offsite_location}\nCopied ${formatWhen(backup.offsite_copied_at)}`}>
+        Copied
+      </span>
+    )
+  }
+  if (!base) {
+    return backup.offsite_state === 'COPIED'
+      ? <span style={muted} title={backup.offsite_location}>Copied earlier</span>
+      : <span style={muted} title="No off-site destination is set">—</span>
+  }
+  if (backup.offsite_state === 'FAILED') {
+    const reason = backup.offsite_error || 'The service recorded no reason.'
+    return (
+      <span style={{ color: 'var(--danger-text)' }} title={`${reason}\nTried ${backup.offsite_attempts} time(s), last ${formatWhen(backup.offsite_attempted_at)}; the service tries again.`}>
+        Failed, retrying
+      </span>
+    )
+  }
+  return <span style={muted} title="The service copies it on a coming poll, newest first">Waiting</span>
 }
 
 function runTimes(run) {

@@ -461,6 +461,30 @@ Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate a
 `fork_schema()` copies from its parent, is edited in the draft editor and saved with the draft.
 `log_digital_thread_event()` already records both as UPDATEs, so neither needed a trigger change.
 
+### A local extension carries no minted id (`0016_a_local_extension_carries_no_minted_id.sql`)
+
+**No id is minted for a local extension (#516).** `0002` seeded `safety_interlock` and
+`max_temp_threshold` with `https://aber.local/semantics/local/<name>`. Nothing outside the
+installation resolves either IRI, so neither named a concept, and on every fresh stack the schema
+builder marked both as mapped, the AAS export left them out of `unmapped_semantic_ids`, and the
+Metrics page's "—" cell for an unmapped metric never appeared (#547). `0002` now seeds both with
+no id and no type.
+
+`0016` clears a database seeded earlier. `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, so
+the seed alone cannot. It clears the id and its type together, and only while a metric's id is
+still exactly the one minted for it, so an id an Administrator has set since stays. Its self-check
+asserts that neither metric still holds its minted id, which is its own work; a replay matches
+nothing.
+
+**The clear is on the Digital Thread as the platform's own act.** It is an UPDATE on
+`metric_catalog`, whose audit trigger `0010` attaches earlier in the chain, so each clear is an
+`UPDATE` row in the asset lane with `actor_source = 'migration'`, `changed_by` NULL, and the
+minted id in `old_data`. Nothing else was needed: db-init applies the chain as `postgres`, which
+`log_digital_thread_event()` files as `migration`. `test_metric_catalog_seed.py` puts the minted
+ids back in a rolled-back transaction and holds `0016` to clearing them, recording both clears that
+way, keeping an id an Administrator set, writing nothing on a replay, and naming a metric its
+self-check finds.
+
 ### Metric name format (0007)
 
 Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics
@@ -3069,7 +3093,7 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | Function | Roles | Notes |
 | :--- | :--- | :--- |
 | [`approve-quarantine`](functions/approve-quarantine) | `Administrator`, `Shopfloor_Manager` | Calls the atomic approval RPC |
-| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read |
+| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `digital_thread:read`, because it carries the thread |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; since `deploy-nodered` was retired this is the sole enforcement point for `gitops:manage` |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
@@ -4102,6 +4126,21 @@ and the page says to keep the file. Every export is an `EXPORTED` row on the thr
 trigger on the insert. Readable by the three roles the bucket admits (Administrator,
 Shopfloor_Manager, Auditor), and the export itself is offered to `archive:manage`.
 
+**The bundle is for the roles that may read what it holds.** Its thread part names who changed
+what, with the values from before each change, and every earlier export of the device with its
+taker's email: rows `digital_thread_select_asset` and `asset_exports_select_privileged` close to
+an Operator. It was first built with the plain export's role list, so an Operator could download
+what RLS refused them everywhere else (#527). `format=bundle` now also asks `has_authority()` for
+`digital_thread:read`, as the caller, and a caller without it gets `403` naming the thread; JSON
+and AASX keep the four-role list. The permission rather than a second role list, because it is
+one name the Devices page already gates View Digital Thread on and now gates Export Bundle on too,
+and `role_permissions`, written only by the seed, decides who holds it: today exactly the three
+roles both policies admit. `test_aas_export.py` reads the seed and the two policies and fails if
+the holders and that intersection ever differ. The thread part is read through the caller's client,
+as the cold catalogue already was, so RLS decides its rows and the part no longer depends on the
+service key; `loadThread()` also filters on `audit_domain = 'asset'`, so a bundle taken by an
+Administrator or an Auditor, who may read the security lane, never carries a row from it.
+
 ### A machine has a name an operator gave it (`0125`)
 
 **`create_machine_principal()` made an identity nobody could name.** The `auth.users` row holds
@@ -4817,6 +4856,25 @@ than `BACKUP_RETENTION_DAYS`; the files go first and `backup_forget()` removes t
 Administrator releases it on the page (`release_backup()`), because a backup taken before a risky
 change is the one a timer must not delete first. `0` disables pruning.
 
+**The newest three are never pruned (`0017`).** `backup_prunable()` used to select by age alone,
+and the service prunes after every job it claims, a failed one included. So a fortnight of failed
+backups (a `pg_dump` older than a server, or one component down and taking the all-or-nothing
+backup with it) deleted the last good scheduled backup on the day it passed the window, while
+Backup Stale was already firing. Now it never returns any of the newest three rows, pinned or not,
+whatever their age. Every `backups` row is a successful backup, so those are the newest three good
+ones; three rather than one, because the newest may be the one that is wrong. The floor is in the
+SQL rather than the service so it covers every caller: the prune after a job, the prune at start,
+and anything added later. It is a constant: a different number would be a new argument, which is a
+new function, dropped and re-granted by name.
+
+The service still prunes after a failure, deliberately. When the failure was a full volume,
+pruning is what lets the next run succeed, and the floor makes that safe; pruning only after a
+success is the obvious alternative and the wrong one. The CronJob and `backup-databases.sh` need no
+floor: both prune last in a script that stops at the first failure. The page's Retention column says
+**Kept: one of the newest three** on a backup the window has passed and the floor is keeping; it
+reads the window from `backup.retentionDays` through the frontend's runtime configuration, and
+`check-docs-drift.mjs` holds its `BACKUP_RETENTION_FLOOR` equal to the SQL's.
+
 **Every act is a thread row.** `BACKUP_REQUESTED`, `BACKUP_CANCELLED` and `BACKUP_RELEASED` as the
 user who did it; `BACKUP_TAKEN`, `BACKUP_FAILED` and `BACKUP_PRUNED` as `service`, with no user.
 `audit_domain_for()` files both entity types under `security` by its fail-closed default, which is
@@ -4858,7 +4916,9 @@ are in a directory on the volume, there are volume archives beside the dumps, an
 taken while a backup job was RUNNING, so the restored database carries that row. The service
 fails it on its next poll (`BACKUP_POLL_SECONDS`, 15 s), as it fails any RUNNING job no process
 is running; until then `request_backup()` refuses, naming it. This is the runbook
-`scripts/rehearse-restore.sh` runs, step for step.
+`scripts/rehearse-restore.sh` runs, step for step. After losing the node there is no pod to stream
+from: start from the bucket instead (*An encrypted copy off site*, below), then continue here from
+the root key.
 
 ```bash
 # The directory, off the backup PVC as a streamed tar (a directory `kubectl cp` may land the
@@ -4920,12 +4980,117 @@ kubectl apply -f deploy/k8s/internal-ca.yaml
 ```
 
 **Rehearsed weekly, from a backup the service took.** `.github/workflows/restore-rehearsal.yml`
-asks for its backup the way the Backups page does, restores both databases and the three volumes
-into a fresh install, asserts what a count cannot catch, and asks for a second backup, so a green
-run also says the restored stack can back itself up
+asks for its backup the way the Backups page does, with an off-site destination set, and restores
+both databases and the three volumes into a fresh install from the copy it fetches out of the
+bucket and decrypts, once the namespace and the backup volume are gone. It asserts what a count
+cannot catch, and asks for a second backup, so a green run also says the restored stack can back
+itself up and copy that backup off site
 ([`deploy/k8s/README.md`](../deploy/k8s/README.md#rehearsing-the-restore-weekly-and-by-hand)
 lists the assertions). The CA is the one component it does not rehearse: the rehearsal installs
 no cert-manager.
+
+### An encrypted copy off site (0018)
+
+**Every backup was on the disk it protects.** The service wrote each backup onto the backup PVC
+and nowhere else, and on the default storage class that claim is `local-path`: one node, no
+replication, no snapshots, usually the disk that holds both databases. So the backups recovered a
+dropped table or a bad migration, and not a failed disk, a lost node or a lost site, which are the
+failures a backup exists for. The parts the documentation calls irreplaceable (`supabase-db`, the
+Vault key, the internal CA, the broker's accounts, the forge) had no copy anywhere else.
+`0132` made the same argument for the cold archive.
+
+**What the service does.** When the Backups page names a destination, the service copies every
+backup to an S3 endpoint and keeps the local one; the PVC stays the fast copy with its own
+retention. On each poll with no job to take it copies one backup that has no copy at the current
+destination, newest first, so a requested backup waits behind one upload at most. Each file of the
+backup directory becomes one object, `<prefix>/<stamp>/<file>.age`, with the manifests last, so a
+copy holding `manifest.json.age` holds every file it names.
+
+- **Encrypted before it leaves the pod, with age.** Every directory holds pgsodium's root key beside
+  the dump holding the Vault's ciphertext, and the CA's key pair. Anyone who could read an
+  unencrypted bucket could decrypt every Vault secret, the cold archive's S3 key among them, and
+  sign certificates every appliance trusts. The service holds only the recipients (age public
+  keys) from the settings, so neither a stolen bucket credential nor a compromised pod can read a
+  copy. The identity that decrypts is the operator's, and is never in this stack.
+- **Checked the way the cold archive checks.** Each object is sent with the SHA-256 of its
+  ciphertext as `ChecksumSHA256`, so the store refuses a corrupted upload, and a `HEAD` with
+  checksum mode on confirms the size and the digest the store computed (`verify_object()` in
+  `ingestion/cold_archive.py`). A file over 64 MiB (`BACKUP_OFFSITE_PART_BYTES`) goes as a
+  multipart upload with a checksum on every part, and the `HEAD` is compared with the composite
+  S3 keeps, the SHA-256 of the parts' digests followed by `-<parts>`. An implementation that
+  returns no checksum has still checked it on write, so absent is not a mismatch. The
+  `manifest.json` digests are of the plaintext and are checked after decryption on restore.
+- **An existing client, not a signer of our own.** The AWS CLI (`s3api put-object`,
+  `upload-part`, `head-object`) and `age`, both Alpine packages in `backup-service/Dockerfile`. They
+  add about 250 MB to the image, nearly all of it the CLI's Python and botocore. The checksum goes
+  as a header, never as the trailer the CLI adds by default
+  (`AWS_REQUEST_CHECKSUM_CALCULATION=when_required`), because not every S3 implementation reads
+  trailers.
+- **A failed upload never fails the backup.** The local backup is good, so the run stays
+  COMPLETED; the copy has its own state on the `backups` row (`offsite_state`: PENDING, COPIED or
+  FAILED, with `offsite_error`), and a failed copy is tried again after 1, 2, 4 and 8 minutes, then
+  every 15, so an unreachable endpoint is not sent the same gigabytes every poll. Setting or
+  changing the destination copies every backup still on the volume to it.
+
+**The remote copies follow the local rules.** `backup_prunable()` hands the prune each row's
+`offsite_location`, and the service deletes the copy (every object under `<prefix>/<stamp>/`) with
+the local files, so pinning and the newest-three floor apply to the bucket too. A delete that
+fails never holds the local prune back, and the `BACKUP_PRUNED` reason says what happened to the
+copy: deleted, not deleted and why, or left because the destination has changed or been removed.
+That is deliberate, because the stricter arrangement is supported: a bucket with versioning or
+Object Lock, and a credential without `s3:DeleteObject`, so that nothing this stack holds can
+delete a copy. There a lifecycle rule expires old copies instead; set its expiry well past
+`backup.retentionDays`, because a lifecycle rule knows nothing of the floor, and a run of failed
+backups longer than the expiry would lose the last good copies to it.
+
+A credential scoped to the prefix needs `s3:PutObject`, `s3:GetObject` (for the `HEAD`),
+`s3:ListBucket` on the prefix, `s3:AbortMultipartUpload` and, unless a lifecycle rule prunes
+instead, `s3:DeleteObject`.
+
+**Configured on the Backups page, as cold storage is.** The endpoint, region, bucket, prefix,
+access key ID, path-style switch and encryption recipient are `backup_offsite.*` settings, flagged
+`sensitive` so only an Administrator reads them, and checked on write by
+`backup_offsite_setting_guard()` (a URL, a bucket name, a prefix without a leading or trailing
+`/`, one or more `age1` keys). The page's destination dialog writes them in one statement through
+`set_backup_offsite_destination()`, and the secret key into the Vault through the write-only
+`set_backup_offsite_credential()`, the second foreign credential there beside the cold archive's.
+`clear_backup_offsite_destination()` empties them and deletes the secret; copies already made stay
+in the bucket. The service reads the whole destination on each poll through
+`backup_offsite_destination()`, a gate no PostgREST role can call, so a change on the page applies
+without a restart.
+
+**The circularity, which the dialog states.** The Vault is inside every backup. Keeping the bucket
+credential there is fine for the service's own writes, but a restore after losing the site starts
+without the Vault, so the bucket credentials and the age identity must be kept outside this stack.
+
+**Under `networkPolicy.enabled` the endpoint needs an egress rule.** The chart cannot derive one
+from a page setting, so `backupService.offsiteEgress` takes NetworkPolicy egress rules for the
+backup service's pod (an `ipBlock` and port for the endpoint). Without one every copy fails at
+connect time.
+
+**It shows.** The Backups page shows each backup's copy in an Off site column, and the destination
+above the list. The Grafana rule *Off-site Backup Stale* reads `backup_offsite_health`, which has a
+row only while the destination is complete: how long the newest backup has gone without a copy at
+the current destination, counted from when it was taken or the destination last changed, whichever
+is later. It fires past 12 hours (`grafana/README.md`).
+
+**Restoring from the bucket** is the runbook above with a different first step: the directory comes
+from the bucket, not from the pod, and is decrypted with the identity the operator kept. After a
+node or site loss there is no pod and no volume to stream from, so this is the one to rehearse
+(`scripts/rehearse-restore.sh fetch` runs it, step for step).
+
+```bash
+# Every object of the backup, then each decrypted beside itself. age authenticates what it
+# decrypts, so a tampered object fails here rather than in the restore.
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=<region>
+aws --endpoint-url <endpoint> s3 cp --recursive s3://<bucket>/<prefix>/<stamp>/ ./backups/<stamp>/
+for f in ./backups/<stamp>/*.age; do age -d -i identity.txt -o "${f%.age}" "$f" && rm "$f"; done
+
+# The digests the manifest recorded, against the plaintext.
+( cd ./backups/<stamp> && jq -r '.components[] | "\(.sha256)  \(.file)"' manifest.json | sha256sum -c )
+
+# Then from "pgsodium's root key FIRST" above, unchanged.
+```
 
 ### Tier 2: infrastructure snapshots
 
@@ -4976,9 +5141,10 @@ backup of half the stack as a backup.
 
 **The schedule is this process's.** At start it registers `enqueue_scheduled_backup()` with
 pg_cron on `BACKUP_SCHEDULE`, or removes the job when the schedule is empty, so a stack with no
-service queues nothing nobody will take. Retention is applied after every run: a scheduled backup
-older than `BACKUP_RETENTION_DAYS` is deleted and forgotten, the row only after the files are
-gone, and a prune can never remove a path outside the backup directory; a requested backup is
+service queues nothing nobody will take. Retention is applied after every run, failed ones
+included: a scheduled backup older than `BACKUP_RETENTION_DAYS` and not one of the newest three is
+deleted and forgotten, the row only after the files are gone, and a prune can never remove a path
+outside the backup directory; a requested backup is
 pinned until an Administrator releases it. A `RUNNING` job that no process is running is failed
 before each claim, not only at start: the service is one replica, so such a row is a previous
 process's, or it came back in a restore from a backup taken while that job ran, and left standing

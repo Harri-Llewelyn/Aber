@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BackupsTab, BACKUP_STALE_HOURS } from '../components/tabs/BackupsTab'
+import { BackupsTab, BACKUP_STALE_HOURS, keptBecause } from '../components/tabs/BackupsTab'
 import { tabIsVisible, TABS, groupedNav } from '../App'
 
 /**
@@ -21,6 +21,11 @@ vi.mock('../api', async () => {
       listBackupRuns: vi.fn(),
       backupRunSummary: vi.fn(),
       activeBackupJob: vi.fn(),
+      newestBackupIds: vi.fn(),
+      backupOffsiteDestination: vi.fn(),
+      setBackupOffsiteDestination: vi.fn(),
+      setBackupOffsiteCredential: vi.fn(),
+      clearBackupOffsiteDestination: vi.fn(),
       requestBackup: vi.fn(),
       cancelBackupJob: vi.fn(),
       releaseBackup: vi.fn()
@@ -99,6 +104,11 @@ beforeEach(() => {
   serveRuns(ALL)
   api.backupRunSummary.mockResolvedValue(HEALTHY)
   api.activeBackupJob.mockResolvedValue(null)
+  api.newestBackupIds.mockResolvedValue([])
+  api.backupOffsiteDestination.mockResolvedValue({
+    endpoint: '', region: '', bucket: '', prefix: '', access_key_id: '', recipient: '', path_style: false, credentialSet: false
+  })
+  delete globalThis.__ABER_CONFIG__
 })
 
 describe('the list of runs', () => {
@@ -159,6 +169,161 @@ describe('the list of runs', () => {
     renderTab()
     await screen.findByTestId('run-j-3')
     expect(screen.getAllByTestId(/^run-/).map(r => r.dataset.testid)).toEqual(['run-j-3', 'run-j-1', 'run-j-2', 'run-j-4', 'run-j-5'])
+  })
+})
+
+describe('the retention floor', () => {
+  const daysAgo = (d) => new Date(Date.now() - d * 24 * 60 * 60 * 1000).toISOString()
+  const scheduled = (id, days) => ({
+    ...SCHEDULED, id: `j-${id}`,
+    backup: { ...SCHEDULED.backup, id: `b-${id}`, stamp: `2026090${id}T023000Z`, taken_at: daysAgo(days) }
+  })
+
+  it('says a backup past the window is kept as one of the newest three', async () => {
+    globalThis.__ABER_CONFIG__ = { VITE_BACKUP_RETENTION_DAYS: '14' }
+    serveRuns([scheduled(1, 20), scheduled(2, 21), scheduled(3, 22), scheduled(4, 23)])
+    api.newestBackupIds.mockResolvedValue(['b-1', 'b-2', 'b-3'])
+    renderTab()
+    const kept = await screen.findByTestId('run-j-1')
+    await waitFor(() => expect(kept).toHaveTextContent('Kept: one of the newest three'))
+    expect(within(kept).getByTitle(/Older than the 14-day retention window/)).toBeInTheDocument()
+    expect(screen.getByTestId('run-j-3')).toHaveTextContent('Kept: one of the newest three')
+    // Past the window and outside the floor: the next prune takes it.
+    expect(screen.getByTestId('run-j-4')).toHaveTextContent('Retention window')
+    expect(api.newestBackupIds).toHaveBeenCalledWith(3)
+  })
+
+  it('says nothing about the floor for a backup still inside the window', async () => {
+    globalThis.__ABER_CONFIG__ = { VITE_BACKUP_RETENTION_DAYS: '14' }
+    serveRuns([scheduled(1, 2)])
+    api.newestBackupIds.mockResolvedValue(['b-1'])
+    renderTab()
+    const row = await screen.findByTestId('run-j-1')
+    expect(row).toHaveTextContent('Retention window')
+    expect(row).not.toHaveTextContent('Kept')
+  })
+
+  it('says nothing about the floor when the page was not told the window', async () => {
+    serveRuns([scheduled(1, 40)])
+    api.newestBackupIds.mockResolvedValue(['b-1'])
+    renderTab()
+    expect(await screen.findByTestId('run-j-1')).toHaveTextContent('Retention window')
+  })
+
+  it('still lists the runs when the floor cannot be read', async () => {
+    globalThis.__ABER_CONFIG__ = { VITE_BACKUP_RETENTION_DAYS: '14' }
+    serveRuns([scheduled(1, 40)])
+    api.newestBackupIds.mockRejectedValue(new Error('boom'))
+    renderTab()
+    expect(await screen.findByTestId('run-j-1')).toHaveTextContent('Retention window')
+    expect(screen.queryByText('boom')).toBeNull()
+  })
+
+  it('keeps Pinned for a pinned backup in the floor, and says when pruning is off', () => {
+    const old = { taken_at: daysAgo(40), pinned: false }
+    expect(keptBecause({ ...old, pinned: true }, { inFloor: true, retentionDays: 14 })).toBeNull()
+    expect(keptBecause(old, { inFloor: true, retentionDays: 14 })).toBe('floor')
+    expect(keptBecause(old, { inFloor: false, retentionDays: 14 })).toBeNull()
+    expect(keptBecause(old, { inFloor: false, retentionDays: 0 })).toBe('off')
+    expect(keptBecause(old, { inFloor: true, retentionDays: null })).toBeNull()
+  })
+})
+
+describe('the off-site copy', () => {
+  const DESTINATION = {
+    endpoint: 'https://s3.eu-west-2.amazonaws.com', region: 'eu-west-2', bucket: 'aber-backups',
+    prefix: 'site-a/backups', access_key_id: 'AKIAEXAMPLE', path_style: false,
+    recipient: 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', credentialSet: true
+  }
+  const BASE = 'https://s3.eu-west-2.amazonaws.com/aber-backups/site-a/backups/'
+  const withCopy = (id, fields) => ({
+    ...SCHEDULED, id: `j-${id}`,
+    backup: { ...SCHEDULED.backup, id: `b-${id}`, stamp: `2026091${id}T023000Z`, ...fields }
+  })
+
+  it('says every backup shares a disk with the data when no destination is set', async () => {
+    renderTab()
+    const line = await screen.findByTestId('offsite-line')
+    expect(line).toHaveTextContent('No off-site copy')
+    expect(line).toHaveTextContent('same disk')
+    expect(within(line).getByRole('button', { name: 'Set a destination' })).toBeInTheDocument()
+  })
+
+  it('names what is missing from a destination that cannot run', async () => {
+    api.backupOffsiteDestination.mockResolvedValue({ ...DESTINATION, recipient: '', credentialSet: false })
+    renderTab()
+    const line = await screen.findByTestId('offsite-line')
+    await waitFor(() => expect(line).toHaveTextContent('The off-site copy cannot run'))
+    expect(line).toHaveTextContent('the encryption recipient, the secret access key')
+  })
+
+  it('shows where copies go, and each backup\'s copy', async () => {
+    api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
+    serveRuns([
+      withCopy(1, { offsite_state: 'COPIED', offsite_location: `${BASE}20260911T023000Z/`, offsite_copied_at: '2026-09-11T02:40:00Z' }),
+      withCopy(2, { offsite_state: 'FAILED', offsite_error: 'aws s3api put-object: AccessDenied', offsite_attempts: 3, offsite_attempted_at: '2026-09-12T03:00:00Z' }),
+      withCopy(3, { offsite_state: 'PENDING' }),
+      withCopy(4, { offsite_state: 'COPIED', offsite_location: 'https://old.example/b/p/20260914T023000Z/' })
+    ])
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('offsite-line')).toHaveTextContent('Every backup is copied, encrypted, to'))
+    expect(screen.getByTestId('offsite-line')).toHaveTextContent(BASE)
+    expect(screen.getByTestId('run-j-1')).toHaveTextContent('Copied')
+    const failed = screen.getByTestId('run-j-2')
+    expect(failed).toHaveTextContent('Failed, retrying')
+    expect(within(failed).getByTitle(/AccessDenied/)).toBeInTheDocument()
+    expect(screen.getByTestId('run-j-3')).toHaveTextContent('Waiting')
+    // Copied to a destination since replaced: the service copies it again.
+    expect(screen.getByTestId('run-j-4')).toHaveTextContent('Waiting')
+  })
+
+  it('saves the destination and the key through the dialog, and states the circularity', async () => {
+    api.setBackupOffsiteDestination.mockResolvedValue(true)
+    api.setBackupOffsiteCredential.mockResolvedValue(true)
+    const { props } = renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Set a destination' }))
+    expect(screen.getByTestId('offsite-circularity')).toHaveTextContent('Keep the bucket credentials and the decryption key outside this stack')
+
+    const type = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+    type('S3 endpoint', ' https://minio.example:9000 ')
+    type('Region', 'us-east-1')
+    type('Bucket', 'backups')
+    type('Key prefix', 'site-a')
+    type('Access key ID', 'backup-writer')
+    type('Encryption recipient', DESTINATION.recipient)
+    type('Secret access key', ' s3cret ')
+    fireEvent.click(screen.getByLabelText(/Address the bucket by path/))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.setBackupOffsiteDestination).toHaveBeenCalledWith({
+      endpoint: 'https://minio.example:9000', region: 'us-east-1', bucket: 'backups', prefix: 'site-a',
+      access_key_id: 'backup-writer', recipient: DESTINATION.recipient, path_style: true
+    }))
+    expect(api.setBackupOffsiteCredential).toHaveBeenCalledWith('s3cret')
+    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/destination saved/i), 'success')
+    await waitFor(() => expect(screen.queryByTestId('offsite-circularity')).toBeNull())
+  })
+
+  it('keeps the stored key when the field is left empty, and shows a refusal in the dialog', async () => {
+    api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
+    api.setBackupOffsiteDestination.mockRejectedValue(new Error('backup_offsite.bucket must be an S3 bucket name'))
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    expect(screen.getByLabelText('Secret access key')).toHaveAttribute('placeholder', expect.stringMatching(/Stored/))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/must be an S3 bucket name/)).toBeInTheDocument()
+    expect(api.setBackupOffsiteCredential).not.toHaveBeenCalled()
+  })
+
+  it('removes the destination after asking', async () => {
+    api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
+    api.clearBackupOffsiteDestination.mockResolvedValue(true)
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the destination' }))
+    expect(screen.getByText(/Copies already made stay in the bucket/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(api.clearBackupOffsiteDestination).toHaveBeenCalled())
   })
 })
 

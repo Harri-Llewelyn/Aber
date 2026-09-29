@@ -2,9 +2,6 @@
 {{- $component := "backup-service" -}}
 {{- $secretName := include "aber.secretName" . -}}
 {{- $fullname := include "aber.fullname" . -}}
-{{- if ne .Values.backup.destination "pvc" }}
-{{- fail "\n\naber: backupService.enabled needs backup.destination=pvc.\n\nThe service writes one directory per backup onto the backup PVC and records where; it has no S3\nclient. Set backupService.enabled=false to keep the CronJob's s3 destination.\n" }}
-{{- end }}
 {{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
       .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
 {{- $includeForge := and .Values.backup.includeForge .Values.gitea.enabled -}}
@@ -29,11 +26,12 @@ Role in that namespace granting `get` on that one Secret by name. Nothing wider:
 resourceNames cannot restrict, and nothing in this namespace.
 
 THE SAME BASE IMAGE AS THE DATABASE, for its pg_dump (the client must be at least the server's
-version), plus node, sqlite3 and GNU tar. The code is projected from a ConfigMap, as the
-credential service's is, so a script change needs no image rebuild.
+version), plus node, sqlite3, GNU tar, age and the AWS CLI. The code is projected from a
+ConfigMap, as the credential service's is, so a script change needs no image rebuild.
 
-NO SERVICE OBJECT. Nothing calls it; the liveness probe reads /healthz on the pod. The dumps
-never leave the PVC, and restore is the runbook in supabase/README.md.
+NO SERVICE OBJECT. Nothing calls it; the liveness probe reads /healthz on the pod. Nothing leaves
+the PVC unencrypted: the off-site copy, when the Backups page sets a destination, is each file
+encrypted with age to the operator's public key. Restore is the runbook in supabase/README.md.
 
 CO-LOCATION. The storage PVC and the forge's are ReadWriteOnce, so including either requires this
 pod on that pod's node -- the same podAffinity the CronJob carries, and required rather than

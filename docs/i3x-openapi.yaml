@@ -7,7 +7,8 @@ info:
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
     Interoperability eXchange) read-side view of this platform's asset model — **52 passed,
     0 failed** against CESMII's official 60-test conformance suite at `5010274f` (cesmii/i3X,
-    2026-06-18), the ref CI pins.
+    2026-06-18), the ref CI pins, which tests shape. What it says about a seeded plant is
+    checked against the Directory by `ingestion/validate.py` (checks 12 and 17).
 
     ### This is a different service from the Platform API
 
@@ -79,7 +80,7 @@ info:
     | Replicas | Exactly one, always. The service holds a plain `spBv1.0/#` broker subscription and its subscription state is in process memory; a second instance would answer `/subscriptions/sync` for ids it has never seen |
     | Reachability during a restart | None — the old instance stops before the new one starts, so the endpoint is absent rather than degraded |
     | Subscriptions across a restart | None. Queues, sequence numbers and open streams are lost |
-    | Current values just after a restart | Cold and **reported as cold**: `quality: "GoodNoData"` with a null value, until that device next publishes |
+    | Current values just after a restart | Filled on the first read: what the value cache lacks for a device is read from `telemetry_latest`, with each sample's stored time. Only a metric the historian does not hold is `GoodNoData` until it next changes |
     | Metadata and history | Unaffected — neither is held by this service |
 
     `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this
@@ -432,15 +433,15 @@ paths:
         Served from the MQTT value cache, **gated on a PostgREST read as the caller** — see
         the RLS note in the introduction.
 
-        `quality` is derived at read time, never stored: a quarantined device or stale
-        gateway is `Uncertain`; a metric that has never been published is `GoodNoData` with
-        no value; anything else is `Good`. A `quality` column on the hypertable would be a
-        stored verdict that goes stale the moment the gateway does.
+        `quality` is derived at read time, never stored, from the device, its gateway and
+        whether a value is held: see `Quality`. What the value cache lacks for a device named
+        here is read once from `telemetry_latest` as the caller, and a failed read makes what
+        is missing `Bad`.
 
         **A device and its metrics.** A device's value is the map of its metrics' latest
         values. Each metric is also an object, `<sparkplug_id>/<metric name>`, and a component
         of the device, whose value is a bare scalar: its latest sample, or `null` with
-        `GoodNoData` timestamped at the read when it has none. So `maxDepth: 1` on a device
+        `GoodNoData` (or `Bad`, per `Quality`) when it has none. So `maxDepth: 1` on a device
         returns the map, and `maxDepth: 0` or `2` adds each metric's own value under
         `components`.
       requestBody:
@@ -703,7 +704,7 @@ paths:
     post:
       tags: [Subscriptions]
       summary: List your subscriptions
-      description: 'Scoped to `clientId` and your token''s principal: an id that is not yours is a per-item 404, exactly as one that does not exist. Only the ids you name are listed. `monitoredObjects` is the set as of the last check of your view, made by each `/sync` and stream tick.'
+      description: 'Scoped to `clientId` and your token''s principal: an id that is not yours is a per-item 404, exactly as one that does not exist. Only the ids you name are listed. `monitoredObjects` is the set as of the last check of your view, made by each `/sync` and stream tick, each `{elementId, maxDepth}` with the depth of its first registration.'
       requestBody:
         required: true
         content:
@@ -718,10 +719,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: Subscriptions owned by this client.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is not yours, or does not exist, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/delete:
@@ -742,10 +748,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: One result per id; unknown or unowned ids are per-item failures.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is unknown or not yours, including one deleted earlier in the same request, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/register:
@@ -761,6 +772,24 @@ paths:
         Validating here also means the monitored set can only contain ids this caller may see,
         so a subscription cannot become a way around RLS on the value path. Each delivery checks
         again: see `/subscriptions/sync`.
+
+        **`maxDepth` applies to every elementId in the call.** What each registration then
+        receives:
+
+        | Registered | Receives updates for |
+        | :--- | :--- |
+        | A device at `maxDepth: 1` | The device: its map of metrics |
+        | A device at `maxDepth: 0`, or 2 or more | The device, and each of its metrics as `<device>/<metric>`, in one batch when both change |
+        | A metric, `<device>/<metric>` | That metric only |
+        | A gateway | That gateway only (its birth, its death, and a heartbeat that changes its live status), not its devices |
+        | The site, an area, a cell, a lane or Unassigned | Nothing: their values change only with the Directory, which is not staged |
+
+        **Registering an object again succeeds and changes nothing**, as the guide requires, so
+        its first `maxDepth` stands. Unregister it first to change the depth.
+
+        **Each device registered, or whose metric is, has what the server lacks for it filled
+        from the historian**, as `/objects/value` fills it, so the first map staged for it is
+        complete. A fill that fails does not fail the registration.
       requestBody:
         required: true
         content:
@@ -771,21 +800,35 @@ paths:
               properties:
                 clientId: { type: string }
                 subscriptionId: { type: string }
+                elementIds:
+                  type: array
+                  description: 'Objects to monitor. `objects` is accepted in its place.'
+                  items: { type: string }
                 objects:
                   type: array
-                  description: 'Objects to monitor. Accepts bare id strings or `{elementId}` objects; `elementIds` is accepted as an alias.'
+                  description: 'An alias of `elementIds`, taking bare id strings or `{elementId}` objects. Only `elementId` is read from an object.'
                   items:
                     oneOf:
                       - type: string
                       - type: object
                         properties:
                           elementId: { type: string }
+                maxDepth:
+                  type: integer
+                  minimum: 0
+                  default: 1
+                  description: '`1` is the object alone, `0` is unbounded, N descends N-1 levels of `HasComponent`, as on `/objects/value`. For every elementId in the call; register separately to use different depths.'
       responses:
         '200':
-          description: One result per entry, in request order.
+          description: 'One result per entry, at its position in the request, so a repeated elementId has a result at each place. An elementId that is not a non-empty string fails its own item with a 400, and one not in your address space with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`maxDepth` not an integer of 0 or more, `elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
 
@@ -808,8 +851,13 @@ paths:
               properties:
                 clientId: { type: string }
                 subscriptionId: { type: string }
+                elementIds:
+                  type: array
+                  description: 'Objects to stop monitoring. `objects` is accepted in its place.'
+                  items: { type: string }
                 objects:
                   type: array
+                  description: 'An alias of `elementIds`, taking bare id strings or `{elementId}` objects.'
                   items:
                     oneOf:
                       - type: string
@@ -818,10 +866,15 @@ paths:
                           elementId: { type: string }
       responses:
         '200':
-          description: One result per entry, in request order.
+          description: 'One result per entry, at its position in the request. An elementId that is not a non-empty string fails its own item with a 400, and one not in your address space with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
 
@@ -882,6 +935,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
         '409':
@@ -940,6 +998,11 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
         '429':
@@ -979,7 +1042,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     SubscriptionNotFound:
-      description: 'No such subscription for this `clientId` and this token''s principal — including after a restart, since subscription state is in memory.'
+      description: 'No such subscription for this `clientId` and this token''s principal, or no `subscriptionId` given — including after a restart, since subscription state is in memory.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -1147,7 +1210,7 @@ components:
           properties:
             quarantined:
               type: boolean
-              description: 'Present in the directory but its telemetry is being dropped. Drives `quality: Uncertain`.'
+              description: 'Present in the directory but its telemetry is being dropped. Makes a held value `Uncertain` and no value `Bad`.'
         relationships:
           type: object
           description: |
@@ -1168,10 +1231,11 @@ components:
         value:
           description: |
             For a device, an object of metric name to latest value, `null` when quality is
-            `GoodNoData`. Every other object sends exactly what its ObjectType declares: the site
+            `GoodNoData` or `Bad`. Every other object sends exactly what its ObjectType declares: the site
             `{cellCount, deviceCount}`, an area `{cellCount, deviceCount, description}`, a cell,
             lane or Unassigned `{deviceCount, description}`, a gateway `{status, sparkplugGroup,
-            lastHeartbeat}`. Counts are of devices or cells, never of children.
+            lastHeartbeat}`, or `null` with `GoodNoData` when it has no stored status. Counts are
+            of devices or cells, never of children.
             A metric sends its latest value, a bare scalar.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }
@@ -1202,14 +1266,23 @@ components:
 
     Quality:
       type: string
-      enum: [Good, Uncertain, GoodNoData]
+      enum: [Good, GoodNoData, Uncertain, Bad]
       description: |
-        Derived at read time, never stored. `Uncertain` — quarantined device, or a gateway
-        that is STALE/OFFLINE/UNKNOWN. `GoodNoData` — never published, and no value is
-        carried. `Good` — otherwise.
+        Derived at read time, never stored, by one rule for values, subscription updates and
+        history, following the i3X guide's quality table:
 
-        A STALE gateway is `Uncertain` rather than `Bad`: it has not been heard from inside
-        the threshold, which is doubt about currency, not a fault.
+        | Condition | With a held value | Without one |
+        | :--- | :--- | :--- |
+        | Device quarantined | `Uncertain` | `Bad` |
+        | Device OFFLINE, or its gateway OFFLINE or STALE | `Uncertain` | `Bad` |
+        | Device online, never published | n/a | `GoodNoData` |
+        | Otherwise | `Good` | n/a |
+
+        A device's map takes the worst quality among the metrics it holds. A gateway's own
+        value is its live status (STALE after 90 s without a heartbeat), and is `Good`
+        whenever that is known: it is the devices behind it whose values are stale. A stored
+        history sample is `Good`. `timestamp` is never null: the sample's, else the
+        device's last birth or death, else the time of the read.
 
     Subscription:
       type: object
@@ -1227,6 +1300,7 @@ components:
           description: 'Increasing per subscription and never reused. A gap is updates that were dropped, by overflow or because their element left your view; the 206 that reports it says which.'
         updates:
           type: array
+          description: 'Each update names its own object: a registered one, or `<device>/<metric>` for a device registered at `maxDepth` 0 or 2 or more.'
           items:
             type: object
             properties:

@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
+import { PERMISSION_UUIDS } from '../constants'
 import { downloadJSON } from '../utils/downloadJSON'
 import { downloadBlob } from '../utils/downloadBlob'
 
@@ -238,5 +239,44 @@ describe('Export AAS — AASX package', () => {
 
     await waitFor(() => expect(downloadJSON).toHaveBeenCalled())
     expect(downloadBlob).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The bundle carries the device's Digital Thread, and aas-export refuses it to a caller without
+ * `digital_thread:read`. The action is withheld from that reader, as View Digital Thread is.
+ */
+describe('Export Bundle — for the readers of the Digital Thread', () => {
+  const BUNDLE = /Export Bundle \(with history\)/i
+
+  const panelFor = async (hasPermission) => {
+    render(<DevicesTab showToast={vi.fn()} onSelectDevice={() => {}} hasPermission={hasPermission} />)
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    return openPanel()
+  }
+
+  it('is offered to a role that holds digital_thread:read, even without the manage permissions', async () => {
+    // The Auditor's grant: the thread and nothing else.
+    const panel = await panelFor((p) => p === PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+    expect(panel.getByText(BUNDLE).closest('button').disabled).toBe(false)
+  })
+
+  it('is withheld from a role without it, which keeps both plain exports', async () => {
+    // The Operator's grants: telemetry, the quarantine view and proposals.
+    const operator = [PERMISSION_UUIDS.TELEMETRY_READ, PERMISSION_UUIDS.QUARANTINE_VIEW, PERMISSION_UUIDS.PROPOSAL_CREATE]
+    const panel = await panelFor((p) => operator.includes(p))
+    expect(panel.queryByText(BUNDLE)).toBeNull()
+    expect(panel.getByText(/Export AAS JSON/i)).toBeInTheDocument()
+    expect(panel.getByText(/Export AASX package/i)).toBeInTheDocument()
+  })
+
+  it('posts the device to the bundle route when offered', async () => {
+    api.post.mockResolvedValue({ blob: new Blob(['PK']), filename: 'CNC_01-bundle.aasx', stats: { bundle: { stored: true } } })
+    const panel = await panelFor(() => true)
+    fireEvent.click(panel.getByText(BUNDLE))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/devices/asset-export', { device_id: DEVICE.asset_id }
+    ))
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'CNC_01-bundle.aasx'))
   })
 })

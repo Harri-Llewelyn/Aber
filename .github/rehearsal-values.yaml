@@ -19,7 +19,6 @@
 # default (custom, .dump), so the rehearsal restores what a default install writes.
 backup:
   enabled: true
-  destination: pvc
   includeStorage: true
   includeForge: true
   includeBroker: true

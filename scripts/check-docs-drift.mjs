@@ -690,6 +690,11 @@ function edgeFunctionNames() {
     // they resolve what the tables' own policies resolve.
     'public.may_decide_proposal': '0013 restates what the cell and gateway lanes check and why no machine reaches them; the baseline holds the pre-0013 comments',
 
+    // 0017 adds the floor, the same signature and return type: the newest three backups are
+    // never prunable. 0018 adds each row's off-site copy to what it returns, so the prune deletes
+    // the copy too. The baseline selects by age alone and folds forward at the next squash.
+    'public.backup_prunable': '0017 never returns the newest three backups and 0018 adds each one\'s off-site copy; the baseline holds the pre-0017 form',
+
     // 0020 believes each X-Aber-Actor value only from the caller it describes, and files a machine
     // identity as 'service' whatever it declares. The same signature and return type.
     'public.log_digital_thread_event': '0020 ties each declared actor_source to its caller; the baseline accepts ingestion, service and migration from anyone',
@@ -931,6 +936,11 @@ function edgeFunctionNames() {
       + 'and revoked from anon/authenticated -- the same arrangement as the views above. It reads '
       + 'backup_jobs as its owner so the Backup Stale rule can see it; the Backups page reads the '
       + 'table itself, under the Administrator-only RLS a published path would bypass',
+  backup_offsite_health:
+      'How long the newest backup has gone without an off-site copy (0018), granted to '
+      + '`grafana_reader` alone and revoked from anon/authenticated, like backup_health above. It '
+      + 'reads backups, the destination settings and the vault through an owner-run function so '
+      + 'the Off-site Backup Stale rule can see a number and nothing behind it',
   digital_thread_default:
       'The DEFAULT partition of digital_thread (0079), which exists so that a lapsed partition '
       + 'job degrades instead of refusing every audit write -- and therefore every asset write, '
@@ -2571,6 +2581,38 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`the backup staleness threshold is ${page} hours on the Backups page and in its alert rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 28b. The Backups page and backup_prunable() agree about how many backups the prune keeps
+//
+// The page says "Kept: one of the newest three" from its own constant; the floor is the LIMIT in
+// the last migration that declares backup_prunable(). Read from the latest declaration, because the
+// chain replays in order and that one wins.
+{
+  const page = read('frontend/src/components/tabs/BackupsTab.jsx')
+    .match(/BACKUP_RETENTION_FLOOR\s*=\s*(\d+)/)?.[1];
+  const declaring = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => /^\d+_.*\.sql$/.test(f))
+    .sort()
+    .filter((f) => /CREATE OR REPLACE FUNCTION public\.backup_prunable\s*\(/.test(read(`supabase/migrations/${f}`)));
+  const last = declaring[declaring.length - 1];
+  const body = last ? read(`supabase/migrations/${last}`).split(/CREATE OR REPLACE FUNCTION public\.backup_prunable\s*\(/)[1] : '';
+  const sql = body?.split(/\$\$;/)[0].match(/ORDER BY n\.taken_at DESC[^\n]*LIMIT (\d+)/)?.[1];
+
+  if (!page || !sql) {
+    fail(
+      `the retention floor could not be read from both sides (page: ${page || 'MISSING'}, ` +
+        `${last || 'no migration'}: ${sql || 'MISSING'}). One of them has been renamed or removed.`
+    );
+  } else if (page !== sql) {
+    fail(
+      `the Backups page says the newest ${page} backups are kept and backup_prunable() in ${last} ` +
+        `keeps ${sql}. The page would explain a backup the next prune deletes, or miss one it keeps.`
+    );
+  } else {
+    pass(`the retention floor is ${page} backups on the Backups page and in backup_prunable() (${last})`);
   }
 }
 

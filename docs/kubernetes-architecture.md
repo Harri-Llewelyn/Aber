@@ -1215,9 +1215,10 @@ survives `helm uninstall` — deleting the release is precisely when the backups
   an append-only audit trail cannot be reconstructed at all.
 - **A zero-byte dump is asserted against**, not just a non-zero exit. A backup that looks like one is
   worse than none.
-- **`s3` refuses rather than half-working**: the `supabase/postgres` image has no `aws` CLI, and the
-  Job says so instead of producing an unsigned request. `destination: s3` with no bucket fails the
-  render for the same reason.
+- **Off site is the backup service's job, not the CronJob's.** The CronJob's `destination: s3`
+  could never run (its image has no `aws` CLI) and is retired; a values file that still sets it
+  fails the render. The backup service copies every backup, age-encrypted, to an S3 destination set
+  on the Backups page (`supabase/README.md`, "An encrypted copy off site").
 - **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
   wants pgBackRest or WAL archiving; this is the floor, said plainly so nobody mistakes it for the
   ceiling. **Test a restore** — an untested backup is a belief, not a capability.

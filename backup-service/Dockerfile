@@ -14,8 +14,10 @@ FROM supabase/postgres:17.6.1.175
 RUN rm /usr/local/bin/gosu
 
 # Alpine. node runs the service; sqlite3 takes the consistent copy of the forge's database; GNU
-# tar (the package named `tar`) replaces busybox's for --exclude and a second -C.
-RUN apk add --no-cache nodejs sqlite tar
+# tar (the package named `tar`) replaces busybox's for --exclude and a second -C. The off-site
+# copy: age encrypts each file to the operator's public key, and the AWS CLI uploads it with a
+# SHA-256 the store checks and HEADs it back. The CLI and its Python are most of the image's size.
+RUN apk add --no-cache nodejs sqlite tar age aws-cli
 
 # ROOT, DELIBERATELY. The service reads three volumes owned by three uids -- the storage objects,
 # the forge (1000) and its own -- and writes one. It holds the two superuser passwords because

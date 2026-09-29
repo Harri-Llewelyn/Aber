@@ -456,7 +456,8 @@ ON CONFLICT DO NOTHING;
 -- by the trigger. Changing a metric is deprecate-and-supersede. `OEE/PERFORMANCE` is deprecated
 -- in favour of `OEE/EFFECTIVENESS` (ISO 22400-2's name); both carry the same semantic_id, which
 -- is why that index is not unique. An MTConnect row carries its data item type's
--- `mtconnect_vocabulary` id, as the standards seed below does (#457).
+-- `mtconnect_vocabulary` id, as the standards seed below does (#457). The two local extensions
+-- carry none: no vocabulary names them, and an id minted here would resolve nowhere.
 
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000007', 'OEE/AVAILABILITY', 10, 'ISO 22400 availability ratio -- NOT MTConnect AVAILABILITY, which means "device connected"', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://aber.local/semantics/iso22400/AVAILABILITY', 'IRI')
 ON CONFLICT (name) DO NOTHING;
@@ -484,9 +485,9 @@ INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000012'
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000013', 'MotionDevice/OverridePercent', 10, 'Operator speed override applied to programmed motion. OPC 40010 calls this browse name SpeedOverride; the semantic id binds this metric to that concept.', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'PERCENT', NULL, 'OPC UA', 'http://opcfoundation.org/UA/Robotics/SpeedOverride', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('e5f5b550-25f7-4c28-9cd4-36eb9c2224af', 'safety_interlock', 11, 'Safety interlock present/enabled (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'EVENT', NULL, NULL, NULL, 'https://aber.local/semantics/local/safety_interlock', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('e5f5b550-25f7-4c28-9cd4-36eb9c2224af', 'safety_interlock', 11, 'Safety interlock present/enabled (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'EVENT', NULL, NULL, NULL, NULL, NULL)
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('a469cb73-0d73-46b3-928e-7ecfd7fc43f0', 'max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, NULL, 'https://aber.local/semantics/local/max_temp_threshold', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('a469cb73-0d73-46b3-928e-7ecfd7fc43f0', 'max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, NULL, NULL, NULL)
 ON CONFLICT (name) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------

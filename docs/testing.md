@@ -193,8 +193,11 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 # service's gates; a requested backup is taken -- both dumps, the storage objects and the forge,
 # digests matching the row, a manifest restore-databases.sh reads -- and the thread names who asked
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
-# backup is released once. Takes a real backup and removes it afterwards; stops the service
-# container for a few seconds for the cancel case.
+# backup is released once; a job that fails is followed by a prune that leaves the newest three
+# backups alone (0017); a backup is copied off site, age-encrypted, to a MinIO the test starts, and a
+# pruned backup's copy goes with it (0018). Takes real backups and removes them afterwards; stops the
+# service container for a few seconds for the cancel case, fails one job with a trigger it drops
+# afterwards, and deletes the MinIO's namespace when done.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
@@ -307,6 +310,11 @@ python supabase/migrations/test_directory_images.py
 # The Backup Stale rule's clock (0011). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
+# And the retention floor (0017): backup_prunable() never returns any of the newest three backups.
+# And the off-site copy (0018): the destination is an Administrator's, checked on write, its key
+# write-only; the service's gates refuse every PostgREST role, hand out the newest backup without a
+# copy and back off a failed one; and Off-site Backup Stale's view counts from the later of the
+# newest backup and the last destination change.
 python supabase/migrations/test_backup_health.py
 # Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
 # property is in the function body rather than in a grant, so a gate that stops working fails open
@@ -435,8 +443,9 @@ sh scripts/wait-for-ingestion-consuming.sh
 # validate.py and the whole stack lane, through port-forwards, with the credentials read out of
 # the release Secret. What CI runs.
 npm run dev:test
-# validate.py alone: the filter matches no stack suite. Its check 12 is the live i3X check, which
-# compares what the server says about a seeded plant with the Directory (i3x/README.md -> Testing).
+# validate.py alone: the filter matches no stack suite. Its checks 12 and 17 are the live i3X
+# checks: what the server says about a seeded plant against the Directory, then its quality and
+# subscriptions against what the run publishes (i3x/README.md -> Testing).
 npm run dev:test -- --filter=i3x
 ```
 
@@ -637,8 +646,9 @@ Three suites have a second half elsewhere, and both halves must move together:
 the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
 [`i3x/README.md`](../i3x/README.md). The i3X server has a third check besides those two: `validate.py`'s
-check 12 compares its answers about a seeded plant with the Directory's, the meaning neither the
-conformance suite nor the unit suite can see.
+checks 12 and 17 compare its answers about a seeded plant with the Directory's, and its quality and
+subscriptions with what the run publishes, the meaning neither the conformance suite nor the unit
+suite can see.
 
 CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
 

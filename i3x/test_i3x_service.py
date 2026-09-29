@@ -1015,6 +1015,65 @@ class TestAStalledStreamStallsOnlyItself(unittest.TestCase):
         self.assertIsNone(req.connection.gettimeout(), "the send timeout outlived the stream")
 
 
+class TestAMessageReachesEachRegistration(unittest.TestCase):
+    """
+    The MQTT side and the registry together: `on_message` builds what some registration watches,
+    and the registry's depth rule decides which subscription each update reaches.
+    """
+
+    DEVICE, NODE = "dev-reach-499", "node-1"
+    METRIC = DEVICE + "/Temperature"
+
+    def setUp(self):
+        self._real_registry = i3x_service.registry
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        i3x_service._liveness_clear()
+        with i3x_service._values_lock:
+            i3x_service._values.pop(self.DEVICE, None)
+
+    def tearDown(self):
+        i3x_service.registry = self._real_registry
+        i3x_service._liveness_clear()
+        with i3x_service._values_lock:
+            i3x_service._values.pop(self.DEVICE, None)
+
+    def subscribe(self, element_id, depth=1):
+        sub = self.registry.create(f"client-{element_id}-{depth}")
+        self.registry.register(sub, [{"elementId": element_id, "maxDepth": depth}])
+        return sub
+
+    def delivered(self, sub):
+        """Each queued batch as [(elementId, quality)], then the queue acknowledged."""
+        batches, _ = self.registry.sync(sub)
+        self.registry.sync(sub, last_sequence_number=-1)
+        return [[(u["elementId"], u["quality"]) for u in b["updates"]] for b in batches]
+
+    def test_a_ddata_reaches_the_device_unbounded_and_the_metric_alone(self):
+        unbounded, shallow = self.subscribe(self.DEVICE, 0), self.subscribe(self.DEVICE, 1)
+        alone = self.subscribe(self.METRIC)
+        i3x_service.on_message(None, None, _ddata(self.DEVICE, 1.0))
+        ids = lambda sub: [[e for e, _ in batch] for batch in self.delivered(sub)]  # noqa: E731
+        self.assertEqual(ids(unbounded), [[self.DEVICE, self.METRIC]])
+        self.assertEqual(ids(shallow), [[self.DEVICE]])
+        self.assertEqual(ids(alone), [[self.METRIC]])
+
+    def test_an_ndeath_reaches_the_gateway_registration(self):
+        gateway, alone = self.subscribe(self.NODE, 0), self.subscribe(self.METRIC)
+        # The device's traffic is how the MQTT side learns which node it is behind.
+        i3x_service.on_message(None, None, _ddata(self.DEVICE, 1.0))
+        self.assertEqual(self.delivered(gateway), [], "a device's data reached its gateway")
+        self.delivered(alone)
+
+        i3x_service.on_message(None, None, _spb("NDEATH", node=self.NODE, group="TestGroup"))
+        batches, _ = self.registry.sync(gateway)
+        updates = [u for batch in batches for u in batch["updates"]]
+        self.assertEqual([(u["elementId"], u["value"]["status"], u["quality"]) for u in updates],
+                         [(self.NODE, "OFFLINE", "Good")])
+        # Its device's values are now held, so the metric registered alone hears that too.
+        self.assertEqual(self.delivered(alone), [[(self.METRIC, "Uncertain")]])
+
+
 class TestTtl(unittest.TestCase):
     def test_idle_subscription_is_reaped(self):
         registry, clock = make_registry(ttl_seconds=60)
@@ -1044,6 +1103,315 @@ class TestTtl(unittest.TestCase):
         registry.open_stream(sub)
         clock.advance(10_000)
         self.assertEqual(registry.reap(), [])
+
+
+class TestDeliveryFollowsDepth(unittest.TestCase):
+    """
+    Who receives a staged update. A metric `<device>/<name>` reaches subscriptions that registered
+    it, and those that registered its device at maxDepth 0 or 2 or more. Nothing else composes:
+    a gateway and a location receive only their own updates. Envelopes are built by hand here;
+    what gets staged, and when, is the MQTT side's.
+    """
+
+    DEVICE, GATEWAY = "dev-one", "gwy-1"
+    METRIC = DEVICE + "/Axes/X/POSITION"
+    OTHER_METRIC = DEVICE + "/Controller/EXECUTION"
+
+    @staticmethod
+    def vqt(element_id, value, quality="Good"):
+        return {"elementId": element_id, "value": value, "quality": quality,
+                "timestamp": "2026-09-28T10:00:00Z"}
+
+    def device_change(self):
+        """A DDATA's envelopes: the device's map, and the one metric that changed."""
+        return {self.DEVICE: self.vqt(self.DEVICE, {"Axes/X/POSITION": 1.5}),
+                self.METRIC: self.vqt(self.METRIC, 1.5)}
+
+    def gateway_change(self):
+        return {self.GATEWAY: self.vqt(self.GATEWAY, {"status": "OFFLINE"}, "Uncertain")}
+
+    def subscribe(self, element_id, depth=None):
+        sub = self.registry.create("c")
+        entry = {"elementId": element_id}
+        if depth is not None:
+            entry["maxDepth"] = depth
+        self.assertTrue(self.registry.register(sub, [entry])[0]["success"])
+        return sub
+
+    def delivered(self, sub):
+        """The elementIds of each queued batch, then the queue acknowledged."""
+        batches, _ = self.registry.sync(sub)
+        self.registry.sync(sub, last_sequence_number=-1)
+        return [[u["elementId"] for u in b["updates"]] for b in batches]
+
+    def setUp(self):
+        self.registry, _ = make_registry()
+
+    def test_a_component_reaches_its_device_registered_unbounded(self):
+        sub = self.subscribe(self.DEVICE, 0)
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(sub), [[self.DEVICE, self.METRIC]])
+
+    def test_a_component_reaches_its_device_registered_at_two_or_more(self):
+        for depth in (2, 3):
+            with self.subTest(maxDepth=depth):
+                sub = self.subscribe(self.DEVICE, depth)
+                self.registry.stage(self.device_change())
+                self.assertEqual(self.delivered(sub), [[self.DEVICE, self.METRIC]])
+
+    def test_a_component_does_not_reach_its_device_registered_at_one(self):
+        for depth in (1, None):
+            with self.subTest(maxDepth=depth):
+                sub = self.subscribe(self.DEVICE, depth)
+                self.registry.stage(self.device_change())
+                self.assertEqual(self.delivered(sub), [[self.DEVICE]])
+                self.registry.stage({self.METRIC: self.vqt(self.METRIC, 2.0)})
+                self.assertEqual(self.delivered(sub), [], "a component alone reached maxDepth 1")
+
+    def test_a_metric_registered_alone_receives_only_its_own_changes(self):
+        sub = self.subscribe(self.METRIC, 0)
+        self.registry.stage(self.device_change())
+        self.registry.stage({self.OTHER_METRIC: self.vqt(self.OTHER_METRIC, "ACTIVE")})
+        self.registry.stage({self.DEVICE: self.vqt(self.DEVICE, {})})
+        self.registry.stage(self.gateway_change())
+        self.assertEqual(self.delivered(sub), [[self.METRIC]])
+
+    def test_the_parent_is_the_text_before_the_first_slash(self):
+        sub = self.subscribe(self.DEVICE, 0)
+        near = "dev-one2/Axes/X/POSITION"
+        self.registry.stage({near: self.vqt(near, 1.0)})
+        self.assertEqual(self.delivered(sub), [], "a device whose id merely starts the same")
+        self.registry.stage({self.OTHER_METRIC: self.vqt(self.OTHER_METRIC, "ACTIVE")})
+        self.assertEqual(self.delivered(sub), [[self.OTHER_METRIC]])
+
+    def test_a_gateway_receives_its_own_envelope_and_composes_nothing(self):
+        gateway = self.subscribe(self.GATEWAY, 0)
+        device = self.subscribe(self.DEVICE, 0)
+        self.registry.stage(self.gateway_change())
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(gateway), [[self.GATEWAY]])
+        self.assertEqual(self.delivered(device), [[self.DEVICE, self.METRIC]])
+        batch = self.registry.stage(self.gateway_change())
+        self.assertEqual(batch, [], "no stream is open, so none is returned to wake")
+        updates = self.registry.sync(gateway)[0][0]["updates"]
+        self.assertEqual(updates, [self.gateway_change()[self.GATEWAY]])
+
+    def test_a_location_receives_nothing_from_below(self):
+        for element_id in (CELL_A, A.SITE_ELEMENT_ID, A.UNASSIGNED_ELEMENT_ID):
+            with self.subTest(location=element_id):
+                sub = self.subscribe(element_id, 0)
+                self.registry.stage(self.device_change())
+                self.registry.stage(self.gateway_change())
+                self.assertEqual(self.delivered(sub), [])
+
+    def test_an_update_is_delivered_once_to_a_subscription_holding_both(self):
+        sub = self.registry.create("c")
+        self.registry.register(sub, [{"elementId": self.DEVICE, "maxDepth": 0},
+                                     {"elementId": self.METRIC, "maxDepth": 1}])
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(sub), [[self.DEVICE, self.METRIC]])
+
+    def test_a_stream_is_woken_for_a_component_alone(self):
+        sub = self.subscribe(self.DEVICE, 0)
+        self.registry.open_stream(sub)
+        self.assertEqual(self.registry.stage({self.METRIC: self.vqt(self.METRIC, 2.0)}), [sub])
+        self.assertEqual(
+            [u["elementId"] for b in self.registry.drain(sub) for u in b["updates"]], [self.METRIC]
+        )
+
+    def test_a_repeat_registration_keeps_the_first_depth(self):
+        sub = self.subscribe(self.DEVICE, 1)
+        result = self.registry.register(sub, [{"elementId": self.DEVICE, "maxDepth": 0}])
+        self.assertEqual(result, [{"success": True, "elementId": self.DEVICE, "result": None}])
+        self.assertEqual(sub.to_json()["monitoredObjects"],
+                         [{"elementId": self.DEVICE, "maxDepth": 1}])
+        self.registry.stage(self.device_change())
+        self.assertEqual(self.delivered(sub), [[self.DEVICE]])
+
+        # Unregistering first is how a client changes the depth.
+        self.registry.unregister(sub, [self.DEVICE])
+        self.registry.register(sub, [{"elementId": self.DEVICE, "maxDepth": 0}])
+        self.assertEqual(sub.monitored[self.DEVICE], 0)
+
+    def test_the_registry_refuses_a_non_string_id_per_entry(self):
+        sub = self.registry.create("c")
+        results = self.registry.register(
+            sub, [{"elementId": ["x"]}, {"elementId": 5}, {}, {"elementId": self.DEVICE}]
+        )
+        self.assertEqual([r["success"] for r in results], [False, False, False, True])
+        self.assertEqual({r["responseDetail"]["status"] for r in results[:3]}, {400})
+        self.assertEqual(list(sub.monitored), [self.DEVICE])
+
+
+class TestRegistrationRequests(unittest.TestCase):
+    """
+    `/subscriptions/register` and `/unregister` through their handlers, over `_metric_rows()`:
+    `maxDepth` read from the top level and validated, results paired with requests by position,
+    and a malformed elementId failing only its own item.
+    """
+
+    DEVICE, METRIC, UNKNOWN = "dev-one", "dev-one/Axes/X/POSITION", "dev-unknown"
+
+    def setUp(self):
+        self._saved = (i3x_service.registry, i3x_service.ADDRESS_SPACE_TTL_SECONDS)
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 0
+        self.sub = self.registry.create("c", principal="p")
+
+    def tearDown(self):
+        i3x_service.registry, i3x_service.ADDRESS_SPACE_TTL_SECONDS = self._saved
+
+    def call(self, handler, pg=True, **fields):
+        body = {"clientId": "c", "subscriptionId": self.sub.subscription_id, **fields}
+        req = FakeRequest(body=body, pg=ColumnCheckingPostgrest(_metric_rows()) if pg else None)
+        req.caller = i3x_service.Caller("p", None)
+        handler(req)
+        return req.result
+
+    def register(self, **fields):
+        return self.call(i3x_service.h_sub_register, **fields)
+
+    def listed(self):
+        req = FakeRequest(body={"clientId": "c", "subscriptionIds": [self.sub.subscription_id]})
+        req.caller = i3x_service.Caller("p", None)
+        i3x_service.h_sub_list(req)
+        return req.result[0]["result"]["monitoredObjects"]
+
+    @staticmethod
+    def outcomes(results):
+        return [(r["elementId"], r["success"], (r.get("responseDetail") or {}).get("status"))
+                for r in results]
+
+    def test_max_depth_is_read_from_the_top_level_and_listed(self):
+        self.register(elementIds=[self.DEVICE], maxDepth=0)
+        self.register(elementIds=[self.METRIC])
+        self.assertEqual(self.listed(), [{"elementId": self.DEVICE, "maxDepth": 0},
+                                         {"elementId": self.METRIC, "maxDepth": 1}])
+
+    def test_the_top_level_depth_applies_to_the_objects_form_too(self):
+        self.register(objects=[{"elementId": self.DEVICE, "maxDepth": 5}], maxDepth=2)
+        self.assertEqual(self.listed(), [{"elementId": self.DEVICE, "maxDepth": 2}])
+
+    def test_a_repeat_registration_succeeds_and_keeps_the_first_depth(self):
+        self.register(elementIds=[self.DEVICE], maxDepth=0)
+        results = self.register(elementIds=[self.DEVICE], maxDepth=1)
+        self.assertEqual(self.outcomes(results), [(self.DEVICE, True, None)])
+        self.assertEqual(self.listed(), [{"elementId": self.DEVICE, "maxDepth": 0}])
+
+    def test_an_invalid_max_depth_is_a_400_before_anything_is_read(self):
+        for bad in ("0", -1, True, 1.5, [0], {"n": 0}):
+            with self.subTest(maxDepth=bad):
+                with self.assertRaises(i3x_service.Problem) as caught:
+                    self.register(pg=False, elementIds=[self.DEVICE], maxDepth=bad)
+                self.assertEqual(caught.exception.status, 400)
+                self.assertIn("maxDepth", caught.exception.detail)
+        self.assertEqual(list(self.sub.monitored), [])
+
+    def test_results_pair_with_requests_by_position_when_an_id_repeats(self):
+        results = self.register(elementIds=[self.DEVICE, self.UNKNOWN, self.DEVICE])
+        self.assertEqual(self.outcomes(results), [(self.DEVICE, True, None),
+                                                  (self.UNKNOWN, False, 404),
+                                                  (self.DEVICE, True, None)])
+        results = self.call(i3x_service.h_sub_unregister,
+                            elementIds=[self.UNKNOWN, self.DEVICE, self.UNKNOWN, self.DEVICE])
+        self.assertEqual(self.outcomes(results), [(self.UNKNOWN, False, 404),
+                                                  (self.DEVICE, True, None),
+                                                  (self.UNKNOWN, False, 404),
+                                                  (self.DEVICE, True, None)])
+        self.assertEqual(list(self.sub.monitored), [])
+
+    def test_a_non_string_element_id_is_a_400_item_not_a_500(self):
+        bad = [["x"], 5, {"a": 1}, None, "", True]
+        for handler in (i3x_service.h_sub_register, i3x_service.h_sub_unregister):
+            for shape in ("elementIds", "objects"):
+                with self.subTest(handler=handler.__name__, shape=shape):
+                    entries = bad + [self.DEVICE]
+                    named = list(bad)
+                    if shape == "objects":
+                        entries = [{"elementId": e} for e in entries]
+                    else:
+                        # A dictionary entry names its own `elementId`, which this one lacks.
+                        named[2] = None
+                    results = self.call(handler, **{shape: entries})
+                    self.assertEqual(self.outcomes(results),
+                                     [(e, False, 400) for e in named] + [(self.DEVICE, True, None)])
+        # The body #499's comment reported as a 500.
+        results = self.register(objects=[{"elementId": ["x"]}])
+        self.assertEqual(self.outcomes(results), [(["x"], False, 400)])
+
+
+class TestSubscriptionIdsAreChecked(unittest.TestCase):
+    """
+    A `subscriptionId` that is not a string is a 400, and so is a `subscriptionIds` that is not an
+    array; a non-string entry in one fails its own item, at its position. Each used to reach a dict
+    lookup and answer 500, or be iterated character by character.
+    """
+
+    BAD = (["x"], 5, {"a": 1}, True)
+
+    def setUp(self):
+        self._saved = i3x_service.registry
+        self.registry = SubscriptionRegistry()
+        i3x_service.registry = self.registry
+        self.sub = self.registry.create("c", principal="p")
+
+    def tearDown(self):
+        i3x_service.registry = self._saved
+
+    def call(self, handler, **fields):
+        req = FakeRequest(body={"clientId": "c", **fields})
+        req.caller = i3x_service.Caller("p", None)
+        handler(req)
+        return req.result
+
+    @staticmethod
+    def outcomes(results):
+        return [(r["subscriptionId"], r["success"], (r.get("responseDetail") or {}).get("status"))
+                for r in results]
+
+    def test_a_non_string_subscription_id_is_a_400(self):
+        for handler in (i3x_service.h_sub_register, i3x_service.h_sub_unregister,
+                        i3x_service.h_sub_sync, i3x_service.h_sub_stream):
+            for bad in self.BAD:
+                with self.subTest(handler=handler.__name__, subscriptionId=bad):
+                    with self.assertRaises(i3x_service.Problem) as caught:
+                        self.call(handler, subscriptionId=bad)
+                    self.assertEqual(caught.exception.status, 400)
+                    self.assertIn("subscriptionId", caught.exception.detail)
+
+    def test_an_absent_or_null_subscription_id_is_still_a_404(self):
+        for fields in ({}, {"subscriptionId": None}):
+            with self.subTest(fields=fields):
+                with self.assertRaises(SubscriptionError) as caught:
+                    self.call(i3x_service.h_sub_sync, **fields)
+                self.assertEqual(caught.exception.status, 404)
+
+    def test_a_non_string_entry_fails_its_own_item_in_place(self):
+        sid = self.sub.subscription_id
+        ids = [sid, ["x"], "nope", 5, sid]
+        self.assertEqual(self.outcomes(self.call(i3x_service.h_sub_list, subscriptionIds=ids)),
+                         [(sid, True, None), (["x"], False, 400), ("nope", False, 404),
+                          (5, False, 400), (sid, True, None)])
+        # The second delete of the same id finds nothing, and says so at its own place.
+        self.assertEqual(self.outcomes(self.call(i3x_service.h_sub_delete, subscriptionIds=ids)),
+                         [(sid, True, None), (["x"], False, 400), ("nope", False, 404),
+                          (5, False, 400), (sid, False, 404)])
+        self.assertEqual(self.registry.count(), 0)
+
+    def test_subscription_ids_that_are_not_an_array_are_a_400(self):
+        for handler in (i3x_service.h_sub_list, i3x_service.h_sub_delete):
+            for bad in (self.sub.subscription_id, "", {"a": 1}, 5, True):
+                with self.subTest(handler=handler.__name__, subscriptionIds=bad):
+                    with self.assertRaises(i3x_service.Problem) as caught:
+                        self.call(handler, subscriptionIds=bad)
+                    self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(self.registry.count(), 1, "a string of ids deleted something")
+
+    def test_absent_or_null_subscription_ids_list_nothing(self):
+        for fields in ({}, {"subscriptionIds": None}, {"subscriptionIds": []}):
+            with self.subTest(fields=fields):
+                self.assertEqual(self.call(i3x_service.h_sub_list, **fields), [])
 
 
 class TestRfc3339(unittest.TestCase):
@@ -1913,8 +2281,12 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
             if type_id not in schemas or type_id == A.UNTYPED_DEVICE_TYPE_ID:
                 continue
             with self.subTest(element_id=element_id):
-                value = i3x_service._current_value(objects, space, element_id)["value"]
-                self.assertEqual(self.nonconformance(value, schemas[type_id]), [])
+                vqt = i3x_service._current_value(objects, space, element_id)
+                if vqt["value"] is None:
+                    # The guide's null rule: no value is Bad or GoodNoData, and conforms to nothing.
+                    self.assertIn(vqt["quality"], ("Bad", "GoodNoData"))
+                    continue
+                self.assertEqual(self.nonconformance(vqt["value"], schemas[type_id]), [])
                 checked.add(type_id)
         self.assertEqual(
             checked, {A.SITE_TYPE_ID, A.CELL_TYPE_ID, A.UNASSIGNED_TYPE_ID, A.GATEWAY_TYPE_ID}
@@ -2112,9 +2484,10 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
 
     def test_a_quarantined_devices_metrics_are_uncertain_only_with_a_value(self):
         self.assertEqual(self.value("dev-ext/Axes/X/POSITION")["quality"], "Uncertain")
-        # A null value is never Uncertain: the guide allows only Bad or GoodNoData with it.
+        # A null value is never Uncertain: the guide allows only Bad or GoodNoData with it, and a
+        # source nobody vouches for is not "connected but silent".
         silent = self.value("dev-ext/Environmental/HUMIDITY")
-        self.assertEqual((silent["value"], silent["quality"]), (None, "GoodNoData"))
+        self.assertEqual((silent["value"], silent["quality"]), (None, "Bad"))
 
     def test_the_device_keeps_its_map_as_its_own_value(self):
         rows = _metric_rows()
@@ -2301,6 +2674,638 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         _, objects, _ = self.space()
         self.assertEqual(objects["dev-bare"]["typeElementId"], A.UNTYPED_DEVICE_TYPE_ID)
         self.assertFalse(objects["dev-bare"]["isExtended"])
+
+
+# -------------------------------------------------------------------------------------------------
+# Quality: one rule for reads, staging and history, from the device, its gateway and the value.
+# -------------------------------------------------------------------------------------------------
+def _iso_ago(seconds: float) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+def _quality_rows(device=None, gateway=None) -> dict:
+    """`_metric_rows()` with dev-one's and dev-two's rows, and their gateway gwy-1's, changed."""
+    rows = _metric_rows()
+    for row in rows["devices"]:
+        if row["sparkplug_id"] in ("dev-one", "dev-two"):
+            row.update(device or {})
+    rows["gateways"][0].update(gateway or {})
+    return rows
+
+
+def _quality_table() -> list:
+    """(condition, device row, gateway row, quality with a held value, without one)."""
+    beat = _iso_ago(5)
+    return [
+        ("device quarantined", {"status": "ONLINE", "is_quarantined": True},
+         {"status": "ONLINE", "last_heartbeat": beat}, "Uncertain", "Bad"),
+        ("device OFFLINE", {"status": "OFFLINE"},
+         {"status": "ONLINE", "last_heartbeat": beat}, "Uncertain", "Bad"),
+        ("gateway OFFLINE", {"status": "ONLINE"},
+         {"status": "OFFLINE", "last_heartbeat": beat}, "Uncertain", "Bad"),
+        ("gateway STALE", {"status": "ONLINE"},
+         {"status": "ONLINE", "last_heartbeat": _iso_ago(600)}, "Uncertain", "Bad"),
+        ("source online", {"status": "ONLINE"},
+         {"status": "ONLINE", "last_heartbeat": beat}, "Good", "GoodNoData"),
+    ]
+
+
+def _spb(msg_type, node="gwy-1", device=None, metrics=(), group="Aber"):
+    """A JSON-encoded Sparkplug B message on its topic."""
+    topic = f"spBv1.0/{group}/{msg_type}/{node}" + (f"/{device}" if device else "")
+    body = {"timestamp": 1790000000000, "metrics": list(metrics)}
+    return _Msg(topic, json.dumps(body).encode("utf-8"))
+
+
+class _QualityCase(_MetricSpace):
+    """
+    `_MetricSpace` with a fresh registry, no liveness observations and nothing filled. dev-one holds
+    a cached Axes/X/POSITION and has never published Controller/EXECUTION; dev-two holds nothing.
+    Every `registry.stage` call is recorded in `self.staged`, whoever it would be delivered to.
+    """
+
+    def setUp(self):
+        super().setUp()
+        i3x_service._liveness_clear()
+        i3x_service._filled.clear()
+        self._real_registry = i3x_service.registry
+        i3x_service.registry = SubscriptionRegistry()
+        self.staged = []
+        real_stage = i3x_service.registry.stage
+
+        def record(updates):
+            self.staged.append(dict(updates))
+            return real_stage(updates)
+
+        i3x_service.registry.stage = record
+
+    def tearDown(self):
+        i3x_service.registry = self._real_registry
+        i3x_service._liveness_clear()
+        i3x_service._filled.clear()
+        super().tearDown()
+
+    def read(self, rows, *element_ids, depth=1, pg=None):
+        """Each element's result through POST /objects/value, keyed by elementId."""
+        i3x_service._space_cache_clear()
+        req = FakeRequest(body={"elementIds": list(element_ids), "maxDepth": depth},
+                          pg=pg or ColumnCheckingPostgrest(rows))
+        i3x_service.h_objects_value(req)
+        return {item["elementId"]: item["result"] for item in req.result}
+
+    def directory(self, rows):
+        """An address-space read, as a subscriber's registration or sync makes one."""
+        i3x_service._space_cache_clear()
+        return i3x_service._read_address_space(ColumnCheckingPostgrest(rows))
+
+    def watch(self, *element_ids):
+        sub = i3x_service.registry.create("client-quality", principal="p-quality")
+        i3x_service.registry.register(sub, [{"elementId": e} for e in element_ids])
+        return sub
+
+    def last_staged(self) -> dict:
+        self.assertTrue(self.staged, "nothing was staged")
+        return self.staged[-1]
+
+    def assertNeverNull(self, vqt):
+        self.assertIsNotNone(vqt["timestamp"])
+        self.assertTrue(vqt["timestamp"].endswith("Z"), vqt["timestamp"])
+
+
+class TestQualityOnTheReadPath(_QualityCase):
+    """
+    POST /objects/value derives quality from the device's row, its gateway's row and whether a
+    value is held, by the i3X guide's table (Query Methods): a stale value being held is
+    Uncertain, a source that is unreachable is Bad, and null never pairs with Good or Uncertain.
+    """
+
+    HELD = ("dev-one", "dev-one/Axes/X/POSITION")
+    WITHOUT = ("dev-two", "dev-one/Controller/EXECUTION")
+
+    def test_every_row_of_the_table(self):
+        for condition, device, gateway, held, without in _quality_table():
+            with self.subTest(condition=condition):
+                got = self.read(_quality_rows(device, gateway), *self.HELD, *self.WITHOUT)
+                for element_id in self.HELD:
+                    self.assertIsNotNone(got[element_id]["value"])
+                    self.assertEqual(got[element_id]["quality"], held, element_id)
+                for element_id in self.WITHOUT:
+                    self.assertEqual((got[element_id]["value"], got[element_id]["quality"]),
+                                     (None, without), element_id)
+                for vqt in got.values():
+                    self.assertNeverNull(vqt)
+
+    def test_a_devices_map_takes_the_worst_quality_among_the_metrics_it_holds(self):
+        beat = {"status": "ONLINE", "last_heartbeat": _iso_ago(5)}
+        got = self.read(_quality_rows({"status": "ONLINE"}, beat), "dev-one", depth=0)["dev-one"]
+        # A modelled metric never published is GoodNoData alone; the map it is absent from is Good.
+        self.assertEqual(got["quality"], "Good")
+        self.assertEqual(got["components"]["dev-one/Controller/EXECUTION"]["quality"], "GoodNoData")
+        self.assertEqual(got["components"]["dev-one/Axes/X/POSITION"]["quality"], "Good")
+
+    def test_the_maps_timestamp_is_its_newest_sample_as_an_instant_not_as_text(self):
+        # As text "10:00:00Z" sorts after "10:00:00.500Z".
+        i3x_service.record_value("dev-two", "Axes/X/POSITION", 1.0, "2026-09-28T10:00:00Z")
+        i3x_service.record_value("dev-two", "OEE/AVAILABILITY", 2.0, "2026-09-28T10:00:00.500Z")
+        got = self.read(_quality_rows({"status": "ONLINE"}), "dev-two")["dev-two"]
+        self.assertEqual(got["timestamp"], "2026-09-28T10:00:00.500Z")
+
+    def test_with_no_sample_the_timestamp_is_the_devices_last_status_change(self):
+        died = time.time() - 1
+        i3x_service._hear_device("dev-two", "gwy-1", "OFFLINE", died)
+        got = self.read(_quality_rows({"status": "ONLINE"}), "dev-two")["dev-two"]
+        self.assertEqual((got["value"], got["quality"]), (None, "Bad"))
+        stamped = A.instant(got["timestamp"]).timestamp()
+        self.assertAlmostEqual(stamped, died, delta=0.01)
+
+    def test_a_gateways_own_value_is_good_whenever_its_status_is_known(self):
+        for gateway, status in (
+            ({"status": "ONLINE", "last_heartbeat": _iso_ago(5)}, "ONLINE"),
+            ({"status": "OFFLINE", "last_heartbeat": _iso_ago(5)}, "OFFLINE"),
+            ({"status": "ONLINE", "last_heartbeat": _iso_ago(600)}, "STALE"),
+            ({"status": "AWAITING_BIRTH", "last_heartbeat": _iso_ago(600)}, "AWAITING_BIRTH"),
+            ({"status": "Maintenance", "last_heartbeat": _iso_ago(5)}, "MAINTENANCE"),
+            ({"status": "ONLINE", "last_heartbeat": None}, "ONLINE"),
+        ):
+            with self.subTest(gateway=gateway):
+                got = self.read(_quality_rows(None, gateway), "gwy-1")["gwy-1"]
+                self.assertEqual((got["value"]["status"], got["quality"]), (status, "Good"))
+                self.assertNeverNull(got)
+        unknown = self.read(_quality_rows(None, {"status": None}), "gwy-1")["gwy-1"]
+        self.assertEqual((unknown["value"], unknown["quality"]), (None, "GoodNoData"))
+        self.assertNeverNull(unknown)
+
+    def test_only_an_offline_or_stale_gateway_holds_its_devices(self):
+        for status in ("AWAITING_BIRTH", "PENDING_ENROLLMENT", "Maintenance", None):
+            with self.subTest(status=status):
+                gateway = {"status": status, "last_heartbeat": _iso_ago(5)}
+                got = self.read(_quality_rows({"status": "ONLINE"}, gateway), "dev-one")
+                self.assertEqual(got["dev-one"]["quality"], "Good")
+
+    def test_an_ndeath_the_rows_do_not_show_yet_holds_the_devices_at_once(self):
+        rows = _quality_rows({"status": "ONLINE"}, {"status": "ONLINE", "last_heartbeat": _iso_ago(20)})
+        i3x_service.on_message(None, None, _spb("NDEATH"))
+        got = self.read(rows, "gwy-1", "dev-one")
+        self.assertEqual((got["gwy-1"]["value"]["status"], got["gwy-1"]["quality"]), ("OFFLINE", "Good"))
+        self.assertEqual(got["dev-one"]["quality"], "Uncertain")
+        # A heartbeat stored after the death, as ingestion writes a rebirth, outranks it.
+        rows["gateways"][0]["last_heartbeat"] = _iso_ago(-1)
+        self.assertEqual(self.read(rows, "dev-one")["dev-one"]["quality"], "Good")
+
+    def test_a_device_row_read_well_after_a_birth_or_death_outranks_it(self):
+        now = time.time()
+        i3x_service._hear_device("dev-one", "gwy-1", "OFFLINE", now - 60)
+        row = {"sparkplug_id": "dev-one", "status": "ONLINE"}
+        # Read inside the lag: ingestion may not have written the death yet.
+        self.assertEqual(i3x_service._effective_device(row, now - 58)["status"], "OFFLINE")
+        # Read past it: the row has since been written, by a birth this process did not see.
+        self.assertEqual(i3x_service._effective_device(row, now)["status"], "ONLINE")
+        self.assertEqual(row, {"sparkplug_id": "dev-one", "status": "ONLINE"}, "the row was mutated")
+
+
+class TestQualityOnTheStagingPath(_QualityCase):
+    """
+    What the MQTT thread stages carries the quality the read path derives: from the rows the last
+    address-space read returned, overlaid with the broker's births and deaths since.
+    """
+
+    def test_every_row_of_the_table_as_staging_derives_it(self):
+        for condition, device, gateway, held, without in _quality_table():
+            with self.subTest(condition=condition):
+                i3x_service._liveness_clear()
+                rows = _quality_rows(device, gateway)
+                self.directory(rows)
+                now = time.time()
+                staged = i3x_service._device_updates(
+                    "dev-one", i3x_service.metrics_for("dev-one"), ["Axes/X/POSITION"], now
+                )
+                self.assertEqual(staged["dev-one"]["quality"], held)
+                self.assertEqual(staged["dev-one/Axes/X/POSITION"]["quality"], held)
+                empty = i3x_service._device_updates("dev-two", {}, (), now)["dev-two"]
+                self.assertEqual((empty["value"], empty["quality"]), (None, without))
+                self.assertNeverNull(empty)
+                read = self.read(rows, "dev-one", "dev-one/Axes/X/POSITION", "dev-two")
+                for element_id, vqt in {**staged, "dev-two": empty}.items():
+                    self.assertEqual(vqt["quality"], read[element_id]["quality"], element_id)
+
+    def test_a_ddata_stages_the_map_and_each_metric_it_changed(self):
+        self.directory(_quality_rows({"status": "ONLINE"},
+                                     {"status": "ONLINE", "last_heartbeat": _iso_ago(5)}))
+        i3x_service.record_value("dev-one", "Controller/EXECUTION", "ACTIVE", None)
+        self.watch("dev-one")
+        i3x_service.on_message(None, None, _spb(
+            "DDATA", device="dev-one", metrics=[{"name": "Axes/X/POSITION", "value": 13.0}]))
+        staged = self.last_staged()
+        self.assertEqual(set(staged), {"dev-one", "dev-one/Axes/X/POSITION"})
+        self.assertEqual(staged["dev-one"]["value"],
+                         {"Axes/X/POSITION": 13.0, "Controller/EXECUTION": "ACTIVE"})
+        self.assertEqual((staged["dev-one/Axes/X/POSITION"]["value"],
+                          staged["dev-one/Axes/X/POSITION"]["quality"]), (13.0, "Good"))
+        self.assertEqual(staged["dev-one"]["quality"], "Good")
+
+    def test_a_quarantined_device_is_staged_as_it_is_read(self):
+        rows = _quality_rows({"status": "ONLINE", "is_quarantined": True})
+        self.directory(rows)
+        self.watch("dev-one")
+        i3x_service.on_message(None, None, _spb(
+            "DDATA", device="dev-one", metrics=[{"name": "Axes/X/POSITION", "value": 13.0}]))
+        self.assertEqual(self.last_staged()["dev-one"]["quality"], "Uncertain")
+        self.assertEqual(self.read(rows, "dev-one")["dev-one"]["quality"], "Uncertain")
+
+    def test_a_ddeath_stages_the_device_and_its_metrics_held_or_bad(self):
+        self.directory(_quality_rows({"status": "ONLINE"},
+                                     {"status": "ONLINE", "last_heartbeat": _iso_ago(5)}))
+        self.watch("dev-one", "dev-two")
+        i3x_service.on_message(None, None, _spb("DDEATH", device="dev-one"))
+        staged = self.last_staged()
+        self.assertEqual(set(staged), {"dev-one", "dev-one/Axes/X/POSITION"})
+        self.assertEqual({e: v["quality"] for e, v in staged.items()},
+                         {"dev-one": "Uncertain", "dev-one/Axes/X/POSITION": "Uncertain"})
+        self.assertEqual(staged["dev-one"]["value"], {"Axes/X/POSITION": 12.5})
+
+        before = time.time()
+        i3x_service.on_message(None, None, _spb("DDEATH", device="dev-two"))
+        empty = self.last_staged()["dev-two"]
+        self.assertEqual((empty["value"], empty["quality"]), (None, "Bad"))
+        # No sample, so the time of the death.
+        self.assertGreaterEqual(A.instant(empty["timestamp"]).timestamp(), before - 1)
+
+    def test_a_dbirth_brings_a_dead_device_back(self):
+        self.directory(_quality_rows({"status": "ONLINE"},
+                                     {"status": "ONLINE", "last_heartbeat": _iso_ago(5)}))
+        self.watch("dev-one")
+        i3x_service.on_message(None, None, _spb("DDEATH", device="dev-one"))
+        i3x_service.on_message(None, None, _spb(
+            "DBIRTH", device="dev-one", metrics=[{"name": "Axes/X/POSITION", "value": 14.0}]))
+        self.assertEqual(self.last_staged()["dev-one"]["quality"], "Good")
+        # A birth with nothing but its identity still changes the device's status.
+        i3x_service.on_message(None, None, _spb("DDEATH", device="dev-one"))
+        i3x_service.on_message(None, None, _spb(
+            "DBIRTH", device="dev-one", metrics=[{"name": "Asset_ID", "string_value": "x"}]))
+        self.assertEqual(set(self.last_staged()), {"dev-one"})
+        self.assertEqual(self.last_staged()["dev-one"]["quality"], "Good")
+
+    def test_an_ndeath_stages_the_gateway_and_the_devices_it_holds(self):
+        rows = _quality_rows({"status": "ONLINE"}, {"status": "ONLINE", "last_heartbeat": _iso_ago(5)})
+        self.directory(rows)
+        # dev-ext is quarantined, so already held: its quality does not change and it is not staged.
+        self.watch("gwy-1", "dev-one", "dev-two", "dev-ext")
+        i3x_service.on_message(None, None, _spb("NDEATH"))
+        staged = self.last_staged()
+        self.assertEqual(set(staged), {"gwy-1", "dev-one", "dev-one/Axes/X/POSITION", "dev-two"})
+        self.assertEqual((staged["gwy-1"]["value"]["status"], staged["gwy-1"]["quality"]),
+                         ("OFFLINE", "Good"))
+        self.assertEqual(staged["gwy-1"]["value"]["sparkplugGroup"], "Aber")
+        self.assertEqual(staged["dev-one"]["quality"], "Uncertain")
+        self.assertEqual((staged["dev-two"]["value"], staged["dev-two"]["quality"]), (None, "Bad"))
+        read = self.read(rows, "gwy-1", "dev-one", "dev-two")
+        for element_id in ("gwy-1", "dev-one", "dev-two"):
+            self.assertEqual(read[element_id]["quality"], staged[element_id]["quality"])
+
+    def test_an_nbirth_stages_the_gateway_back_and_the_devices_it_releases(self):
+        self.directory(_quality_rows({"status": "ONLINE"},
+                                     {"status": "ONLINE", "last_heartbeat": _iso_ago(5)}))
+        self.watch("gwy-1", "dev-one", "dev-two")
+        i3x_service.on_message(None, None, _spb("NDEATH"))
+        i3x_service.on_message(None, None, _spb("NBIRTH"))
+        staged = self.last_staged()
+        self.assertEqual((staged["gwy-1"]["value"]["status"], staged["gwy-1"]["quality"]),
+                         ("ONLINE", "Good"))
+        self.assertEqual(staged["dev-one"]["quality"], "Good")
+        self.assertEqual((staged["dev-two"]["value"], staged["dev-two"]["quality"]),
+                         (None, "GoodNoData"))
+
+    def test_an_ndata_stages_only_a_change_of_live_status(self):
+        self.directory(_quality_rows({"status": "ONLINE"},
+                                     {"status": "ONLINE", "last_heartbeat": _iso_ago(5)}))
+        self.watch("gwy-1", "dev-one")
+        i3x_service.on_message(None, None, _spb("NDATA"))
+        self.assertEqual(self.staged, [], "a heartbeat that changes nothing was staged")
+
+        i3x_service._liveness_clear()
+        self.directory(_quality_rows({"status": "ONLINE"},
+                                     {"status": "ONLINE", "last_heartbeat": _iso_ago(600)}))
+        i3x_service.on_message(None, None, _spb("NDATA"))
+        staged = self.last_staged()
+        self.assertEqual(staged["gwy-1"]["value"]["status"], "ONLINE")
+        self.assertEqual(staged["dev-one"]["quality"], "Good", "the STALE gateway held it")
+
+    def test_a_reported_status_is_staged_as_ingestion_writes_it(self):
+        self.directory(_quality_rows())
+        self.watch("gwy-1")
+        for reported, status in (("MAINTENANCE", "MAINTENANCE"), (" stale ", "ONLINE"),
+                                 ("x" * 33, "ONLINE"), ("", "ONLINE")):
+            with self.subTest(reported=reported):
+                i3x_service.on_message(None, None, _spb(
+                    "NBIRTH", metrics=[{"name": "Gateway_Status", "string_value": reported}]))
+                self.assertEqual(self.last_staged()["gwy-1"]["value"]["status"], status)
+
+    def test_nothing_is_built_while_nobody_watches(self):
+        self.directory(_quality_rows({"status": "ONLINE"},
+                                     {"status": "ONLINE", "last_heartbeat": _iso_ago(5)}))
+        messages = [
+            _spb("NBIRTH"), _spb("NDATA"),
+            _spb("DBIRTH", device="dev-one", metrics=[{"name": "Axes/X/POSITION", "value": 1.0}]),
+            _spb("DDATA", device="dev-one", metrics=[{"name": "Axes/X/POSITION", "value": 2.0}]),
+            _spb("DDEATH", device="dev-one"), _spb("NDEATH"),
+        ]
+        with mock.patch.object(i3x_service, "_device_updates", wraps=i3x_service._device_updates) as device, \
+                mock.patch.object(A, "gateway_value", wraps=A.gateway_value) as gateway:
+            for message in messages:
+                i3x_service.on_message(None, None, message)
+            self.assertEqual((device.call_count, gateway.call_count), (0, 0))
+            self.assertEqual(self.staged, [])
+
+            # One metric watched makes its device's messages, and its gateway's, worth building.
+            self.watch("dev-one/Axes/X/POSITION")
+            for message in messages:
+                i3x_service.on_message(None, None, message)
+            self.assertGreater(device.call_count, 0)
+            self.assertEqual(gateway.call_count, 0, "nobody watches the gateway itself")
+            self.assertTrue(any("dev-one/Axes/X/POSITION" in batch for batch in self.staged))
+
+
+class TestCurrentValuesAreFilledFromTheHistorian(_QualityCase):
+    """
+    A value read fills what the MQTT cache lacks for a device from `telemetry_latest`, read as the
+    caller, once per device, and seeds the cache with it, so a slow metric is not GoodNoData after
+    a restart while the historian holds it.
+    """
+
+    DEV_TWO = (
+        ("2026-09-28T08:30:00+00:00", "Axes/X/POSITION", 6.0),
+        ("2026-09-28T09:00:00+00:00", "Axes/X/POSITION", 7.0),
+        ("2026-09-28T08:00:00+00:00", "OEE/AVAILABILITY", 88.0),
+        # Stored, but no longer one of its components: never filled into the map.
+        ("2026-09-28T07:00:00+00:00", "Retired/METRIC", 1.0),
+    )
+
+    def pg(self, device=None, gateway=None, telemetry=None, fail=None, rows=None):
+        rows = rows or _quality_rows(
+            device or {"status": "ONLINE"},
+            gateway or {"status": "ONLINE", "last_heartbeat": _iso_ago(5)},
+        )
+        return LatestPostgrest(rows, _telemetry(*(telemetry or self.DEV_TWO), sid="dev-two"), fail)
+
+    def latest_reads(self, pg) -> list:
+        return [params for relation, params in pg.calls if relation == "telemetry_latest"]
+
+    def test_a_restart_reads_what_the_cache_lacks_from_telemetry_latest(self):
+        got = self.read(None, "dev-two", depth=0, pg=self.pg())["dev-two"]
+        self.assertEqual(got["value"], {"Axes/X/POSITION": 7.0, "OEE/AVAILABILITY": 88.0})
+        self.assertEqual((got["quality"], got["timestamp"]), ("Good", "2026-09-28T09:00:00Z"))
+        components = got["components"]
+        self.assertEqual((components["dev-two/OEE/AVAILABILITY"]["value"],
+                          components["dev-two/OEE/AVAILABILITY"]["timestamp"]),
+                         (88.0, "2026-09-28T08:00:00Z"))
+        self.assertEqual(components["dev-two/Controller/EXECUTION"]["quality"], "GoodNoData")
+
+    def test_a_value_filled_for_an_offline_device_is_uncertain(self):
+        got = self.read(None, "dev-two", "dev-two/Axes/X/POSITION",
+                        pg=self.pg({"status": "OFFLINE"}))
+        self.assertEqual((got["dev-two"]["quality"], got["dev-two/Axes/X/POSITION"]["quality"]),
+                         ("Uncertain", "Uncertain"))
+
+    def test_it_seeds_the_cache_so_a_ddata_merges_into_a_complete_map(self):
+        self.read(None, "dev-two", pg=self.pg())
+        self.assertEqual(set(i3x_service.metrics_for("dev-two")),
+                         {"Axes/X/POSITION", "OEE/AVAILABILITY"})
+        self.watch("dev-two")
+        i3x_service.on_message(None, None, _spb(
+            "DDATA", device="dev-two", metrics=[{"name": "OEE/AVAILABILITY", "value": 90.0}]))
+        self.assertEqual(self.last_staged()["dev-two"]["value"],
+                         {"Axes/X/POSITION": 7.0, "OEE/AVAILABILITY": 90.0})
+
+    def test_it_is_one_read_as_the_caller_for_every_device_named_then_none(self):
+        pg = self.pg()
+        self.read(None, "dev-one", "dev-two/OEE/AVAILABILITY", "gwy-1", pg=pg)
+        reads = self.latest_reads(pg)
+        self.assertEqual(len(reads), 1, reads)
+        self.assertEqual(reads[0]["asset_id"], "in.(dev-one,dev-two)")
+        self.assertEqual(reads[0]["limit"], str(i3x_service.FILL_MAX_ROWS))
+        again = self.pg()
+        self.read(None, "dev-one", "dev-two", pg=again)
+        self.assertEqual(self.latest_reads(again), [], "a filled device was read again")
+
+    def test_a_cached_value_is_never_replaced_and_only_components_are_filled(self):
+        telemetry = self.DEV_TWO + (("2026-09-28T11:00:00+00:00", "Axes/X/POSITION", 1.0),)
+        pg = LatestPostgrest(_quality_rows({"status": "ONLINE"}),
+                             _telemetry(*telemetry, sid="dev-one"))
+        got = self.read(None, "dev-one", pg=pg)["dev-one"]
+        # dev-one's Controller/EXECUTION has no stored sample, and Retired/METRIC is no component.
+        self.assertEqual(got["value"], {"Axes/X/POSITION": 12.5})
+
+    def test_an_integer_metric_is_served_as_an_integer(self):
+        rows = _quality_rows({"status": "ONLINE"})
+        rows["metric_catalog"][2]["datatype"] = 3  # OEE/AVAILABILITY as Int32
+        got = self.read(None, "dev-two/OEE/AVAILABILITY", pg=self.pg(rows=rows))
+        value = got["dev-two/OEE/AVAILABILITY"]["value"]
+        self.assertEqual((value, type(value)), (88, int))
+
+    def test_a_failed_read_makes_what_is_missing_bad_and_is_tried_again(self):
+        failing = self.pg(fail=SubscriptionError(502, "Bad Gateway", "historian down"))
+        got = self.read(None, "dev-one", "dev-one/Controller/EXECUTION", "dev-one/Axes/X/POSITION",
+                        "dev-two", pg=failing)
+        self.assertEqual((got["dev-two"]["value"], got["dev-two"]["quality"]), (None, "Bad"))
+        self.assertEqual((got["dev-one"]["value"], got["dev-one"]["quality"]),
+                         ({"Axes/X/POSITION": 12.5}, "Uncertain"))
+        self.assertEqual(got["dev-one/Controller/EXECUTION"]["quality"], "Bad")
+        self.assertEqual(got["dev-one/Axes/X/POSITION"]["quality"], "Good")
+        got = self.read(None, "dev-two", pg=self.pg())
+        self.assertEqual(got["dev-two"]["quality"], "Good")
+
+    def test_nothing_is_read_when_nothing_is_missing(self):
+        i3x_service.record_value("dev-one", "Controller/EXECUTION", "ACTIVE", None)
+        pg = self.pg()
+        self.read(None, "dev-one", pg=pg)
+        self.assertEqual(self.latest_reads(pg), [])
+
+    def test_a_read_that_comes_back_full_is_read_again(self):
+        with mock.patch.object(i3x_service, "FILL_MAX_ROWS", 1):
+            first, second = self.pg(), self.pg()
+            self.read(None, "dev-two", pg=first)
+            self.read(None, "dev-two", pg=second)
+        self.assertEqual((len(self.latest_reads(first)), len(self.latest_reads(second))), (1, 1))
+
+
+class TestARegistrationFillsFromTheHistorian(_QualityCase):
+    """
+    A registration fills what the cache lacks for each device it names, a metric naming its
+    device, as a value read does, so the first map staged for a device no read has named since a
+    restart is complete. A fill that fails leaves the registration standing.
+    """
+
+    DEV_TWO = TestCurrentValuesAreFilledFromTheHistorian.DEV_TWO
+    pg = TestCurrentValuesAreFilledFromTheHistorian.pg
+    latest_reads = TestCurrentValuesAreFilledFromTheHistorian.latest_reads
+
+    def register(self, pg, *element_ids):
+        i3x_service._space_cache_clear()
+        sub = i3x_service.registry.create("client-fill", principal="p-fill")
+        req = FakeRequest(body={"clientId": "client-fill", "subscriptionId": sub.subscription_id,
+                                "elementIds": list(element_ids)}, pg=pg)
+        req.caller = i3x_service.Caller("p-fill", None)
+        i3x_service.h_sub_register(req)
+        return [(r["elementId"], r["success"]) for r in req.result]
+
+    def test_registering_a_metric_fills_its_device_before_anything_is_staged(self):
+        pg = self.pg()
+        self.assertEqual(self.register(pg, "dev-two/OEE/AVAILABILITY"),
+                         [("dev-two/OEE/AVAILABILITY", True)])
+        self.assertEqual([r["asset_id"] for r in self.latest_reads(pg)], ["in.(dev-two)"])
+        i3x_service.on_message(None, None, _spb(
+            "DDATA", device="dev-two", metrics=[{"name": "OEE/AVAILABILITY", "value": 90.0}]))
+        # The map staged for the device holds the filled position, not only what was published.
+        self.assertEqual(self.last_staged()["dev-two"]["value"],
+                         {"Axes/X/POSITION": 7.0, "OEE/AVAILABILITY": 90.0})
+
+    def test_only_registered_devices_are_read_once_between_them(self):
+        pg = self.pg()
+        self.register(pg, "dev-one", "gwy-1", CELL_A, "dev-unknown", "dev-two/Axes/X/POSITION",
+                      "dev-two")
+        self.assertEqual([r["asset_id"] for r in self.latest_reads(pg)], ["in.(dev-one,dev-two)"])
+        nothing = self.pg()
+        self.register(nothing, "gwy-1", CELL_A)
+        self.assertEqual(self.latest_reads(nothing), [])
+
+    def test_a_failed_fill_leaves_the_registration_standing(self):
+        failing = self.pg(fail=SubscriptionError(502, "Bad Gateway", "historian down"))
+        with self.assertLogs(i3x_service.logger, "WARNING") as logged:
+            self.assertEqual(self.register(failing, "dev-two"), [("dev-two", True)])
+        self.assertIn("historian down", "\n".join(logged.output))
+        with mock.patch.object(i3x_service, "_fill_from_historian", side_effect=RuntimeError("x")), \
+                self.assertLogs(i3x_service.logger, "ERROR") as logged:
+            self.assertEqual(self.register(self.pg(), "dev-two"), [("dev-two", True)])
+        self.assertIn("filling 1 registered device(s)", "\n".join(logged.output))
+
+
+class LatestPostgrest(ColumnCheckingPostgrest):
+    """
+    ColumnCheckingPostgrest answering `telemetry_latest` from seeded `telemetry` rows as the view
+    does: the newest row per series, filtered by `asset_id=eq.` or `in.(...)`, limited, projected.
+    `fail` is raised by that read instead.
+    """
+
+    def __init__(self, rows=None, telemetry=(), fail=None):
+        super().__init__({**(rows or {}), "telemetry": list(telemetry)})
+        self.fail = fail
+
+    def get(self, relation, params=None):
+        answer = super().get(relation, params)
+        if relation != "telemetry_latest":
+            return answer
+        if self.fail is not None:
+            raise self.fail
+        op, _, arg = params.get("asset_id", "").partition(".")
+        assets = arg.strip("()").split(",") if op == "in" else [arg]
+        newest = {}
+        for row in self.rows["telemetry"]:
+            key = (row["asset_id"], row["metric_name"])
+            if row["asset_id"] in assets and (
+                key not in newest
+                or TelemetryPostgrest._instant(row["time"]) > TelemetryPostgrest._instant(newest[key]["time"])
+            ):
+                newest[key] = row
+        rows = list(newest.values())[: int(params.get("limit", len(newest)))]
+        return [{c: row.get(c) for c in params["select"].split(",")} for row in rows]
+
+
+class TestLivenessMirrorsTheDirectory(unittest.TestCase):
+    """
+    The rules this server copies rather than reads: the gateway_status view's STALE, ingestion's
+    acceptance of a self-reported status, and the premise that history needs no quality rule.
+    """
+
+    def _view(self) -> str:
+        """The last definition of public.gateway_status the migrations make, pg_dump's form."""
+        text = ""
+        for path in sorted(MIGRATIONS_DIR.glob("[0-9]*.sql")):
+            sql = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"^CREATE OR REPLACE VIEW public\.gateway_status\b.*?;$", sql,
+                                 re.M | re.S):
+                text = m.group(0)
+        self.assertTrue(text, "no gateway_status view in the migrations")
+        return text
+
+    def test_gateway_live_status_is_the_views_rule(self):
+        view = self._view()
+        steps = [
+            "WHEN (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text])) THEN status",
+            "WHEN (status = 'OFFLINE'::text) THEN 'OFFLINE'::text",
+            "WHEN (last_heartbeat IS NULL) THEN status",
+            "WHEN ((now() - last_heartbeat) > '00:01:30'::interval) THEN 'STALE'::text",
+            "ELSE status",
+        ]
+        at = [view.find(step) for step in steps]
+        self.assertNotIn(-1, at, "the view's CASE changed; update gateway_live_status to match")
+        self.assertEqual(at, sorted(at), "the view's CASE was reordered")
+        self.assertEqual(A.GATEWAY_STALE_SECONDS, 90)
+        self.assertEqual(set(A.GATEWAY_ENROLMENT_STATUSES), {"PENDING_ENROLLMENT", "AWAITING_BIRTH"})
+
+        now = time.time()
+
+        def beat(age):
+            from datetime import datetime, timezone
+
+            return datetime.fromtimestamp(now - age, tz=timezone.utc).isoformat()
+
+        for status, heartbeat, expected in (
+            ("ONLINE", beat(89), "ONLINE"), ("ONLINE", beat(91), "STALE"),
+            ("OFFLINE", beat(1000), "OFFLINE"), ("AWAITING_BIRTH", beat(1000), "AWAITING_BIRTH"),
+            ("PENDING_ENROLLMENT", None, "PENDING_ENROLLMENT"), ("ONLINE", None, "ONLINE"),
+            ("Maintenance", beat(1), "MAINTENANCE"), ("Maintenance", beat(1000), "STALE"),
+            (None, beat(1), "UNKNOWN"),
+        ):
+            with self.subTest(status=status, heartbeat=heartbeat):
+                gateway = {"status": status, "last_heartbeat": heartbeat}
+                self.assertEqual(A.gateway_live_status(gateway, now), expected)
+
+    def _ingestion_literal(self, name):
+        import ast
+
+        for node in ast.parse((INGESTION_DIR / "ingestion.py").read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
+                value = node.value
+                if isinstance(value, ast.Call):  # frozenset({...})
+                    value = value.args[0]
+                return ast.literal_eval(value)
+        self.fail(f"{name} is not in ingestion.py")
+
+    def test_a_reported_status_is_accepted_as_ingestion_accepts_it(self):
+        import logging
+
+        reserved = self._ingestion_literal("RESERVED_GATEWAY_STATUSES")
+        longest = self._ingestion_literal("MAX_GATEWAY_STATUS_LENGTH")
+        self.assertEqual(set(reserved), set(i3x_service.RESERVED_GATEWAY_STATUSES))
+        self.assertEqual(longest, i3x_service.MAX_GATEWAY_STATUS_LENGTH)
+        theirs = TestMirroredConstants._function(
+            INGESTION_DIR / "ingestion.py", "accept_reported_status",
+            MAX_GATEWAY_STATUS_LENGTH=longest, RESERVED_GATEWAY_STATUSES=frozenset(reserved),
+            _throttled=lambda *_: False, _status_rejected_warned={},
+            STATUS_REJECT_WARN_INTERVAL_SECONDS=0, logger=logging.getLogger("mirror"),
+            count=lambda *_: None,
+        )
+        for reported in ("MAINTENANCE", " Maintenance ", "", "   ", "stale", "Awaiting_Birth",
+                         "OFFLINE", "x" * 32, "x" * 33, "ONLINE"):
+            with self.subTest(reported=reported):
+                metric = {"name": "Gateway_Status", "field": "string_value", "value": reported}
+                self.assertEqual(
+                    i3x_service.reported_gateway_status("Aber", "gwy-1", [metric]),
+                    theirs(reported, "gwy-1"),
+                )
+
+    def test_history_is_good_because_ingestion_stores_nothing_from_a_quarantined_device(self):
+        source = (INGESTION_DIR / "ingestion.py").read_text(encoding="utf-8")
+        # The premise: process_ddata drops a quarantined device's readings, and DBIRTH values go to
+        # asset_config, so no stored sample came from a source in quarantine.
+        premise = r'device\.get\("is_quarantined"\):\s+drop\(\s+"quarantined_or_unregistered"'
+        self.assertIsNotNone(re.search(premise, source), "ingestion no longer drops that DDATA")
+        self.assertEqual(i3x_service._vqt(1.0, "2026-09-28T10:00:00+00:00")["quality"], "Good")
+        self.assertEqual(i3x_service._vqt(None, "2026-09-28T10:00:00+00:00")["quality"], "GoodNoData")
+        self.assertEqual(A.stored_sample_quality(True),
+                         A.value_quality(A.STORED_SAMPLE_SOURCE, None, True))
 
 
 class TestRequestValidation(unittest.TestCase):
@@ -2841,7 +3846,7 @@ class TestComponentLimit(_HistoryCase):
         space, objects = _device_space(*self.DEVICES)
         req = FakeRequest(body=body, pg=ColumnCheckingPostgrest())
 
-        def current(objects_, space_, element_id):
+        def current(objects_, space_, element_id, unfilled=frozenset()):
             if element_id not in objects_:
                 return None
             return {"value": 1.0, "quality": "Good", "timestamp": "2026-09-28T10:00:00Z"}
@@ -3502,9 +4507,10 @@ class BulkElementIdsCapTest(unittest.TestCase):
                     i3x_service._registration_entries(body)
                 self.assertEqual(caught.exception.status, 400)
 
-        # And the ordinary case still passes through, normalised.
+        # And the ordinary case still passes through, as the id each entry names.
+        self.assertEqual(i3x_service._registration_entries({"elementIds": ["a"]}), ["a"])
         self.assertEqual(
-            i3x_service._registration_entries({"elementIds": ["a"]}), [{"elementId": "a"}]
+            i3x_service._registration_entries({"objects": [{"elementId": "a"}, "b"]}), ["a", "b"]
         )
 
     def test_only_the_two_sanctioned_helpers_read_elementIds(self):

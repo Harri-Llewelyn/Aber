@@ -1652,8 +1652,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: 'Download an AASX (OPC) package, with any attached 3D model bundled in'
           },
           /* Withheld from a replay lane, which is a recording of an asset rather than one: the
-             bundle is for taking a machine away, and a lane goes with its original. */
-          !selectedDevice.shadow_of && {
+             bundle is for taking a machine away, and a lane goes with its original. Withheld too
+             from a reader without `digital_thread:read`: the bundle carries the thread, and
+             aas-export refuses it on the same permission. */
+          !selectedDevice.shadow_of && canReadThread && {
             label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export Bundle (with history)',
             icon: <IconDownload size={13} />,
             onClick: () => exportAas(selectedDevice, 'bundle'),

@@ -88,6 +88,11 @@ VAL_SCHEMA_METRICS = ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller
 VAL_UNMODELLED_METRIC = "Environmental/HUMIDITY_RELATIVE"
 VAL_KPI_METRIC = "OEE/AVAILABILITY"
 VAL_KPI_SCHEMA_METRICS = [VAL_KPI_METRIC]
+# The registered device's birth certificate: its schema's metrics, the unmodelled one, and the KPI
+# only the second attached submodel models (check 6e). Sent by step 7, and again before check 12.
+VAL_KNOWN_BIRTH = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
+                   "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2,
+                   VAL_KPI_METRIC: 0.92}
 
 # The plant check 12 compares with the Directory: an area with the cell filed in it, a gateway serving
 # the whole area, and two devices with two metrics each. A carries one schema, whose semantic id its
@@ -111,6 +116,8 @@ VAL_PLANT_LATER = {"plant_a": ({"Controller/EXECUTION": "STOPPED"}, {"Systems/TE
 # A device of its own for check 12z, which archives it: no other check may see it leave.
 VAL_WITHDRAWN_DEVICE = "VALIDATE_Withdrawn_Device_001"
 VAL_SUBSCRIPTION_CLIENT = "validate-withdrawal"
+# The clientId check 17's subscriptions are made under; each is deleted by the check that made it.
+VAL_LIVE_CLIENT = "validate-live"
 # Never components of a device: wire plumbing, as i3x_service.IDENTITY_METRICS has it.
 IDENTITY_METRICS = {"Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID"}
 
@@ -880,7 +887,11 @@ def seed_supabase():
     print(f"  Gateway  {VAL_GW_NAME}     -> {SEEDED.get('gateway_id')}")
     print(f"  Device   {VAL_KNOWN_DEVICE} -> {SEEDED.get('known_id')}")
 
-def run_simulation():
+def connect_publisher(capture=True):
+    """
+    A connected broker session as the seeded gateway, its network loop running, or None when the
+    broker cannot be reached. `capture` subscribes to the NCMD and STATE topics checks 9 and 15 read.
+    """
     print("Connecting validation publisher to MQTT broker...")
     # MQTT 5, matching the daemon and the i3X server: the validator stands in for a physical edge
     # node and must speak what the fleet speaks. paho 1.6.1's v1 callback API is unchanged.
@@ -922,12 +933,12 @@ def run_simulation():
     def on_ncmd(_client, _userdata, msg):
         CAPTURED_NCMD.append((msg.topic, msg.payload))
 
-    client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
-
     def on_state(_client, _userdata, msg):
         CAPTURED_STATE.append((msg.topic, msg.payload, msg.retain))
 
-    client.message_callback_add("spBv1.0/STATE/#", on_state)
+    if capture:
+        client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
+        client.message_callback_add("spBv1.0/STATE/#", on_state)
     # The CONNACK return code is the point: paho's connect() completes the TCP handshake and
     # returns, and the broker's verdict on the credential arrives in this callback and nowhere else.
     # A callback that ignored it made a rejected login indistinguishable from a good one, with the
@@ -938,7 +949,7 @@ def run_simulation():
     # is a ReasonCodes under v5; `== 0` still holds and it prints as its reason string.
     def on_connect(c, _userdata, _flags, rc, properties=None):
         connack.append(rc)
-        if rc == 0:
+        if rc == 0 and capture:
             c.subscribe("spBv1.0/+/NCMD/+")
             # The primary host's birth certificate is RETAINED, so it arrives on subscribe rather
             # than being waited for. A gateway does exactly this to learn, at connect, whether its
@@ -959,7 +970,7 @@ def run_simulation():
 
     if not connected:
         print("Failed to connect to MQTT broker.")
-        return
+        return None
 
     client.loop_start()
 
@@ -992,6 +1003,13 @@ def run_simulation():
             "  means the two have diverged -- restart the broker (kubectl rollout restart\n"
             "  deploy/mosquitto) after confirming the Secret."
         )
+    return client
+
+
+def run_simulation():
+    client = connect_publisher()
+    if client is None:
+        return
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     gw = SEEDED.get("gateway_id") or VAL_GW_NAME
@@ -1035,11 +1053,7 @@ def run_simulation():
     # twice, identically: the daemon must record the declared set the first time and write nothing
     # the second, since log_digital_thread_event() fires on every UPDATE to `devices`.
     print(f"\n--- DBIRTH from registered device declaring an unmodelled metric: {VAL_UNMODELLED_METRIC} ---")
-    birth_metrics = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
-                     "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2,
-                     # Modelled only by the second attached submodel -- see check 6e.
-                     VAL_KPI_METRIC: 0.92}
-    publish("DBIRTH", SEEDED["known_id"], birth_metrics)
+    publish("DBIRTH", SEEDED["known_id"], VAL_KNOWN_BIRTH)
 
     if supabase_client and SEEDED.get("known_uuid"):
         res = supabase_client.table("devices").select("last_birth_metrics_at").eq(
@@ -1049,7 +1063,7 @@ def run_simulation():
 
     print("\n--- Identical DBIRTH again: the declared set is unchanged, so nothing must be written ---")
     time.sleep(6)  # outlast the daemon's 5s device-resolution cache
-    publish("DBIRTH", SEEDED["known_id"], birth_metrics)
+    publish("DBIRTH", SEEDED["known_id"], VAL_KNOWN_BIRTH)
 
     # 8. The acceptance test for the whole change: rename the device, then publish again.
     #    Telemetry must continue landing on the same series.
@@ -1147,6 +1161,30 @@ def run_simulation():
     client.loop_stop()
     client.disconnect()
     record_ingested_devices()
+
+
+def freshen_the_plant():
+    """
+    Just before checks 12 and 17: a node heartbeat from the seeded gateway, and step 7's birth
+    again from the registered device. i3X holds a device's values Uncertain once its gateway has
+    not beaten for 90 s or the device is OFFLINE, and the simulation's last node message is minutes
+    old by then. Only a DBIRTH sets a device ONLINE; this one declares the same set, so it rewrites
+    nothing else.
+    """
+    client = connect_publisher(capture=False)
+    if client is None:
+        return
+    gw = SEEDED.get("gateway_id") or VAL_GW_NAME
+    at_ms = int(time.time() * 1000)
+    print(f"\n--- Before the i3X checks: NDATA from {gw}, and DBIRTH from {SEEDED.get('known_id')} ---")
+    # A node payload with no metrics: a plain heartbeat.
+    client.publish(f"spBv1.0/{VAL_GROUP}/NDATA/{gw}", make_node_birth_payload({}, at_ms))
+    if SEEDED.get("known_id"):
+        client.publish(f"spBv1.0/{VAL_GROUP}/DBIRTH/{gw}/{SEEDED['known_id']}",
+                       make_sparkplug_payload(SEEDED["known_id"], VAL_KNOWN_BIRTH, at_ms))
+    time.sleep(2)
+    client.loop_stop()
+    client.disconnect()
 
 
 def record_ingested_devices():
@@ -2040,9 +2078,13 @@ def verify_i3x(token):
               "so nothing behind authentication was checked.")
         return False
 
-    ctx = I3xContext(token, info)
+    return run_i3x_checks(I3xContext(token, info), I3X_CHECKS)
+
+
+def run_i3x_checks(ctx, checks):
+    """Run and print each (label, check) in order. Returns True when none failed."""
     passed = True
-    for label, check in I3X_CHECKS:
+    for label, check in checks:
         try:
             ok, detail = check(ctx)
         except Exception as err:
@@ -2055,6 +2097,376 @@ def verify_i3x(token):
             print(f"❌ {label} FAIL: {detail}")
             passed = False
     return passed
+
+
+# =================================================================================================
+# Check 17: i3X quality and subscriptions, against what this run publishes
+# =================================================================================================
+# What check 12 cannot assert, since it publishes nothing of its own: quality against the
+# Directory's liveness, which updates each kind of registration receives, and a death and a birth
+# reaching a subscriber. Each takes the I3xContext, with `publisher` connected as the seeded gateway
+# and `subscriptions` holding what it made, and returns what 12's return. Each deletes its
+# subscriptions and brings back what it killed in a `finally`; 17g, which kills the gateway, runs
+# last of all.
+
+# How long a check waits for the i3X server to act on a message it published.
+I3X_WAIT_SECONDS = 10.0
+
+
+def i3x_publish(ctx, msg_type, device_id=None, metrics=None):
+    """One Sparkplug message as the seeded gateway: the node's own with no device, else the device's."""
+    gw = SEEDED.get("gateway_id") or VAL_GW_NAME
+    at_ms = int(time.time() * 1000)
+    if device_id:
+        ctx.publisher.publish(f"spBv1.0/{VAL_GROUP}/{msg_type}/{gw}/{device_id}",
+                              make_sparkplug_payload(device_id, metrics or {}, at_ms))
+    else:
+        ctx.publisher.publish(f"spBv1.0/{VAL_GROUP}/{msg_type}/{gw}", make_node_birth_payload({}, at_ms))
+
+
+def i3x_subscribe(ctx, *registrations):
+    """A new subscription under VAL_LIVE_CLIENT holding each (elementId, maxDepth), in `ctx`'s list
+    for deletion. Raises, naming the answer, when the create or a registration fails."""
+    status, answer = i3x_request("POST", "/subscriptions", ctx.token, {"clientId": VAL_LIVE_CLIENT})
+    sub = ((answer or {}).get("result") or {}).get("subscriptionId")
+    if status != 200 or not sub:
+        raise RuntimeError(f"POST /subscriptions answered {status}: {answer}")
+    ctx.subscriptions.append(sub)
+    for element_id, depth in registrations:
+        status, answer = i3x_request("POST", "/subscriptions/register", ctx.token, {
+            "clientId": VAL_LIVE_CLIENT, "subscriptionId": sub, "elementIds": [element_id],
+            "maxDepth": depth})
+        item = ((answer or {}).get("results") or [{}])[0]
+        if status != 200 or item.get("success") is not True:
+            raise RuntimeError(f"registering {element_id} at maxDepth {depth} answered {status}: {item}")
+    return sub
+
+
+def i3x_unsubscribe(ctx):
+    """Delete every subscription in `ctx`'s list. Returns a problem per failure, else []."""
+    subs, ctx.subscriptions = list(ctx.subscriptions), []
+    if not subs:
+        return []
+    status, answer = i3x_request("POST", "/subscriptions/delete", ctx.token,
+                                 {"clientId": VAL_LIVE_CLIENT, "subscriptionIds": subs})
+    deleted = [r.get("subscriptionId") for r in (answer or {}).get("results") or []
+               if r.get("success") is True]
+    if status != 200 or sorted(deleted) != sorted(subs):
+        return [f"deleting {len(subs)} subscription(s) answered HTTP {status}: {answer}"]
+    return []
+
+
+def i3x_updates(ctx, sub, until=None):
+    """The updates queued on `sub` as (sequenceNumber, elementId, value, quality), synced without
+    acknowledging until `until(updates)` holds or I3X_WAIT_SECONDS pass, then acknowledged. With no
+    `until`, one read."""
+    body = {"clientId": VAL_LIVE_CLIENT, "subscriptionId": sub}
+    deadline = time.monotonic() + I3X_WAIT_SECONDS
+    while True:
+        status, answer = i3x_request("POST", "/subscriptions/sync", ctx.token, body)
+        if status not in (200, 206):
+            raise RuntimeError(f"/subscriptions/sync answered {status}: {answer}")
+        updates = [(batch.get("sequenceNumber"), u.get("elementId"), u.get("value"), u.get("quality"))
+                   for batch in answer.get("result") or [] for u in batch.get("updates") or []]
+        if until is None or until(updates) or time.monotonic() > deadline:
+            break
+        time.sleep(0.5)
+    if updates:
+        i3x_request("POST", "/subscriptions/sync", ctx.token, dict(body, lastSequenceNumber=-1))
+    return updates
+
+
+def i3x_values_until(ctx, element_ids, until):
+    """/objects/value for `element_ids`, read again until `until(values)` holds or I3X_WAIT_SECONDS
+    pass. Returns the last values, by elementId."""
+    deadline = time.monotonic() + I3X_WAIT_SECONDS
+    while True:
+        values = i3x_bulk("/objects/value", ctx.token, {"elementIds": list(element_ids)})
+        if until(values) or time.monotonic() > deadline:
+            return values
+        time.sleep(0.5)
+
+
+def status_of(vqt):
+    """A gateway VQT's (status, quality)."""
+    return ((vqt or {}).get("value") or {}).get("status"), (vqt or {}).get("quality")
+
+
+def check_i3x_quality_follows_the_directory(ctx):
+    wrong, gateways, quarantined = [], 0, []
+    for key in seeded_keys("gateways"):
+        element_id = SEEDED.get(key + "_id")
+        rows = supabase_client.table("gateway_status").select("live_status").eq(
+            "id", SEEDED[key + "_uuid"]).execute().data or []
+        live = (rows[0].get("live_status") if rows else None)
+        live = live.upper() if isinstance(live, str) else live
+        status, _ = status_of(i3x_value(ctx.token, element_id))
+        gateways += 1
+        if status != live:
+            wrong.append(f"gateway {element_id} reads {status!r} here and {live!r} in gateway_status")
+    uuids = [SEEDED[key + "_uuid"] for key in seeded_keys("devices")]
+    rows = supabase_client.table("devices").select("sparkplug_id").eq("is_quarantined", True).in_(
+        "id", uuids).execute().data or []
+    for row in rows:
+        vqt = i3x_value(ctx.token, row["sparkplug_id"]) or {}
+        held = vqt.get("value") is not None
+        quarantined.append(f"{row['sparkplug_id']} {vqt.get('quality')}")
+        if vqt.get("quality") != ("Uncertain" if held else "Bad"):
+            wrong.append(f"quarantined {row['sparkplug_id']} is {vqt.get('quality')!r} "
+                         f"{'with' if held else 'without'} a value, expected "
+                         f"{'Uncertain' if held else 'Bad'}")
+    if not rows:
+        wrong.append("this run quarantined no device, so the quarantined rows were not compared")
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"{gateways} gateway(s) read the gateway_status view's live status, and "
+                  f"{len(rows)} quarantined device(s) are Uncertain with a value and Bad without "
+                  f"({', '.join(quarantined)})")
+
+
+def check_i3x_every_value_is_well_formed(ctx):
+    element_ids, checked, gone, wrong = sorted(ctx.objects), 0, 0, []
+    for start in range(0, len(element_ids), 200):
+        status, answer = i3x_request("POST", "/objects/value", ctx.token,
+                                     {"elementIds": element_ids[start:start + 200], "maxDepth": 0})
+        if status not in (200, 206):
+            wrong.append(f"/objects/value answered {status} for {len(element_ids[start:start + 200])} ids")
+            continue
+        for item in (answer or {}).get("results") or []:
+            if not item.get("success"):
+                if (item.get("responseDetail") or {}).get("status") == 404:
+                    gone += 1  # left the address space since check 12 listed it
+                else:
+                    wrong.append(f"{item.get('elementId')}: {item.get('responseDetail')}")
+                continue
+            result = item.get("result") or {}
+            for element_id, vqt in [(item.get("elementId"), result),
+                                    *(result.get("components") or {}).items()]:
+                checked += 1
+                if vqt.get("timestamp") is None:
+                    wrong.append(f"{element_id} has a null timestamp")
+                if vqt.get("value") is None and vqt.get("quality") in ("Good", "Uncertain"):
+                    wrong.append(f"{element_id} pairs a null value with {vqt.get('quality')}")
+    if not checked:
+        wrong.append(f"no value was read for the {len(element_ids)} objects")
+    if wrong:
+        return False, "; ".join(wrong[:8]) + (f" (and {len(wrong) - 8} more)" if len(wrong) > 8 else "")
+    return True, (f"{checked} values and components of {len(element_ids)} objects at maxDepth 0 each "
+                  f"have a timestamp, and none pairs null with Good or Uncertain"
+                  + (f" ({gone} gone since 12 listed them)" if gone else ""))
+
+
+def check_i3x_stored_history_is_good(ctx):
+    known = SEEDED.get("known_id")
+    now_ms = int(time.time() * 1000)
+    status, answer = i3x_request("POST", "/objects/history", ctx.token, {
+        "elementIds": [known], "startTime": iso_ms(now_ms - 3600_000), "endTime": iso_ms(now_ms)})
+    item = ((answer or {}).get("results") or [{}])[0]
+    values = (item.get("result") or {}).get("values") or []
+    if status not in (200, 206) or not values:
+        return False, f"the last hour of {known}'s history answered HTTP {status} with {len(values)} values"
+    wrong = [(v.get("timestamp"), v.get("quality")) for v in values
+             if v.get("quality") != ("Good" if v.get("value") is not None else "GoodNoData")]
+    if wrong:
+        return False, f"{len(wrong)} of {known}'s {len(values)} stored values are not Good: {wrong[:5]}"
+    return True, f"all {len(values)} of {known}'s stored values in the last hour are Good"
+
+
+def check_i3x_registration_requests(ctx):
+    known, wrong = SEEDED.get("known_id"), []
+    try:
+        sub = i3x_subscribe(ctx)
+        ids = {"clientId": VAL_LIVE_CLIENT, "subscriptionId": sub}
+
+        def register(**fields):
+            status, answer = i3x_request("POST", "/subscriptions/register", ctx.token, {**ids, **fields})
+            return status, [
+                (r.get("elementId"), r.get("success"), (r.get("responseDetail") or {}).get("status"))
+                for r in (answer or {}).get("results") or []
+            ]
+
+        status, got = register(elementIds=[known, "i3x:nope", known], maxDepth=0)
+        if (status, got) != (200, [(known, True, None), ("i3x:nope", False, 404), (known, True, None)]):
+            wrong.append(f"[{known}, i3x:nope, {known}] answered HTTP {status} {got}, expected ok, 404, ok")
+        status, got = register(elementIds=[known], maxDepth=1)
+        if (status, got) != (200, [(known, True, None)]):
+            wrong.append(f"registering {known} again answered HTTP {status} {got}, expected success")
+        status, answer = i3x_request("POST", "/subscriptions/list", ctx.token,
+                                     {"clientId": VAL_LIVE_CLIENT, "subscriptionIds": [sub]})
+        listed = (((answer or {}).get("results") or [{}])[0].get("result") or {}).get("monitoredObjects")
+        if listed != [{"elementId": known, "maxDepth": 0}]:
+            wrong.append(f"after registering {known} at 0 then 1, list shows {listed}; "
+                         "the first depth should stand")
+        status, got = register(objects=[{"elementId": ["x"]}])
+        if (status, got) != (200, [(["x"], False, 400)]):
+            wrong.append(f"a non-string elementId answered HTTP {status} {got}, expected a per-item 400")
+        status, _ = register(elementIds=[known], maxDepth="0")
+        if status != 400:
+            wrong.append(f'maxDepth "0" answered {status}, expected 400')
+        status, _ = i3x_request("POST", "/subscriptions/sync", ctx.token,
+                                {"clientId": VAL_LIVE_CLIENT, "subscriptionId": ["x"]})
+        if status != 400:
+            wrong.append(f"a non-string subscriptionId answered {status}, expected 400")
+    finally:
+        wrong += i3x_unsubscribe(ctx)
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, ("results pair with requests by position, a repeat keeps the first depth, and a "
+                  "malformed elementId, maxDepth or subscriptionId is a 400")
+
+
+def check_i3x_subscription_depth(ctx):
+    known, cell = SEEDED.get("known_id"), SEEDED.get("cell_uuid")
+    metric, wrong = f"{known}/Systems/TEMPERATURE", []
+
+    def together(updates):
+        batches = {}
+        for seq, element_id, _value, _quality in updates:
+            batches.setdefault(seq, set()).add(element_id)
+        return any({known, metric} <= ids for ids in batches.values())
+
+    def ids(updates):
+        return sorted({element_id for _seq, element_id, _value, _quality in updates})
+
+    try:
+        unbounded, shallow = i3x_subscribe(ctx, (known, 0)), i3x_subscribe(ctx, (known, 1))
+        alone, place = i3x_subscribe(ctx, (metric, 1)), i3x_subscribe(ctx, (cell, 0))
+        i3x_publish(ctx, "DDATA", known, {"Systems/TEMPERATURE": 44.5})
+        got = i3x_updates(ctx, unbounded, together)
+        if not together(got):
+            wrong.append(f"{known} at maxDepth 0 received {ids(got)}, not it and {metric} in one batch")
+        got = i3x_updates(ctx, shallow, bool)
+        if ids(got) != [known]:
+            wrong.append(f"{known} at maxDepth 1 received {ids(got)}, expected only itself")
+        got = i3x_updates(ctx, alone, bool)
+        if ids(got) != [metric] or [v for _s, _e, v, _q in got][-1:] != [44.5]:
+            wrong.append(f"{metric} registered alone received {got}, expected only itself at 44.5")
+        got = i3x_updates(ctx, place)
+        if got:
+            wrong.append(f"the cell {cell} at maxDepth 0 received {ids(got)}, expected nothing")
+    finally:
+        wrong += i3x_unsubscribe(ctx)
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"one DDATA reached {known} at maxDepth 0 with {metric} in one batch, at maxDepth 1 "
+                  f"as its map only, the metric registered alone as itself, and its cell not at all")
+
+
+def check_i3x_device_death_and_birth(ctx):
+    known, wrong, dead = SEEDED.get("known_id"), [], False
+
+    def seen(updates, quality):
+        return [(q, v is not None) for _s, e, v, q in updates if e == known and q == quality]
+
+    try:
+        sub = i3x_subscribe(ctx, (known, 1))
+        i3x_publish(ctx, "DDEATH", known)
+        dead = True
+        got = i3x_updates(ctx, sub, lambda updates: seen(updates, "Uncertain"))
+        if ("Uncertain", True) not in seen(got, "Uncertain"):
+            wrong.append(f"after its DDEATH, {known}'s subscriber received "
+                         f"{[(e, q) for _s, e, _v, q in got]}, not its values held Uncertain")
+        i3x_publish(ctx, "DBIRTH", known, VAL_KNOWN_BIRTH)
+        dead = False
+        got = i3x_updates(ctx, sub, lambda updates: seen(updates, "Good"))
+        if not seen(got, "Good"):
+            wrong.append(f"after its DBIRTH, {known}'s subscriber received "
+                         f"{[(e, q) for _s, e, _v, q in got]}, not Good")
+    finally:
+        if dead:
+            i3x_publish(ctx, "DBIRTH", known, VAL_KNOWN_BIRTH)
+        wrong += i3x_unsubscribe(ctx)
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, f"{known}'s subscriber received its values Uncertain on DDEATH and Good on DBIRTH"
+
+
+def check_i3x_gateway_death_and_birth(ctx):
+    # Last: it kills the seeded gateway, and brings it and the registered device back.
+    gateway, known = SEEDED.get("gateway_id"), SEEDED.get("known_id")
+    wrong, dead = [], False
+
+    def announced(updates, status):
+        return [q for _s, e, v, q in updates if e == gateway and status_of({"value": v})[0] == status]
+
+    try:
+        sub = i3x_subscribe(ctx, (gateway, 1))
+        i3x_publish(ctx, "NDEATH")
+        dead = True
+        got = i3x_updates(ctx, sub, lambda updates: announced(updates, "OFFLINE"))
+        if "Good" not in announced(got, "OFFLINE"):
+            wrong.append(f"after its NDEATH, {gateway}'s subscriber received "
+                         f"{[(e, status_of({'value': v})[0], q) for _s, e, v, q in got]}")
+        values = i3x_values_until(ctx, [gateway, known], lambda values: (
+            status_of(values.get(gateway)) == ("OFFLINE", "Good")
+            and (values.get(known) or {}).get("quality") == "Uncertain"))
+        if status_of(values.get(gateway)) != ("OFFLINE", "Good"):
+            wrong.append(f"after its NDEATH, {gateway} reads {status_of(values.get(gateway))}")
+        if (values.get(known) or {}).get("quality") != "Uncertain":
+            wrong.append(f"after its gateway's NDEATH, {known} reads "
+                         f"{(values.get(known) or {}).get('quality')}")
+        i3x_publish(ctx, "NBIRTH")
+        i3x_publish(ctx, "DBIRTH", known, VAL_KNOWN_BIRTH)
+        dead = False
+        got = i3x_updates(ctx, sub, lambda updates: announced(updates, "ONLINE"))
+        if "Good" not in announced(got, "ONLINE"):
+            wrong.append(f"after its NBIRTH, {gateway}'s subscriber received "
+                         f"{[(e, status_of({'value': v})[0], q) for _s, e, v, q in got]}")
+        values = i3x_values_until(ctx, [gateway, known], lambda values: (
+            status_of(values.get(gateway)) == ("ONLINE", "Good")
+            and (values.get(known) or {}).get("quality") == "Good"))
+        if status_of(values.get(gateway)) != ("ONLINE", "Good") \
+                or (values.get(known) or {}).get("quality") != "Good":
+            wrong.append(f"after NBIRTH and DBIRTH, {gateway} reads {status_of(values.get(gateway))} "
+                         f"and {known} {(values.get(known) or {}).get('quality')}")
+    finally:
+        if dead:
+            i3x_publish(ctx, "NBIRTH")
+            i3x_publish(ctx, "DBIRTH", known, VAL_KNOWN_BIRTH)
+        wrong += i3x_unsubscribe(ctx)
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, (f"{gateway}'s NDEATH reached its subscriber as OFFLINE and Good, held {known} "
+                  f"Uncertain, and its NBIRTH brought both back to Good")
+
+
+# The order they run and print in; 17g last. The same conventions as I3X_CHECKS.
+I3X_LIVE_CHECKS = (
+    ("17a. i3X QUALITY FOLLOWS THE DIRECTORY", check_i3x_quality_follows_the_directory),
+    ("17b. i3X EVERY VALUE IS WELL-FORMED", check_i3x_every_value_is_well_formed),
+    ("17c. i3X STORED HISTORY IS GOOD", check_i3x_stored_history_is_good),
+    ("17d. i3X REGISTRATION REQUESTS", check_i3x_registration_requests),
+    ("17e. i3X SUBSCRIPTION DEPTH", check_i3x_subscription_depth),
+    ("17f. i3X DEVICE DEATH AND BIRTH", check_i3x_device_death_and_birth),
+    # Last: it kills the seeded gateway.
+    ("17g. i3X GATEWAY DEATH AND BIRTH", check_i3x_gateway_death_and_birth),
+)
+
+
+def verify_i3x_live(token):
+    """Check 17 and its letters. Returns True when none failed."""
+    if not token:
+        print("❌ 17.  i3X LIVE FAIL: no access token for the seeded administrator (see check 11c), "
+              "so nothing was checked.")
+        return False
+    # Check 12 and the checks since took minutes: a value is Good only while its gateway has beaten
+    # within 90 s and its device is ONLINE.
+    freshen_the_plant()
+    publisher = connect_publisher(capture=False)
+    if publisher is None:
+        print("❌ 17.  i3X LIVE FAIL: could not connect to the broker as the seeded gateway, so "
+              "nothing was published.")
+        return False
+    print(f"✅ 17.  i3X LIVE: publishing as the seeded gateway {SEEDED.get('gateway_id') or VAL_GW_NAME}")
+    ctx = I3xContext(token, {})
+    ctx.publisher, ctx.subscriptions = publisher, []
+    try:
+        return run_i3x_checks(ctx, I3X_LIVE_CHECKS)
+    finally:
+        for problem in i3x_unsubscribe(ctx):
+            print(f"⚠️  17.  i3X LIVE: {problem}")
+        publisher.loop_stop()
+        publisher.disconnect()
 
 
 def verify_results():
@@ -2605,7 +3017,7 @@ def verify_results():
             print(f"❌ 10. DEVICE WATCHDOG ERROR: {e}")
             passed = False
 
-    # One sign-in for everything behind authentication: checks 11c-11e and 12.
+    # One sign-in for everything behind authentication: checks 11c-11e, 12 and 17.
     token, auth_err = sign_in_admin()
 
     # 11. Factory+ Directory adapter. These routes are exempt from the gateway's key-auth and the
@@ -2701,6 +3113,7 @@ def verify_results():
 
     # 12. The i3X server, against the Directory: see verify_i3x().
     try:
+        freshen_the_plant()
         if not verify_i3x(token):
             passed = False
     except Exception as e:
@@ -2882,6 +3295,15 @@ def verify_results():
             else:
                 print("✅ 15c. TIMESTAMP: a JSON number, as 3.0.0 requires (it pairs the birth "
                       "with the death certificate).")
+
+    # 17. The i3X server's quality and subscriptions, against what this run publishes: see
+    # verify_i3x_live(). Last, because 17g kills the seeded gateway before bringing it back.
+    try:
+        if not verify_i3x_live(token):
+            passed = False
+    except Exception as e:
+        print(f"❌ 17.  i3X LIVE ERROR: {type(e).__name__}: {e}")
+        passed = False
 
     return passed
 
