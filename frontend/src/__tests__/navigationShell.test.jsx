@@ -142,22 +142,24 @@ describe('Merged navigation shell', () => {
   })
 
   /**
-   * Four controls on the right, and the count is the assertion: the alert pill, whose value
-   * changes; the shortcuts key and the help control, which are signposts rather than preferences;
-   * and the account door, behind which the standing preferences live. Help is the only one carrying
-   * `aria-expanded`, because it toggles a drawer that stays open. An exact count rather than an
-   * upper bound, because the failure this guards against is accretion.
+   * Five controls on the right, and the count is the assertion: the alert pill and the
+   * notification bell, whose values change; the shortcuts key and the help control, which are
+   * signposts rather than preferences; and the account door, behind which the standing preferences
+   * live. An exact count rather than an upper bound, because the failure this guards against is
+   * accretion.
    */
-  it('keeps the bar to the changing control, the two signposts and the account door', async () => {
+  it('keeps the bar to the two changing controls, the two signposts and the account door', async () => {
     await renderShell()
 
     const right = topbar().querySelector('.topbar-right')
     expect(right).toBeTruthy()
     const controls = [...right.querySelectorAll('button')]
-    expect(controls).toHaveLength(4)
+    expect(controls).toHaveLength(5)
 
-    // The one whose VALUE moves, the two signposts, and the door to everything else.
+    // The two whose VALUES move, the two signposts, and the door to everything else. The bell sits
+    // directly after the pill.
     expect(right.querySelector('.alert-pill')).toBeTruthy()
+    expect(controls[1]).toBe(within(right).getByRole('button', { name: /^notifications/i }))
     expect(within(right).getByRole('button', { name: /keyboard shortcuts/i })).toBeTruthy()
     expect(within(right).getByRole('button', { name: /help for this page/i })).toBeTruthy()
     expect(right.querySelector('.user-avatar')).toBeTruthy()
