@@ -1,5 +1,5 @@
 """
-The digital thread's security lane, and the acts that make one necessary (archived migration 0070).
+The audit trail's security lane, and the acts that make one necessary (archived migration 0070).
 
 WHAT THIS SUITE IS DEFENDING:
 
@@ -71,7 +71,7 @@ _LANE_ENTRY = re.compile(
 
 def dashboard_lanes():
     """
-    `DIGITAL_THREAD_ENTITY_TYPES` from constants.js: the kinds the platform still records.
+    `AUDIT_TRAIL_ENTITY_TYPES` from constants.js: the kinds the platform still records.
 
     Read as text because it is the only place the frontend's half of this decision is written
     down. Two suites want it -- one to check the two sides agree, one to scope an assertion to
@@ -83,7 +83,7 @@ def dashboard_lanes():
     )
     with open(path, encoding="utf-8") as handle:
         source = handle.read()
-    start = source.index("export const DIGITAL_THREAD_ENTITY_TYPES")
+    start = source.index("export const AUDIT_TRAIL_ENTITY_TYPES")
     end = source.index("];", start)
     table = source[start:end]
     return table, [m.groupdict() for m in _LANE_ENTRY.finditer(table)]
@@ -137,7 +137,7 @@ class AuditDomainFixture(unittest.TestCase):
             (SUBJECT_ID, self.role_id["Administrator"]),
         )
         cur.execute(
-            "SELECT id FROM public.digital_thread"
+            "SELECT id FROM public.audit_trail"
             " WHERE entity_type = 'user_roles' ORDER BY id DESC LIMIT 1;"
         )
         return cur.fetchone()[0]
@@ -228,7 +228,7 @@ class TheClassifier(AuditDomainFixture):
         recorded = [lane["table"] for lane in lanes]
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT entity_type, count(*) FROM public.digital_thread"
+                "SELECT entity_type, count(*) FROM public.audit_trail"
                 " WHERE entity_type = ANY(%s)"
                 "   AND audit_domain IS DISTINCT FROM"
                 "       public.audit_domain_for(entity_type, action)"
@@ -251,7 +251,7 @@ class TheDomainCannotBeSupplied(AuditDomainFixture):
         # than of a policy, which is the point: the trigger is what nine call sites rely on.
         with self.conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO public.digital_thread"
+                "INSERT INTO public.audit_trail"
                 " (entity_type, entity_id, action, audit_domain, actor_source)"
                 " VALUES ('service_principals', %s, 'TOKEN_MINTED', 'asset', 'service')"
                 " RETURNING audit_domain;",
@@ -271,7 +271,7 @@ class TheDomainCannotBeSupplied(AuditDomainFixture):
             row = self._security_row(cur)
             with self.assertRaises(psycopg2.errors.CheckViolation):
                 cur.execute(
-                    "UPDATE public.digital_thread SET audit_domain = 'governance' WHERE id = %s;",
+                    "UPDATE public.audit_trail SET audit_domain = 'governance' WHERE id = %s;",
                     (row,),
                 )
 
@@ -286,7 +286,7 @@ class TheActsNothingRecorded(AuditDomainFixture):
             )
             cur.execute(
                 "SELECT action, audit_domain, entity_id, new_data->>'role'"
-                "  FROM public.digital_thread WHERE entity_type = 'user_roles'"
+                "  FROM public.audit_trail WHERE entity_type = 'user_roles'"
                 " ORDER BY id DESC LIMIT 1;"
             )
             action, domain, entity_id, role = cur.fetchone()
@@ -307,7 +307,7 @@ class TheActsNothingRecorded(AuditDomainFixture):
             cur.execute("DELETE FROM public.user_roles WHERE user_id = %s;", (SUBJECT_ID,))
             cur.execute(
                 "SELECT action, audit_domain, old_data->>'role'"
-                "  FROM public.digital_thread WHERE entity_type = 'user_roles'"
+                "  FROM public.audit_trail WHERE entity_type = 'user_roles'"
                 " ORDER BY id DESC LIMIT 1;"
             )
             self.assertEqual(cur.fetchone(), ("ROLE_REVOKED", "security", "Administrator"))
@@ -322,23 +322,23 @@ class TheActsNothingRecorded(AuditDomainFixture):
                 "UPDATE public.system_settings SET label = label || ' ' WHERE key = %s;", (row[0],)
             )
             cur.execute(
-                "SELECT action, audit_domain FROM public.digital_thread"
+                "SELECT action, audit_domain FROM public.audit_trail"
                 " WHERE entity_type = 'system_settings' ORDER BY id DESC LIMIT 1;"
             )
             self.assertEqual(cur.fetchone(), ("UPDATE", "security"))
 
     def test_the_grant_carries_an_actor_source(self):
-        """`digital_thread` rows without one are unattributable, which 0005 exists to prevent."""
+        """`audit_trail` rows without one are unattributable, which 0005 exists to prevent."""
         with self.conn.cursor() as cur:
             row = self._security_row(cur)
-            cur.execute("SELECT actor_source FROM public.digital_thread WHERE id = %s;", (row,))
+            cur.execute("SELECT actor_source FROM public.audit_trail WHERE id = %s;", (row,))
             self.assertIn(cur.fetchone()[0], ("user", "service", "migration"))
 
 
 class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
 
     def _visible(self, cur, row_id):
-        cur.execute("SELECT count(*) FROM public.digital_thread WHERE id = %s;", (row_id,))
+        cur.execute("SELECT count(*) FROM public.audit_trail WHERE id = %s;", (row_id,))
         return cur.fetchone()[0] == 1
 
     def test_a_manager_cannot_read_a_role_grant(self):
@@ -360,7 +360,7 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
 
     def test_an_auditor_can_read_a_role_grant(self):
         """
-        The whole reason `Auditor` exists. It holds one permission, `digital_thread:read`, and
+        The whole reason `Auditor` exists. It holds one permission, `audit_trail:read`, and
         until 0070 did nothing a read-only Administrator could not.
         """
         with self.conn.cursor() as cur:
@@ -371,11 +371,11 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
     def test_a_manager_still_reads_the_asset_lane(self):
         """
         The refusal above must be about the LANE, not about the Manager losing the page. Their own
-        shopfloor history is the thing this role opens the Digital Thread for.
+        shopfloor history is the thing this role opens the Audit Trail for.
         """
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM public.digital_thread WHERE audit_domain = 'asset'"
+                "SELECT id FROM public.audit_trail WHERE audit_domain = 'asset'"
                 " ORDER BY id DESC LIMIT 1;"
             )
             row = cur.fetchone()
@@ -396,7 +396,7 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
                 " VALUES ('Audit_Domain_Fixture_Schema', '{}'::jsonb);"
             )
             cur.execute(
-                "SELECT id, audit_domain FROM public.digital_thread"
+                "SELECT id, audit_domain FROM public.audit_trail"
                 " WHERE entity_type = 'schemas' ORDER BY id DESC LIMIT 1;"
             )
             row_id, domain = cur.fetchone()
@@ -419,7 +419,7 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
             metric = cur.fetchone()[0]
             cur.execute("UPDATE public.metric_catalog SET deprecated = true WHERE id = %s;", (metric,))
             cur.execute(
-                "SELECT id, audit_domain FROM public.digital_thread"
+                "SELECT id, audit_domain FROM public.audit_trail"
                 " WHERE entity_type = 'metric_catalog' AND entity_id = %s AND action = 'UPDATE';",
                 (metric,),
             )
@@ -437,7 +437,7 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
         """The authority rule, asserted end to end rather than only on the classifier."""
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM public.digital_thread WHERE action = 'CREDENTIAL_ISSUED'"
+                "SELECT id FROM public.audit_trail WHERE action = 'CREDENTIAL_ISSUED'"
                 " ORDER BY id DESC LIMIT 1;"
             )
             row = cur.fetchone()
@@ -457,7 +457,7 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
             cur.execute('SET LOCAL "request.jwt.claims" = \'{"sub": "%s"}\';'
                         % "a0d17070-0000-4000-8000-00000000000e")
             self.assertFalse(self._visible(cur, row))
-            cur.execute("SELECT count(*) FROM public.digital_thread;")
+            cur.execute("SELECT count(*) FROM public.audit_trail;")
             self.assertEqual(cur.fetchone()[0], 0)
 
     def test_the_wide_policy_is_gone(self):
@@ -469,12 +469,12 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT policyname FROM pg_policies"
-                " WHERE schemaname = 'public' AND tablename = 'digital_thread'"
+                " WHERE schemaname = 'public' AND tablename = 'audit_trail'"
                 " ORDER BY policyname;"
             )
             self.assertEqual(
                 [r[0] for r in cur.fetchall()],
-                ["digital_thread_select_asset", "digital_thread_select_security"]
+                ["audit_trail_select_asset", "audit_trail_select_security"]
             )
 
 
@@ -483,8 +483,8 @@ class TheDashboardAgreesWithTheClassifier(unittest.TestCase):
     THE GUARD THAT WAS MISSING, and the reason 0120 was a bug for as long as it was.
 
     The lane a kind belongs to is written down twice, in two languages: `audit_domain_for()`
-    decides which rows PostgreSQL returns, and `DIGITAL_THREAD_ENTITY_TYPES` in constants.js
-    decides which filters the page OFFERS -- `digitalThreadEntityTypesFor()` drops the security
+    decides which rows PostgreSQL returns, and `AUDIT_TRAIL_ENTITY_TYPES` in constants.js
+    decides which filters the page OFFERS -- `auditTrailEntityTypesFor()` drops the security
     ones for a Shopfloor_Manager. Nothing compared them. `schemas` said `asset` on one side and
     took the fail-closed `security` on the other for twelve migrations, so the page offered a
     Manager a Schemas filter that the policy could only answer with an empty timeline.
@@ -515,11 +515,11 @@ class TheDashboardAgreesWithTheClassifier(unittest.TestCase):
         declared = self.table.count("kind:")
         self.assertEqual(
             len(self.entries), declared,
-            "DIGITAL_THREAD_ENTITY_TYPES declares %d lane(s) and this suite parsed %d -- the "
+            "AUDIT_TRAIL_ENTITY_TYPES declares %d lane(s) and this suite parsed %d -- the "
             "literal's shape changed, so the lanes it missed are going unchecked."
             % (declared, len(self.entries))
         )
-        self.assertGreater(declared, 0, "DIGITAL_THREAD_ENTITY_TYPES parsed as empty")
+        self.assertGreater(declared, 0, "AUDIT_TRAIL_ENTITY_TYPES parsed as empty")
 
     def test_each_lane_lands_where_the_page_says_it_will(self):
         with self.conn.cursor() as cur:

@@ -370,7 +370,7 @@ class TestLocalExtensionsCarryNoMintedId(SeedTestCase):
             "max_temp_threshold": (None, None), "safety_interlock": (None, None),
         })
 
-    def test_an_earlier_seed_s_ids_are_cleared_and_the_thread_records_it(self):
+    def test_an_earlier_seed_s_ids_are_cleared_and_the_trail_records_it(self):
         def probe(cur):
             for name in self.MINTED:
                 self.mint(cur, name)
@@ -379,7 +379,7 @@ class TestLocalExtensionsCarryNoMintedId(SeedTestCase):
             for name, minted in self.MINTED.items():
                 cur.execute(
                     "SELECT t.actor_source, t.audit_domain, t.changed_by"
-                    "  FROM public.digital_thread t JOIN public.metric_catalog c ON c.id = t.entity_id"
+                    "  FROM public.audit_trail t JOIN public.metric_catalog c ON c.id = t.entity_id"
                     " WHERE t.entity_type = 'metric_catalog' AND t.action = 'UPDATE' AND c.name = %s"
                     "   AND t.old_data ->> 'semantic_id' = %s AND t.new_data ->> 'semantic_id' IS NULL"
                     # This transaction's rows only: on a stack that booted from an earlier seed, the
@@ -390,9 +390,9 @@ class TestLocalExtensionsCarryNoMintedId(SeedTestCase):
                 rows.append((name, cur.fetchall()))
             return self.ids(cur), rows
 
-        ids, thread = self.in_transaction(probe)
+        ids, trail = self.in_transaction(probe)
         self.assertEqual(ids, {"max_temp_threshold": (None, None), "safety_interlock": (None, None)})
-        for name, rows in thread:
+        for name, rows in trail:
             with self.subTest(name=name):
                 # The platform's own act: no person, and in the lane every reader of the catalog sees.
                 self.assertEqual(rows, [("migration", "asset", None)])
@@ -410,11 +410,11 @@ class TestLocalExtensionsCarryNoMintedId(SeedTestCase):
 
     def test_a_replay_writes_nothing(self):
         def probe(cur):
-            cur.execute("SELECT count(*) FROM public.digital_thread WHERE entity_type = 'metric_catalog'")
+            cur.execute("SELECT count(*) FROM public.audit_trail WHERE entity_type = 'metric_catalog'")
             before = cur.fetchone()[0]
             cur.execute(self.migration_sql())
             cur.execute(self.migration_sql())
-            cur.execute("SELECT count(*) FROM public.digital_thread WHERE entity_type = 'metric_catalog'")
+            cur.execute("SELECT count(*) FROM public.audit_trail WHERE entity_type = 'metric_catalog'")
             return before, cur.fetchone()[0], self.ids(cur)
 
         before, after, ids = self.in_transaction(probe)

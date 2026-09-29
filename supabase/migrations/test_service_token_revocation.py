@@ -71,7 +71,7 @@ def get_connection():
 def ensure_auth_user(cur, user_id, label, with_email=False):
     """
     Make `user_id` exist in `auth.users`. Same helper, same reasoning, as the other RLS suites:
-    `log_digital_thread_event()` writes `changed_by = auth.uid()` under a foreign key to
+    `log_audit_trail_event()` writes `changed_by = auth.uid()` under a foreign key to
     `auth.users`, so a fixture that fakes a session without an account fails on the AUDIT insert.
 
     THE SUBJECT NEEDS IT FOR A SECOND REASON HERE. record_service_token_issued() reads
@@ -109,7 +109,7 @@ def ensure_auth_user(cur, user_id, label, with_email=False):
         except psycopg2.Error:
             cur.execute("ROLLBACK TO SAVEPOINT ensure_user;")
     raise RuntimeError(
-        f"could not create auth.users row {user_id}; digital_thread.changed_by is an FK to it, "
+        f"could not create auth.users row {user_id}; audit_trail.changed_by is an FK to it, "
         "so the tests that act as this user cannot run"
     )
 
@@ -377,7 +377,7 @@ class ServiceTokenRevocation(unittest.TestCase):
             # Recorded directly: record_service_token_issued() refuses a past expiry, which is its
             # job, so the row this needs cannot be made through the front door.
             cur.execute(
-                "INSERT INTO public.digital_thread"
+                "INSERT INTO public.audit_trail"
                 " (entity_type, entity_id, action, new_data, actor_source, audit_domain)"
                 " VALUES ('service_principals', %s::uuid, 'TOKEN_MINTED',"
                 "         jsonb_build_object('jti', %s, 'expires_at', now() - interval '1 day'),"
@@ -435,7 +435,7 @@ class ServiceTokenRevocation(unittest.TestCase):
             cur.execute("RESET ROLE;")
             cur.execute(
                 "SELECT action, audit_domain, changed_by, actor_source, new_data, old_data"
-                " FROM public.digital_thread WHERE action = 'TOKEN_REVOKED'"
+                " FROM public.audit_trail WHERE action = 'TOKEN_REVOKED'"
                 "   AND new_data ->> 'jti' = %s;", (jti,)
             )
             row = cur.fetchone()

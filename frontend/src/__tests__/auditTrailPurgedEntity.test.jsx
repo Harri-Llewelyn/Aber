@@ -1,9 +1,9 @@
 /**
- * Digital Thread: naming an entity the live lookups cannot, and the SCHEMA_REJECTION event class.
- * `digital_thread` holds only `entity_id`, so the page joins client-side against the live lists,
+ * Audit Trail: naming an entity the live lookups cannot, and the SCHEMA_REJECTION event class.
+ * `audit_trail` holds only `entity_id`, so the page joins client-side against the live lists,
  * and that join cannot resolve a hard-purged entity -- nor one of a kind nothing fetches at all.
  * The fallback reads an ordered list of identity fields out of the audit payload, SHARED WITH
- * `digital_thread_page()`'s `p_search` (0115): a field in one and not the other is a lane you can
+ * `audit_trail_page()`'s `p_search` (0115): a field in one and not the other is a lane you can
  * see and cannot search for, or a row you can find and cannot identify. The CSV export is tested
  * separately from the lane label because they are separate code.
  */
@@ -14,7 +14,7 @@ import {
   resolveLaneName,
   classifyEvent,
   diffFields,
-} from '../components/tabs/DigitalThreadTab'
+} from '../components/tabs/AuditTrailTab'
 
 const purgedDeviceDelete = {
   event_id: 9, entity_type: 'devices', entity_id: 'dev-gone', event_type: 'DELETE',
@@ -66,9 +66,9 @@ describe('snapshotIdentity', () => {
   })
 
   it('falls back to a setting key when there is no label', () => {
-    const event = { new_data: { key: 'ui.digital_thread_poll_seconds' }, old_data: null }
+    const event = { new_data: { key: 'ui.audit_trail_poll_seconds' }, old_data: null }
     expect(snapshotIdentity(event))
-      .toEqual({ label: 'ui.digital_thread_poll_seconds', field: 'key' })
+      .toEqual({ label: 'ui.audit_trail_poll_seconds', field: 'key' })
   })
 
   it('names a backup by its stamp, which is what the Backups page calls one', () => {

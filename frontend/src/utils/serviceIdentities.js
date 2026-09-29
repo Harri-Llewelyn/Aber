@@ -194,7 +194,7 @@ const PERMISSION_REACH = {
     + 'read both, so this grant records what the identity is for rather than opening anything.',
   'quarantine:view': 'Sees the onboarding quarantine queue, which any identity with a valid token '
     + 'can read. It cannot approve or reject a device: quarantine decisions are made by people.',
-  'digital_thread:read': 'Reads the Digital Thread’s asset lane (every attributed change to the '
+  'audit_trail:read': 'Reads the Audit Trail’s asset lane (every attributed change to the '
     + 'shopfloor’s assets, schemas, metrics and proposals) and the record of deleted assets. Not '
     + 'the security lane: credentials, tokens and role changes.',
   'archive:manage': 'Reads the record of assets that were archived and then deleted. Archiving '

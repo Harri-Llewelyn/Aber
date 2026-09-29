@@ -47,7 +47,7 @@ deploy/helm/**/*.tgz
 ingestion/*_pb2.py
 
 # Logical backups written by scripts/backup-databases.sh. These are FULL DATABASE DUMPS -- they
-# contain auth.users, hashed OAuth client secrets and the whole digital_thread. Never commit one.
+# contain auth.users, hashed OAuth client secrets and the whole audit_trail. Never commit one.
 backups/
 *.sql.gz
 *.dump

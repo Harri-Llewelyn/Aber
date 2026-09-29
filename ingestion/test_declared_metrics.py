@@ -170,7 +170,7 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
 
     def test_no_write_when_the_declared_set_is_unchanged(self):
         """
-        The point of the change check: log_digital_thread_event() fires on every UPDATE to
+        The point of the change check: log_audit_trail_event() fires on every UPDATE to
         `devices`, so an unchanged rewrite on each rebirth would append an audit row every
         time to a table that is deliberately append-only.
         """
@@ -497,7 +497,7 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
     """
     A device that stops publishing writes nothing and emits no DDEATH, so without a watchdog it
     stays ONLINE forever. The hard constraint is that this must not become an audit-row generator:
-    log_digital_thread_event() fires on every UPDATE to `devices`.
+    log_audit_trail_event() fires on every UPDATE to `devices`.
     """
 
     DEVICE = {"id": "dev-uuid-1", "name": "Robot_01", "sparkplug_id": "dev" + "1" * 21}

@@ -5,7 +5,7 @@ import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
-import { DIGITAL_THREAD_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
+import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
 import {
@@ -350,7 +350,7 @@ async function queryTelemetryHorizons() {
   }
 }
 
-const mapDigitalThreadRow = (t) => ({
+const mapAuditTrailRow = (t) => ({
   ...t,
   event_id: t.id || t.event_id,
   timestamp: t.recorded_at || t.timestamp,
@@ -721,7 +721,7 @@ const apiMethods = {
    * Principal id -> `{ name, purpose, created_by, created_at }` from `machine_principals` (0125).
    *
    * Administrator and Auditor at the database, matching `list_user_accounts()`: a name here labels
-   * digital-thread rows both roles may read. Empty for anybody else.
+   * audit-trail rows both roles may read. Empty for anybody else.
    */
   listMachinePrincipalNames: async () => {
     const { data, error } = await supabase
@@ -736,7 +736,7 @@ const apiMethods = {
    *
    * Through `list_user_accounts()` (0116) for the reason `listServicePrincipals()` goes through an
    * RPC: `auth.users` is not served by PostgREST. Administrator and Auditor only, matching the
-   * policy on the digital_thread rows these names label -- so a caller who may not ask is REFUSED
+   * policy on the audit_trail rows these names label -- so a caller who may not ask is REFUSED
    * rather than given an empty list, and the caller must treat a rejection as "not allowed to
    * know" rather than as "nobody is registered".
    */
@@ -819,12 +819,12 @@ const apiMethods = {
    *
    * All of them, not the latest per principal: a re-mint does not invalidate the previous token,
    * so two mints are two live credentials. tokenStatus() counts the unexpired ones. Only
-   * TOKEN_MINTED rows and only the columns the status derivation reads, since `digital_thread`
+   * TOKEN_MINTED rows and only the columns the status derivation reads, since `audit_trail`
    * cannot be pruned.
    */
   listServiceTokens: async () => {
     const { data, error } = await supabase
-      .from('digital_thread')
+      .from('audit_trail')
       .select('entity_id,recorded_at,new_data')
       .eq('action', 'TOKEN_MINTED')
       .eq('entity_type', 'service_principals')
@@ -908,7 +908,7 @@ const apiMethods = {
    * Through `create_machine_principal()` (0125, 0013), which is SECURITY DEFINER and checks
    * has_role() itself. It takes permissions from an allow-list, not a role, so widening `Operator`
    * does not widen the identity. Machines propose, people decide: four reads (`telemetry:read`,
-   * `quarantine:view`, `digital_thread:read`, `archive:manage`) and two writes
+   * `quarantine:view`, `audit_trail:read`, `archive:manage`) and two writes
    * (`proposal:create`, `schema:manage`). Anything else is refused, and the message thrown gives
    * the reason. No token is issued here: the identity reaches nothing until `mintServiceToken()`
    * signs one, which the page offers next.
@@ -947,7 +947,7 @@ const apiMethods = {
    * Every gateway with what the platform knows about its broker credential.
    *
    * Two reads, not a join: `gateway_status` carries `enrolled_at` and `credential_revoked_at`
-   * for a remote gateway; a host-run one has only the CREDENTIAL_ISSUED row in `digital_thread`,
+   * for a remote gateway; a host-run one has only the CREDENTIAL_ISSUED row in `audit_trail`,
    * whose `entity_id` carries no foreign key by design. Only CREDENTIAL_ISSUED rows are selected
    * and only the newest per gateway is kept.
    */
@@ -961,7 +961,7 @@ const apiMethods = {
         .select('id,name,sparkplug_id,deployment,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
         .order('name'),
       supabase
-        .from('digital_thread')
+        .from('audit_trail')
         .select('entity_id,recorded_at,changed_by')
         .eq('action', 'CREDENTIAL_ISSUED')
         .eq('entity_type', 'gateways')
@@ -970,7 +970,7 @@ const apiMethods = {
 
     if (gatewaysRes.error) throw new Error(gatewaysRes.error.message || 'Could not read gateways');
 
-    // AN AUDIT READ THAT FAILS IS NOT FATAL. `digital_thread:read` is a separate permission, and a
+    // AN AUDIT READ THAT FAILS IS NOT FATAL. `audit_trail:read` is a separate permission, and a
     // caller without it should still see the gateway inventory -- with every host-run gateway
     // reading `No platform record`, which is exactly what that state means from where they stand.
     const issuedBy = new Map();
@@ -1478,7 +1478,7 @@ const apiMethods = {
    * Held and current are different facts: the broker keeps one password per gateway, so every mint
    * after the first replaces one, and the reported id set does not change when it does.
    *
-   * Server-side, because the comparison is against `digital_thread`, which the dialog has no
+   * Server-side, because the comparison is against `audit_trail`, which the dialog has no
    * business reading.
    */
   playbackStaleCredentials: async () => {
@@ -1584,10 +1584,10 @@ const apiMethods = {
   },
 
   get: async (path, _options = {}) => {
-    const entityDigitalThreadMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/digital-thread/);
-    if (entityDigitalThreadMatch) {
-      const rawEntityType = entityDigitalThreadMatch[1];
-      const entityId = entityDigitalThreadMatch[2];
+    const entityAuditTrailMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/audit-trail/);
+    if (entityAuditTrailMatch) {
+      const rawEntityType = entityAuditTrailMatch[1];
+      const entityId = entityAuditTrailMatch[2];
       const SINGULAR_MAP = { cells: 'cell', gateways: 'gateway', devices: 'device', assets: 'device' };
       const singularType = SINGULAR_MAP[rawEntityType] || rawEntityType.replace(/s$/, '');
 
@@ -1598,7 +1598,7 @@ const apiMethods = {
       const ALSO_ABOUT = { device: ['device_nameplate'], devices: ['device_nameplate'] };
       const alsoAbout = new Set(ALSO_ABOUT[singularType] || []);
 
-      let query = supabase.from('digital_thread').select('*').eq('entity_id', entityId);
+      let query = supabase.from('audit_trail').select('*').eq('entity_id', entityId);
       const { data, error } = await query.order('recorded_at', { ascending: false });
       if (error) throw error;
 
@@ -1609,12 +1609,12 @@ const apiMethods = {
           || alsoAbout.has(et);
       });
 
-      return filtered.map(mapDigitalThreadRow);
+      return filtered.map(mapAuditTrailRow);
     }
 
     /**
      * The tombstones: rows that were archived and then deleted, one per entity, written by the
-     * database on the DELETE and readable by whoever may read the page or the thread's asset
+     * database on the DELETE and readable by whoever may read the page or the trail's asset
      * lane. Each carries the exports taken of it while it was alive, so the page can offer the
      * download after the row is gone.
      */
@@ -1626,7 +1626,7 @@ const apiMethods = {
       if (error) throw error;
       const rows = data || [];
       // Tolerated: the exports table is readable by the three bucket roles, and a reader admitted
-      // to the tombstones by `digital_thread:read` alone sees them without their downloads.
+      // to the tombstones by `audit_trail:read` alone sees them without their downloads.
       const { data: exportRows } = await supabase
         .from('asset_exports')
         .select('*')
@@ -1876,16 +1876,16 @@ const apiMethods = {
       }));
     }
 
-    if (path.includes('/digital-thread')) {
+    if (path.includes('/audit-trail')) {
       // Every one of these parameters was previously parsed by the caller, appended to the path,
-      // and then dropped on the floor here -- the Digital Thread tab's entity dropdown, search box
+      // and then dropped on the floor here -- the Audit Trail tab's entity dropdown, search box
       // and row limit all had no effect at all. They are honoured now.
       const url = new URL(path, window.location.origin);
       const entityType = url.searchParams.get('entity_type');
       // Pushed down as a SQL predicate (0115), matching the entity id and the audit-snapshot fields
       // the timeline labels a lane from. It used to be resolved in the tab against the LIVE tables
       // and sent as `entity_ids`, so searching for something deleted sent an empty list and drew an
-      // empty thread.
+      // empty trail.
       const search = (url.searchParams.get('search') || '').trim();
       const entityIds = url.searchParams.has('entity_ids')
         ? url.searchParams.get('entity_ids').split(',').filter(Boolean)
@@ -1907,7 +1907,7 @@ const apiMethods = {
       const hasCursor = beforeRecordedAt !== '' && beforeId !== '';
 
       // An EMPTY list must return nothing rather than everything -- "these ids, of which there are
-      // none" is not "no filter". The Digital Thread page no longer sends this: it asks the
+      // none" is not "no filter". The Audit Trail page no longer sends this: it asks the
       // database to match the name (`search` above) rather than resolving one to ids here, which is
       // what stopped a deleted entity being unsearchable. The parameter is kept because it is the
       // right primitive for "this entity's history" and `p_search` cannot express an exact set.
@@ -1915,17 +1915,17 @@ const apiMethods = {
 
       // The deleted-asset filter is a predicate, not a post-filter, which is why this is an RPC:
       // "still exists" is an anti-join against three tables, and a filter applied after the limit
-      // pages through mixed rows and shows whichever fraction survived. `digital_thread_page()` also
+      // pages through mixed rows and shows whichever fraction survived. `audit_trail_page()` also
       // returns the purged count, which drives the control that reveals them.
       const includePurged = url.searchParams.get('include_purged') === 'true';
 
-      if (action && !Object.prototype.hasOwnProperty.call(DIGITAL_THREAD_ACTIONS, action)) {
+      if (action && !Object.prototype.hasOwnProperty.call(AUDIT_TRAIL_ACTIONS, action)) {
         // An action the client does not know about. Refusing beats widening: returning every row
         // for an unrecognised filter is how a caller ends up believing it has seen a filtered set.
         return [];
       }
 
-      const { data, error } = await supabase.rpc('digital_thread_page', {
+      const { data, error } = await supabase.rpc('audit_trail_page', {
         p_limit: Number.isFinite(limit) && limit > 0 ? limit : 200,
         p_include_purged: includePurged,
         // Normalised to the stored form: the trigger writes TG_TABLE_NAME ('cells' / 'gateways' /
@@ -1955,7 +1955,7 @@ const apiMethods = {
       // searched the id by a longer route, and no caller ever sent the parameter that reached it.
       // A filter applied after the page also makes `rows.length` say nothing about whether the
       // database had more, which is why `next_cursor` is the only end-of-data signal.
-      const rows = (payload.events || []).map(mapDigitalThreadRow);
+      const rows = (payload.events || []).map(mapAuditTrailRow);
 
       // The array is still the return value, with the page-level facts attached to it, so
       // `.length`, `.map`, destructuring and bare-array mocks keep working.
@@ -2672,7 +2672,7 @@ const apiMethods = {
     }
 
     /**
-     * The per-asset bundle: the AASX with the device's thread, its live telemetry and a manifest
+     * The per-asset bundle: the AASX with the device's trail, its live telemetry and a manifest
      * naming the cold objects, stored beside the cold tier and recorded in `asset_exports` by the
      * function. Fetched directly for the reason the AASX path is: the body is a ZIP. The counts,
      * and whether the copy was stored, ride in the same header.

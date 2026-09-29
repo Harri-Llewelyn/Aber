@@ -1,5 +1,5 @@
 /**
- * Digital Thread: events too close together to draw separately are collapsed into a badge carrying
+ * Audit Trail: events too close together to draw separately are collapsed into a badge carrying
  * the count. What must stay true: x is untouched, since a badge sits at the mean of its members'
  * positions and the time axis keeps telling the truth; the causation signal survives, stated as
  * "One transaction" when every member shares a causation_id; and the threshold is in pixels, so
@@ -10,8 +10,8 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  DigitalThreadTab, clusterEvents, clusterSummary, CLUSTER_GAP_PX
-} from '../components/tabs/DigitalThreadTab'
+  AuditTrailTab, clusterEvents, clusterSummary, CLUSTER_GAP_PX
+} from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 
 const WIDTH = 1000
@@ -123,7 +123,7 @@ describe('width is measured, and an unmeasured track groups nothing', () => {
 
 describe('order is decided by position, not by the order events arrived', () => {
   it('reads the same whichever way the API returned them', () => {
-    // `/api/v1/digital-thread` returns newest first.
+    // `/api/v1/audit-trail` returns newest first.
     const forward = at(0.5, 0.5005, 0.501)
     const backward = [...forward].reverse()
 
@@ -250,7 +250,7 @@ describe('the component draws the badges', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.get.mockImplementation((path) => {
-      if (path.startsWith('/api/v1/digital-thread')) {
+      if (path.startsWith('/api/v1/audit-trail')) {
         /* The range control is honoured: the window is a query parameter, so a narrower range
            returns fewer rows, which shrinks the domain and spreads a burst. A mock that ignored
            `since` would make that test a no-op. */
@@ -282,7 +282,7 @@ describe('the component draws the badges', () => {
   const fractionOf = (left) => Number(/([\d.e-]+)\s*\*|\*\s*([\d.e-]+)/.exec(left)?.slice(1).find(Boolean) ?? NaN)
 
   const draw = async () => {
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
     await waitFor(() => expect(badges()).toHaveLength(1))
   }

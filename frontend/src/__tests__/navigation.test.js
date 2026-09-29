@@ -45,11 +45,11 @@ describe('the groups', () => {
   })
 
   /**
-   * The placements pinned so they are not re-litigated by accident. Digital Thread traces cells,
+   * The placements pinned so they are not re-litigated by accident. Audit Trail traces cells,
    * gateways and devices equally, so it is filed by tense with Capture rather than beside Devices.
    */
-  it('files Digital Thread by tense rather than by subject', () => {
-    expect(TABS.find(t => t.id === 'digital-thread').group).toBe('history')
+  it('files Audit Trail by tense rather than by subject', () => {
+    expect(TABS.find(t => t.id === 'audit-trail').group).toBe('history')
   })
 
   /**
@@ -161,24 +161,24 @@ describe('the page id lists agree', () => {
     const tab = (id) => TABS.find(t => t.id === id)
     const holding = (...ids) => (uuid) => ids.includes(uuid)
 
-    it('hides the Digital Thread from a role without digital_thread:read', () => {
-      // The Operator dead end: `digital_thread` has its own RLS and returns no rows without the
+    it('hides the Audit Trail from a role without audit_trail:read', () => {
+      // The Operator dead end: `audit_trail` has its own RLS and returns no rows without the
       // permission, so the page rendered an empty table.
-      expect(tabIsVisible(tab('digital-thread'), holding(PERMISSION_UUIDS.PROPOSAL_CREATE), 'Operator')).toBe(false)
+      expect(tabIsVisible(tab('audit-trail'), holding(PERMISSION_UUIDS.PROPOSAL_CREATE), 'Operator')).toBe(false)
     })
 
     it('shows it to the three roles the policy admits', () => {
-      const canRead = holding(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+      const canRead = holding(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
       for (const role of ['Administrator', 'Shopfloor_Manager', 'Auditor']) {
-        expect(tabIsVisible(tab('digital-thread'), canRead, role), role).toBe(true)
+        expect(tabIsVisible(tab('audit-trail'), canRead, role), role).toBe(true)
       }
     })
 
     it('gates it on the permission rather than on a list of role names', () => {
       // One predicate deciding visibility and access: a role list here would be a second opinion
       // beside the RLS policy.
-      expect(tab('digital-thread').permission).toBe(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
-      expect(tab('digital-thread').role).toBeUndefined()
+      expect(tab('audit-trail').permission).toBe(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
+      expect(tab('audit-trail').role).toBeUndefined()
     })
   })
 })

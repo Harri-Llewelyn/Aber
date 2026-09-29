@@ -231,7 +231,7 @@ HELP = {
     "aber_ingestion_device_state_writes_skipped_total":
         "Device state writes suppressed because nothing had changed.",
     "aber_ingestion_payload_violations_recorded_total":
-        "DDATA payloads recorded in digital_thread as failing schema validation.",
+        "DDATA payloads recorded in audit_trail as failing schema validation.",
     "aber_ingestion_payload_violations_suppressed_total":
         "Repeat violations not re-recorded, because the signature was unchanged.",
     "aber_ingestion_payload_violation_write_failures_total":

@@ -716,7 +716,7 @@ html, body, #root {
   color: var(--text-muted);
 }
 
-/* A finding above the results rather than instead of them: an id always has the Digital Thread
+/* A finding above the results rather than instead of them: an id always has the Audit Trail
    row to offer, so this says what the asset probes did not find and leaves the row to speak. */
 .global-search-note {
   padding: 9px 12px;
@@ -3516,14 +3516,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border: 0;
 }
 
-/* Digital Thread swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
+/* Audit Trail swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
 /* The page fills the viewport instead of growing past it, so the timeline can scroll inside the
    card and the axis row can pin to the top of that scroll. A chain of flex columns from here down
    to .dt-scroll: every link may shrink, and everything beside the scroller -- the card header, the
    filter bar, the header row, the lane toggle, the foot -- is told not to. A maximum rather than a
-   height, so a short thread gets a short card. */
+   height, so a short trail gets a short card. */
 .dt-page { height: 100%; }
 
 .dt-page > .page-main {
@@ -3587,7 +3587,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   flex-shrink: 0;
 }
 
-/* How much of the thread is on screen. Shares one row with the legend: the count at the left, the
+/* How much of the trail is on screen. Shares one row with the legend: the count at the left, the
    key at the right. A tier above the muted legend beside it, which is what stops it reading as part
    of the key. Tabular figures so the numbers do not shuffle sideways as the poll and Load more
    change them under a reader's eye. */
@@ -3932,7 +3932,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 0 5px;
 }
 
-/* The foot of the timeline, present only when the thread continues past what is loaded or ended
+/* The foot of the timeline, present only when the trail continues past what is loaded or ended
    at a page boundary. Separated by a rule, because it makes a claim about the data above it. */
 .dt-pagination {
   display: flex;
@@ -4080,7 +4080,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--text-muted);
 }
 
-/* ===== Digital Thread: the diff inspector inside the drawer ===== */
+/* ===== Audit Trail: the diff inspector inside the drawer ===== */
 .dt-diff { margin-top: 14px; }
 
 .dt-diff-none {
@@ -4194,7 +4194,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   font-family: inherit;
 }
 
-/* ===== Digital Thread: the raw payload accordion ===== */
+/* ===== Audit Trail: the raw payload accordion ===== */
 .dt-raw { margin-top: 4px; }
 
 .dt-raw-summary {

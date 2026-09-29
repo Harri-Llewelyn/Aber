@@ -673,10 +673,10 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # Digital Thread Partitions Falling Behind: rows in the DEFAULT partition, for 30m. The view
+      # Audit Trail Partitions Falling Behind: rows in the DEFAULT partition, for 30m. The view
       # always returns one row, so an empty frame is the datasource.
-      - uid: aber-digital-thread-partitions
-        title: Digital Thread Partitions Falling Behind
+      - uid: aber-audit-trail-partitions
+        title: Audit Trail Partitions Falling Behind
         condition: C
         for: 30m
         noDataState: OK
@@ -686,10 +686,10 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            {{ printf "%.0f" $values.B.Value }} audit row(s) have landed in the digital_thread
+            {{ printf "%.0f" $values.B.Value }} audit row(s) have landed in the audit_trail
             DEFAULT partition, so the monthly partition job has stopped. Nothing is lost and
             nothing is refused, but retention by DETACH will skip these rows. Run
-            SELECT public.ensure_digital_thread_partitions(3); and check cron.job_run_details.
+            SELECT public.ensure_audit_trail_partitions(3); and check cron.job_run_details.
         data:
           - refId: A
             relativeTimeRange:
@@ -707,7 +707,7 @@ groups:
               rawSql: |
                 SELECT now()        AS "time",
                        default_rows AS default_partition_rows
-                  FROM public.digital_thread_partition_health
+                  FROM public.audit_trail_partition_health
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1931,3 +1931,8 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
+
+deleteRules:
+  # The partitions rule's uid before the page was renamed; a Grafana that loaded it drops it.
+  - orgId: 1
+    uid: aber-digital-thread-partitions

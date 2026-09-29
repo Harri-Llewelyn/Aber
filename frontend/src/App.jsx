@@ -65,7 +65,7 @@ const AreasTab         = lazy(() => import('./components/tabs/AreasTab').then(m 
 const CellsTab         = lazy(() => import('./components/tabs/CellsTab').then(m => ({ default: m.CellsTab })))
 const GatewaysTab      = lazy(() => import('./components/tabs/GatewaysTab').then(m => ({ default: m.GatewaysTab })))
 const DevicesTab       = lazy(() => import('./components/tabs/DevicesTab').then(m => ({ default: m.DevicesTab })))
-const DigitalThreadTab = lazy(() => import('./components/tabs/DigitalThreadTab').then(m => ({ default: m.DigitalThreadTab })))
+const AuditTrailTab = lazy(() => import('./components/tabs/AuditTrailTab').then(m => ({ default: m.AuditTrailTab })))
 // Reached only via GoTrue's OAuth redirect, so it is never in the main bundle's critical path.
 const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
@@ -381,8 +381,8 @@ function Dashboard({ session, onSignOut }) {
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
   // Set by the search bar; consumed by SettingsTab, which opens that setting's category on it.
   const [selectedSettingKey, setSelectedSettingKey] = useState('')
-  // Set by a "Digital Thread" action on an asset row; consumed by DigitalThreadTab as { id, type }.
-  const [selectedThreadEntity, setSelectedThreadEntity] = useState(null)
+  // Set by an "Audit Trail" action on an asset row; consumed by AuditTrailTab as { id, type }.
+  const [selectedTrailEntity, setSelectedTrailEntity] = useState(null)
   // Set by Use on the Vocabulary page; consumed by MetricsTab, which resolves it against the
   // vocabularies it already holds and opens its Add Metric form.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
@@ -392,7 +392,7 @@ function Dashboard({ session, onSignOut }) {
 
   const { tab, setTab, handleNavClick } = useAppRouting(
     setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
-    setSelectedThreadEntity, setPendingVocabularyEntry, setSelectedAreaFilter
+    setSelectedTrailEntity, setPendingVocabularyEntry, setSelectedAreaFilter
   )
 
   /**
@@ -400,9 +400,9 @@ function Dashboard({ session, onSignOut }) {
    * is a tombstone's handover: the entity is gone from the live tables, so the page shows deleted
    * entities rather than hiding every row of it.
    */
-  const viewThreadFor = (id, type, purged = false) => {
-    setSelectedThreadEntity({ id, type, purged })
-    setTab('digital-thread', { entity: id })
+  const viewTrailFor = (id, type, purged = false) => {
+    setSelectedTrailEntity({ id, type, purged })
+    setTab('audit-trail', { entity: id })
   }
 
   /**
@@ -536,9 +536,9 @@ function Dashboard({ session, onSignOut }) {
           onSelectArea={showArea}
           onSelectSchema={showSchema}
           onSelectSetting={showSetting}
-          /* No type: the search knows the id and not what it belongs to, and the thread's own
+          /* No type: the search knows the id and not what it belongs to, and the trail's own
              search matches an entity id whatever kind carries it. */
-          onSelectThread={(id) => viewThreadFor(id, '')}
+          onSelectTrail={(id) => viewTrailFor(id, '')}
         />
 
         {/* The right-hand side holds the two controls whose values move, the alert pill and the
@@ -612,17 +612,17 @@ function Dashboard({ session, onSignOut }) {
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-            {tab === 'areas'          && <AreasTab showToast={showToast} onViewThread={a => viewThreadFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
-            {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+            {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
-            {tab === 'digital-thread' && hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ) && (
-              <DigitalThreadTab
+            {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
+              <AuditTrailTab
                 userRole={userRole}
-                initialEntity={selectedThreadEntity}
-                onClearEntity={() => setSelectedThreadEntity(null)}
+                initialEntity={selectedTrailEntity}
+                onClearEntity={() => setSelectedTrailEntity(null)}
                 showToast={showToast}
               />
             )}
@@ -639,13 +639,13 @@ function Dashboard({ session, onSignOut }) {
               onOpenSubject={openProposalSubject}
               /* The proposal's subject, not the proposal: the page names its kind and whether it
                  was deleted, as the Archived Entities page does. */
-              onViewThread={t => viewThreadFor(t.id, t.type, t.purged)} />}
+              onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` is passed on because the page distinguishes read-only Auditor from the
                 roles that can record. */}
             {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewThread={t => viewThreadFor(t.id, t.type, t.purged)} />}
+            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}

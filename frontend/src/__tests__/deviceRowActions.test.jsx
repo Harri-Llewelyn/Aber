@@ -79,7 +79,7 @@ describe('device row actions', () => {
     expect(inRow().queryByText('Telemetry')).not.toBeInTheDocument()
     expect(openPanel().getByText('View Realtime Telemetry')).toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
-    expect(inRow().queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
     expect(document.querySelector('[data-testid^="device-actions-"]')).toBeNull()
   })
@@ -88,7 +88,7 @@ describe('device row actions', () => {
     await show([device()])
 
     const labels = panelLabels()
-    for (const expected of [/Digital Thread/i, /Configuration Parameters/i,
+    for (const expected of [/Audit Trail/i, /Configuration Parameters/i,
       /Export AAS JSON/i, /Export AASX package/i, /Archive Device/i,
       /Digital Nameplate/i, /Realtime Telemetry/i, /Edit Details/i]) {
       expect(labels).toMatch(expected)
@@ -126,9 +126,9 @@ describe('device row actions', () => {
     expect(btn(/Export AAS JSON/i).disabled).toBe(false)
     expect(btn(/Configuration Parameters/i).disabled).toBe(false)
 
-    // The audit trace is withdrawn, not disabled: without `digital_thread:read` the page returns no
+    // The audit trace is withdrawn, not disabled: without `audit_trail:read` the page returns no
     // rows rather than an error, and the nav hides it from this reader entirely.
-    expect(panel.queryByText(/Digital Thread/i)).toBeNull()
+    expect(panel.queryByText(/Audit Trail/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {

@@ -123,6 +123,13 @@ data comes by backup, reinstall and restore, and the restored database is what t
 | The vault secret and psql variable `supabase_anon_key`, which held the publishable key | `supabase_publishable_key` | Nothing. `0002` rewrites the secret from db-init's variable on every boot and deletes the old name. A migration runner of your own that passes `-v supabase_anon_key=` passes the new name instead, or credential revocation and the forge sweep go inert. |
 | The dev cluster `k3d-acs-cymru` and the development credentials in `values-dev.yaml` (`sb_publishable_acscymru_dev_…`, `acscymru-ingest-writer`, `acscymrusecret`, …) | `k3d-aber`, `…aber…` | Development only. `k3d cluster delete acs-cymru`, then `npm run dev:up` creates `aber`. The Node-RED credential secret changed, so a dev cluster that keeps its volume needs `npm run dev:reset`. |
 | The Storage bucket `floor-plans`, its policies `floor_plans_*` and the path check `is_floor_plan_path()`; in the dashboard `FloorPlan.jsx`, `FloorPlacementPicker.jsx`, `utils/floorPlans.js`, the `.floor-plan*`, `.floor-pin*` and `.floor-placement*` classes, and `api.uploadFloorPlan`, `removeFloorPlan` and `loadFloorPlanUrl` | `area-plans`, `area_plans_*`, `is_area_plan_path()`; `AreaPlan.jsx`, `CellPlacementPicker.jsx`, `utils/areaPlans.js`, `.area-plan*`, `uploadAreaPlan`, `removeAreaPlan`, `loadAreaPlanUrl` | Nothing. `storage-policies.sql` replaces the four policies and drops the old check, and `storage-init.mjs` creates `area-plans`, moves every plan into it under the same key and deletes `floor-plans`. `areas.plan_path` holds only the key, so no row changes. A restored backup that still holds `floor-plans` is moved the same way by the next `helm upgrade`, and until then the Site Map draws the default outline and says the plan could not be loaded. A script of your own that read plans from `floor-plans` names `area-plans`. |
+| The dashboard page *Digital Thread*, its route `/digital-thread` and the words on every page that link to it | *Audit Trail*, `/audit-trail` | Nothing. A bookmark or a shared link to `/digital-thread` opens the Audit Trail and the address is rewritten. |
+| The audit table `digital_thread`: its partitions `digital_thread_default` and `digital_thread_YYYY_MM`, its sequence, indexes, constraints and policies, the view `digital_thread_partition_health`, the functions `digital_thread_page()`, `log_digital_thread_event()`, `ensure_digital_thread_partition(s)()`, `secure_digital_thread_partition()`, `enforce_digital_thread_append_only()`, `digital_thread_user_ids_matching()` and `digital_thread_backup_job_ids_matching()`, the `trg_*_digital_thread` triggers and the nightly job `digital_thread_partitions` | `audit_trail`, `audit_trail_*` throughout | Nothing in the database: `0000` renames the table and every partition, index and constraint on the first boot, so every row keeps its id; it drops the functions, triggers, policies, view and job under the old names and the baseline declares them under the new ones. A backup from before the rename is renamed the same way on the boot after its restore. A query, report or PostgREST call of your own that reads `/rest/v1/digital_thread` or `/rest/v1/rpc/digital_thread_page` names the new ones. |
+| The columns `change_proposals.applied_thread_id` and `retired_entities.thread_id`, and the `thread_id` key `approve_proposal()` returns | `applied_trail_id`, `trail_id` | Nothing in the database: `0000` renames both columns in place. A caller of your own that reads them reads the new names. |
+| The permission `digital_thread:read` | `audit_trail:read`, the same id (`d345e678-…-933e08544e42`) | Nothing. `0000` renames the row, so every role and machine identity that held it still does. A script of your own that grants the permission to a machine identity by name names the new one. |
+| The setting `ui.digital_thread_poll_seconds`, under the Settings category *Digital Thread* | `ui.audit_trail_poll_seconds`, under *Audit Trail* | Nothing. A settings key cannot be renamed, so `0000` copies the value to the new key and deletes the old row. |
+| The alert rule uid `aber-digital-thread-partitions`, titled *Digital Thread Partitions Falling Behind* | `aber-audit-trail-partitions`, *Audit Trail Partitions Falling Behind* | Nothing. The rules file names the old uid under `deleteRules`, so a Grafana that loaded it drops it. A silence or a notification route of your own that matched the old title matches the new one. |
+| The AAS bundle's part `aasx/files/aber/digital-thread.json`, its manifest key `digital_thread`, the `thread_rows` count in `X-AAS-Stats`, the manifest schema id `aber/asset-bundle/1`, and the cap `ASSET_EXPORT_MAX_THREAD_ROWS` | `audit-trail.json`, `audit_trail`, `trail_rows`, `aber/asset-bundle/2`, `ASSET_EXPORT_MAX_TRAIL_ROWS` | A consumer that unpacks a bundle by path reads the new part, and the schema id tells the two layouts apart. Bundles exported before 1.0 keep the old layout and the old id. An override of the cap in your own environment names the new variable. |
 
 **A development forge that already tagged `v0.1.0` holds other content under that tag.** The
 platform playbook has changed since a development forge first published it (the appliance flow's
@@ -256,10 +263,10 @@ bash scripts/restore-databases.sh         # the other half
 ```
 
 **Restore is a runbook, not a button** — [`supabase/README.md`](../supabase/README.md) §*Backup and
-Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `digital_thread`, so
+Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `audit_trail`, so
 the bytes are deliberately never handed to a browser.
 
-**`digital_thread` is the reason this matters more than it looks.** It is append-only audit and is
+**`audit_trail` is the reason this matters more than it looks.** It is append-only audit and is
 unreconstructable from anything else, so it is the one table for which "restore from backup" is the
 entire recovery story.
 
@@ -313,7 +320,7 @@ token** and is a manual act, per appliance.
 - **Its devices are untouched.** `enroll-gateway` does not reference the `devices` table at all.
   Approved devices stay approved and stay bound; they are not re-quarantined and do not need
   re-approving.
-- **History survives.** `telemetry`, `digital_thread` and `platform_alerts` all key on identity that
+- **History survives.** `telemetry`, `audit_trail` and `platform_alerts` all key on identity that
   did not change.
 
 So re-bundling is *re-provisioning an appliance*, not *re-registering an asset*. That is a much

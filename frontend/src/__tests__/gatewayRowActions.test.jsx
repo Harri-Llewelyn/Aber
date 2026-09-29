@@ -64,7 +64,7 @@ describe('gateway row actions', () => {
     expect(inRow().queryByRole('link', { name: /Launch UI/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
-    expect(inRow().queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Docs/i })).not.toBeInTheDocument()
     expect(screen.queryByTestId('gateway-actions-gw-1')).not.toBeInTheDocument()
   })
@@ -92,7 +92,7 @@ describe('gateway row actions', () => {
     await show([gateway()])
     const panel = openPanel()
 
-    expect(panel.getByText(/View Digital Thread/i)).toBeTruthy()
+    expect(panel.getByText(/View Audit Trail/i)).toBeTruthy()
     expect(panel.getByText(/Attached Links/i)).toBeTruthy()
     // Exact, matching the other assertions about this action in this file: a loose regex broke when
     // another component in the drawer mentioned the control by name.
@@ -121,9 +121,9 @@ describe('gateway row actions', () => {
     const panel = openPanel()
     expect(panel.getByText('Edit Details').closest('button').disabled).toBe(true)
     expect(panel.getByText(/Archive Gateway/i).closest('button').disabled).toBe(true)
-    // The audit trace is withdrawn, not disabled, as on Devices: without `digital_thread:read` the
+    // The audit trace is withdrawn, not disabled, as on Devices: without `audit_trail:read` the
     // page returns no rows, and the nav hides it from this reader.
-    expect(panel.queryByText(/View Digital Thread/i)).toBeNull()
+    expect(panel.queryByText(/View Audit Trail/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {

@@ -147,7 +147,7 @@ export const SUITES = {
       'must return the STORED OBJECT rather than a copy, because process_dbirth() and ' +
       'record_declared_metrics() mutate the cached row in place so the next lookup inside the TTL ' +
       'sees the change -- a copying cache would resurrect the duplicate UPDATE and duplicate ' +
-      'digital_thread row that the write-only-what-moved work exists to prevent, and nothing ' +
+      'audit_trail row that the write-only-what-moved work exists to prevent, and nothing ' +
       'would point at the cache. And `get` must distinguish a cached `None` (the NEGATIVE entry) ' +
       'from a miss, or negative caching quietly stops working and every message from an ' +
       'unregistered device costs a directory round trip.',
@@ -155,8 +155,8 @@ export const SUITES = {
   'ingestion/test_payload_conformance.py': {
     lanes: ['unit'],
     why:
-      'Payload conformance -- the SCHEMA_REJECTION half of the digital thread. THE DEDUPLICATION ' +
-      'IS WHAT THIS IS FOR. These rows go into `digital_thread`, which is append-only to every ' +
+      'Payload conformance -- the SCHEMA_REJECTION half of the audit trail. THE DEDUPLICATION ' +
+      'IS WHAT THIS IS FOR. These rows go into `audit_trail`, which is append-only to every ' +
       'application role and which the application cannot prune at all. DDATA arrives ' +
       'continuously, so a regression that writes one row per message does not degrade -- it fills ' +
       'the disk. Archived migration 0005 gave the audit TRIGGER a guard against exactly this; the ' +
@@ -445,7 +445,7 @@ export const SUITES = {
     lanes: ['db'],
     why:
       "0026's two halves: causation grouping, and -- the security one -- that `service_role` can " +
-      'no longer INSERT into digital_thread directly. That key is in the release Secret and is held by the ' +
+      'no longer INSERT into audit_trail directly. That key is in the release Secret and is held by the ' +
       'daemon and every edge function; while it could insert, any holder could forge an audit row ' +
       'naming an operator who was not there. A later migration re-granting INSERT would restore ' +
       'that silently and nothing else here would notice.',
@@ -555,7 +555,7 @@ export const SUITES = {
       'by an Area-Wide asset would roll back the three deletes above it every night, so the guard ' +
       'is asserted in the job text and exercised. A lane that did not follow its original stayed ' +
       'live on the playback gateway, visible only as a replay that succeeded. And a tombstone ' +
-      'whose thread_id is NULL means the two AFTER triggers fired in the wrong order, which no ' +
+      'whose trail_id is NULL means the two AFTER triggers fired in the wrong order, which no ' +
       'page would show.',
   },
   'supabase/migrations/test_relocate_devices.py': {
@@ -564,12 +564,12 @@ export const SUITES = {
       "0033's batch relocation, and the property it defends is NOT \"an admin can move devices\". " +
       'It is that one rearrangement is ONE transaction, so six machines reassigned in one gesture ' +
       'carry one causation_id instead of six -- a property that does not live in 0033 at all, but ' +
-      'in log_digital_thread_event() stamping txid_current(). The other half is the hole ' +
+      'in log_audit_trail_event() stamping txid_current(). The other half is the hole ' +
       'atomicity opens: the RPC is SECURITY DEFINER, so RLS does not apply inside it and ' +
       '`devices_update_privileged` never runs. If its own has_role() check were dropped, ANY ' +
       'authenticated user could relocate the whole shopfloor and no policy anywhere would refuse.',
   },
-  'supabase/migrations/test_digital_thread_guard.py': {
+  'supabase/migrations/test_audit_trail_guard.py': {
     lanes: ['db'],
     why:
       'THE AUDIT SUPPRESSION RULES. Archived migration 0005 suppresses the no-op UPDATE and the ' +
@@ -616,10 +616,10 @@ export const SUITES = {
       'one winner, a lapsed lease is taken over, and a pass that outlived its lease cannot end ' +
       "its successor's.",
   },
-  'supabase/migrations/test_digital_thread_paging.py': {
+  'supabase/migrations/test_audit_trail_paging.py': {
     lanes: ['db'],
     why:
-      'Walking the thread to its end (0077), saying how far the end is (0115) and deciding what ' +
+      'Walking the trail to its end (0077), saying how far the end is (0115) and deciding what ' +
       'counts as deleted (0117). Paging that loses or repeats a row across a page boundary ' +
       'corrupts an append-only audit read without failing anything; a total counted over the page ' +
       'instead of the match, or a search that cannot reach a deleted entity, misreports how much ' +
@@ -635,10 +635,10 @@ export const SUITES = {
       'property that makes it safe is in the function body rather than in a grant, so a gate ' +
       'that stops working fails open, silently, with the page looking exactly as it should.',
   },
-  'supabase/migrations/test_digital_thread_partitioning.py': {
+  'supabase/migrations/test_audit_trail_partitioning.py': {
     lanes: ['db'],
     why:
-      'The partitioning behind the thread (0079). A partition that stops being created is not an ' +
+      'The partitioning behind the trail (0079). A partition that stops being created is not an ' +
       'error until the first write that has nowhere to go.',
   },
   'supabase/migrations/test_gateway_deployment.py': {
@@ -800,7 +800,7 @@ export const SUITES = {
       'The backup service (0101): an Operator cannot ask and cannot read the tables; the ' +
       "service's gates answer no PostgREST role; a backup an Administrator asks for is taken, with " +
       'the files where the row says, as big as it says, with the digests it says, a manifest ' +
-      'restore-databases.sh can read and a forge archive carrying the host keys; the thread names ' +
+      'restore-databases.sh can read and a forge archive carrying the host keys; the trail names ' +
       'who asked and that the service wrote it; a queued request refuses a twin, can be cancelled ' +
       'and says why; a pinned backup is released once; the prune after a failed job leaves the ' +
       'newest three; and a backup reaches a MinIO encrypted, decrypts to its digest, and a pruned ' +

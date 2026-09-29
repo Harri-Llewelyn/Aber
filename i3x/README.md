@@ -567,20 +567,20 @@ obvious.
 `elementIds` (plural, an array), not `elementId`. Those are the two shapes worth knowing before
 concluding the server is at fault.
 
-**What it cannot do is answer anything about the Digital Thread.** i3X models objects, values and
+**What it cannot do is answer anything about the Audit Trail.** i3X models objects, values and
 history and has no audit concept, so *"what changed and who changed it"* is outside this client's
 reach entirely — not a gap in the address space, a gap in the protocol it speaks.
 
 **AND IT IS NOT GOING TO BE CLOSED. That is a decision, not an omission.** The obvious fix is a
-second, small MCP server over PostgREST, exposing `digital_thread` with the caller's own token and
-the same RLS scope. It was considered and rejected on audience rather than difficulty: the Digital
-Thread page already reads a change with its diff and its causation siblings beside it, and a model
+second, small MCP server over PostgREST, exposing `audit_trail` with the caller's own token and
+the same RLS scope. It was considered and rejected on audience rather than difficulty: the Audit
+Trail page already reads a change with its diff and its causation siblings beside it, and a model
 summarising that trail produces a weaker artefact than the page it would be summarising. Building a
 second server to make an audit trail *less* legible is the wrong trade.
 
 **The cost, stated plainly so nobody reports it as a bug:** an assistant connected over MCP can ask
 what a machine *is* and what it is *reading*, and cannot ask what changed, when, or who changed it.
-Audit questions are answered on the Digital Thread page, by a person, with the diff in front of
+Audit questions are answered on the Audit Trail page, by a person, with the diff in front of
 them. Do not extend the i3X address space to carry audit rows either — i3X has no audit concept,
 and bending objects and history into that shape would export a claim the protocol does not make.
 
@@ -630,7 +630,7 @@ the next session, and the symptom is `401`s on a server that was working.
   node scripts/mint-mcp-token.mjs --json     # a ready-to-paste mcpServers block
   ```
 
-Both record the issue in the Digital Thread before they reveal the token, and both sign a JWT with
+Both record the issue in the Audit Trail before they reveal the token, and both sign a JWT with
 the HS256 secret the rest of the stack shares, so PostgREST validates it exactly as it validates a
 GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP` governs what GoTrue *issues* and
 does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
@@ -640,16 +640,15 @@ read-only MCP principal seeded by archived migration 0034. The ceiling is
 **The principal holds `telemetry:read` and nothing else, and the narrowness is deliberate.** Every
 write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069`
 narrowed the schema and metric-catalog policies to the former — so it writes nothing. What it must
-also not have is `digital_thread:read`: the difference the old choice of `Operator` **over**
-`Auditor` was making is `digital_thread_select_privileged_or_auditor`, and an Auditor can read the
-audit trail. This client has no surface for the Digital Thread and deliberately never will, so that
-grant would leave a capability sitting on a long-lived credential that nothing can use and someone
-might later find.
+also not have is `audit_trail:read`: the difference the old choice of `Operator` **over**
+`Auditor` was making is the audit trail's read policy, which admits an Auditor. This client has
+no surface for the Audit Trail and deliberately never will, so that grant would leave a capability
+sitting on a long-lived credential that nothing can use and someone might later find.
 
 **It used to hold `Operator` itself, and `0080` ended that** — a person's role widening whenever
 somebody asked for a shopfloor user to see one more thing is not a thing a machine credential should
 inherit. `0080`'s self-check re-asserts `0034`'s property against the new mechanism on every boot:
-this principal must not hold `digital_thread:read`.
+this principal must not hold `audit_trail:read`.
 
 **It is not `service_role`**, which would be the one-line answer and would bypass the RLS scoping
 that makes the paragraph above true.

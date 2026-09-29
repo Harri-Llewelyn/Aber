@@ -11,10 +11,10 @@
 --   * Reference vocabularies use DO UPDATE, because they are maintained by editing this file.
 --     MTConnect re-stamps only `category`: `semantic_id` is a hand-corrected assertion.
 --   * Everything operator-facing uses DO NOTHING. A DO UPDATE on `devices` fires
---     log_digital_thread_event() whether or not a value differs, appending an audit row on
+--     log_audit_trail_event() whether or not a value differs, appending an audit row on
 --     every boot forever.
 --
--- Not here: `digital_thread` (written by trigger as a side effect of the inserts below);
+-- Not here: `audit_trail` (written by trigger as a side effect of the inserts below);
 -- `user_roles` and the demo accounts (GoTrue's, seeded by `supabase/seed.sql`); `cells`
 -- (Unassigned and Site-Wide are derived lanes, never rows); the `storage.buckets` row (created
 -- by `scripts/storage-init.mjs`).
@@ -35,7 +35,7 @@ INSERT INTO public.roles VALUES (2, 'Shopfloor_Manager', 'Can manage devices, ce
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.roles VALUES (3, 'Operator', 'Operational dashboard view, live telemetry streaming, and document viewing')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only audit trace and digital thread access')
+INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only access to the audit trail')
 ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
@@ -71,7 +71,9 @@ INSERT INTO public.permissions VALUES ('f123d456-7890-4c1d-8706-933e08544e40', '
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('c234e567-8901-4c1d-8706-933e08544e41', 'gitops:manage', 'Deploy flows and manage GitOps edge configurations')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'digital_thread:read', 'View continuous Digital Thread audit log entries')
+-- `audit_trail:read`, renamed with the page before 1.0. THE ID DOES NOT MOVE, as with `link:manage`
+-- above; `0000` renames an existing row, which ON CONFLICT (id) DO NOTHING cannot correct.
+INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'audit_trail:read', 'View the audit trail')
 ON CONFLICT (id) DO NOTHING;
 
 -- Granted to all three working roles below, which no other permission is: a manager drafting a
@@ -2640,7 +2642,7 @@ SELECT public.ensure_cron_job(
 -- 3. Honour the archive retention timer ------------------------------------------------------
 --
 -- `auto_delete_at` is set per row by the Archive dialog; NULL means permanent retention, so the
--- NOT NULL test is load-bearing. These DELETEs fire log_digital_thread_event() by design.
+-- NOT NULL test is load-bearing. These DELETEs fire log_audit_trail_event() by design.
 --
 -- EVERY ROW HERE IS DELETED ON ITS OWN TIMER AND NOBODY ELSE'S, which is a property of the FKs
 -- rather than of this order: since 0112 every child of a purged parent is SET NULL, so a gateway
@@ -7611,7 +7613,7 @@ ON CONFLICT (name) DO NOTHING;
 -- on every replay while leaving the value alone, so an operator's change survives a restart.
 --
 -- Every one has a reader; a setting nothing reads is a control that does nothing.
--- `ui.digital_thread_lane_limit` was declared here until the Digital Thread stopped capping its
+-- `ui.digital_thread_lane_limit` was declared here until the Audit Trail stopped capping its
 -- lanes, and `0000` removes the row from a stack that still holds it.
 --
 -- THREE OF THESE ARE NOT CONSTANTS. `sparkplug.group_id`, `archive.site_key` and the five S3
@@ -7636,14 +7638,14 @@ SELECT set_config('aber.archive_access_key_id', :'archive_access_key_id', false)
 SELECT set_config('aber.archive_path_style',    :'archive_path_style',    false);
 
 SELECT public.seed_setting(
-    'ui.digital_thread_poll_seconds',
+    'ui.audit_trail_poll_seconds',
     to_jsonb(60),
     'number',
-    'Digital Thread',
+    'Audit Trail',
     'Refresh interval (seconds)',
-    'How often the Digital Thread re-reads the audit log. The page is an audit trail rather than '
+    'How often the Audit Trail re-reads the audit log. The page is a record to read rather than '
     'a live feed, so this is deliberately not a live-tail interval.',
-    'the 60_000 ms interval in DigitalThreadTab.jsx'
+    'the 60_000 ms interval in AuditTrailTab.jsx'
 );
 
 SELECT public.seed_setting(
@@ -7694,7 +7696,7 @@ SELECT public.seed_setting(
     'Approvals',
     'Closed proposals kept for (days)',
     'How long an applied, rejected, withdrawn or expired proposal is kept before the nightly '
-    'prune removes it. What an approval CHANGED lives in digital_thread under its own retention; '
+    'prune removes it. What an approval CHANGED lives in audit_trail under its own retention; '
     'this governs only the queue entry and the rationale attached to it.',
     'the ninety-day fallback in prune_closed_proposals()'
 );
@@ -8065,7 +8067,7 @@ UPDATE public.system_settings
 -- JWT for it with the stack's HS256 secret, so PostgREST validates it as it validates a GoTrue
 -- token. Not `service_role`: the i3X server passes the caller's bearer through so that it
 -- queries as them. Not a demo persona: a machine credential borrowing a human account conflates
--- two lifecycles. Its grant is `telemetry:read`, never `digital_thread:read`: the MCP client has
+-- two lifecycles. Its grant is `telemetry:read`, never `audit_trail:read`: the MCP client has
 -- no surface for the audit trail.
 -- =============================================================================================
 
@@ -8074,7 +8076,7 @@ UPDATE public.system_settings
 -- ---------------------------------------------------------------------------------------------
 -- `id` is the only column on this image's `auth.users` without a default. The row is minimal:
 -- this account cannot sign in. It exists so a JWT subject resolves to something real and
--- `digital_thread.changed_by` has a foreign key to satisfy.
+-- `audit_trail.changed_by` has a foreign key to satisfy.
 INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000001')
 ON CONFLICT (id) DO NOTHING;
@@ -8104,7 +8106,7 @@ INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000003')
 ON CONFLICT (id) DO NOTHING;
 
--- No role is assigned here (see the MCP reader above). `digital_thread:read` is deliberately
+-- No role is assigned here (see the MCP reader above). `audit_trail:read` is deliberately
 -- not among this principal's grants: the worker holds broker publish rights and neither writes
 -- nor reads the audit trail.
 
@@ -8173,7 +8175,7 @@ INSERT INTO public.directory_liveness_probe (id) VALUES (true) ON CONFLICT (id) 
 -- Unscheduled before scheduled: `cron.schedule` appends rather than reconciling.
 --
 -- The nightly ones are spaced so a morning reading of the cron history has one thing at a time:
--- 03:00 prune_cron_history, 03:15 prune_platform_alerts, 03:20 digital_thread_partitions,
+-- 03:00 prune_cron_history, 03:15 prune_platform_alerts, 03:20 audit_trail_partitions,
 -- 03:30 purge_expired_archives, 03:45 expire_open_proposals, 03:50 prune_closed_proposals.
 
 -- Daily, and separate from the archive-retention job: that honours a per-row date the user
@@ -8212,9 +8214,9 @@ SELECT cron.schedule('sweep-gateway-credential-revocations', '*/15 * * * *',
 -- called by 0001 at migration time, so a fresh database has its partitions before the first
 -- write rather than on the first night.
 SELECT public.ensure_cron_job(
-  'digital_thread_partitions',
+  'audit_trail_partitions',
   '20 3 * * *',
-  $job$SELECT public.ensure_digital_thread_partitions(3)$job$
+  $job$SELECT public.ensure_audit_trail_partitions(3)$job$
 );
 
 SELECT public.ensure_cron_job(

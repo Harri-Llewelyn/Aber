@@ -30,7 +30,8 @@ export const PAGE_KEYWORDS = {
   'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
-  'digital-thread': ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed'],
+  // The page's name before 1.0 stays findable, as the archives' old name does above.
+  'audit-trail':    ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed', 'digital thread'],
   'capture':        ['record', 'recording', 'replay', 'playback', 'shadow'],
   'cold-storage':   ['parquet', 'tiered', 'object storage', 'minio', 'telemetry archive', 's3'],
   'access-control': ['users', 'roles', 'permissions', 'principals', 'credentials', 'rbac', 'identities'],
@@ -65,7 +66,7 @@ export const CARDS = [
   { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory',     keywords: ['mosquitto', 'broker', 'daemon'] },
   { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
-  { id: 'thread-timeline',      label: 'Digital Thread',       tab: 'digital-thread', keywords: ['timeline', 'events', 'audit trail'] },
+  { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events', 'digital thread'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },

@@ -1,5 +1,5 @@
 /**
- * Digital Thread: reading one operator action back as one act. `causation_id` is `txid_current()`,
+ * Audit Trail: reading one operator action back as one act. `causation_id` is `txid_current()`,
  * so every row a transaction writes shares it. This suite pins two claims about what the page must
  * not say: a NULL causation is not a group (legacy rows carry NULL, and matching NULL to NULL would
  * fabricate a causal link), and the sibling list is drawn from the fetched, filtered set, so on its
@@ -13,7 +13,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { DigitalThreadTab, causationSiblings } from '../components/tabs/DigitalThreadTab'
+import { AuditTrailTab, causationSiblings } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -61,7 +61,7 @@ const EVENTS = [
 const UNCOUNTED = EVENTS.map(e => { const c = { ...e }; delete c.transaction_rows; return c })
 
 const serve = (events) => (path) => {
-  if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(events)
+  if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(events)
   if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
   if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
   if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
@@ -74,7 +74,7 @@ beforeEach(() => {
 })
 
 const show = async () => {
-  render(<DigitalThreadTab />)
+  render(<AuditTrailTab />)
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
@@ -271,7 +271,7 @@ describe('the Same transaction control', () => {
 
   it('points at the next page when the search is the transaction and rows are still missing', async () => {
     /* A transaction longer than a page. The search is already this transaction, so the control
-       would do what has been done; what is missing is further down the thread. */
+       would do what has been done; what is missing is further down the trail. */
     api.get.mockImplementation(serve(EVENTS.filter(e => e.event_id !== 4)))
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)

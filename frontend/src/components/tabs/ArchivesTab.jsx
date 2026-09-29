@@ -11,17 +11,17 @@ import { PageHeading } from '../common/PageHeading'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 
-/** The page's singular row type -> the Digital Thread page's handover type. */
-const THREAD_TYPE = { area: 'AREA', cell: 'CELL', gateway: 'GATEWAY', device: 'DEVICE' }
+/** The page's singular row type -> the Audit Trail page's handover type. */
+const TRAIL_TYPE = { area: 'AREA', cell: 'CELL', gateway: 'GATEWAY', device: 'DEVICE' }
 
 /**
  * Two cards, two stages of one lifecycle. The first is what archiving leaves: the row still in its
  * table, restorable, its retention timer running. The second is what deleting leaves: the row
  * gone, a tombstone written by the database on the DELETE, with links to what survives it -- the
- * digital thread, a gateway's repository in the forge, any bundle exported while it was alive, and
+ * audit trail, a gateway's repository in the forge, any bundle exported while it was alive, and
  * the historian id its readings are still keyed by.
  */
-export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
+export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   const [archives, setArchives] = useState([])
   const [retired, setRetired]   = useState([])
   const [exports, setExports]   = useState([])
@@ -61,7 +61,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
   /**
    * The manual half of the retention policy. `auto_delete_at` purges on a timer; this is the same
    * destruction on demand. A real DELETE, not another soft flag: the row leaves the table, the
-   * digital thread keeps its history, and the database writes the tombstone the second card lists.
+   * audit trail keeps its history, and the database writes the tombstone the second card lists.
    */
   const purge = async (item) => {
     try {
@@ -74,7 +74,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
   }
 
   /**
-   * Take the device away: the AASX with its thread, its live telemetry and the manifest, downloaded
+   * Take the device away: the AASX with its trail, its live telemetry and the manifest, downloaded
    * now and stored beside the cold tier so the tombstone can offer it after the row is gone.
    */
   const exportBundle = async (item) => {
@@ -83,7 +83,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
       const result = await api.post('/api/v1/devices/asset-export', { device_id: item.entity_id })
       downloadBlob(result.blob, result.filename || `${item.name}-bundle.aasx`)
       const b = result.stats?.bundle || {}
-      const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.thread_rows ?? 0} thread rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
+      const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} audit trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
       if (b.stored === false) {
         showToast(`Bundle downloaded for '${item.name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
       } else if (b.truncated) {
@@ -112,15 +112,15 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
   /** What survives a retired entity, as links; derived from the tombstone's row and its exports. */
   const survivors = (r) => {
     const items = []
-    if (onViewThread) {
+    if (onViewTrail) {
       items.push(
         <button
-          key="thread"
+          key="trail"
           className="btn btn-sm btn-ghost"
-          onClick={() => onViewThread({ id: r.entity_id, type: THREAD_TYPE[r.entity_type], purged: true })}
-          title="Open this entity's audit trace on the Digital Thread page, deleted entities shown"
+          onClick={() => onViewTrail({ id: r.entity_id, type: TRAIL_TYPE[r.entity_type], purged: true })}
+          title="Open this entity's audit trace on the Audit Trail page, deleted entities shown"
         >
-          <IconHistory size={12} /> Digital Thread
+          <IconHistory size={12} /> Audit Trail
         </button>
       )
     }
@@ -145,7 +145,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
           key={x.id}
           className="btn btn-sm btn-ghost"
           onClick={() => downloadExport(x)}
-          title={`The bundle taken ${new Date(x.taken_at).toLocaleString()}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, thread, live telemetry and the cold-object manifest`}
+          title={`The bundle taken ${new Date(x.taken_at).toLocaleString()}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, audit trail, live telemetry and the cold-object manifest`}
         >
           <IconDownload size={12} /> Bundle {new Date(x.taken_at).toLocaleDateString()}
         </button>
@@ -224,7 +224,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
                            className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
                            disabled={!canArchive || exporting === a.entity_id}
                            onClick={() => canArchive && exportBundle(a)}
-                           title={!canArchive ? 'Requires Admin permissions' : 'Download an AASX bundle of this device — its shell, digital thread, live telemetry and a manifest naming the cold objects — and keep a copy beside the cold tier'}
+                           title={!canArchive ? 'Requires Admin permissions' : 'Download an AASX bundle of this device — its shell, audit trail, live telemetry and a manifest naming the cold objects — and keep a copy beside the cold tier'}
                          >
                            <IconDownload size={12} /> {exporting === a.entity_id ? 'Exporting…' : 'Export Bundle'}
                          </button>
@@ -254,7 +254,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
             Retired Entities
             <HelpTip
               label="About retired entities"
-              text="Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the digital thread, a forge repository, any exported bundle. Readings stay in the historian under its id."
+              text="Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the audit trail, a forge repository, any exported bundle. Readings stay in the historian under its id."
             />
           </h3>
         </div>
@@ -332,7 +332,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewThread }) {
           message={
             `Permanently delete the ${confirmPurge.entity_type} '${confirmPurge.name}'? ` +
             'This removes the record from the database immediately. It cannot be restored, and ' +
-            'it does not wait for the retention timer. Its digital thread history is kept, and a ' +
+            'it does not wait for the retention timer. Its audit trail history is kept, and a ' +
             'tombstone is left on this page.' +
             // What happens to what was inside it, for the two types that hold other assets.
             // Until 0112 a cell's children were deleted with it, on the cell's timer rather than

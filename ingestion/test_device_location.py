@@ -208,7 +208,7 @@ class DeviceLocationInvariantTest(unittest.TestCase):
     def test_gateway_heartbeat_never_touches_location(self):
         """
         The gateway side of the same rule. A heartbeat arrives every 30s; if it wrote
-        location_scope it would also be appending to digital_thread on every beat.
+        location_scope it would also be appending to audit_trail on every beat.
         """
         ingestion.process_node_message(
             "gwy000000000000000000abc", "NDATA",

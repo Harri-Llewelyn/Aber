@@ -17,7 +17,7 @@ const COPY_FEEDBACK_MS = 1600
  * session within a second and refuses its next CONNECT.
  *
  * The password lives in this component's state until the modal closes: not in a toast, the URL or
- * `digital_thread`, and `mosquitto_passwd` stores only a hash.
+ * `audit_trail`, and `mosquitto_passwd` stores only a hash.
  */
 export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   const [step, setStep] = useState('confirm')
@@ -47,7 +47,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
         // Surfaced, not swallowed: the credential is real and usable; what failed is the record of
         // its issue, which is for the operator to escalate.
         showToast?.(
-          'Credential issued, but the Digital Thread entry could not be written. Note this.',
+          'Credential issued, but the Audit Trail entry could not be written. Note this.',
           'error'
         )
       } else {
@@ -284,7 +284,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
 
             {credential.audit_recorded === false && (
               <div className="form-group" style={{ color: 'var(--danger)', fontSize: '12px' }}>
-                <IconShieldAlert size={12} /> The credential was issued, but the Digital Thread entry
+                <IconShieldAlert size={12} /> The credential was issued, but the Audit Trail entry
                 could not be written. The account exists; the record of it does not.
               </div>
             )}

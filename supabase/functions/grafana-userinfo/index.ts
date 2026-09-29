@@ -15,7 +15,7 @@ import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
  * Supabase RBAC role to Grafana org role. Operator and Auditor both map to Viewer: Grafana has no
- * read-only-plus-audit tier, and the Auditor's privilege is over digital_thread in Supabase.
+ * read-only-plus-audit tier, and the Auditor's privilege is over audit_trail in Supabase.
  */
 const ROLE_MAP: Record<string, string> = {
   Administrator: "Admin",

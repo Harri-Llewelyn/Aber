@@ -1211,7 +1211,7 @@ survives `helm uninstall` — deleting the release is precisely when the backups
   restore needs: `supabase_auth_admin`, `authenticator` and `supabase_storage_admin` own objects, and
   RLS policies reference roles by name. A dump stripped of ownership restores into a database where
   every policy denies.
-- **`digital_thread` is the reason this matters most.** Telemetry can be re-derived from a rebirth;
+- **`audit_trail` is the reason this matters most.** Telemetry can be re-derived from a rebirth;
   an append-only audit trail cannot be reconstructed at all.
 - **A zero-byte dump is asserted against**, not just a non-zero exit. A backup that looks like one is
   worse than none.

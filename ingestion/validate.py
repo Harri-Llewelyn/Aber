@@ -395,7 +395,7 @@ def get_timescaledb_connection():
 
 def get_supabase_admin_connection():
     """A direct owner connection to the Supabase database, used only to clear this run's audit rows.
-    public.digital_thread is append-only for every application role, `service_role` included, so
+    public.audit_trail is append-only for every application role, `service_role` included, so
     clearing fixture rows needs owner authority; the trigger exempts `postgres` because a role that
     can issue DDL can drop the trigger anyway.
     """
@@ -430,19 +430,19 @@ def preflight_supabase_admin():
     try:
         with conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM public.digital_thread LIMIT 1")
+                cur.execute("SELECT id FROM public.audit_trail LIMIT 1")
                 row = cur.fetchone()
                 if row is None:
                     # Nothing to test against. Connectivity is proven; authority is not, and saying
                     # so is better than implying a check that did not happen.
-                    print(f"⚠️  PREFLIGHT: connected as {label}, but digital_thread is empty, so")
+                    print(f"⚠️  PREFLIGHT: connected as {label}, but audit_trail is empty, so")
                     print("   DELETE authority could not be exercised.")
                     return True
-                cur.execute("DELETE FROM public.digital_thread WHERE id = %s", (row[0],))
+                cur.execute("DELETE FROM public.audit_trail WHERE id = %s", (row[0],))
                 # Never committed. The row is untouched; only the trigger's verdict was wanted.
                 conn.rollback()
     except Exception as exc:
-        print(f"❌ PREFLIGHT: connected as {label}, but it cannot DELETE from digital_thread.")
+        print(f"❌ PREFLIGHT: connected as {label}, but it cannot DELETE from audit_trail.")
         print(f"   {exc}")
         print("   0003's append-only trigger refuses every application role including service_role,")
         print("   and exempts the table owner. SUPABASE_DB_USER must be that owner (`postgres`),")
@@ -529,12 +529,12 @@ def cleanup_validation_data():
             try:
                 audit_conn.autocommit = True
                 with audit_conn.cursor() as cur:
-                    cur.execute("DELETE FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
+                    cur.execute("DELETE FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
                                 (entity_ids,))
             finally:
                 audit_conn.close()
         except Exception as e:
-            failures.append(f"{len(entity_ids)} entity id(s) left in public.digital_thread, which only "
+            failures.append(f"{len(entity_ids)} entity id(s) left in public.audit_trail, which only "
                             f"an owner connection can clear: {e}")
 
     failures += cleanup_historian(asset_ids)
@@ -736,7 +736,7 @@ def seed_supabase():
         {"name": VAL_CELL_NAME, "area_id": SEEDED["area_uuid"]}
     ).execute()
     cell_id = c_res.data[0]["id"] if c_res.data else None
-    # Kept on SEEDED so check 2 can scope itself to this run's entities: digital_thread is keyed
+    # Kept on SEEDED so check 2 can scope itself to this run's entities: audit_trail is keyed
     # by entity_id, and the cell's id is otherwise not recoverable once the row is deleted.
     SEEDED["cell_uuid"] = cell_id
 
@@ -1056,7 +1056,7 @@ def run_simulation():
 
     # 7. DBIRTH for the registered device declaring one metric its schema does not model. Published
     # twice, identically: the daemon must record the declared set the first time and write nothing
-    # the second, since log_digital_thread_event() fires on every UPDATE to `devices`.
+    # the second, since log_audit_trail_event() fires on every UPDATE to `devices`.
     print(f"\n--- DBIRTH from registered device declaring an unmodelled metric: {VAL_UNMODELLED_METRIC} ---")
     publish("DBIRTH", SEEDED["known_id"], VAL_KNOWN_BIRTH)
 
@@ -2618,7 +2618,7 @@ def verify_results():
                 passed = False
 
             # 6b. The change-only write: an identical rebirth must not touch the row, or every
-            # rebirth would append a digital_thread entry saying nothing changed.
+            # rebirth would append an audit_trail entry saying nothing changed.
             before = SEEDED.get("birth_metrics_at")
             after = row.get("last_birth_metrics_at")
             if before and after == before:
@@ -2696,9 +2696,9 @@ def verify_results():
             print(f"❌ 6e. MULTI-SUBMODEL ERROR: {e}")
             passed = False
 
-        # 2. Verify Digital Thread triggers. Scoped to the entities this run created; asserting the
+        # 2. Verify Audit Trail triggers. Scoped to the entities this run created; asserting the
         # whole table is non-empty would pass on audit rows from any source. Both actions are
-        # required because log_digital_thread_event() serves INSERT, UPDATE and DELETE, and the run
+        # required because log_audit_trail_event() serves INSERT, UPDATE and DELETE, and the run
         # performs the first two.
         try:
             run_entity_ids = [
@@ -2707,26 +2707,26 @@ def verify_results():
                 if SEEDED.get(key)
             ]
             if not run_entity_ids:
-                print("❌ 2. DIGITAL THREAD TRIGGERS FAIL: no seeded entity ids to check against.")
+                print("❌ 2. AUDIT TRAIL TRIGGERS FAIL: no seeded entity ids to check against.")
                 passed = False
             else:
-                res_thread = supabase_client.table("digital_thread").select(
+                res_trail = supabase_client.table("audit_trail").select(
                     "entity_type,entity_id,action"
                 ).in_("entity_id", run_entity_ids).execute()
-                logs = res_thread.data if res_thread else []
+                logs = res_trail.data if res_trail else []
                 actions = {row.get("action") for row in logs}
                 if "INSERT" in actions and "UPDATE" in actions:
-                    print(f"✅ 2. DIGITAL THREAD TRIGGERS: {len(logs)} audit entries written for this run's "
+                    print(f"✅ 2. AUDIT TRAIL TRIGGERS: {len(logs)} audit entries written for this run's "
                           f"{len(run_entity_ids)} entities, covering {', '.join(sorted(actions))}.")
                 elif logs:
-                    print(f"❌ 2. DIGITAL THREAD TRIGGERS FAIL: {len(logs)} entries for this run's entities but "
+                    print(f"❌ 2. AUDIT TRAIL TRIGGERS FAIL: {len(logs)} entries for this run's entities but "
                           f"actions were {sorted(actions)}; expected both INSERT and UPDATE.")
                     passed = False
                 else:
-                    print("❌ 2. DIGITAL THREAD TRIGGERS FAIL: no audit entries for any entity this run created.")
+                    print("❌ 2. AUDIT TRAIL TRIGGERS FAIL: no audit entries for any entity this run created.")
                     passed = False
         except Exception as e:
-            print(f"❌ 2. DIGITAL THREAD TRIGGERS ERROR: {e}")
+            print(f"❌ 2. AUDIT TRAIL TRIGGERS ERROR: {e}")
             passed = False
     else:
         print("⚠️  Skipping Supabase API checks: client unavailable.")
@@ -3000,10 +3000,10 @@ def verify_results():
                       "DEVICE_OFFLINE_TIMEOUT_SECONDS this shell does.")
                 passed = False
 
-            # 10a. Written once, not once per sweep tick: log_digital_thread_event() fires on every
+            # 10a. Written once, not once per sweep tick: log_audit_trail_event() fires on every
             # UPDATE to `devices`, so a watchdog rewriting OFFLINE each tick would append to the
             # audit table forever.
-            audit = supabase_client.table("digital_thread").select("id,new_data").eq(
+            audit = supabase_client.table("audit_trail").select("id,new_data").eq(
                 "entity_id", SEEDED["alias_uuid"]
             ).eq("action", "UPDATE").execute()
             offline_rows = [

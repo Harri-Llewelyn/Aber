@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab'
+import { AuditTrailTab } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 
 /**
@@ -48,14 +48,14 @@ const EVENTS = [
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation((p) => {
-    if (p.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+    if (p.startsWith('/api/v1/audit-trail')) return Promise.resolve(EVENTS)
     if (p.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
     return Promise.resolve([])
   })
 })
 
 const show = async () => {
-  render(<DigitalThreadTab />)
+  render(<AuditTrailTab />)
   await waitFor(() => expect(screen.getByText('Press_01')).toBeInTheDocument())
 }
 

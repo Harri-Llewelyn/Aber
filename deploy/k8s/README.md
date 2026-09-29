@@ -100,7 +100,7 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | `telemetry_5m` (not compressed) | `fiveMinuteRetainFor`, 1 year | ~19 GB | ~188 GB |
 | `telemetry_1h` (not compressed) | `oneHourRetainFor`, 5 years | ~8 GB | ~81 GB |
 | WAL, each database | `max_wal_size`, 1 GB by default | 1 GB | 1 GB |
-| `digital_thread` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
+| `audit_trail` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
 | Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
 | Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
 | Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
@@ -1230,7 +1230,7 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
 - **Ownership and privileges are kept in the dump on purpose.** Objects are owned by those roles and
   RLS policies reference them by name; a dump stripped of ownership restores into a database where
   every policy denies.
-- **`digital_thread` is the reason this matters most** — telemetry can be re-derived from a rebirth, an
+- **`audit_trail` is the reason this matters most** — telemetry can be re-derived from a rebirth, an
   append-only audit trail cannot.
 - **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
   wants pgBackRest or WAL archiving.
@@ -1291,7 +1291,7 @@ because every one of these can be missing while the counts agree:
 
 | Assertion | What its absence looks like |
 | :--- | :--- |
-| `digital_thread` append-only trigger and revoked grants | an audit table that is quietly editable |
+| `audit_trail` append-only trigger and revoked grants | an audit table that is quietly editable |
 | RLS enabled, with both lane policies | the security audit lane readable by every logged-in user |
 | Still range-partitioned, nothing in the DEFAULT partition | retention by `DETACH` silently retires nothing |
 | No application role can reach a partition directly | `TRUNCATE` on a month, which no row trigger refuses |
@@ -1403,15 +1403,15 @@ RWO permits several pods only within one node, so without it the Job schedules e
 is also why it is off by default — a backup that silently stops running is worse than one never
 enabled.
 
-### Trimming the Digital Thread
+### Trimming the Audit Trail
 
-`public.digital_thread` is range-partitioned by month on `recorded_at` (`0079`), so history is
+`public.audit_trail` is range-partitioned by month on `recorded_at` (`0079`), so history is
 retired by **detaching a partition**, not by deleting rows. That distinction is the whole point:
 `DELETE` over a large audit table is fully logged, bloats the heap and needs a `VACUUM` afterwards,
 while `DETACH` is instant, writes almost nothing, and leaves the data queryable as a standalone
 table you can inspect before it is destroyed.
 
-**A pg_cron job keeps three months of partitions ahead of the writes** (`digital_thread_partitions`,
+**A pg_cron job keeps three months of partitions ahead of the writes** (`audit_trail_partitions`,
 daily at 03:20). Nothing routine is required of you. There is also a DEFAULT partition, so a lapsed
 job cannot refuse an audit write — which matters more than it sounds, because the audit INSERT is a
 trigger on `cells`, `gateways` and `devices`: a refused audit row fails **the asset write that
@@ -1420,7 +1420,7 @@ caused it**, and the operator sees "cannot create device" with the audit table n
 Check the state before doing anything:
 
 ```sql
-SELECT * FROM public.digital_thread_partition_health;
+SELECT * FROM public.audit_trail_partition_health;
 --  partition_count | default_rows |     covered_until
 -- -----------------+--------------+------------------------
 --               28 |            0 | 2027-01-01 00:00:00+00
@@ -1428,13 +1428,13 @@ SELECT * FROM public.digital_thread_partition_health;
 
 `default_rows` must be **0**. Anything else means the job has stopped and rows are landing outside
 their month — they are not lost, but they will not be detached with the month they belong to. The
-Grafana rule *Digital Thread Partitions Falling Behind* watches exactly this. Repair it with:
+Grafana rule *Audit Trail Partitions Falling Behind* watches exactly this. Repair it with:
 
 ```sql
-SELECT public.ensure_digital_thread_partitions(3);
+SELECT public.ensure_audit_trail_partitions(3);
 SELECT j.jobname, d.status, d.return_message, d.start_time
   FROM cron.job_run_details d JOIN cron.job j USING (jobid)
- WHERE j.jobname = 'digital_thread_partitions' ORDER BY d.start_time DESC LIMIT 5;
+ WHERE j.jobname = 'audit_trail_partitions' ORDER BY d.start_time DESC LIMIT 5;
 ```
 
 Rows already in the default partition stay there. Moving them means an owner-level
@@ -1449,19 +1449,19 @@ only chance to check the archive before the data stops existing.
 
 ```bash
 # 1. DETACH -- instant, and reversible with ATTACH until you drop it.
-kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.audit_trail DETACH PARTITION public.audit_trail_2026_03;"
 
 # 2. VERIFY -- copy it out, then confirm the object exists and is the size you expect.
-kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.audit_trail_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
 #    ...then move it off the pod and into wherever your retained audit lives.
 
 # 3. DROP -- only once step 2's artefact has been checked.
-kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.audit_trail_2026_03;"
 ```
 
 > **`DETACH` alone does not free any space.** The table is still there, still on the PVC, just no
 > longer part of the parent. If you detached to reclaim a full disk, nothing changes until step 3 —
-> and a detached partition is invisible to `SELECT ... FROM digital_thread`, so it is easy to
+> and a detached partition is invisible to `SELECT ... FROM audit_trail`, so it is easy to
 > believe the space was recovered.
 
 **Clearing audit rows requires an owner connection, and that is deliberate.** `0003`'s append-only
@@ -1596,7 +1596,7 @@ What that costs is *not uniform*, and the difference is worth knowing before cho
 
 | Volume | What a node loss costs |
 | :--- | :--- |
-| `supabase-db` | Recoverable from the nightly `pg_dump`, to the last run and no finer. Its `digital_thread` rows are append-only audit — **unreconstructable**, not merely inconvenient — so the dump is the whole safety net |
+| `supabase-db` | Recoverable from the nightly `pg_dump`, to the last run and no finer. Its `audit_trail` rows are append-only audit — **unreconstructable**, not merely inconvenient — so the dump is the whole safety net |
 | `timescaledb` | The same, but the dump is large and slow; a replicated class is what keeps the restore window sane |
 | `supabase-storage` | **Not in any dump** unless `backup.includeStorage` is on. It holds every bucket's objects (3D models, area plans, broker captures, export bundles), and rows in the *backed-up* database point at them, `devices.model_3d_path` among them — so restoring the database alone leaves those rows pointing at objects that no longer exist. An AAS shell then exports a `File` element with a dead URL, **silently**: the exporter composes that URL from the key without fetching it, so nothing detects the break until a viewer opens the shell |
 | `grafana` | SSO-created users, their org roles, and any dashboard saved through the UI. Provisioned dashboards come back from the repository; these do not |

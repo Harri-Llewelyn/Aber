@@ -1,22 +1,22 @@
 """
-The Digital Thread's keyset cursor (0077), and how far it has to walk (0115).
+The Audit Trail's keyset cursor (0077), and how far it has to walk (0115).
 
 WHAT THIS IS DEFENDING. Every way paging breaks is silent. A repeated row shows the reader one
 event twice; a skipped row never shows it at all; a cursor that stops early looks exactly like the
 end of the data. None of those raises, none of them renders as an error, and the page cannot tell
-the difference between "that is all there is" and "that is all I asked for". The Digital Thread
+the difference between "that is all there is" and "that is all I asked for". The Audit Trail
 spent its whole life until now unable to tell those apart -- `truncated` was returned by the server
 and stored by the tab and never once rendered.
 
 SAME-TIMESTAMP BATCHES ARE THE WHOLE DIFFICULTY, and every fixture here builds them deliberately.
-`log_digital_thread_event()` stamps one transaction's rows with one `now()`, and a batch relocation
+`log_audit_trail_event()` stamps one transaction's rows with one `now()`, and a batch relocation
 of six devices is ONE transaction on purpose (0033) -- so `recorded_at` is not a key, and a cursor
 built on it alone either skips the rest of the batch or repeats its first row forever. The suite
 proves the composite `(recorded_at, id)` fixes that by ALSO running the naive cursor against the
 same fixture and asserting it fails: without that half, the passing tests below would pass just as
 well against a broken implementation on a fixture with distinct timestamps.
 
-EVERY TEST ROLLS BACK, and here that is not tidiness. `digital_thread` is append-only -- 0003 makes
+EVERY TEST ROLLS BACK, and here that is not tidiness. `audit_trail` is append-only -- 0003 makes
 it so and 0026 revoked DELETE even from service_role -- so a committed fixture is permanent. Two
 thirds of a development stack's audit log turned out to be exactly that (see scripts/test-db.mjs),
 which is the failure this file must not repeat.
@@ -26,7 +26,7 @@ which is the failure this file must not repeat.
 cursor rather than before it, it would count down as the reader walked, which reads as rows leaving
 an append-only table. And `p_search` matches the audit snapshot, because the tab used to resolve a
 typed name against the LIVE tables -- so searching for something that had been deleted sent an
-empty id list and rendered as an empty thread, answering the one question this page exists for
+empty id list and rendered as an empty trail, answering the one question this page exists for
 with "nothing happened".
 """
 
@@ -71,7 +71,7 @@ def become(cur, user_id, role_name):
     cur.execute('SET LOCAL "request.jwt.claims" = %s;', ('{"sub": "%s"}' % user_id,))
 
 
-class DigitalThreadPaging(unittest.TestCase):
+class AuditTrailPaging(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.conn = get_connection()
@@ -83,12 +83,12 @@ class DigitalThreadPaging(unittest.TestCase):
     def setUp(self):
         self.cur = self.conn.cursor()
         # The rows this suite reasons about, and nothing else: every page and count is scoped with
-        # p_entity_ids to the entities seeded here. Unscoped, a thread that already holds rows (a
+        # p_entity_ids to the entities seeded here. Unscoped, a trail that already holds rows (a
         # dev stack, `test:db --with-history`) sorts these 2026-01-01 rows last, past the walk's
         # page limit.
         self.cur.execute(
             """
-            INSERT INTO public.digital_thread
+            INSERT INTO public.audit_trail
                    (entity_type, entity_id, action, new_data, recorded_at, actor_source)
             SELECT 'gateways', gen_random_uuid(), 'INSERT', '{}'::jsonb,
                    timestamptz '2026-01-01 00:00:00+00' + make_interval(mins => (i / %s)),
@@ -113,7 +113,7 @@ class DigitalThreadPaging(unittest.TestCase):
         """One page over the seeded entities, returned as (ids, next_cursor, payload)."""
         self.cur.execute(
             """
-            SELECT public.digital_thread_page(
+            SELECT public.audit_trail_page(
                 p_limit              => %s,
                 p_include_purged     => true,
                 p_entity_ids         => %s::uuid[],
@@ -170,7 +170,7 @@ class DigitalThreadPaging(unittest.TestCase):
             self.cur.execute(
                 """
                 SELECT count(*), min(recorded_at)
-                  FROM (SELECT recorded_at FROM public.digital_thread
+                  FROM (SELECT recorded_at FROM public.audit_trail
                          WHERE entity_id = ANY(%s::uuid[])
                            AND (%s::timestamptz IS NULL OR recorded_at < %s::timestamptz)
                          ORDER BY recorded_at DESC LIMIT %s) s
@@ -213,15 +213,15 @@ class DigitalThreadPaging(unittest.TestCase):
                         "the second page repeated rows from the first")
 
     # ---------------------------------------------------------------------------------------
-    # A HALF-CURSOR MUST NOT LOOK LIKE THE END OF THE THREAD
+    # A HALF-CURSOR MUST NOT LOOK LIKE THE END OF THE TRAIL
     #
     # `(recorded_at, id) < (NULL, 41)` is NULL, which filters out every row -- so a caller that
-    # sent one half would get an empty page and read it as "no more events" on a thread that has
+    # sent one half would get an empty page and read it as "no more events" on a trail that has
     # plenty. The RPC ignores a half-cursor instead.
     # ---------------------------------------------------------------------------------------
     def test_a_cursor_missing_its_timestamp_is_ignored_not_obeyed(self):
         self.cur.execute(
-            "SELECT public.digital_thread_page(p_limit => %s, p_include_purged => true, "
+            "SELECT public.audit_trail_page(p_limit => %s, p_include_purged => true, "
             "p_entity_ids => %s::uuid[], p_before_id => %s)",
             (PAGE, self.entities, self.seeded[-1]),
         )
@@ -231,7 +231,7 @@ class DigitalThreadPaging(unittest.TestCase):
 
     def test_a_cursor_missing_its_id_is_ignored_not_obeyed(self):
         self.cur.execute(
-            "SELECT public.digital_thread_page(p_limit => %s, p_include_purged => true, "
+            "SELECT public.audit_trail_page(p_limit => %s, p_include_purged => true, "
             "p_entity_ids => %s::uuid[], p_before_recorded_at => %s)",
             (PAGE, self.entities, "2026-01-01 00:02:00+00"),
         )
@@ -271,8 +271,8 @@ class DigitalThreadPaging(unittest.TestCase):
         """
         self.cur.execute(
             "SELECT indexdef FROM pg_indexes "
-            " WHERE schemaname='public' AND tablename='digital_thread' "
-            "   AND indexname='idx_digital_thread_recorded_id'"
+            " WHERE schemaname='public' AND tablename='audit_trail' "
+            "   AND indexname='idx_audit_trail_recorded_id'"
         )
         row = self.cur.fetchone()
         self.assertIsNotNone(row, "0077's keyset index is missing")
@@ -288,10 +288,10 @@ class DigitalThreadPaging(unittest.TestCase):
         self.cur.execute(
             "SELECT count(*), max(pg_get_function_identity_arguments(p.oid)) "
             "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            " WHERE n.nspname='public' AND p.proname='digital_thread_page'"
+            " WHERE n.nspname='public' AND p.proname='audit_trail_page'"
         )
         count, args = self.cur.fetchone()
-        self.assertEqual(count, 1, f"digital_thread_page is declared {count} times, not once")
+        self.assertEqual(count, 1, f"audit_trail_page is declared {count} times, not once")
         self.assertIn("p_before_recorded_at", args)
         self.assertIn("p_before_id", args)
         # 0115 appends p_search and drops 0077's form in turn. Same argument: two declarations
@@ -300,14 +300,14 @@ class DigitalThreadPaging(unittest.TestCase):
 
 
 # =================================================================================================
-# HOW LONG THE THREAD IS, AND FINDING A ROW IN IT (0115)
+# HOW LONG THE TRAIL IS, AND FINDING A ROW IN IT (0115)
 #
 # Every assertion below is SCOPED WITH p_entity_ids to the ids this fixture seeds, so the numbers
-# are exact on a stack whose thread already holds thousands of rows. That is also what makes them
+# are exact on a stack whose trail already holds thousands of rows. That is also what makes them
 # relative rather than absolute: each compares the function's answer to a direct count of the same
 # set, never to a number written here.
 # =================================================================================================
-class DigitalThreadTotalAndSearch(unittest.TestCase):
+class AuditTrailTotalAndSearch(unittest.TestCase):
     # One seed per field the lane label falls back to, so "the search reads them all" is a loop
     # over the same table rather than a list that drifts from the one in the function. The terms
     # are distinctive, which is what keeps the direct counts exact on a populated stack.
@@ -352,7 +352,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         for entity_type, payload, _ in self.SEEDS:
             self.cur.execute(
                 """
-                INSERT INTO public.digital_thread
+                INSERT INTO public.audit_trail
                        (entity_type, entity_id, action, new_data, recorded_at, actor_source)
                 VALUES (%s, gen_random_uuid(), 'INSERT', %s::jsonb,
                         timestamptz '2026-01-01 00:00:00+00', 'migration')
@@ -375,7 +375,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         """One call, scoped to this fixture's entities unless `ids` says otherwise."""
         self.cur.execute(
             """
-            SELECT public.digital_thread_page(
+            SELECT public.audit_trail_page(
                 p_limit              => %s,
                 p_include_purged     => %s,
                 p_entity_ids         => %s::uuid[],
@@ -400,7 +400,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         # Read before the call: `total()` reuses this cursor, so evaluating it first would consume
         # the result set this fetch is waiting on.
         self.cur.execute(
-            "SELECT count(*) FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
+            "SELECT count(*) FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
             (self.ids,),
         )
         direct = self.cur.fetchone()[0]
@@ -409,7 +409,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     def test_the_total_does_not_shrink_as_the_reader_pages(self):
         """
         The legend renders "N of TOTAL". A total recomputed after the cursor would count down
-        towards zero while the reader walked, which reads as the thread getting shorter behind
+        towards zero while the reader walked, which reads as the trail getting shorter behind
         them -- and would be indistinguishable from rows being removed from an append-only table.
         """
         first = self.page(limit=1)
@@ -495,7 +495,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         self.cur.execute(
             "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
             "  JOIN pg_namespace n ON n.oid = p.pronamespace"
-            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_page'"
+            " WHERE n.nspname = 'public' AND p.proname = 'audit_trail_page'"
         )
         body = self.cur.fetchone()[0]
         listed = set(re.findall(
@@ -513,7 +513,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     def test_a_deleted_asset_is_found_by_the_name_in_its_snapshot(self):
         """
         The failure this replaces: the tab resolved a name against the LIVE tables, so searching
-        for something deleted sent an empty id list and rendered as an empty thread.
+        for something deleted sent an empty id list and rendered as an empty trail.
         """
         payload = self.page(search="Ghost Press")
         self.assertEqual(payload["total_matching"], 1)
@@ -521,7 +521,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
 
     def test_the_search_reads_every_field_the_lane_label_falls_back_to(self):
         """
-        `snapshotIdentity()` in DigitalThreadTab.jsx labels a lane from these fields. A field it
+        `snapshotIdentity()` in AuditTrailTab.jsx labels a lane from these fields. A field it
         reads and the search does not is a lane you can see and cannot search for; a field the
         search reads and it does not is a row you can find and cannot identify.
         """
@@ -536,7 +536,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         """An INSERT has only `new_data` and a DELETE only `old_data`; both are the lane's name."""
         self.cur.execute(
             """
-            INSERT INTO public.digital_thread
+            INSERT INTO public.audit_trail
                    (entity_type, entity_id, action, old_data, recorded_at, actor_source)
             VALUES ('devices', gen_random_uuid(), 'DELETE',
                     jsonb_build_object('name', 'Ghost Final 0115'),
@@ -568,7 +568,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     # -----------------------------------------------------------------------------------------
     def test_the_person_matcher_is_security_definer_and_not_public(self):
         """
-        `digital_thread_user_ids_matching()` reads `auth.users`, which `authenticated` cannot --
+        `audit_trail_user_ids_matching()` reads `auth.users`, which `authenticated` cannot --
         so without SECURITY DEFINER it answers every search with an empty array and the
         role-assignment lane silently goes back to being unsearchable, an empty disjunct being
         indistinguishable from no match. And the gate inside it is a role check rather than a
@@ -577,12 +577,12 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         self.cur.execute(
             "SELECT p.prosecdef,"
             "       has_function_privilege('public',"
-            "           'public.digital_thread_user_ids_matching(text)', 'EXECUTE')"
+            "           'public.audit_trail_user_ids_matching(text)', 'EXECUTE')"
             "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
-            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_user_ids_matching'"
+            " WHERE n.nspname = 'public' AND p.proname = 'audit_trail_user_ids_matching'"
         )
         row = self.cur.fetchone()
-        self.assertIsNotNone(row, "digital_thread_user_ids_matching() is missing")
+        self.assertIsNotNone(row, "audit_trail_user_ids_matching() is missing")
         self.assertTrue(row[0], "it is not SECURITY DEFINER")
         self.assertFalse(row[1], "PUBLIC may execute it")
 
@@ -590,23 +590,23 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         """
         It is one disjunct of a search. Raising would fail the whole page for a reader who cannot
         see the role-assignment lane anyway -- turning "your search matched nothing here" into
-        "the Digital Thread is broken".
+        "the Audit Trail is broken".
         """
         self.cur.execute("SET LOCAL ROLE authenticated;")
         # cardinality() rather than the array itself: psycopg2 hands back an unparsed uuid[] as
         # the literal '{}', which compares equal to neither [] nor None.
-        self.cur.execute("SELECT cardinality(public.digital_thread_user_ids_matching('%@%'));")
+        self.cur.execute("SELECT cardinality(public.audit_trail_user_ids_matching('%@%'));")
         self.assertEqual(self.cur.fetchone()[0], 0)
 
     def test_a_null_pattern_names_nobody(self):
         # What an unfiltered page relies on: the disjunct has to match no row when nothing was
         # searched for, or every page would gain rows for no reason.
-        self.cur.execute("SELECT cardinality(public.digital_thread_user_ids_matching(NULL));")
+        self.cur.execute("SELECT cardinality(public.audit_trail_user_ids_matching(NULL));")
         self.assertEqual(self.cur.fetchone()[0], 0)
 
     def test_the_backup_job_matcher_is_security_definer_and_not_public(self):
         """
-        0118. `backup_jobs` and `backups` are Administrator-only, while `digital_thread_select_
+        0118. `backup_jobs` and `backups` are Administrator-only, while `audit_trail_select_
         security` admits Administrator AND Auditor -- so through a plain join in a SECURITY INVOKER
         function an Auditor could see a backup lane and never search it, silently, an empty
         disjunct being indistinguishable from no match. The gate inside is a role check rather than
@@ -615,13 +615,13 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         self.cur.execute(
             "SELECT p.prosecdef,"
             "       has_function_privilege('public',"
-            "           'public.digital_thread_backup_job_ids_matching(text)', 'EXECUTE')"
+            "           'public.audit_trail_backup_job_ids_matching(text)', 'EXECUTE')"
             "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
             " WHERE n.nspname = 'public'"
-            "   AND p.proname = 'digital_thread_backup_job_ids_matching'"
+            "   AND p.proname = 'audit_trail_backup_job_ids_matching'"
         )
         row = self.cur.fetchone()
-        self.assertIsNotNone(row, "digital_thread_backup_job_ids_matching() is missing")
+        self.assertIsNotNone(row, "audit_trail_backup_job_ids_matching() is missing")
         self.assertTrue(row[0], "it is not SECURITY DEFINER")
         self.assertFalse(row[1], "PUBLIC may execute it")
 
@@ -629,7 +629,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         """The same reason as the person matcher above: it is one disjunct, not a request."""
         self.cur.execute("SET LOCAL ROLE authenticated;")
         self.cur.execute(
-            "SELECT cardinality(public.digital_thread_backup_job_ids_matching('%'));"
+            "SELECT cardinality(public.audit_trail_backup_job_ids_matching('%'));"
         )
         self.assertEqual(self.cur.fetchone()[0], 0)
 
@@ -637,7 +637,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         # What an unfiltered page relies on: a disjunct that matched rows for a null search would
         # widen every page, and this one is evaluated on every call.
         self.cur.execute(
-            "SELECT cardinality(public.digital_thread_backup_job_ids_matching(NULL));"
+            "SELECT cardinality(public.audit_trail_backup_job_ids_matching(NULL));"
         )
         self.assertEqual(self.cur.fetchone()[0], 0)
 
@@ -656,7 +656,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         """
         The half of 0118 that needs a role, and the reason the helper exists at all: the note is on
         `backup_jobs` and in no audit payload, so without this disjunct a search for what somebody
-        typed when they asked for the backup reaches the Backups page and not the thread.
+        typed when they asked for the backup reaches the Backups page and not the trail.
         """
         self.cur.execute(
             "INSERT INTO public.backup_jobs (origin, status, note)"
@@ -666,7 +666,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         self._become(self.ADMIN_ID, "Administrator")
 
         self.cur.execute(
-            "SELECT %s = ANY(public.digital_thread_backup_job_ids_matching('%%ghostnote0118%%'));",
+            "SELECT %s = ANY(public.audit_trail_backup_job_ids_matching('%%ghostnote0118%%'));",
             (job_id,),
         )
         self.assertTrue(self.cur.fetchone()[0], "an Administrator cannot find a job by its note")
@@ -674,7 +674,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     def test_an_auditor_finds_a_job_by_a_stamp_they_may_not_read(self):
         """
         WHY THE HELPER IS SECURITY DEFINER, stated as the case that would otherwise fail silently.
-        `backup_jobs` and `backups` are Administrator-only; `digital_thread_select_security` admits
+        `backup_jobs` and `backups` are Administrator-only; `audit_trail_select_security` admits
         Auditors as well. Through a plain join in a SECURITY INVOKER function an Auditor would see
         the backup lane and match nothing in it, which is indistinguishable from no match.
         """
@@ -699,7 +699,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
 
         self.cur.execute(
             "SELECT %s = ANY("
-            "  public.digital_thread_backup_job_ids_matching('%%01180118T011800Z%%'));",
+            "  public.audit_trail_backup_job_ids_matching('%%01180118T011800Z%%'));",
             (job_id,),
         )
         self.assertTrue(self.cur.fetchone()[0],
@@ -716,7 +716,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
             "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
             "  JOIN pg_namespace n ON n.oid = p.pronamespace"
             " WHERE n.nspname = 'public'"
-            "   AND p.proname = 'digital_thread_backup_job_ids_matching'"
+            "   AND p.proname = 'audit_trail_backup_job_ids_matching'"
         )
         body = self.cur.fetchone()[0]
         self.assertIn("LEFT JOIN", body,
@@ -727,12 +727,12 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
         The CTE holding it is MATERIALIZED. Inlined, a STABLE function is ALLOWED to be evaluated
         once and is not promised to be -- Postgres put this one in the per-row Filter of every
         partition scan, which took a search from 53ms to 583ms on 4,065 rows. That is the shape of
-        cost that reads as "the thread got big" rather than as a query doing the wrong thing.
+        cost that reads as "the trail got big" rather than as a query doing the wrong thing.
         """
         self.cur.execute(
             "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
             "  JOIN pg_namespace n ON n.oid = p.pronamespace"
-            " WHERE n.nspname = 'public' AND p.proname = 'digital_thread_page'"
+            " WHERE n.nspname = 'public' AND p.proname = 'audit_trail_page'"
         )
         body = self.cur.fetchone()[0]
         self.assertIn("MATERIALIZED", body,
@@ -741,7 +741,7 @@ class DigitalThreadTotalAndSearch(unittest.TestCase):
     def test_a_like_metacharacter_is_a_character(self):
         """
         The box promises a substring of a name or an id. Unescaped, a typed percentage hands back
-        the whole thread and an underscore quietly matches any character -- both of which look
+        the whole trail and an underscore quietly matches any character -- both of which look
         like a search that worked.
         """
         seeded = self.total()
@@ -760,7 +760,7 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
     """
     0121. The event drawer offers three copyable ids; the search took one of them.
 
-    `digital_thread.id` and `causation_id` had no consumer anywhere in the platform -- no filter,
+    `audit_trail.id` and `causation_id` had no consumer anywhere in the platform -- no filter,
     no search, no RPC argument -- so a reader handed a mutation id in a ticket had nowhere to put
     it, and the drawer's sibling list could only ever report the members of a transaction that
     happened to be loaded.
@@ -790,7 +790,7 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
         for i in range(3):
             self.cur.execute(
                 """
-                INSERT INTO public.digital_thread
+                INSERT INTO public.audit_trail
                        (entity_type, entity_id, action, new_data, recorded_at, actor_source,
                         causation_id)
                 VALUES ('devices', gen_random_uuid(), 'INSERT', %s::jsonb,
@@ -803,7 +803,7 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
 
         self.cur.execute(
             """
-            INSERT INTO public.digital_thread
+            INSERT INTO public.audit_trail
                    (entity_type, entity_id, action, new_data, recorded_at, actor_source,
                     causation_id)
             VALUES ('devices', gen_random_uuid(), 'INSERT', %s::jsonb,
@@ -820,7 +820,7 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
 
     def total(self, search):
         self.cur.execute(
-            "SELECT (public.digital_thread_page(p_limit => 1000, p_include_purged => true,"
+            "SELECT (public.audit_trail_page(p_limit => 1000, p_include_purged => true,"
             "        p_search => %s) ->> 'total_matching')::bigint",
             (search,),
         )
@@ -835,7 +835,7 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
         the group, so this cannot pass by finding a different three rows.
         """
         self.cur.execute(
-            "SELECT count(*) FROM public.digital_thread WHERE causation_id = %s",
+            "SELECT count(*) FROM public.audit_trail WHERE causation_id = %s",
             (self.CAUSATION,),
         )
         direct = self.cur.fetchone()[0]
@@ -846,7 +846,7 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
         # An off-by-one in the predicate, or a LIKE where an equality was meant, would take both.
         found = self.total(str(self.CAUSATION))
         self.cur.execute(
-            "SELECT count(*) FROM public.digital_thread WHERE causation_id = %s",
+            "SELECT count(*) FROM public.audit_trail WHERE causation_id = %s",
             (self.CAUSATION + 1,),
         )
         self.assertLess(found, 3 + self.cur.fetchone()[0] + 1)
@@ -903,7 +903,7 @@ class HowManyRowsATransactionWrote(unittest.TestCase):
     def _insert(self, entity_type, payload, causation_id):
         self.cur.execute(
             """
-            INSERT INTO public.digital_thread
+            INSERT INTO public.audit_trail
                    (entity_type, entity_id, action, new_data, recorded_at, actor_source,
                     causation_id)
             VALUES (%s, gen_random_uuid(), 'INSERT', %s::jsonb,
@@ -935,7 +935,7 @@ class HowManyRowsATransactionWrote(unittest.TestCase):
     def events(self, ids, include_purged=True, entity_type=None):
         self.cur.execute(
             """
-            SELECT public.digital_thread_page(
+            SELECT public.audit_trail_page(
                 p_limit => 1000, p_include_purged => %s, p_entity_type => %s,
                 p_entity_ids => %s::uuid[]
             ) -> 'events'

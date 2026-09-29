@@ -109,7 +109,7 @@ describe('ranking', () => {
    * first-time reader arrives with.
    */
   it('finds a page by the word the job uses rather than the word the UI uses', () => {
-    expect(labels('audit')).toContain('Digital Thread')
+    expect(labels('audit')).toContain('Audit Trail')
     expect(labels('mqtt')).toContain('Gateways')
     expect(labels('parquet')).toContain('Cold Storage')
   })
@@ -130,9 +130,9 @@ describe('ranking', () => {
    * character, so a one-letter query matches the higher-scoring prefix band first.
    */
   it('scores a single letter as a prefix, never as initials', () => {
-    const thread = targets().find(t => t.label === 'Digital Thread')
-    expect(scoreTarget(thread, 'd')).toBe(80)
-    expect(scoreTarget(thread, 'dt')).toBe(70)
+    const trail = targets().find(t => t.label === 'Audit Trail')
+    expect(scoreTarget(trail, 'a')).toBe(80)
+    expect(scoreTarget(trail, 'at')).toBe(70)
   })
 
   it('caps the list, so the panel is a shortlist and not a directory', () => {
@@ -154,7 +154,7 @@ describe('the palette', () => {
     onSelectArea: vi.fn(),
     onSelectSchema: vi.fn(),
     onSelectSetting: vi.fn(),
-    onSelectThread: vi.fn()
+    onSelectTrail: vi.fn()
   })
 
   const type = (value) => {
@@ -330,19 +330,19 @@ describe('the palette', () => {
 
     /**
      * THE ID HAD ONE CONSUMER AND IT COVERED FIVE KINDS. `resolveId` probes areas, cells,
-     * gateways, devices and schemas; the Digital Thread records every kind in
-     * DIGITAL_THREAD_ENTITY_TYPES, so the copyable Entity ID in its drawer was a dead end for a
-     * setting, a backup, a proposal or a person. The thread's own search matches `entity_id`
+     * gateways, devices and schemas; the Audit Trail records every kind in
+     * AUDIT_TRAIL_ENTITY_TYPES, so the copyable Entity ID in its drawer was a dead end for a
+     * setting, a backup, a proposal or a person. The trail's own search matches `entity_id`
      * whatever kind carries it, so this row is the answer for the rest -- and it is offered for
      * the five too, because "what happened to this" is the second question somebody pasting an id
      * is asking.
      */
-    it('offers the Digital Thread for an id no asset probe could name', async () => {
+    it('offers the Audit Trail for an id no asset probe could name', async () => {
       api.resolveId.mockResolvedValue([])
       render(<GlobalSearch {...props()} />)
       type(UUID)
 
-      expect(await screen.findByText(/Find this ID in the Digital Thread/)).toBeTruthy()
+      expect(await screen.findByText(/Find this ID in the Audit Trail/)).toBeTruthy()
     })
 
     it('offers it for a resolved id as well, beneath the asset itself', async () => {
@@ -355,7 +355,7 @@ describe('the palette', () => {
         .map(el => el.textContent)
       // The asset first: it is the more specific answer, and a row that moves under the cursor
       // once the lookup lands is the reason the static index is ordered this way too.
-      expect(rows).toEqual(['Haas VF-2', 'Find this ID in the Digital Thread'])
+      expect(rows).toEqual(['Haas VF-2', 'Find this ID in the Audit Trail'])
     })
 
     it('hands over the id in the box, not the one before it', async () => {
@@ -370,24 +370,24 @@ describe('the palette', () => {
       const p = props()
       render(<GlobalSearch {...p} />)
       type(UUID)
-      await screen.findByText(/Find this ID in the Digital Thread/)
+      await screen.findByText(/Find this ID in the Audit Trail/)
 
       const second = '11111111-2222-4333-8444-555555555555'
       type(second)
       await waitFor(() => expect(api.resolveId).toHaveBeenCalledWith(second))
 
-      fireEvent.click(screen.getByText(/Find this ID in the Digital Thread/))
-      expect(p.onSelectThread).toHaveBeenCalledWith(second)
+      fireEvent.click(screen.getByText(/Find this ID in the Audit Trail/))
+      expect(p.onSelectTrail).toHaveBeenCalledWith(second)
     })
 
-    it('hands the id to the thread rather than to an asset page', async () => {
+    it('hands the id to the trail rather than to an asset page', async () => {
       api.resolveId.mockResolvedValue([])
       const p = props()
       render(<GlobalSearch {...p} />)
       type(UUID)
 
-      fireEvent.click(await screen.findByText(/Find this ID in the Digital Thread/))
-      expect(p.onSelectThread).toHaveBeenCalledWith(UUID)
+      fireEvent.click(await screen.findByText(/Find this ID in the Audit Trail/))
+      expect(p.onSelectTrail).toHaveBeenCalledWith(UUID)
       // Not an entity hit: those open a page for a kind this id may not have.
       expect(p.onSelectDevice).not.toHaveBeenCalled()
     })

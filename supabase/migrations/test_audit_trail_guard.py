@@ -1,8 +1,8 @@
 """
-PostgreSQL integration tests for the Digital Thread audit guard in
+PostgreSQL integration tests for the Audit Trail's no-op guard in
 `0005_digital_thread_signal_and_attribution.sql`.
 
-WHAT THIS PROTECTS. `log_digital_thread_event()` suppresses two kinds of machine non-event: an
+WHAT THIS PROTECTS. `log_audit_trail_event()` suppresses two kinds of machine non-event: an
 UPDATE that changes nothing, and an UPDATE that moves only `gateways.last_heartbeat`. Both are
 written by the ingestion daemon on a timer -- a heartbeat every 30s per gateway, a birth
 certificate every 60s per device -- so without the guard a four-gateway, twelve-device stack
@@ -23,7 +23,7 @@ is the specific case a careless per-column implementation drops.
 Runs against the Supabase database, not the historian. Requires the stack (or CI's Postgres
 service) to be up:
 
-    python supabase/migrations/test_digital_thread_guard.py
+    python supabase/migrations/test_audit_trail_guard.py
 """
 import os
 import unittest
@@ -50,7 +50,7 @@ class AuditGuardTestCase(unittest.TestCase):
     """
     Every test runs inside one transaction and rolls back.
 
-    ROLLBACK IS WHAT MAKES THIS SAFE TO RUN AGAINST A LIVE STACK. `digital_thread` is append-only
+    ROLLBACK IS WHAT MAKES THIS SAFE TO RUN AGAINST A LIVE STACK. `audit_trail` is append-only
     to every application role, so a test that committed its scratch rows would leave permanent
     noise in exactly the table under test -- and could not clean up after itself without the
     owner exemption this suite deliberately does not rely on.
@@ -61,20 +61,20 @@ class AuditGuardTestCase(unittest.TestCase):
         conn = get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT to_regclass('public.digital_thread');")
+                cur.execute("SELECT to_regclass('public.audit_trail');")
                 if not cur.fetchone()[0]:
-                    raise RuntimeError("public.digital_thread does not exist; is the stack up?")
+                    raise RuntimeError("public.audit_trail does not exist; is the stack up?")
 
                 # The guard lives in the function body. Assert the migration that carries it has
                 # actually been applied before asserting behaviour, so a failure names the cause
                 # rather than reporting a mysterious extra audit row.
                 cur.execute("""
                     SELECT prosrc, prosecdef FROM pg_proc
-                     WHERE proname = 'log_digital_thread_event'
+                     WHERE proname = 'log_audit_trail_event'
                 """)
                 row = cur.fetchone()
                 if not row:
-                    raise RuntimeError("log_digital_thread_event() is not defined")
+                    raise RuntimeError("log_audit_trail_event() is not defined")
                 cls.function_source, cls.is_security_definer = row
         finally:
             conn.close()
@@ -111,11 +111,11 @@ class AuditGuardTestCase(unittest.TestCase):
 
     def _mark(self):
         """Record the current high-water mark so counts below measure only what a test caused."""
-        self.cur.execute("SELECT coalesce(max(id), 0) FROM public.digital_thread")
+        self.cur.execute("SELECT coalesce(max(id), 0) FROM public.audit_trail")
         self._high_water = self.cur.fetchone()[0]
 
     def audit_rows(self, entity_type=None):
-        sql = "SELECT entity_type, action, old_data, new_data FROM public.digital_thread WHERE id > %s"
+        sql = "SELECT entity_type, action, old_data, new_data FROM public.audit_trail WHERE id > %s"
         params = [self._high_water]
         if entity_type:
             sql += " AND entity_type = %s"
@@ -134,7 +134,7 @@ class TestFunctionShape(AuditGuardTestCase):
     def test_function_is_security_definer(self):
         self.assertTrue(
             self.is_security_definer,
-            "log_digital_thread_event() lost SECURITY DEFINER; it writes to a table application "
+            "log_audit_trail_event() lost SECURITY DEFINER; it writes to a table application "
             "roles cannot insert into directly",
         )
 
@@ -338,7 +338,7 @@ class TestAttribution(AuditGuardTestCase):
             "UPDATE public.devices SET status = 'OFFLINE' WHERE id = %s", (self.device_id,)
         )
         self.cur.execute(
-            "SELECT actor_source FROM public.digital_thread WHERE id > %s", (self._high_water,)
+            "SELECT actor_source FROM public.audit_trail WHERE id > %s", (self._high_water,)
         )
         rows = self.cur.fetchall()
         self.assertEqual(len(rows), 1)
@@ -349,7 +349,7 @@ class TestAttribution(AuditGuardTestCase):
             "UPDATE public.devices SET status = 'OFFLINE' WHERE id = %s", (self.device_id,)
         )
         self.cur.execute(
-            "SELECT actor_source FROM public.digital_thread WHERE id > %s", (self._high_water,)
+            "SELECT actor_source FROM public.audit_trail WHERE id > %s", (self._high_water,)
         )
         self.assertIn(self.cur.fetchone()[0], ("user", "ingestion", "migration", "service"))
 
@@ -358,7 +358,7 @@ class TestAttribution(AuditGuardTestCase):
         The approve_quarantined_device() path: a SECURITY DEFINER RPC sets the GUC so the audit
         row names the operator who authorised it rather than the service credential it rode in on.
 
-        Uses a REAL account, because `digital_thread.changed_by` is a foreign key into auth.users
+        Uses a REAL account, because `audit_trail.changed_by` is a foreign key into auth.users
         -- which is itself the reason 0005 needed a separate `actor_source` column rather than
         writing 'ingestion' into changed_by.
 
@@ -409,7 +409,7 @@ class TestAttribution(AuditGuardTestCase):
             "UPDATE public.devices SET status = 'OFFLINE' WHERE id = %s", (self.device_id,)
         )
         self.cur.execute(
-            "SELECT changed_by, actor_source FROM public.digital_thread WHERE id > %s",
+            "SELECT changed_by, actor_source FROM public.audit_trail WHERE id > %s",
             (self._high_water,),
         )
         changed_by, actor_source = self.cur.fetchone()
@@ -426,13 +426,13 @@ class TestMigrationIsIdempotent(AuditGuardTestCase):
 
     def test_behaviour_is_unchanged_after_redeclaring_the_function(self):
         self.cur.execute(
-            "SELECT prosrc FROM pg_proc WHERE proname = 'log_digital_thread_event'"
+            "SELECT prosrc FROM pg_proc WHERE proname = 'log_audit_trail_event'"
         )
         source = self.cur.fetchone()[0]
 
         # Re-create it exactly as it stands, which is what a replay of 0005 does.
         self.cur.execute(
-            "CREATE OR REPLACE FUNCTION public.log_digital_thread_event() RETURNS trigger "
+            "CREATE OR REPLACE FUNCTION public.log_audit_trail_event() RETURNS trigger "
             "LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $body$"
             + source
             + "$body$"
@@ -459,7 +459,7 @@ class TestMigrationIsIdempotent(AuditGuardTestCase):
         """
         self.cur.execute(
             """
-            SELECT count(*) FROM public.digital_thread
+            SELECT count(*) FROM public.audit_trail
              WHERE action = 'UPDATE'
                AND old_data IS NOT NULL AND new_data IS NOT NULL
                AND (new_data - 'last_heartbeat') IS NOT DISTINCT FROM (old_data - 'last_heartbeat')
@@ -472,7 +472,7 @@ class TestMigrationIsIdempotent(AuditGuardTestCase):
         )
 
 
-class TestMetricCatalogReachesTheThread(AuditGuardTestCase):
+class TestMetricCatalogReachesTheTrail(AuditGuardTestCase):
     """
     0010 (#468). Deprecating is the only way to retire a metric, and `metric_catalog` carried no
     trigger, so neither a deprecation nor its reversal said who made it or when. Both are UPDATEs
@@ -522,9 +522,9 @@ class TestMetricCatalogReachesTheThread(AuditGuardTestCase):
         self.cur.execute(
             "SELECT tgname FROM pg_trigger "
             " WHERE tgrelid = 'public.metric_catalog'::regclass AND NOT tgisinternal"
-            "   AND tgfoid = 'public.log_digital_thread_event()'::regprocedure"
+            "   AND tgfoid = 'public.log_audit_trail_event()'::regprocedure"
         )
-        self.assertEqual([r[0] for r in self.cur.fetchall()], ["trg_metric_catalog_digital_thread"])
+        self.assertEqual([r[0] for r in self.cur.fetchall()], ["trg_metric_catalog_audit_trail"])
 
     def test_a_deprecation_is_logged_with_its_replacement(self):
         replacement = self._metric("NEW")
@@ -574,7 +574,7 @@ class TestMetricCatalogReachesTheThread(AuditGuardTestCase):
     def test_a_replayed_seed_update_is_not(self):
         """
         0002 re-applies `permitted_values` on every boot with an unguarded UPDATE. It writes the
-        value the row already holds, so the function's own no-op rule must keep it off the thread.
+        value the row already holds, so the function's own no-op rule must keep it off the trail.
         """
         metric = self._metric("SEEDED", permitted_values=["READY", "ACTIVE"])
         self._mark()
@@ -597,23 +597,23 @@ class TestMetricCatalogReachesTheThread(AuditGuardTestCase):
         self.cur.execute("RESET ROLE;")
 
         self.cur.execute(
-            "SELECT changed_by::text, actor_source, audit_domain FROM public.digital_thread "
+            "SELECT changed_by::text, actor_source, audit_domain FROM public.audit_trail "
             " WHERE id > %s AND entity_type = 'metric_catalog'",
             (self._high_water,),
         )
         self.assertEqual(self.cur.fetchall(), [(admin, "user", "asset")])
 
 
-class TestNameplateEditsReachTheThread(AuditGuardTestCase):
+class TestNameplateEditsReachTheTrail(AuditGuardTestCase):
     """
     0122, AND THE REASON IT IS HERE RATHER THAN IN ITS OWN FILE.
 
-    `device_nameplate` was a Digital Thread lane that nothing wrote. The classifier knew it, the
+    `device_nameplate` was an Audit Trail lane that nothing wrote. The classifier knew it, the
     dashboard offered it as a filter and resolved its rows against the device they name -- and the
     table carried no trigger at all, so the filter answered empty on every stack that ever ran. A
     live one held 4,075 audit rows across eleven entity types and not one was a nameplate.
 
-    The obstacle was the function this file is about. `log_digital_thread_event()` read `NEW.id`,
+    The obstacle was the function this file is about. `log_audit_trail_event()` read `NEW.id`,
     and this table is keyed by `device_id` with no `id` column, so the trigger could not be
     attached. 0122 makes the key column a trigger argument defaulting to `id` -- which is why the
     assertions below belong beside the rest of that function's behaviour rather than apart from it.
@@ -631,13 +631,13 @@ class TestNameplateEditsReachTheThread(AuditGuardTestCase):
         """
         self.cur.execute(self.NAMEPLATE, (self.device_id,))
         self.cur.execute(
-            "SELECT entity_type, entity_id::text, action FROM public.digital_thread "
+            "SELECT entity_type, entity_id::text, action FROM public.audit_trail "
             " WHERE id > %s AND entity_type = 'device_nameplate'",
             (self._high_water,),
         )
         self.assertEqual(
             self.cur.fetchall(), [("device_nameplate", self.device_id, "INSERT")],
-            "a nameplate insert did not reach the thread under its device's id",
+            "a nameplate insert did not reach the trail under its device's id",
         )
 
     def test_an_edit_is_logged(self):
@@ -687,14 +687,14 @@ class TestNameplateEditsReachTheThread(AuditGuardTestCase):
 
     def test_the_row_lands_in_the_asset_lane(self):
         """
-        Without this the feature is invisible to the role that uses it: digital_thread_select_asset
+        Without this the feature is invisible to the role that uses it: audit_trail_select_asset
         is what admits a Shopfloor_Manager, and a Manager is one of the two roles RLS lets edit a
         nameplate at all. The classifier has said `asset` since 0070; 0122 is the first file whose
         rows depend on the answer.
         """
         self.cur.execute(self.NAMEPLATE, (self.device_id,))
         self.cur.execute(
-            "SELECT DISTINCT audit_domain FROM public.digital_thread "
+            "SELECT DISTINCT audit_domain FROM public.audit_trail "
             " WHERE id > %s AND entity_type = 'device_nameplate'",
             (self._high_water,),
         )
@@ -717,9 +717,9 @@ class TestNameplateEditsReachTheThread(AuditGuardTestCase):
              CROSS JOIN LATERAL (
                     SELECT coalesce(
                              (regexp_match(pg_get_triggerdef(t.oid),
-                                           'log_digital_thread_event\(''([^'']*)''\)'))[1],
+                                           'log_audit_trail_event\(''([^'']*)''\)'))[1],
                              'id') AS col) k
-             WHERE p.proname = 'log_digital_thread_event'
+             WHERE p.proname = 'log_audit_trail_event'
                AND NOT t.tgisinternal
                AND NOT EXISTS (SELECT 1 FROM pg_attribute a
                                 WHERE a.attrelid = c.oid AND a.attnum > 0
@@ -727,7 +727,7 @@ class TestNameplateEditsReachTheThread(AuditGuardTestCase):
             """
         )
         self.assertEqual(self.cur.fetchall(), [],
-                         "a digital thread trigger names a key column its table does not have")
+                         "an audit trail trigger names a key column its table does not have")
 
     def test_the_nameplate_triggers_are_attached(self):
         """
@@ -742,7 +742,7 @@ class TestNameplateEditsReachTheThread(AuditGuardTestCase):
         )
         self.assertEqual(
             [r[0] for r in self.cur.fetchall()],
-            ["trg_device_nameplate_digital_thread", "trg_device_nameplate_digital_thread_update"],
+            ["trg_device_nameplate_audit_trail", "trg_device_nameplate_audit_trail_update"],
         )
 
 

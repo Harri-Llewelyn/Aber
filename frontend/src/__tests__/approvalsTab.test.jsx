@@ -44,7 +44,7 @@ const deviceProposal = (over = {}) => ({
   decided_by: null,
   decided_at: null,
   decision_reason: null,
-  applied_thread_id: null,
+  applied_trail_id: null,
   target_label: 'Lathe_01',
   target_missing: false,
   current: { name: 'Lathe_01' },
@@ -64,7 +64,7 @@ const schemaProposal = (over = {}) => ({
   decided_by: null,
   decided_at: null,
   decision_reason: null,
-  applied_thread_id: null,
+  applied_trail_id: null,
   target_label: 'CNC_Mill v2',
   target_missing: false,
   current: { schema_name: 'CNC_Mill', version: 2, status: 'draft' },
@@ -412,23 +412,23 @@ describe('finding a decision again', () => {
   })
 })
 
-describe('following an approval into the Digital Thread', () => {
+describe('following an approval into the Audit Trail', () => {
   it('offers the hand-over on a proposal that was applied', async () => {
-    const onViewThread = vi.fn()
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal({
       status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z',
-      applied_thread_id: 4321
+      applied_trail_id: 4321
     })])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /view in digital thread/i }))
+    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
     // THE TARGET, NOT THE PROPOSAL. What a reader wants after an approval is the machine's history
     // with the approval in it, beside everything else that happened to it.
-    expect(onViewThread).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: false })
+    expect(onViewTrail).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: false })
   })
 
-  /* `digital_thread_page()` compares `entity_type` exactly, and the approval row is filed under the
+  /* `audit_trail_page()` compares `entity_type` exactly, and the approval row is filed under the
      lane's table. Filtered to DEVICE, a cell's or a nameplate's approval row is not listed. */
   it.each([
     ['cells', 'CELL'],
@@ -436,16 +436,16 @@ describe('following an approval into the Digital Thread', () => {
     ['areas', 'AREA'],
     ['device_nameplate', 'NAMEPLATE']
   ])('opens a %s approval filtered to %s', async (lane, kind) => {
-    const onViewThread = vi.fn()
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal({
       entity_type: lane, entity_id: `${lane}-1`, status: 'applied', decided_by: MANAGER_ID,
-      decided_at: '2026-09-06T00:00:00Z', applied_thread_id: 4321
+      decided_at: '2026-09-06T00:00:00Z', applied_trail_id: 4321
     })])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /view in digital thread/i }))
-    expect(onViewThread).toHaveBeenCalledWith({ id: `${lane}-1`, type: kind, purged: false })
+    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
+    expect(onViewTrail).toHaveBeenCalledWith({ id: `${lane}-1`, type: kind, purged: false })
   })
 
   it('maps every lane to the kind whose filter asks for that lane', () => {
@@ -455,39 +455,39 @@ describe('following an approval into the Digital Thread', () => {
   })
 
   it('asks for purged rows when the subject has been deleted', async () => {
-    // The thread hides a deleted entity's rows unless asked, and the approval row is one of them.
-    const onViewThread = vi.fn()
+    // The trail hides a deleted entity's rows unless asked, and the approval row is one of them.
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal({
       entity_type: 'cells', entity_id: 'cell-gone', target_label: 'cell-gone', target_missing: true,
       current: null, status: 'applied', decided_by: MANAGER_ID,
-      decided_at: '2026-09-06T00:00:00Z', applied_thread_id: 4321
+      decided_at: '2026-09-06T00:00:00Z', applied_trail_id: 4321
     })])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /view in digital thread/i }))
-    expect(onViewThread).toHaveBeenCalledWith({ id: 'cell-gone', type: 'CELL', purged: true })
+    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
+    expect(onViewTrail).toHaveBeenCalledWith({ id: 'cell-gone', type: 'CELL', purged: true })
   })
 
   it('does not offer it on a rejection, which changed nothing', async () => {
-    // `applied_thread_id` is set by the approval and by nothing else. A dead button on the three
+    // `applied_trail_id` is set by the approval and by nothing else. A dead button on the three
     // outcomes that wrote no row would teach the reader the control lies.
-    const onViewThread = vi.fn()
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal({
       status: 'rejected', decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z',
-      decision_reason: 'no', applied_thread_id: null
+      decision_reason: 'no', applied_trail_id: null
     })])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
-    expect(screen.queryByRole('button', { name: /view in digital thread/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /view in audit trail/i })).toBeNull()
   })
 
   it('does not offer it while the proposal is still open', async () => {
-    const onViewThread = vi.fn()
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal()])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
-    expect(screen.queryByRole('button', { name: /view in digital thread/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /view in audit trail/i })).toBeNull()
   })
 })
 
@@ -869,7 +869,7 @@ describe('a relocation names the cells rather than their uuids', () => {
     expect(screen.queryByText('cell-weld')).toBeNull()
   })
 
-  /* The uuid is what the digital thread and the filter speak, so it is kept where it costs nothing. */
+  /* The uuid is what the audit trail and the filter speak, so it is kept where it costs nothing. */
   it('keeps the uuid in the tooltip', async () => {
     mockWithCells()
     renderTab()

@@ -1,5 +1,5 @@
 /**
- * Digital Thread: ← and → step the drawer through the selected asset's history, the same pair of
+ * Audit Trail: ← and → step the drawer through the selected asset's history, the same pair of
  * moves as the ◀ Previous and Next ▶ buttons. The binding lives in the tab and is active only while
  * an event is selected; it stands down for editable targets and modified keystrokes, because the
  * filter bar's selects and date inputs consume arrow keys natively.
@@ -7,7 +7,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab'
+import { AuditTrailTab } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -38,7 +38,7 @@ const EVENTS = [
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation((path) => {
-    if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+    if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(EVENTS)
     if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
     if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
     if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
@@ -47,7 +47,7 @@ beforeEach(() => {
 })
 
 const show = async () => {
-  render(<DigitalThreadTab />)
+  render(<AuditTrailTab />)
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 

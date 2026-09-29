@@ -822,12 +822,12 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * `digital_thread:read` is separate from listing principals; a caller without it must still see
+   * `audit_trail:read` is separate from listing principals; a caller without it must still see
    * the identities.
    */
   it('still lists identities when the token history cannot be read', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    api.listServiceTokens.mockRejectedValue(new Error('permission denied for table digital_thread'))
+    api.listServiceTokens.mockRejectedValue(new Error('permission denied for table audit_trail'))
     await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())

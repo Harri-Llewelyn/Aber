@@ -37,7 +37,7 @@ import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewThread, hasPermission, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
+export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, hasPermission, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   /**
@@ -184,7 +184,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
   /* One form, two endings (utils/proposeFromForm.js): for somebody who may not save it, the footer
@@ -734,11 +734,11 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   ? 'Requires Admin permissions'
                   : 'Edit cell configuration'
           },
-          /* Withheld from a reader who may not open the page: the nav hides Digital Thread without
-             `digital_thread:read`. `.filter(Boolean)` drops it. */
-          canReadThread && {
-            label: 'View Digital Thread', icon: <IconHistory size={13} />,
-            onClick: () => onViewThread?.(selectedCell),
+          /* Withheld from a reader who may not open the page: the nav hides Audit Trail without
+             `audit_trail:read`. `.filter(Boolean)` drops it. */
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            onClick: () => onViewTrail?.(selectedCell),
             title: 'Open the immutable audit trace for this cell'
           },
           {

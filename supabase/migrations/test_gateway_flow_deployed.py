@@ -14,7 +14,7 @@ TWO HALVES, AND THE FIRST IS THE ONE THAT WAS SILENTLY WRONG.
      writes nothing.
 
 Every test runs inside one transaction and rolls back, which is what makes this safe against a
-live database: `digital_thread` is append-only to every application role.
+live database: `audit_trail` is append-only to every application role.
 
 Runs against the Supabase database, not the historian:
 
@@ -90,7 +90,7 @@ class FlowDeployedTestCase(unittest.TestCase):
     def rows(self, action):
         self.cur.execute(
             "SELECT old_data, new_data, changed_by, actor_source "
-            "  FROM public.digital_thread WHERE entity_type = 'gateways' AND entity_id = %s AND action = %s "
+            "  FROM public.audit_trail WHERE entity_type = 'gateways' AND entity_id = %s AND action = %s "
             " ORDER BY recorded_at, id",
             (self.gateway_id, action),
         )

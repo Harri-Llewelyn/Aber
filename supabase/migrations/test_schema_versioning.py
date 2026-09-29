@@ -17,7 +17,7 @@ Two things have to be true before the guard is even reachable, and both were fai
 this was written:
   * the JWT claims must name a schema-managing role, or the RLS policy on `schemas` filters the
     UPDATE to zero rows and it "succeeds" without ever reaching the trigger;
-  * `auth.users` must contain the acting user, because `log_digital_thread_event()` writes
+  * `auth.users` must contain the acting user, because `log_audit_trail_event()` writes
     `changed_by = auth.uid()` under an FK -- so publishing, which repoints devices, fails on the
     audit insert rather than on anything to do with versioning.
 
@@ -128,9 +128,9 @@ class SchemaVersioningTestCase(unittest.TestCase):
         Give the two acting users their roles, and make them exist in `auth.users`.
 
         The second half is not optional and is easy to mistake for boilerplate:
-        `log_digital_thread_event()` writes `changed_by = auth.uid()` under a foreign key to
+        `log_audit_trail_event()` writes `changed_by = auth.uid()` under a foreign key to
         `auth.users`, so without these rows the publish tests fail on the AUDIT insert -- with an
-        FK error naming `digital_thread`, which reads like a fault in the audit trail rather than
+        FK error naming `audit_trail`, which reads like a fault in the audit trail rather than
         a missing fixture.
         """
         for user_id in (ADMIN_USER_ID, OPERATOR_USER_ID, MANAGER_USER_ID):
@@ -163,7 +163,7 @@ class SchemaVersioningTestCase(unittest.TestCase):
                     self.cur.execute("ROLLBACK TO SAVEPOINT ensure_user;")
             else:
                 raise RuntimeError(
-                    f"could not create auth.users row {user_id}; digital_thread.changed_by is "
+                    f"could not create auth.users row {user_id}; audit_trail.changed_by is "
                     "an FK to it, so the publish tests cannot run"
                 )
 
@@ -748,9 +748,9 @@ class TestPublish(SchemaVersioningTestCase):
         self.assertEqual(current["schema_definition"], widened)
         self.assertEqual(current["change_description"], "Added spindle temperature threshold")
 
-    def test_publishing_writes_the_rebinding_to_the_digital_thread(self):
+    def test_publishing_writes_the_rebinding_to_the_audit_trail(self):
         """
-        Repointing `devices.schema_id` fires `log_digital_thread_event()`, so "what was this
+        Repointing `devices.schema_id` fires `log_audit_trail_event()`, so "what was this
         machine judged against, and when did that change" is answerable from the audit trail
         rather than only from the schema rows.
         """
@@ -758,7 +758,7 @@ class TestPublish(SchemaVersioningTestCase):
         device_id = self._seed_device_on(v1_id, "AUDIT")
 
         self.cur.execute(
-            "SELECT count(*) FROM public.digital_thread WHERE entity_id = %s AND action = 'UPDATE';",
+            "SELECT count(*) FROM public.audit_trail WHERE entity_id = %s AND action = 'UPDATE';",
             (device_id,),
         )
         before = self.cur.fetchone()[0]
@@ -770,7 +770,7 @@ class TestPublish(SchemaVersioningTestCase):
 
         self.cur.execute(
             """
-            SELECT count(*) FROM public.digital_thread
+            SELECT count(*) FROM public.audit_trail
              WHERE entity_id = %s AND entity_type = 'devices' AND action = 'UPDATE'
                AND new_data ->> 'schema_id' = %s;
             """,
@@ -779,7 +779,7 @@ class TestPublish(SchemaVersioningTestCase):
         self.assertEqual(self.cur.fetchone()[0], 1)
 
         self.cur.execute(
-            "SELECT count(*) FROM public.digital_thread WHERE entity_id = %s AND action = 'UPDATE';",
+            "SELECT count(*) FROM public.audit_trail WHERE entity_id = %s AND action = 'UPDATE';",
             (device_id,),
         )
         self.assertGreater(self.cur.fetchone()[0], before)

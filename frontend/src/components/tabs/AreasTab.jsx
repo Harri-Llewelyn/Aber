@@ -42,7 +42,7 @@ import {
  * cell's, or its own when it is Area-Wide, which is set on the Devices page. An area's plan is
  * managed from its details panel.
  */
-export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
+export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewTrail, hasPermission, initialSearchFilter, onClearFilter }) {
   const [areas, setAreas]       = useState([])
   const [cells, setCells]       = useState([])
   const [assets, setAssets]     = useState([])
@@ -115,7 +115,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
   /* One form, two endings (utils/proposeFromForm.js): for somebody who may not save it, the footer
@@ -564,9 +564,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 ? 'Requires Admin permissions'
                 : 'Rename or describe this area'
           },
-          canReadThread && {
-            label: 'View Digital Thread', icon: <IconHistory size={13} />,
-            onClick: () => onViewThread?.(selectedArea),
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            onClick: () => onViewTrail?.(selectedArea),
             title: 'Open the immutable audit trace for this area'
           },
           {

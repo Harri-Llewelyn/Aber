@@ -21,7 +21,7 @@ export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
           <span>Archive Entity (Decommission)</span>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
-          Decommissioning <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> will mark it as archived. Historical telemetry and Digital Thread data remain 100% retained.
+          Decommissioning <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> will mark it as archived. Historical telemetry and Audit Trail data remain 100% retained.
         </p>
 
         <div className="form-group">

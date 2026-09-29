@@ -162,7 +162,7 @@ function, which calls the atomic `public.approve_quarantined_device()` RPC.
 ## Schema Conformance
 
 Every DDATA metric is evaluated against the schemas bound to its device, and what fails is recorded
-in `digital_thread` through `record_ingestion_rejection()` (`0026`). Since `0050` a device can also
+in `audit_trail` through `record_ingestion_rejection()` (`0026`). Since `0050` a device can also
 be set to **reject** what fails, rather than only report it.
 
 ### `audit` and `enforce`
@@ -171,7 +171,7 @@ be set to **reject** what fails, rather than only report it.
 
 | | `audit` (default) | `enforce` |
 | :--- | :--- | :--- |
-| Violation recorded in `digital_thread` | yes | yes |
+| Violation recorded in `audit_trail` | yes | yes |
 | Sample written to the historian | **yes** | **no**, for the offending metric |
 | Rest of the message | written | written |
 
@@ -245,7 +245,7 @@ device, so the loss is made **loud** instead:
 - a per-message summary follows, naming how to switch the device back to `audit`;
 - `aber_ingestion_schema_rejected_total` counts it, beside `aber_ingestion_metrics_written_total`.
 
-A metric dropped this way is still recorded in `digital_thread`, and that row is then the **only**
+A metric dropped this way is still recorded in `audit_trail`, and that row is then the **only**
 remaining evidence the device sent anything — which is why enforcement does not switch recording
 off, and why `conformance_policy` has no third value that would.
 
@@ -492,7 +492,7 @@ is added to the `supabase_realtime` publication explicitly, and the page sets `s
 the daemon to observe on its next message. A flag also survives a page reload, which a fired-off
 POST would not.
 
-**`capture_jobs` deliberately has no digital-thread trigger.** That trigger is opt-in per table, and
+**`capture_jobs` deliberately has no audit-trail trigger.** That trigger is opt-in per table, and
 adding it here would look like consistency while writing a row per progress tick into an append-only
 table no application role can prune.
 
@@ -1179,10 +1179,11 @@ appear where the hierarchy is being named: here, and in the Summary of each page
 standard lacks: a process cell is one of ISA-95's work center types, so the rename would have traded
 a concrete word operators recognise for the category it belongs to, and left the standard's own
 ambiguity (a work cell is a work unit type) where it was. It would also have been a table, its API
-routes, the `cell:manage` permission name, the proposal lane, the `CELL` thread kind and every page,
-across two releases and directly ahead of the migration squash. `devices` stays for the same reason
-it always did: it is Sparkplug's word and the row is a Sparkplug device. The topics were never at
-stake: a cell is not addressed on the wire, and `<cell>` is the cell's name, not the table's.
+routes, the `cell:manage` permission name, the proposal lane, the `CELL` kind on the Audit Trail
+and every page, across two releases and directly ahead of the migration squash. `devices` stays
+for the same reason it always did: it is Sparkplug's word and the row is a Sparkplug device. The
+topics were never at stake: a cell is not addressed on the wire, and `<cell>` is the cell's name,
+not the table's.
 
 **An incomplete path is skipped, never filled with a placeholder.** A device that is unassigned, a
 cell filed in no area, a site whose name is unset: none is published, each is counted under
@@ -1241,11 +1242,11 @@ Three properties keep it from becoming an audit-row generator or a false-alarm g
 
 - **Only devices seen in *this process* are candidates.** An empty map after a restart is an
   absence of evidence, not evidence of absence. Seeding it from the database would mark a whole
-  fleet OFFLINE on every restart — one `digital_thread` row each, in an append-only table — which
+  fleet OFFLINE on every restart — one `audit_trail` row each, in an append-only table — which
   is a far worse failure than the stale ONLINE this fixes.
 - **The write goes through `ingest_mark_device_offline()`, whose UPDATE carries
   `status IS DISTINCT FROM 'OFFLINE'` as a filter**, so an already-OFFLINE row matches nothing, no
-  UPDATE runs, and `log_digital_thread_event()` never fires. That is a database-side guarantee,
+  UPDATE runs, and `log_audit_trail_event()` never fires. That is a database-side guarantee,
   not a client-side intention. The function answers whether it moved the row.
 - **A swept device is dropped from tracking**, so it is written once per quiet period rather than
   once per 30s tick. A failed write keeps it tracked, so the next sweep retries rather than
@@ -1507,7 +1508,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
 | `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
 | `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
-| `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
+| `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `audit_trail` (archived migration 0026). The telemetry was still written. |
 | `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
 | `aber_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
 | `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by the directory plus `MAX_ENTITIES_PER_CACHE`. |
@@ -1770,7 +1771,7 @@ heartbeat — which correctly reports unhealthy — rather than crash a daemon t
 
 It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts the
 outcomes counted in the table above: quarantine, identity diagnostics, birth observation,
-multi-submodel conformance, digital-thread triggers, telemetry mapping, rename safety, quarantine
+multi-submodel conformance, audit-trail triggers, telemetry mapping, rename safety, quarantine
 gating, and what the i3X server answers (checks 12 and 17).
 
 **Every assertion is scoped to the run's own entities.** A stack in use holds audit rows, telemetry
@@ -1778,7 +1779,7 @@ and devices of its own, so a check that queried a whole table and asserted "not 
 regardless of whether anything was exercised.
 
 Its cleanup uses a **direct owner connection** to Supabase Postgres for audit rows, because
-`public.digital_thread` is genuinely append-only — the trigger added in
+`public.audit_trail` is genuinely append-only — the trigger added in
 [`0003`](../supabase/migrations/archive/0003_audit_immutability_and_quarantine_rpc.sql) refuses `DELETE`
 for `service_role` too. Clearing audit rows is meant to require owner authority.
 

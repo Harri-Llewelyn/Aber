@@ -118,7 +118,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
 
   // Composes an AAS shell. Needs the service-role key to read across the tables a shell
   // aggregates, plus the identifiers and endpoints the document embeds. The last two bound the
-  // `bundle` format's telemetry and thread parts; each has a default in the function, so neither
+  // `bundle` format's telemetry and trail parts; each has a default in the function, so neither
   // is plumbed through the chart.
   "aas-export": [
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -128,7 +128,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "AAS_MAX_BUNDLED_MODEL_BYTES",
     "STORAGE_MODEL_BUCKET",
     "ASSET_EXPORT_MAX_TELEMETRY_ROWS",
-    "ASSET_EXPORT_MAX_THREAD_ROWS",
+    "ASSET_EXPORT_MAX_TRAIL_ROWS",
   ],
 
   // The IDTA 02001/02002 read surface over the same mapping aas-export uses. No service-role key: a

@@ -121,7 +121,7 @@ export default async function handler(req: Request): Promise<Response> {
   // no caller-scoped client here because there is no caller identity to scope one to.
   const admin = serviceRoleClient(supabaseUrl, serviceRoleKey, {
     // Names this function in the audit trail rather than leaving it as the generic 'service'.
-    // The digital_thread trigger accepts only ingestion/service/migration from this header.
+    // The audit_trail trigger accepts only ingestion/service/migration from this header.
     "X-Aber-Actor": "service",
   });
 

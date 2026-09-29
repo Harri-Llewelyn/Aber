@@ -136,7 +136,7 @@ export function AccessControlTab({ showToast }) {
       .then(d => { setPrincipals(d); setPrincipalError(null) })
       .catch(e => { setPrincipals([]); setPrincipalError(e?.message || 'Could not list service principals.') })
 
-    // Its own failure, swallowed to an empty map: `digital_thread:read` is a separate permission,
+    // Its own failure, swallowed to an empty map: `audit_trail:read` is a separate permission,
     // and a caller without it still sees the identities, each reading No token on record.
     api.listServiceTokens()
       .then(setTokens)
@@ -748,7 +748,7 @@ export function AccessControlTab({ showToast }) {
                               <button
                                 className="btn btn-ghost"
                                 onClick={() => setMintFor({ principal: p, name: meta.name })}
-                                title="Sign a token for this identity and show it once. Recorded in the Digital Thread before it is returned, and revocable against the API afterwards."
+                                title="Sign a token for this identity and show it once. Recorded in the Audit Trail before it is returned, and revocable against the API afterwards."
                               >
                                 <IconLock size={13} /> Issue Token
                               </button>

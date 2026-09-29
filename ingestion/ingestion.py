@@ -157,7 +157,7 @@ supabase_client = None
 try:
     from supabase import create_client
     if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
-        # Names the daemon as the actor behind its writes; log_digital_thread_event() reads it from
+        # Names the daemon as the actor behind its writes; log_audit_trail_event() reads it from
         # the `request.headers` GUC and believes 'ingestion' only from Service_Ingestor's token.
         # Set on the PostgREST session: ClientOptions(headers=...) raises in supabase-py 2.x.
         supabase_client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
@@ -1025,7 +1025,7 @@ def sweep_stale_devices(now=None, timeout=None):
     """
     Flip quiet devices OFFLINE. Returns the ids written.
 
-    Write-on-change: log_digital_thread_event() fires on every UPDATE to `devices`, so the gate
+    Write-on-change: log_audit_trail_event() fires on every UPDATE to `devices`, so the gate
     refuses a no-op write and the device is dropped from tracking afterwards, giving one write per
     quiet period. Its next DDATA may set it ONLINE again: see accept_device_data().
     """
@@ -1542,7 +1542,7 @@ def record_declared_metrics(device: dict, payload):
     """
     Persist the birth-declared metric names onto the device row, only when the set has changed.
 
-    log_digital_thread_event() fires on every UPDATE to `devices`, so an unchanged write on every
+    log_audit_trail_event() fires on every UPDATE to `devices`, so an unchanged write on every
     rebirth would append an audit row each time.
     """
     if not supabase_client or not device:
@@ -1612,7 +1612,7 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
     now = datetime.now(timezone.utc).isoformat()
 
     # `status` and `is_quarantined` are pinned by the gate; this is the quarantine path only.
-    # `last_birth_metrics` is carried here so a new device produces one digital_thread entry rather
+    # `last_birth_metrics` is carried here so a new device produces one audit_trail entry rather
     # than an insert chased by an update.
     res = supabase_client.rpc("ingest_register_quarantined_device", {
         "p_name": extract_name_hint(payload) or wire_id,
@@ -2175,7 +2175,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # Not skippable: `public.gateway_status` derives staleness from `last_heartbeat` at read time,
     # so suppressing this write would make a live gateway read STALE. The audit trigger subtracts
     # the columns a heartbeat writes (audit_telemetry_columns(), 0100) before comparing, so a
-    # heartbeat records no digital_thread row; a changed Flow_Hash is the exception, which the gate
+    # heartbeat records no audit_trail row; a changed Flow_Hash is the exception, which the gate
     # records itself as a FLOW_DEPLOYED row. The comparison below only decides the log level.
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
@@ -2231,7 +2231,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 # -----------------------------------------------------------------------------
 # Under the default `audit` policy nothing is dropped: the historian records what was observed
 # and conformance is judged at read time against a schema an engineer can edit afterwards. What
-# this adds is one SCHEMA_REJECTION row in the digital thread per change in the set of faults.
+# this adds is one SCHEMA_REJECTION row in the audit trail per change in the set of faults.
 # Metrics the loop skipped (unresolved alias, timestamp outside the window) are included with
 # `dropped: true`, since those are genuinely lost.
 # See ingestion/README.md -> "Schema Conformance".
@@ -2289,7 +2289,7 @@ _last_violation_signature = {}
 
 def record_payload_violations(device: dict, violations, observed_at):
     """
-    Write one SCHEMA_REJECTION row to the digital thread, only when the fault is new.
+    Write one SCHEMA_REJECTION row to the audit trail, only when the fault is new.
 
     DDATA arrives continuously and the table is append-only with no application role able to
     prune it, so a row per non-conforming message would fill the disk. Written when the set of

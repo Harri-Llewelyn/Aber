@@ -232,7 +232,7 @@ describe('Panel layout pushes rather than covers', () => {
 
 describe('Gateways page drawer', () => {
   const renderTab = () => render(
-    <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />
+    <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />
   )
 
   it('opens on a row click and shows the identifiers the row has no room for', async () => {
@@ -323,7 +323,7 @@ describe('Devices page drawer', () => {
     // showing the raw column would render an empty cell for a device that is plainly located.
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
@@ -340,7 +340,7 @@ describe('Devices page drawer', () => {
 describe('Cells page drawer', () => {
   it('opens from the row, and marks the row it opened', async () => {
     // The page is one table, so the whole row is the click target, as on Gateways and Devices.
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Assembly Line 1'))
@@ -423,7 +423,7 @@ describe('Tables shed what the panel now carries', () => {
     const onSelectGateway = vi.fn()
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()}
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()}
         onSelectGateway={onSelectGateway} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
@@ -448,7 +448,7 @@ describe('Tables shed what the panel now carries', () => {
   it('opens the telemetry inspector as a modal, not inside the narrow panel', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
@@ -469,7 +469,7 @@ describe('Tables shed what the panel now carries', () => {
 
   it('answers WHICH devices a gateway carries, which the row can only count', async () => {
     render(
-      <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />
+      <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
@@ -483,11 +483,11 @@ describe('Tables shed what the panel now carries', () => {
 
   it('leaves no action buttons on a cell row at all', async () => {
     // The cells are rows, and the per-cell action cluster is in the drawer.
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     const card = document.querySelector('.page-main .card')
-    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Thread/i]) {
+    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Audit Trail/i]) {
       expect(within(card).queryByRole('button', { name })).toBeNull()
     }
     expect(within(card).queryByText('Attached Document Links')).toBeNull()
@@ -498,7 +498,7 @@ describe('Tables shed what the panel now carries', () => {
     const p = within(panel())
     expect(p.getByText('Edit Details')).toBeTruthy()
     expect(p.getByText('Attached Links')).toBeTruthy()
-    expect(p.getByText('View Digital Thread')).toBeTruthy()
+    expect(p.getByText('View Audit Trail')).toBeTruthy()
     expect(p.getByText(/Archive Cell/i)).toBeTruthy()
     // The accordion is gone from the drawer too -- it was a cramped list in a 360px column, and
     // Attached Links opens the full editor.
@@ -509,7 +509,7 @@ describe('Tables shed what the panel now carries', () => {
 describe('The panel is the single home for entity actions', () => {
   it('leaves no ACTIONS column on the gateways table', async () => {
     render(
-      <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />
+      <GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
@@ -517,7 +517,7 @@ describe('The panel is the single home for entity actions', () => {
     expect(headers).not.toContain('Actions')
 
     const p = within(panel_after(() => fireEvent.click(list().getByText('Host_Gateway_NodeRED'))))
-    for (const label of ['Edit Details', 'View Digital Thread', 'Attached Links']) {
+    for (const label of ['Edit Details', 'View Audit Trail', 'Attached Links']) {
       expect(p.getByText(label)).toBeTruthy()
     }
     expect(p.getByText(/Archive Gateway/i)).toBeTruthy()
@@ -529,7 +529,7 @@ describe('The panel is the single home for entity actions', () => {
   it('leaves no ACTIONS column on the devices table, and lets Type take the width', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
@@ -546,7 +546,7 @@ describe('The panel is the single home for entity actions', () => {
     // ignore red. The separation is structural; the colour arrives on hover.
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
@@ -562,7 +562,7 @@ describe('Links accordion no longer duplicates the panel action', () => {
   /* One way in: the accordion is identified by its heading, which nothing else renders, and the
      Attached Links action by there being exactly one of it. */
   it('leaves one way into link editing, and no accordion beside it', async () => {
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Assembly Line 1'))
@@ -577,7 +577,7 @@ describe('Links accordion no longer duplicates the panel action', () => {
   it('keeps one device figure on a cell, not two ways of counting them', async () => {
     // One device count on a cell: "Located" and "Directly Assigned" differed only in inherited
     // versus pinned, which the Devices page states per device.
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Assembly Line 1'))
@@ -619,7 +619,7 @@ describe('A card is a composition: header, description, filters, table', () => {
   }
 
   it('composes the gateways card', async () => {
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     composedCard(/New Gateway/i)
   })
@@ -627,7 +627,7 @@ describe('A card is a composition: header, description, filters, table', () => {
   it('composes the devices card, and still drops Export CSV', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
     composedCard(/New Device/i)
@@ -635,7 +635,7 @@ describe('A card is a composition: header, description, filters, table', () => {
   })
 
   it('composes the cells card', async () => {
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
     composedCard(/New Cell/i)
   })
@@ -643,7 +643,7 @@ describe('A card is a composition: header, description, filters, table', () => {
 
 describe('The cells table hands its neighbours over, and stays one row tall', () => {
   const renderCells = (props = {}) => render(
-    <CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} {...props} />
+    <CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} {...props} />
   )
 
   const cellsTable = () => document.querySelector('.page-main .card table')
@@ -722,7 +722,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
     api.get.mockImplementation(routeGet({
       gateways: [{ ...gateway, sparkplug_group: 'Wales' }]
     }))
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
@@ -732,7 +732,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
   })
 
   it('falls back to a wildcard only where no group is recorded', async () => {
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
@@ -745,7 +745,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
   })
 
   it('names the connected devices once, not a count and then a list', async () => {
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
@@ -762,7 +762,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
 describe('Context panel layout invariants', () => {
   it('keeps the cells table to one row per cell', async () => {
     // A cell is one row and the detail is in the drawer; this pins that it stayed that way.
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     const table = document.querySelector('.page-main .card table')
@@ -773,7 +773,7 @@ describe('Context panel layout invariants', () => {
   })
 
   it('puts a gateway\'s device list above its actions, not below them', async () => {
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
     fireEvent.click(list().getByText('Host_Gateway_NodeRED'))
@@ -794,7 +794,7 @@ describe('Context panel layout invariants', () => {
     }))
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
@@ -807,7 +807,7 @@ describe('Context panel layout invariants', () => {
   it('says why the device topic group is a wildcard when it is', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
@@ -823,7 +823,7 @@ describe('Context panel layout invariants', () => {
     // above a dropzone in a 360px column, restating the label beside it.
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 

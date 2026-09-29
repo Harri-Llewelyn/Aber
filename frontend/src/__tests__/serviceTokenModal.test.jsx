@@ -92,7 +92,7 @@ describe('ServiceTokenModal', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue(MINTED.token)).toBeTruthy())
     // THE jti IS SHOWN BECAUSE IT IS THE HANDLE FOR REVOKING THIS TOKEN. Without it, an operator
-    // who has closed the dialog has to find the TOKEN_MINTED row in the Digital Thread.
+    // who has closed the dialog has to find the TOKEN_MINTED row in the Audit Trail.
     expect(screen.getByDisplayValue(MINTED.jti)).toBeTruthy()
   })
 

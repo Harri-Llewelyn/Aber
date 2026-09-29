@@ -21,7 +21,7 @@ const DEFAULT_TTL = 30
  * instead is that a mint adds rather than replaces.
  *
  * The token lives in this component's state until the modal closes: not in a toast, the URL or
- * `digital_thread`, which records the jti, expiry and roles only.
+ * `audit_trail`, which records the jti, expiry and roles only.
  */
 export function ServiceTokenModal({ principal, principalName, onClose, showToast }) {
   const [step, setStep] = useState('confirm')
@@ -169,7 +169,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
 
             <div className="form-group">
               {/* The jti is the handle for withdrawing this token; without it an operator must find
-                  the TOKEN_MINTED row in the Digital Thread. */}
+                  the TOKEN_MINTED row in the Audit Trail. */}
               <label className="form-label">Token ID (jti)</label>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <input className="form-control mono" readOnly value={minted.jti} />
@@ -183,7 +183,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
               </div>
               <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
                 Keep this. It is what identifies this token for revocation, and it is recorded in
-                the Digital Thread — unlike the token itself.
+                the Audit Trail — unlike the token itself.
               </div>
             </div>
 

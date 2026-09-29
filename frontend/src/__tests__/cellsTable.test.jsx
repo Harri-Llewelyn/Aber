@@ -47,7 +47,7 @@ const renderCells = (props = {}, routes = {}) => {
   return render(
     <CellsTab
       showToast={vi.fn()} hasPermission={() => true}
-      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} onViewThread={vi.fn()}
+      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} onViewTrail={vi.fn()}
       {...props}
     />
   )
@@ -178,7 +178,7 @@ describe('the row and its drawer', () => {
     await ready()
 
     const row = rowFor('Assembly Line 1')
-    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Thread/i]) {
+    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Audit Trail/i]) {
       expect(within(row).queryByRole('button', { name })).toBeNull()
     }
 

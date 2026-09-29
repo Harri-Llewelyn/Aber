@@ -224,7 +224,7 @@ $roles$;
 -- its final form and appears exactly once. Comments inside function bodies survive the dump;
 -- the narrative between objects lives in the archived migrations.
 --
--- `digital_thread`'s monthly partitions are NOT here. They are created at run time by the
+-- `audit_trail`'s monthly partitions are NOT here. They are created at run time by the
 -- function 0079 installs, so the months present on the day of the dump are not schema; the
 -- partitioned parent and the DEFAULT partition are, and both are below.
 
@@ -324,7 +324,7 @@ DECLARE
     v_actor     uuid := auth.uid();
     v_allowed   text[];
     v_key       text;
-    v_thread    bigint;
+    v_trail    bigint;
 BEGIN
     -- The outer gate is the union of everybody who may decide anything; the lane's own gate below
     -- is the one that decides.
@@ -491,7 +491,7 @@ BEGIN
     -- attached by the direct edit that `link:manage` gates.
 
     -- The row that names both parties; the target's own audit trigger records only the approver.
-    INSERT INTO public.digital_thread
+    INSERT INTO public.audit_trail
         (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source, audit_domain)
     VALUES (
         v_proposal.entity_type,
@@ -510,17 +510,17 @@ BEGIN
         'user',
         public.audit_domain_for(v_proposal.entity_type, 'PROPOSAL_APPLIED')
     )
-    RETURNING id INTO v_thread;
+    RETURNING id INTO v_trail;
 
     PERFORM set_config('aber.proposal_transition', 'on', true);
 
     UPDATE public.change_proposals
        SET status = 'applied', decided_by = v_actor, decided_at = now(),
-           applied_thread_id = v_thread
+           applied_trail_id = v_trail
      WHERE id = p_proposal_id;
 
     RETURN jsonb_build_object(
-        'id', p_proposal_id, 'status', 'applied', 'thread_id', v_thread
+        'id', p_proposal_id, 'status', 'applied', 'trail_id', v_trail
     );
 END;
 $$;
@@ -664,7 +664,7 @@ ALTER FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uu
 --
 
 -- FUNCTION approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) :: COMMENT
-COMMENT ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) IS 'Atomically approves or merges a quarantined device. Re-checks the actor role against public.user_roles and attributes the resulting digital_thread rows to that actor. Takes the three location scopes; location is written only when answered.';
+COMMENT ON FUNCTION public.approve_quarantined_device(p_device_id uuid, p_actor_id uuid, p_gateway_id uuid, p_merge_into_device_id uuid, p_asset_name text, p_cell_id uuid, p_location_scope text, p_set_cell boolean, p_set_location_scope boolean, p_area_id uuid, p_set_area boolean) IS 'Atomically approves or merges a quarantined device. Re-checks the actor role against public.user_roles and attributes the resulting audit_trail rows to that actor. Takes the three location scopes; location is written only when answered.';
 
 --
 
@@ -787,7 +787,7 @@ ALTER FUNCTION public.audit_domain_for(p_entity_type text, p_action text) OWNER 
 --
 
 -- FUNCTION audit_domain_for(p_entity_type text, p_action text) :: COMMENT
-COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane a digital_thread row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070 -- with `schemas` the one exception 0120 makes, because its own table is readable by every authenticated user. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
+COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane an audit_trail row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070 -- with `schemas` the one exception 0120 makes, because its own table is readable by every authenticated user. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
 
 --
 
@@ -813,7 +813,7 @@ ALTER FUNCTION public.audit_telemetry_columns() OWNER TO postgres;
 --
 
 -- FUNCTION audit_telemetry_columns() :: COMMENT
-COMMENT ON FUNCTION public.audit_telemetry_columns() IS 'The gateways columns a heartbeat rewrites: liveness and the health readings (0035), and flow_hash, whose change ingest_record_gateway_health() records as its own FLOW_DEPLOYED row. log_digital_thread_event() subtracts these before deciding whether an UPDATE is an event.';
+COMMENT ON FUNCTION public.audit_telemetry_columns() IS 'The gateways columns a heartbeat rewrites: liveness and the health readings (0035), and flow_hash, whose change ingest_record_gateway_health() records as its own FLOW_DEPLOYED row. log_audit_trail_event() subtracts these before deciding whether an UPDATE is an event.';
 
 --
 
@@ -1014,7 +1014,7 @@ BEGIN
         RETURN;
     END IF;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -1070,7 +1070,7 @@ BEGIN
        SET status = 'COMPLETED', finished_at = now(), backup_id = v_backup_id
      WHERE id = p_job_id;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -1097,7 +1097,7 @@ ALTER FUNCTION public.backup_finalise(p_job_id uuid, p_stamp text, p_location te
 --
 
 -- FUNCTION backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) :: COMMENT
-COMMENT ON FUNCTION public.backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) IS 'Record a finished backup: the backups row, the job COMPLETED, and BACKUP_TAKEN in the thread, in one transaction. A requested backup is born pinned.';
+COMMENT ON FUNCTION public.backup_finalise(p_job_id uuid, p_stamp text, p_location text, p_components jsonb, p_size_bytes bigint) IS 'Record a finished backup: the backups row, the job COMPLETED, and BACKUP_TAKEN in the trail, in one transaction. A requested backup is born pinned.';
 
 --
 
@@ -1118,7 +1118,7 @@ BEGIN
         RETURN false;
     END IF;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -1197,7 +1197,7 @@ BEGIN
          WHERE status = 'RUNNING'
         RETURNING id, origin, started_at
     LOOP
-        INSERT INTO public.digital_thread (
+        INSERT INTO public.audit_trail (
             entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
             causation_id, recorded_at
         ) VALUES (
@@ -1281,7 +1281,7 @@ BEGIN
         RETURN false;
     END IF;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -1581,7 +1581,7 @@ DECLARE
     -- somebody decides otherwise: a machine identity holding a write permission becomes an
     -- unrevocable write credential the moment a token is signed for it. check-docs-drift.mjs
     -- asserts the Access Control page offers exactly this list.
-    c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'digital_thread:read'];
+    c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'audit_trail:read'];
     v_id      uuid;
     v_name    text := btrim(p_name);
     v_purpose text := nullif(btrim(coalesce(p_purpose, '')), '');
@@ -1673,7 +1673,7 @@ BEGIN
 
     -- ATTRIBUTED TO A PERSON: this is called by an Administrator with a session, so `auth.uid()` is
     -- the attribution rather than a claim.
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -1703,7 +1703,7 @@ ALTER FUNCTION public.create_machine_principal(p_name text, p_permissions text[]
 --
 
 -- FUNCTION create_machine_principal(p_name text, p_permissions text[], p_purpose text) :: COMMENT
-COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding its own read-only permissions and a name the Access Control page lists it by. Administrator only. Refuses anything but telemetry:read, quarantine:view and digital_thread:read: once a token is signed for a principal it cannot be revoked. The name is unique ignoring case. Replaces the two-argument form of 0080, dropped because an overload whose extra arguments default makes every RPC call ambiguous.';
+COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding its own read-only permissions and a name the Access Control page lists it by. Administrator only. Refuses anything but telemetry:read, quarantine:view and audit_trail:read: once a token is signed for a principal it cannot be revoked. The name is unique ignoring case. Replaces the two-argument form of 0080, dropped because an overload whose extra arguments default makes every RPC call ambiguous.';
 
 --
 
@@ -1821,7 +1821,7 @@ BEGIN
     END IF;
 
     -- NOTHING TO SAY IS NOT AN EVENT. An unchanged save writes no row and returns NULL, so the
-    -- thread records decisions rather than clicks.
+    -- trail records decisions rather than clicks.
     IF v_old.name = v_name AND v_old.purpose IS NOT DISTINCT FROM v_purpose THEN
         RETURN NULL;
     END IF;
@@ -1830,7 +1830,7 @@ BEGIN
        SET name = v_name, purpose = v_purpose
      WHERE principal_id = p_principal_id;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -1860,8 +1860,8 @@ COMMENT ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_nam
 
 --
 
--- digital_thread_backup_job_ids_matching(text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) RETURNS uuid[]
+-- audit_trail_backup_job_ids_matching(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) RETURNS uuid[]
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -1874,17 +1874,17 @@ CREATE OR REPLACE FUNCTION public.digital_thread_backup_job_ids_matching(p_patte
 $$;
 
 
-ALTER FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) OWNER TO postgres;
+ALTER FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) OWNER TO postgres;
 
 --
 
--- FUNCTION digital_thread_backup_job_ids_matching(p_pattern text) :: COMMENT
-COMMENT ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) IS 'The ids of backup jobs whose note, or the stamp of the backup they produced, matches a LIKE pattern -- the two things the Backups page identifies a job by and neither of which is in its audit payload. For digital_thread_page()''s search. Administrator and Auditor only, matching the roles digital_thread_select_security admits, and an empty array rather than an error for anybody else because this is part of a query rather than a request of its own.';
+-- FUNCTION audit_trail_backup_job_ids_matching(p_pattern text) :: COMMENT
+COMMENT ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) IS 'The ids of backup jobs whose note, or the stamp of the backup they produced, matches a LIKE pattern -- the two things the Backups page identifies a job by and neither of which is in its audit payload. For audit_trail_page()''s search. Administrator and Auditor only, matching the roles audit_trail_select_security admits, and an empty array rather than an error for anybody else because this is part of a query rather than a request of its own.';
 
 --
 
--- digital_thread_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.digital_thread_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text) RETURNS jsonb
+-- audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_trail_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text) RETURNS jsonb
     LANGUAGE sql STABLE
     SET search_path TO 'public'
     AS $_$
@@ -1893,7 +1893,7 @@ WITH term AS (
 ),
 pattern AS (
     -- The search as a LIKE pattern, built once. THE METACHARACTERS ARE ESCAPED: the box promises
-    -- a substring of a name or an id, and an unescaped '%' would silently return the whole thread
+    -- a substring of a name or an id, and an unescaped '%' would silently return the whole trail
     -- to somebody who typed a percentage into it. Backslash is the default LIKE escape, so the
     -- backslashes have to be doubled first or an escape would be introduced by the escaping.
     SELECT CASE
@@ -1911,12 +1911,12 @@ pattern AS (
 -- MATERIALIZED, AND MEASURED. Without it Postgres inlines this CTE and the helper lands in the
 -- per-row Filter of every partition scan -- a STABLE function is allowed to be called once and is
 -- not promised to be. On 4,065 rows that took a search from 53ms to 583ms, which is the shape of
--- cost that looks like "the thread got big" rather than like a query doing the wrong thing.
+-- cost that looks like "the trail got big" rather than like a query doing the wrong thing.
 q AS MATERIALIZED (
     SELECT p.pattern,
            p.id_term,
-           public.digital_thread_user_ids_matching(p.pattern)        AS user_ids,
-           public.digital_thread_backup_job_ids_matching(p.pattern)  AS job_ids
+           public.audit_trail_user_ids_matching(p.pattern)        AS user_ids,
+           public.audit_trail_backup_job_ids_matching(p.pattern)  AS job_ids
       FROM pattern p
 ),
 matching AS (
@@ -1935,7 +1935,7 @@ matching AS (
        AND NOT EXISTS (SELECT 1 FROM public.devices  d WHERE d.id = t.entity_id)
        AND NOT EXISTS (SELECT 1 FROM public.schemas  s WHERE s.id = t.entity_id)
                AS is_purged
-      FROM public.digital_thread t
+      FROM public.audit_trail t
      CROSS JOIN q
      WHERE (p_entity_type IS NULL OR t.entity_type = p_entity_type)
        AND (p_action      IS NULL OR t.action      = p_action)
@@ -1984,7 +1984,7 @@ SELECT jsonb_build_object(
            FROM visible v),
         '[]'::jsonb),
     'purged_assets', (SELECT count(DISTINCT entity_id) FROM matching WHERE is_purged),
-    -- HOW LONG THE THREAD IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
+    -- HOW LONG THE TRAIL IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
     -- of it that is. Counted under the SAME predicate `visible` opens with, minus the cursor and
     -- the limit -- so it does not move as the reader pages, and a page can never report more rows
     -- than the total it is a fraction of.
@@ -1993,7 +1993,7 @@ SELECT jsonb_build_object(
     -- the same thing when there was no way to ask for more. Callers that only ever showed a banner
     -- keep working unchanged.
     'truncated', (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000)),
-    -- WHERE THE READER GOT TO, or null at the end of the thread. Null is the ONLY end-of-data
+    -- WHERE THE READER GOT TO, or null at the end of the trail. Null is the ONLY end-of-data
     -- signal a caller should trust: an empty `events` array with a non-null cursor cannot happen,
     -- but a full page that happens to be the last one is ordinary, so "fewer rows than I asked
     -- for" is not a reliable test and callers must not invent one.
@@ -2007,17 +2007,17 @@ SELECT jsonb_build_object(
 $_$;
 
 
-ALTER FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) OWNER TO postgres;
+ALTER FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) OWNER TO postgres;
 
 --
 
--- FUNCTION digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: COMMENT
-COMMENT ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) IS 'One page of the Digital Thread, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the thread they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
+-- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: COMMENT
+COMMENT ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) IS 'One page of the Audit Trail, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the trail they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
 
 --
 
--- digital_thread_user_ids_matching(text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.digital_thread_user_ids_matching(p_pattern text) RETURNS uuid[]
+-- audit_trail_user_ids_matching(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_trail_user_ids_matching(p_pattern text) RETURNS uuid[]
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -2029,12 +2029,12 @@ CREATE OR REPLACE FUNCTION public.digital_thread_user_ids_matching(p_pattern tex
 $$;
 
 
-ALTER FUNCTION public.digital_thread_user_ids_matching(p_pattern text) OWNER TO postgres;
+ALTER FUNCTION public.audit_trail_user_ids_matching(p_pattern text) OWNER TO postgres;
 
 --
 
--- FUNCTION digital_thread_user_ids_matching(p_pattern text) :: COMMENT
-COMMENT ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) IS 'The ids of people whose email matches a LIKE pattern, for the one disjunct of digital_thread_page()''s search that cannot read its answer out of an audit payload: a role-assignment row names the role, and the dashboard labels that lane with the person (0116). Administrator and Auditor only, and an empty array rather than an error for anybody else, because this is part of a query rather than a request of its own.';
+-- FUNCTION audit_trail_user_ids_matching(p_pattern text) :: COMMENT
+COMMENT ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) IS 'The ids of people whose email matches a LIKE pattern, for the one disjunct of audit_trail_page()''s search that cannot read its answer out of an audit payload: a role-assignment row names the role, and the dashboard labels that lane with the person (0116). Administrator and Auditor only, and an empty array rather than an error for anybody else, because this is part of a query rather than a request of its own.';
 
 --
 
@@ -2206,8 +2206,8 @@ ALTER FUNCTION public.dispatch_device_quarantine_webhook() OWNER TO postgres;
 
 --
 
--- enforce_digital_thread_append_only() :: FUNCTION
-CREATE OR REPLACE FUNCTION public.enforce_digital_thread_append_only() RETURNS trigger
+-- enforce_audit_trail_append_only() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.enforce_audit_trail_append_only() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public'
     AS $$
@@ -2220,21 +2220,21 @@ BEGIN
   END IF;
 
   RAISE EXCEPTION
-    'public.digital_thread is append-only: % is not permitted (attempted by role %)',
+    'public.audit_trail is append-only: % is not permitted (attempted by role %)',
     TG_OP, current_user
     USING ERRCODE = 'insufficient_privilege',
-          HINT = 'Audit rows are written only by log_digital_thread_event(). Correcting history '
+          HINT = 'Audit rows are written only by log_audit_trail_event(). Correcting history '
                  'is not a supported operation; record a compensating change instead.';
 END;
 $$;
 
 
-ALTER FUNCTION public.enforce_digital_thread_append_only() OWNER TO postgres;
+ALTER FUNCTION public.enforce_audit_trail_append_only() OWNER TO postgres;
 
 --
 
--- FUNCTION enforce_digital_thread_append_only() :: COMMENT
-COMMENT ON FUNCTION public.enforce_digital_thread_append_only() IS 'Rejects UPDATE and DELETE on public.digital_thread for every application role, including service_role. Owner roles are exempt because they can drop the trigger anyway.';
+-- FUNCTION enforce_audit_trail_append_only() :: COMMENT
+COMMENT ON FUNCTION public.enforce_audit_trail_append_only() IS 'Rejects UPDATE and DELETE on public.audit_trail for every application role, including service_role. Owner roles are exempt because they can drop the trigger anyway.';
 
 --
 
@@ -2424,8 +2424,8 @@ COMMENT ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_comma
 
 --
 
--- ensure_digital_thread_partition(timestamp with time zone) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) RETURNS boolean
+-- ensure_audit_trail_partition(timestamp with time zone) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
@@ -2439,35 +2439,35 @@ DECLARE
   v_name text;
 BEGIN
   v_to   := v_from + interval '1 month';
-  v_name := 'digital_thread_' || to_char(v_from AT TIME ZONE 'UTC', 'YYYY_MM');
+  v_name := 'audit_trail_' || to_char(v_from AT TIME ZONE 'UTC', 'YYYY_MM');
 
   IF to_regclass('public.' || quote_ident(v_name)) IS NOT NULL THEN
     RETURN false;
   END IF;
 
   EXECUTE format(
-    'CREATE TABLE public.%I PARTITION OF public.digital_thread FOR VALUES FROM (%L) TO (%L)',
+    'CREATE TABLE public.%I PARTITION OF public.audit_trail FOR VALUES FROM (%L) TO (%L)',
     v_name, v_from, v_to
   );
   -- Before it can hold a row. The window is inside this transaction either way, but the ordering
   -- is what makes "a partition is never reachable directly" true by construction rather than by
   -- the maintenance job finishing.
-  PERFORM public.secure_digital_thread_partition(format('public.%I', v_name)::regclass);
+  PERFORM public.secure_audit_trail_partition(format('public.%I', v_name)::regclass);
   RETURN true;
 END $$;
 
 
-ALTER FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) OWNER TO postgres;
+ALTER FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) OWNER TO postgres;
 
 --
 
--- FUNCTION ensure_digital_thread_partition(p_month timestamp with time zone) :: COMMENT
-COMMENT ON FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) IS 'Create the monthly digital_thread partition containing the given instant, if absent. Returns true if one was created. Bounds are computed in UTC so which partition a row lands in does not depend on the session TimeZone.';
+-- FUNCTION ensure_audit_trail_partition(p_month timestamp with time zone) :: COMMENT
+COMMENT ON FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) IS 'Create the monthly audit_trail partition containing the given instant, if absent. Returns true if one was created. Bounds are computed in UTC so which partition a row lands in does not depend on the session TimeZone.';
 
 --
 
--- ensure_digital_thread_partitions(integer) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer DEFAULT 3) RETURNS integer
+-- ensure_audit_trail_partitions(integer) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer DEFAULT 3) RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
@@ -2476,14 +2476,14 @@ DECLARE
   v_i integer;
 BEGIN
   IF p_months_ahead IS NULL OR p_months_ahead < 0 THEN
-    RAISE EXCEPTION 'ensure_digital_thread_partitions: months ahead must not be negative (got %)', p_months_ahead;
+    RAISE EXCEPTION 'ensure_audit_trail_partitions: months ahead must not be negative (got %)', p_months_ahead;
   END IF;
 
   -- THE CURRENT MONTH IS INCLUDED RATHER THAN ASSUMED. A stack restored from a dump taken months ago
   -- comes up with every partition ending in the past, and the first asset write would meet the
   -- default partition instead of a fresh one.
   FOR v_i IN 0..p_months_ahead LOOP
-    IF public.ensure_digital_thread_partition(now() + (v_i || ' months')::interval) THEN
+    IF public.ensure_audit_trail_partition(now() + (v_i || ' months')::interval) THEN
       v_created := v_created + 1;
     END IF;
   END LOOP;
@@ -2492,12 +2492,12 @@ BEGIN
 END $$;
 
 
-ALTER FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) OWNER TO postgres;
+ALTER FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) OWNER TO postgres;
 
 --
 
--- FUNCTION ensure_digital_thread_partitions(p_months_ahead integer) :: COMMENT
-COMMENT ON FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) IS 'Create this month''s digital_thread partition and the next p_months_ahead of them. Idempotent; returns how many were actually created. Called by the digital_thread_partitions cron job and by 0079 itself.';
+-- FUNCTION ensure_audit_trail_partitions(p_months_ahead integer) :: COMMENT
+COMMENT ON FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) IS 'Create this month''s audit_trail partition and the next p_months_ahead of them. Idempotent; returns how many were actually created. Called by the audit_trail_partitions cron job and by 0079 itself.';
 
 --
 
@@ -2538,7 +2538,7 @@ BEGIN
     'public.gateways with heartbeat staleness derived at read time. Mirrors '
     'frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state '
     'short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing '
-    'status would append to the immutable digital_thread audit table on every sweep and would be '
+    'status would append to the immutable audit_trail table on every sweep and would be '
     'stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a '
     'gateways column.';
 
@@ -2706,7 +2706,7 @@ BEGIN
            AND proposed_at < now() - make_interval(secs => v_days::double precision * 86400.0)
         RETURNING id, entity_type, entity_id, proposed_by
     LOOP
-        INSERT INTO public.digital_thread
+        INSERT INTO public.audit_trail
             (entity_type, entity_id, action, new_data, changed_by, actor_source, audit_domain)
         VALUES (
             'change_proposals',
@@ -3346,7 +3346,7 @@ CREATE OR REPLACE FUNCTION public.gateway_has_broker_credential(g public.gateway
     SELECT
         (g.deployment = 'remote' AND g.enrolled_at IS NOT NULL)
      OR (g.deployment = 'host' AND EXISTS (
-            SELECT 1 FROM public.digital_thread dt
+            SELECT 1 FROM public.audit_trail dt
              WHERE dt.entity_type = 'gateways'
                AND dt.entity_id   = g.id
                AND dt.action      = 'CREDENTIAL_ISSUED'
@@ -3480,7 +3480,7 @@ BEGIN
        OR NEW.decided_by IS DISTINCT FROM OLD.decided_by
        OR NEW.decided_at IS DISTINCT FROM OLD.decided_at
        OR NEW.decision_reason IS DISTINCT FROM OLD.decision_reason
-       OR NEW.applied_thread_id IS DISTINCT FROM OLD.applied_thread_id
+       OR NEW.applied_trail_id IS DISTINCT FROM OLD.applied_trail_id
     THEN
         RAISE EXCEPTION
             'only the patch and the rationale may be edited; approve_proposal(), reject_proposal() '
@@ -3980,7 +3980,7 @@ BEGIN
     -- heartbeat is its only channel. `matches_main` is what the forge held at that moment.
     v_flow_hash := p_health->>'flow_hash';
     IF v_has_health AND v_flow_hash IS NOT NULL AND v_flow_hash IS DISTINCT FROM v_before.flow_hash THEN
-        INSERT INTO public.digital_thread (
+        INSERT INTO public.audit_trail (
             entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
             causation_id, recorded_at
         ) VALUES (
@@ -4387,7 +4387,7 @@ ALTER FUNCTION public.is_machine_principal(p_user_id uuid) OWNER TO postgres;
 --
 
 -- FUNCTION is_machine_principal(p_user_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.is_machine_principal(p_user_id uuid) IS 'True for a seeded or minted machine identity -- no email, no password, no identity provider, and therefore unable to sign in. The predicate is 0042''s, deliberately unchanged: a second definition of "is this a service account" would be worse than none. Used by log_digital_thread_event() to keep a machine''s writes from being recorded as a human''s.';
+COMMENT ON FUNCTION public.is_machine_principal(p_user_id uuid) IS 'True for a seeded or minted machine identity -- no email, no password, no identity provider, and therefore unable to sign in. The predicate is 0042''s, deliberately unchanged: a second definition of "is this a service account" would be worse than none. Used by log_audit_trail_event() to keep a machine''s writes from being recorded as a human''s.';
 
 --
 
@@ -4500,7 +4500,7 @@ BEGIN
 
   -- The gateway enters the lifecycle here rather than at creation, so a row created before this
   -- migration -- or one whose bundle is being re-issued after a failed enrolment -- lands in the
-  -- same state as a new one. Guarded on an actual change: `gateways` carries the digital_thread
+  -- same state as a new one. Guarded on an actual change: `gateways` carries the audit_trail
   -- trigger, and an unconditional write would append an audit row on every re-issue.
   IF v_gateway.status IS DISTINCT FROM 'PENDING_ENROLLMENT' THEN
     UPDATE public.gateways
@@ -4569,7 +4569,7 @@ CREATE OR REPLACE FUNCTION public.list_user_accounts() RETURNS TABLE(user_id uui
     SET search_path TO 'public'
     AS $$
 BEGIN
-    -- Administrator and Auditor: the two roles `digital_thread_select_security` admits. See the
+    -- Administrator and Auditor: the two roles `audit_trail_select_security` admits. See the
     -- header for why this is not narrower.
     IF NOT public.has_role(ARRAY['Administrator', 'Auditor']) THEN
         RAISE EXCEPTION 'insufficient privileges to list user accounts'
@@ -4592,7 +4592,7 @@ ALTER FUNCTION public.list_user_accounts() OWNER TO postgres;
 --
 
 -- FUNCTION list_user_accounts() :: COMMENT
-COMMENT ON FUNCTION public.list_user_accounts() IS 'The people who can reach this stack, as id and email, for naming the person a digital_thread role-assignment row is about. Membership is NOT is_machine_principal() (0048), the same predicate the rest of the stack tells a person from a service identity with. Administrator and Auditor only -- the roles digital_thread_select_security admits, because an Auditor reading uuids beside an Administrator reading names would be the same record told two ways. The email may be NULL; the caller falls back to the id.';
+COMMENT ON FUNCTION public.list_user_accounts() IS 'The people who can reach this stack, as id and email, for naming the person an audit_trail role-assignment row is about. Membership is NOT is_machine_principal() (0048), the same predicate the rest of the stack tells a person from a service identity with. Administrator and Auditor only -- the roles audit_trail_select_security admits, because an Auditor reading uuids beside an Administrator reading names would be the same record told two ways. The email may be NULL; the caller falls back to the id.';
 
 --
 
@@ -4602,7 +4602,7 @@ CREATE OR REPLACE FUNCTION public.log_asset_export() RETURNS trigger
     SET search_path TO 'public'
     AS $$
 BEGIN
-    INSERT INTO public.digital_thread
+    INSERT INTO public.audit_trail
         (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
          causation_id, recorded_at)
     VALUES
@@ -4619,12 +4619,12 @@ ALTER FUNCTION public.log_asset_export() OWNER TO postgres;
 --
 
 -- FUNCTION log_asset_export() :: COMMENT
-COMMENT ON FUNCTION public.log_asset_export() IS 'Records an asset_exports row in digital_thread as EXPORTED, attributed to the person the function verified. The one thread row that survives the entity in a form the tombstone can link to.';
+COMMENT ON FUNCTION public.log_asset_export() IS 'Records an asset_exports row in audit_trail as EXPORTED, attributed to the person the function verified. The one trail row that survives the entity in a form the tombstone can link to.';
 
 --
 
--- log_digital_thread_event() :: FUNCTION
-CREATE OR REPLACE FUNCTION public.log_digital_thread_event() RETURNS trigger
+-- log_audit_trail_event() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.log_audit_trail_event() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -4677,11 +4677,11 @@ BEGIN
 
     -- A column that is not there reads as NULL through `->>`, so a mistyped trigger argument
     -- would otherwise file every row under no entity. entity_id is NOT NULL, so this would be
-    -- caught either way -- but by a constraint that names digital_thread rather than the trigger
+    -- caught either way -- but by a constraint that names audit_trail rather than the trigger
     -- that is wrong.
     IF v_entity_id IS NULL THEN
         RAISE EXCEPTION
-            'log_digital_thread_event: % has no % to name the entity by -- check the column named '
+            'log_audit_trail_event: % has no % to name the entity by -- check the column named '
             'in the trigger argument', TG_TABLE_NAME, v_key
             USING ERRCODE = 'null_value_not_allowed';
     END IF;
@@ -4745,7 +4745,7 @@ BEGIN
         END IF;
     END IF;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -4758,12 +4758,12 @@ END;
 $$;
 
 
-ALTER FUNCTION public.log_digital_thread_event() OWNER TO postgres;
+ALTER FUNCTION public.log_audit_trail_event() OWNER TO postgres;
 
 --
 
--- FUNCTION log_digital_thread_event() :: COMMENT
-COMMENT ON FUNCTION public.log_digital_thread_event() IS 'AFTER trigger that appends to digital_thread. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names (0100). The entity id is read from the column named in the trigger argument, defaulting to `id` -- 0122, for device_nameplate, which is keyed by device_id. Attribution is auth.uid(), then aber.actor_id, then the X-Aber-Actor header, then the effective role.';
+-- FUNCTION log_audit_trail_event() :: COMMENT
+COMMENT ON FUNCTION public.log_audit_trail_event() IS 'AFTER trigger that appends to audit_trail. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names (0100). The entity id is read from the column named in the trigger argument, defaulting to `id` -- 0122, for device_nameplate, which is keyed by device_id. Attribution is auth.uid(), then aber.actor_id, then the X-Aber-Actor header, then the effective role.';
 
 --
 
@@ -4787,7 +4787,7 @@ BEGIN
     v_action := 'ROLE_GRANTED';
   END IF;
 
-  -- Attribution, the short form. The full ladder in `log_digital_thread_event()` distinguishes an
+  -- Attribution, the short form. The full ladder in `log_audit_trail_event()` distinguishes an
   -- ingestion write from an edge function by request header; neither ever touches this table.
   -- What reaches it is a person with a session, or a migration -- so the two arms that matter are
   -- `auth.uid()` and the role the statement is running as.
@@ -4806,7 +4806,7 @@ BEGIN
     v_source := CASE WHEN v_role IN ('postgres', 'supabase_admin') THEN 'migration' ELSE 'service' END;
   END IF;
 
-  INSERT INTO public.digital_thread (
+  INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
@@ -4837,7 +4837,7 @@ ALTER FUNCTION public.log_role_assignment() OWNER TO postgres;
 --
 
 -- FUNCTION log_role_assignment() :: COMMENT
-COMMENT ON FUNCTION public.log_role_assignment() IS 'Audit trigger for public.user_roles. Separate from log_digital_thread_event() because that function reads NEW.id and user_roles has no id column -- its key is (user_id, role_id).';
+COMMENT ON FUNCTION public.log_role_assignment() IS 'Audit trigger for public.user_roles. Separate from log_audit_trail_event() because that function reads NEW.id and user_roles has no id column -- its key is (user_id, role_id).';
 
 --
 
@@ -5119,7 +5119,7 @@ CREATE OR REPLACE FUNCTION public.platform_storage_rows() RETURNS TABLE(tier tex
     AS $$
     SELECT
         CASE
-          WHEN c.relname = 'digital_thread' THEN 'audit'
+          WHEN c.relname = 'audit_trail' THEN 'audit'
           WHEN c.relname = 'platform_alerts' THEN 'alerts'
           -- The standards vocabularies are seeded reference data, not operational state. They are
           -- large (ASHRAE 223P alone is a six-figure INSERT chain in 0013) and they never grow at
@@ -5353,12 +5353,12 @@ CREATE OR REPLACE FUNCTION public.playback_stale_credentials() RETURNS TABLE(spa
       CROSS JOIN LATERAL unnest(w.held_edge_nodes) AS held(node)
       JOIN public.gateways g ON g.sparkplug_id = held.node
       -- THE SAME THREE PREDICATES gateway_has_broker_credential() uses, entity_type included: the
-      -- thread is partitioned (0079) and carries no index on (entity_id, action), so the shape of
+      -- trail is partitioned (0079) and carries no index on (entity_id, action), so the shape of
       -- this lookup is the one already established for that question rather than a new one. It runs
       -- over the held nodes alone -- a handful -- once per dialog open.
       JOIN LATERAL (
             SELECT max(dt.recorded_at) AS issued_at
-              FROM public.digital_thread dt
+              FROM public.audit_trail dt
              WHERE dt.entity_type = 'gateways'
                AND dt.entity_id   = g.id
                AND dt.action      = 'CREDENTIAL_ISSUED'
@@ -5375,7 +5375,7 @@ ALTER FUNCTION public.playback_stale_credentials() OWNER TO postgres;
 --
 
 -- FUNCTION playback_stale_credentials() :: COMMENT
-COMMENT ON FUNCTION public.playback_stale_credentials() IS 'The gateways the playback worker reports holding a credential for whose credential has been re-issued since the worker last observed it (#217) -- so it is holding the previous password and a playback onto it would fail at CONNACK. SECURITY DEFINER so the dialog needs no privilege on digital_thread. A gateway with no observation is absent from this result, not stale: that is what a worker from the previous release reports.';
+COMMENT ON FUNCTION public.playback_stale_credentials() IS 'The gateways the playback worker reports holding a credential for whose credential has been re-issued since the worker last observed it (#217) -- so it is holding the previous password and a playback onto it would fail at CONNACK. SECURITY DEFINER so the dialog needs no privilege on audit_trail. A gateway with no observation is absent from this result, not stale: that is what a worker from the previous release reports.';
 
 --
 
@@ -5598,7 +5598,7 @@ ALTER FUNCTION public.prune_closed_proposals() OWNER TO postgres;
 --
 
 -- FUNCTION prune_closed_proposals() :: COMMENT
-COMMENT ON FUNCTION public.prune_closed_proposals() IS 'Removes decided proposals older than proposals.retention_days. Only the queue entry: what an approval changed is in digital_thread under its own retention.';
+COMMENT ON FUNCTION public.prune_closed_proposals() IS 'Removes decided proposals older than proposals.retention_days. Only the queue entry: what an approval changed is in audit_trail under its own retention.';
 
 --
 
@@ -5714,7 +5714,7 @@ BEGIN
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
 
     -- The legacy 1:1 pointer moves too: `devices.schema_id` is the fallback arm of the
-    -- `device_schemas` view. This UPDATE fires `log_digital_thread_event()`, so the rebinding lands in
+    -- `device_schemas` view. This UPDATE fires `log_audit_trail_event()`, so the rebinding lands in
     -- the audit trail per device.
     UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_legacy = ROW_COUNT;
@@ -5768,7 +5768,7 @@ BEGIN
       USING ERRCODE = 'foreign_key_violation';
   END IF;
 
-  INSERT INTO public.digital_thread (
+  INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
@@ -5778,7 +5778,7 @@ BEGIN
     NULL,
     -- The identity as it was at the time: `name` is mutable and the gateway may later be renamed or
     -- purged. No password and no hash of one: this table is readable by any holder of
-    -- `digital_thread:read` and its rows cannot be deleted.
+    -- `audit_trail:read` and its rows cannot be deleted.
     jsonb_build_object(
       'name',           v_gateway.name,
       'sparkplug_id',   v_gateway.sparkplug_id,
@@ -5805,7 +5805,7 @@ ALTER FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) OWNER 
 --
 
 -- FUNCTION record_gateway_credential_issued(p_gateway_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) IS 'Record that a broker credential was minted for a host-run gateway, as a CREDENTIAL_ISSUED row in digital_thread attributed to the calling operator. Carries the wire identity and never the password: the audit trail is append-only and the secret is reveal-once.';
+COMMENT ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) IS 'Record that a broker credential was minted for a host-run gateway, as a CREDENTIAL_ISSUED row in audit_trail attributed to the calling operator. Carries the wire identity and never the password: the audit trail is append-only and the secret is reveal-once.';
 
 --
 
@@ -5842,7 +5842,7 @@ BEGIN
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  INSERT INTO public.digital_thread (
+  INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
@@ -5891,7 +5891,7 @@ ALTER FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id u
 --
 
 -- FUNCTION record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) :: COMMENT
-COMMENT ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) IS 'Record that a host script issued a broker credential to a gateway, as a CREDENTIAL_ISSUED row in digital_thread. Reachable by service_role ALONE -- 0041''s pair is the operator path and gates on has_role(), which no host script can satisfy. actor_source is pinned to ''service'' and changed_by to NULL; the host and OS user are stored under `claimed` because the database cannot verify either. Carries the wire identity and never the password.';
+COMMENT ON FUNCTION public.record_gateway_credential_issued_by_service(p_gateway_id uuid, p_context jsonb) IS 'Record that a host script issued a broker credential to a gateway, as a CREDENTIAL_ISSUED row in audit_trail. Reachable by service_role ALONE -- 0041''s pair is the operator path and gates on has_role(), which no host script can satisfy. actor_source is pinned to ''service'' and changed_by to NULL; the host and OS user are stored under `claimed` because the database cannot verify either. Carries the wire identity and never the password.';
 
 --
 
@@ -5938,7 +5938,7 @@ BEGIN
     -- FAIL ON AN UNKNOWN DEVICE rather than writing an audit row about an entity that does not
     -- exist. `entity_id` is a bare uuid with no foreign key -- deliberately, so history survives a
     -- purge -- which means nothing else would catch a typo'd id, and the row would sit in the
-    -- thread forever describing nothing.
+    -- trail forever describing nothing.
     SELECT id, name, sparkplug_id, schema_id INTO v_device
       FROM public.devices WHERE id = p_device_id;
 
@@ -5947,7 +5947,7 @@ BEGIN
             USING ERRCODE = 'foreign_key_violation';
     END IF;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -5993,7 +5993,7 @@ ALTER FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations 
 --
 
 -- FUNCTION record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) :: COMMENT
-COMMENT ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) IS 'Record a Sparkplug payload the ingestion daemon refused, as a SCHEMA_REJECTION row in digital_thread. The violation list is capped at 50 entries with the true count kept alongside. actor_source is pinned to ''ingestion'' and changed_by to NULL: this is the narrow gate that replaces service_role''s direct INSERT on the audit table. Callable only by the Service_Ingestor principal (0051), which is what makes the grant to `authenticated` safe.';
+COMMENT ON FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone) IS 'Record a Sparkplug payload the ingestion daemon refused, as a SCHEMA_REJECTION row in audit_trail. The violation list is capped at 50 entries with the true count kept alongside. actor_source is pinned to ''ingestion'' and changed_by to NULL: this is the narrow gate that replaces service_role''s direct INSERT on the audit table. Callable only by the Service_Ingestor principal (0051), which is what makes the grant to `authenticated` safe.';
 
 --
 
@@ -6006,7 +6006,7 @@ DECLARE
     v_row    jsonb := to_jsonb(OLD);
     v_actor  uuid;
     v_email  text;
-    v_thread bigint;
+    v_trail bigint;
 BEGIN
     -- ONLY A ROW THAT WENT THROUGH THE LIFECYCLE. A device rejected from quarantine, a fixture a
     -- suite removes, a row a cleanup migration deletes: none was in service, and a tombstone for
@@ -6015,7 +6015,7 @@ BEGIN
         RETURN OLD;
     END IF;
 
-    -- Who, the way log_digital_thread_event() answers it: the session's user, else the actor a
+    -- Who, the way log_audit_trail_event() answers it: the session's user, else the actor a
     -- SECURITY DEFINER RPC declared with SET LOCAL.
     v_actor := auth.uid();
     IF v_actor IS NULL THEN
@@ -6028,11 +6028,11 @@ BEGIN
     v_email := NULLIF(auth.jwt() ->> 'email', '');
 
     -- The DELETE audit row this same event wrote. AFTER triggers on one event fire in name order
-    -- and trg_<table>_retired sorts after trg_<table>_digital_thread, so it is there to find;
+    -- and trg_<table>_retired sorts after trg_<table>_audit_trail, so it is there to find;
     -- looked up by the transaction rather than assumed, so a renamed trigger leaves this NULL
     -- rather than pointing at the wrong row.
-    SELECT t.id INTO v_thread
-      FROM public.digital_thread t
+    SELECT t.id INTO v_trail
+      FROM public.audit_trail t
      WHERE t.entity_type = TG_TABLE_NAME
        AND t.entity_id = OLD.id
        AND t.action = 'DELETE'
@@ -6044,11 +6044,11 @@ BEGIN
     -- retirement is the one that describes the row.
     INSERT INTO public.retired_entities
         (entity_type, entity_id, name, sparkplug_id, archived_at, retired_at,
-         retired_by, retired_by_email, thread_id, old_data)
+         retired_by, retired_by_email, trail_id, old_data)
     VALUES
         (TG_TABLE_NAME, OLD.id, v_row ->> 'name', v_row ->> 'sparkplug_id',
          (v_row ->> 'archived_at')::timestamp with time zone, now(),
-         v_actor, v_email, v_thread, v_row)
+         v_actor, v_email, v_trail, v_row)
     ON CONFLICT (entity_type, entity_id) DO UPDATE
        SET name             = EXCLUDED.name,
            sparkplug_id     = EXCLUDED.sparkplug_id,
@@ -6056,7 +6056,7 @@ BEGIN
            retired_at       = EXCLUDED.retired_at,
            retired_by       = EXCLUDED.retired_by,
            retired_by_email = EXCLUDED.retired_by_email,
-           thread_id        = EXCLUDED.thread_id,
+           trail_id        = EXCLUDED.trail_id,
            old_data         = EXCLUDED.old_data;
 
     RETURN OLD;
@@ -6164,7 +6164,7 @@ BEGIN
         'having issued a service token.', v_actor
         USING ERRCODE = 'insufficient_privilege';
     END IF;
-    -- 'user', which log_digital_thread_event() refuses from a REQUEST HEADER for good reason --
+    -- 'user', which log_audit_trail_event() refuses from a REQUEST HEADER for good reason --
     -- claiming a human author is the assertion a client must not make about itself. It is written
     -- here only after the claim has been checked against user_roles above.
     v_source := 'user';
@@ -6179,7 +6179,7 @@ BEGIN
     JOIN public.roles r ON r.id = ur.role_id
    WHERE ur.user_id = p_principal_id::text;
 
-  INSERT INTO public.digital_thread (
+  INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
@@ -6218,7 +6218,7 @@ ALTER FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti tex
 --
 
 -- FUNCTION record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) IS 'Record that a long-lived JWT was signed for a service principal, as a TOKEN_MINTED row in digital_thread. Refuses a human account and any expiry beyond service_token_max_days(). With p_actor_id NULL the row is attributed to ''service'' with no changed_by, which is how the host scripts record. With an actor it is re-checked against user_roles for Administrator and the row names that person -- the shape mint-service-token uses.';
+COMMENT ON FUNCTION public.record_service_token_issued(p_principal_id uuid, p_jti text, p_expires_at timestamp with time zone, p_context jsonb, p_actor_id uuid) IS 'Record that a long-lived JWT was signed for a service principal, as a TOKEN_MINTED row in audit_trail. Refuses a human account and any expiry beyond service_token_max_days(). With p_actor_id NULL the row is attributed to ''service'' with no changed_by, which is how the host scripts record. With an actor it is re-checked against user_roles for Administrator and the row names that person -- the shape mint-service-token uses.';
 
 --
 
@@ -6534,7 +6534,7 @@ BEGIN
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  INSERT INTO public.digital_thread (
+  INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
@@ -6737,7 +6737,7 @@ BEGIN
         RETURN false;
     END IF;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -6980,7 +6980,7 @@ BEGIN
   END LOOP;
 
   RETURN jsonb_build_object(
-    -- The transaction the UPDATEs ran in, which log_digital_thread_event() stamped on every row it
+    -- The transaction the UPDATEs ran in, which log_audit_trail_event() stamped on every row it
     -- wrote; NULL when nothing changed, since the trigger then wrote no row.
     'causation_id', CASE WHEN v_applied > 0 THEN txid_current() ELSE NULL END,
     'requested',    v_len,
@@ -6997,7 +6997,7 @@ ALTER FUNCTION public.relocate_devices(p_moves jsonb) OWNER TO postgres;
 --
 
 -- FUNCTION relocate_devices(p_moves jsonb) :: COMMENT
-COMMENT ON FUNCTION public.relocate_devices(p_moves jsonb) IS 'Apply a batch of device relocations in ONE transaction, so the whole rearrangement shares a single digital_thread causation_id. A move states location_scope (cell, area_wide or site_wide) and, for area_wide, area_id. Refuses the batch outright on an unknown device, cell or area, a duplicate device, a missing location_scope or an area_wide move with no area -- a half-applied batch is the failure mode this exists to remove. Authority: Administrator or Shopfloor_Manager.';
+COMMENT ON FUNCTION public.relocate_devices(p_moves jsonb) IS 'Apply a batch of device relocations in ONE transaction, so the whole rearrangement shares a single audit_trail causation_id. A move states location_scope (cell, area_wide or site_wide) and, for area_wide, area_id. Refuses the batch outright on an unknown device, cell or area, a duplicate device, a missing location_scope or an area_wide move with no area -- a half-applied batch is the failure mode this exists to remove. Authority: Administrator or Shopfloor_Manager.';
 
 --
 
@@ -7040,7 +7040,7 @@ BEGIN
     VALUES ('requested', 'PENDING', nullif(btrim(coalesce(p_note, '')), ''), auth.uid())
     RETURNING id INTO v_job_id;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -7491,7 +7491,7 @@ BEGIN
     SELECT DISTINCT ON (dt.new_data ->> 'jti')
            dt.new_data ->> 'jti'                     AS jti,
            (dt.new_data ->> 'expires_at')::timestamptz AS expires_at
-      FROM public.digital_thread dt
+      FROM public.audit_trail dt
      WHERE dt.entity_type = 'service_principals'
        AND dt.action = 'TOKEN_MINTED'
        AND dt.entity_id = p_principal_id
@@ -7505,7 +7505,7 @@ BEGIN
 
     IF FOUND THEN
       v_tokens := v_tokens + 1;
-      INSERT INTO public.digital_thread (
+      INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
       ) VALUES (
@@ -7520,7 +7520,7 @@ BEGIN
     END IF;
   END LOOP;
 
-  INSERT INTO public.digital_thread (
+  INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
@@ -7594,7 +7594,7 @@ BEGIN
   -- The mint row is the source of the principal and the expiry; requiring it stops this table
   -- filling with jtis nobody issued. Newest first, so the choice is defined.
   SELECT dt.new_data INTO v_mint
-    FROM public.digital_thread dt
+    FROM public.audit_trail dt
    WHERE dt.entity_type = 'service_principals'
      AND dt.action = 'TOKEN_MINTED'
      AND dt.new_data ->> 'jti' = p_jti
@@ -7609,7 +7609,7 @@ BEGIN
   END IF;
 
   SELECT dt.entity_id INTO v_principal
-    FROM public.digital_thread dt
+    FROM public.audit_trail dt
    WHERE dt.entity_type = 'service_principals'
      AND dt.action = 'TOKEN_MINTED'
      AND dt.new_data ->> 'jti' = p_jti
@@ -7640,7 +7640,7 @@ BEGIN
   VALUES (p_jti, v_principal, v_expires, v_actor)
   ON CONFLICT (jti) DO NOTHING;
 
-  INSERT INTO public.digital_thread (
+  INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
     causation_id, recorded_at
   ) VALUES (
@@ -7699,8 +7699,8 @@ COMMENT ON FUNCTION public.schema_version_base_name(schema_name text) IS 'The li
 
 --
 
--- secure_digital_thread_partition(regclass) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.secure_digital_thread_partition(p_partition regclass) RETURNS void
+-- secure_audit_trail_partition(regclass) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.secure_audit_trail_partition(p_partition regclass) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
@@ -7710,12 +7710,12 @@ BEGIN
 END $$;
 
 
-ALTER FUNCTION public.secure_digital_thread_partition(p_partition regclass) OWNER TO postgres;
+ALTER FUNCTION public.secure_audit_trail_partition(p_partition regclass) OWNER TO postgres;
 
 --
 
--- FUNCTION secure_digital_thread_partition(p_partition regclass) :: COMMENT
-COMMENT ON FUNCTION public.secure_digital_thread_partition(p_partition regclass) IS 'Strip every application-role privilege from one digital_thread partition. Partitions do not inherit the parent ACL and the image default grants service_role ALL -- including TRUNCATE, which no row trigger can refuse. Readers use the parent; a partition needs no grants.';
+-- FUNCTION secure_audit_trail_partition(p_partition regclass) :: COMMENT
+COMMENT ON FUNCTION public.secure_audit_trail_partition(p_partition regclass) IS 'Strip every application-role privilege from one audit_trail partition. Partitions do not inherit the parent ACL and the image default grants service_role ALL -- including TRUNCATE, which no row trigger can refuse. Readers use the parent; a partition needs no grants.';
 
 --
 
@@ -8880,7 +8880,7 @@ END $c$;
 --
 
 -- TABLE asset_exports :: COMMENT
-COMMENT ON TABLE public.asset_exports IS 'Each per-asset bundle aas-export stored: an AASX carrying the shell, the digital thread, the telemetry still in the live historian and a manifest naming the cold objects that hold the rest. A sibling of the cold tier that shares its bucket, and not a row in the historian''s manifest, which is keyed by chunk and exists to make dropping one safe. Readable by the three roles the bucket admits; written by the function alone.';
+COMMENT ON TABLE public.asset_exports IS 'Each per-asset bundle aas-export stored: an AASX carrying the shell, the audit trail, the telemetry still in the live historian and a manifest naming the cold objects that hold the rest. A sibling of the cold tier that shares its bucket, and not a row in the historian''s manifest, which is keyed by chunk and exists to make dropping one safe. Readable by the three roles the bucket admits; written by the function alone.';
 
 --
 
@@ -9102,7 +9102,7 @@ END $c$;
 --
 
 -- TABLE backups :: COMMENT
-COMMENT ON TABLE public.backups IS 'One row per backup that EXISTS on the backup volume; the row is deleted when the service prunes the files, and BACKUP_PRUNED in digital_thread is the record that it did. Written only by backup_finalise() and released only by release_backup(). Readable by Administrator only. The bytes never leave the volume: nothing serves them to a browser.';
+COMMENT ON TABLE public.backups IS 'One row per backup that EXISTS on the backup volume; the row is deleted when the service prunes the files, and BACKUP_PRUNED in audit_trail is the record that it did. Written only by backup_finalise() and released only by release_backup(). Readable by Administrator only. The bytes never leave the volume: nothing serves them to a browser.';
 
 --
 
@@ -9601,11 +9601,11 @@ CREATE TABLE IF NOT EXISTS public.change_proposals (
     decided_by uuid,
     decided_at timestamp with time zone,
     decision_reason text,
-    applied_thread_id bigint,
+    applied_trail_id bigint,
     proposed_by_email text,
     CONSTRAINT change_proposals_closed_rows_are_decided CHECK (((status = 'open'::text) OR (decided_at IS NOT NULL))),
     CONSTRAINT change_proposals_entity_type_known CHECK ((entity_type = ANY (ARRAY['devices'::text, 'device_nameplate'::text, 'areas'::text, 'cells'::text, 'gateways'::text, 'schemas'::text]))),
-    CONSTRAINT change_proposals_open_rows_are_undecided CHECK (((status <> 'open'::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_thread_id IS NULL)))),
+    CONSTRAINT change_proposals_open_rows_are_undecided CHECK (((status <> 'open'::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_trail_id IS NULL)))),
     CONSTRAINT change_proposals_patch_is_an_object CHECK (((jsonb_typeof(patch) = 'object'::text) AND (patch <> '{}'::jsonb))),
     CONSTRAINT change_proposals_rejection_carries_a_reason CHECK (((status <> 'rejected'::text) OR ((decision_reason IS NOT NULL) AND (btrim(decision_reason) <> ''::text)))),
     CONSTRAINT change_proposals_status_known CHECK ((status = ANY (ARRAY['open'::text, 'applied'::text, 'rejected'::text, 'withdrawn'::text, 'expired'::text])))
@@ -9626,7 +9626,7 @@ ALTER TABLE public.change_proposals
     ADD COLUMN IF NOT EXISTS decided_by uuid,
     ADD COLUMN IF NOT EXISTS decided_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS decision_reason text,
-    ADD COLUMN IF NOT EXISTS applied_thread_id bigint,
+    ADD COLUMN IF NOT EXISTS applied_trail_id bigint,
     ADD COLUMN IF NOT EXISTS proposed_by_email text;
 
 ALTER TABLE public.change_proposals
@@ -9641,7 +9641,7 @@ ALTER TABLE public.change_proposals
     ALTER COLUMN decided_by DROP DEFAULT,
     ALTER COLUMN decided_at DROP DEFAULT,
     ALTER COLUMN decision_reason DROP DEFAULT,
-    ALTER COLUMN applied_thread_id DROP DEFAULT,
+    ALTER COLUMN applied_trail_id DROP DEFAULT,
     ALTER COLUMN proposed_by_email DROP DEFAULT;
 
 DO $c$ BEGIN
@@ -9681,14 +9681,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_open_rows_are_undecided'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''open''::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_thread_id IS NULL))))') THEN
+                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''open''::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_trail_id IS NULL))))') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_open_rows_are_undecided;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'change_proposals_open_rows_are_undecided'
                     AND conrelid = 'public.change_proposals'::regclass) THEN
     ALTER TABLE public.change_proposals
-        ADD CONSTRAINT change_proposals_open_rows_are_undecided CHECK (((status <> 'open'::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_thread_id IS NULL))));
+        ADD CONSTRAINT change_proposals_open_rows_are_undecided CHECK (((status <> 'open'::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_trail_id IS NULL))));
   END IF;
 END $c$;
 
@@ -9748,7 +9748,7 @@ COMMENT ON TABLE public.change_proposals IS 'A change somebody proposed but may 
 --
 
 -- COLUMN change_proposals.entity_type :: COMMENT
-COMMENT ON COLUMN public.change_proposals.entity_type IS 'The TARGET TABLE, so this speaks the same vocabulary as digital_thread.entity_type and audit_domain_for().';
+COMMENT ON COLUMN public.change_proposals.entity_type IS 'The TARGET TABLE, so this speaks the same vocabulary as audit_trail.entity_type and audit_domain_for().';
 
 --
 
@@ -9772,8 +9772,8 @@ COMMENT ON COLUMN public.change_proposals.decision_reason IS 'Required to reject
 
 --
 
--- COLUMN change_proposals.applied_thread_id :: COMMENT
-COMMENT ON COLUMN public.change_proposals.applied_thread_id IS 'The digital_thread row the approval wrote, so the queue entry and the audit trail can be read from either end.';
+-- COLUMN change_proposals.applied_trail_id :: COMMENT
+COMMENT ON COLUMN public.change_proposals.applied_trail_id IS 'The audit_trail row the approval wrote, so the queue entry and the audit trail can be read from either end.';
 
 --
 
@@ -10216,7 +10216,7 @@ COMMENT ON TABLE public.device_nameplate IS 'Operator-supplied IDTA 02006 Digita
 --
 
 -- COLUMN device_nameplate.updated_by :: COMMENT
-COMMENT ON COLUMN public.device_nameplate.updated_by IS 'Who last edited this nameplate. A nameplate is an assertion about an asset, so who made it is part of the record -- the same reason digital_thread exists.';
+COMMENT ON COLUMN public.device_nameplate.updated_by IS 'Who last edited this nameplate. A nameplate is an assertion about an asset, so who made it is part of the record -- the same reason audit_trail exists.';
 
 --
 
@@ -10297,8 +10297,8 @@ COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: dev
 
 --
 
--- digital_thread :: TABLE
-CREATE TABLE IF NOT EXISTS public.digital_thread (
+-- audit_trail :: TABLE
+CREATE TABLE IF NOT EXISTS public.audit_trail (
     id bigint NOT NULL,
     entity_type text NOT NULL,
     entity_id uuid NOT NULL,
@@ -10310,15 +10310,15 @@ CREATE TABLE IF NOT EXISTS public.digital_thread (
     actor_source text,
     causation_id bigint,
     audit_domain text NOT NULL,
-    CONSTRAINT digital_thread_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text])))),
-    CONSTRAINT digital_thread_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])))
+    CONSTRAINT audit_trail_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text])))),
+    CONSTRAINT audit_trail_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])))
 )
 PARTITION BY RANGE (recorded_at);
 
 
-ALTER TABLE public.digital_thread OWNER TO postgres;
+ALTER TABLE public.audit_trail OWNER TO postgres;
 
-ALTER TABLE public.digital_thread
+ALTER TABLE public.audit_trail
     ADD COLUMN IF NOT EXISTS id bigint NOT NULL,
     ADD COLUMN IF NOT EXISTS entity_type text NOT NULL,
     ADD COLUMN IF NOT EXISTS entity_id uuid NOT NULL,
@@ -10331,7 +10331,7 @@ ALTER TABLE public.digital_thread
     ADD COLUMN IF NOT EXISTS causation_id bigint,
     ADD COLUMN IF NOT EXISTS audit_domain text NOT NULL;
 
-ALTER TABLE public.digital_thread
+ALTER TABLE public.audit_trail
     ALTER COLUMN id DROP DEFAULT,
     ALTER COLUMN entity_type DROP DEFAULT,
     ALTER COLUMN entity_id DROP DEFAULT,
@@ -10347,59 +10347,59 @@ ALTER TABLE public.digital_thread
 DO $c$ BEGIN
 
   IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'digital_thread_actor_source_check'
-                AND conrelid = 'public.digital_thread'::regclass
+              WHERE conname = 'audit_trail_actor_source_check'
+                AND conrelid = 'public.audit_trail'::regclass
                 AND pg_get_constraintdef(oid) <> 'CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY[''user''::text, ''ingestion''::text, ''migration''::text, ''service''::text]))))') THEN
-    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_actor_source_check;
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_actor_source_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'digital_thread_actor_source_check'
-                    AND conrelid = 'public.digital_thread'::regclass) THEN
-    ALTER TABLE public.digital_thread
-        ADD CONSTRAINT digital_thread_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text]))));
+                  WHERE conname = 'audit_trail_actor_source_check'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text]))));
   END IF;
 END $c$;
 
 DO $c$ BEGIN
 
   IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'digital_thread_audit_domain_check'
-                AND conrelid = 'public.digital_thread'::regclass
+              WHERE conname = 'audit_trail_audit_domain_check'
+                AND conrelid = 'public.audit_trail'::regclass
                 AND pg_get_constraintdef(oid) <> 'CHECK ((audit_domain = ANY (ARRAY[''asset''::text, ''security''::text])))') THEN
-    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_audit_domain_check;
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_audit_domain_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'digital_thread_audit_domain_check'
-                    AND conrelid = 'public.digital_thread'::regclass) THEN
-    ALTER TABLE public.digital_thread
-        ADD CONSTRAINT digital_thread_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])));
+                  WHERE conname = 'audit_trail_audit_domain_check'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])));
   END IF;
 END $c$;
 
 --
 
--- TABLE digital_thread :: COMMENT
-COMMENT ON TABLE public.digital_thread IS 'Append-only audit of every attributed change to cells, gateways and devices, plus the security lane 0070 added. Range-partitioned by month on recorded_at (0079) so retention is DETACH rather than DELETE. Rows are written only by log_digital_thread_event() and its named siblings; UPDATE and DELETE are refused for every role that is not an owner.';
+-- TABLE audit_trail :: COMMENT
+COMMENT ON TABLE public.audit_trail IS 'Append-only audit of every attributed change to cells, gateways and devices, plus the security lane 0070 added. Range-partitioned by month on recorded_at (0079) so retention is DETACH rather than DELETE. Rows are written only by log_audit_trail_event() and its named siblings; UPDATE and DELETE are refused for every role that is not an owner.';
 
 --
 
--- COLUMN digital_thread.actor_source :: COMMENT
-COMMENT ON COLUMN public.digital_thread.actor_source IS 'What kind of actor made the change: user | ingestion | migration | service. Complements changed_by, which names WHICH user and is NULL for every machine-originated write.';
+-- COLUMN audit_trail.actor_source :: COMMENT
+COMMENT ON COLUMN public.audit_trail.actor_source IS 'What kind of actor made the change: user | ingestion | migration | service. Complements changed_by, which names WHICH user and is NULL for every machine-originated write.';
 
 --
 
--- COLUMN digital_thread.causation_id :: COMMENT
-COMMENT ON COLUMN public.digital_thread.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an approval and the change it applied, a batch relocation, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
+-- COLUMN audit_trail.causation_id :: COMMENT
+COMMENT ON COLUMN public.audit_trail.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an approval and the change it applied, a batch relocation, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
 
 --
 
--- COLUMN digital_thread.audit_domain :: COMMENT
-COMMENT ON COLUMN public.digital_thread.audit_domain IS 'asset | security. Stamped by trg_digital_thread_stamp_domain from audit_domain_for(); callers do not supply it and cannot override it. Decides which SELECT policy admits the row.';
+-- COLUMN audit_trail.audit_domain :: COMMENT
+COMMENT ON COLUMN public.audit_trail.audit_domain IS 'asset | security. Stamped by trg_audit_trail_stamp_domain from audit_domain_for(); callers do not supply it and cannot override it. Decides which SELECT policy admits the row.';
 
 --
 
--- digital_thread_id_seq :: SEQUENCE
-CREATE SEQUENCE IF NOT EXISTS public.digital_thread_id_seq
+-- audit_trail_id_seq :: SEQUENCE
+CREATE SEQUENCE IF NOT EXISTS public.audit_trail_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -10407,40 +10407,40 @@ CREATE SEQUENCE IF NOT EXISTS public.digital_thread_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.digital_thread_id_seq OWNER TO postgres;
+ALTER SEQUENCE public.audit_trail_id_seq OWNER TO postgres;
 
 --
 
--- digital_thread_id_seq :: SEQUENCE OWNED BY
-ALTER SEQUENCE public.digital_thread_id_seq OWNED BY public.digital_thread.id;
+-- audit_trail_id_seq :: SEQUENCE OWNED BY
+ALTER SEQUENCE public.audit_trail_id_seq OWNED BY public.audit_trail.id;
 
 --
 
--- digital_thread_default :: TABLE
-CREATE TABLE IF NOT EXISTS public.digital_thread_default PARTITION OF public.digital_thread DEFAULT;
+-- audit_trail_default :: TABLE
+CREATE TABLE IF NOT EXISTS public.audit_trail_default PARTITION OF public.audit_trail DEFAULT;
 
 --
 
--- digital_thread_partition_health :: VIEW
-CREATE OR REPLACE VIEW public.digital_thread_partition_health AS
+-- audit_trail_partition_health :: VIEW
+CREATE OR REPLACE VIEW public.audit_trail_partition_health AS
  SELECT ( SELECT count(*) AS count
            FROM (pg_class c
              JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
-          WHERE (i.inhparent = ('public.digital_thread'::regclass)::oid)) AS partition_count,
+          WHERE (i.inhparent = ('public.audit_trail'::regclass)::oid)) AS partition_count,
     ( SELECT count(*) AS count
-           FROM public.digital_thread_default) AS default_rows,
+           FROM public.audit_trail_default) AS default_rows,
     ( SELECT max((regexp_replace(pg_get_expr(c.relpartbound, c.oid), '^FOR VALUES FROM \(''([^'']+)''\) TO \(''([^'']+)''\).*$'::text, '\2'::text))::timestamp with time zone) AS max
            FROM (pg_class c
              JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
-          WHERE ((i.inhparent = ('public.digital_thread'::regclass)::oid) AND (pg_get_expr(c.relpartbound, c.oid) !~~ 'DEFAULT%'::text))) AS covered_until;
+          WHERE ((i.inhparent = ('public.audit_trail'::regclass)::oid) AND (pg_get_expr(c.relpartbound, c.oid) !~~ 'DEFAULT%'::text))) AS covered_until;
 
 
-ALTER VIEW public.digital_thread_partition_health OWNER TO postgres;
+ALTER VIEW public.audit_trail_partition_health OWNER TO postgres;
 
 --
 
--- VIEW digital_thread_partition_health :: COMMENT
-COMMENT ON VIEW public.digital_thread_partition_health IS 'Whether digital_thread partitioning is keeping up. default_rows > 0 means the maintenance job has stopped and retention by DETACH is no longer complete; covered_until is the instant beyond which new rows fall to the default partition. Read by the Grafana rule "Digital Thread Partitions Falling Behind".';
+-- VIEW audit_trail_partition_health :: COMMENT
+COMMENT ON VIEW public.audit_trail_partition_health IS 'Whether audit_trail partitioning is keeping up. default_rows > 0 means the maintenance job has stopped and retention by DETACH is no longer complete; covered_until is the instant beyond which new rows fall to the default partition. Read by the Grafana rule "Audit Trail Partitions Falling Behind".';
 
 --
 
@@ -10643,7 +10643,7 @@ END $c$;
 --
 
 -- TABLE gateway_enrollment_tokens :: COMMENT
-COMMENT ON TABLE public.gateway_enrollment_tokens IS 'Single-use, short-lived claims that let a Remote gateway appliance exchange its downloaded bundle for a broker credential exactly once. NOT READABLE BY ANY BROWSER-FACING ROLE -- RLS is enabled with no policy for anon or authenticated, so only service_role (which bypasses RLS) can see it, and only the enroll-gateway edge function holds that key. Deliberately a separate table rather than columns on public.gateways: that table is world-readable to authenticated users, its full row is copied into digital_thread on every write, and public.gateway_status selects g.*.';
+COMMENT ON TABLE public.gateway_enrollment_tokens IS 'Single-use, short-lived claims that let a Remote gateway appliance exchange its downloaded bundle for a broker credential exactly once. NOT READABLE BY ANY BROWSER-FACING ROLE -- RLS is enabled with no policy for anon or authenticated, so only service_role (which bypasses RLS) can see it, and only the enroll-gateway edge function holds that key. Deliberately a separate table rather than columns on public.gateways: that table is world-readable to authenticated users, its full row is copied into audit_trail on every write, and public.gateway_status selects g.*.';
 
 --
 
@@ -10739,7 +10739,7 @@ ALTER VIEW public.gateway_status OWNER TO postgres;
 --
 
 -- VIEW gateway_status :: COMMENT
-COMMENT ON VIEW public.gateway_status IS 'public.gateways with heartbeat staleness derived at read time. Mirrors frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing status would append to the immutable digital_thread audit table on every sweep and would be stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a gateways column.';
+COMMENT ON VIEW public.gateway_status IS 'public.gateways with heartbeat staleness derived at read time. Mirrors frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing status would append to the immutable audit_trail table on every sweep and would be stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a gateways column.';
 
 --
 
@@ -10986,7 +10986,7 @@ COMMENT ON COLUMN public.machine_principals.purpose IS 'Why the identity exists,
 --
 
 -- COLUMN machine_principals.created_by :: COMMENT
-COMMENT ON COLUMN public.machine_principals.created_by IS 'The Administrator whose session created the identity. NULL once that account is deleted; the digital thread row keeps the attribution.';
+COMMENT ON COLUMN public.machine_principals.created_by IS 'The Administrator whose session created the identity. NULL once that account is deleted; the audit trail row keeps the attribution.';
 
 --
 
@@ -11836,7 +11836,7 @@ CREATE TABLE IF NOT EXISTS public.retired_entities (
     retired_at timestamp with time zone DEFAULT now() NOT NULL,
     retired_by uuid,
     retired_by_email text,
-    thread_id bigint,
+    trail_id bigint,
     old_data jsonb NOT NULL,
     CONSTRAINT retired_entities_type_known CHECK ((entity_type = ANY (ARRAY['areas'::text, 'cells'::text, 'gateways'::text, 'devices'::text])))
 );
@@ -11853,7 +11853,7 @@ ALTER TABLE public.retired_entities
     ADD COLUMN IF NOT EXISTS retired_at timestamp with time zone DEFAULT now() NOT NULL,
     ADD COLUMN IF NOT EXISTS retired_by uuid,
     ADD COLUMN IF NOT EXISTS retired_by_email text,
-    ADD COLUMN IF NOT EXISTS thread_id bigint,
+    ADD COLUMN IF NOT EXISTS trail_id bigint,
     ADD COLUMN IF NOT EXISTS old_data jsonb NOT NULL;
 
 ALTER TABLE public.retired_entities
@@ -11865,7 +11865,7 @@ ALTER TABLE public.retired_entities
     ALTER COLUMN retired_at SET DEFAULT now(),
     ALTER COLUMN retired_by DROP DEFAULT,
     ALTER COLUMN retired_by_email DROP DEFAULT,
-    ALTER COLUMN thread_id DROP DEFAULT,
+    ALTER COLUMN trail_id DROP DEFAULT,
     ALTER COLUMN old_data DROP DEFAULT;
 
 DO $c$ BEGIN
@@ -11887,7 +11887,7 @@ END $c$;
 --
 
 -- TABLE retired_entities :: COMMENT
-COMMENT ON TABLE public.retired_entities IS 'One row per asset that was archived and then deleted, written by record_retired_entity() on the DELETE. Not derived from digital_thread, which is partitioned for an eventual DETACH: a tombstone outlives the month that recorded the delete. Readable by whoever may read the Archived Entities page or the thread''s asset lane; written by nothing but the trigger.';
+COMMENT ON TABLE public.retired_entities IS 'One row per asset that was archived and then deleted, written by record_retired_entity() on the DELETE. Not derived from audit_trail, which is partitioned for an eventual DETACH: a tombstone outlives the month that recorded the delete. Readable by whoever may read the Archived Entities page or the trail''s asset lane; written by nothing but the trigger.';
 
 --
 
@@ -11922,7 +11922,7 @@ ALTER TABLE public.revoked_service_principals
 --
 
 -- TABLE revoked_service_principals :: COMMENT
-COMMENT ON TABLE public.revoked_service_principals IS 'Service principals that public.auth_pre_request() refuses by subject. Not self-pruning: a principal has no expiry, so a row stays until reinstate_service_principal() removes it. The permanent record is the PRINCIPAL_REVOKED / PRINCIPAL_REINSTATED rows in digital_thread.';
+COMMENT ON TABLE public.revoked_service_principals IS 'Service principals that public.auth_pre_request() refuses by subject. Not self-pruning: a principal has no expiry, so a row stays until reinstate_service_principal() removes it. The permanent record is the PRINCIPAL_REVOKED / PRINCIPAL_REINSTATED rows in audit_trail.';
 
 --
 
@@ -11955,7 +11955,7 @@ ALTER TABLE public.revoked_service_tokens
 --
 
 -- TABLE revoked_service_tokens :: COMMENT
-COMMENT ON TABLE public.revoked_service_tokens IS 'Unexpired service-token jtis that public.auth_pre_request() refuses. Operational, not audit: rows are pruned once the token they name has expired, because the signature check refuses it from then on. The permanent record is the TOKEN_REVOKED row in digital_thread.';
+COMMENT ON TABLE public.revoked_service_tokens IS 'Unexpired service-token jtis that public.auth_pre_request() refuses. Operational, not audit: rows are pruned once the token they name has expired, because the signature check refuses it from then on. The permanent record is the TOKEN_REVOKED row in audit_trail.';
 
 --
 
@@ -12985,8 +12985,8 @@ ALTER TABLE timescale.telemetry_archive_manifest
 
 --
 
--- digital_thread id :: DEFAULT
-ALTER TABLE public.digital_thread ALTER COLUMN id SET DEFAULT nextval('public.digital_thread_id_seq'::regclass);
+-- audit_trail id :: DEFAULT
+ALTER TABLE public.audit_trail ALTER COLUMN id SET DEFAULT nextval('public.audit_trail_id_seq'::regclass);
 
 --
 
@@ -13356,20 +13356,20 @@ END $c$;
 
 --
 
--- digital_thread digital_thread_pkey :: CONSTRAINT
+-- audit_trail audit_trail_pkey :: CONSTRAINT
 DO $c$ BEGIN
 
   IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'digital_thread_pkey'
-                AND conrelid = 'public.digital_thread'::regclass
+              WHERE conname = 'audit_trail_pkey'
+                AND conrelid = 'public.audit_trail'::regclass
                 AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id, recorded_at)') THEN
-    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_pkey;
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'digital_thread_pkey'
-                    AND conrelid = 'public.digital_thread'::regclass) THEN
-    ALTER TABLE public.digital_thread
-        ADD CONSTRAINT digital_thread_pkey PRIMARY KEY (id, recorded_at);
+                  WHERE conname = 'audit_trail_pkey'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_pkey PRIMARY KEY (id, recorded_at);
   END IF;
 END $c$;
 
@@ -14171,23 +14171,23 @@ CREATE INDEX IF NOT EXISTS change_proposals_open_by_age ON public.change_proposa
 
 --
 
--- idx_digital_thread_domain :: INDEX
-CREATE INDEX IF NOT EXISTS idx_digital_thread_domain ON public.digital_thread USING btree (audit_domain, recorded_at DESC);
+-- idx_audit_trail_domain :: INDEX
+CREATE INDEX IF NOT EXISTS idx_audit_trail_domain ON public.audit_trail USING btree (audit_domain, recorded_at DESC);
 
 --
 
--- idx_digital_thread_causation :: INDEX
-CREATE INDEX IF NOT EXISTS idx_digital_thread_causation ON public.digital_thread USING btree (causation_id) WHERE (causation_id IS NOT NULL);
+-- idx_audit_trail_causation :: INDEX
+CREATE INDEX IF NOT EXISTS idx_audit_trail_causation ON public.audit_trail USING btree (causation_id) WHERE (causation_id IS NOT NULL);
 
 --
 
--- idx_digital_thread_recorded_id :: INDEX
-CREATE INDEX IF NOT EXISTS idx_digital_thread_recorded_id ON public.digital_thread USING btree (recorded_at DESC, id DESC);
+-- idx_audit_trail_recorded_id :: INDEX
+CREATE INDEX IF NOT EXISTS idx_audit_trail_recorded_id ON public.audit_trail USING btree (recorded_at DESC, id DESC);
 
 --
 
--- INDEX idx_digital_thread_recorded_id :: COMMENT
-COMMENT ON INDEX public.idx_digital_thread_recorded_id IS 'Serves digital_thread_page()''s keyset order. MUST match its ORDER BY (recorded_at DESC, id DESC) exactly -- a cursor walking one order against an index in another degrades to a full sort per page, which is invisible until the table is large.';
+-- INDEX idx_audit_trail_recorded_id :: COMMENT
+COMMENT ON INDEX public.idx_audit_trail_recorded_id IS 'Serves audit_trail_page()''s keyset order. MUST match its ORDER BY (recorded_at DESC, id DESC) exactly -- a cursor walking one order against an index in another degrades to a full sort per page, which is invisible until the table is large.';
 
 --
 
@@ -14349,9 +14349,9 @@ CREATE TRIGGER system_settings_stamp_trg BEFORE UPDATE ON public.system_settings
 
 --
 
--- areas trg_areas_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_areas_digital_thread ON public.areas;
-CREATE TRIGGER trg_areas_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- areas trg_areas_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_areas_audit_trail ON public.areas;
+CREATE TRIGGER trg_areas_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
@@ -14361,15 +14361,15 @@ CREATE TRIGGER trg_areas_retired AFTER DELETE ON public.areas FOR EACH ROW EXECU
 
 --
 
--- asset_exports trg_asset_exports_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_asset_exports_digital_thread ON public.asset_exports;
-CREATE TRIGGER trg_asset_exports_digital_thread AFTER INSERT ON public.asset_exports FOR EACH ROW EXECUTE FUNCTION public.log_asset_export();
+-- asset_exports trg_asset_exports_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_asset_exports_audit_trail ON public.asset_exports;
+CREATE TRIGGER trg_asset_exports_audit_trail AFTER INSERT ON public.asset_exports FOR EACH ROW EXECUTE FUNCTION public.log_asset_export();
 
 --
 
--- cells trg_cells_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_cells_digital_thread ON public.cells;
-CREATE TRIGGER trg_cells_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- cells trg_cells_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_cells_audit_trail ON public.cells;
+CREATE TRIGGER trg_cells_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
@@ -14409,15 +14409,15 @@ CREATE TRIGGER trg_change_proposals_validate BEFORE INSERT OR UPDATE OF patch, e
 
 --
 
--- device_nameplate trg_device_nameplate_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_device_nameplate_digital_thread ON public.device_nameplate;
-CREATE TRIGGER trg_device_nameplate_digital_thread AFTER INSERT OR DELETE ON public.device_nameplate FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event('device_id');
+-- device_nameplate trg_device_nameplate_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_device_nameplate_audit_trail ON public.device_nameplate;
+CREATE TRIGGER trg_device_nameplate_audit_trail AFTER INSERT OR DELETE ON public.device_nameplate FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event('device_id');
 
 --
 
--- device_nameplate trg_device_nameplate_digital_thread_update :: TRIGGER
-DROP TRIGGER IF EXISTS trg_device_nameplate_digital_thread_update ON public.device_nameplate;
-CREATE TRIGGER trg_device_nameplate_digital_thread_update AFTER UPDATE ON public.device_nameplate FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_digital_thread_event('device_id');
+-- device_nameplate trg_device_nameplate_audit_trail_update :: TRIGGER
+DROP TRIGGER IF EXISTS trg_device_nameplate_audit_trail_update ON public.device_nameplate;
+CREATE TRIGGER trg_device_nameplate_audit_trail_update AFTER UPDATE ON public.device_nameplate FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_audit_trail_event('device_id');
 
 --
 
@@ -14439,9 +14439,9 @@ CREATE TRIGGER trg_device_submodels_reject_archived_schema BEFORE INSERT OR UPDA
 
 --
 
--- devices trg_devices_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_devices_digital_thread ON public.devices;
-CREATE TRIGGER trg_devices_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- devices trg_devices_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_devices_audit_trail ON public.devices;
+CREATE TRIGGER trg_devices_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
@@ -14475,15 +14475,15 @@ CREATE TRIGGER trg_devices_shadow_follows_delete BEFORE DELETE ON public.devices
 
 --
 
--- digital_thread trg_digital_thread_append_only :: TRIGGER
-DROP TRIGGER IF EXISTS trg_digital_thread_append_only ON public.digital_thread;
-CREATE TRIGGER trg_digital_thread_append_only BEFORE DELETE OR UPDATE ON public.digital_thread FOR EACH ROW EXECUTE FUNCTION public.enforce_digital_thread_append_only();
+-- audit_trail trg_audit_trail_append_only :: TRIGGER
+DROP TRIGGER IF EXISTS trg_audit_trail_append_only ON public.audit_trail;
+CREATE TRIGGER trg_audit_trail_append_only BEFORE DELETE OR UPDATE ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.enforce_audit_trail_append_only();
 
 --
 
--- digital_thread trg_digital_thread_stamp_domain :: TRIGGER
-DROP TRIGGER IF EXISTS trg_digital_thread_stamp_domain ON public.digital_thread;
-CREATE TRIGGER trg_digital_thread_stamp_domain BEFORE INSERT ON public.digital_thread FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
+-- audit_trail trg_audit_trail_stamp_domain :: TRIGGER
+DROP TRIGGER IF EXISTS trg_audit_trail_stamp_domain ON public.audit_trail;
+CREATE TRIGGER trg_audit_trail_stamp_domain BEFORE INSERT ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
 
 --
 
@@ -14499,9 +14499,9 @@ CREATE TRIGGER trg_gateways_clear_credential_revoked BEFORE UPDATE OF is_archive
 
 --
 
--- gateways trg_gateways_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_digital_thread ON public.gateways;
-CREATE TRIGGER trg_gateways_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- gateways trg_gateways_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_gateways_audit_trail ON public.gateways;
+CREATE TRIGGER trg_gateways_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
@@ -14565,27 +14565,27 @@ CREATE TRIGGER trg_prevent_active_schema_mutation BEFORE UPDATE ON public.schema
 
 --
 
--- schemas trg_schemas_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_schemas_digital_thread ON public.schemas;
-CREATE TRIGGER trg_schemas_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- schemas trg_schemas_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_schemas_audit_trail ON public.schemas;
+CREATE TRIGGER trg_schemas_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
--- system_settings trg_system_settings_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_system_settings_digital_thread ON public.system_settings;
-CREATE TRIGGER trg_system_settings_digital_thread AFTER INSERT OR DELETE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+-- system_settings trg_system_settings_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_system_settings_audit_trail ON public.system_settings;
+CREATE TRIGGER trg_system_settings_audit_trail AFTER INSERT OR DELETE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
--- system_settings trg_system_settings_digital_thread_update :: TRIGGER
-DROP TRIGGER IF EXISTS trg_system_settings_digital_thread_update ON public.system_settings;
-CREATE TRIGGER trg_system_settings_digital_thread_update AFTER UPDATE ON public.system_settings FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_digital_thread_event();
+-- system_settings trg_system_settings_audit_trail_update :: TRIGGER
+DROP TRIGGER IF EXISTS trg_system_settings_audit_trail_update ON public.system_settings;
+CREATE TRIGGER trg_system_settings_audit_trail_update AFTER UPDATE ON public.system_settings FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
--- user_roles trg_user_roles_digital_thread :: TRIGGER
-DROP TRIGGER IF EXISTS trg_user_roles_digital_thread ON public.user_roles;
-CREATE TRIGGER trg_user_roles_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.log_role_assignment();
+-- user_roles trg_user_roles_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_user_roles_audit_trail ON public.user_roles;
+CREATE TRIGGER trg_user_roles_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.log_role_assignment();
 
 --
 
@@ -14937,20 +14937,20 @@ END $c$;
 
 --
 
--- digital_thread digital_thread_changed_by_fkey :: FK CONSTRAINT
+-- audit_trail audit_trail_changed_by_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
 
   IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'digital_thread_changed_by_fkey'
-                AND conrelid = 'public.digital_thread'::regclass
+              WHERE conname = 'audit_trail_changed_by_fkey'
+                AND conrelid = 'public.audit_trail'::regclass
                 AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (changed_by) REFERENCES auth.users(id)') THEN
-    ALTER TABLE public.digital_thread DROP CONSTRAINT digital_thread_changed_by_fkey;
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_changed_by_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'digital_thread_changed_by_fkey'
-                    AND conrelid = 'public.digital_thread'::regclass) THEN
-    ALTER TABLE public.digital_thread
-        ADD CONSTRAINT digital_thread_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES auth.users(id);
+                  WHERE conname = 'audit_trail_changed_by_fkey'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES auth.users(id);
   END IF;
 END $c$;
 
@@ -15529,20 +15529,20 @@ CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenti
 
 --
 
--- digital_thread :: ROW SECURITY
-ALTER TABLE public.digital_thread ENABLE ROW LEVEL SECURITY;
+-- audit_trail :: ROW SECURITY
+ALTER TABLE public.audit_trail ENABLE ROW LEVEL SECURITY;
 
 --
 
--- digital_thread digital_thread_select_asset :: POLICY
-DROP POLICY IF EXISTS digital_thread_select_asset ON public.digital_thread;
-CREATE POLICY digital_thread_select_asset ON public.digital_thread FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text])));
+-- audit_trail audit_trail_select_asset :: POLICY
+DROP POLICY IF EXISTS audit_trail_select_asset ON public.audit_trail;
+CREATE POLICY audit_trail_select_asset ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text])));
 
 --
 
--- digital_thread digital_thread_select_security :: POLICY
-DROP POLICY IF EXISTS digital_thread_select_security ON public.digital_thread;
-CREATE POLICY digital_thread_select_security ON public.digital_thread FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
+-- audit_trail audit_trail_select_security :: POLICY
+DROP POLICY IF EXISTS audit_trail_select_security ON public.audit_trail;
+CREATE POLICY audit_trail_select_security ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
 
 --
 
@@ -15828,7 +15828,7 @@ ALTER TABLE public.retired_entities ENABLE ROW LEVEL SECURITY;
 
 -- retired_entities retired_entities_select_privileged :: POLICY
 DROP POLICY IF EXISTS retired_entities_select_privileged ON public.retired_entities;
-CREATE POLICY retired_entities_select_privileged ON public.retired_entities FOR SELECT TO authenticated USING (public.has_authority(ARRAY['archive:manage'::text, 'digital_thread:read'::text]));
+CREATE POLICY retired_entities_select_privileged ON public.retired_entities FOR SELECT TO authenticated USING (public.has_authority(ARRAY['archive:manage'::text, 'audit_trail:read'::text]));
 
 --
 
@@ -16151,24 +16151,24 @@ GRANT ALL ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_n
 
 --
 
--- FUNCTION digital_thread_backup_job_ids_matching(p_pattern text) :: ACL
-REVOKE ALL ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) TO service_role;
-GRANT ALL ON FUNCTION public.digital_thread_backup_job_ids_matching(p_pattern text) TO authenticated;
+-- FUNCTION audit_trail_backup_job_ids_matching(p_pattern text) :: ACL
+REVOKE ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) TO service_role;
+GRANT ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) TO authenticated;
 
 --
 
--- FUNCTION digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: ACL
-REVOKE ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO service_role;
-GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO authenticated;
+-- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: ACL
+REVOKE ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO service_role;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO authenticated;
 
 --
 
--- FUNCTION digital_thread_user_ids_matching(p_pattern text) :: ACL
-REVOKE ALL ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) TO service_role;
-GRANT ALL ON FUNCTION public.digital_thread_user_ids_matching(p_pattern text) TO authenticated;
+-- FUNCTION audit_trail_user_ids_matching(p_pattern text) :: ACL
+REVOKE ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) TO service_role;
+GRANT ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) TO authenticated;
 
 --
 
@@ -16192,9 +16192,9 @@ GRANT ALL ON FUNCTION public.dispatch_device_quarantine_webhook() TO authenticat
 
 --
 
--- FUNCTION enforce_digital_thread_append_only() :: ACL
-REVOKE ALL ON FUNCTION public.enforce_digital_thread_append_only() FROM PUBLIC;
-GRANT ALL ON FUNCTION public.enforce_digital_thread_append_only() TO service_role;
+-- FUNCTION enforce_audit_trail_append_only() :: ACL
+REVOKE ALL ON FUNCTION public.enforce_audit_trail_append_only() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.enforce_audit_trail_append_only() TO service_role;
 
 --
 
@@ -16236,15 +16236,15 @@ REVOKE ALL ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_co
 
 --
 
--- FUNCTION ensure_digital_thread_partition(p_month timestamp with time zone) :: ACL
-REVOKE ALL ON FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.ensure_digital_thread_partition(p_month timestamp with time zone) TO service_role;
+-- FUNCTION ensure_audit_trail_partition(p_month timestamp with time zone) :: ACL
+REVOKE ALL ON FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) TO service_role;
 
 --
 
--- FUNCTION ensure_digital_thread_partitions(p_months_ahead integer) :: ACL
-REVOKE ALL ON FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.ensure_digital_thread_partitions(p_months_ahead integer) TO service_role;
+-- FUNCTION ensure_audit_trail_partitions(p_months_ahead integer) :: ACL
+REVOKE ALL ON FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) TO service_role;
 
 --
 
@@ -16525,9 +16525,9 @@ GRANT ALL ON FUNCTION public.log_asset_export() TO service_role;
 
 --
 
--- FUNCTION log_digital_thread_event() :: ACL
-REVOKE ALL ON FUNCTION public.log_digital_thread_event() FROM PUBLIC;
-GRANT ALL ON FUNCTION public.log_digital_thread_event() TO service_role;
+-- FUNCTION log_audit_trail_event() :: ACL
+REVOKE ALL ON FUNCTION public.log_audit_trail_event() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.log_audit_trail_event() TO service_role;
 
 --
 
@@ -16868,9 +16868,9 @@ GRANT ALL ON FUNCTION public.schema_version_base_name(schema_name text) TO authe
 
 --
 
--- FUNCTION secure_digital_thread_partition(p_partition regclass) :: ACL
-REVOKE ALL ON FUNCTION public.secure_digital_thread_partition(p_partition regclass) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.secure_digital_thread_partition(p_partition regclass) TO service_role;
+-- FUNCTION secure_audit_trail_partition(p_partition regclass) :: ACL
+REVOKE ALL ON FUNCTION public.secure_audit_trail_partition(p_partition regclass) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.secure_audit_trail_partition(p_partition regclass) TO service_role;
 
 --
 
@@ -17065,17 +17065,17 @@ GRANT ALL ON TABLE public.device_schemas TO authenticated;
 
 --
 
--- TABLE digital_thread :: ACL
-GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.digital_thread TO service_role;
-GRANT SELECT ON TABLE public.digital_thread TO authenticated;
+-- TABLE audit_trail :: ACL
+GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.audit_trail TO service_role;
+GRANT SELECT ON TABLE public.audit_trail TO authenticated;
 
 --
 
--- TABLE digital_thread_partition_health :: ACL
-GRANT ALL ON TABLE public.digital_thread_partition_health TO service_role;
+-- TABLE audit_trail_partition_health :: ACL
+GRANT ALL ON TABLE public.audit_trail_partition_health TO service_role;
 DO $g$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.digital_thread_partition_health TO grafana_reader';
+    EXECUTE 'GRANT SELECT ON TABLE public.audit_trail_partition_health TO grafana_reader';
   END IF;
 END $g$;
 
@@ -17419,21 +17419,21 @@ BEGIN
                'create_machine_principal',
                'custom_access_token_hook',
                'describe_machine_principal',
-               'digital_thread_backup_job_ids_matching',
-               'digital_thread_page',
-               'digital_thread_user_ids_matching',
+               'audit_trail_backup_job_ids_matching',
+               'audit_trail_page',
+               'audit_trail_user_ids_matching',
                'directory_liveness_job_map',
                'discard_schema_draft',
                'dispatch_device_quarantine_webhook',
-               'enforce_digital_thread_append_only',
+               'enforce_audit_trail_append_only',
                'enforce_metric_catalog_immutability',
                'enforce_metric_group_spelling',
                'enforce_open_proposal_cap',
                'enforce_schema_version_provenance',
                'enqueue_scheduled_backup',
                'ensure_cron_job',
-               'ensure_digital_thread_partition',
-               'ensure_digital_thread_partitions',
+               'ensure_audit_trail_partition',
+               'ensure_audit_trail_partitions',
                'ensure_gateway_status_view',
                'ensure_shadow_devices',
                'expire_open_proposals',
@@ -17472,7 +17472,7 @@ BEGIN
                'list_machine_principals',
                'list_user_accounts',
                'log_asset_export',
-               'log_digital_thread_event',
+               'log_audit_trail_event',
                'log_role_assignment',
                'may_decide_proposal',
                'may_manage_captures',
@@ -17523,7 +17523,7 @@ BEGIN
                'revoke_service_principal',
                'revoke_service_token',
                'schema_version_base_name',
-               'secure_digital_thread_partition',
+               'secure_audit_trail_partition',
                'seed_setting',
                'service_token_max_days',
                'set_archive_credential',
@@ -17572,21 +17572,21 @@ BEGIN
             'create_machine_principal(text, text[], text)',
             'custom_access_token_hook(jsonb)',
             'describe_machine_principal(uuid, text, text)',
-            'digital_thread_backup_job_ids_matching(text)',
-            'digital_thread_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text)',
-            'digital_thread_user_ids_matching(text)',
+            'audit_trail_backup_job_ids_matching(text)',
+            'audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text)',
+            'audit_trail_user_ids_matching(text)',
             'directory_liveness_job_map()',
             'discard_schema_draft(uuid)',
             'dispatch_device_quarantine_webhook()',
-            'enforce_digital_thread_append_only()',
+            'enforce_audit_trail_append_only()',
             'enforce_metric_catalog_immutability()',
             'enforce_metric_group_spelling()',
             'enforce_open_proposal_cap()',
             'enforce_schema_version_provenance()',
             'enqueue_scheduled_backup()',
             'ensure_cron_job(text, text, text)',
-            'ensure_digital_thread_partition(timestamp with time zone)',
-            'ensure_digital_thread_partitions(integer)',
+            'ensure_audit_trail_partition(timestamp with time zone)',
+            'ensure_audit_trail_partitions(integer)',
             'ensure_gateway_status_view()',
             'ensure_shadow_devices(uuid)',
             'expire_open_proposals()',
@@ -17625,7 +17625,7 @@ BEGIN
             'list_machine_principals()',
             'list_user_accounts()',
             'log_asset_export()',
-            'log_digital_thread_event()',
+            'log_audit_trail_event()',
             'log_role_assignment()',
             'may_decide_proposal(text)',
             'may_manage_captures()',
@@ -17676,7 +17676,7 @@ BEGIN
             'revoke_service_principal(uuid, text)',
             'revoke_service_token(text)',
             'schema_version_base_name(text)',
-            'secure_digital_thread_partition(regclass)',
+            'secure_audit_trail_partition(regclass)',
             'seed_setting(text, jsonb, text, text, text, text, text)',
             'service_token_max_days()',
             'set_archive_credential(text)',
@@ -17704,7 +17704,7 @@ $overloads$;
 
 
 -- ---------------------------------------------------------------------------------------------
--- 4b. The partitions digital_thread can accept, and their privileges
+-- 4b. The partitions audit_trail can accept, and their privileges
 -- ---------------------------------------------------------------------------------------------
 -- BEFORE 0002 SEEDS, and that ordering is the whole point of where this sits. Section 4 creates
 -- the partitioned parent and the DEFAULT partition only -- the monthly partitions are run-time
@@ -17716,13 +17716,13 @@ $overloads$;
 --
 -- THE FIRST LINE IS A PRIVILEGE FIX, NOT A TIDY-UP. A partition's privileges are checked when it
 -- is addressed directly, so they do not follow the parent's. 0079 created this partition through
--- secure_digital_thread_partition(), which withdraws everything; section 4 creates it directly,
+-- secure_audit_trail_partition(), which withdraws everything; section 4 creates it directly,
 -- where the image's default privileges hand `service_role` INSERT, UPDATE, DELETE and TRUNCATE on
 -- it -- on the default partition of the append-only audit table, which is exactly what the
--- parent's own grants refuse. `ensure_digital_thread_partitions()` secures the months it creates;
+-- parent's own grants refuse. `ensure_audit_trail_partitions()` secures the months it creates;
 -- nothing secures this one but this line.
-SELECT public.secure_digital_thread_partition('public.digital_thread_default'::regclass);
-SELECT public.ensure_digital_thread_partitions(3);
+SELECT public.secure_audit_trail_partition('public.audit_trail_default'::regclass);
+SELECT public.ensure_audit_trail_partitions(3);
 
 -- ---------------------------------------------------------------------------------------------
 -- 4c. gateway_status is rebuilt from the column set this database actually has
@@ -17742,7 +17742,7 @@ SELECT public.ensure_gateway_status_view();
 -- and adding it would silently emit nothing. REPLICA IDENTITY FULL is required: Realtime
 -- evaluates RLS against the old row too.
 --
--- `digital_thread` is absent because an unauthenticated subscriber still receives the change
+-- `audit_trail` is absent because an unauthenticated subscriber still receives the change
 -- envelope (payload redacted, 401 attached), so the fact and timing of an audit write would leak
 -- to anyone who can reach the socket, and nothing subscribes to it. A publication governs
 -- logical replication only; grants and RLS on the table are untouched. Asset-edit timing still
@@ -17791,7 +17791,7 @@ ALTER TABLE public.devices        REPLICA IDENTITY FULL;
 -- Returned to the default now that the table is unpublished. FULL only ever affected UPDATE and
 -- DELETE, which 0003's append-only trigger refuses anyway, so this changes no behaviour -- it
 -- stops the file asserting a replication requirement for a table that is not replicated.
-ALTER TABLE public.digital_thread REPLICA IDENTITY DEFAULT;
+ALTER TABLE public.audit_trail REPLICA IDENTITY DEFAULT;
 
 -- ---------------------------------------------------------------------------------------------
 -- 6. Privileges withdrawn
@@ -17799,15 +17799,15 @@ ALTER TABLE public.digital_thread REPLICA IDENTITY DEFAULT;
 -- These cannot be read off a dump, which describes what is granted rather than what must not
 -- be. The image's default privileges hand anon, authenticated and service_role full rights on
 -- every sequence created after them.
-REVOKE ALL ON SEQUENCE public.digital_thread_id_seq FROM anon, authenticated;
-REVOKE ALL ON SEQUENCE public.digital_thread_id_seq FROM service_role;
+REVOKE ALL ON SEQUENCE public.audit_trail_id_seq FROM anon, authenticated;
+REVOKE ALL ON SEQUENCE public.audit_trail_id_seq FROM service_role;
 
 -- APPEND-ONLY IS ENFORCED BY THE ABSENCE OF A GRANT, which is precisely what a dump cannot state.
 -- `service_role` is the credential ingestion and every edge function hold, so these two tables --
 -- the audit trail and the ledger that stops a one-shot migration running twice -- are the two the
 -- squash must not hand back write access to. A generated baseline grants ALL by default and the
 -- only trace of the mistake would be four extra words in one ACL line.
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.digital_thread FROM service_role;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.audit_trail FROM service_role;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.one_shot_migrations FROM service_role;
 
 -- Three functions nothing outside a migration may call: two maintenance routines that pg_cron

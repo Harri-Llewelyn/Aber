@@ -1,5 +1,5 @@
 /**
- * Digital Thread filter bar and actor attribution. The audit trigger stops recording heartbeat
+ * Audit Trail filter bar and actor attribution. The audit trigger stops recording heartbeat
  * stamps and no-op writes and stamps `actor_source` on what remains, so a blank author means a
  * genuine gap.
  */
@@ -8,7 +8,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { DigitalThreadTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow } from '../components/tabs/DigitalThreadTab'
+import { AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 
 /* Newlines normalised on read, because `cssRule()` matches multi-line selectors with `\n` and
@@ -80,13 +80,13 @@ const EVENTS = [
 ]
 const ENTITY_COUNT = new Set(EVENTS.map(e => e.entity_id)).size
 
-const urls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes('/digital-thread'))
-const lastThreadUrl = () => urls()[urls().length - 1]
+const urls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes('/audit-trail'))
+const lastTrailUrl = () => urls()[urls().length - 1]
 
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation((path) => {
-    if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+    if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(EVENTS)
     if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
     if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
     if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
@@ -99,7 +99,7 @@ beforeEach(() => {
  * joins.
  */
 const show = async () => {
-  render(<DigitalThreadTab />)
+  render(<AuditTrailTab />)
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
@@ -126,7 +126,7 @@ const selectEvent = async (pattern) => {
 
 const rangeSelect = () => screen.getByTitle('Limit the timeline to a time range')
 
-describe('Digital Thread filter bar', () => {
+describe('Audit Trail filter bar', () => {
   it('offers entity type, entity name, event type and time range, in the shared filter bar', async () => {
     await show()
 
@@ -135,8 +135,8 @@ describe('Digital Thread filter bar', () => {
     expect(document.querySelector('.filter-bar')).toBeTruthy()
     expect(screen.getByTitle(/Show only events against one kind of asset/)).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/)).toBeInTheDocument()
-    // The wording is load-bearing: this control filters `digital_thread.action`, while the coloured
-    // markers show a derived classification. See digitalThreadActionFilter.test.jsx.
+    // The wording is load-bearing: this control filters `audit_trail.action`, while the coloured
+    // markers show a derived classification. See auditTrailActionFilter.test.jsx.
     expect(screen.getByTitle(/Filter by the database action/)).toBeInTheDocument()
     expect(rangeSelect()).toBeInTheDocument()
   })
@@ -145,14 +145,14 @@ describe('Digital Thread filter bar', () => {
     await show()
     fireEvent.change(screen.getByTitle(/Show only events against one kind of asset/), { target: { value: 'GATEWAY' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('entity_type=GATEWAY'))
+    await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=GATEWAY'))
   })
 
   it('filters by audit event type', async () => {
     await show()
     fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'DELETE' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('action=DELETE'))
+    await waitFor(() => expect(lastTrailUrl()).toContain('action=DELETE'))
   })
 
   /* SENT AS THE TYPED TEXT, not resolved to ids here. It is still a database predicate rather than
@@ -163,20 +163,20 @@ describe('Digital Thread filter bar', () => {
     await show()
     fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Simulated' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('search=Simulated'))
+    await waitFor(() => expect(lastTrailUrl()).toContain('search=Simulated'))
     // And no longer resolves it against the live lists first, which is what made a deleted entity
-    // unsearchable: no match there meant an empty id list, which drew an empty thread.
-    expect(lastThreadUrl()).not.toContain('entity_ids=')
+    // unsearchable: no match there meant an empty id list, which drew an empty trail.
+    expect(lastTrailUrl()).not.toContain('entity_ids=')
   })
 
   it('still matches on a raw id, so an id pasted from elsewhere works', async () => {
     await show()
     fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'gw-1' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('search=gw-1'))
+    await waitFor(() => expect(lastTrailUrl()).toContain('search=gw-1'))
   })
 
-  it('searches for a name no live asset has, instead of drawing an empty thread', async () => {
+  it('searches for a name no live asset has, instead of drawing an empty trail', async () => {
     /* THE BUG THIS REPLACES. `Decommissioned Line` is in the fixture's audit payload and in no
        live list, so resolving the name against the live lists produced no ids -- and an empty id
        list is not "no filter", it is "these, of which there are none". The page asked for nothing
@@ -185,8 +185,8 @@ describe('Digital Thread filter bar', () => {
     fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/),
       { target: { value: 'Decommissioned' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('search=Decommissioned'))
-    expect(lastThreadUrl()).not.toContain('entity_ids=')
+    await waitFor(() => expect(lastTrailUrl()).toContain('search=Decommissioned'))
+    expect(lastTrailUrl()).not.toContain('entity_ids=')
   })
 
   it('counts the active filters and clears them together, the time range included', async () => {
@@ -199,8 +199,8 @@ describe('Digital Thread filter bar', () => {
     expect(clear.textContent).toContain('(3)')
 
     fireEvent.click(clear)
-    await waitFor(() => expect(lastThreadUrl()).not.toContain('action='))
-    expect(lastThreadUrl()).not.toContain('since=')
+    await waitFor(() => expect(lastTrailUrl()).not.toContain('action='))
+    expect(lastTrailUrl()).not.toContain('since=')
     expect(rangeSelect().value).toBe('all')
   })
 })
@@ -210,13 +210,13 @@ describe('Digital Thread filter bar', () => {
  * newest-first, so a window filtered in the browser would spend its row budget on events outside
  * the window. These assert on the URL because that is where the difference is observable.
  */
-describe('Digital Thread time range', () => {
+describe('Audit Trail time range', () => {
   it('defaults to All time and sends no bound at all', async () => {
     await show()
 
     expect(rangeSelect().value).toBe('all')
-    expect(lastThreadUrl()).not.toContain('since=')
-    expect(lastThreadUrl()).not.toContain('until=')
+    expect(lastTrailUrl()).not.toContain('since=')
+    expect(lastTrailUrl()).not.toContain('until=')
   })
 
   /* The default is unbounded: the page's main entry path is a handover from a device row, and under
@@ -230,8 +230,8 @@ describe('Digital Thread time range', () => {
     await show()
     fireEvent.change(rangeSelect(), { target: { value: '24h' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('since='))
-    const since = new URL(lastThreadUrl(), 'http://x').searchParams.get('since')
+    await waitFor(() => expect(lastTrailUrl()).toContain('since='))
+    const since = new URL(lastTrailUrl(), 'http://x').searchParams.get('since')
     const ageMs = Date.now() - new Date(since).getTime()
     // 24 hours, give or take the time the test took to run.
     expect(ageMs).toBeGreaterThan(23.9 * 60 * 60 * 1000)
@@ -246,8 +246,8 @@ describe('Digital Thread time range', () => {
     fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T09:30' } })
     fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T09:45' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('until='))
-    const params = new URL(lastThreadUrl(), 'http://x').searchParams
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    const params = new URL(lastTrailUrl(), 'http://x').searchParams
     // Local, not UTC: an operator choosing 09:30 means 09:30 where they stand. The end bound is
     // widened to the end of that minute.
     expect(new Date(params.get('since')).getTime())
@@ -264,8 +264,8 @@ describe('Digital Thread time range', () => {
     fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T16:11' } })
     fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T16:12' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('until='))
-    const params = new URL(lastThreadUrl(), 'http://x').searchParams
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    const params = new URL(lastTrailUrl(), 'http://x').searchParams
     const spanMs = new Date(params.get('until')) - new Date(params.get('since'))
     expect(spanMs).toBeLessThan(2 * 60 * 1000)
     expect(spanMs).toBeGreaterThan(0)
@@ -296,8 +296,8 @@ describe('Digital Thread time range', () => {
     await show()
     fireEvent.change(rangeSelect(), { target: { value: '15m' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('since='))
-    const since = new URL(lastThreadUrl(), 'http://x').searchParams.get('since')
+    await waitFor(() => expect(lastTrailUrl()).toContain('since='))
+    const since = new URL(lastTrailUrl(), 'http://x').searchParams.get('since')
     const ageMs = Date.now() - new Date(since).getTime()
     expect(ageMs).toBeGreaterThan(14.5 * 60 * 1000)
     expect(ageMs).toBeLessThan(15.5 * 60 * 1000)
@@ -305,12 +305,12 @@ describe('Digital Thread time range', () => {
 
   it('says the range is why the timeline is empty, rather than blaming the filters', async () => {
     api.get.mockImplementation((path) => {
-      if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve([])
+      if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve([])
       if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
       return Promise.resolve([])
     })
-    render(<DigitalThreadTab />)
-    await waitFor(() => expect(screen.getByText(/No digital thread events/)).toBeInTheDocument())
+    render(<AuditTrailTab />)
+    await waitFor(() => expect(screen.getByText(/No audit trail events/)).toBeInTheDocument())
 
     fireEvent.change(rangeSelect(), { target: { value: '24h' } })
     await waitFor(() => expect(screen.getByText(/Widen it, or switch back to All time/)).toBeInTheDocument())
@@ -321,7 +321,7 @@ describe('Digital Thread time range', () => {
   // rather than an error.
   it('applies the bounds as arguments to the page RPC, not as a client-side filter', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../api.js'), 'utf8')
-    expect(source).toMatch(/supabase\.rpc\('digital_thread_page'/)
+    expect(source).toMatch(/supabase\.rpc\('audit_trail_page'/)
     expect(source).toMatch(/p_since: since \|\| null/)
     expect(source).toMatch(/p_until: until \|\| null/)
     // And the filter this whole change exists for: it is a predicate, so the row budget is spent
@@ -334,7 +334,7 @@ describe('Digital Thread time range', () => {
  * The swimlanes: one lane per audited entity, ordered busiest first. Stable ordering is asserted
  * because lanes that reshuffle between refreshes put a different marker under the cursor.
  */
-describe('Digital Thread swimlanes', () => {
+describe('Audit Trail swimlanes', () => {
   it('draws one lane per entity, not one row per event', async () => {
     await showAll()
 
@@ -400,7 +400,7 @@ describe('Digital Thread swimlanes', () => {
        made this reachable: before it, none of those kinds could be named at all, so none of them
        ever reached the flag. */
     api.get.mockImplementation((path) => {
-      if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve([{
+      if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve([{
         event_id: 90, entity_type: 'system_settings', entity_id: 'set-1', event_type: 'UPDATE',
         timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null,
         actor_source: 'user', old_data: { key: 'ui.x', label: 'Lanes drawn before folding' },
@@ -411,7 +411,7 @@ describe('Digital Thread swimlanes', () => {
       if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
       return Promise.resolve([])
     })
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     const label = await screen.findByText('Lanes drawn before folding')
     expect(within(label.closest('.dt-lane')).queryByText('deleted')).toBeNull()
@@ -440,7 +440,7 @@ describe('Digital Thread swimlanes', () => {
 
     // The fixture is unfiltered by the mock, so this asserts the grouping, not the query: with
     // only device lanes present, Cells and Gateways must not appear as empty headings.
-    await waitFor(() => expect(lastThreadUrl()).toContain('entity_type=DEVICE'))
+    await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=DEVICE'))
     const headings = [...document.querySelectorAll('.dt-section .dt-section-name')].map(h => h.textContent)
     expect(headings).not.toContain('Cells (0)')
   })
@@ -468,11 +468,11 @@ describe('Digital Thread swimlanes', () => {
       asset_id: `bulk-${i}`, asset_name: `Bulk_${i}`, last_birth_metrics: []
     }))
     api.get.mockImplementation((path) => {
-      if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(many)
+      if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(many)
       if (path.startsWith('/api/v1/devices')) return Promise.resolve(bulkDevices)
       return Promise.resolve([])
     })
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(40))
     // The header names the whole set, as a plain count: nothing is held back to make a fraction.
@@ -486,7 +486,7 @@ describe('Digital Thread swimlanes', () => {
  * The time axis. One rule, asserted directly: two adjacent ticks must never print the same string.
  * Every band exists because the coarser format above it collapses at that span.
  */
-describe('Digital Thread time axis', () => {
+describe('Audit Trail time axis', () => {
   const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR
 
   /** The five labels the component would draw for a span ending now. */
@@ -540,11 +540,11 @@ describe('Digital Thread time axis', () => {
 })
 
 /**
- * The derived marker taxonomy. `digital_thread.action` holds only INSERT / UPDATE / DELETE;
+ * The derived marker taxonomy. `audit_trail.action` holds only INSERT / UPDATE / DELETE;
  * archiving, quarantining and schema rebinding are all UPDATEs distinguished by what the diff
  * touched, so the classifier is the only thing that tells them apart.
  */
-describe('Digital Thread event classification', () => {
+describe('Audit Trail event classification', () => {
   const classOf = (pattern) => nodeFor(pattern).className
 
   it('paints an INSERT as creation', async () => {
@@ -651,7 +651,7 @@ describe('Digital Thread event classification', () => {
  * The drawer. The diff is built here and handed to ContextPanel through `beforeActions`;
  * ContextPanel is presentational and knows nothing about audit payloads.
  */
-describe('Digital Thread event drawer', () => {
+describe('Audit Trail event drawer', () => {
   it('stays shut until an event is clicked', async () => {
     await show()
     expect(document.querySelector('.context-panel-open')).toBeNull()
@@ -786,7 +786,7 @@ describe('Digital Thread event drawer', () => {
  * Stepping through one asset's history: ascending, against the descending fetch order, because
  * Previous has to go back in time and Next forward.
  */
-describe('Digital Thread drawer navigation', () => {
+describe('Audit Trail drawer navigation', () => {
   const prev = () => screen.getByRole('button', { name: /Previous/ })
   const next = () => screen.getByRole('button', { name: /Next/ })
   const position = () => document.querySelector('.dt-drawer-nav-pos').textContent
@@ -870,7 +870,7 @@ describe('Digital Thread drawer navigation', () => {
  * lane is one asset. A blank author means a genuine gap, since the trigger no longer records
  * machine non-events.
  */
-describe('Digital Thread attribution', () => {
+describe('Audit Trail attribution', () => {
   it('labels a user-made change as User', async () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
@@ -911,7 +911,7 @@ describe('Digital Thread attribution', () => {
 
 // There is no tag filter on this page. Asserted negatively so it cannot drift back: it also pulled
 // a /api/v1/schemas fetch and the deviceTags derivation into a page with no other use for them.
-describe('Digital Thread — removed tag filter', () => {
+describe('Audit Trail — removed tag filter', () => {
   it('offers no device-type filter', async () => {
     await show()
 
@@ -964,16 +964,16 @@ describe('Digital Thread — removed tag filter', () => {
        rather than swapping for a spinner every minute. */
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
       await vi.waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
-      const threadCalls = () =>
-        api.get.mock.calls.filter(c => String(c[0]).startsWith('/api/v1/digital-thread')).length
-      const before = threadCalls()
+      const trailCalls = () =>
+        api.get.mock.calls.filter(c => String(c[0]).startsWith('/api/v1/audit-trail')).length
+      const before = trailCalls()
 
       await vi.advanceTimersByTimeAsync(60_000)
 
-      expect(threadCalls()).toBe(before + 1)
+      expect(trailCalls()).toBe(before + 1)
       // Still the timeline, not a spinner.
       expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
       expect(document.querySelector('.loading-wrap')).toBeNull()
@@ -982,7 +982,7 @@ describe('Digital Thread — removed tag filter', () => {
     }
   })
 
-  /* Hiding events whose asset is gone. `digital_thread` is append-only and DELETE is revoked even
+  /* Hiding events whose asset is gone. `audit_trail` is append-only and DELETE is revoked even
      from `service_role`, so hiding is a filter and removal is an administrative act. The fixture
      already contains the case: `cell-gone` and the orphan UUID on event 6. */
   describe('events for assets that no longer exist', () => {
@@ -1050,7 +1050,7 @@ describe('Digital Thread — removed tag filter', () => {
       /* The common case on a healthy stack: a permanent control reading "(0)" is one whose
          relationship to the page has to be guessed at. */
       api.get.mockImplementation((path) => {
-        if (path.startsWith('/api/v1/digital-thread')) {
+        if (path.startsWith('/api/v1/audit-trail')) {
           return Promise.resolve(EVENTS.filter(e => ['dev-1', 'dev-2', 'gw-1'].includes(e.entity_id)))
         }
         if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
@@ -1068,10 +1068,10 @@ describe('Digital Thread — removed tag filter', () => {
          is absent, so filtering eagerly would blank the page. Lookups that never resolve are the
          same situation: unable to tell purged from live means hide nothing. */
       api.get.mockImplementation((path) => {
-        if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+        if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(EVENTS)
         return new Promise(() => {})   // never resolves
       })
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
@@ -1082,7 +1082,7 @@ describe('Digital Thread — removed tag filter', () => {
       /* An archived device is still in the /api/v1/devices lookup and is therefore live as far as
          this filter is concerned; getting it wrong would drop a recoverable asset's whole history. */
       api.get.mockImplementation((path) => {
-        if (path.startsWith('/api/v1/digital-thread')) {
+        if (path.startsWith('/api/v1/audit-trail')) {
           return Promise.resolve(EVENTS.filter(e => e.entity_id === 'dev-2'))
         }
         if (path.startsWith('/api/v1/devices')) {
@@ -1092,7 +1092,7 @@ describe('Digital Thread — removed tag filter', () => {
         if (path.startsWith('/api/v1/cells'))    return Promise.resolve([])
         return Promise.resolve([])
       })
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
       await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
 
       expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
@@ -1100,7 +1100,7 @@ describe('Digital Thread — removed tag filter', () => {
   })
 
   /* 0117: the rule reaches every kind the page can tell a deletion of, which is every kind whose
-     lookup it fetches AND whose table `digital_thread_page()` can probe. Schemas qualify and were
+     lookup it fetches AND whose table `audit_trail_page()` can probe. Schemas qualify and were
      missing, so a deleted one wore the "deleted" flag, could not be hidden, and -- the count being
      what draws the reveal control -- was offered no way to be. */
   describe('deleted entities beyond the shopfloor tables', () => {
@@ -1124,7 +1124,7 @@ describe('Digital Thread — removed tag filter', () => {
     /** @param make what /api/v1/schemas resolves to, called per request so a rejection is attached. */
     const withSchemas = (make) => {
       api.get.mockImplementation((path) => {
-        if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(SCHEMA_EVENTS)
+        if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(SCHEMA_EVENTS)
         if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
         if (path.startsWith('/api/v1/schemas')) return make()
         return Promise.resolve([])
@@ -1173,7 +1173,7 @@ describe('Digital Thread — removed tag filter', () => {
          is an auth.users row the RPC cannot read, so the server can never hide one -- and a flag the
          control cannot act on is the defect this describe exists for, in the other direction. */
       api.get.mockImplementation((path) => {
-        if (path.startsWith('/api/v1/digital-thread')) {
+        if (path.startsWith('/api/v1/audit-trail')) {
           return Promise.resolve([{
             event_id: 13, entity_type: 'user_roles',
             entity_id: '11111111-2222-4333-8444-555555555555', event_type: 'INSERT',
@@ -1185,7 +1185,7 @@ describe('Digital Thread — removed tag filter', () => {
         if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
         return Promise.resolve([])
       })
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
       await waitFor(() => expect(document.querySelector('.dt-lane-label')).toBeTruthy())
 
       expect(document.querySelector('.dt-lane-gone')).toBeNull()
@@ -1221,7 +1221,7 @@ describe('Digital Thread — removed tag filter', () => {
 
     const respondWith = (events) => {
       api.get.mockImplementation((path) => {
-        if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(events)
+        if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(events)
         if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
         return Promise.resolve([])
       })
@@ -1234,7 +1234,7 @@ describe('Digital Thread — removed tag filter', () => {
 
     it('names a backup job for the act it was, not its uuid', async () => {
       respondWith(JOB_EVENTS)
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
 
       await waitFor(() => expect(laneLabelled('On request')).toBeTruthy())
       expect(laneLabelled('Scheduled')).toBeTruthy()
@@ -1250,7 +1250,7 @@ describe('Digital Thread — removed tag filter', () => {
         JOB_EVENTS[0],
         { ...JOB_EVENTS[1], entity_id: JOB_B, new_data: { origin: 'requested', note: 'x' } },
       ])
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
 
       await waitFor(() => expect(document.querySelectorAll('.dt-lane-qualifier').length).toBe(2))
       const chips = [...document.querySelectorAll('.dt-lane-qualifier')].map(c => c.textContent)
@@ -1261,7 +1261,7 @@ describe('Digital Thread — removed tag filter', () => {
     it('does not call a backup job deleted, having no table it could probe', async () => {
       /* `backup_jobs` is outside DELETABLE_KINDS (0117), so naming it must not start flagging it. */
       respondWith(JOB_EVENTS)
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
 
       await waitFor(() => expect(laneLabelled('On request')).toBeTruthy())
       expect(document.querySelector('.dt-lane-gone')).toBeNull()
@@ -1276,7 +1276,7 @@ describe('Digital Thread — removed tag filter', () => {
         description: 'Action BACKUP_TAKEN on backups', changed_by: null, actor_source: 'service',
         old_data: null, new_data: { stamp: '20260802T134100Z', origin: 'scheduled' },
       }])
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
 
       await waitFor(() => expect(laneLabelled('20260802T134100Z')).toBeTruthy())
       expect(laneLabelled('Scheduled')).toBeFalsy()
@@ -1290,7 +1290,7 @@ describe('Digital Thread — removed tag filter', () => {
         actor_source: 'user', old_data: null,
         new_data: { jti: '49d996ed-7420-476e-a710-0b46c37c7213', ttl_days: 1 },
       }])
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
 
       await waitFor(() => expect(laneLabelled('MCP read-only client')).toBeTruthy())
     })
@@ -1306,7 +1306,7 @@ describe('Digital Thread — removed tag filter', () => {
         description: 'Action TOKEN_MINTED on service_principals', changed_by: null,
         actor_source: 'user', old_data: null, new_data: { jti: 'x', ttl_days: 1 },
       }])
-      render(<DigitalThreadTab />)
+      render(<AuditTrailTab />)
 
       await waitFor(() => expect(document.querySelector('.dt-lane-unnamed')).toBeTruthy())
       expect(screen.queryByText(/Undocumented principal/)).not.toBeInTheDocument()
@@ -1455,7 +1455,7 @@ describe('Digital Thread — removed tag filter', () => {
   it('names a schema event by its schema and version, not by a uuid', async () => {
     const SCHEMA_ID = 'sch-77'
     api.get.mockImplementation((path) => {
-      if (path.startsWith('/api/v1/digital-thread')) {
+      if (path.startsWith('/api/v1/audit-trail')) {
         return Promise.resolve([{
           id: 9001, entity_type: 'schemas', entity_id: SCHEMA_ID, action: 'UPDATE',
           recorded_at: '2026-09-06T10:00:00Z', changed_by: null,
@@ -1470,7 +1470,7 @@ describe('Digital Thread — removed tag filter', () => {
       }
       return Promise.resolve([])
     })
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     /* The version is part of the identity: a lineage is a chain of rows sharing one `schema_name`,
        and which version something happened to is the point of a schema's audit trail. It is drawn
@@ -1499,7 +1499,7 @@ describe('Digital Thread — removed tag filter', () => {
     await show()
     fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Press' } })
 
-    await waitFor(() => expect(lastThreadUrl()).toContain('search=Press'))
+    await waitFor(() => expect(lastTrailUrl()).toContain('search=Press'))
   })
 })
 
@@ -1508,7 +1508,7 @@ describe('Digital Thread — removed tag filter', () => {
  * about thirty fit a 1080p card, and the label is sticky because opening the drawer takes width
  * off this list.
  */
-describe('Digital Thread timeline density', () => {
+describe('Audit Trail timeline density', () => {
   const rule = (selector) =>
     APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
