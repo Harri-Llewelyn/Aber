@@ -47,7 +47,8 @@ export const LANES = [
   {
     id: 'cells',
     label: 'Cell details',
-    blurb: 'A cell’s name, its Grafana dashboard and its icon.'
+    blurb: 'A cell’s name, description, Grafana dashboard and icon, and its area and place on the '
+      + 'plan.'
   },
   {
     id: 'gateways',
@@ -347,7 +348,7 @@ function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
           {/* No Proposed by column: the drawer names the proposer, by email or machine name. Status
               and time are two columns because they are two facts. */}
           <tr>
-            <th title="The asset or schema this proposal is about">Subject</th>
+            <th title="The device, area, cell or gateway this proposal is about">Subject</th>
             <th title="Which lane, and therefore who may decide it">Change</th>
             <th title="The fields this proposal would change">Field(s) changed</th>
             <th title="Its current state">Status</th>

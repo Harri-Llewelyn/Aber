@@ -21,10 +21,10 @@ vi.mock('../api', () => ({
 }))
 
 /**
- * The Approvals page. The property worth guarding is the asymmetry: a `Shopfloor_Manager` decides
- * the asset lanes and only an `Administrator` decides a schema publication, and the page must not
- * offer a button the RPC will refuse. The second is the cap's repair: editing the proposal you
- * already have must be one click from the refusal.
+ * The Approvals page. The property worth guarding is the gate: an `Administrator` or a
+ * `Shopfloor_Manager` decides every live lane, nobody decides the withdrawn schema lane, and the
+ * page must not offer a button the RPC will refuse. The second is the cap's repair: editing the
+ * proposal you already have must be one click from the refusal.
  */
 
 const OPERATOR_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
@@ -125,8 +125,8 @@ describe('who may decide which lane', () => {
   })
 
   it('lets a manager decide every live lane too', () => {
-    // 0090 gates the five lanes it added on cell:manage, gateway:manage and link:manage -- all
-    // three held by exactly these two roles, so the answer is the same for both today.
+    // Cells and gateways resolve cell:manage and gateway:manage, held by exactly these two roles,
+    // so the answer is the same for both today.
     for (const lane of LANES.map(l => l.id)) {
       expect(canDecide(lane, 'Shopfloor_Manager'), lane).toBe(true)
     }
@@ -845,5 +845,93 @@ describe('a relocation names the cells rather than their uuids', () => {
     renderTab()
     await selectRow()
     await waitFor(() => expect(screen.getByText('cell-weld')).toBeTruthy())
+  })
+})
+
+describe('a cell, a gateway or an area proposal names its subject', () => {
+  const CELL_ID = 'c0000000-0000-4000-8000-000000000001'
+  const GATEWAY_ID = 'a0000000-0000-4000-8000-000000000002'
+  const AREA_ID = 'e0000000-0000-4000-8000-000000000003'
+
+  // As `GET /api/v1/proposals` hands them over: named, with the row each patch would change.
+  const cellMove = (over = {}) => deviceProposal({
+    id: 'p-cell', entity_type: 'cells', entity_id: CELL_ID,
+    patch: { area_id: 'area-paint' }, target_label: 'Weld Bay',
+    current: { name: 'Weld Bay', area_id: 'area-yard' }, ...over
+  })
+  const gatewayUrl = (over = {}) => deviceProposal({
+    id: 'p-gateway', entity_type: 'gateways', entity_id: GATEWAY_ID,
+    patch: { access_url: 'https://line3.test' }, target_label: 'Line 3 edge',
+    current: { name: 'Line 3 edge', access_url: null }, ...over
+  })
+  const areaIcon = (over = {}) => deviceProposal({
+    id: 'p-area', entity_type: 'areas', entity_id: AREA_ID,
+    patch: { icon: 'Warehouse' }, target_label: 'North Shop',
+    current: { name: 'North Shop', icon: 'Factory' }, ...over
+  })
+
+  const mockSubjects = (proposals) => api.get.mockImplementation((path) => {
+    if (path === '/api/v1/proposals') return Promise.resolve(proposals)
+    if (path === '/api/v1/areas') return Promise.resolve([
+      { area_id: 'area-yard', area_name: 'Goods Yard', cells: [] },
+      { area_id: 'area-paint', area_name: 'Paint Shop', cells: [] }
+    ])
+    return Promise.resolve([])
+  })
+
+  /** Open the row naming `label` and read its drawer's before/after table as [field, now, proposed]. */
+  async function diffOf(label) {
+    const rows = await screen.findAllByTestId('proposal-row')
+    fireEvent.click(rows.find(r => within(r).queryByText(label)))
+    const table = document.querySelector('.modal-table')
+    return [...table.querySelectorAll('tbody tr')].map(tr => [...tr.cells].map(td => td.textContent))
+  }
+
+  it('shows each subject by name, never its uuid', async () => {
+    mockSubjects([cellMove(), gatewayUrl(), areaIcon()])
+    renderTab()
+    const rows = await screen.findAllByTestId('proposal-row')
+    const subjects = rows.map(r => r.querySelector('td strong').textContent).sort()
+    expect(subjects).toEqual(['Line 3 edge', 'North Shop', 'Weld Bay'])
+    for (const id of [CELL_ID, GATEWAY_ID, AREA_ID]) expect(screen.queryByText(id)).toBeNull()
+  })
+
+  it('diffs a cell against its current row, naming both areas', async () => {
+    mockSubjects([cellMove()])
+    renderTab()
+    expect(await diffOf('Weld Bay')).toEqual([['Area', 'Goods Yard', 'Paint Shop']])
+  })
+
+  it('diffs a gateway and an area against their current rows', async () => {
+    mockSubjects([gatewayUrl(), areaIcon()])
+    renderTab()
+    expect(await diffOf('Line 3 edge')).toEqual([['Access URL', '—', 'https://line3.test']])
+    expect(await diffOf('North Shop')).toEqual([['Icon', 'Factory', 'Warehouse']])
+  })
+
+  it('marks a subject that no longer exists', async () => {
+    mockSubjects([cellMove({ target_label: CELL_ID, target_missing: true, current: null })])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    expect(within(row).getByText(CELL_ID)).toBeInTheDocument()
+    expect(within(row).getByText('MISSING')).toBeInTheDocument()
+  })
+
+  it('keeps the uuid when the subject could not be read, without calling it missing', async () => {
+    mockSubjects([gatewayUrl({ target_label: GATEWAY_ID, target_missing: false, current: null })])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    expect(within(row).getByText(GATEWAY_ID)).toBeInTheDocument()
+    expect(within(row).queryByText('MISSING')).toBeNull()
+  })
+
+  it("finds a proposal by its subject's name", async () => {
+    mockSubjects([cellMove(), gatewayUrl(), areaIcon()])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    fireEvent.change(screen.getByTitle(/filter open proposals/i), { target: { value: 'line 3' } })
+    const rows = screen.getAllByTestId('proposal-row')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText('Line 3 edge')).toBeInTheDocument()
   })
 })

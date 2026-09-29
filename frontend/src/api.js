@@ -2277,63 +2277,66 @@ const apiMethods = {
       const rows = data || [];
       if (rows.length === 0) return [];
 
-      const deviceIds = [...new Set(rows
-        .filter(r => r.entity_type === 'devices' || r.entity_type === 'device_nameplate')
-        .map(r => r.entity_id))];
-      const schemaIds = [...new Set(rows
-        .filter(r => r.entity_type === 'schemas')
+      const idsOf = (...types) => [...new Set(rows
+        .filter(r => types.includes(r.entity_type))
         .map(r => r.entity_id))];
 
-      const [devicesRes, nameplatesRes, schemasRes, proposersRes] = await Promise.all([
-        deviceIds.length
-          ? supabase.from('devices')
-              .select('id,name,description,asset_type,connection_method,cell_id,location_scope,model_3d_path,is_archived')
-              .in('id', deviceIds)
-          : Promise.resolve({ data: [] }),
-        deviceIds.length
-          ? supabase.from('device_nameplate').select('*').in('device_id', deviceIds)
-          : Promise.resolve({ data: [] }),
-        schemaIds.length
-          ? supabase.from('schemas').select('id,schema_name,version,status,parent_schema_id')
-              .in('id', schemaIds)
-          : Promise.resolve({ data: [] }),
+      // One read per subject table, for this page's ids only. A read that fails resolves to null:
+      // its rows keep their uuid and no diff, and are not marked missing, because a failed read is
+      // not evidence the subject is gone.
+      const readByIds = async (table, columns, key, ids) => {
+        if (ids.length === 0) return new Map();
+        try {
+          const { data, error } = await supabase.from(table).select(columns).in(key, ids);
+          if (error) return null;
+          return new Map((data || []).map(row => [row[key], row]));
+        } catch {
+          return null;
+        }
+      };
+
+      // Each read names every column `proposable_columns()` lets its lane patch, or the drawer's Now
+      // column reads blank for that field. apiProposals.test.js checks this against the migrations.
+      const deviceIds = idsOf('devices', 'device_nameplate');
+      const [devices, nameplates, schemas, areas, cells, gateways, proposersRes] = await Promise.all([
+        readByIds('devices',
+          'id,name,description,asset_type,connection_method,cell_id,area_id,location_scope,model_3d_path,is_archived',
+          'id', deviceIds),
+        readByIds('device_nameplate', '*', 'device_id', deviceIds),
+        readByIds('schemas', 'id,schema_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
+        readByIds('areas', 'id,name,description,icon', 'id', idsOf('areas')),
+        readByIds('cells', 'id,name,grafana_url,icon,area_id,plan_x,plan_y,description', 'id',
+          idsOf('cells')),
+        readByIds('gateways', 'id,name,sparkplug_id,description,cell_id,area_id,location_scope,access_url',
+          'id', idsOf('gateways')),
         // The machines behind the proposals this caller may decide (0022); empty for anyone else.
         // An error leaves the proposer as its uuid rather than failing the queue.
         Promise.resolve(supabase.rpc('list_proposer_names')).catch(() => ({ data: [] }))
       ]);
 
-      const devices = new Map((devicesRes.data || []).map(d => [d.id, d]));
-      const nameplates = new Map((nameplatesRes.data || []).map(n => [n.device_id, n]));
-      const schemas = new Map((schemasRes.data || []).map(s => [s.id, s]));
       const machineNames = new Map((proposersRes?.data || []).map(m => [m.principal_id, m.name]));
 
+      // Per lane: the read that holds the subject and how to name it. A nameplate's subject is its
+      // device and its `current` is the nameplate row, `{}` until the first approval creates it.
+      const subjects = {
+        devices:          { found: devices,  label: d => d.name },
+        device_nameplate: { found: devices,  label: d => d.name,
+                            current: id => (nameplates ? nameplates.get(id) || {} : null) },
+        schemas:          { found: schemas,  label: s => `${s.schema_name} v${s.version}` },
+        areas:            { found: areas,    label: a => a.name },
+        cells:            { found: cells,    label: c => c.name },
+        gateways:         { found: gateways, label: g => g.name || g.sparkplug_id }
+      };
+
       return rows.map(r => {
-        // `current` is what the patch would change FROM, so the page can show a diff rather than
-        // only what was asked for. A nameplate with no row yet is `{}` and not an error: the row is
-        // created by whoever first asserts something about the asset.
-        let current = null;
-        let targetLabel = r.entity_id;
-        let targetMissing = false;
-
-        if (r.entity_type === 'devices') {
-          const d = devices.get(r.entity_id);
-          current = d || null;
-          targetLabel = d?.name || r.entity_id;
-          targetMissing = !d;
-        } else if (r.entity_type === 'device_nameplate') {
-          const d = devices.get(r.entity_id);
-          current = nameplates.get(r.entity_id) || {};
-          targetLabel = d?.name || r.entity_id;
-          targetMissing = !d;
-        } else if (r.entity_type === 'schemas') {
-          const sc = schemas.get(r.entity_id);
-          current = sc || null;
-          targetLabel = sc ? `${sc.schema_name} v${sc.version}` : r.entity_id;
-          targetMissing = !sc;
-        }
-
+        const lane = subjects[r.entity_type];
+        const subject = lane?.found?.get(r.entity_id) || null;
         return {
-          ...r, target_label: targetLabel, target_missing: targetMissing, current,
+          ...r,
+          target_label: (subject && lane.label(subject)) || r.entity_id,
+          target_missing: Boolean(lane?.found) && !subject,
+          // What the patch would change FROM, so the drawer shows a diff and not only the ask.
+          current: lane?.current ? lane.current(r.entity_id) : subject,
           proposed_by_machine_name: machineNames.get(r.proposed_by) || null
         };
       });
