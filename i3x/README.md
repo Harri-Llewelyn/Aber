@@ -183,9 +183,9 @@ The mappings that are decisions rather than mechanics:
   to every metric its schemas model, published or not, and every metric its last DBIRTH
   declared, identity metrics aside. It keeps its map as its own value: `maxDepth: 1` returns the
   whole device in one read, and `maxDepth: 0` adds each metric's own value under `components`. A
-  metric's value is its latest sample with its device's quality; one never published is
-  `GoodNoData`, timestamped at the read. There is no metric-group level, because `Controller`
-  and `Controller/EXECUTION` can both be metrics.
+  metric's value is its latest sample, with the quality the table below gives its device; one
+  never published is `GoodNoData` while its device is online. There is no metric-group level,
+  because `Controller` and `Controller/EXECUTION` can both be metrics.
 
   A metric's type is its catalog row, `i3x:type:metric:<name>`: a scalar schema from its
   Sparkplug datatype, with the row's description and its unit as `x-unit`. A metric the catalog
@@ -199,9 +199,42 @@ The mappings that are decisions rather than mechanics:
   inlined. `isExtended` is judged against the union of what they model. When it is true,
   `metadata.schemaExtensions` gives each metric beyond them a JSON Schema fragment from its DBIRTH
   datatype. Vendor keys, `quarantined` among them, are under `metadata.system`.
-- **`quality` is derived at read time.** Quarantined or stale → `Uncertain`; never published →
-  `GoodNoData` with no value. A `quality` column on the hypertable would be a stored verdict that
-  goes stale the moment the gateway does.
+- **`quality` is derived at read time, by one rule.** `value_quality()` in `address_space.py`
+  decides it for `/objects/value`, for every staged subscription update and for history. It takes
+  the device's row, its gateway's row and whether a value is held. A `quality` column on the
+  hypertable would be a stored verdict that goes stale the moment the gateway does. The rule is
+  the guide's quality table (Query Methods): `Uncertain` is a "stale value being held", `Bad` is
+  "source unreachable" with a null value, and "`value: null` paired with `quality: "Good"` or
+  `quality: "Uncertain"` is invalid".
+
+  | Condition | With a held value | Without one |
+  | :--- | :--- | :--- |
+  | Device quarantined | `Uncertain` | `Bad` |
+  | Device `OFFLINE`, or its gateway `OFFLINE` or `STALE` | `Uncertain` | `Bad` |
+  | Device online, never published | n/a | `GoodNoData` |
+  | Otherwise | `Good` | n/a |
+
+  - A device's map takes the worst quality among the metrics it holds. A modelled metric that
+    was never published is `GoodNoData` on its own and absent from a map that is `Good`.
+  - `timestamp` is never null, as the guide requires: the sample's time, else the time of the
+    device's last birth or death this process saw, else the time of the read.
+  - A gateway's liveness is the `gateway_status` view's rule. `gateway_live_status()` mirrors it
+    and a test holds it to the view: an enrolment state stands, then `OFFLINE`, then a gateway
+    with no heartbeat keeps its stored status, and one not heard from for 90 s is `STALE`.
+    `gateways.status` alone never says `STALE`. A gateway's own value is that status, `Good`
+    whenever it is known, because an `OFFLINE` seen through NDEATH is a fact: it is the devices
+    behind the gateway whose values are stale. A gateway with no stored status is `GoodNoData`
+    with a null value.
+  - Only `OFFLINE` and `STALE` hold a gateway's devices. An enrolment state, or a status the
+    gateway reports itself such as `MAINTENANCE`, does not.
+  - The rows are overlaid with what the broker has said since they were read. A gateway's
+    newest heartbeat wins, row or message. A device's DBIRTH or DDEATH outranks a row read less
+    than 5 s after it (`LIVENESS_LAG_SECONDS`), which is how long ingestion may take to write it.
+    So an NDEATH holds its devices at once, before ingestion has written it.
+  - A stored sample in history is `Good` (or `GoodNoData` when it is null): `value_quality()` for
+    a trusted, live source. Ingestion stores DDATA only from a device that is not quarantined
+    (`process_ddata` drops the rest), and DBIRTH values go to `asset_config`, so no stored row
+    came from a source in quarantine. A test holds ingestion to that premise.
 
 A device's place is what the `device_locations` view resolves, keyed by `device_id`: its lane
 (`location_source`), else `effective_cell_id`, else `effective_area_id`, so an explicit cell and one
@@ -225,6 +258,35 @@ still sees every asset it may, under Unassigned. The location read once selected
 taken for "no rows", and every device sat under Unassigned without an error anywhere (#492).
 `TestAddressSpaceReads` now holds every select list to the columns the migrations create.
 
+**A value the cache lacks is read from the historian.** `/objects/value` is served from the MQTT
+cache, which is empty when the process starts, and Sparkplug reports by exception: a setpoint may
+not change for days. So for each device a value request names, the components the cache lacks are
+read from `telemetry_latest` as the caller, which is one row per series. There is one read per 50
+devices, capped at 5000 rows, and each device is read once per process. The cache is seeded with
+the answer, so a later DDATA merges into a complete map, on reads and on subscriptions alike. A
+cached value is never replaced, and a stored series that is no longer a component is not added. A
+filled value's quality follows the table: `Good` for a device online now, `Uncertain` for one that
+is offline. If the read fails, what the cache lacks is `Bad` ("unavailable due to an error") and a
+map holding the rest is `Uncertain`, and the next request tries again. The filled values are
+served only as cached values are, for an element the caller's own address space contains.
+
+**Staged updates carry the same quality.** The MQTT thread never reads PostgREST. It keeps a small
+liveness map from NBIRTH, NDATA, NDEATH, DBIRTH and DDEATH, and the device and gateway rows the
+last address-space read returned. A registration, a `/sync` and a stream tick each make that read
+as the subscription's owner. Quality is then derived from those rows as the read path derives it.
+What is staged:
+
+- **DBIRTH or DDATA:** the device's map, and each metric the message carried.
+- **DDEATH:** the device's map and each metric it holds, now `Uncertain`, or a null map that is
+  `Bad` when it holds nothing.
+- **NBIRTH and NDEATH, and an NDATA that changes the gateway's live status** (a `STALE` gateway
+  beating again, or a new status it reports): the gateway's value, and the map and metrics of
+  each watched device behind it whose quality changed.
+- **Nothing is built** unless the element, its device or a metric of that device is registered
+  on some subscription. Which subscriptions receive a staged value is the registry's matching.
+- A gateway going `STALE` is a clock, not a message, so it stages nothing. The next read carries
+  it, and so does the next value staged for a device behind it.
+
 ## Endpoints
 
 All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
@@ -240,7 +302,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | GET | `/objects` | `?typeElementId=`, `?root=true`, `?includeMetadata=true` |
 | POST | `/objects/list` | Bulk, **results in request order** |
 | POST | `/objects/related` | Edges as `{sourceRelationship, object}` |
-| POST | `/objects/value` | From the MQTT cache, gated on a PostgREST read |
+| POST | `/objects/value` | From the MQTT cache, gated on a PostgREST read; what the cache lacks from `telemetry_latest` |
 | POST | `/objects/history` | From TimescaleDB; `startTime`/`endTime` **required** |
 | POST | `/subscriptions` | + `/list`, `/delete`, `/register`, `/unregister` |
 | POST | `/subscriptions/sync` | MUST. 206 on queue overflow, or when elements left the caller's view |
@@ -640,6 +702,10 @@ with the Directory's:
 
 12a–12f are older: read-only, fail-closed, a single root, live values, and values scoped by RLS.
 
+Just before check 12, `freshen_the_plant()` sends an NDATA from the seeded gateway and step 7's
+DBIRTH again from the registered device. A value is `Good` only while its gateway has beaten
+within 90 s and its device is `ONLINE`, and only a birth sets a device `ONLINE`.
+
 **Adding an assertion.** Each is a function in `validate.py` that takes the shared `I3xContext` (the
 token, `/info`, every object with its metadata, the Directory's resolved location per seeded device,
 `/objecttypes` on first use) and returns `(True | False | None, detail)`, `None` being a skip. List it
@@ -685,7 +751,7 @@ and discover it during their own integration.
 | Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/aber/templates/apps/i3x-service.yaml) |
 | Endpoint reachability across a restart | **None.** `Recreate` stops the old pod before starting the new one, so there is a window with no i3X endpoint at all rather than a degraded one |
 | Subscription survival across a restart | **None.** Queues, sequence numbers and open SSE streams are process memory |
-| Current values immediately after a restart | **Cold, and reported as cold.** The MQTT cache refills from `spBv1.0/#` as devices publish; until a device next publishes, `/objects/value` answers `quality: "GoodNoData"` with a null value for it |
+| Current values immediately after a restart | **Filled on the first read.** The MQTT cache refills from `spBv1.0/#` as devices publish, and the first `/objects/value` naming a device fills what it lacks from `telemetry_latest`, with each sample's stored time ([Address space](#address-space)). Only a metric the historian does not hold within raw retention is `GoodNoData` until it next changes. A subscription's staged values come from the cache alone, so a device no value read has named since the restart is staged with only what it has published since |
 | Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
 | Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
 | Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. A principal is the token's `sub`, so every token minted for one service principal shares its 20 |
@@ -783,8 +849,15 @@ than minutes, and why `0` disables the cache outright.
 - **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
   respect to a permission that has just been revoked. See
   [The address-space cache](#the-address-space-cache).
-- **History `quality` is `Good` for every stored value**, whatever state the device was in when it
-  was stored (#497).
+- **A device the ingestion watchdog marked `OFFLINE` stays `Uncertain` until its next DBIRTH**,
+  even while its DDATA arrives, because that is what the Directory shows: ingestion sets `ONLINE`
+  only on a birth. Raising `DEVICE_OFFLINE_TIMEOUT_SECONDS` for an event-driven device avoids it.
+- **A gateway that sends no NDATA heartbeat reads `STALE` 90 s after its last node-level
+  message**, and holds its devices `Uncertain` while their DDATA arrives, as the dashboard shows
+  it. The gateway appliance beats every 30 s.
+- **A metric silent for longer than raw retention** (`timescaledb.retention.retainFor`, 14 days
+  in the chart) is not in `telemetry_latest`, so after a restart it is `GoodNoData` until it
+  changes.
 - **History reads the raw hypertable only.** A range older than raw retention
   (`timescaledb.retention.retainFor`, 14 days in the chart) comes back empty, although the rollups
   still hold it (#505).
