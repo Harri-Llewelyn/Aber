@@ -2205,6 +2205,8 @@ function edgeFunctionNames() {
       'the OAuth consent screen, which names the identity a user is being asked to share',
     'deploy/helm/aber/values.yaml':
       'supabaseStudio.organizationName is displayed in Studio',
+    'deploy/helm/aber/templates/NOTES.txt':
+      'Helm prints it after every install and upgrade, and its first line names the product',
     // Swagger UI renders info.title as the page heading. Whole-file, because every other Factory+
     // reference in this repository is to the framework and belongs in docs/openapi.yaml, which is
     // deliberately not listed.
