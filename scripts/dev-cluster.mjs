@@ -361,7 +361,9 @@ async function installChart ({ tls, e2e }) {
     '--set', 'backup.enabled=true', '--set', 'backupService.enabled=true',
     '--set', 'backup.includeStorage=true', '--set', 'backup.includeForge=true',
     '--set', 'backup.includeBroker=true',
-    '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`]
+    '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`,
+    // Empty leaves an archived gateway's broker credential working; the stack lane asserts it stops.
+    '--set', `secrets.gatewayRevokeSecret=${keptSecret('gatewayRevokeSecret')}`]
   // What an appliance is told to dial. The browser-facing hosts stay on the loopback domain, which
   // resolves on this machine whatever the resolver does; the two functions that hand an appliance
   // an address refuse loopback, so they get this machine's LAN address instead. An appliance

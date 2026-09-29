@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -44,6 +45,7 @@ from test_enroll_gateway import (  # noqa: E402
 from test_forge_membership import (  # noqa: E402
     FORGE_URL, MACHINE_PASSWORD, MACHINE_USER, ORGANISATION, PERSONAS, members_of, request, through_the_door,
 )
+import stack_exec  # noqa: E402  -- on the path test_enroll_gateway puts there
 
 try:
     from cryptography import x509
@@ -405,9 +407,10 @@ class TestRepositories(ForgeSweepBase):
         status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
         self.assertIn(status, (200, 204))
         try:
+            # The archive asks the database for a sweep too, and that one may get there first, so
+            # the forge's state is the assertion, not which sweep reports the archive.
             status, body = sweep()
             self.assertEqual(status, 200, body)
-            self.assertIn(self.repo, body["archived"], body)
 
             repo = self.repository()
             self.assertTrue(repo["archived"], "the repository of an archived gateway is still live")
@@ -498,9 +501,9 @@ class TestRepositories(ForgeSweepBase):
         status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
         self.assertIn(status, (200, 204))
         try:
+            # As above: the database's own sweep may revoke the key first.
             status, body = sweep()
             self.assertEqual(status, 200, body)
-            self.assertTrue(any(entry.startswith(f"{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}") for entry in body["revoked"]), body)
             _, platform_keys = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/keys?limit=50")
             self.assertEqual([k for k in platform_keys if k["title"] == own["title"]], [])
         finally:
@@ -823,6 +826,28 @@ class TestTheSchedule(ForgeSweepBase):
         status, answer = rest("/rpc/sweep_forge", method="POST", body={})
         self.assertEqual(status, 200, answer)
         self.assertTrue(answer, "sweep_forge() answered false: the Vault holds no sweep secret, so the schedule is inert")
+
+    def test_the_call_the_database_queues_reaches_the_function(self):
+        """
+        "Asked" is not enough: pg_net records a call that never reached a server in
+        net._http_response and tells no one. The address is the Vault's supabase_functions_url,
+        which revoke_gateway_credential() posts to as well, so this covers both callers.
+        """
+        def psql(sql):
+            return stack_exec.output("supabase-db", "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", sql).strip()
+
+        before = int(psql("SELECT coalesce(max(id), 0) FROM net._http_response") or 0)
+        status, answer = rest("/rpc/sweep_forge", method="POST", body={})
+        self.assertEqual(status, 200, answer)
+        self.assertTrue(answer, "sweep_forge() answered false: the Vault holds no sweep secret")
+        outcomes, deadline = [], time.monotonic() + 75  # the call's own timeout is 60s
+        while not outcomes and time.monotonic() < deadline:
+            time.sleep(1)
+            outcomes = psql(f"SELECT coalesce(status_code::text, error_msg) FROM net._http_response "
+                            f"WHERE id > {before} ORDER BY id").splitlines()
+        self.assertTrue(outcomes, "pg_net recorded no outcome for the sweep within 75s")
+        self.assertEqual([], [o for o in outcomes if not o.isdigit()],
+                         "a call the database queued reached no server: check supabase_functions_url in the Vault")
 
     def test_a_user_cannot_ask(self):
         try:
