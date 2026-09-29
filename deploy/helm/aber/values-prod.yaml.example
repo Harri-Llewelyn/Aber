@@ -440,9 +440,9 @@ backup:
   enabled: true
   schedule: "30 2 * * *"
   retentionDays: 30
-  # s3 needs an image carrying the aws CLI -- the supabase/postgres image has none, and the Job
-  # refuses rather than silently producing an unsigned request. pvc is the default for that reason.
-  destination: pvc
+  # The PVC is on the node that holds the databases. For a copy that survives losing it, enable
+  # backupService and set an off-site destination on the Backups page (and, under networkPolicy,
+  # backupService.offsiteEgress for the endpoint).
   persistence:
     size: 100Gi
     storageClass: ""

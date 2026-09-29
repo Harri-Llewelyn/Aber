@@ -371,6 +371,64 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # Off-site Backup Stale: the newest backup has had no copy at the off-site destination for 12h,
+      # counted from when it was taken or the destination last changed. No row while no destination.
+      - uid: aber-backup-offsite-stale
+        title: Off-site Backup Stale
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The newest platform backup has had no off-site copy for
+            {{ humanizeDuration $values.B.Value }}. The Backups page shows why the copy failed;
+            check the S3 endpoint, the credential and, under a NetworkPolicy, the egress rule.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       age_seconds  AS without_copy_seconds
+                  FROM public.backup_offsite_health
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [43200]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
   # Ingestion Pipeline: the daemon's Prometheus counters, which see the pipe the views cannot. Resolves
   # only where a datasource with uid `prometheus` exists; elsewhere DatasourceError, routed by the policy.
   - orgId: 1

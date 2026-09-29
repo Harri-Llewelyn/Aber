@@ -118,6 +118,7 @@
   "sqlalchemy-execute-raw-query supabase/migrations/test_archiving_is_a_lifecycle.py 0b4adc06fc62": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_archiving_is_a_lifecycle.py e4f8cd614445": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_audit_domain.py 6a996592d38d": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
+  "sqlalchemy-execute-raw-query supabase/migrations/test_backup_health.py 033e8296ceae": "Test fixture: the column is one of the test's own keyword arguments, quoted by psycopg2.sql.Identifier; no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_cold_archive_backlog.py 04d55518f787": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_cold_archive_backlog.py 37af1da0a139": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_cold_archive_backlog.py 7ae995386f68": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",

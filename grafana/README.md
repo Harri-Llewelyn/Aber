@@ -232,6 +232,26 @@ its history, and pg_cron keeps queueing a job no process claims, so the rule fir
 service returns or the rule is silenced. The same holds for a site that empties `backup.schedule`
 and backs up only on request.
 
+### Off-site Backup Stale (`aber-backup-offsite-stale`)
+
+Warning, `for: 0s`, over 12 hours: the newest platform backup has no copy at the off-site
+destination. The backup service copies each backup, encrypted, to the S3 endpoint the Backups page
+names, and a copy that fails is retried rather than failing the backup, so an endpoint that is
+unreachable, a credential that has been revoked or a NetworkPolicy with no egress rule for the
+endpoint fails quietly by design. This is where it stops being quiet: an upload that fails silently
+is the failure the copy exists to prevent, because the backups are then on the disk they protect.
+
+The value is `backup_offsite_health.age_seconds` (0018), read as `grafana_reader` through
+`backup_offsite_health_rows()`, which runs as its owner so the reader needs no privilege on
+`backups`, the settings or the Vault. The clock is when the newest backup was taken, or when the
+destination last changed if that is later, and it reads zero once the backup is copied. A copy
+usually lands within minutes of the backup; 12 hours leaves room for a large upload over a slow
+link, and for the retry backoff (every 15 minutes at most) to ride out a short outage, and still
+reports a nightly backup the same day. The window is the delay, so there is no `for`. While the
+destination is incomplete the view has no row, so a stack without one, and every CI run, reads
+NoData, which is OK. Warning rather than critical: the local backup exists, and Backup Stale is the
+rule for having none.
+
 ## Ingestion Pipeline
 
 Whether telemetry is being recorded at all. The views above cannot see the pipe between the broker

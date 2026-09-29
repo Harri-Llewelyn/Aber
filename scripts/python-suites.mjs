@@ -509,7 +509,10 @@ export const SUITES = {
       'the backup service alerts 36 hours after install; the first job recorded until one ' +
       'succeeds, so a service that never ran what it queued is reported; the last success after ' +
       'that, unmoved by later failures; and no browser role reads it, since it runs past the ' +
-      "Administrator-only RLS on backup_jobs.",
+      'Administrator-only RLS on backup_jobs. And the two things that keep the last good backups: ' +
+      "0017's floor, the newest three never prunable, and 0018's off-site copy, whose destination " +
+      'is refused a value the service could not use and whose view counts how long the newest backup ' +
+      'has gone without one.',
   },
   'supabase/migrations/test_system_settings_rls.py': {
     lanes: ['db'],
@@ -795,7 +798,9 @@ export const SUITES = {
       'the files where the row says, as big as it says, with the digests it says, a manifest ' +
       'restore-databases.sh can read and a forge archive carrying the host keys; the thread names ' +
       'who asked and that the service wrote it; a queued request refuses a twin, can be cancelled ' +
-      'and says why; and a pinned backup is released once. Stops the service container briefly.',
+      'and says why; a pinned backup is released once; the prune after a failed job leaves the ' +
+      'newest three; and a backup reaches a MinIO encrypted, decrypts to its digest, and a pruned ' +
+      'one takes its copy with it. Stops the service container briefly.',
   },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],

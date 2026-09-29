@@ -847,8 +847,9 @@ docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 # with nothing logged at either end. The code is NOT baked in — the chart mounts it from a ConfigMap.
 docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
 
-# The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar. The
-# code itself is projected from a ConfigMap (scripts/backup-service.mjs), so this is runtime only.
+# The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, and age and
+# the AWS CLI for the off-site copy. The code itself is projected from a ConfigMap
+# (scripts/backup-service.mjs), so this is runtime only.
 docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
 
 # The API documentation site — THE SPECS, baked in. swaggerapi/swagger-ui with docs/openapi.yaml
@@ -1174,6 +1175,23 @@ the pod to that pod's node — on a cluster where those pods sit on different no
 ones that share one. The mechanism, the tables and the restore runbook are in
 [`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-0101).
 
+**A copy off site, from the same service.** On `local-path` the backup PVC sits on the node, and
+usually the disk, that holds both databases, so it survives a dropped table and not a lost disk,
+node or site. Set a destination on the **Backups** page (an S3 endpoint, bucket, prefix, access key
+and an age public key) and the service copies every backup there, each file encrypted before it
+leaves the pod, checked against its SHA-256 by the store and by a `HEAD`, and pruned by the same
+rules as the local copy. A failed upload leaves the backup COMPLETED and is retried; *Off-site
+Backup Stale* fires when the newest backup has had no copy for 12 hours. Keep the bucket
+credentials and the age identity outside the cluster: the Vault holding the secret key is inside
+every backup. **Under `networkPolicy.enabled` the endpoint needs an egress rule**, listed in
+`backupService.offsiteEgress`, or every copy fails at connect time. The design and the runbook that
+starts from the bucket are in
+[`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0018).
+
+The CronJob writes to the PVC only. Its `backup.destination: s3` and `backup.s3.*` are retired, and
+a values file that still sets them fails the render: the upload could not run, having no `aws` CLI
+in its image, and it left the storage archive behind and pruned nothing in the bucket.
+
 Ad hoc, without waiting for the schedule:
 
 ```bash
@@ -1211,8 +1229,6 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
   append-only audit trail cannot.
 - **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
   wants pgBackRest or WAL archiving.
-- **`destination: s3` needs an image with the `aws` CLI.** The `supabase/postgres` image has none, and
-  the Job refuses rather than producing an unsigned request.
 
 **Test a restore.** An untested backup is a belief, not a capability.
 
@@ -1235,9 +1251,10 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
 
 **`.github/workflows/restore-rehearsal.yml` performs a full cycle every Sunday** against a
 disposable k3d cluster: seed known data → back up **through the backup service**, as the seeded
-Administrator through PostgREST → **destroy the namespace and its volumes** → reinstall → restore
-→ assert → back up again. It also runs on `workflow_dispatch`, which is what to use before a
-migration you are nervous about.
+Administrator through PostgREST, and wait for its **encrypted copy in a MinIO** that outlives the
+namespace → **destroy the namespace and its volumes** → reinstall → **fetch the copy from the bucket
+and decrypt it** → restore → assert → back up again. It also runs on `workflow_dispatch`, which is
+what to use before a migration you are nervous about.
 
 **Destroying the volumes is the point.** A restore into a namespace that still has its PVCs proves
 almost nothing, because the data was never gone — so the workflow deletes the namespace, waits for
@@ -1250,10 +1267,14 @@ The same code runs by hand against any cluster:
 ```bash
 export NS=aber POSTGRES_PASSWORD=... DB_PASSWORD=...
 scripts/rehearse-restore.sh seed
+kubectl apply -f test-harness/restore-rehearsal/minio.yaml     # the off-site store
+scripts/rehearse-restore.sh offsite-setup ./identity.txt       # before the snapshot: it writes rows
 scripts/rehearse-restore.sh snapshot before.txt
 scripts/rehearse-restore.sh backup ./rehearsal
+scripts/rehearse-restore.sh offsite-wait <stamp>
 # ... destroy and reinstall ...
-scripts/rehearse-restore.sh restore ./rehearsal <stamp>
+scripts/rehearse-restore.sh fetch ./offsite <stamp> ./identity.txt
+scripts/rehearse-restore.sh restore ./offsite <stamp>
 scripts/rehearse-restore.sh snapshot after.txt
 scripts/rehearse-restore.sh compare before.txt after.txt
 scripts/rehearse-restore.sh assert
@@ -1280,6 +1301,7 @@ because every one of these can be missing while the counts agree:
 | The forge's published SSH host key has the same digest as before the backup | every appliance refuses to clone: a host-key mismatch, which reads as an attack |
 | The seeded broker account is in the restored document and the plugin answers for it | every gateway re-issued |
 | The job the dump carried as RUNNING is FAILED, and a second backup completes | a restored stack that refuses every new backup |
+| The copy fetched from the bucket decrypts, matches its manifest and is the volume's byte for byte, and the restored stack copies its own backup there | a restore after losing the site starts from a copy that is incomplete, unreadable or different, or the restored Vault cannot decrypt the bucket's key |
 
 **A failure files itself.** A weekly job nobody watches is the same as no job, so a scheduled failure
 opens an issue labelled `restore-rehearsal` — or comments on the existing one rather than opening a
