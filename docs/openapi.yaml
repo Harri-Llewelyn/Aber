@@ -2799,7 +2799,9 @@ paths:
 
         **Allowed to `Operator` and `Auditor` as well** — it is a read. Still an allow-list,
         and still a broader disclosure than any single table, since a shell aggregates
-        nameplate, config and gateway identity into one payload.
+        nameplate, config and gateway identity into one payload. `bundle` also needs
+        `digital_thread:read` (Administrator, Shopfloor_Manager, Auditor), because it carries the
+        device's Digital Thread.
 
         **Telemetry values are never inlined.** The Time Series submodel carries a
         `LinkedSegment` naming the historian endpoint plus an `asset_id` query.
@@ -2813,8 +2815,9 @@ paths:
 
         `?format=bundle` returns the same AASX with the device's history inside, for taking an
         asset away before it is taken out of service: supplementary parts under
-        `aasx/files/aber/` hold the digital thread (JSON), the readings still in the live
-        historian at raw and hourly resolution (CSV, oldest first, capped newest-first), and a
+        `aasx/files/aber/` hold the digital thread's asset lane, read as the caller (JSON), the
+        readings still in the live historian at raw and hourly resolution (CSV, oldest first,
+        capped newest-first), and a
         manifest (`aber/asset-bundle/1`) that says what each part holds, where it was cut,
         and which cold-tier objects hold the rest — named, never read back. A copy is stored in the
         cold tier's bucket under `assets/<sparkplug_id>/<stamp>.aasx` and recorded in
@@ -2859,7 +2862,7 @@ paths:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Role is outside the allow-list.' }
+        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `digital_thread:read`; the bundle refusal names the Digital Thread.' }
         '404': { description: No such device. }
 
   /functions/v1/aas-api:

@@ -461,6 +461,30 @@ Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate a
 `fork_schema()` copies from its parent, is edited in the draft editor and saved with the draft.
 `log_digital_thread_event()` already records both as UPDATEs, so neither needed a trigger change.
 
+### A local extension carries no minted id (`0016_a_local_extension_carries_no_minted_id.sql`)
+
+**No id is minted for a local extension (#516).** `0002` seeded `safety_interlock` and
+`max_temp_threshold` with `https://aber.local/semantics/local/<name>`. Nothing outside the
+installation resolves either IRI, so neither named a concept, and on every fresh stack the schema
+builder marked both as mapped, the AAS export left them out of `unmapped_semantic_ids`, and the
+Metrics page's "—" cell for an unmapped metric never appeared (#547). `0002` now seeds both with
+no id and no type.
+
+`0016` clears a database seeded earlier. `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, so
+the seed alone cannot. It clears the id and its type together, and only while a metric's id is
+still exactly the one minted for it, so an id an Administrator has set since stays. Its self-check
+asserts that neither metric still holds its minted id, which is its own work; a replay matches
+nothing.
+
+**The clear is on the Digital Thread as the platform's own act.** It is an UPDATE on
+`metric_catalog`, whose audit trigger `0010` attaches earlier in the chain, so each clear is an
+`UPDATE` row in the asset lane with `actor_source = 'migration'`, `changed_by` NULL, and the
+minted id in `old_data`. Nothing else was needed: db-init applies the chain as `postgres`, which
+`log_digital_thread_event()` files as `migration`. `test_metric_catalog_seed.py` puts the minted
+ids back in a rolled-back transaction and holds `0016` to clearing them, recording both clears that
+way, keeping an id an Administrator set, writing nothing on a replay, and naming a metric its
+self-check finds.
+
 ### Metric name format (0007)
 
 Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics
@@ -3001,7 +3025,7 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | Function | Roles | Notes |
 | :--- | :--- | :--- |
 | [`approve-quarantine`](functions/approve-quarantine) | `Administrator`, `Shopfloor_Manager` | Calls the atomic approval RPC |
-| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read |
+| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `digital_thread:read`, because it carries the thread |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; since `deploy-nodered` was retired this is the sole enforcement point for `gitops:manage` |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
@@ -4033,6 +4057,21 @@ failure does not fail the export: the file is still returned, the response says 
 and the page says to keep the file. Every export is an `EXPORTED` row on the thread, written by a
 trigger on the insert. Readable by the three roles the bucket admits (Administrator,
 Shopfloor_Manager, Auditor), and the export itself is offered to `archive:manage`.
+
+**The bundle is for the roles that may read what it holds.** Its thread part names who changed
+what, with the values from before each change, and every earlier export of the device with its
+taker's email: rows `digital_thread_select_asset` and `asset_exports_select_privileged` close to
+an Operator. It was first built with the plain export's role list, so an Operator could download
+what RLS refused them everywhere else (#527). `format=bundle` now also asks `has_authority()` for
+`digital_thread:read`, as the caller, and a caller without it gets `403` naming the thread; JSON
+and AASX keep the four-role list. The permission rather than a second role list, because it is
+one name the Devices page already gates View Digital Thread on and now gates Export Bundle on too,
+and `role_permissions`, written only by the seed, decides who holds it: today exactly the three
+roles both policies admit. `test_aas_export.py` reads the seed and the two policies and fails if
+the holders and that intersection ever differ. The thread part is read through the caller's client,
+as the cold catalogue already was, so RLS decides its rows and the part no longer depends on the
+service key; `loadThread()` also filters on `audit_domain = 'asset'`, so a bundle taken by an
+Administrator or an Auditor, who may read the security lane, never carries a row from it.
 
 ### A machine has a name an operator gave it (`0125`)
 

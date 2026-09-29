@@ -203,18 +203,21 @@ export async function loadTelemetry(
 }
 
 /**
- * The device's own thread: every row keyed by its id, which is the devices rows and the nameplate
- * rows (device_nameplate is keyed by device id). Oldest first, so the part reads as a history.
+ * The device's own thread: every asset-lane row keyed by its id, which is the devices rows and the
+ * nameplate rows (device_nameplate is keyed by device id). Oldest first, so the part reads as a
+ * history. Pass the CALLER's client: RLS then decides what the part holds, and the lane filter
+ * keeps a security-lane row out even for a role that may read that lane.
  */
 export async function loadThread(
-  client: Client,
+  userClient: Client,
   deviceId: string,
   cap: number,
 ): Promise<{ rows: Record<string, unknown>[]; truncated: boolean }> {
-  const { data, error } = await client
+  const { data, error } = await userClient
     .from("digital_thread")
     .select("id,entity_type,entity_id,action,old_data,new_data,changed_by,actor_source,causation_id,recorded_at,audit_domain")
     .eq("entity_id", deviceId)
+    .eq("audit_domain", "asset")
     .order("id", { ascending: true })
     .limit(cap + 1);
   if (error) throw new Error(`digital_thread: ${error.message}`);
