@@ -3990,7 +3990,7 @@ components:
             unreachable. Read `device_locations.effective_cell_id` to display.
         area_id: { type: string, format: uuid, nullable: true, description: 'Populated exactly when `location_scope` is `area_wide`. Read `device_locations.effective_area_id` to display.' }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
-        status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: 'Set ONLINE on DBIRTH, OFFLINE on DDEATH, and OFFLINE by the ingestion watchdog after a configurable silence.' }
+        status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: 'Set ONLINE on DBIRTH, OFFLINE on DDEATH, and OFFLINE by the ingestion watchdog after a configurable silence. DDATA from a device the watchdog timed out sets it ONLINE again.' }
         is_quarantined:
           type: boolean
           default: false

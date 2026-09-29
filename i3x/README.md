@@ -771,7 +771,8 @@ Each deletes its subscriptions and brings back what it killed in a `finally`.
 
 Just before checks 12 and 17, `freshen_the_plant()` sends an NDATA from the seeded gateway and step
 7's DBIRTH again from the registered device. A value is `Good` only while its gateway has beaten
-within 90 s and its device is `ONLINE`, and only a birth sets a device `ONLINE`.
+within 90 s and its device is `ONLINE`, and a birth sets a device `ONLINE` whatever took it
+`OFFLINE`.
 
 **Adding an assertion.** Each is a function in `validate.py` that takes the shared `I3xContext` (the
 token, `/info`, every object with its metadata, the Directory's resolved location per seeded device,
@@ -918,9 +919,12 @@ than minutes, and why `0` disables the cache outright.
 - **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
   respect to a permission that has just been revoked. See
   [The address-space cache](#the-address-space-cache).
-- **A device the ingestion watchdog marked `OFFLINE` stays `Uncertain` until its next DBIRTH**,
-  even while its DDATA arrives, because that is what the Directory shows: ingestion sets `ONLINE`
-  only on a birth. Raising `DEVICE_OFFLINE_TIMEOUT_SECONDS` for an event-driven device avoids it.
+- **A device the ingestion watchdog marked `OFFLINE` is `Uncertain` until it publishes again.**
+  Ingestion sets it `ONLINE` on its next DDATA, and this server reads that from the Directory, so
+  a subscriber may receive the first values after it resumes as `Uncertain`, until the next
+  address-space read. A device `OFFLINE` for any other reason (a DDEATH, or its node's birth or
+  death since) stays `Uncertain` until its DBIRTH, which ingestion requests. See
+  [A device that publishes again](../ingestion/README.md#a-device-that-publishes-again).
 - **A gateway that sends no NDATA heartbeat reads `STALE` 90 s after its last node-level
   message**, and holds its devices `Uncertain` while their DDATA arrives, as the dashboard shows
   it. The gateway appliance beats every 30 s.

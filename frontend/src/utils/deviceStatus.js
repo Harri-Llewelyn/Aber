@@ -22,9 +22,9 @@ export const DEVICE_STATUS = {
 
 /**
  * Resolve a device row to one of DEVICE_STATUS. Reads only database-backed fields:
- * `is_quarantined` (set by ingestion) and `status` (DBIRTH sets ONLINE; DDEATH and the liveness
- * watchdog set OFFLINE). Archived is a separate axis drawn as its own badge, so a decommissioned
- * device is distinguishable from one that went quiet.
+ * `is_quarantined` (set by ingestion) and `status` (DBIRTH sets ONLINE, as does DDATA after a
+ * watchdog timeout; DDEATH and the liveness watchdog set OFFLINE). Archived is a separate axis
+ * drawn as its own badge, so a decommissioned device is distinguishable from one that went quiet.
  */
 export function deviceLifecycleStatus(device) {
   if (!device) return DEVICE_STATUS.OFFLINE;

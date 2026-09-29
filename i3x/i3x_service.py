@@ -643,7 +643,8 @@ _liveness_lock = threading.Lock()
 # NDATA or NDEATH, as ingestion writes it to `gateways.status` and `last_heartbeat`.
 _gateways_heard: "OrderedDict[str, dict]" = OrderedDict()
 # Device id -> {"status", "at", "node"}: the last DBIRTH (ONLINE) or DDEATH (OFFLINE), and the node
-# its messages last came through. A DDATA moves only "node", as it moves nothing in `devices`.
+# its messages last came through. A DDATA moves only "node": whether it sets a timed-out device
+# ONLINE again is ingestion's decision, which reaches here through the `devices` row.
 _devices_heard: "OrderedDict[str, dict]" = OrderedDict()
 # The rows the last address-space read returned, for the MQTT thread, which never reads PostgREST.
 # Only what quality needs; `_read_at` is when they were read.

@@ -14,7 +14,7 @@ allowed to be heard at all.
 | [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 76 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
-| [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
+| [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog, a device that publishes again |
 | [`test_device_location.py`](test_device_location.py) | Invariant: the daemon never writes an asset's location |
 | [`test_entity_cache.py`](test_entity_cache.py) | The bounded resolution caches: LRU eviction, and the in-place-mutation and negative-entry contracts |
 | [`test_telemetry_writer.py`](test_telemetry_writer.py) | The historian writer: several messages become one transaction, and one bad message still loses one |
@@ -1040,7 +1040,10 @@ birth again for weeks. Without a way to ask, an ingestion restart would silently
 every alias-optimised device on the plant until someone power-cycled its gateway.
 
 On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
-`spBv1.0/<group>/NCMD/<edge_node>`.
+`spBv1.0/<group>/NCMD/<edge_node>`. It asks the same way on a sequence gap, and on DDATA from a
+device held OFFLINE that has not been born since (see
+[A device that publishes again](#a-device-that-publishes-again)). An operator's request from the
+dashboard and a broker capture ask too, past the rate limit below.
 
 - **Rate limited per edge node** (`REBIRTH_REQUEST_INTERVAL_SECONDS`, default 300s). This is the
   load-bearing half: a gateway that answers a rebirth by restarting, or one that never answers at
@@ -1240,9 +1243,10 @@ Three properties keep it from becoming an audit-row generator or a false-alarm g
   absence of evidence, not evidence of absence. Seeding it from the database would mark a whole
   fleet OFFLINE on every restart — one `digital_thread` row each, in an append-only table — which
   is a far worse failure than the stale ONLINE this fixes.
-- **The UPDATE carries `status = ONLINE` as a filter**, so an already-OFFLINE row matches nothing,
-  no UPDATE runs, and `log_digital_thread_event()` never fires. That is a database-side guarantee,
-  not a client-side intention.
+- **The write goes through `ingest_mark_device_offline()`, whose UPDATE carries
+  `status IS DISTINCT FROM 'OFFLINE'` as a filter**, so an already-OFFLINE row matches nothing, no
+  UPDATE runs, and `log_digital_thread_event()` never fires. That is a database-side guarantee,
+  not a client-side intention. The function answers whether it moved the row.
 - **A swept device is dropped from tracking**, so it is written once per quiet period rather than
   once per 30s tick. A failed write keeps it tracked, so the next sweep retries rather than
   silently concluding it was handled.
@@ -1253,6 +1257,31 @@ authoritative answer and needs no second opinion.
 > **Tuning.** Too *low* a value reports a healthy machine offline, which is the more misleading of
 > the two failures. Raise the window for event-driven devices that legitimately stay quiet, or set
 > `0` to disable.
+
+### A device that publishes again
+
+What DDATA from a device the Directory holds OFFLINE does depends on why it is OFFLINE. The data is
+stored either way.
+
+- **The watchdog timed it out, and its node has sent no NBIRTH or NDEATH since.** Silence was the
+  only evidence, and the DDATA refutes it: the daemon sets the device ONLINE through
+  `ingest_set_device_state()`, the gate a DBIRTH uses, leaving `identity_source` and
+  `first_dbirth_at` to the next birth. It logs `WATCHDOG: device ... is publishing again` and
+  requests no rebirth. The node's aliases and birth metrics still stand, and a lost message would
+  already show as a sequence gap, which requests one anyway. Asking here would spend the node's
+  rate limit on a device that is fine.
+- **Anything else**: a DDEATH, the node's NBIRTH or NDEATH since the device was last heard, a
+  sweep that found the row already OFFLINE, or an OFFLINE row this process has not seen born (after
+  a restart, or a device registered and never born). DDATA without a DBIRTH is out of protocol
+  there, so the device stays OFFLINE and the daemon requests a rebirth of its node, rate limited
+  as above. The DBIRTH that answers sets it ONLINE.
+
+Which case applies is held in memory, beside the watchdog's own map, and nothing in the database
+records it. The sweep takes `ingest_mark_device_offline()`'s answer, so only a sweep that moved the
+row counts as a timeout. After a restart every OFFLINE row is the second case, which costs one
+rebirth request per node.
+
+`test_declared_metrics.py` (`TestADeviceThatPublishesAgain`) covers both cases.
 
 ---
 

@@ -1028,9 +1028,14 @@ def run_simulation():
     print(f"\n--- DDATA from quarantined device: {UNKNOWN_DEVICE_ID} ---")
     publish("DDATA", UNKNOWN_DEVICE_ID, {"Systems/TEMPERATURE": 99.9, "Controller/EXECUTION": "STOPPED"})
 
-    # 3. DDATA for the registered device -> ingested, keyed by its sparkplug_id
-    print(f"\n--- DDATA from registered device: {VAL_KNOWN_DEVICE} ({SEEDED.get('known_id')}) ---")
-    publish("DDATA", SEEDED["known_id"], {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE", "Controller/EMERGENCY_STOP": "ARMED"})
+    # 3. DBIRTH then DDATA for the registered device -> ingested, keyed by its sparkplug_id. Born
+    #    first: DDATA from an OFFLINE device not born draws a rebirth request, and that would spend
+    #    the node's rate limit before check 9 asks for one. The birth declares a smaller set than
+    #    step 7's, so step 7's first birth is still a change.
+    print(f"\n--- DBIRTH then DDATA from registered device: {VAL_KNOWN_DEVICE} ({SEEDED.get('known_id')}) ---")
+    known_reading = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE", "Controller/EMERGENCY_STOP": "ARMED"}
+    publish("DBIRTH", SEEDED["known_id"], known_reading)
+    publish("DDATA", SEEDED["known_id"], known_reading)
 
     # 4. DBIRTH under a truncated id: quarantined with a message naming the length mismatch, which
     # is the point of the fixed 24-character format.
@@ -1168,8 +1173,8 @@ def freshen_the_plant():
     Just before checks 12 and 17: a node heartbeat from the seeded gateway, and step 7's birth
     again from the registered device. i3X holds a device's values Uncertain once its gateway has
     not beaten for 90 s or the device is OFFLINE, and the simulation's last node message is minutes
-    old by then. Only a DBIRTH sets a device ONLINE; this one declares the same set, so it rewrites
-    nothing else.
+    old by then. A DBIRTH sets a device ONLINE whatever took it OFFLINE; this one declares the same
+    set, so it rewrites nothing else.
     """
     client = connect_publisher(capture=False)
     if client is None:

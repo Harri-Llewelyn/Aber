@@ -131,7 +131,7 @@ class DBirthDedupTestCase(unittest.TestCase):
             ("verify_gateway_binding", lambda device, gw, group=None: None),
             ("store_birth_parameters", lambda sparkplug_id, payload: None),
             ("record_declared_metrics", lambda device, payload: None),
-            ("mark_device_seen", lambda device: None),
+            ("mark_device_seen", lambda *a, **k: None),
             ("register_birth_aliases", lambda *a, **k: 0),
         ):
             self._patched[name] = getattr(ingestion, name)
