@@ -22,7 +22,7 @@ chain that grew on top of it was squashed back into the same two files with a ta
 
 | File | Contents |
 | :--- | :--- |
-| `0000_a_database_from_before_the_fold.sql` | The whole corrective tail: every subtraction the baseline cannot express, plus the one conversion it cannot describe |
+| `0000_a_database_from_before_the_fold.sql` | The whole corrective tail: every subtraction the baseline cannot express, plus the conversion and the rename it cannot describe |
 | `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants, the FDW, the Realtime publication |
 | `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalogue, settings, secrets, cron, the Playback gateway |
 
@@ -43,9 +43,10 @@ candidate files left nine functions, two comments and a lane list at their older
 which is exactly what the equivalence check reported the first time it was run against the fold.
 
 So the subtractions were lifted out into `0000`, which holds nothing else. It sorts **before**
-`0001` rather than after, and has to: it converts `audit_trail` from an ordinary table into a
+`0001` rather than after, and has to: it converts the audit table from an ordinary table into a
 partitioned one, and the baseline describes it already partitioned — `CREATE TABLE … PARTITION OF`
-fails against a database that has not been converted. Once the first block has to run early they
+fails against a database that has not been converted. The rename to `audit_trail` is the same case:
+the baseline names the table by its new name only. Once the first block has to run early they
 all may as well, and running early is what makes the `archive.bucket` block correct: it decides by
 asking whether `system_settings.sensitive` exists yet, which is precisely "has the new schema
 arrived", and only `0000` can still ask it.

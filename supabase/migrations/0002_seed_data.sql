@@ -35,7 +35,7 @@ INSERT INTO public.roles VALUES (2, 'Shopfloor_Manager', 'Can manage devices, ce
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.roles VALUES (3, 'Operator', 'Operational dashboard view, live telemetry streaming, and document viewing')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only audit trace and audit trail access')
+INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only access to the audit trail')
 ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
@@ -71,7 +71,9 @@ INSERT INTO public.permissions VALUES ('f123d456-7890-4c1d-8706-933e08544e40', '
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('c234e567-8901-4c1d-8706-933e08544e41', 'gitops:manage', 'Deploy flows and manage GitOps edge configurations')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'audit_trail:read', 'View continuous Audit Trail audit log entries')
+-- `audit_trail:read`, renamed with the page before 1.0. THE ID DOES NOT MOVE, as with `link:manage`
+-- above; `0000` renames an existing row, which ON CONFLICT (id) DO NOTHING cannot correct.
+INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'audit_trail:read', 'View the audit trail')
 ON CONFLICT (id) DO NOTHING;
 
 -- Granted to all three working roles below, which no other permission is: a manager drafting a
@@ -7641,7 +7643,7 @@ SELECT public.seed_setting(
     'number',
     'Audit Trail',
     'Refresh interval (seconds)',
-    'How often the Audit Trail re-reads the audit log. The page is an audit trail rather than '
+    'How often the Audit Trail re-reads the audit log. The page is a record to read rather than '
     'a live feed, so this is deliberately not a live-tail interval.',
     'the 60_000 ms interval in AuditTrailTab.jsx'
 );
