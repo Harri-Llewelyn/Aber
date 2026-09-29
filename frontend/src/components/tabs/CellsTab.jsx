@@ -13,9 +13,9 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
-import { formatPlace, isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/floorPlans'
+import { formatPlace, isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { useSetting } from '../../hooks/useSettings'
-import { FloorPlacementPicker } from '../common/FloorPlacementPicker'
+import { CellPlacementPicker } from '../common/CellPlacementPicker'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
@@ -74,7 +74,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const [attentionOnly, setAttentionOnly] = useState(false)
   const [emptyOnly, setEmptyOnly] = useState(false)
 
-  // Re-reads on a later hand-over: the tab stays mounted across an Overview -> Cells -> Overview
+  // Re-reads on a later hand-over: the tab stays mounted across a Site Map -> Cells -> Site Map
   // -> Cells round trip, so the initial state above only fires once.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -534,7 +534,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             {formArea && (
               <div className="form-group">
                 <label className="form-label">Place on the plan</label>
-                <FloorPlacementPicker
+                <CellPlacementPicker
                   area={formArea}
                   cells={cells}
                   cellId={editing?.cell_id || null}
@@ -562,7 +562,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   rows={2}
                   value={formVal.__rationale || ''}
                   onChange={e => setFormVal(f => ({ ...f, __rationale: e.target.value }))}
-                  placeholder="e.g. the cell was renamed on the floor plan last month"
+                  placeholder="e.g. the cell was renamed on the area plan last month"
                 />
               </div>
             )}

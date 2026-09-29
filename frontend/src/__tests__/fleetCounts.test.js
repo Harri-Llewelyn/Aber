@@ -159,7 +159,7 @@ describe('deviceFleetCounts', () => {
   })
 
   it('agrees with the fleet this stack actually runs', () => {
-    // The provisioned demonstration floor plus one replay, which is the shape that surfaced this:
+    // The provisioned demonstration shopfloor plus one replay, which is the shape that surfaced this:
     // six Sim_ devices and one `Sim_BMS_Zone_HVAC (replay)`.
     const c = deviceFleetCounts([
       device({ name: 'Sim_BMS_Zone_HVAC' }),

@@ -92,7 +92,7 @@ describe('AlertPill', () => {
     })
 
     it('takes the critical treatment when any alert is critical', () => {
-      // A floor with one critical and four warnings is a floor with a critical on it. Averaging the
+      // A site with one critical and four warnings is a site with a critical on it. Averaging the
       // severities would be a summary nobody asked for.
       render(<AlertPill alerts={[alert({ severity: 'warning' }), alert({ id: 'a2', fingerprint: 'fp-2' })]} />)
       expect(pill()).toHaveClass('alert-pill-critical')

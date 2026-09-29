@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { FloorPlan, FloorPin } from './FloorPlan'
+import { AreaPlan, AreaPlanPin } from './AreaPlan'
 import { cellIconComponent } from '../../utils/cellIcon'
-import { floorAspect, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SPACING } from '../../utils/floorPlans'
+import { planAspect, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 
 /**
  * Where a cell sits on its area's plan, chosen by clicking the plan. The other cells in the area
@@ -11,11 +11,11 @@ import { floorAspect, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SP
  *
  * `value` is `{ x, y }` in fractions or null; `onChange` receives the same.
  */
-export function FloorPlacementPicker({ area, cells, cellId, cellIcon, value, onChange, minSpacing = DEFAULT_MIN_PIN_SPACING, disabled = false }) {
+export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onChange, minSpacing = DEFAULT_MIN_PIN_SPACING, disabled = false }) {
   const [refusal, setRefusal] = useState(null)
   const areaId = area?.area_id ?? area?.id
   const others = (cells || []).filter(c => c.area_id === areaId && (c.cell_id ?? c.id) !== cellId)
-  const aspect = floorAspect(area)
+  const aspect = planAspect(area)
 
   const place = (p) => {
     if (disabled) return
@@ -33,14 +33,14 @@ export function FloorPlacementPicker({ area, cells, cellId, cellIcon, value, onC
   }
 
   return (
-    <div className="floor-placement">
-      <FloorPlan
+    <div className="area-plan-placement">
+      <AreaPlan
         area={area}
         onPlaceClick={disabled ? undefined : place}
         title={disabled ? undefined : 'Click where the cell is on this plan'}
       >
         {others.filter(isPlaced).map(c => (
-          <FloorPin
+          <AreaPlanPin
             key={c.cell_id ?? c.id}
             x={c.plan_x}
             y={c.plan_y}
@@ -52,10 +52,10 @@ export function FloorPlacementPicker({ area, cells, cellId, cellIcon, value, onC
           />
         ))}
         {value && (
-          <FloorPin x={value.x} y={value.y} status="normal" selected Icon={cellIconComponent(cellIcon)} label="This cell" title="Where this cell will be shown" />
+          <AreaPlanPin x={value.x} y={value.y} status="normal" selected Icon={cellIconComponent(cellIcon)} label="This cell" title="Where this cell will be shown" />
         )}
-      </FloorPlan>
-      <div className="floor-placement-footer">
+      </AreaPlan>
+      <div className="area-plan-placement-footer">
         <span style={{ fontSize: '11px', color: refusal ? 'var(--danger)' : 'var(--text-muted)' }} role={refusal ? 'alert' : undefined}>
           {refusal || (value ? `Placed ${formatPlace({ plan_x: value.x, plan_y: value.y })}.` : 'Not placed — the cell is listed beside the plan until it is.')}
         </span>

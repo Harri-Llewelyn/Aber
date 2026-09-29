@@ -37,8 +37,8 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
   const count = alerts.length
   const healthy = count === 0
 
-  // Severity drives the colour, and critical wins outright. A floor with one critical and four
-  // warnings is a floor with a critical on it; averaging the two would be a summary nobody asked for.
+  // Severity drives the colour, and critical wins outright. A site with one critical and four
+  // warnings is a site with a critical on it; averaging the two would be a summary nobody asked for.
   const critical = alerts.filter((a) => a.severity === 'critical').length
   const tone = healthy
     ? 'alert-pill-healthy'

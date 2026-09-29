@@ -502,7 +502,7 @@ describe('ArchivesTab lists archived areas', () => {
 
     const prompt = await screen.findByText(/Permanently delete the area/i)
     expect(prompt.textContent).toMatch(/cells are kept and become unfiled/i)
-    expect(prompt.textContent).toMatch(/floor plan is deleted/i)
+    expect(prompt.textContent).toMatch(/area plan is deleted/i)
     expect(prompt.textContent).toMatch(/Area-Wide asset/i)
     expect(prompt.textContent).toMatch(/tombstone/i)
   })
@@ -511,7 +511,7 @@ describe('ArchivesTab lists archived areas', () => {
     await showLifecycle({ archives: [{ ...ARCHIVED_AREA, plan_path: null }] })
     fireEvent.click(purgeButton())
 
-    expect((await screen.findByText(/Permanently delete the area/i)).textContent).not.toMatch(/floor plan/i)
+    expect((await screen.findByText(/Permanently delete the area/i)).textContent).not.toMatch(/area plan/i)
   })
 })
 

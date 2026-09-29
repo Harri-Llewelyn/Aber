@@ -89,9 +89,9 @@ info:
     operator's assertion that an asset has no single cell; a CHECK forbids either wide scope with
     a populated `cell_id`.
 
-    Above the cell sits the ISA-95 **area** (a building, `/rest/v1/areas`): `cells.area_id` files
-    a cell, and a device's `effective_area_id` on the same view is its cell's area, or its own
-    `area_id` when it is `area_wide`. The site is one campus and lives in `system_settings` as
+    Above the cell sits the ISA-95 **area** (one part of the site, `/rest/v1/areas`):
+    `cells.area_id` files a cell, and a device's `effective_area_id` on the same view is its cell's
+    area, or its own `area_id` when it is `area_wide`. The site is one campus and lives in `system_settings` as
     `site.name`; the enterprise is each gateway's `sparkplug_group`. An area carries one SVG
     **plan** (`areas.plan_path`), and a cell's `plan_x`/`plan_y` place says where the Site Map
     pins it on that plan; nothing else reads them. A floor is not a level of the hierarchy and is
@@ -291,7 +291,7 @@ paths:
   /rest/v1/areas:
     get:
       tags: [Assets]
-      summary: List areas (buildings)
+      summary: List areas
       description: |
         The ISA-95 level above the cells. `?select=*,cells(*)` embeds each area's cells; devices
         are not embeddable here for the reason in the Asset location note — read
@@ -3806,23 +3806,24 @@ components:
       description: |
         `site_wide` is an operator's assertion that this asset has no single cell and no single
         area: it serves the whole campus (an AGV, an ambient sensor). `area_wide` is the same
-        assertion one level down: no single cell, one building (a BMS), and it REQUIRES `area_id`.
-        A CHECK forbids either alongside a populated `cell_id`, and forbids `area_id` on anything
-        but `area_wide` — a cell-scoped asset's area is its cell's, read from `device_locations`.
+        assertion one level down: no single cell, one area (a building management system), and it
+        REQUIRES `area_id`. A CHECK forbids either alongside a populated `cell_id`, and forbids
+        `area_id` on anything but `area_wide` — a cell-scoped asset's area is its cell's, read from
+        `device_locations`.
 
         **Scope does not inherit; only `cell_id` does.** A device behind a site-wide gateway
         resolves to *Unassigned*, not to Site-Wide.
 
     Area:
       type: object
-      description: An ISA-95 area — one building of the one site. The level between the site (a setting, `site.name`) and the cells.
+      description: An ISA-95 area — one part of the one site. The level between the site (a setting, `site.name`) and the cells.
       properties:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Building 3, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
         description: { type: string, nullable: true }
-        icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the building is for.' }
+        icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the area is for.' }
         created_at: { type: string, format: date-time, readOnly: true }
-        plan_path: { type: string, nullable: true, description: 'Object path of the SVG plan in the private `floor-plans` bucket, `<area_id>/<file>.svg`, or NULL for the default outline. Set through the dashboard, which uploads the object first.' }
+        plan_path: { type: string, nullable: true, description: 'Object path of the SVG plan in the private `area-plans` bucket, `<area_id>/<file>.svg`, or NULL for the default outline. Set through the dashboard, which uploads the object first.' }
         plan_aspect: { type: number, nullable: true, description: 'Width over height of the plan''s viewBox; NULL exactly when `plan_path` is. Cell places are fractions of the plan, so this is what turns them back into a distance.' }
         cells:
           type: array
@@ -3844,10 +3845,10 @@ components:
       properties:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Assembly Line 1, description: 'UNIQUE — cells are not addressed on the wire, so a stable name is safe here. It is the `<cell>` segment of its `uns/` topics, so a new name cannot contain `/`, `+` or `#`.' }
-        area_id: { type: string, format: uuid, nullable: true, description: 'The area (building) this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
+        area_id: { type: string, format: uuid, nullable: true, description: 'The area this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
         plan_x: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Where the cell sits on its area''s plan, as a fraction of the plan''s width. Set with `plan_y` or not at all, requires `area_id`, and is refused closer than `site_map.min_pin_spacing` (a fraction of the plan''s shorter side) to another cell in the same area. Moving the cell to another area clears it, unless the same write names a new place.' }
         plan_y: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Fraction of the plan''s height, 0 at the top.' }
-        description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Overview map when present.' }
+        description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Site Map when present.' }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }

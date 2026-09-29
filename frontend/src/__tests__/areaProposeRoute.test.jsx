@@ -16,8 +16,8 @@ vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
   return {
     ...actual,
-    loadFloorPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
-    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), uploadFloorPlan: vi.fn(), removeFloorPlan: vi.fn() }
+    loadAreaPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
+    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), uploadAreaPlan: vi.fn(), removeAreaPlan: vi.fn() }
   }
 })
 

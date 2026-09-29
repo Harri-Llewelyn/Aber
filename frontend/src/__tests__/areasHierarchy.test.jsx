@@ -16,8 +16,8 @@ vi.mock('../api', async () => {
     ...actual,
     // The plan is downloaded through the authenticated client and handed to an <img>; without a
     // stub the download rejects and every plan reads as unavailable rather than as a drawing.
-    loadFloorPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
-    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), uploadFloorPlan: vi.fn(), removeFloorPlan: vi.fn() }
+    loadAreaPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
+    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), uploadAreaPlan: vi.fn(), removeAreaPlan: vi.fn() }
   }
 })
 
@@ -78,7 +78,7 @@ afterEach(() => {
 })
 
 const thumbs = () => [...document.querySelectorAll('.shopfloor-grid > .area-thumb')]
-const pins = () => [...document.querySelectorAll('.area-thumb .floor-pin')]
+const pins = () => [...document.querySelectorAll('.area-thumb .area-plan-pin')]
 const pinNames = () => pins().map(p => p.getAttribute('aria-label'))
 const lanes = () => [...document.querySelectorAll('.site-lanes > .site-lane')]
 const panel = () => document.querySelector('.context-panel')
@@ -134,7 +134,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     // THE POINT OF THE ONE VIEW: both of Building A's cells are pinned, and the header's count
     // agrees with what is drawn. A floor selector used to show one of them at a time.
     expect(pinNames()).toEqual(['Bay 1', 'Bay 2'])
-    expect(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' }).querySelector('.floor-pin-label')).toHaveTextContent('Bay 1')
+    expect(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' }).querySelector('.area-plan-pin-label')).toHaveTextContent('Bay 1')
     // Nothing to enter and nothing to come back from.
     expect(screen.queryByRole('button', { name: 'All areas' })).toBeNull()
     expect(screen.queryByRole('group', { name: 'Zoom' })).toBeNull()
@@ -349,7 +349,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
      the cursor already says pointer, so the card takes the click as well. */
   it('opens the area from the card itself, and leaves a pin to its own cell', async () => {
     await renderSiteMap()
-    fireEvent.click(thumbs()[0].querySelector('.floor-plan'))
+    fireEvent.click(thumbs()[0].querySelector('.area-plan'))
     expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
 
     // A pin stops its own click, so the cell wins over the area behind it.
@@ -399,8 +399,8 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
   it('draws the uploaded plan where there is one, and the default outline where there is not', async () => {
     await renderSiteMap()
-    expect(thumbs()[0].querySelector('.floor-plan').getAttribute('data-plan')).toBe('uploaded')
-    expect(thumbs()[1].querySelector('.floor-plan').getAttribute('data-plan')).toBe('outline')
+    expect(thumbs()[0].querySelector('.area-plan').getAttribute('data-plan')).toBe('uploaded')
+    expect(thumbs()[1].querySelector('.area-plan').getAttribute('data-plan')).toBe('outline')
   })
 
   it('opens a pin into the details panel, naming where the cell is and what it holds', async () => {
@@ -592,11 +592,11 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     return document.querySelector('.context-panel')
   }
 
-  const planRow = () => document.querySelector('.area-plan-row')
+  const planRow = () => document.querySelector('.area-plan-panel-row')
 
   it('says whether a plan is attached and how many cells are placed on it', async () => {
     const panel = await openArea()
-    expect(within(panel).getByText('Floor plan')).toBeInTheDocument()
+    expect(within(panel).getByText('Area plan')).toBeInTheDocument()
     expect(planRow().getAttribute('data-plan')).toBe('uploaded')
     expect(within(planRow()).getByText('Plan attached')).toBeInTheDocument()
     expect(within(planRow()).getByText('2 cells placed on it')).toBeInTheDocument()
@@ -617,33 +617,33 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   })
 
   it('takes a plan dropped onto the zone, not only one browsed for', async () => {
-    api.uploadFloorPlan.mockResolvedValue({})
+    api.uploadAreaPlan.mockResolvedValue({})
     await openArea('Building B')
     const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
     await act(async () => { fireEvent.drop(planRow(), { dataTransfer: { files: [file] } }) })
-    expect(api.uploadFloorPlan).toHaveBeenCalledTimes(1)
-    expect(api.uploadFloorPlan.mock.calls[0][1]).toBe(file)
+    expect(api.uploadAreaPlan).toHaveBeenCalledTimes(1)
+    expect(api.uploadAreaPlan.mock.calls[0][1]).toBe(file)
   })
 
   it('uploads a plan against the area itself', async () => {
-    api.uploadFloorPlan.mockResolvedValue({})
+    api.uploadAreaPlan.mockResolvedValue({})
     await openArea('Building B')
     const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
     const input = within(planRow()).getByLabelText('Plan file for Building B')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
-    expect(api.uploadFloorPlan).toHaveBeenCalledTimes(1)
-    expect(api.uploadFloorPlan.mock.calls[0][0]).toMatchObject({ area_id: 'area-b' })
-    expect(api.uploadFloorPlan.mock.calls[0][1]).toBe(file)
+    expect(api.uploadAreaPlan).toHaveBeenCalledTimes(1)
+    expect(api.uploadAreaPlan.mock.calls[0][0]).toMatchObject({ area_id: 'area-b' })
+    expect(api.uploadAreaPlan.mock.calls[0][1]).toBe(file)
   })
 
   it('removes a plan once the dialog is confirmed', async () => {
-    api.removeFloorPlan.mockResolvedValue({})
+    api.removeAreaPlan.mockResolvedValue({})
     await openArea()
     fireEvent.click(within(planRow()).getByRole('button', { name: /Remove plan/ }))
     const dialog = document.querySelector('.modal')
     expect(within(dialog).getByText(/Remove the plan from Building A\?/)).toBeInTheDocument()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Remove plan' })) })
-    expect(api.removeFloorPlan).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'area-a' }))
+    expect(api.removeAreaPlan).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'area-a' }))
   })
 
   it('refuses a file that is not an SVG before anything is uploaded', async () => {
@@ -654,7 +654,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     const file = new File(['png'], 'plan.png', { type: 'image/png' })
     const input = within(planRow()).getByLabelText('Plan file for Building A')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
-    expect(api.uploadFloorPlan).not.toHaveBeenCalled()
+    expect(api.uploadAreaPlan).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/not an SVG/), 'error')
   })
 

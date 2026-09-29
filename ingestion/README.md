@@ -1161,16 +1161,16 @@ uns/<enterprise>/<site>/<device>/<metric>                   site-wide -- serves 
 | :--- | :--- | :--- |
 | `<enterprise>` | Enterprise | The message's Sparkplug group (`gateways.sparkplug_group`), already on the wire |
 | `<site>` | Site | The `site.name` setting. One campus, so one value; a second campus is the migration that makes it a table |
-| `<area>` | Area | `areas.name` (`0097`) — a building. A cell files into one; an area-wide asset names one |
+| `<area>` | Area | `areas.name` (`0097`) — one part of the site. A cell files into one; an area-wide asset names one |
 | `<cell>` | Work center | `cells.name`, through `device_locations.effective_cell_id` |
 | `<device>` | Work unit | `devices.name` |
 | `<metric>` | | The metric name as the leaf. A catalog name with a `/` group prefix becomes a subtree |
 
-The floor a cell is on is a number on the cell for the Overview map and is deliberately **not** a
-segment: ISA-95 has no rung for it and a consumer subscribing per building or per cell does not
-want one. The words in the data model stay the stack's (`gateways`, `devices`, `cells`; `areas` is
-already the standard's) and the ISA-95 words appear where the hierarchy is being named: here, and in
-the Summary of each page's help.
+A floor is **not** a segment, and is not modelled at all: ISA-95 has no rung for it, so a building
+with two floors is two areas. A cell's place on its area's plan is for the Site Map alone and is not
+a segment either; a consumer subscribes per area or per cell. The words in the data model stay the
+stack's (`gateways`, `devices`, `cells`; `areas` is already the standard's) and the ISA-95 words
+appear where the hierarchy is being named: here, and in the Summary of each page's help.
 
 **Renaming `cells` to work centers was considered and declined.** "Cell" is not a plant word the
 standard lacks: a process cell is one of ISA-95's work center types, so the rename would have traded
@@ -1183,7 +1183,7 @@ stake: a cell is not addressed on the wire, and `<cell>` is the cell's name, not
 
 **An incomplete path is skipped, never filled with a placeholder.** A device that is unassigned, a
 cell filed in no area, a site whose name is unset: none is published, each is counted under
-`aber_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Overview's
+`aber_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Site Map's
 Unassigned lane are where an operator completes the path. An invented segment would put a word
 nobody chose in every topic, which is the trap the derived lanes exist to avoid. Names are checked
 for `/`, `+` and `#` on the way in (`areas_name_topic_safe`, `cells_name_topic_safe`; the cell

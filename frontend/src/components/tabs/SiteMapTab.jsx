@@ -10,12 +10,12 @@ import { gatewayFleetCounts } from '../../utils/fleetCounts'
 import { useSetting } from '../../hooks/useSettings'
 import { HelpTip } from '../common/HelpTip'
 import { ContextPanel } from '../common/ContextPanel'
-import { FloorPlan, FloorPin } from '../common/FloorPlan'
+import { AreaPlan, AreaPlanPin } from '../common/AreaPlan'
 import {
   SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE,
   SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
 } from '../../utils/cellResolution'
-import { isPlaced, formatPlace } from '../../utils/floorPlans'
+import { isPlaced, formatPlace } from '../../utils/areaPlans'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { areaIconComponent } from '../../utils/areaIcon'
 import {
@@ -315,7 +315,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const gateways = cellGatewaysOf(c)
     const devices = cellDevicesOf(c)
     return (
-      <FloorPin
+      <AreaPlanPin
         key={c.cell_id}
         x={c.plan_x}
         y={c.plan_y}
@@ -355,7 +355,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         key={ar.area_id}
         className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}${archived ? ' area-thumb-archived' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
         data-area={ar.area_id}
-        /* A pin stops its own click (FloorPin), so a click that reaches here is the area's. */
+        /* A pin stops its own click (AreaPlanPin), so a click that reaches here is the area's. */
         onClick={() => toggleArea(ar.area_id)}
       >
         <div className="area-thumb-header">
@@ -398,9 +398,9 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             {wideCount > 0 && <> · <span className="area-thumb-wide">{wideCount} Area-Wide</span></>}
           </span>
         </div>
-        <FloorPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
+        <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
           {areaCells.map(cellPin)}
-        </FloorPlan>
+        </AreaPlan>
         {/* The one thing the counts cannot say: a cell filed here that the plan does not draw.
             That is a job, not a tally, so it keeps its line -- and a card with everything placed
             spends no space on it. */}

@@ -221,8 +221,9 @@ html, body, #root {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
-  /* It became a <button> when it became the way back to Overview, so everything a button brings
-     with it has to be taken back off: the chrome, the centred text, the inherited-nothing font. */
+  /* It became a <button> when it became the way back to the Site Map, so everything a button
+     brings with it has to be taken back off: the chrome, the centred text, the inherited-nothing
+     font. */
   padding: 4px 6px;
   margin-left: -6px;
   border: 1px solid transparent;
@@ -793,8 +794,8 @@ html, body, #root {
    the 15px override applies only inside `.card-header` -- so it outranks the card titles below it.
 
    Not licence to restate the rail: a heading that only repeats the tab's name was removed from
-   Overview for saying nothing, and `navigationShell.test.jsx` still guards that. The description is
-   what earns the block. */
+   the Site Map for saying nothing, and `navigationShell.test.jsx` still guards that. The
+   description is what earns the block. */
 .page-heading {
   margin: 0 0 var(--stack);
 }
@@ -1938,7 +1939,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .site-hierarchy-sep { color: var(--text-dim); }
 
-/* ===== The Overview card: the three lanes, side by side across the width ===== */
+/* ===== The Site Map card: the three lanes, side by side across the width ===== */
 /* One track each so the three always share the width evenly; below 720px they stack. Each lane is
    a button that opens the panel, so the whole strip is the target. */
 .site-lanes {
@@ -2019,7 +2020,7 @@ tbody tr:hover { background: var(--bg-glass); }
 /* The open lane is the one the panel shows: the same outline the selected pin gets. */
 .site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* ===== The Site Map card: floor plans and pins ===== */
+/* ===== The Site Map card: area plans and pins ===== */
 /* Area thumbnails share the cell grid's tracks. */
 .area-thumb {
   display: flex;
@@ -2138,12 +2139,12 @@ tbody tr:hover { background: var(--bg-glass); }
 .shopfloor-grid[style*="--map-columns: 2"] .area-thumb { --thumb-max-height: 340px; }
 .shopfloor-grid[style*="--map-columns: 1"] .area-thumb { --thumb-max-height: 440px; }
 
-.area-thumb .floor-plan {
+.area-thumb .area-plan {
   width: min(100%, calc(var(--thumb-max-height) * var(--plan-aspect, 1.3333)));
   margin: 0 auto;
 }
 
-.floor-plan {
+.area-plan {
   position: relative;
   width: 100%;
   background: var(--bg-glass);
@@ -2153,10 +2154,10 @@ tbody tr:hover { background: var(--bg-glass); }
   user-select: none;
 }
 
-.floor-plan-interactive { cursor: crosshair; }
+.area-plan-interactive { cursor: crosshair; }
 
-.floor-plan-image,
-.floor-plan-outline {
+.area-plan-image,
+.area-plan-outline {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2166,18 +2167,18 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The plan fills its box exactly, so a fraction of the box is a fraction of the drawing. */
-.floor-plan-image { object-fit: fill; }
+.area-plan-image { object-fit: fill; }
 
-.floor-plan-outline .outline-frame {
+.area-plan-outline .outline-frame {
   fill: none;
   stroke: var(--text-dim);
   stroke-width: 2;
   stroke-dasharray: 8 6;
 }
 
-.floor-plan-outline .outline-grid { stroke: var(--border); stroke-width: 1; }
+.area-plan-outline .outline-grid { stroke: var(--border); stroke-width: 1; }
 
-.floor-plan-caption {
+.area-plan-caption {
   position: absolute;
   left: 8px;
   bottom: 6px;
@@ -2189,7 +2190,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* A pin: the disc sits on the place, the label hangs beneath. Colour names a state the legend
    decodes and the `title` repeats it in words. */
-.floor-pin {
+.area-plan-pin {
   --pin-colour: var(--text-dim);
   position: absolute;
   transform: translate(-50%, -50%);
@@ -2206,13 +2207,13 @@ tbody tr:hover { background: var(--bg-glass); }
   font: inherit;
 }
 
-.floor-pin-normal    { --pin-colour: var(--success); }
-.floor-pin-attention { --pin-colour: var(--warning); }
-.floor-pin-idle      { --pin-colour: var(--text-dim); }
-.floor-pin-alert     { --pin-colour: var(--danger); }
-.floor-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
+.area-plan-pin-normal    { --pin-colour: var(--success); }
+.area-plan-pin-attention { --pin-colour: var(--warning); }
+.area-plan-pin-idle      { --pin-colour: var(--text-dim); }
+.area-plan-pin-alert     { --pin-colour: var(--danger); }
+.area-plan-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
 
-.floor-pin-disc {
+.area-plan-pin-disc {
   position: relative;
   width: 40px;
   height: 40px;
@@ -2226,20 +2227,20 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
-.floor-pin-small .floor-pin-disc {
+.area-plan-pin-small .area-plan-pin-disc {
   width: 18px;
   height: 18px;
   border-width: 2px;
   box-shadow: none;
 }
 
-.floor-pin-small { gap: 2px; }
+.area-plan-pin-small { gap: 2px; }
 
-.floor-pin-selected .floor-pin-disc { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25); }
+.area-plan-pin-selected .area-plan-pin-disc { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25); }
 
-.floor-pin:focus-visible .floor-pin-disc { outline: 2px solid var(--accent); outline-offset: 2px; }
+.area-plan-pin:focus-visible .area-plan-pin-disc { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.floor-pin-label {
+.area-plan-pin-label {
   font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
@@ -2253,29 +2254,28 @@ tbody tr:hover { background: var(--bg-glass); }
   text-overflow: ellipsis;
 }
 
-.floor-pin-small .floor-pin-label { font-size: 11px; padding: 0 4px; max-width: 90px; }
+.area-plan-pin-small .area-plan-pin-label { font-size: 11px; padding: 0 4px; max-width: 90px; }
 
 /* The alert ring: the one animated thing on the map, and it means what the legend's red means. */
-.floor-pin-alert .floor-pin-disc::after {
+.area-plan-pin-alert .area-plan-pin-disc::after {
   content: '';
   position: absolute;
   inset: -4px;
   border-radius: 50%;
   border: 3px solid var(--danger);
-  animation: floor-pin-pulse 1.4s ease-out infinite;
+  animation: area-plan-pin-pulse 1.4s ease-out infinite;
 }
 
-@keyframes floor-pin-pulse {
+@keyframes area-plan-pin-pulse {
   0%   { transform: scale(1); opacity: 0.8; }
   100% { transform: scale(1.8); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .floor-pin-alert .floor-pin-disc::after { animation: none; opacity: 0.6; }
+  .area-plan-pin-alert .area-plan-pin-disc::after { animation: none; opacity: 0.6; }
 }
 
-/* Under the floor rail: the cells on this floor with no place, cells on no floor, and the area's
-   Area-Wide assets. On the all-areas view it holds the unfiled cells, beside the thumbnails. */
+/* Under the grid of areas: the cells filed in no area, which no plan can draw. */
 .site-map-tray {
   display: flex;
   flex-direction: column;
@@ -2293,8 +2293,8 @@ tbody tr:hover { background: var(--bg-glass); }
   gap: 6px;
 }
 
-/* The chips wrap in the tray, and scroll once there are many: the side column must not push the
-   plan below the fold. */
+/* The chips wrap in the tray, and scroll once there are many, so a long queue of unfiled cells
+   stays one short block under the areas. */
 .site-map-tray-group .context-device-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
 
 .chip-link.is-selected {
@@ -2314,9 +2314,9 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The placement picker in the cell form. */
-.floor-placement { display: flex; flex-direction: column; gap: 6px; }
+.area-plan-placement { display: flex; flex-direction: column; gap: 6px; }
 
-.floor-placement-footer {
+.area-plan-placement-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2325,9 +2325,9 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The plan control in the area panel: the one attached plan, or the zone that takes one. */
-.area-plan { display: flex; flex-direction: column; gap: 8px; }
+.area-plan-panel { display: flex; flex-direction: column; gap: 8px; }
 
-.area-plan-header {
+.area-plan-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2335,7 +2335,7 @@ tbody tr:hover { background: var(--bg-glass); }
   flex-wrap: wrap;
 }
 
-.area-plan-row {
+.area-plan-panel-row {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2346,17 +2346,17 @@ tbody tr:hover { background: var(--bg-glass); }
   font-size: 12px;
 }
 
-.area-plan-glyph { flex-shrink: 0; color: var(--text-muted); }
+.area-plan-panel-glyph { flex-shrink: 0; color: var(--text-muted); }
 
-.area-plan-state { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.area-plan-panel-state { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 
-.area-plan-meta { font-size: 11px; color: var(--text-muted); }
+.area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-.area-plan-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
+.area-plan-panel-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
 
 /* An area with no plan gets the target rather than a button: the file is usually already in a
    folder somebody is dragging from. */
-.area-plan-drop {
+.area-plan-panel-drop {
   flex-direction: column;
   gap: 6px;
   padding: 18px 12px;
@@ -2368,10 +2368,10 @@ tbody tr:hover { background: var(--bg-glass); }
   transition: border-color 120ms, background 120ms;
 }
 
-.area-plan-drop:hover { border-color: var(--accent); }
-.area-plan-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.area-plan-drop[data-dragging='yes'] { border-color: var(--accent); background: var(--bg-surface); }
-.area-plan-drop-line { font-size: 12px; color: var(--text-primary); }
+.area-plan-panel-drop:hover { border-color: var(--accent); }
+.area-plan-panel-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.area-plan-panel-drop[data-dragging='yes'] { border-color: var(--accent); background: var(--bg-surface); }
+.area-plan-panel-drop-line { font-size: 12px; color: var(--text-primary); }
 
 .zone-name {
   overflow: hidden;

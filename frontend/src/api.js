@@ -3,7 +3,7 @@ import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
-import { isSvgFile, readSvgPlan, decodeSvgBytes, floorPlanPath, FLOOR_PLAN_MAX_BYTES } from './utils/floorPlans';
+import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import { DIGITAL_THREAD_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
@@ -144,7 +144,7 @@ function locationFieldsFrom(body) {
   return fields;
 }
 
-// A place on a floor plan is a fraction 0..1 or nothing; the form submits '' or null for nothing.
+// A place on an area plan is a fraction 0..1 or nothing; the form submits '' or null for nothing.
 const planCoordFrom = (v) => {
   if (v === undefined || v === null || String(v).trim() === '') return null;
   const n = Number(v);
@@ -377,28 +377,28 @@ const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
 const CAPTURE_BUCKET = readSetting('VITE_CAPTURE_BUCKET', 'broker-captures');
 
 /**
- * Floor plans. Private, and the name is fixed: scripts/storage-init.mjs and
+ * Area plans. Private, and the name is fixed: scripts/storage-init.mjs and
  * supabase/storage-policies.sql name it too. Objects live under `<area_id>/`, which the write
  * policy confines to an area that exists.
  */
-const FLOOR_PLAN_BUCKET = 'floor-plans';
+const AREA_PLAN_BUCKET = 'area-plans';
 
 /**
  * Object URLs for downloaded plans, by path. A plan is fetched once per session through the
  * authenticated client and handed to an <img> as a blob URL, so no signed URL expires under a
  * wall display and the SVG never becomes part of the page.
  */
-const floorPlanUrls = new Map();
+const areaPlanUrls = new Map();
 
 /** The blob URL for a stored plan, downloading it on first use. Null with no path. */
-export async function loadFloorPlanUrl(path) {
+export async function loadAreaPlanUrl(path) {
   if (!path) return null;
-  if (floorPlanUrls.has(path)) return floorPlanUrls.get(path);
-  const { data, error } = await supabase.storage.from(FLOOR_PLAN_BUCKET).download(path);
-  if (error) throw new Error(error.message || 'Could not load the floor plan');
+  if (areaPlanUrls.has(path)) return areaPlanUrls.get(path);
+  const { data, error } = await supabase.storage.from(AREA_PLAN_BUCKET).download(path);
+  if (error) throw new Error(error.message || 'Could not load the area plan');
   const blob = data.type === 'image/svg+xml' ? data : new Blob([data], { type: 'image/svg+xml' });
   const url = typeof URL.createObjectURL === 'function' ? URL.createObjectURL(blob) : null;
-  floorPlanUrls.set(path, url);
+  areaPlanUrls.set(path, url);
   return url;
 }
 
@@ -2974,27 +2974,27 @@ const apiMethods = {
    * not saved".
    */
   /**
-   * Attach a floor plan to an area. The file is read first so an SVG with no stated size is
+   * Attach a plan to an area. The file is read first so an SVG with no stated size is
    * refused before anything is uploaded; the object goes up, then the row records its path and
    * aspect; a failed row write removes the object, and a successful one removes the plan it
    * replaced. Each upload takes a new path, so a cached blob URL never shows a stale drawing.
    */
-  uploadFloorPlan: async (area, file) => {
-    if (!isSvgFile(file)) throw new Error('A floor plan is an SVG file.');
-    if (file.size > FLOOR_PLAN_MAX_BYTES) {
-      throw new Error(`"${file.name}" is larger than the ${Math.round(FLOOR_PLAN_MAX_BYTES / 1048576)} MiB limit for a floor plan.`);
+  uploadAreaPlan: async (area, file) => {
+    if (!isSvgFile(file)) throw new Error('An area plan is an SVG file.');
+    if (file.size > AREA_PLAN_MAX_BYTES) {
+      throw new Error(`"${file.name}" is larger than the ${Math.round(AREA_PLAN_MAX_BYTES / 1048576)} MiB limit for an area plan.`);
     }
     const { aspect, problem } = readSvgPlan(decodeSvgBytes(await file.arrayBuffer()));
     if (problem) throw new Error(problem);
 
     const areaId = area.area_id ?? area.id;
-    const path = floorPlanPath({ area_id: areaId });
+    const path = areaPlanPath({ area_id: areaId });
     const { error: uploadError } = await supabase.storage
-      .from(FLOOR_PLAN_BUCKET)
+      .from(AREA_PLAN_BUCKET)
       .upload(path, file, { upsert: false, contentType: 'image/svg+xml' });
     if (uploadError) {
       if (/row-level security|Unauthorized/i.test(uploadError.message || '')) {
-        throw new Error('You do not have permission to upload a floor plan.');
+        throw new Error('You do not have permission to upload an area plan.');
       }
       throw new Error(uploadError.message || 'Upload failed');
     }
@@ -3005,13 +3005,13 @@ const apiMethods = {
       .eq('id', areaId)
       .select();
     if (error || !data?.length) {
-      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([path]);
+      await supabase.storage.from(AREA_PLAN_BUCKET).remove([path]);
       throw new Error(error?.message || 'Could not attach the plan to the area');
     }
 
     const previous = area.plan_path;
     if (previous && previous !== path) {
-      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([previous]).catch(() => {});
+      await supabase.storage.from(AREA_PLAN_BUCKET).remove([previous]).catch(() => {});
     }
     return { ...data[0], area_id: data[0].id };
   },
@@ -3021,7 +3021,7 @@ const apiMethods = {
    * stranded object, never an area pointing at a drawing that is gone. Cell places in the area are
    * kept, since the default outline shares the plan's coordinate space.
    */
-  removeFloorPlan: async (area) => {
+  removeAreaPlan: async (area) => {
     const areaId = area.area_id ?? area.id;
     const { data, error } = await supabase
       .from('areas')
@@ -3031,7 +3031,7 @@ const apiMethods = {
     if (error) throw new Error(error.message || 'Could not detach the plan');
     if (!data?.length) throw new Error('You do not have permission to change this area.');
     if (area.plan_path) {
-      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([area.plan_path]).catch(() => {});
+      await supabase.storage.from(AREA_PLAN_BUCKET).remove([area.plan_path]).catch(() => {});
     }
     return { ...data[0], area_id: data[0].id };
   },
@@ -3139,7 +3139,7 @@ const apiMethods = {
       const { error } = await supabase.from('areas').delete().eq('id', id);
       if (error) throw error;
       const planPath = rows?.[0]?.plan_path;
-      if (planPath) await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([planPath]).catch(() => {});
+      if (planPath) await supabase.storage.from(AREA_PLAN_BUCKET).remove([planPath]).catch(() => {});
       return true;
     }
 

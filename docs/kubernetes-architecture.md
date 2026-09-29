@@ -495,7 +495,7 @@ of a boot that half-works:
 |---|---|---|
 | `supabase-db-roles-init` | Hook Job, weight 0 | Mutates shared DB state. **Load-bearing:** without it `supabase_storage_admin` has no password and storage-api crash-loops on `28P01` with nothing else reporting a problem |
 | `supabase-db-init` | Hook Job, weight 10 | Applies migrations + seed. Must wait for `supabase-db` **and** `supabase-auth` — GoTrue installs the `auth` schema the migrations build on |
-| `supabase-storage-init` | Hook Job, weight 20 | Creates the bucket through the Storage REST API. Must wait for storage-api to have finished its own `storage`-schema migrations |
+| `supabase-storage-init` | Hook Job, weight 20 | Creates the buckets through the Storage REST API, and moves a renamed bucket's objects into its new name before deleting it. Must wait for storage-api to have finished its own `storage`-schema migrations |
 | `supabase-kong-init` | initContainer | `render-config` in the gateway's own pod: the keys come from the Secret, which the chart cannot read under `existingSecret` (§4.5) |
 | `mosquitto-init` | initContainer | Writes the Dynamic Security plugin's document onto the broker's PVC — see §5.1 |
 | `node-red-init` | initContainer | Writes into `/data` on Node-RED's own PVC, and must run from the *same image* as the main container (§6.1) |

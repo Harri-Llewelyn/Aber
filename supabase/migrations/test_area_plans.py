@@ -200,8 +200,8 @@ class TestTheAreaCarriesThePlan(PlansBase):
         not_svg = f"{AREA}/plan-1.png"
         too_deep = f"{AREA}/x/plan-1.svg"
         self.cur.execute(
-            "SELECT public.is_floor_plan_path(%s), public.is_floor_plan_path(%s), "
-            "public.is_floor_plan_path(%s), public.is_floor_plan_path(%s), public.is_floor_plan_path('nonsense');",
+            "SELECT public.is_area_plan_path(%s), public.is_area_plan_path(%s), "
+            "public.is_area_plan_path(%s), public.is_area_plan_path(%s), public.is_area_plan_path('nonsense');",
             (ok, no_such_area, not_svg, too_deep),
         )
         self.assertEqual(self.cur.fetchone(), (True, False, False, False, False))
