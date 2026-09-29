@@ -28,6 +28,10 @@ import {
  */
 const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';
 
+/** The off-site destination's settings (0018); the secret key is in the vault, not here. */
+const OFFSITE_SETTING_KEYS = ['endpoint', 'region', 'bucket', 'prefix', 'access_key_id', 'recipient', 'path_style']
+  .map(k => `backup_offsite.${k}`);
+
 /**
  * Which nameplate fields a device can answer for itself, and the OPC UA concept that answers them.
  * Mirrors the exporter's resolution order (a published value wins over a stored one). Keyed by
@@ -1142,6 +1146,62 @@ const apiMethods = {
       .limit(count);
     if (error) throw new Error(error.message || 'Could not read backups');
     return (data || []).map(b => b.id);
+  },
+
+  /**
+   * The off-site destination as the settings hold it, and whether the secret key is in the vault.
+   * The rows are Administrator-only (`sensitive`), so anybody else reads an empty destination.
+   */
+  backupOffsiteDestination: async () => {
+    const [rows, credential] = await Promise.all([
+      supabase.from('system_settings').select('key,value').in('key', OFFSITE_SETTING_KEYS),
+      supabase.rpc('backup_offsite_credential_is_set')
+    ]);
+    const error = rows.error || credential.error;
+    if (error) throw new Error(error.message || 'Could not read the off-site destination');
+    const byKey = Object.fromEntries((rows.data || []).map(r => [r.key.replace('backup_offsite.', ''), r.value]));
+    return {
+      endpoint: byKey.endpoint || '',
+      region: byKey.region || '',
+      bucket: byKey.bucket || '',
+      prefix: byKey.prefix || '',
+      access_key_id: byKey.access_key_id || '',
+      recipient: byKey.recipient || '',
+      path_style: byKey.path_style === true,
+      credentialSet: credential.data === true
+    };
+  },
+
+  /** Every destination field in one call; a refused field saves none of them. Administrator only. */
+  setBackupOffsiteDestination: async (d) => {
+    const { error } = await supabase.rpc('set_backup_offsite_destination', {
+      p_endpoint: d.endpoint, p_region: d.region, p_bucket: d.bucket, p_prefix: d.prefix,
+      p_access_key_id: d.access_key_id, p_recipient: d.recipient, p_path_style: !!d.path_style
+    });
+    if (error) {
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can set the off-site destination'
+        : (error.message || 'Could not save the off-site destination'));
+    }
+    return true;
+  },
+
+  /** The secret key, into the vault. Write-only: nothing reads it back. */
+  setBackupOffsiteCredential: async (secret) => {
+    const { error } = await supabase.rpc('set_backup_offsite_credential', { p_secret: secret });
+    if (error) {
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can set the off-site credential'
+        : (error.message || 'Could not save the off-site credential'));
+    }
+    return true;
+  },
+
+  /** Stop copying: every field emptied and the secret deleted. Copies already made stay. */
+  clearBackupOffsiteDestination: async () => {
+    const { error } = await supabase.rpc('clear_backup_offsite_destination');
+    if (error) throw new Error(error.message || 'Could not remove the off-site destination');
+    return true;
   },
 
   /** The backup that is queued or running, or null. At most one, by a partial unique index. */
