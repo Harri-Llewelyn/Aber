@@ -27,35 +27,11 @@ import { PageHeading } from '../common/PageHeading'
  * fallback below. The form for each lane is the asset's own Edit Details dialog.
  */
 export const LANES = [
-  {
-    id: 'devices',
-    label: 'Device details',
-    blurb: 'Name, description, type, connection and location.'
-  },
-  {
-    id: 'device_nameplate',
-    label: 'Device nameplate',
-    blurb: 'The IDTA Digital Nameplate a person asserts about a machine — manufacturer, serial, '
-      + 'versions.'
-  },
-  {
-    id: 'areas',
-    label: 'Area details',
-    blurb: 'An area’s name, its description and its icon. The name is also the <area> segment of '
-      + 'every uns/ topic beneath it.'
-  },
-  {
-    id: 'cells',
-    label: 'Cell details',
-    blurb: 'A cell’s name, description, Grafana dashboard and icon, and its area and place on the '
-      + 'plan.'
-  },
-  {
-    id: 'gateways',
-    label: 'Gateway details',
-    blurb: 'Name, description, access URL and where the gateway sits. Not what it IS, and not what '
-      + 'the platform observed about its health.'
-  },
+  { id: 'devices', label: 'Device details' },
+  { id: 'device_nameplate', label: 'Device nameplate' },
+  { id: 'areas', label: 'Area details' },
+  { id: 'cells', label: 'Cell details' },
+  { id: 'gateways', label: 'Gateway details' },
   /* No link lanes. 0108 withdrew `cell_links`, `gateway_links` and `device_links`: no UI ever filed
      one, and a link is attached directly through `link:manage`. LANE_BY_ID falls back rather than
      filtering, so a decided row left over from before still renders under its raw lane name. */
