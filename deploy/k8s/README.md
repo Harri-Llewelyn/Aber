@@ -1597,7 +1597,7 @@ What that costs is *not uniform*, and the difference is worth knowing before cho
 | :--- | :--- |
 | `supabase-db` | Recoverable from the nightly `pg_dump`, to the last run and no finer. Its `digital_thread` rows are append-only audit — **unreconstructable**, not merely inconvenient — so the dump is the whole safety net |
 | `timescaledb` | The same, but the dump is large and slow; a replicated class is what keeps the restore window sane |
-| `supabase-storage` | **Not in any dump** unless `backup.includeStorage` is on. It holds the 3D model objects, and `devices.model_3d_path` in the *backed-up* database points at them — so restoring the database alone leaves every row pointing at objects that no longer exist. An AAS shell then exports a `File` element with a dead URL, **silently**: the exporter composes that URL from the key without fetching it, so nothing detects the break until a viewer opens the shell |
+| `supabase-storage` | **Not in any dump** unless `backup.includeStorage` is on. It holds every bucket's objects (3D models, area plans, broker captures, export bundles), and rows in the *backed-up* database point at them, `devices.model_3d_path` among them — so restoring the database alone leaves those rows pointing at objects that no longer exist. An AAS shell then exports a `File` element with a dead URL, **silently**: the exporter composes that URL from the key without fetching it, so nothing detects the break until a viewer opens the shell |
 | `grafana` | SSO-created users, their org roles, and any dashboard saved through the UI. Provisioned dashboards come back from the repository; these do not |
 | `node-red` | The encrypted credentials, editor sessions and the editor-users map |
 
@@ -1625,7 +1625,8 @@ FDW gate exists to catch exactly that.
 
 Envoy reads its bootstrap once at start. The pod's `checksum/envoy-template` annotation
 rolls it when the **routes** change, but the API keys come from the Secret — which the chart may
-not even be able to see (`existingSecret`). After rotating `SUPABASE_ANON_KEY` or
+not even be able to see (`existingSecret`). After rotating any of the four keys its init container
+substitutes, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_ANON_KEY` or
 `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```bash

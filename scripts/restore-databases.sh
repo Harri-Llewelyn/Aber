@@ -267,7 +267,7 @@ log "  ok -- $AGGS continuous aggregate(s) present"
 
 # --- 3. Storage objects ------------------------------------------------------------------------
 if [ "$RESTORE_STORAGE" = "true" ] && [ -n "$STORAGE_NAME" ]; then
-  log "restoring 3D model objects"
+  log "restoring the storage objects (every bucket)"
   log "  SKIPPED: this script cannot reach the volume. Untar $STORAGE_NAME into the storage path."
 elif [ -z "$STORAGE_NAME" ]; then
   log "no storage archive in this backup -- devices.model_3d_path will point at absent objects"

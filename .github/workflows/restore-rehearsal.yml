@@ -58,7 +58,7 @@
 #                              backups.
 #   supabase-auth              so the rehearsal can prove a password set before the backup still
 #                              works after it, which is GoTrue's schema AND the JWT secret
-#   supabase-storage           the 3D model objects live on its volume
+#   supabase-storage           every bucket's objects live on its volume
 #   supabase-rest, envoy       the gateway the storage, auth and backup-request paths sit behind
 #   db-init                    the migration chain
 #

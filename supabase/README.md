@@ -4703,7 +4703,7 @@ logical dump cannot boot a dead appliance.
 ### Tier 1: logical dumps
 
 ```bash
-scripts/backup-databases.sh                  # both databases + the 3D model objects
+scripts/backup-databases.sh                  # both databases + the storage objects
 BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 ```
 
@@ -4718,7 +4718,7 @@ port-forwards (`npm run dev:forward`), and the passwords come from `POSTGRES_PAS
 | `BACKUP_FORMAT` | `plain` | `.sql.gz`. Use `custom` for `.dump` — selective `pg_restore`, and what the chart's CronJob writes |
 | `BACKUP_DIR` | `./backups` | |
 | `BACKUP_RETENTION_DAYS` | `14` | `0` disables pruning |
-| `INCLUDE_STORAGE` | `true` | The `asset-3d-models` objects |
+| `INCLUDE_STORAGE` | `true` | Every bucket's objects, as a tar of `STORAGE_HOST_PATH`: the storage volume's directory on this host, which must then be set |
 
 Without a port-forward, `kubectl exec` directly:
 
@@ -5000,6 +5000,15 @@ kubectl -n cert-manager create secret generic aber-ca-key-pair \
   --from-file=tls.crt=ca/tls.crt --from-file=tls.key=ca/tls.key --from-file=ca.crt=ca/ca.crt
 kubectl apply -f deploy/k8s/internal-ca.yaml
 ```
+
+**The buckets and their policies come back from the dump, not from the chart.** `storage.buckets`
+and the RLS policies on `storage.objects` are rows and objects in `supabase-db`, so the `--clean`
+restore replaces what the fresh install's storage-policies and storage-init Jobs created with the
+backup's copy. Nothing reconciles them to the chart until the next `helm upgrade`, when those two
+Jobs run again: until then a bucket added since the backup was taken is missing, and a bucket's
+settings and policies are the backup's. So run `helm upgrade` with the release's values once the
+restore is done. This follows from what the dump holds and from `restore-databases.sh`'s `--clean`;
+it has not been tested live, and the rehearsal does not assert it.
 
 **Rehearsed weekly, from a backup the service took.** `.github/workflows/restore-rehearsal.yml`
 asks for its backup the way the Backups page does, with an off-site destination set, and restores

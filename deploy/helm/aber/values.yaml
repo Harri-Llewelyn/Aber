@@ -1443,8 +1443,8 @@ backup:
   # whatever their age, so failures longer than the window leave the last good ones; a requested
   # backup is pinned until released. The CronJob prunes only after a dump succeeds. 0: no pruning.
   retentionDays: 14
-  # Also archive the 3D model objects from supabase-storage's PVC. The pg_dumps capture
-  # `devices.model_3d_path` but not the bytes it points at. Off by default because the PVC is
+  # Also archive every bucket's objects from supabase-storage's PVC. The pg_dumps capture the
+  # rows that name them (`devices.model_3d_path`, `areas.plan_path`) but not the bytes. Off by default because the PVC is
   # ReadWriteOnce: the Job must land on the storage pod's node (the chart adds a podAffinity),
   # and on a full or cordoned node it stays Pending. Check the first run completed. Prefer
   # Velero or a CSI snapshotter where available (supabaseStorage.podAnnotations).
