@@ -3612,6 +3612,11 @@ paths:
         Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the publishable key.
         The identities acted on come from `user_roles` and the forge's own lists, never from the
         request, so a caller holding the secret can only make the forge more correct, and sooner.
+
+        **One pass at a time** (migration `0025`). A pass holds a five-minute lease from before it
+        reads the forge until it answers; a call that finds the lease held does nothing and answers
+        200 with `already_sweeping: true`. The running pass, or the one its release then queues,
+        sees whatever that call was asked about.
       security:
         - apiKeyAuth: []
       parameters:
@@ -3619,6 +3624,14 @@ paths:
           name: x-sweep-secret
           required: true
           schema: { type: string }
+        - in: header
+          name: x-sweep-lease
+          required: false
+          description: >-
+            A lease the caller holds, from `claim_forge_sweep()` as `service_role`. The pass renews
+            it, runs under it and leaves it held, so no other pass runs between the caller's changes
+            and this one.
+          schema: { type: string, format: uuid }
       requestBody:
         required: false
         content:
@@ -3630,14 +3643,19 @@ paths:
         '200':
           description: >-
             The pass completed. `placed`, `removed`, `hooked`, `protected`, `rekeyed`, `revoked`,
-            `published` and `recorded` list what changed; `errors` lists what the forge refused, per
-            item; `warnings` lists what the sweep declined and was right to decline -- a released tag
-            found at other content than this build ships, which no retry clears and only a version
-            bump resolves.
+            `archived`, `restored`, `published` and `recorded` list what changed; `errors` lists what
+            the forge refused, per item; `warnings` lists what the sweep declined and was right to
+            decline -- a released tag found at other content than this build ships, which no retry
+            clears and only a version bump resolves. Or, with the body `{"already_sweeping": true}`
+            and nothing else, another pass holds the lease and this call did nothing.
         '401':
           description: The secret is missing or wrong.
+        '409':
+          description: The lease named in `x-sweep-lease` is not held, because it was released or lapsed and was taken over.
         '502':
-          description: The forge could not be reached or the organisation could not be read; nothing further was attempted.
+          description: >-
+            The forge could not be reached or the organisation could not be read, or the lease could
+            not be read; nothing further was attempted.
         '503':
           description: FORGE_SWEEP_SECRET is not configured, or this deployment has no forge.
   /functions/v1/forge-signout:

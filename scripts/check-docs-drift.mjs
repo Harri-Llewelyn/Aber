@@ -885,6 +885,10 @@ function edgeFunctionNames() {
       'one row holding the in-flight pg_net request id for the Prometheus liveness probe (0054). ' +
       'RLS on with no policy and the anon/authenticated grants revoked -- infrastructure, and a ' +
       'writable request-id table would let a caller redirect where the probe reads liveness from',
+    forge_sweep_lease:
+      'one row saying which forge-sweep pass may run (0025). RLS on with no policy, nothing granted ' +
+      'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +
+      'RPCs that forge-sweep calls, and a browser has no reason to see which pass is running',
     schema_bootstrap:
       'one row recording whether db-init reached the end of the migration chain on this boot ' +
       '(0072). RLS on with no policy and the anon/authenticated grants revoked -- it is bootstrap ' +

@@ -17,6 +17,12 @@ own sweep_forge() answers true, which is
 "asked" -- that call is asynchronous, and the function itself is what the rest of this file drives
 directly.
 
+ONE PASS AT A TIME (0025). A pass claims a lease and a call that finds it held answers
+`already_sweeping`. Every test here holds that lease from setUp to cleanup and runs its own passes
+under it (`x-sweep-lease`), so the database's own asks -- the schedule, an archive's trigger, one
+a previous test queued -- are refused while it runs, and the report a test reads is the report of
+the pass that made the change.
+
 Needs the stack, the forge, the seeded personas, the gateways organisation (one enrolment creates
 it) and FORGE_SWEEP_SECRET, the value the edge runtime holds (read it from .env). Skips without them.
 
@@ -36,6 +42,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
@@ -70,11 +77,39 @@ RETIRED_FLOW_SHAPE_CONTEXT = "acs/flow-shape"
 TEST_GW_ID = "f5aee000-0000-4000-8000-000000000001"
 HAND_MADE_REPOSITORY = "playbook-sweep-test"
 
+# The lease the suite asks for, as the function does (LEASE_SECONDS in index.ts), and how long it
+# waits for one: past a lease a dead pass left, so waiting ends in the lease or in a real fault.
+LEASE_SECONDS = 300
+LEASE_WAIT = LEASE_SECONDS + 30
 
-def sweep(secret=SWEEP_SECRET, with_secret=True):
+# The lease the running test holds (ForgeSweepBase.setUp). sweep() runs every pass under it.
+held_lease = None
+
+
+def claim_lease(seconds=LEASE_SECONDS, wait=LEASE_WAIT):
+    """The sweep lease, waiting while a pass holds it. Raises when none came within `wait`."""
+    deadline = time.monotonic() + wait
+    while True:
+        _, holder = rest("/rpc/claim_forge_sweep", method="POST", body={"p_seconds": seconds})
+        if holder:
+            return holder
+        if time.monotonic() > deadline:
+            raise AssertionError(f"the sweep lease stayed held for {wait}s")
+        time.sleep(1)
+
+
+def release_lease(holder):
+    _, released = rest("/rpc/release_forge_sweep", method="POST", body={"p_holder": holder})
+    return released
+
+
+def post_sweep(secret=SWEEP_SECRET, with_secret=True, lease=None):
+    """One call to the function, answered as it is."""
     headers = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}", "Content-Type": "application/json"}
     if with_secret:
         headers["x-sweep-secret"] = secret
+    if lease:
+        headers["x-sweep-lease"] = lease
     req = urllib.request.Request(f"{SUPABASE_URL}/functions/v1/forge-sweep", method="POST", data=b"{}", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=120) as response:
@@ -82,6 +117,24 @@ def sweep(secret=SWEEP_SECRET, with_secret=True):
     except urllib.error.HTTPError as err:
         text = err.read().decode()
         return err.code, (json.loads(text) if text.strip() else None)
+
+
+def sweep(secret=SWEEP_SECRET, with_secret=True):
+    """
+    One pass, under the lease the running test holds. With none held, a call that meets another
+    pass waits for it and asks again: `already_sweeping` says when to ask, and is never the result.
+    """
+    deadline = time.monotonic() + LEASE_WAIT
+    while True:
+        status, body = post_sweep(secret, with_secret, lease=held_lease)
+        if status != 200 or not (body or {}).get("already_sweeping") or time.monotonic() > deadline:
+            return status, body
+        time.sleep(1)
+
+
+def psql(sql):
+    """One statement as the database owner, inside the database pod: net is not exposed."""
+    return stack_exec.output("supabase-db", "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", sql).strip()
 
 
 def forge(path, method="GET", body=None):
@@ -116,6 +169,20 @@ class ForgeSweepBase(unittest.TestCase):
         if status != 200:
             raise unittest.SkipTest(f"the '{ORGANISATION}' organisation does not exist yet; enrol one gateway to create it")
 
+    def setUp(self):
+        self.hold()
+        self.addCleanup(self.let_go)
+
+    def hold(self, wait=LEASE_WAIT):
+        global held_lease
+        held_lease = claim_lease(wait=wait)
+
+    def let_go(self):
+        global held_lease
+        if held_lease:
+            release_lease(held_lease)
+            held_lease = None
+
 
 class TestTheSecret(ForgeSweepBase):
     def test_a_call_without_the_secret_is_refused(self):
@@ -136,6 +203,60 @@ class TestTheSecret(ForgeSweepBase):
         # retry that clears it, so it answers in `warnings` and this assertion stays meaningful on a
         # development forge whose playbook has moved on from its tag.
         self.assertEqual(body["errors"], [], body)
+
+
+class TestOnePassAtATime(ForgeSweepBase):
+    """
+    THE LEASE (0025). Two passes at once each list what the forge holds and each write what is
+    missing: two webhooks on one repository was the case seen. The test holds the lease, which is
+    what any call meets while another pass runs.
+    """
+
+    def test_a_call_while_another_pass_runs_does_nothing_and_says_so(self):
+        started = time.monotonic()
+        status, body = post_sweep()
+        # 200: pg_net records the status, and a call that found a pass running did not fail.
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body, {"already_sweeping": True})
+        self.assertLess(time.monotonic() - started, 15, "a refused call answered only after a pass")
+
+    def test_a_lease_the_caller_does_not_hold_is_refused(self):
+        for lease in (str(uuid.uuid4()), "not-a-lease"):
+            status, body = post_sweep(lease=lease)
+            self.assertEqual(status, 409, body)
+
+    def test_a_lapsed_lease_is_taken_over_and_a_pass_lets_go_before_it_answers(self):
+        # A pass that died holding the lease: claimed for a second and never released.
+        self.let_go()
+        dead = claim_lease(seconds=1)
+        time.sleep(2)
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIsInstance(body.get("errors"), list, f"no pass ran past a lapsed lease: {body}")
+        # Whatever took it over, the dead holder can neither end it nor run under it.
+        self.assertFalse(release_lease(dead))
+        self.assertEqual(post_sweep(lease=dead)[0], 409)
+
+        # Released before the answer, so the lease is free once any pass the release queued has
+        # run. A pass lives at most a minute; a lease left held would last five.
+        self.hold(wait=90)
+
+    def test_a_call_the_database_queued_meets_the_lease_and_is_recorded_as_answered(self):
+        """
+        Refused is not failed. pg_net records the status each call met, and it is the only record
+        of a sweep the database asked for, so a refusal there must read as an answer.
+        """
+        before = int(psql("SELECT coalesce(max(id), 0) FROM net._http_response") or 0)
+        status, answer = rest("/rpc/sweep_forge", method="POST", body={})
+        self.assertEqual(status, 200, answer)
+        self.assertTrue(answer, "sweep_forge() answered false: the Vault holds no sweep secret")
+        outcome, deadline = "", time.monotonic() + 75  # the call's own timeout is 60s
+        while not outcome and time.monotonic() < deadline:
+            time.sleep(1)
+            outcome = psql(f"SELECT status_code FROM net._http_response WHERE id > {before} "
+                           f"AND content LIKE '%already_sweeping%' ORDER BY id LIMIT 1")
+        self.assertEqual(outcome, "200", "the database's call was not answered already_sweeping within 75s")
 
 
 class TestMembership(ForgeSweepBase):
@@ -276,6 +397,33 @@ class TestRepositories(ForgeSweepBase):
         self.assertNotIn(self.repo, body["hooked"], body)
         self.assertNotIn(self.repo, body["protected"], body)
 
+    def test_a_second_push_webhook_of_ours_is_removed(self):
+        """
+        Two registrations that raced -- two passes, or a pass and an enrolment -- each found no hook
+        and each created one, and forge-events then receives every push twice. The sweep keeps the
+        one enrolment registered and removes the other.
+        """
+        self.enrol()
+        ours = self.our_hooks()
+        if not ours:
+            self.skipTest("enrolment registered no hook; GITEA_WEBHOOK_SECRET is unset on this stack")
+        (original,) = ours
+        status, created = forge(f"/repos/{ORGANISATION}/{self.repo}/hooks", method="POST", body={
+            "type": "gitea", "active": True, "events": ["push"], "branch_filter": original["branch_filter"],
+            "config": {"url": original["config"]["url"], "content_type": "json", "secret": "a-second-registration"},
+        })
+        self.assertEqual(status, 201, created)
+        self.assertEqual(len(self.our_hooks()), 2)
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIn(self.repo, body["hooked"], body)
+        self.assertEqual([h["id"] for h in self.our_hooks()], [original["id"]])
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertNotIn(self.repo, body["hooked"], body)
+
     def gateway_row(self):
         _, rows = rest(f"/gateways?id=eq.{TEST_GW_ID}&select=enrolled_at,forge_repository_at")
         return rows[0]
@@ -382,10 +530,9 @@ class TestRepositories(ForgeSweepBase):
                                 "status_check_contexts": [RETIRED_FLOW_SHAPE_CONTEXT, "site/extra-check"]})
         self.assertEqual(status, 200)
 
-        # The forge's rule, not which sweep reports repairing it: one the database asked for can
-        # land first.
         status, body = sweep()
         self.assertEqual(status, 200, body)
+        self.assertIn(self.repo, body["protected"], body)
         status, main = self.rule("main")
         self.assertEqual(status, 200)
         self.assertTrue(main["enable_status_check"], main)
@@ -436,10 +583,10 @@ class TestRepositories(ForgeSweepBase):
         status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
         self.assertIn(status, (200, 204))
         try:
-            # The archive asks the database for a sweep too, and that one may get there first, so
-            # the forge's state is the assertion, not which sweep reports the archive.
+            # The archive asks the database for a sweep too, which meets the lease this test holds.
             status, body = sweep()
             self.assertEqual(status, 200, body)
+            self.assertIn(self.repo, body["archived"], body)
 
             repo = self.repository()
             self.assertTrue(repo["archived"], "the repository of an archived gateway is still live")
@@ -530,9 +677,9 @@ class TestRepositories(ForgeSweepBase):
         status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
         self.assertIn(status, (200, 204))
         try:
-            # As above: the database's own sweep may revoke the key first.
             status, body = sweep()
             self.assertEqual(status, 200, body)
+            self.assertTrue(any(entry.startswith(f"{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}") for entry in body["revoked"]), body)
             _, platform_keys = forge(f"/repos/{PLATFORM_ORGANISATION}/{PLATFORM_REPOSITORY}/keys?limit=50")
             self.assertEqual([k for k in platform_keys if k["title"] == own["title"]], [])
         finally:
@@ -860,11 +1007,9 @@ class TestTheSchedule(ForgeSweepBase):
         """
         "Asked" is not enough: pg_net records a call that never reached a server in
         net._http_response and tells no one. The address is the Vault's supabase_functions_url,
-        which revoke_gateway_credential() posts to as well, so this covers both callers.
+        which revoke_gateway_credential() posts to as well, so this covers both callers. The test
+        holds the lease, so the function answers `already_sweeping` at once, which is an answer.
         """
-        def psql(sql):
-            return stack_exec.output("supabase-db", "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", sql).strip()
-
         before = int(psql("SELECT coalesce(max(id), 0) FROM net._http_response") or 0)
         status, answer = rest("/rpc/sweep_forge", method="POST", body={})
         self.assertEqual(status, 200, answer)

@@ -29,6 +29,9 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * ships in every browser bundle. An unset secret is 503, never a pass. The identities acted on come
  * from `user_roles` and the forge's lists, never from a parameter, so a caller holding the secret
  * can only make the forge more correct, and sooner.
+ *
+ * One pass at a time (0025): every step reads the forge and then writes, so two passes at once
+ * both write. A call that finds another pass holding the lease answers 200 `already_sweeping`.
  */
 
 import {
@@ -80,6 +83,16 @@ const DASHBOARD_IDENTITY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 
 /** Gitea's page size ceiling is configurable and 50 is under every default. */
 const PAGE = 50;
+
+/**
+ * How long a pass holds the sweep lease. Above the 60 seconds the edge runtime gives a worker
+ * (main/index.ts) and pg_net gives the call, so it outlasts a pass only when the pass died
+ * holding it. Raise it with either limit.
+ */
+const LEASE_SECONDS = 300;
+
+/** A holder id as claim_forge_sweep() returns it. */
+const LEASE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface Summary {
   placed: string[];
@@ -547,6 +560,26 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
   return true;
 }
 
+/** The lease RPC failed, so whether another pass is running is unknown and none is started. */
+function leaseUnreadable(details: string): Response {
+  console.error(`forge-sweep: could not read the sweep lease: ${details}`);
+  return json({ error: "Could not read the sweep lease", details }, 502);
+}
+
+/** Never throws: the pass has already answered for itself, and a lease left held lapses. */
+async function releaseLease(admin: ReturnType<typeof serviceRoleClient>, holder: string): Promise<void> {
+  try {
+    const { data, error } = await admin.rpc("release_forge_sweep", { p_holder: holder });
+    if (error) throw new Error(error.message);
+    if (!data) console.warn("forge-sweep: this pass outlived its lease, which another pass then took");
+  } catch (err) {
+    console.error(
+      `forge-sweep: could not release the sweep lease (${err instanceof Error ? err.message : err}); ` +
+        `it lapses within ${LEASE_SECONDS}s`,
+    );
+  }
+}
+
 let saidNoForge = false;
 
 export default async function handler(req: Request): Promise<Response> {
@@ -573,11 +606,34 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: "This deployment has no forge configured" }, 503);
   }
 
+  const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+  // A caller that holds the lease itself names it in x-sweep-lease: the pass runs under it and
+  // leaves it held, so nothing else sweeps between that caller's changes and its own pass.
+  const named = req.headers.get("x-sweep-lease");
+  let holder: string | null = null;
+  if (named !== null) {
+    const renewed = LEASE_ID.test(named)
+      ? await admin.rpc("renew_forge_sweep", { p_holder: named, p_seconds: LEASE_SECONDS })
+      : { data: false, error: null };
+    if (renewed.error) return leaseUnreadable(renewed.error.message);
+    if (!renewed.data) return json({ error: "The lease named in x-sweep-lease is not held" }, 409);
+  } else {
+    const claimed = await admin.rpc("claim_forge_sweep", { p_seconds: LEASE_SECONDS });
+    if (claimed.error) return leaseUnreadable(claimed.error.message);
+    // 200, not an error status: pg_net records the status, and nothing failed. The pass holding
+    // the lease, or the one its release queues, sees whatever this call was asked about.
+    if (!claimed.data) {
+      console.log("forge-sweep: another pass holds the lease; this call did nothing");
+      return json({ already_sweeping: true }, 200);
+    }
+    holder = claimed.data as string;
+  }
+
   const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], warnings: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const readersId = await ensurePlatformOrganisation(cfg);
-    const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     await sweepMembership(cfg, admin, teamIds, readersId, summary);
     // The platform repository before the gateway repositories, so the keys have somewhere to go.
     const platform = await sweepPlatform(cfg, summary);
@@ -586,6 +642,9 @@ export default async function handler(req: Request): Promise<Response> {
     const details = err instanceof Error ? err.message : String(err);
     console.error(`forge-sweep: the sweep could not complete: ${details}`);
     return json({ error: "The sweep could not complete", details, ...summary }, 502);
+  } finally {
+    // Before the answer, so a caller that has it can claim at once.
+    if (holder) await releaseLease(admin, holder);
   }
 
   // A warning is not a change, so it does not make a quiet sweep speak: nothing was done, and the
