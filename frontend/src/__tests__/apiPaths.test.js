@@ -25,7 +25,7 @@ vi.mock('../lib/supabaseClient', () => {
     SUPABASE_GATEWAY_KEY: 'sb_publishable_test',
     supabase: {
       from: vi.fn(() => mockQueryBuilder),
-      // '/api/v1/digital-thread' is served by the digital_thread_page RPC. This path only has to
+      // '/api/v1/audit-trail' is served by the audit_trail_page RPC. This path only has to
       // not throw here; what it sends is asserted in apiRelationships.test.js.
       rpc: vi.fn().mockResolvedValue({
         data: { events: [], purged_assets: 0, truncated: false }, error: null
@@ -62,8 +62,8 @@ describe('API Path Coverage Test', () => {
     '/api/v1/devices',
     '/api/v1/assets',
     '/api/v1/quarantine',
-    '/api/v1/digital-thread',
-    '/api/v1/cells/some-id/digital-thread',
+    '/api/v1/audit-trail',
+    '/api/v1/cells/some-id/audit-trail',
     '/api/v1/links?entity_type=cell&entity_id=123',
     '/api/v1/devices/dev-123/config',
     '/api/v1/schemas',

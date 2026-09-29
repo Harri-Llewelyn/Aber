@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab';
+import { AuditTrailTab } from '../components/tabs/AuditTrailTab';
 import { api } from '../api';
 
 /**
@@ -14,7 +14,7 @@ const DEVICE_ID = '11111111-2222-3333-4444-555555555555';
 
 /**
  * Post-mapping shape, which is what the component receives. api.get is mocked here, so
- * `mapDigitalThreadRow` never runs and the fixture must carry `event_id`, `event_type` and
+ * `mapAuditTrailRow` never runs and the fixture must carry `event_id`, `event_type` and
  * `timestamp` rather than the raw column names.
  */
 const events = [
@@ -30,7 +30,7 @@ const events = [
 beforeEach(() => {
   vi.clearAllMocks();
   api.get.mockImplementation((url) => {
-    if (url.startsWith('/api/v1/digital-thread')) return Promise.resolve(events);
+    if (url.startsWith('/api/v1/audit-trail')) return Promise.resolve(events);
     if (url === '/api/v1/devices') {
       return Promise.resolve([{ asset_id: DEVICE_ID, asset_name: 'Simulated_CNC_01' }]);
     }
@@ -38,32 +38,32 @@ beforeEach(() => {
   });
 });
 
-const threadCalls = () =>
-  api.get.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/v1/digital-thread'));
+const trailCalls = () =>
+  api.get.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/v1/audit-trail'));
 
-describe('DigitalThreadTab handover', () => {
+describe('AuditTrailTab handover', () => {
   it('narrows to the handed-over device', async () => {
-    render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 
-    await waitFor(() => expect(threadCalls().length).toBeGreaterThan(0));
+    await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0));
     // The id lands in the name filter because that filter matches on id as well as name, which is
     // what makes the handover exact rather than a name search that could match two devices. The
     // database matches it now (0115), so a handover from a DELETED asset's page works too.
     expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(DEVICE_ID);
     await waitFor(() =>
-      expect(threadCalls().some((url) => url.includes(`search=${DEVICE_ID}`))).toBe(true));
-    expect(threadCalls().some((url) => url.includes('entity_type=DEVICE'))).toBe(true);
+      expect(trailCalls().some((url) => url.includes(`search=${DEVICE_ID}`))).toBe(true));
+    expect(trailCalls().some((url) => url.includes('entity_type=DEVICE'))).toBe(true);
   });
 
   it('shows everything when opened without a handover', async () => {
-    render(<DigitalThreadTab />);
-    await waitFor(() => expect(threadCalls().length).toBeGreaterThan(0));
-    expect(threadCalls().every((url) => !url.includes('search='))).toBe(true);
+    render(<AuditTrailTab />);
+    await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0));
+    expect(trailCalls().every((url) => !url.includes('search='))).toBe(true);
   });
 
   it('lets Clear Filters actually clear the handover', async () => {
     const onClearEntity = vi.fn();
-    render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={onClearEntity} />);
+    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={onClearEntity} />);
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(DEVICE_ID));
 
@@ -78,12 +78,12 @@ describe('DigitalThreadTab handover', () => {
   it('re-narrows when a second device is handed over', async () => {
     const other = '99999999-8888-7777-6666-555555555555';
     const { rerender } = render(
-      <DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />
+      <AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />
     );
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(DEVICE_ID));
 
-    rerender(<DigitalThreadTab initialEntity={{ id: other, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    rerender(<AuditTrailTab initialEntity={{ id: other, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value).toBe(other));
@@ -92,7 +92,7 @@ describe('DigitalThreadTab handover', () => {
   // The fixture is the shape api.js emits, so the row it produces has to render completely.
   // Asserted so the fixture cannot drift back to raw column names.
   it('renders the handed-over event in full', async () => {
-    render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 
     // One lane, one marker. The description and the mutation id moved into the drawer -- they
     // describe one EVENT, and a lane is one ASSET.
@@ -111,10 +111,10 @@ describe('DigitalThreadTab handover', () => {
   /* The reason the default range is All time: this fixture is dated 2026-08-10 and never refreshed,
      and an operator asking for one asset's history means all of it. */
   it('requests an unbounded window, so an old asset history is not silently empty', async () => {
-    render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 
-    await waitFor(() => expect(threadCalls().length).toBeGreaterThan(0));
-    expect(threadCalls().every((url) => !url.includes('since='))).toBe(true);
+    await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0));
+    expect(trailCalls().every((url) => !url.includes('since='))).toBe(true);
     expect(await screen.findByRole('button', { name: /UPDATE on Simulated_CNC_01/ })).toBeInTheDocument();
   });
 });

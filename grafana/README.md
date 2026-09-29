@@ -38,7 +38,7 @@ dashboard tell an asset alert from a fleet one. A rule about a machine goes in a
 and needs a metric that exists in `metric_catalog`, which `check-docs-drift.mjs` asserts.
 
 **Datasources.** The `supabase` datasource connects as `grafana_reader`, which may `SELECT` the
-views the rules name (`platform_health`, `gateway_health`, `digital_thread_partition_health`,
+views the rules name (`platform_health`, `gateway_health`, `audit_trail_partition_health`,
 `storage_footprint`, `backup_health`) and no base table, so a browser-SSO-fronted service never holds the plant's
 inventory; a rule that queried `public.devices` fails as `permission denied` and sits in error
 health. `asset_config` lives in Supabase and `postgres_fdw` runs Supabase → TimescaleDB only, so a
@@ -83,7 +83,7 @@ from the cause.
 
 **Grafana is not given `service_role`, and that is the whole point of the file.** The obvious way
 to let Grafana write to Supabase is to hand it the service-role key. That key bypasses RLS
-entirely and can rewrite `digital_thread`, and this stack has already corrected exactly this shape
+entirely and can rewrite `audit_trail`, and this stack has already corrected exactly this shape
 once: Grafana used to connect to the historian as the `postgres` superuser, a service fronted by
 browser SSO holding the credential that owns the database, and the fix was the read-only
 `grafana_reader` role. Handing it `service_role` would be strictly worse than the credential that
@@ -303,9 +303,9 @@ the remedies differ. Five minutes because the trigger is a directory that is bri
 and the daemon does not retry these, so recovery waits on the next rebirth timer or an operator's
 request.
 
-### Digital Thread Partitions Falling Behind (`aber-digital-thread-partitions`)
+### Audit Trail Partitions Falling Behind (`aber-audit-trail-partitions`)
 
-Warning, `for: 30m`. `digital_thread` is range-partitioned by month and a pg_cron job keeps three
+Warning, `for: 30m`. `audit_trail` is range-partitioned by month and a pg_cron job keeps three
 months ahead; a cron job that stops is silent. A default partition absorbs the rows so asset writes
 never fail, which is why this is a warning and not critical. The condition is `default_rows > 0`,
 because a row filed outside its month is never detached with it. Thirty minutes since the job runs

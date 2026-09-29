@@ -50,7 +50,7 @@ import { HelpTip } from '../common/HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
+export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [gateways, setGateways] = useState([])
@@ -242,7 +242,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
   /* One form, two endings (utils/proposeFromForm.js). Derived rather than stored, so it cannot
@@ -1116,11 +1116,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 ? 'Requires Admin permissions'
                 : 'Edit gateway configuration'
           },
-          /* Withheld from a reader who may not open the page: the nav hides Digital Thread without
-             `digital_thread:read`. `.filter(Boolean)` drops it. */
-          canReadThread && {
-            label: 'View Digital Thread', icon: <IconHistory size={13} />,
-            onClick: () => onViewThread?.(selected),
+          /* Withheld from a reader who may not open the page: the nav hides Audit Trail without
+             `audit_trail:read`. `.filter(Boolean)` drops it. */
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            onClick: () => onViewTrail?.(selected),
             title: 'Open the immutable audit trace for this gateway'
           },
           {

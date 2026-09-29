@@ -162,7 +162,7 @@ describe('GatewayCredentialModal', () => {
     await confirmAndMint()
 
     await waitFor(() => {
-      expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Digital Thread'), 'error')
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Audit Trail'), 'error')
     })
     // And the password is still shown -- the account exists, and withholding it would strand one
     // nobody can ever authenticate as.

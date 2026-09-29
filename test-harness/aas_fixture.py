@@ -175,7 +175,7 @@ def teardown(base, token, anon):
     """
     Remove the subject. Best effort: a failure here must not fail a suite that passed.
 
-    `digital_thread` is deliberately NOT touched -- it is append-only by design, and these deletes
+    `audit_trail` is deliberately NOT touched -- it is append-only by design, and these deletes
     APPEND to it. See 0020: "the purge is itself recorded".
     """
     for path in (

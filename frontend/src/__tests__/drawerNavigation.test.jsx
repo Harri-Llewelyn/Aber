@@ -104,7 +104,7 @@ const chip = (name) => within(panel()).getByRole('button', { name: new RegExp(na
 describe('a drawer names its neighbours, and each one is a way to reach them', () => {
   it('cell drawer -> gateway chip hands over the gateway id', async () => {
     const onSelectGateway = vi.fn()
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       onSelectDevice={vi.fn()} onSelectGateway={onSelectGateway} />)
     await openRow('Assembly Line 1')
 
@@ -114,7 +114,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
 
   it('cell drawer -> device chip hands over the device id', async () => {
     const onSelectDevice = vi.fn()
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       onSelectDevice={onSelectDevice} onSelectGateway={vi.fn()} />)
     await openRow('Assembly Line 1')
 
@@ -123,7 +123,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
   })
 
   it('keeps the cell\'s online figure on the label, so the chips did not cost the summary', async () => {
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await openRow('Assembly Line 1')
 
@@ -134,7 +134,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
 
   it('gateway drawer -> device chip hands over the device id', async () => {
     const onSelectDevice = vi.fn()
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="" onClearFilter={vi.fn()} onSelectDevice={onSelectDevice} />)
     await openRow('Sim_Gateway_CNC')
 
@@ -144,7 +144,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
 
   it('device drawer -> schema chip hands over the schema uuid', async () => {
     const onSelectSchema = vi.fn()
-    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="" onClearFilter={vi.fn()} onSelectSchema={onSelectSchema} />)
     await openRow('Sim_CNC_Mill_01')
 
@@ -166,7 +166,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
 /** The device drawer's schema field, which was the defect rather than a missing convenience. */
 describe('the device drawer resolves a schema by either route', () => {
   const renderDevices = (extra = {}) => render(
-    <DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    <DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="" onClearFilter={vi.fn()} onSelectSchema={vi.fn()} {...extra} />
   )
 
@@ -362,26 +362,26 @@ describe('useArrivalSelection', () => {
 /** The four pages, each opening the entity it was handed. */
 describe('arriving with an identifier opens that entity\'s drawer', () => {
   it('Devices, by asset id', async () => {
-    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="dev-1" onClearFilter={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
     expect(within(panel()).getByText('Sim_CNC_Mill_01')).toBeTruthy()
   })
 
   it('Devices, by sparkplug id -- which is what an alert row carries', async () => {
-    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="dev220000000000400080000" onClearFilter={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
   })
 
   it('Gateways, by gateway id', async () => {
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="gw-1" onClearFilter={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
   })
 
   it('Cells, by cell id', async () => {
-    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} initialSearchFilter="cell-1" />)
     await waitFor(() => expect(isOpen()).toBe(true))
   })
@@ -396,7 +396,7 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
   })
 
   it('opens nothing when the page is merely searched', async () => {
-    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewThread={vi.fn()}
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="Mill" onClearFilter={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Sim_CNC_Mill_01')).toBeInTheDocument())
     expect(isOpen()).toBe(false)

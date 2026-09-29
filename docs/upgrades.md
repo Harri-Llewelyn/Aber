@@ -256,10 +256,10 @@ bash scripts/restore-databases.sh         # the other half
 ```
 
 **Restore is a runbook, not a button** — [`supabase/README.md`](../supabase/README.md) §*Backup and
-Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `digital_thread`, so
+Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `audit_trail`, so
 the bytes are deliberately never handed to a browser.
 
-**`digital_thread` is the reason this matters more than it looks.** It is append-only audit and is
+**`audit_trail` is the reason this matters more than it looks.** It is append-only audit and is
 unreconstructable from anything else, so it is the one table for which "restore from backup" is the
 entire recovery story.
 
@@ -313,7 +313,7 @@ token** and is a manual act, per appliance.
 - **Its devices are untouched.** `enroll-gateway` does not reference the `devices` table at all.
   Approved devices stay approved and stay bound; they are not re-quarantined and do not need
   re-approving.
-- **History survives.** `telemetry`, `digital_thread` and `platform_alerts` all key on identity that
+- **History survives.** `telemetry`, `audit_trail` and `platform_alerts` all key on identity that
   did not change.
 
 So re-bundling is *re-provisioning an appliance*, not *re-registering an asset*. That is a much

@@ -4,7 +4,7 @@ import { IconX } from '../common/Icons'
 
 /**
  * What the keyboard does, in one place. Every row is a shortcut that exists; the application binds
- * the palette, its two movement keys and its opener, the Digital Thread drawer's two stepping keys,
+ * the palette, its two movement keys and its opener, the Audit Trail drawer's two stepping keys,
  * plus Escape through one hook. The browser's own keys are included because Tab is the only way to
  * reach the navigation rail without a mouse, and it makes the rail expand. Plain strings, never
  * matched against: the bindings live with the components that own them.
@@ -29,9 +29,9 @@ export function shortcutGroups({ mac = false } = {}) {
       ]
     },
     {
-      title: 'Digital Thread',
+      title: 'Audit Trail',
       items: [
-        // Bound by DigitalThreadTab, and only while its drawer has a selected event.
+        // Bound by AuditTrailTab, and only while its drawer has a selected event.
         { keys: ['←', '→'], join: 'or', description: 'Step to the previous or next change to the selected asset' }
       ]
     },

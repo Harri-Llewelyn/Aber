@@ -17,10 +17,10 @@ vi.mock('../api', async () => {
 
 const SETTINGS = [
   {
-    id: '2', key: 'ui.digital_thread_poll_seconds', value: 60, value_type: 'number',
-    category: 'Digital Thread', label: 'Refresh interval (seconds)',
-    description: 'How often the Digital Thread re-reads the audit log.',
-    fallback_source: 'the 60_000 ms interval in DigitalThreadTab.jsx',
+    id: '2', key: 'ui.audit_trail_poll_seconds', value: 60, value_type: 'number',
+    category: 'Audit Trail', label: 'Refresh interval (seconds)',
+    description: 'How often the Audit Trail re-reads the audit log.',
+    fallback_source: 'the 60_000 ms interval in AuditTrailTab.jsx',
     updated_at: '2026-08-22T10:00:00Z', updated_by: null
   },
   {
@@ -130,14 +130,14 @@ describe('the page', () => {
     // every row: the page is a list of controls, not a manual.
     const tip = screen.getByRole('button', { name: 'About Refresh interval (seconds)' })
     fireEvent.mouseEnter(tip)
-    expect(screen.getByRole('tooltip')).toHaveTextContent(/How often the Digital Thread/)
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/How often the Audit Trail/)
   })
 
   it('names what applies when a setting has never been changed', async () => {
     /* An absent row is not an absent value: the fallback is the first thing to check when a setting
        appears to do nothing, so the page names it. */
     await show()
-    expect(screen.getByText('the 60_000 ms interval in DigitalThreadTab.jsx')).toBeInTheDocument()
+    expect(screen.getByText('the 60_000 ms interval in AuditTrailTab.jsx')).toBeInTheDocument()
   })
 
   it('offers no way to add or delete a setting', async () => {
@@ -165,7 +165,7 @@ describe('the page', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
 
     await waitFor(() => expect(api.patchSetting).toHaveBeenCalled())
-    expect(api.patchSetting).toHaveBeenCalledWith('ui.digital_thread_poll_seconds', 45)
+    expect(api.patchSetting).toHaveBeenCalledWith('ui.audit_trail_poll_seconds', 45)
   })
 
   it('refuses a malformed value locally rather than sending it', async () => {
@@ -221,10 +221,10 @@ describe('the page', () => {
   })
 
   it('offers each category as its own tab, and shows one at a time', async () => {
-    /* Category drives the page's sections, and a retention window is not a Digital Thread control.
+    /* Category drives the page's sections, and a retention window is not an Audit Trail control.
        The tab is now the only place a category is named, so these queries are unambiguous. */
     await show()
-    expect(screen.getByRole('tab', { name: /^Digital Thread/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^Audit Trail/ })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /^Retention/ })).toBeInTheDocument()
 
     // The first category the API returned is selected, and the other category's rows are absent.

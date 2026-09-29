@@ -1,6 +1,6 @@
 ## Summary
 
-Platform settings an administrator owns: retention windows, thresholds, and the switches that decide what the stack does on its own. Everything here is a stored value with a name, and every change lands in the Digital Thread as a row.
+Platform settings an administrator owns: retention windows, thresholds, and the switches that decide what the stack does on its own. Everything here is a stored value with a name, and every change lands in the Audit Trail as a row.
 
 ## What the controls do
 

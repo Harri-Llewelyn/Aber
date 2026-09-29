@@ -10,11 +10,11 @@
  * `python supabase/migrations/test_audit_domain.py`, no environment set -- points at production
  * data, and always has.
  *
- * Most of them roll back. It does not help as much as it sounds: `digital_thread` is append-only by
+ * Most of them roll back. It does not help as much as it sounds: `audit_trail` is append-only by
  * 0003, and the rows a rolled-back test provokes are the ones a COMMITTED fixture leaves behind.
  * On this stack, at the time this was written:
  *
- *     525 digital_thread rows total
+ *     525 audit_trail rows total
  *     346 of them (66%) stamped actor_source = 'migration'
  *
  * and not one of those 346 was written by a migration. `Test_Host_Run_Gateway` and
@@ -68,7 +68,7 @@
  *
  * Everything above builds the schema by replaying the chain onto nothing, which is what CI does and
  * what the migrations' own self-checks run against. A migration that asserts over ACCUMULATED ROWS
- * is invisible to all of it. 0120 asserted that no row in `digital_thread` disagreed with the
+ * is invisible to all of it. 0120 asserted that no row in `audit_trail` disagreed with the
  * audit-domain classifier -- true of an empty database, false of any deployed stack, because a
  * retired entity type's rows keep the lane they were stamped with and nothing backfills them. It
  * passed 29 suites twice and then failed db-init four times on the dev cluster.
@@ -299,7 +299,7 @@ if (history) loadHistoryAndReplay()
 // WHY THIS EXISTS, AND WHAT IT COST NOT TO HAVE IT. Every verification path in this repository
 // replays the chain onto an EMPTY database: CI, this script, and the migrations' own self-checks.
 // An assertion whose subject is accumulated data is invisible to all three, and the first thing it
-// meets is a deployment. 0120 asserted that no row in digital_thread disagreed with the classifier
+// meets is a deployment. 0120 asserted that no row in audit_trail disagreed with the classifier
 // -- true of an empty database, false of any stack with history, because a retired entity type's
 // rows keep the lane they were stamped with. It passed 29 suites twice and then failed db-init
 // four times on the dev cluster, taking the Helm upgrade with it.
@@ -445,7 +445,7 @@ function loadHistoryAndReplay () {
   const loaded = psql(['-f', '/tmp/history.sql'])
   if (loaded.status !== 0) die('the history did not load.', loaded.stderr || loaded.stdout)
 
-  const rows = psql(['-Atc', 'SELECT count(*) FROM public.digital_thread;'])
+  const rows = psql(['-Atc', 'SELECT count(*) FROM public.audit_trail;'])
   console.log(c.dim(`  ${rows.stdout.trim()} audit rows in place`))
 
   // THE ASSERTION. Everything above is setup; this is a boot of a deployed stack, and a migration

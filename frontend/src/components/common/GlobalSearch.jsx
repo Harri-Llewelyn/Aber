@@ -7,7 +7,7 @@ import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, I
 /**
  * One box that answers three questions: where is the page called X (the nav), where is the card or
  * setting called X (`searchIndex.js`), and what is this UUID (resolved against the database, and
- * always also offered to the Digital Thread, which knows every kind in DIGITAL_THREAD_ENTITY_TYPES
+ * always also offered to the Audit Trail, which knows every kind in AUDIT_TRAIL_ENTITY_TYPES
  * where `resolveId` reads five). A UUID is detected, not declared: nothing in the static index can look like one. Names
  * are searched too, because the page-level box can only be used by somebody who knows which page
  * the thing is on. The estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the
@@ -34,7 +34,7 @@ const ENTITY_ICON = {
 const isMac = () =>
   typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '')
 
-export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onSelectSetting, onSelectThread }) {
+export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onSelectSetting, onSelectTrail }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
@@ -109,9 +109,9 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     // there is nothing to merge and a "nothing found" flash while the lookup runs would be the
     // only effect.
     //
-    // THE THREAD IS OFFERED WHETHER OR NOT A PROBE ANSWERED. `resolveId` reads five tables, and
-    // the Digital Thread records more kinds -- a setting, a backup, a proposal, a person had a
-    // copyable id in the drawer and nowhere in the app that would take it. The thread's own search
+    // THE TRAIL IS OFFERED WHETHER OR NOT A PROBE ANSWERED. `resolveId` reads five tables, and
+    // the Audit Trail records more kinds -- a setting, a backup, a proposal, a person had a
+    // copyable id in the drawer and nowhere in the app that would take it. The trail's own search
     // matches `entity_id` for every kind, so this one row is the answer for every kind it cannot
     // name, and it stays offered for the five it can: an asset's history is the other question
     // somebody pasting an id is asking.
@@ -119,12 +119,12 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       /* Not an entity hit: it opens a page with a filter rather than an asset, and `activate`
          tells them apart by `kind`. */
       return [...assetHits, {
-        key: `thread:${trimmed}`,
-        kind: 'thread',
-        label: 'Find this ID in the Digital Thread',
-        detail: 'Digital Thread',
+        key: `trail:${trimmed}`,
+        kind: 'trail',
+        label: 'Find this ID in the Audit Trail',
+        detail: 'Audit Trail',
         icon: <IconHistory size={15} />,
-        threadId: trimmed
+        trailId: trimmed
       }]
     }
 
@@ -193,10 +193,10 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       else if (kind === 'cell') onSelectCell?.(id)
       else if (kind === 'area') onSelectArea?.(id)
       else if (kind === 'schema') onSelectSchema?.(id)
-    } else if (result.kind === 'thread') {
+    } else if (result.kind === 'trail') {
       // The id goes into the page's own search, which matches the entity id of every kind rather
       // than the five `resolveId` can name.
-      onSelectThread?.(result.threadId)
+      onSelectTrail?.(result.trailId)
     } else if (result.kind === 'setting' && onSelectSetting) {
       // A setting CAN be jumped to: the page is a tablist by category, so its category is an
       // anchor in all but name and landing on the wrong one would hide the row that was asked for.
@@ -284,7 +284,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           )}
 
           {looksLikeId && !resolving && entities.length === 0 && (
-            /* A NOTE, NOT AN EMPTY STATE: the thread row below is always offered for an id, so
+            /* A NOTE, NOT AN EMPTY STATE: the trail row below is always offered for an id, so
                there is never nothing to show. Says what was searched and stops -- RLS returns no
                rows rather than an error, so not found and not cleared for are the same reply. */
             <div className="global-search-note">

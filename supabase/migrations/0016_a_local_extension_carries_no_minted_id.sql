@@ -11,7 +11,7 @@
 -- A metric is cleared, id and type together, only while its id is still exactly the one minted
 -- for it. An id an Administrator has set since stays.
 --
--- An UPDATE, so the audit trigger 0010 attaches records each clear on the Digital Thread: asset
+-- An UPDATE, so the audit trigger 0010 attaches records each clear on the Audit Trail: asset
 -- lane, actor_source 'migration', changed_by NULL.
 --
 -- Idempotent: the second run matches nothing.

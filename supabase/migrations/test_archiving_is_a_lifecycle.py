@@ -26,7 +26,7 @@ A deleted row that had been archived leaves a tombstone, and one that had not do
 tombstone names the DELETE audit row of the same transaction, which is the assertion that the two
 triggers fire in the order the migration relies on.
 
-EVERY TEST ROLLS BACK. Writes to the asset tables fire the digital-thread trigger, and that table
+EVERY TEST ROLLS BACK. Writes to the asset tables fire the audit-trail trigger, and that table
 is append-only to every application role.
 """
 import json
@@ -320,12 +320,12 @@ class ADeletedAssetLeavesATombstone(LifecycleBase):
         self.assertEqual(stone["old_data"]["gateway_id"], gateway)
 
         # THE ORDERING THE MIGRATION RELIES ON: the audit trigger has already written the DELETE
-        # row when the tombstone trigger looks for it, so thread_id is set and names that row.
-        self.assertIsNotNone(stone["thread_id"], "the tombstone found no DELETE audit row")
-        self.cur.execute("SELECT entity_type, entity_id, action FROM public.digital_thread WHERE id = %s;",
-                         (stone["thread_id"],))
-        thread = self.cur.fetchone()
-        self.assertEqual((thread["entity_type"], str(thread["entity_id"]), thread["action"]),
+        # row when the tombstone trigger looks for it, so trail_id is set and names that row.
+        self.assertIsNotNone(stone["trail_id"], "the tombstone found no DELETE audit row")
+        self.cur.execute("SELECT entity_type, entity_id, action FROM public.audit_trail WHERE id = %s;",
+                         (stone["trail_id"],))
+        trail = self.cur.fetchone()
+        self.assertEqual((trail["entity_type"], str(trail["entity_id"]), trail["action"]),
                          ("devices", device, "DELETE"))
 
     def test_a_row_that_was_never_archived_leaves_none(self):
@@ -369,7 +369,7 @@ class ADeletedAssetLeavesATombstone(LifecycleBase):
         self.assertFalse(grants["anon_sel"], "anon can read retired_entities")
 
 
-class AnExportReachesTheThread(LifecycleBase):
+class AnExportReachesTheTrail(LifecycleBase):
     def test_recording_an_export_writes_an_exported_row(self):
         device = self.device(gateway_id=self.gateway())
         self.cur.execute(
@@ -380,10 +380,10 @@ class AnExportReachesTheThread(LifecycleBase):
         )
         export_id = self.cur.fetchone()["id"]
         self.cur.execute(
-            "SELECT action, audit_domain, new_data FROM public.digital_thread "
+            "SELECT action, audit_domain, new_data FROM public.audit_trail "
             "WHERE entity_type = 'devices' AND entity_id = %s AND action = 'EXPORTED';", (device,))
         row = self.cur.fetchone()
-        self.assertIsNotNone(row, "the export did not reach the digital thread")
+        self.assertIsNotNone(row, "the export did not reach the audit trail")
         self.assertEqual(row["audit_domain"], "asset")
         self.assertEqual(row["new_data"]["id"], str(export_id))
 

@@ -1,5 +1,5 @@
 /**
- * The Digital Thread's second page, and the ways paging loses data silently. A page showing the
+ * The Audit Trail's second page, and the ways paging loses data silently. A page showing the
  * newest 200 of several thousand events looks exactly like a page showing all of them, so these
  * assert what is on screen and what was asked for, not internal state.
  */
@@ -9,12 +9,12 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  DigitalThreadTab, mergeFirstPage, countRatio, isPartial,
-} from '../components/tabs/DigitalThreadTab'
+  AuditTrailTab, mergeFirstPage, countRatio, isPartial,
+} from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
-import { DIGITAL_THREAD_ENTITY_TYPES } from '../constants'
+import { AUDIT_TRAIL_ENTITY_TYPES } from '../constants'
 
-/* Newlines normalised on read, as digitalThreadFilters.test.jsx does it: .gitattributes checks
+/* Newlines normalised on read, as auditTrailFilters.test.jsx does it: .gitattributes checks
    this file out with the platform's native ending, and the rule matcher below spans lines. */
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
@@ -26,7 +26,7 @@ vi.mock('../api', async () => {
 })
 
 /**
- * One audit row, shaped as `mapDigitalThreadRow` leaves it. Its gateway must exist in the lookups
+ * One audit row, shaped as `mapAuditTrailRow` leaves it. Its gateway must exist in the lookups
  * below, or the deleted-entity filter hides it and every assertion fails for a reason that is not
  * paging.
  */
@@ -77,21 +77,21 @@ function page (events, {
 }
 
 /**
- * Everything the tab fetches that is not the thread itself resolves empty. The thread request is
+ * Everything the tab fetches that is not the trail itself resolves empty. The trail request is
  * matched by path.
  */
-function respond (threadHandler) {
+function respond (trailHandler) {
   api.get.mockImplementation((url) => {
     const path = String(url)
-    if (path.includes('/digital-thread')) return Promise.resolve(threadHandler(path))
+    if (path.includes('/audit-trail')) return Promise.resolve(trailHandler(path))
     if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
     if (path.startsWith('/api/v1/schemas')) return Promise.resolve(SCHEMAS)
     return Promise.resolve([])
   })
 }
 
-const threadCalls = () =>
-  api.get.mock.calls.map(c => String(c[0])).filter(u => u.includes('/digital-thread'))
+const trailCalls = () =>
+  api.get.mock.calls.map(c => String(c[0])).filter(u => u.includes('/audit-trail'))
 
 beforeEach(() => { vi.clearAllMocks() })
 afterEach(() => { vi.useRealTimers() })
@@ -141,12 +141,12 @@ describe('mergeFirstPage', () => {
 })
 
 // The control, and what it asks the server for.
-describe('DigitalThreadTab paging', () => {
-  it('offers no Load more when the first page is the whole thread', async () => {
+describe('AuditTrailTab paging', () => {
+  it('offers no Load more when the first page is the whole trail', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null }))
-    render(<DigitalThreadTab />)
-    await waitFor(() => expect(threadCalls().length).toBeGreaterThan(0))
-    await waitFor(() => expect(screen.queryByText(/Loading digital thread/)).not.toBeInTheDocument())
+    render(<AuditTrailTab />)
+    await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.queryByText(/Loading audit trail/)).not.toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /Load \d+ more/ })).not.toBeInTheDocument()
   })
 
@@ -156,14 +156,14 @@ describe('DigitalThreadTab paging', () => {
       ? page([event(40)], { nextCursor: null })
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true }))
 
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     const button = await screen.findByRole('button', { name: /Load \d+ more/ })
     fireEvent.click(button)
 
-    await waitFor(() => expect(threadCalls().some(u => u.includes('before_id'))).toBe(true))
-    const paged = threadCalls().find(u => u.includes('before_id'))
+    await waitFor(() => expect(trailCalls().some(u => u.includes('before_id'))).toBe(true))
+    const paged = trailCalls().find(u => u.includes('before_id'))
     // A half-cursor makes the server's row comparison NULL, which filters out every row and reads
-    // as "end of thread" on a thread that has plenty. Both or neither.
+    // as "end of trail" on a trail that has plenty. Both or neither.
     expect(paged).toContain('before_id=41')
     expect(paged).toContain(`before_recorded_at=${encodeURIComponent(cursor.recorded_at)}`)
   })
@@ -175,7 +175,7 @@ describe('DigitalThreadTab paging', () => {
           nextCursor: { recorded_at: '2026-01-01T00:00:00.000Z', id: 3 }, truncated: true
         }))
 
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     fireEvent.click(await screen.findByRole('button', { name: /Load \d+ more/ }))
 
     // Four events across two pages, and the count is the page's own claim about itself.
@@ -188,7 +188,7 @@ describe('DigitalThreadTab paging', () => {
       Array.from({ length: 200 }, (_, i) => event(200 - i)),
       { nextCursor: null, truncated: true }
     ))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     expect(await screen.findByText(/there are older ones this view cannot reach/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Load \d+ more/ })).not.toBeInTheDocument()
   })
@@ -198,7 +198,7 @@ describe('DigitalThreadTab paging', () => {
       Array.from({ length: 200 }, (_, i) => event(200 - i)),
       { nextCursor: null, truncated: false }
     ))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     expect(await screen.findByText(/every event matching these filters is loaded/i)).toBeInTheDocument()
   })
 
@@ -206,7 +206,7 @@ describe('DigitalThreadTab paging', () => {
     // Nothing to load, nothing cut off, no boundary met: a foot here could only repeat the count
     // the header row already carries.
     respond(() => page([event(2), event(1)], { nextCursor: null, truncated: false }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
     expect(screen.queryByText(/every event matching these filters is loaded/i)).not.toBeInTheDocument()
     expect(document.querySelector('.dt-pagination')).toBeNull()
@@ -217,7 +217,7 @@ describe('DigitalThreadTab paging', () => {
  * Every lane the header counts is a lane the timeline draws. A section list is a presentation
  * choice and must never also act as a filter, so these assert the invariant rather than the kinds.
  */
-describe('DigitalThreadTab section coverage', () => {
+describe('AuditTrailTab section coverage', () => {
   const laneEvent = (id, entityType, entityId) => ({
     ...event(id), entity_type: entityType, entity_id: entityId,
     description: `Action UPDATE on ${entityType} [${entityId}]`,
@@ -231,7 +231,7 @@ describe('DigitalThreadTab section coverage', () => {
       laneEvent(1, 'gateways', 'gw-1'),
     ], { nextCursor: null }))
 
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     // The headings are what say a lane was drawn at all.
     expect(await screen.findByLabelText('Role assignments lanes')).toBeInTheDocument()
     expect(screen.getByLabelText('Service identities lanes')).toBeInTheDocument()
@@ -247,7 +247,7 @@ describe('DigitalThreadTab section coverage', () => {
       laneEvent(1, 'gateways', 'gw-1'),
     ], { nextCursor: null }))
 
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     expect(await screen.findByLabelText('SOMETHING_NEW lanes')).toBeInTheDocument()
   })
 
@@ -256,19 +256,19 @@ describe('DigitalThreadTab section coverage', () => {
     // failure was two lists of the same thing disagreeing.
     respond(() => page([laneEvent(1, 'gateways', 'gw-1')], { nextCursor: null }))
 
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
 
     const select = screen.getByTitle('Show only events against one kind of asset')
     const options = [...select.querySelectorAll('option')]
 
-    for (const { kind, label } of DIGITAL_THREAD_ENTITY_TYPES) {
+    for (const { kind, label } of AUDIT_TRAIL_ENTITY_TYPES) {
       const option = options.find(o => o.value === kind)
       expect(option, `no filter option for ${kind}`).toBeTruthy()
       expect(option.textContent).toBe(label)
     }
     // Every entry, plus the unfiltered default and nothing else.
-    expect(options).toHaveLength(DIGITAL_THREAD_ENTITY_TYPES.length + 1)
+    expect(options).toHaveLength(AUDIT_TRAIL_ENTITY_TYPES.length + 1)
     expect(options[0].value).toBe('')
   })
 
@@ -284,7 +284,7 @@ describe('DigitalThreadTab section coverage', () => {
       laneEvent(1, 'gateways', 'gw-1'),
     ], { nextCursor: null }))
 
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
     const drawn = screen.getAllByRole('separator').length
     expect(drawn).toBe(3)
@@ -293,7 +293,7 @@ describe('DigitalThreadTab section coverage', () => {
 })
 
 // =================================================================================================
-// HOW MUCH OF THE THREAD THIS IS
+// HOW MUCH OF THE TRAIL THIS IS
 //
 // "200 events" above a button offering 200 more is the same sentence whether the next page is the
 // last or the third of twelve. The server counts the whole match (0115) and the page names it.
@@ -304,7 +304,7 @@ describe('the count ratio', () => {
   })
 
   it('degrades to a plain count once everything matching is drawn', () => {
-    // The equal case is the end of the thread. "467/467" is a fraction of itself and reads as
+    // The equal case is the end of the trail. "467/467" is a fraction of itself and reads as
     // though something were still missing.
     expect(countRatio(467, 467)).toBe('467')
   })
@@ -329,12 +329,12 @@ describe('the count ratio', () => {
  * by default and a search naming one matches only hidden rows. The reader saw "no events match"
  * with the answer behind a toggle they had no reason to try.
  */
-describe('DigitalThreadTab empty state', () => {
+describe('AuditTrailTab empty state', () => {
   it('offers the deleted entities when the filters match only those', async () => {
     // `purged_assets` is counted over everything the filters select INCLUDING the search, so an
     // empty page with a non-zero count is exactly this case and needs no second request.
     respond(() => page([], { nextCursor: null, purgedAssets: 1, totalMatching: 0 }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     expect(await screen.findByText(/one deleted entity does/i)).toBeInTheDocument()
     /* SCOPED TO THE EMPTY STATE. The filter bar carries the same control whenever anything is
@@ -345,12 +345,12 @@ describe('DigitalThreadTab empty state', () => {
       .getByRole('button', { name: /Show deleted entities \(1\)/ })
     fireEvent.click(offer)
     // And the click asks the server for them, rather than only re-filtering what is held.
-    await waitFor(() => expect(threadCalls().some(u => u.includes('include_purged=true'))).toBe(true))
+    await waitFor(() => expect(trailCalls().some(u => u.includes('include_purged=true'))).toBe(true))
   })
 
   it('counts more than one of them in words that agree', async () => {
     respond(() => page([], { nextCursor: null, purgedAssets: 4, totalMatching: 0 }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     expect(await screen.findByText(/4 deleted entities do/i)).toBeInTheDocument()
   })
 
@@ -358,34 +358,34 @@ describe('DigitalThreadTab empty state', () => {
     // No deleted entities behind the filter either: offering the toggle here would send the reader
     // after something that is not there.
     respond(() => page([], { nextCursor: null, purgedAssets: 0, totalMatching: 0 }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
-    expect(await screen.findByText(/No digital thread events match the filter criteria/i))
+    expect(await screen.findByText(/No audit trail events match the filter criteria/i))
       .toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Show deleted entities/ })).toBeNull()
   })
 
   it('does not offer them again once they are shown', async () => {
     respond(() => page([], { nextCursor: null, purgedAssets: 2, totalMatching: 0 }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     await screen.findByText(/2 deleted entities do/i)
     fireEvent.click(within(document.querySelector('.empty-state'))
       .getByRole('button', { name: /Show deleted entities \(2\)/ }))
     // Still empty, but the toggle is on: repeating the offer would be a loop with no exit.
     await waitFor(() =>
-      expect(screen.getByText(/No digital thread events match the filter criteria/i)).toBeInTheDocument())
+      expect(screen.getByText(/No audit trail events match the filter criteria/i)).toBeInTheDocument())
   })
 })
 
-describe('DigitalThreadTab total', () => {
+describe('AuditTrailTab total', () => {
   const cursor = { recorded_at: '2026-01-01T00:00:00.000Z', id: 41 }
 
   it('says what fraction of the match is on screen, once, on the header row', async () => {
     respond(() => page([event(42), event(41)], {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     // Above the timeline, on the header row beside the key.
     expect(await screen.findByText(/2 entities · 2\/467 events/)).toBeInTheDocument()
@@ -397,7 +397,7 @@ describe('DigitalThreadTab total', () => {
 
   it('counts one event as one event', async () => {
     respond(() => page([event(1)], { nextCursor: null, totalMatching: 1 }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     expect(await screen.findByText(/1 entity · 1 event$/)).toBeInTheDocument()
   })
 
@@ -408,7 +408,7 @@ describe('DigitalThreadTab total', () => {
     respond(() => page([event(42), event(41)], {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await screen.findByText(/2 entities · 2\/467 events/)
 
     const count = document.querySelector('.dt-count')
@@ -439,7 +439,7 @@ describe('DigitalThreadTab total', () => {
 
   it('drops the fraction when the loaded page is the whole match', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
     expect(screen.queryByText(/2\/2|2 of 2/)).not.toBeInTheDocument()
   })
@@ -448,7 +448,7 @@ describe('DigitalThreadTab total', () => {
     // Every other fixture in this file leaves `totalMatching` null, so this is the state they all
     // assert against; stated once, explicitly, so the fallback is a decision rather than a default.
     respond(() => page([event(2), event(1)], { nextCursor: cursor, truncated: true }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
     expect(screen.queryByText(/of null|of undefined|NaN|\/null|\/undefined/)).not.toBeInTheDocument()
   })
@@ -460,7 +460,7 @@ describe('DigitalThreadTab total', () => {
       ? page([event(40), event(39)], { nextCursor: null, totalMatching: 4 })
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true, totalMatching: 4 }))
 
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     await screen.findByText(/2 entities · 2\/4 events/)
     fireEvent.click(screen.getByRole('button', { name: /Load \d+ more/ }))
 
@@ -474,7 +474,7 @@ describe('DigitalThreadTab total', () => {
       Array.from({ length: 200 }, (_, i) => event(200 - i)),
       { nextCursor: null, truncated: true, totalMatching: 467 }
     ))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
     expect(await screen.findByText(/newest 200 of 467 events/i)).toBeInTheDocument()
   })
 
@@ -485,7 +485,7 @@ describe('DigitalThreadTab total', () => {
     respond(() => page([event(42), event(41)], {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     const button = await screen.findByRole('button', { name: /Export CSV/ })
     expect(button).toHaveTextContent('Export CSV (2/467)')
@@ -495,7 +495,7 @@ describe('DigitalThreadTab total', () => {
 
   it('Export CSV promises the filtered set once it really holds it', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
-    render(<DigitalThreadTab />)
+    render(<AuditTrailTab />)
 
     const button = await screen.findByRole('button', { name: /Export CSV/ })
     expect(button).toHaveTextContent('Export CSV (2)')

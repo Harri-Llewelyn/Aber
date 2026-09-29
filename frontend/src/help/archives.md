@@ -5,7 +5,7 @@ Entities taken out of commission -- areas, cells, gateways and devices that were
 ## What the controls do
 
 - **Restore** puts an entity back into service with the identifiers it already had. That is the reason archiving exists rather than deletion -- a machine that comes back from a rebuild comes back as itself, and everything that ever referenced it still resolves. A device's replay lanes come back with it.
-- **Export Bundle** is offered on a device. It downloads the device's Asset Administration Shell as an AASX with its history inside: the digital thread, the readings still in the live historian at raw and hourly resolution, and a manifest that names the cold-storage objects holding older readings and says plainly what the bundle could not include. A copy is kept beside the cold tier, so the bundle can still be fetched from this page after the device is deleted. Take it before **Permanent Delete** if the record and its readings are to leave with the machine.
+- **Export Bundle** is offered on a device. It downloads the device's Asset Administration Shell as an AASX with its history inside: the audit trail, the readings still in the live historian at raw and hourly resolution, and a manifest that names the cold-storage objects holding older readings and says plainly what the bundle could not include. A copy is kept beside the cold tier, so the bundle can still be fetched from this page after the device is deleted. Take it before **Permanent Delete** if the record and its readings are to leave with the machine.
 - **Permanent Delete** removes the row for good. It asks for the name to be typed back because it cannot be undone. A deleted cell un-files what was in it; a deleted area un-files its cells and loses its plan, and is refused while an Area-Wide asset still names it; a deleted device takes its replay lanes with it.
 - **The auto-purge timer** is how long the archived record is kept before it is removed for good. An entity marked **Permanent (No Auto-Purge)** is kept indefinitely.
 - **Entity ID** and **Archived At** are the two facts worth quoting when the question is whether something was taken out deliberately.
@@ -14,7 +14,7 @@ Entities taken out of commission -- areas, cells, gateways and devices that were
 
 The second card lists what has been through the first: archived, then deleted, by the timer or by hand. The row is gone; what is shown is the tombstone the database wrote as it went. Each names what survives it:
 
-- **Digital Thread** opens the entity's audit trace, with deleted entities shown.
+- **Audit Trail** opens the entity's audit trace, with deleted entities shown.
 - **Forge repository** opens a gateway's repository in the forge, which archiving made read-only and nothing deleted.
 - **Bundle** downloads an export taken while the device was alive, if one was.
 - **Historian ID** is the key its readings are still stored under. They stay in the historian until retention or cold storage takes them, and the Cold Storage page lists the objects by date range rather than by device.

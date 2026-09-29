@@ -9,7 +9,7 @@ import {
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import {
-  DIGITAL_THREAD_ACTIONS, DIGITAL_THREAD_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, digitalThreadEntityTypesFor
+  AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, auditTrailEntityTypesFor
 } from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
 
@@ -41,7 +41,7 @@ function actorTitle(event) {
 const ENTITY_KIND = ENTITY_KIND_BY_TABLE
 /**
  * The kinds a deletion can be told about: this page fetches a lookup covering them, and
- * `digital_thread_page()` can probe a table for their rows (0117). Absence from `entityIdentities`
+ * `audit_trail_page()` can probe a table for their rows (0117). Absence from `entityIdentities`
  * means the row is gone, for these and for nothing else. `NAMEPLATE` qualifies because
  * `device_nameplate` is keyed by the device's id, so the devices lookup names it and the devices
  * probe answers for it.
@@ -129,7 +129,7 @@ export function diffFields(oldData, newData) {
 }
 
 /**
- * Which marker an event gets. `digital_thread.action` holds only INSERT / UPDATE / DELETE from the
+ * Which marker an event gets. `audit_trail.action` holds only INSERT / UPDATE / DELETE from the
  * trigger, so archiving, quarantining and a schema rebinding are derived from the diff.
  * SCHEMA_REJECTION is written by `record_ingestion_rejection()` with no diff, so the action itself
  * decides: governance, not critical. An INSERT is always creation, even of an already-quarantined
@@ -206,19 +206,19 @@ export function timeWindow(preset, customStart, customEnd) {
 }
 
 /**
- * The fallback for the `ui.digital_thread_poll_seconds` setting, whose `fallback_source` names this
+ * The fallback for the `ui.audit_trail_poll_seconds` setting, whose `fallback_source` names this
  * constant.
  */
 const DEFAULT_POLL_SECONDS = 60
 
 /**
- * Rows per request. `digital_thread_page()` scans the whole match to count deleted entities whatever
+ * Rows per request. `audit_trail_page()` scans the whole match to count deleted entities whatever
  * the page size, so a larger page only costs; paging is the answer, not a bigger page.
  */
 const PAGE_SIZE = 200
 
 /**
- * Fold a freshly polled first page into the pages already loaded. The thread is append-only and
+ * Fold a freshly polled first page into the pages already loaded. The trail is append-only and
  * read newest-first, so a poll can only prepend. If the fresh page and the held list no longer
  * overlap, more than PAGE_SIZE events arrived since the last poll, and the list restarts from the
  * newest page rather than splicing a hole.
@@ -235,7 +235,7 @@ export function mergeFirstPage (prev, fresh) {
 
 /* Markers too close to draw separately become one badge carrying the count. Grouping is by pixel
    distance, so the range control acts as a zoom, and positions are never nudged along the time
-   axis: identical timestamps are the visual signature of one transaction. See the Digital Thread
+   axis: identical timestamps are the visual signature of one transaction. See the Audit Trail
    notes in frontend/README.md. */
 
 /**
@@ -325,7 +325,7 @@ export function clusterSummary(events, kindOf) {
 
 /**
  * The sections, in the order a plant is organised, then the governance lane. Order and labels come
- * from `DIGITAL_THREAD_ENTITY_TYPES`; only the icons live here, so a kind added to the shared table
+ * from `AUDIT_TRAIL_ENTITY_TYPES`; only the icons live here, so a kind added to the shared table
  * reaches the timeline and the filter together.
  */
 /** The icon for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
@@ -347,7 +347,7 @@ const SECTION_ICONS = {
 }
 
 /** A kind without an icon here still gets a section, with the fallback icon. */
-const SECTIONS = DIGITAL_THREAD_ENTITY_TYPES.map(({ kind, label }) => ({
+const SECTIONS = AUDIT_TRAIL_ENTITY_TYPES.map(({ kind, label }) => ({
   kind,
   label,
   Icon: SECTION_ICONS[kind] || FALLBACK_SECTION_ICON
@@ -385,7 +385,7 @@ const ENTITY_ID_HELP =
 const MUTATION_ID_HELP =
   'This audit row, not the thing it changed. It is the value to quote in a ticket or an incident '
   + 'note: it never changes, and two edits a second apart are told apart by it and by nothing '
-  + 'else. The search box above accepts it; it is `digital_thread.id` in SQL and the '
+  + 'else. The search box above accepts it; it is `audit_trail.id` in SQL and the '
   + '`mutation_id` column of the CSV export.'
 
 const TRANSACTION_ID_HELP =
@@ -394,12 +394,12 @@ const TRANSACTION_ID_HELP =
   + 'act wrote more than is loaded, "Show whole transaction" below loads all of them. It is unique '
   + 'within this database only, and is '
   + 'not preserved by a restore from a dump: group by it, never store it as a reference. It is '
-  + '`digital_thread.causation_id` in SQL and `transaction_id` in the CSV export.'
+  + '`audit_trail.causation_id` in SQL and `transaction_id` in the CSV export.'
 
 /**
  * The fields an audit snapshot can name its subject with, in the order they are preferred.
  *
- * SHARED WITH `digital_thread_page()`'s `p_search` (0115). A field the search matches and this does
+ * SHARED WITH `audit_trail_page()`'s `p_search` (0115). A field the search matches and this does
  * not is a row you can find and cannot identify; a field here that the search does not match is a
  * lane you can see and cannot search for. `sparkplug_id` is immutable and is what telemetry and
  * alerts are keyed by, so it outranks the rest where a row carries both.
@@ -570,7 +570,7 @@ export function causationSiblings(event, events) {
 /**
  * Rendered whenever the row carries a transaction, siblings or not. Two numbers decide what it
  * says: `event.transaction_rows`, how many rows the transaction wrote, counted by
- * digital_thread_page() over the whole table (0006); and `siblings`, drawn from the loaded,
+ * audit_trail_page() over the whole table (0006); and `siblings`, drawn from the loaded,
  * filtered set. One row, and there is nothing to offer; every row loaded, and the list is
  * complete; rows missing, how many, and the control that loads them. Without the count (a server
  * without 0006) the section hedges instead, because a group whose other members are outside the
@@ -771,10 +771,10 @@ function RawSnapshots({ event }) {
  * so every control still works and Clear filters clears it. The id goes into the name filter, which
  * matches ids as well as names.
  */
-export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showToast }) {
+export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToast }) {
   // The kinds this role may ask for. The database policy decides what comes back; this decides
   // what is offered, so the two agree on which lanes exist for a Shopfloor_Manager.
-  const entityTypes = useMemo(() => digitalThreadEntityTypesFor(userRole), [userRole])
+  const entityTypes = useMemo(() => auditTrailEntityTypesFor(userRole), [userRole])
   const allowedKinds = useMemo(() => new Set(entityTypes.map(e => e.kind)), [entityTypes])
   // Raw, from the API. `events` below is the displayed set, and every consumer reads that one so
   // the purged filter applies everywhere.
@@ -808,7 +808,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
 
   /* A runtime override, falling back to the constant above, which is what a stack whose Settings
      were never touched runs on. */
-  const pollSeconds = useSetting('ui.digital_thread_poll_seconds', DEFAULT_POLL_SECONDS)
+  const pollSeconds = useSetting('ui.audit_trail_poll_seconds', DEFAULT_POLL_SECONDS)
 
   useEffect(() => {
     // Cells, gateways, devices and schemas are joined here so the log can be searched by name; the
@@ -946,7 +946,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   }, [serverPurgedCount, allEvents, entityNames, lookupsLoaded, loadedKinds])
 
   /**
-   * What the page renders. Deleted entities are hidden by default. `digital_thread_page()` applies
+   * What the page renders. Deleted entities are hidden by default. `audit_trail_page()` applies
    * the same rule as a predicate before the row limit; this client-side filter is kept for a server
    * without the RPC.
    */
@@ -970,7 +970,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
    *
    * IT USED TO BE RESOLVED HERE, against `entityNames` -- the LIVE tables -- and sent as a list of
    * ids. So a search naming something that had been deleted matched no live row, sent an EMPTY id
-   * list, and rendered as an empty thread: the one question this page exists to answer, answered
+   * list, and rendered as an empty trail: the one question this page exists to answer, answered
    * "nothing happened". The lane label never had that problem, because it falls back to the audit
    * snapshot; `p_search` reads the same fields, so the search now finds what the timeline draws.
    *
@@ -991,7 +991,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
   useEffect(() => { allEventsRef.current = allEvents }, [allEvents])
 
   const buildUrl = useCallback((cursor) => {
-    let url = `/api/v1/digital-thread?limit=${PAGE_SIZE}`
+    let url = `/api/v1/audit-trail?limit=${PAGE_SIZE}`
     if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
     if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
     if (search)           url += `&search=${encodeURIComponent(search)}`
@@ -1062,7 +1062,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
       .catch(() => setLoadingMore(false))
   }, [nextCursor, loadingMore, buildUrl])
 
-  // A later handover -- clicking Digital Thread on a second device without leaving the page --
+  // A later handover -- clicking Audit Trail on a second device without leaving the page --
   // replaces the filter rather than being ignored because state was already initialised.
   useEffect(() => {
     if (!initialEntity?.id) return
@@ -1345,7 +1345,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         ? 'current'
         : (snapshotIdentity(e) ? `audit snapshot (${snapshotIdentity(e).field})` : 'unresolved'),
       entity_id:      e.entity_id,
-      // The UI's words, not the database's: these are `digital_thread.id` and `causation_id`, and
+      // The UI's words, not the database's: these are `audit_trail.id` and `causation_id`, and
       // the drawer calls them Mutation ID and Transaction ID. One name per thing, across all three.
       mutation_id:    e.event_id,
       transaction_id: e.causation_id ?? '',
@@ -1375,9 +1375,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Digital Thread
+              Audit Trail
               <HelpTip
-                label="About the Digital Thread"
+                label="About the Audit Trail"
                 text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable. Administrators and Auditors also see the security lane: roles, service identities, settings and backups."
               />
             </h3>
@@ -1387,7 +1387,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             <button
               className="btn btn-ghost btn-sm"
               style={{ marginLeft: 'auto' }}
-              onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')}
+              onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
               title={hasMoreToLoad
                 ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
                   + 'the current filters -- load the rest first to export them all.'
@@ -1434,7 +1434,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             title="Filter by the database action recorded on the audit row, as the event drawer's badge shows it. The coloured markers below are a separate classification; see the key beside the timeline."
           >
             <option value="">Any action</option>
-            {Object.entries(DIGITAL_THREAD_ACTIONS).map(([value, label]) => (
+            {Object.entries(AUDIT_TRAIL_ACTIONS).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
           </select>
@@ -1511,7 +1511,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
             `dt-timeline` is the one part of the card that gives way when the viewport is short. */}
         <div className="card-body dt-timeline">
           {loading ? (
-            <div className="loading-wrap"><div className="spinner" /> Loading digital thread trace sequence…</div>
+            <div className="loading-wrap"><div className="spinner" /> Loading audit trail trace sequence…</div>
           ) : events.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><IconHistory size={36} /></div>
@@ -1539,14 +1539,14 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
               ) : (
                 <div className="empty-text">
                   {rangeIsFiltering
-                    ? 'No digital thread events in this time range. Widen it, or switch back to All time.'
-                    : 'No digital thread events match the filter criteria.'}
+                    ? 'No audit trail events in this time range. Widen it, or switch back to All time.'
+                    : 'No audit trail events match the filter criteria.'}
                 </div>
               )}
             </div>
           ) : (
             <>
-              {/* One row above the timeline: how much of the thread is on screen at the left, the
+              {/* One row above the timeline: how much of the trail is on screen at the left, the
                   colour key at the right. */}
               <div className="dt-header">
                 {/* ENTITIES, not assets: a lane can be a setting, a role assignment or a backup
@@ -1743,9 +1743,9 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                 </div>
               </div>
 
-              {/* Where the thread's end is, drawn only when there is something to say about it: a
+              {/* Where the trail's end is, drawn only when there is something to say about it: a
                   page still to load, a cut-off, or an end met at a page boundary. The count is on
-                  the header row and is not said twice. A first response holding the whole thread
+                  the header row and is not said twice. A first response holding the whole trail
                   has no end to announce, so on a stack smaller than one page there is no foot. */}
               {(nextCursor || truncated || allEvents.length >= PAGE_SIZE) && (
                 <div className="dt-pagination">
@@ -1769,7 +1769,7 @@ export function DigitalThreadTab({ userRole, initialEntity, onClearEntity, showT
                     </span>
                   ) : (
                     <span className="dt-pagination-end">
-                      End of the thread — every event matching these filters is loaded.
+                      End of the trail — every event matching these filters is loaded.
                     </span>
                   )}
                 </div>

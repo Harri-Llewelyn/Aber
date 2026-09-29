@@ -52,7 +52,7 @@ kept separate from `metric_catalog`, which records what a device actually publis
   scalar fields (`batteryCharge`, `driving`, `paused`, `velocity`, `operatingMode`, `lastNodeId`) as
   a vocabulary and put the protocol in a Node-RED edge adapter republishing to `spBv1.0/#`. The same
   verdict applies to BACnet for the BMS. AGV *position* is telemetry, never `devices.cell_id` —
-  writing it there fires `log_digital_thread_event()` on every update.
+  writing it there fires `log_audit_trail_event()` on every update.
 
 ## Extension points
 

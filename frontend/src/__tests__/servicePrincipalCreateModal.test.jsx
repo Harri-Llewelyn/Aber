@@ -21,7 +21,7 @@ describe('GRANTABLE_PERMISSIONS', () => {
    */
   it('is the six permissions create_machine_principal() allows, reads first', () => {
     expect(GRANTABLE_PERMISSIONS).toEqual([
-      'telemetry:read', 'quarantine:view', 'digital_thread:read', 'archive:manage',
+      'telemetry:read', 'quarantine:view', 'audit_trail:read', 'archive:manage',
       'proposal:create', 'schema:manage',
     ])
   })
@@ -48,8 +48,8 @@ describe('permissionReach', () => {
     }
   })
 
-  it('says digital_thread:read stops short of the security lane', () => {
-    expect(permissionReach(['digital_thread:read'])).toMatch(/Not the security lane/)
+  it('says audit_trail:read stops short of the security lane', () => {
+    expect(permissionReach(['audit_trail:read'])).toMatch(/Not the security lane/)
   })
 
   it('says a proposal is decided by a person', () => {
@@ -137,7 +137,7 @@ describe('ServicePrincipalCreateModal', () => {
 
   it('creates with the trimmed name, the chosen permissions in menu order, and hands the row on', async () => {
     // 0080's return shape: no name. The dialog adds the one it sent.
-    const created = { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['telemetry:read', 'digital_thread:read'] }
+    const created = { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['telemetry:read', 'audit_trail:read'] }
     api.createServicePrincipal.mockResolvedValue(created)
     const props = open()
 
@@ -151,7 +151,7 @@ describe('ServicePrincipalCreateModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Create Principal/i }))
 
     await waitFor(() => expect(api.createServicePrincipal).toHaveBeenCalledWith(
-      'Line 4 OEE report', ['telemetry:read', 'digital_thread:read'], 'Reads the hourly rollup.'
+      'Line 4 OEE report', ['telemetry:read', 'audit_trail:read'], 'Reads the hourly rollup.'
     ))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith({ ...created, name: 'Line 4 OEE report' }))
     expect(props.onClose).toHaveBeenCalled()

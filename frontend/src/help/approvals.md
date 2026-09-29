@@ -16,7 +16,7 @@ A machine identity can propose too, if an Administrator gave it that permission.
 
 **Awaiting a decision** is the working queue, oldest first, because a queue is worked from the front. **Decided** is the record, newest first.
 
-- **applied** — approved, and the change was made. The Digital Thread carries a row naming both the person who asked and the person who authorised it, and **View in Digital Thread** on the proposal opens the target's history at it. Only an applied proposal has one: the other three outcomes changed nothing.
+- **applied** — approved, and the change was made. The Audit Trail carries a row naming both the person who asked and the person who authorised it, and **View in Audit Trail** on the proposal opens the target's history at it. Only an applied proposal has one: the other three outcomes changed nothing.
 - **rejected** — refused, with a reason. The slot is freed immediately and the same change can be proposed again straight away; the reason is what should make the second attempt different from the first.
 - **withdrawn** — the proposer took it back.
 - **expired** — nobody decided in time and it closed on a timer. It names no approver, because a timer is not a person. The Administrator sets the window on the Settings page.

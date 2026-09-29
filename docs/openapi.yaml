@@ -43,7 +43,7 @@ info:
 
     Row Level Security is enforced by PostgreSQL, not by this gateway, and fails closed.
     Reads are open to any authenticated user; writes to `cells`, `gateways`, `devices` and
-    friends require `Administrator` or `Shopfloor_Manager`. `digital_thread` is readable by
+    friends require `Administrator` or `Shopfloor_Manager`. `audit_trail` is readable by
     `Administrator`, `Shopfloor_Manager` and `Auditor` only, and is **append-only** — the
     write verbs are revoked from every application role including `service_role`.
 
@@ -123,7 +123,7 @@ tags:
   - name: Telemetry
     description: Time-series metrics, served from the standalone TimescaleDB hypertable.
   - name: Audit
-    description: Append-only Digital Thread audit log.
+    description: Append-only Audit Trail audit log.
   - name: Registry
     description: Schemas, metric catalog, reference vocabularies, links and services.
   - name: Storage
@@ -418,7 +418,7 @@ paths:
         `heartbeat_age_seconds`, derived at read time against a 90-second threshold.
 
         **Staleness is deliberately not stored.** A sweep writing `STALE` would fire
-        `log_digital_thread_event()` on every tick and append to an append-only audit table
+        `log_audit_trail_event()` on every tick and append to an append-only audit table
         forever, and would be correct only between ticks.
       parameters:
         - $ref: '#/components/parameters/Select'
@@ -741,12 +741,12 @@ paths:
           description: Granted to authenticated users only; `anon` is refused.
 
   # --------------------------------------------------------------- Audit ----
-  /rest/v1/digital_thread:
+  /rest/v1/audit_trail:
     get:
       tags: [Audit]
-      summary: Read the Digital Thread audit log
+      summary: Read the Audit Trail audit log
       description: |
-        **Append-only.** Rows are written only by `log_digital_thread_event()` and its named
+        **Append-only.** Rows are written only by `log_audit_trail_event()` and its named
         siblings: triggers on the audited tables, and the `SECURITY DEFINER` functions behind
         proposals, backups, service identities and gateway credentials. `INSERT`/`UPDATE`/`DELETE`
         are revoked from every application role — `service_role` included. The asset lane
@@ -756,7 +756,7 @@ paths:
         `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
         `device_nameplate`, `schemas`, `metric_catalog` and `change_proposals` in the asset lane,
         and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and `backups` in
-        the security lane. A thread older than their retirement also holds `area_floors`,
+        the security lane. A trail older than their retirement also holds `area_floors`,
         `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
         entity's history after deleting it, collect the ids first.
 
@@ -764,8 +764,8 @@ paths:
         `migration`). The trigger refuses to accept `user` from a client-supplied header.
       parameters:
         - { name: entity_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
-        - { name: entity_type, in: query, schema: { type: string }, description: 'e.g. `eq.devices` or `eq.metric_catalog`; any `DigitalThreadEntry.entity_type`' }
-        - { name: action, in: query, schema: { type: string }, description: 'e.g. `eq.UPDATE` or `eq.TOKEN_REVOKED`; any `DigitalThreadEntry.action`' }
+        - { name: entity_type, in: query, schema: { type: string }, description: 'e.g. `eq.devices` or `eq.metric_catalog`; any `AuditTrailEntry.entity_type`' }
+        - { name: action, in: query, schema: { type: string }, description: 'e.g. `eq.UPDATE` or `eq.TOKEN_REVOKED`; any `AuditTrailEntry.action`' }
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
         - $ref: '#/components/parameters/Limit'
@@ -774,8 +774,8 @@ paths:
           description: Matching audit entries.
           content:
             application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/DigitalThreadEntry' } }
-        '403': { description: Role lacks Digital Thread read access. }
+              schema: { type: array, items: { $ref: '#/components/schemas/AuditTrailEntry' } }
+        '403': { description: Role lacks Audit Trail read access. }
 
   /rest/v1/revoked_service_tokens:
     get:
@@ -787,7 +787,7 @@ paths:
 
         **Operational, not audit.** Rows are pruned once the token they name has expired, because
         the signature check refuses it from then on — so this is *not* the history of revocations.
-        That is the `TOKEN_REVOKED` entry in `/rest/v1/digital_thread`, which is append-only and
+        That is the `TOKEN_REVOKED` entry in `/rest/v1/audit_trail`, which is append-only and
         carries the original mint in `old_data` so it stays readable after the row here is gone.
 
         **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime`, the edge
@@ -875,7 +875,7 @@ paths:
         name. No write policy exists. Deleting the `auth.users` row cascades to this one.
 
         Read is `Administrator` and `Auditor`, matching `list_user_accounts()`: a name here labels
-        digital-thread rows both roles may read, and holds nothing a token could be derived from.
+        audit-trail rows both roles may read, and holds nothing a token could be derived from.
       parameters:
         - { name: principal_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` to name one identity.' }
         - $ref: '#/components/parameters/Select'
@@ -1009,7 +1009,7 @@ paths:
       description: |
         One transaction: flips the draft to `active`, archives the predecessor, repoints every
         `device_submodels` row **and** `devices.schema_id`, and logs the device updates to the
-        Digital Thread.
+        Audit Trail.
 
         A device attached to both versions has its redundant old attachment dropped first, or
         the repoint would collide on `uq_device_submodels`.
@@ -1473,7 +1473,7 @@ paths:
       description: |
         One row per backup **on the backup volume** (`0101`): where it is, how big, which
         components it holds with their digests, and whether it is pinned. The row is deleted when
-        the service prunes the files; `BACKUP_PRUNED` in `digital_thread` is the record that it did.
+        the service prunes the files; `BACKUP_PRUNED` in `audit_trail` is the record that it did.
 
         **The bytes are not served.** Nothing here or in Storage hands a dump to a browser: it
         holds every user account, every service credential's hash, the whole audit trail and the
@@ -1709,8 +1709,8 @@ paths:
         `value` is `jsonb` and `value_type` says what it holds; a CHECK constraint enforces the
         pair, so a reader may trust the type. `anon` is revoked.
       parameters:
-        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_poll_seconds`' }
-        - { name: category, in: query, schema: { type: string }, description: 'e.g. `eq.Digital Thread`' }
+        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.ui.audit_trail_poll_seconds`' }
+        - { name: category, in: query, schema: { type: string }, description: 'e.g. `eq.Audit Trail`' }
         - $ref: '#/components/parameters/Select'
       responses:
         '200':
@@ -1731,7 +1731,7 @@ paths:
         A non-Administrator receives `204` with zero rows affected rather than an error: the row
         is invisible to the UPDATE policy.
       parameters:
-        - { name: key, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_poll_seconds`' }
+        - { name: key, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.ui.audit_trail_poll_seconds`' }
       requestBody:
         required: true
         content:
@@ -1880,7 +1880,7 @@ paths:
         change cannot be approved**, it aborts rather than becoming an audit record of something
         that did not happen.
 
-        Writes one `digital_thread` row naming both parties: `changed_by` is the approver,
+        Writes one `audit_trail` row naming both parties: `changed_by` is the approver,
         `new_data.proposed_by` is who asked. It carries the same `causation_id` as the audit row
         the change itself wrote, so the two read as one act. On the nameplate lane `updated_by` is
         set to the **proposer**, because a nameplate is an assertion about an asset and who made it
@@ -1896,7 +1896,7 @@ paths:
                 p_proposal_id: { type: string, format: uuid }
       responses:
         '200':
-          description: Applied, with the digital_thread id it wrote.
+          description: Applied, with the audit_trail id it wrote.
           content:
             application/json:
               schema: { type: object }
@@ -2026,17 +2026,17 @@ paths:
         One row per area, cell, gateway or device that was **archived and then deleted**, by its
         retention timer or by hand, written by an `AFTER DELETE` trigger on each of the four tables
         as the row goes (`0124`). A delete that skipped the archive stage leaves no row here: it is
-        still on the digital thread, but it is not a retirement.
+        still on the audit trail, but it is not a retirement.
 
         The row carries what the entity was called, the `sparkplug_id` its readings are still keyed
         by in the historian, when it was archived and retired, who retired it (`retired_by` is null
-        when the timer did), the id of the thread's `DELETE` row, and `old_data`, the whole row as
+        when the timer did), the id of the trail's `DELETE` row, and `old_data`, the whole row as
         it was. It is the Archived Entities page's second card, where each row links to what
-        survives it: the digital thread, a gateway's repository in the forge, and any bundle in
+        survives it: the audit trail, a gateway's repository in the forge, and any bundle in
         `asset_exports`.
 
         **Read-only for every role.** No write policy exists; the trigger writes as definer.
-        Readable by any role holding `archive:manage` or `digital_thread:read`.
+        Readable by any role holding `archive:manage` or `audit_trail:read`.
       parameters:
         - { name: entity_type, in: query, schema: { type: string, enum: [areas, cells, gateways, devices] }, description: 'e.g. `eq.devices`' }
         - { name: entity_id, in: query, schema: { type: string, format: uuid } }
@@ -2060,7 +2060,7 @@ paths:
                     retired_at: { type: string, format: date-time }
                     retired_by: { type: string, format: uuid, nullable: true, description: 'Null when the retention job deleted it.' }
                     retired_by_email: { type: string, nullable: true }
-                    thread_id: { type: integer, nullable: true, description: 'The digital thread row that recorded the DELETE.' }
+                    trail_id: { type: integer, nullable: true, description: 'The audit trail row that recorded the DELETE.' }
                     old_data: { type: object, description: 'The row as it was.' }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
@@ -2078,7 +2078,7 @@ paths:
 
         **Read-only for every role**, and readable by the three roles the bucket's read policy
         admits: `Administrator`, `Shopfloor_Manager` and `Auditor`. The row is written by the
-        function with the service role; its insert is recorded on the digital thread as `EXPORTED`.
+        function with the service role; its insert is recorded on the audit trail as `EXPORTED`.
         It is **not** a row in `telemetry_archive_manifest`: that catalogue is keyed by chunk and
         exists to make dropping a chunk safe, and a per-asset bundle has no chunk.
       parameters:
@@ -2105,7 +2105,7 @@ paths:
                     object_key: { type: string }
                     object_bytes: { type: integer, nullable: true }
                     sha256: { type: string, nullable: true }
-                    stats: { type: object, description: 'The counts the manifest reported: raw, hourly and thread rows, cold objects named, whether a cap was hit.' }
+                    stats: { type: object, description: 'The counts the manifest reported: raw, hourly and trail rows, cold objects named, whether a cap was hit.' }
                     taken_at: { type: string, format: date-time }
                     taken_by: { type: string, format: uuid, nullable: true }
                     taken_by_email: { type: string, nullable: true }
@@ -2205,7 +2205,7 @@ paths:
         A WebSocket upgrade, not a REST call — use `supabase-js`
         (`supabase.channel(...).on('postgres_changes', …)`) rather than calling this directly.
 
-        The publication carries `cells`, `gateways`, `devices` and `digital_thread`.
+        The publication carries `cells`, `gateways`, `devices` and `audit_trail`.
         **`telemetry` is unpublishable, not merely unpublished** — see that endpoint.
 
         Three things a client must know:
@@ -2389,7 +2389,7 @@ paths:
         Requires `Administrator` or `Shopfloor_Manager`. The authority decision is made by
         `authorize_host_gateway_credential()`, a `SECURITY DEFINER` RPC called *as the caller*
         that checks `has_role()` itself — the role check in the function turns a refusal into a
-        usable 403 rather than being the boundary. The mint is recorded in `digital_thread` as a
+        usable 403 rather than being the boundary. The mint is recorded in `audit_trail` as a
         `CREDENTIAL_ISSUED` row attributed to the calling operator, carrying the wire identity and
         never the password.
 
@@ -2412,7 +2412,7 @@ paths:
         '200':
           description: >-
             The credential. `audit_recorded` is `false` when the mint succeeded but the
-            `digital_thread` row could not be written — the password is still returned, because the
+            `audit_trail` row could not be written — the password is still returned, because the
             account exists and withholding it would strand one nobody can authenticate as.
           content:
             application/json:
@@ -2519,14 +2519,14 @@ paths:
                     type: string
                     format: uuid
                     description: >-
-                      The handle for revoking this token. Recorded in `digital_thread` — unlike the
+                      The handle for revoking this token. Recorded in `audit_trail` — unlike the
                       token itself — so it survives the dialog being closed.
                   principal_id: { type: string, format: uuid }
                   expires_at:   { type: string, format: date-time }
                   audit_row_id:
                     type: integer
                     format: int64
-                    description: The `digital_thread` row recording the mint.
+                    description: The `audit_trail` row recording the mint.
                   revocation_scope:
                     type: string
                     enum: [postgrest]
@@ -2825,8 +2825,8 @@ paths:
         **Allowed to `Operator` and `Auditor` as well** — it is a read. Still an allow-list,
         and still a broader disclosure than any single table, since a shell aggregates
         nameplate, config and gateway identity into one payload. `bundle` also needs
-        `digital_thread:read` (Administrator, Shopfloor_Manager, Auditor), because it carries the
-        device's Digital Thread.
+        `audit_trail:read` (Administrator, Shopfloor_Manager, Auditor), because it carries the
+        device's Audit Trail.
 
         **Telemetry values are never inlined.** The Time Series submodel carries a
         `LinkedSegment` naming the historian endpoint plus an `asset_id` query.
@@ -2840,7 +2840,7 @@ paths:
 
         `?format=bundle` returns the same AASX with the device's history inside, for taking an
         asset away before it is taken out of service: supplementary parts under
-        `aasx/files/aber/` hold the digital thread's asset lane, read as the caller (JSON), the
+        `aasx/files/aber/` hold the audit trail's asset lane, read as the caller (JSON), the
         readings still in the live historian at raw and hourly resolution (CSV, oldest first,
         capped newest-first), and a
         manifest (`aber/asset-bundle/1`) that says what each part holds, where it was cut,
@@ -2887,7 +2887,7 @@ paths:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `digital_thread:read`; the bundle refusal names the Digital Thread.' }
+        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
         '404': { description: No such device. }
 
   /functions/v1/aas-api:
@@ -2910,7 +2910,7 @@ paths:
         runtime rather than by care.
 
         Every route is a `GET`. Writes would bypass the dashboard's role model and its
-        `digital_thread` audit trail, so the advertised profiles are the read-only SSP-002 pair.
+        `audit_trail` audit trail, so the advertised profiles are the read-only SSP-002 pair.
       responses:
         '404':
           description: No resource at the root; the body names the routes that exist.
@@ -2946,7 +2946,7 @@ paths:
 
         Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
         `GET`; asset data is authored through the dashboard, which has the role model and writes
-        `digital_thread`, and a write here would bypass both.
+        `audit_trail`, and a write here would bypass both.
       responses:
         '200':
           description: The advertised profiles.
@@ -3459,7 +3459,7 @@ paths:
         **Authenticated by a scoped bearer secret, not by a Supabase key.** Grafana presents
         `GRAFANA_ALERT_WEBHOOK_SECRET`; this function verifies it and then uses its own service-role
         client internally. Grafana is deliberately *not* given the service-role key — that key
-        bypasses RLS entirely and can rewrite `digital_thread`, and a service fronted by browser SSO
+        bypasses RLS entirely and can rewrite `audit_trail`, and a service fronted by browser SSO
         gets the narrowest credential that does its job. Same shape as `nodered_webhook_jwt_secret`
         for the quarantine webhook.
 
@@ -4174,7 +4174,7 @@ components:
         datatype: { type: integer, nullable: true, example: 12, description: 'Sparkplug B datatype code (9 Float, 10 Double, 11 Boolean, 12 String, …).' }
         updated_at: { type: string, format: date-time }
 
-    DigitalThreadEntry:
+    AuditTrailEntry:
       type: object
       description: One audit event.
       properties:
@@ -4184,7 +4184,7 @@ components:
           enum: [areas, cells, gateways, devices, device_nameplate, schemas, metric_catalog, change_proposals,
                  user_roles, service_principals, system_settings, backup_jobs, backups]
           description: >-
-            The table the event is about: the types the thread records today. A thread older than
+            The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
             `device_links` rows.
         entity_id: { type: string, format: uuid }
@@ -4415,7 +4415,7 @@ components:
           description: |
             Dotted, lowercase, `namespace.name`. IMMUTABLE: a key names the value some code reads,
             so renaming one would silently disconnect it from that reader.
-          example: ui.digital_thread_poll_seconds
+          example: ui.audit_trail_poll_seconds
         value:
           description: |
             The value, as JSON. Its JSON type must match `value_type` — a CHECK constraint enforces
@@ -4428,7 +4428,7 @@ components:
         category:
           type: string
           description: 'Grouping for the settings page.'
-          example: Digital Thread
+          example: Audit Trail
         label: { type: string, example: 'Refresh interval (seconds)' }
         description:
           type: string
@@ -4440,7 +4440,7 @@ components:
             The environment variable or code constant this overrides, named so the fallback is
             greppable from either end. An absent row means the fallback applies, which is what
             keeps local boot zero-configuration.
-          example: the 60_000 ms interval in DigitalThreadTab.jsx
+          example: the 60_000 ms interval in AuditTrailTab.jsx
         updated_at: { type: string, format: date-time }
         updated_by:
           type: string

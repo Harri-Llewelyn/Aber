@@ -60,7 +60,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 REQUIRE = os.getenv("REQUIRE_PLAYBACK_REPLAY") == "1"
 
 # The Supabase database, as its OWNER. Used for one thing: clearing the audit rows this suite's
-# fixtures generate. `digital_thread` is append-only to every application role, service_role
+# fixtures generate. `audit_trail` is append-only to every application role, service_role
 # included, so PostgREST cannot remove them. validate.py carries the same connection for the same
 # reason.
 SUPABASE_DB_HOST = os.getenv("SUPABASE_DB_HOST", "localhost")
@@ -366,7 +366,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         except Exception as err:  # noqa: BLE001 -- cleanup must not mask a real failure
             print(f"historian cleanup warning: {err}")
 
-        # The audit rows, which need the owner: digital_thread takes no DELETE from any
+        # The audit rows, which need the owner: audit_trail takes no DELETE from any
         # application role, so PostgREST cannot clear what the fixtures wrote.
         try:
             conn = psycopg2.connect(
@@ -377,12 +377,12 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
             conn.autocommit = True
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
+                    "DELETE FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
                     ([SOURCE_GATEWAY_ID, SOURCE_DEVICE_ID],),
                 )
             conn.close()
         except Exception as err:  # noqa: BLE001
-            print(f"audit cleanup warning: {err}; fixture rows left in digital_thread")
+            print(f"audit cleanup warning: {err}; fixture rows left in audit_trail")
 
     # ------------------------------------------------------------------------------------------
     # The path

@@ -140,7 +140,7 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--text-dim on panel surface',    '--text-dim',    surface,                           AA_TEXT],
     ['--text-primary on panel surface','--text-primary', surface,                          AA_TEXT],
     // CopyableId is the pattern every identifier uses, on the card, on the surface and in the
-    // digital thread. It reveals a --bg-glass hover ground, so the hover state is measured rather
+    // audit trail. It reveals a --bg-glass hover ground, so the hover state is measured rather
     // than assumed.
     ['--accent id on card',            '--accent',      card,                              AA_LARGE],
     ['--accent id on glass hover',     '--accent',      glass(card),                       AA_LARGE],

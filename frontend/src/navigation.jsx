@@ -37,7 +37,7 @@ import {
  *                     timer over something and offers a way to restore from it.
  *   Administration -- who may do what, where does everything live, how is it configured?
  *
- * The Site Map is in no group: it is the landing page. Digital Thread leads History rather than
+ * The Site Map is in no group: it is the landing page. Audit Trail leads History rather than
  * sitting beside Devices because it is the audit trace of every entity.
  *
  * The groups are not captioned in the rail: the separator is the whole of the grouping, and a
@@ -82,10 +82,10 @@ export const TABS = [
   // Reference you read, where the two above are state you edit.
   { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} /> },
 
-  /* Gated on the permission, not on role names: the `digital_thread` SELECT policies resolve
-     `digital_thread:read`, so one predicate decides visibility and access. Without it an Operator
+  /* Gated on the permission, not on role names: the `audit_trail` SELECT policies resolve
+     `audit_trail:read`, so one predicate decides visibility and access. Without it an Operator
      saw an empty table with no explanation, since RLS returns no rows rather than an error. */
-  { id: 'digital-thread', label: 'Digital Thread', group: 'history', icon: <IconHistory size={16} />, permission: PERMISSION_UUIDS.DIGITAL_THREAD_READ },
+  { id: 'audit-trail', label: 'Audit Trail', group: 'history', icon: <IconHistory size={16} />, permission: PERMISSION_UUIDS.AUDIT_TRAIL_READ },
   // The three roles the database admits: SELECT on `captures` and `capture_jobs` is granted to
   // Administrator, Shopfloor_Manager and Auditor. Operator is absent, which is why the page is
   // gated at all.

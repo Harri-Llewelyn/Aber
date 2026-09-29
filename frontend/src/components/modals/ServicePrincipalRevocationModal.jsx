@@ -117,7 +117,7 @@ export function ServicePrincipalRevocationModal({
               {/* RECORDED ON THE ROW AND IN THE AUDIT TRAIL. "Why" is the question a reader of the
                   denylist will have, and without this it lives only in somebody's memory. */}
               <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
-                Shown on the identity and recorded in the Digital Thread.
+                Shown on the identity and recorded in the Audit Trail.
               </div>
             </div>
           </>

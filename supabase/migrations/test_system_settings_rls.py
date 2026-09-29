@@ -42,7 +42,7 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 ADMIN_ID = "5e771465-0000-4000-8000-00000000ad11"
 OPERATOR_ID = "5e771465-0000-4000-8000-00000000009e"
 
-SEEDED_KEY = "ui.digital_thread_poll_seconds"
+SEEDED_KEY = "ui.audit_trail_poll_seconds"
 
 
 def get_connection():
@@ -57,10 +57,10 @@ def ensure_auth_user(cur, user_id, label):
     """
     Make `user_id` exist in `auth.users`.
 
-    NOT BOILERPLATE, AND EASY TO MISTAKE FOR IT. `log_digital_thread_event()` writes
+    NOT BOILERPLATE, AND EASY TO MISTAKE FOR IT. `log_audit_trail_event()` writes
     `changed_by = auth.uid()` under a foreign key to `auth.users`, so a fixture that fakes a
     session without an account fails on the AUDIT insert -- with an FK error naming
-    `digital_thread`, which reads like a fault in the audit trail rather than a missing fixture.
+    `audit_trail`, which reads like a fault in the audit trail rather than a missing fixture.
 
     IT ONLY STARTED MATTERING WHEN THE TABLE UNDER TEST BECAME AUDITED. `0070` attached the
     trigger to `system_settings`, `schemas` and `user_roles`, so suites that had been writing to
@@ -95,7 +95,7 @@ def ensure_auth_user(cur, user_id, label):
         except psycopg2.Error:
             cur.execute("ROLLBACK TO SAVEPOINT ensure_user;")
     raise RuntimeError(
-        f"could not create auth.users row {user_id}; digital_thread.changed_by is an FK to it, "
+        f"could not create auth.users row {user_id}; audit_trail.changed_by is an FK to it, "
         "so the tests that act as this user cannot run"
     )
 
@@ -124,11 +124,11 @@ def drop_fixture_principals(user_ids):
     THE AUDIT ROWS ARE LEFT ALONE, DELIBERATELY, AND THIS COSTS TWO ROWS PER RUN
 
     Dropping the `user_roles` grants fires `log_role_assignment()`, which writes a ROLE_REVOKED
-    row -- so cleaning up is itself audited, and this teardown ADDS to `digital_thread` rather
+    row -- so cleaning up is itself audited, and this teardown ADDS to `audit_trail` rather
     than subtracting from it.
 
     Deleting those rows too was considered and refused. The suite connects as `postgres`, which is
-    one of the two roles `enforce_digital_thread_append_only()` lets through, so it is mechanically
+    one of the two roles `enforce_audit_trail_append_only()` lets through, so it is mechanically
     possible -- and that trigger's own header says why it must not be done here: *"clearing audit
     rows is an act that should require the same authority as dropping a table."* A test suite that
     quietly exercises that authority every run is a worse outcome than the noise it removes, and it

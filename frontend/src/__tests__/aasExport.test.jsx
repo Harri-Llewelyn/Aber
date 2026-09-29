@@ -243,10 +243,10 @@ describe('Export AAS — AASX package', () => {
 })
 
 /**
- * The bundle carries the device's Digital Thread, and aas-export refuses it to a caller without
- * `digital_thread:read`. The action is withheld from that reader, as View Digital Thread is.
+ * The bundle carries the device's Audit Trail, and aas-export refuses it to a caller without
+ * `audit_trail:read`. The action is withheld from that reader, as View Audit Trail is.
  */
-describe('Export Bundle — for the readers of the Digital Thread', () => {
+describe('Export Bundle — for the readers of the Audit Trail', () => {
   const BUNDLE = /Export Bundle \(with history\)/i
 
   const panelFor = async (hasPermission) => {
@@ -255,9 +255,9 @@ describe('Export Bundle — for the readers of the Digital Thread', () => {
     return openPanel()
   }
 
-  it('is offered to a role that holds digital_thread:read, even without the manage permissions', async () => {
-    // The Auditor's grant: the thread and nothing else.
-    const panel = await panelFor((p) => p === PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  it('is offered to a role that holds audit_trail:read, even without the manage permissions', async () => {
+    // The Auditor's grant: the trail and nothing else.
+    const panel = await panelFor((p) => p === PERMISSION_UUIDS.AUDIT_TRAIL_READ)
     expect(panel.getByText(BUNDLE).closest('button').disabled).toBe(false)
   })
 

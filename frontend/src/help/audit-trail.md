@@ -14,6 +14,6 @@ The record of what changed, who changed it, and what it looked like before. Ever
 
 **This is the audit trail, and it is deliberately not the logs.** Entries here are append-only, attributed to an actor, and immutable once written. Container and pod logs are none of those things; they are diagnostics, and they are gone when the container is recreated. If something matters for audit it belongs in a row, which is why it is here.
 
-**Not every entry is visible to every role.** The thread carries more than one lane, and some of what is recorded is deliberately unreadable to the engineering roles -- an audit trail an engineer can edit or fully inspect is worth less than one they cannot.
+**Not every entry is visible to every role.** The trail carries more than one lane, and some of what is recorded is deliberately unreadable to the engineering roles -- an audit trail an engineer can edit or fully inspect is worth less than one they cannot.
 
-Entries are retained on a bounded window rather than for ever. The thread stopped growing without end on purpose: a store with no retention answer is one that eventually fails at the worst moment.
+Entries are retained on a bounded window rather than for ever. The trail stopped growing without end on purpose: a store with no retention answer is one that eventually fails at the worst moment.

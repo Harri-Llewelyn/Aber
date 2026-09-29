@@ -78,7 +78,7 @@ describe('ArchivesTab Component', () => {
 
 /**
  * Permanent Delete: the manual half of the retention policy. The row is really deleted; only the
- * digital thread survives, because audit rows are immutable and independent of the entity.
+ * audit trail survives, because audit rows are immutable and independent of the entity.
  */
 /**
  * Open the dialog and satisfy its typed-name gate, so the tests about what happens after a
@@ -455,12 +455,12 @@ const EXPORT_ROW = {
 const RETIRED_DEVICE = {
   entity_type: 'device', entity_id: 'dev-1', name: 'CNC_01', sparkplug_id: 'abc123',
   archived_at: '2026-09-01T10:00:00Z', retired_at: '2026-10-01T10:00:00Z',
-  retired_by: null, retired_by_email: null, thread_id: 42, old_data: {}, exports: [EXPORT_ROW]
+  retired_by: null, retired_by_email: null, trail_id: 42, old_data: {}, exports: [EXPORT_ROW]
 }
 const RETIRED_GATEWAY = {
   entity_type: 'gateway', entity_id: 'gw-1', name: 'Line_A_Gateway', sparkplug_id: 'def456',
   archived_at: '2026-09-01T10:00:00Z', retired_at: '2026-10-02T10:00:00Z',
-  retired_by: 'user-1', retired_by_email: 'admin@example.test', thread_id: 43,
+  retired_by: 'user-1', retired_by_email: 'admin@example.test', trail_id: 43,
   old_data: { forge_repository_at: '2026-08-01T00:00:00Z' }, exports: []
 }
 
@@ -474,11 +474,11 @@ const routed = ({ archives = [], retired = [], exports = [] } = {}) => (path) =>
 const showLifecycle = async (lists, props = {}) => {
   api.get.mockImplementation(routed(lists))
   const showToast = vi.fn()
-  const onViewThread = vi.fn()
-  render(<ArchivesTab showToast={showToast} hasPermission={() => true} onViewThread={onViewThread} {...props} />)
+  const onViewTrail = vi.fn()
+  render(<ArchivesTab showToast={showToast} hasPermission={() => true} onViewTrail={onViewTrail} {...props} />)
   const first = lists.archives?.[0] || lists.retired?.[0]
   await waitFor(() => expect(screen.getAllByText(first.name).length).toBeGreaterThan(0))
-  return { showToast, onViewThread }
+  return { showToast, onViewTrail }
 }
 
 describe('ArchivesTab lists archived areas', () => {
@@ -521,7 +521,7 @@ describe('ArchivesTab exports a device before it goes', () => {
   it('offers Export Bundle on a device, and posts the device id to the bundle route', async () => {
     api.post.mockResolvedValue({
       blob: new Blob(['zip']), filename: 'CNC_01-bundle.aasx', format: 'bundle',
-      stats: { bundle: { stored: true, raw_rows: 10, hourly_rows: 2, thread_rows: 3, cold_objects: 1 } }
+      stats: { bundle: { stored: true, raw_rows: 10, hourly_rows: 2, trail_rows: 3, cold_objects: 1 } }
     })
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] })
 
@@ -591,10 +591,10 @@ describe('ArchivesTab shows what has been retired', () => {
     expect(rows[1].textContent).toContain('admin@example.test')
   })
 
-  it('opens the digital thread with deleted entities shown, since the row is gone', async () => {
-    const { onViewThread } = await showLifecycle({ retired: [RETIRED_DEVICE] })
-    fireEvent.click(screen.getByRole('button', { name: /Digital Thread/i }))
-    expect(onViewThread).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: true })
+  it('opens the audit trail with deleted entities shown, since the row is gone', async () => {
+    const { onViewTrail } = await showLifecycle({ retired: [RETIRED_DEVICE] })
+    fireEvent.click(screen.getByRole('button', { name: /Audit Trail/i }))
+    expect(onViewTrail).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: true })
   })
 
   it('links a gateway to its repository in the forge, which archiving kept', async () => {
@@ -620,11 +620,11 @@ describe('ArchivesTab shows what has been retired', () => {
   it('offers nothing to download for a device that was never exported', async () => {
     await showLifecycle({ retired: [{ ...RETIRED_DEVICE, exports: [] }] })
     expect(screen.queryByRole('button', { name: /^Bundle/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /Digital Thread/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Audit Trail/i })).toBeInTheDocument()
   })
 
   it('still shows the archived card when the tombstones cannot be read', async () => {
-    // The tombstone policy admits archive:manage or digital_thread:read; a reader with neither
+    // The tombstone policy admits archive:manage or audit_trail:read; a reader with neither
     // still has the first card, and the page must not fail closed on the second.
     api.get.mockImplementation((path) => path.startsWith('/api/v1/archives/retired') || path.startsWith('/api/v1/archives/exports')
       ? Promise.reject(new Error('permission denied'))

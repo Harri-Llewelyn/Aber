@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Migration: 0021_an_approval_shares_a_causation_id_with_the_change_it_made.sql
--- A proposal's thread row carries the transaction that applied or expired it (#536)
+-- A proposal's trail row carries the transaction that applied or expired it (#536)
 -- =============================================================================================
 --
 -- approve_proposal() writes a PROPOSAL_APPLIED row, and the target's own audit trigger records
@@ -47,7 +47,7 @@ DECLARE
     v_actor     uuid := auth.uid();
     v_allowed   text[];
     v_key       text;
-    v_thread    bigint;
+    v_trail    bigint;
 BEGIN
     -- The outer gate is the union of everybody who may decide anything; the lane's own gate below
     -- is the one that decides.
@@ -215,7 +215,7 @@ BEGIN
     -- The row that names both parties; the target's own audit trigger records only the approver.
     -- causation_id is this transaction, which the trigger also stamped on the target's row, so
     -- the two group as one act.
-    INSERT INTO public.digital_thread
+    INSERT INTO public.audit_trail
         (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
          causation_id, audit_domain)
     VALUES (
@@ -236,17 +236,17 @@ BEGIN
         txid_current(),
         public.audit_domain_for(v_proposal.entity_type, 'PROPOSAL_APPLIED')
     )
-    RETURNING id INTO v_thread;
+    RETURNING id INTO v_trail;
 
     PERFORM set_config('aber.proposal_transition', 'on', true);
 
     UPDATE public.change_proposals
        SET status = 'applied', decided_by = v_actor, decided_at = now(),
-           applied_thread_id = v_thread
+           applied_trail_id = v_trail
      WHERE id = p_proposal_id;
 
     RETURN jsonb_build_object(
-        'id', p_proposal_id, 'status', 'applied', 'thread_id', v_thread
+        'id', p_proposal_id, 'status', 'applied', 'trail_id', v_trail
     );
 END;
 $$;
@@ -289,7 +289,7 @@ BEGIN
            AND proposed_at < now() - make_interval(secs => v_days::double precision * 86400.0)
         RETURNING id, entity_type, entity_id, proposed_by
     LOOP
-        INSERT INTO public.digital_thread
+        INSERT INTO public.audit_trail
             (entity_type, entity_id, action, new_data, changed_by, actor_source, causation_id,
              audit_domain)
         VALUES (

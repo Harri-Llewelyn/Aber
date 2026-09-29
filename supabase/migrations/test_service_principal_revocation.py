@@ -288,7 +288,7 @@ class ServicePrincipalRevocation(unittest.TestCase):
             self.assertEqual(cur.fetchone()[0], 1, "the outstanding token was not withdrawn")
 
             cur.execute(
-                "SELECT new_data FROM public.digital_thread WHERE action = 'TOKEN_REVOKED'"
+                "SELECT new_data FROM public.audit_trail WHERE action = 'TOKEN_REVOKED'"
                 "   AND new_data ->> 'jti' = %s;", (live,))
             self.assertEqual(cur.fetchone()["new_data"]["cascaded_from"], "PRINCIPAL_REVOKED")
 
@@ -298,7 +298,7 @@ class ServicePrincipalRevocation(unittest.TestCase):
             self._revoke(cur, reason="left the project")
 
             cur.execute(
-                "SELECT audit_domain, changed_by, actor_source, new_data FROM public.digital_thread"
+                "SELECT audit_domain, changed_by, actor_source, new_data FROM public.audit_trail"
                 " WHERE action = 'PRINCIPAL_REVOKED' AND entity_id = %s::uuid;", (SUBJECT_ID,))
             row = cur.fetchone()
             self.assertEqual(row["audit_domain"], "security")

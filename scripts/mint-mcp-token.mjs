@@ -13,7 +13,7 @@
 // The subject is `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
 // archived migration 0034, which holds `telemetry:read` and nothing else (0080 moved it off
 // `Operator`): it reads every relation the i3X address space is assembled from and writes nothing,
-// and it cannot read `digital_thread`.
+// and it cannot read `audit_trail`.
 //
 // GOTRUE_JWT_EXP DOES NOT APPLY. It governs what GoTrue ISSUES; a JWT signed here is validated on
 // its signature and `exp`, and by PostgREST against the revocation denylists. That is the whole
@@ -158,7 +158,7 @@ const serviceKey = creds.SUPABASE_SERVICE_ROLE_KEY;
 if (!serviceKey || !creds.SUPABASE_PUBLISHABLE_KEY) {
   console.error(missingCredentialAdvice(serviceKey ? 'SUPABASE_PUBLISHABLE_KEY' : 'SUPABASE_SERVICE_ROLE_KEY'));
   console.error(
-    'It is needed to record the issue in the Digital Thread, which happens BEFORE the token is\n' +
+    'It is needed to record the issue in the Audit Trail, which happens BEFORE the token is\n' +
     'printed -- a token that cannot be recorded is not handed out.'
   );
   process.exit(1);
@@ -196,7 +196,7 @@ try {
 
 if (!response.ok) {
   const detail = (await response.text()).slice(0, 500);
-  console.error(`The Digital Thread refused to record this issue (HTTP ${response.status}):`);
+  console.error(`The Audit Trail refused to record this issue (HTTP ${response.status}):`);
   console.error(detail);
   console.error(
     '\nNO TOKEN HAS BEEN PRINTED. That is deliberate: a credential nobody can revoke must not\n' +
@@ -232,7 +232,7 @@ if (asJson) {
     )
   );
   console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until} (jti ${jti})`);
-  console.error('# recorded in the Digital Thread as TOKEN_MINTED; revoke with revoke_service_token');
+  console.error('# recorded in the Audit Trail as TOKEN_MINTED; revoke with revoke_service_token');
 } else {
   console.log(token);
   console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until}`);

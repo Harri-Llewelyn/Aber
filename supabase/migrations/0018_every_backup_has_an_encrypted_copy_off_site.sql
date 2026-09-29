@@ -45,7 +45,7 @@ END $c$;
 
 COMMENT ON TABLE public.backups IS
   'One row per backup that EXISTS on the backup volume; the row is deleted when the service prunes '
-  'the files, and BACKUP_PRUNED in digital_thread is the record that it did. Written only by '
+  'the files, and BACKUP_PRUNED in audit_trail is the record that it did. Written only by '
   'backup_finalise() and backup_offsite_record(), and released only by release_backup(). Readable '
   'by Administrator only. No byte reaches a browser; the off-site copy is encrypted before it '
   'leaves the service.';

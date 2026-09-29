@@ -5,7 +5,7 @@ WHAT IS UNDER TEST, in order of what would be worst to get wrong: nobody but an 
 queue a backup, and no PostgREST role can call the service's gates; a backup an Administrator asks
 for is taken -- both dumps, the storage objects, the forge, the broker's document and, with TLS
 on, the internal CA, each with the digest the row records, and a manifest restore-databases.sh
-can read; the thread records who asked and that the service wrote it; a request nobody has
+can read; the trail records who asked and that the service wrote it; a request nobody has
 claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; a
 RUNNING job no service is running is failed, so a restored database does not refuse backups; a
 failed job is followed by a prune that leaves the newest three backups alone; and, with a MinIO of
@@ -152,7 +152,7 @@ class BackupServiceTests(unittest.TestCase):
 
         # Who asked, as a user.
         self.assertEqual(psql(
-            f"SELECT actor_source || ' ' || (changed_by IS NOT NULL)::text FROM public.digital_thread "
+            f"SELECT actor_source || ' ' || (changed_by IS NOT NULL)::text FROM public.audit_trail "
             f"WHERE entity_type = 'backup_jobs' AND entity_id = '{job_id}' AND action = 'BACKUP_REQUESTED'"
         ), "user true")
 
@@ -225,7 +225,7 @@ class BackupServiceTests(unittest.TestCase):
 
         # And the service witnessed it.
         self.assertEqual(psql(
-            f"SELECT actor_source || ' ' || (changed_by IS NULL)::text FROM public.digital_thread "
+            f"SELECT actor_source || ' ' || (changed_by IS NULL)::text FROM public.audit_trail "
             f"WHERE entity_type = 'backups' AND entity_id = '{backup['id']}' AND action = 'BACKUP_TAKEN'"
         ), "service true")
 
@@ -244,7 +244,7 @@ class BackupServiceTests(unittest.TestCase):
             status, again = rpc("cancel_backup_job", {"p_job_id": job_id}, self.admin)
             self.assertEqual((status, again), (200, False), "cancelling twice is a no-op, not an error")
             self.assertEqual(psql(
-                f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backup_jobs' "
+                f"SELECT count(*) FROM public.audit_trail WHERE entity_type = 'backup_jobs' "
                 f"AND entity_id = '{job_id}' AND action = 'BACKUP_CANCELLED' AND actor_source = 'user'"
             ), "1")
         finally:
@@ -265,7 +265,7 @@ class BackupServiceTests(unittest.TestCase):
         status, again = rpc("release_backup", {"p_backup_id": backup_id}, self.admin)
         self.assertEqual((status, again), (200, False))
         self.assertEqual(psql(
-            f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backups' "
+            f"SELECT count(*) FROM public.audit_trail WHERE entity_type = 'backups' "
             f"AND entity_id = '{backup_id}' AND action = 'BACKUP_RELEASED'"
         ), "1")
 
@@ -298,7 +298,7 @@ class BackupServiceTests(unittest.TestCase):
         self.assertEqual(row["status"], "FAILED", row)
         self.assertIn("no backup service was running this job", row["error"])
         self.assertEqual(psql(
-            f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backup_jobs' "
+            f"SELECT count(*) FROM public.audit_trail WHERE entity_type = 'backup_jobs' "
             f"AND entity_id = '{job_id}' AND action = 'BACKUP_FAILED' AND actor_source = 'service'"
         ), "1")
 
@@ -461,7 +461,7 @@ class BackupServiceTests(unittest.TestCase):
             self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{old}'"), "0")
             self.assertEqual(remaining.get("Contents", []), [], "the prune removed the backup and left its copy")
             self.assertIn("was deleted", psql(
-                "SELECT new_data ->> 'reason' FROM public.digital_thread WHERE action = 'BACKUP_PRUNED' "
+                "SELECT new_data ->> 'reason' FROM public.audit_trail WHERE action = 'BACKUP_PRUNED' "
                 f"AND old_data ->> 'stamp' = '{old}' ORDER BY recorded_at DESC LIMIT 1"))
         else:
             self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{old}'"), "1")

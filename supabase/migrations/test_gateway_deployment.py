@@ -19,7 +19,7 @@ this file asserted that agreement in both directions. `is_virtual` was dropped a
 baseline squash and the trigger with it, so that half has gone -- `0000` performs the drop and
 asserts it, and there is no second column left to disagree.
 
-EVERY TEST ROLLS BACK. Writes to `gateways` fire the digital-thread trigger, and that table is
+EVERY TEST ROLLS BACK. Writes to `gateways` fire the audit-trail trigger, and that table is
 append-only and cannot be pruned.
 """
 import os

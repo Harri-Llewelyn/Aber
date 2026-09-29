@@ -142,9 +142,9 @@ handed to a third party, and `'0'` cannot begin an `idShort`, so the shell fails
 The lesson is the one the fixture already taught: *an implementation that is not listed in the
 fixture is an implementation that is not checked.*
 
-### Why the Digital Thread groups overlapping markers into a badge
+### Why the Audit Trail groups overlapping markers into a badge
 
-`components/tabs/DigitalThreadTab.jsx` draws one lane per asset with a marker per event. Events
+`components/tabs/AuditTrailTab.jsx` draws one lane per asset with a marker per event. Events
 written by one transaction share a timestamp exactly (`recorded_at` is the transaction start time),
 so a commissioning burst of five or six rows lands on one pixel. Two fixes were tried and rejected:
 
@@ -180,7 +180,7 @@ claim about the broker, which is the one thing the page cannot see.
 
 ## Realtime
 
-`supabase-realtime` publishes `cells`, `gateways`, `devices` and `digital_thread`. Tabs subscribe
+`supabase-realtime` publishes `cells`, `gateways`, `devices` and `audit_trail`. Tabs subscribe
 through `hooks/useRealtimeTable.js`.
 
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
@@ -294,9 +294,9 @@ supplies no release version, is not evidence of drift.
 | `DevicesTab` | Quarantined devices render **in the onboarding queue banner only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. Two visible actions, not seven |
 | `SchemasTab` | Metric catalog, the standard-vocabulary reference card, and the schema registry. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `TelemetryTab` | Time-series viewer over the FDW view. A time window is required whenever a tag filter is active |
-| `DigitalThreadTab` | Audit trail. Filtering by tag matches devices carrying it **now**; the log records what was true then, and the UI says so |
+| `AuditTrailTab` | Audit trail. Filtering by tag matches devices carrying it **now**; the log records what was true then, and the UI says so |
 | `DirectoryTab` | Directory service configuration and the GitOps flow push |
-| `ArchivesTab` | Two cards of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Digital Thread page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `ArchivesTab` | Two cards of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 

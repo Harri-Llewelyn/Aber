@@ -47,7 +47,7 @@ import { supabase } from '../lib/supabaseClient'
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
 // Every page reachable from the rail. The mocked session has no permission rows, so every
-// permission-gated page is absent: Archived Entities, Approvals and Digital Thread. Capture stays visible
+// permission-gated page is absent: Archived Entities, Approvals and Audit Trail. Capture stays visible
 // because it is gated on role, and the mocked session is an Administrator.
 const ALWAYS_VISIBLE = [
   'Site Map', 'Cells', 'Gateways', 'Devices',

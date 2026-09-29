@@ -14,8 +14,8 @@
 -- person's act; access control stays with people; no check a machine passes consults link:manage
 -- or gitops:manage.
 --
--- digital_thread:read opens the thread's asset lane to a machine: the policy named three roles, so
--- a machine granted the permission read no thread rows. The security lane stays Administrator and
+-- audit_trail:read opens the trail's asset lane to a machine: the policy named three roles, so
+-- a machine granted the permission read no trail rows. The security lane stays Administrator and
 -- Auditor. Nothing moves for a person: those three roles are the ones that hold the permission.
 --
 -- may_decide_proposal() is rewritten with the same five arms and comments that say what the cell
@@ -43,7 +43,7 @@ DECLARE
     -- Machines propose, people decide. An allow-list, so a permission added later is refused
     -- until somebody decides a machine may hold it. check-docs-drift.mjs asserts the Access
     -- Control page offers exactly this list (11e) and that each entry reaches a machine (11f).
-    c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'digital_thread:read',
+    c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'audit_trail:read',
                                        'archive:manage', 'proposal:create', 'schema:manage'];
     v_id      uuid;
     v_name    text := btrim(p_name);
@@ -152,7 +152,7 @@ BEGIN
 
     -- ATTRIBUTED TO A PERSON: this is called by an Administrator with a session, so `auth.uid()` is
     -- the attribution rather than a claim.
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -178,20 +178,20 @@ $$;
 
 ALTER FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) OWNER TO postgres;
 
-COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding permissions of its own and a name the Access Control page lists it by. Administrator only. Machines propose, people decide: allows telemetry:read, quarantine:view, digital_thread:read, archive:manage, proposal:create and schema:manage, and refuses every other permission with its reason -- device writes, quarantine decisions, deciding proposals and access control are made by people, and no check a machine passes consults link:manage or gitops:manage. revoke_service_token() and revoke_service_principal() withdraw what it creates at PostgREST, where every check those grants open is reached. The name is unique ignoring case. One form only: an overload whose extra arguments default makes every RPC call ambiguous.';
+COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding permissions of its own and a name the Access Control page lists it by. Administrator only. Machines propose, people decide: allows telemetry:read, quarantine:view, audit_trail:read, archive:manage, proposal:create and schema:manage, and refuses every other permission with its reason -- device writes, quarantine decisions, deciding proposals and access control are made by people, and no check a machine passes consults link:manage or gitops:manage. revoke_service_token() and revoke_service_principal() withdraw what it creates at PostgREST, where every check those grants open is reached. The name is unique ignoring case. One form only: an overload whose extra arguments default makes every RPC call ambiguous.';
 
 -- 0001's ACL, restated; CREATE OR REPLACE keeps it either way.
 REVOKE ALL ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) FROM PUBLIC, anon;
 GRANT ALL ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
--- 2. digital_thread:read opens the asset lane; the security lane is untouched
+-- 2. audit_trail:read opens the asset lane; the security lane is untouched
 -- ---------------------------------------------------------------------------------------------
 -- has_role() for a person, has_authority() for a machine, which holds permissions and never a
 -- role. The roles the first arm names are the roles that hold the permission, so for a person
 -- the second arm adds nobody.
-DROP POLICY IF EXISTS digital_thread_select_asset ON public.digital_thread;
-CREATE POLICY digital_thread_select_asset ON public.digital_thread FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]) OR public.has_authority(ARRAY['digital_thread:read'::text]))));
+DROP POLICY IF EXISTS audit_trail_select_asset ON public.audit_trail;
+CREATE POLICY audit_trail_select_asset ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]) OR public.has_authority(ARRAY['audit_trail:read'::text]))));
 
 -- ---------------------------------------------------------------------------------------------
 -- 3. may_decide_proposal(): the same arms, and comments that say what they check
@@ -252,7 +252,7 @@ BEGIN
       FROM regexp_matches(
              substring(v_def FROM 'c_allowed CONSTANT text\[\] := ARRAY\[([^]]*)\]'),
              '''([^'']+)''', 'g') AS m;
-    IF v_allowed IS DISTINCT FROM ARRAY['archive:manage', 'digital_thread:read', 'proposal:create',
+    IF v_allowed IS DISTINCT FROM ARRAY['archive:manage', 'audit_trail:read', 'proposal:create',
                                         'quarantine:view', 'schema:manage', 'telemetry:read'] THEN
         RAISE EXCEPTION '0013 self-check: create_machine_principal() allows %, not the six this file decided.',
             coalesce(array_to_string(v_allowed, ', '), '(nothing it could read)');
@@ -287,25 +287,25 @@ BEGIN
     SELECT pg_get_expr(pol.polqual, pol.polrelid), pol.polcmd, pol.polroles
       INTO v_qual, v_cmd, v_roles
       FROM pg_policy pol
-     WHERE pol.polrelid = 'public.digital_thread'::regclass
-       AND pol.polname = 'digital_thread_select_asset'
+     WHERE pol.polrelid = 'public.audit_trail'::regclass
+       AND pol.polname = 'audit_trail_select_asset'
        AND pol.polpermissive;
     IF v_qual IS NULL
        OR v_cmd <> 'r'
        OR v_roles IS DISTINCT FROM ARRAY['authenticated'::regrole::oid]
        OR v_qual NOT LIKE '%audit_domain = ''asset''::text%'
        OR v_qual NOT LIKE '%has_role(ARRAY[''Administrator''::text, ''Shopfloor_Manager''::text, ''Auditor''::text])%'
-       OR v_qual NOT LIKE '%has_authority(ARRAY[''digital_thread:read''::text])%' THEN
-        RAISE EXCEPTION '0013 self-check: digital_thread_select_asset is %, not the asset lane for the three roles or digital_thread:read.',
+       OR v_qual NOT LIKE '%has_authority(ARRAY[''audit_trail:read''::text])%' THEN
+        RAISE EXCEPTION '0013 self-check: audit_trail_select_asset is %, not the asset lane for the three roles or audit_trail:read.',
             coalesce(v_qual, '(missing)');
     END IF;
 
     SELECT pg_get_expr(pol.polqual, pol.polrelid) INTO v_qual
       FROM pg_policy pol
-     WHERE pol.polrelid = 'public.digital_thread'::regclass
-       AND pol.polname = 'digital_thread_select_security';
+     WHERE pol.polrelid = 'public.audit_trail'::regclass
+       AND pol.polname = 'audit_trail_select_security';
     IF v_qual IS NULL OR v_qual LIKE '%has_authority%' THEN
-        RAISE EXCEPTION '0013 self-check: digital_thread_select_security is %; the security lane is Administrator and Auditor only.',
+        RAISE EXCEPTION '0013 self-check: audit_trail_select_security is %; the security lane is Administrator and Auditor only.',
             coalesce(v_qual, '(missing)');
     END IF;
 

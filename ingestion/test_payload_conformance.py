@@ -1,9 +1,9 @@
 """
-Unit tests for payload conformance auditing -- the SCHEMA_REJECTION half of the digital thread.
+Unit tests for payload conformance auditing -- the SCHEMA_REJECTION half of the audit trail.
 
 WHAT THIS PROTECTS, IN ORDER OF HOW BADLY IT FAILS.
 
-  1. THE DEDUPLICATION. `record_payload_violations()` writes to `public.digital_thread`, which is
+  1. THE DEDUPLICATION. `record_payload_violations()` writes to `public.audit_trail`, which is
      append-only to every application role and cannot be pruned by the application at all. DDATA
      arrives continuously, so a regression that writes one row per message does not degrade -- it
      fills the disk, and the first symptom is the database refusing writes. archived migration 0005 made
@@ -497,7 +497,7 @@ class RecordViolationsTestCase(unittest.TestCase):
     def test_the_same_fault_repeated_writes_exactly_once(self):
         """
         THE TEST THIS FILE EXISTS FOR. Ten identical messages are one problem, not ten, and
-        digital_thread cannot be pruned by any application role.
+        audit_trail cannot be pruned by any application role.
         """
         for _ in range(10):
             ingestion.record_payload_violations(device(), self.violation(), OBSERVED_AT)

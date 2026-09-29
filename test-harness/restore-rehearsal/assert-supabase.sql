@@ -35,9 +35,9 @@ BEGIN
 
   -- 2. The audit trail of that seeding came back ------------------------------------------------
   --
-  -- Written by log_digital_thread_event(), so this is evidence the trigger fired at seed time AND
+  -- Written by log_audit_trail_event(), so this is evidence the trigger fired at seed time AND
   -- that its rows survived. The trigger itself is checked separately below.
-  SELECT count(*) INTO v_count FROM public.digital_thread
+  SELECT count(*) INTO v_count FROM public.audit_trail
    WHERE entity_id IN ('e1000000-0000-4000-8000-000000000001',
                        'e2000000-0000-4000-8000-000000000001',
                        'e3000000-0000-4000-8000-000000000001');
@@ -45,41 +45,41 @@ BEGIN
     RAISE EXCEPTION 'expected at least 3 audit rows for the seeded assets, found %', v_count;
   END IF;
 
-  -- 3. digital_thread is still append-only ------------------------------------------------------
+  -- 3. audit_trail is still append-only ------------------------------------------------------
   --
   -- BOTH LAYERS, because they fail differently. The trigger is what refuses a role that HAS the
   -- privilege; the revoked grants are what stop the question being asked. A dump carries both, and
   -- a restore that dropped either leaves an audit table that looks completely normal.
   SELECT count(*) INTO v_count FROM pg_trigger
-   WHERE tgrelid = 'public.digital_thread'::regclass
-     AND tgname = 'trg_digital_thread_append_only' AND NOT tgisinternal;
-  IF v_count <> 1 THEN RAISE EXCEPTION 'the digital_thread append-only trigger did not survive'; END IF;
+   WHERE tgrelid = 'public.audit_trail'::regclass
+     AND tgname = 'trg_audit_trail_append_only' AND NOT tgisinternal;
+  IF v_count <> 1 THEN RAISE EXCEPTION 'the audit_trail append-only trigger did not survive'; END IF;
 
-  IF has_table_privilege('service_role', 'public.digital_thread', 'UPDATE')
-     OR has_table_privilege('service_role', 'public.digital_thread', 'DELETE')
-     OR has_table_privilege('service_role', 'public.digital_thread', 'TRUNCATE') THEN
-    RAISE EXCEPTION 'service_role can write to digital_thread after the restore -- 0001''s REVOKE did not survive';
+  IF has_table_privilege('service_role', 'public.audit_trail', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.audit_trail', 'DELETE')
+     OR has_table_privilege('service_role', 'public.audit_trail', 'TRUNCATE') THEN
+    RAISE EXCEPTION 'service_role can write to audit_trail after the restore -- 0001''s REVOKE did not survive';
   END IF;
 
-  SELECT relrowsecurity INTO v_bool FROM pg_class WHERE oid = 'public.digital_thread'::regclass;
-  IF NOT v_bool THEN RAISE EXCEPTION 'row-level security is OFF on digital_thread after the restore'; END IF;
+  SELECT relrowsecurity INTO v_bool FROM pg_class WHERE oid = 'public.audit_trail'::regclass;
+  IF NOT v_bool THEN RAISE EXCEPTION 'row-level security is OFF on audit_trail after the restore'; END IF;
 
-  SELECT count(*) INTO v_count FROM pg_policy WHERE polrelid = 'public.digital_thread'::regclass;
+  SELECT count(*) INTO v_count FROM pg_policy WHERE polrelid = 'public.audit_trail'::regclass;
   IF v_count <> 2 THEN
-    RAISE EXCEPTION 'expected 2 RLS policies on digital_thread, found % -- the audit lane split did not survive', v_count;
+    RAISE EXCEPTION 'expected 2 RLS policies on audit_trail, found % -- the audit lane split did not survive', v_count;
   END IF;
 
   -- 4. The partitioning survived, and is still routing (0079) -----------------------------------
   --
-  -- A dump writes `COPY public.digital_thread` and the live constraints route each row on the way
+  -- A dump writes `COPY public.audit_trail` and the live constraints route each row on the way
   -- in. So a database that came back UNPARTITIONED holds every row and passes every count -- and
   -- has quietly lost the ability to retire a month at all. This is the check that separates them.
   IF NOT EXISTS (SELECT 1 FROM pg_partitioned_table
-                  WHERE partrelid = 'public.digital_thread'::regclass) THEN
-    RAISE EXCEPTION 'digital_thread came back UNPARTITIONED -- retention by DETACH is gone';
+                  WHERE partrelid = 'public.audit_trail'::regclass) THEN
+    RAISE EXCEPTION 'audit_trail came back UNPARTITIONED -- retention by DETACH is gone';
   END IF;
 
-  SELECT count(*) INTO v_count FROM public.digital_thread_default;
+  SELECT count(*) INTO v_count FROM public.audit_trail_default;
   IF v_count > 0 THEN
     RAISE EXCEPTION 'restored % row(s) into the DEFAULT partition -- the monthly partitions did not come back, so those rows will never be detached with their month', v_count;
   END IF;
@@ -88,7 +88,7 @@ BEGIN
   -- recreates them, and the image's default privileges apply to anything created afterwards.
   SELECT count(*) INTO v_count
     FROM pg_class c JOIN pg_inherits i ON i.inhrelid = c.oid
-   WHERE i.inhparent = 'public.digital_thread'::regclass
+   WHERE i.inhparent = 'public.audit_trail'::regclass
      AND (has_table_privilege('service_role', c.oid, 'TRUNCATE')
        OR has_table_privilege('authenticated', c.oid, 'SELECT'));
   IF v_count > 0 THEN
@@ -125,8 +125,8 @@ BEGIN
   --
   -- A restore that lost grants queries perfectly as postgres and fails for every actual caller,
   -- which is the shape of failure that reaches production rather than CI.
-  IF NOT has_table_privilege('authenticated', 'public.digital_thread', 'SELECT') THEN
-    RAISE EXCEPTION 'authenticated lost SELECT on digital_thread -- the Digital Thread page would be empty, not broken';
+  IF NOT has_table_privilege('authenticated', 'public.audit_trail', 'SELECT') THEN
+    RAISE EXCEPTION 'authenticated lost SELECT on audit_trail -- the Audit Trail page would be empty, not broken';
   END IF;
   IF NOT has_table_privilege('authenticated', 'public.devices', 'SELECT') THEN
     RAISE EXCEPTION 'authenticated lost SELECT on devices';

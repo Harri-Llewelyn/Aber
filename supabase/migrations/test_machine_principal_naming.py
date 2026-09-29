@@ -27,7 +27,7 @@ only, and every change a PRINCIPAL_DESCRIBED row carrying what it replaced.
 MACHINES PROPOSE, PEOPLE DECIDE (0013). Every permission is either on the allow-list or refused
 with its own reason. What an allowed grant opens is exercised as the machine itself: schema:manage
 forks, publishes and discards; proposal:create files a proposal that only a person can decide;
-digital_thread:read reads the asset lane and never the security lane; archive:manage reads the
+audit_trail:read reads the asset lane and never the security lane; archive:manage reads the
 record of deleted assets. A revoked identity or token is refused before its write runs, the way
 PostgREST runs auth_pre_request() ahead of every request.
 
@@ -55,7 +55,7 @@ DB_NAME = os.getenv("SUPABASE_DB_NAME", os.getenv("DB_NAME", "postgres"))
 DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
-ALLOWED = ("telemetry:read", "quarantine:view", "digital_thread:read",
+ALLOWED = ("telemetry:read", "quarantine:view", "audit_trail:read",
            "archive:manage", "proposal:create", "schema:manage")
 
 # Every other permission, and the reason create_machine_principal() gives for refusing it.
@@ -169,14 +169,14 @@ class TheNameIsWrittenWithTheIdentity(NamingBase):
         row = self.create("Kiln telemetry mirror", purpose="  ")
         self.as_postgres()
         self.cur.execute(
-            "SELECT new_data, changed_by FROM public.digital_thread "
+            "SELECT new_data, changed_by FROM public.audit_trail "
             "WHERE entity_type = 'service_principals' AND entity_id = %s AND action = 'INSERT';",
             (row["principal_id"],),
         )
         audit = self.cur.fetchone()
         self.assertIsNotNone(audit, "create_machine_principal() wrote no audit row")
         self.assertEqual(audit["new_data"]["name"], "Kiln telemetry mirror")
-        # A purpose of whitespace is no purpose, on the row and in the thread alike.
+        # A purpose of whitespace is no purpose, on the row and in the trail alike.
         self.assertIsNone(audit["new_data"]["purpose"])
         self.assertEqual(str(audit["changed_by"]), self.admin)
 
@@ -363,10 +363,10 @@ class AMachineMayVersionASchema(MachineBase):
         self.cur.execute("SELECT public.discard_schema_draft(%s) AS discarded;", (second["id"],))
         self.assertEqual(self.cur.fetchone()["discarded"]["discarded_schema_id"], second["id"])
 
-        # The thread names the machine and files the act as a service's, never as a person's.
+        # The trail names the machine and files the act as a service's, never as a person's.
         self.as_postgres()
         self.cur.execute(
-            "SELECT changed_by::text, actor_source FROM public.digital_thread "
+            "SELECT changed_by::text, actor_source FROM public.audit_trail "
             "WHERE entity_type = 'schemas' AND entity_id = %s AND action = 'INSERT';",
             (draft["id"],),
         )
@@ -396,7 +396,7 @@ class AMachineMayVersionASchema(MachineBase):
 
 class AMachineIsFiledAsAServiceWhateverItDeclares(MachineBase):
     """
-    0020: log_digital_thread_event() believes an X-Aber-Actor header only from the caller it
+    0020: log_audit_trail_event() believes an X-Aber-Actor header only from the caller it
     describes. PostgREST exposes the header as the request.headers GUC, which is what is set here.
     """
 
@@ -413,7 +413,7 @@ class AMachineIsFiledAsAServiceWhateverItDeclares(MachineBase):
     def filed_as(self, draft_id):
         self.as_postgres()
         self.cur.execute(
-            "SELECT changed_by::text, actor_source FROM public.digital_thread "
+            "SELECT changed_by::text, actor_source FROM public.audit_trail "
             "WHERE entity_type = 'schemas' AND entity_id = %s AND action = 'INSERT';",
             (draft_id,),
         )
@@ -426,7 +426,7 @@ class AMachineIsFiledAsAServiceWhateverItDeclares(MachineBase):
                          (cell, f"Declared {cell[:8]}"))
         self.as_postgres()
         self.cur.execute(
-            "SELECT actor_source FROM public.digital_thread "
+            "SELECT actor_source FROM public.audit_trail "
             "WHERE entity_type = 'cells' AND entity_id = %s AND action = 'INSERT';",
             (cell,),
         )
@@ -594,7 +594,7 @@ class WhoeverDecidesReadsTheMachinesName(MachineBase):
 
 
 class AMachineReadsTheAssetLaneOnly(MachineBase):
-    """digital_thread:read opens the asset lane to a machine, never the security lane."""
+    """audit_trail:read opens the asset lane to a machine, never the security lane."""
 
     def setUp(self):
         super().setUp()
@@ -602,20 +602,20 @@ class AMachineReadsTheAssetLaneOnly(MachineBase):
         self.rows = {}
         for entity_type in ("devices", "service_principals"):
             self.cur.execute(
-                "INSERT INTO public.digital_thread (entity_type, entity_id, action, actor_source) "
+                "INSERT INTO public.audit_trail (entity_type, entity_id, action, actor_source) "
                 "VALUES (%s, %s, 'UPDATE', 'service') RETURNING id, entity_id::text, audit_domain;",
                 (entity_type, str(uuid.uuid4())),
             )
             row = self.cur.fetchone()
             self.rows[row["audit_domain"]] = row
         self.assertEqual(sorted(self.rows), ["asset", "security"])
-        self.reader = self.machine("Thread reader", ("digital_thread:read",))
-        self.other = self.machine("No thread", ("telemetry:read",))
+        self.reader = self.machine("Trail reader", ("audit_trail:read",))
+        self.other = self.machine("No trail", ("telemetry:read",))
 
     def visible(self, who):
         self.as_user(who)
         self.cur.execute(
-            "SELECT id FROM public.digital_thread WHERE id = ANY(%s);",
+            "SELECT id FROM public.audit_trail WHERE id = ANY(%s);",
             ([r["id"] for r in self.rows.values()],),
         )
         seen = {r["id"] for r in self.cur.fetchall()}
@@ -629,10 +629,10 @@ class AMachineReadsTheAssetLaneOnly(MachineBase):
         self.assertEqual(self.visible(self.other), set())
 
     def test_the_paged_read_agrees(self):
-        # digital_thread_page() is SECURITY INVOKER, so the same policy decides what it returns.
+        # audit_trail_page() is SECURITY INVOKER, so the same policy decides what it returns.
         self.as_user(self.reader)
         self.cur.execute(
-            "SELECT public.digital_thread_page(p_limit => 50, p_include_purged => true, "
+            "SELECT public.audit_trail_page(p_limit => 50, p_include_purged => true, "
             "p_entity_ids => %s::uuid[]) AS page;",
             ([r["entity_id"] for r in self.rows.values()],),
         )
@@ -836,13 +836,13 @@ class ANameCanBeChangedAgain(NamingBase):
         )
         return self.cur.fetchone()
 
-    def test_the_row_changes_and_the_thread_keeps_what_it_replaced(self):
+    def test_the_row_changes_and_the_trail_keeps_what_it_replaced(self):
         self.as_user(self.admin)
         audit_id = self.describe(self.subject, "  After  ", "New purpose")
         self.assertIsNotNone(audit_id)
         self.assertEqual(self._row(self.subject), {"name": "After", "purpose": "New purpose"})
         self.cur.execute(
-            "SELECT action, old_data, new_data, changed_by FROM public.digital_thread WHERE id = %s;",
+            "SELECT action, old_data, new_data, changed_by FROM public.audit_trail WHERE id = %s;",
             (audit_id,),
         )
         audit = self.cur.fetchone()
@@ -858,7 +858,7 @@ class ANameCanBeChangedAgain(NamingBase):
         # purpose is text, so only an identical pair is "unchanged".
         self.as_postgres()
         self.cur.execute(
-            "SELECT count(*) AS n FROM public.digital_thread "
+            "SELECT count(*) AS n FROM public.audit_trail "
             "WHERE entity_id = %s AND action = 'PRINCIPAL_DESCRIBED';",
             (self.subject,),
         )

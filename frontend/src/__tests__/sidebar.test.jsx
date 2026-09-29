@@ -152,10 +152,10 @@ describe('the shortcuts dialog', () => {
     expect(described.filter(k => k === 'Esc').length).toBeGreaterThan(0)
   })
 
-  it('lists the stepping keys the Digital Thread drawer installs', () => {
-    // Bound in DigitalThreadTab while an event is selected; digitalThreadArrowKeys.test.jsx proves
+  it('lists the stepping keys the Audit Trail drawer installs', () => {
+    // Bound in AuditTrailTab while an event is selected; auditTrailArrowKeys.test.jsx proves
     // the binding. A row here without that binding would teach a key that does nothing.
-    const group = shortcutGroups().find(g => g.title === 'Digital Thread')
+    const group = shortcutGroups().find(g => g.title === 'Audit Trail')
     expect(group).toBeTruthy()
     expect(group.items.map(i => i.keys.join('+'))).toContain('←+→')
   })

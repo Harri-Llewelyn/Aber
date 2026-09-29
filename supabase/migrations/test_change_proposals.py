@@ -110,7 +110,7 @@ class ProposalCase(unittest.TestCase):
 
             # AND THEY HAVE TO BE REAL PEOPLE IN auth.users, for two separate reasons.
             #
-            # `digital_thread.changed_by` carries a foreign key to auth.users, so the moment an
+            # `audit_trail.changed_by` carries a foreign key to auth.users, so the moment an
             # approval writes an audit row naming the approver, an actor that exists only in
             # `user_roles` fails the insert -- and the error names the audit table rather than
             # anything the test did.
@@ -211,7 +211,7 @@ class ProposalCase(unittest.TestCase):
             conn.commit()
 
             # THE auth.users ROWS ARE LEFT BEHIND WHEN AN AUDIT ROW NAMES ONE, and that is the
-            # design rather than a leak: `digital_thread` is append-only and its changed_by holds a
+            # design rather than a leak: `audit_trail` is append-only and its changed_by holds a
             # foreign key, so a person an audit row names cannot be deleted. Attempted, then
             # tolerated -- the ids are pinned, so a later run reuses them rather than accumulating.
             try:
@@ -500,7 +500,7 @@ class TestDeciding(ProposalCase):
         self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
         as_owner(self.cur)
         self.cur.execute(
-            "SELECT new_data, changed_by, actor_source, audit_domain FROM public.digital_thread "
+            "SELECT new_data, changed_by, actor_source, audit_domain FROM public.audit_trail "
             " WHERE action = 'PROPOSAL_APPLIED' AND new_data->>'proposal_id' = %s;", (str(proposal),))
         row = self.cur.fetchone()
         self.assertIsNotNone(row, "approving wrote no PROPOSAL_APPLIED row")
@@ -519,7 +519,7 @@ class TestDeciding(ProposalCase):
         as_owner(self.cur)
         self.cur.execute(
             "SELECT p.status, t.action FROM public.change_proposals p "
-            "  JOIN public.digital_thread t ON t.id = p.applied_thread_id WHERE p.id = %s;",
+            "  JOIN public.audit_trail t ON t.id = p.applied_trail_id WHERE p.id = %s;",
             (proposal,))
         self.assertEqual(self.cur.fetchone(), ("applied", "PROPOSAL_APPLIED"))
 
@@ -528,15 +528,15 @@ class TestDeciding(ProposalCase):
         # it made are one act only if both carry the approving transaction.
         proposal = self.propose({"name": "One Act"})
         as_user(self.cur, MANAGER)
-        self.cur.execute("SELECT public.approve_proposal(%s) ->> 'thread_id';", (proposal,))
-        thread_id = int(self.cur.fetchone()[0])
+        self.cur.execute("SELECT public.approve_proposal(%s) ->> 'trail_id';", (proposal,))
+        trail_id = int(self.cur.fetchone()[0])
         as_owner(self.cur)
-        self.cur.execute("SELECT causation_id FROM public.digital_thread WHERE id = %s;",
-                         (thread_id,))
+        self.cur.execute("SELECT causation_id FROM public.audit_trail WHERE id = %s;",
+                         (trail_id,))
         causation = self.cur.fetchone()[0]
         self.assertIsNotNone(causation, "the PROPOSAL_APPLIED row carries no causation_id")
         self.cur.execute(
-            "SELECT entity_type, entity_id::text, action FROM public.digital_thread "
+            "SELECT entity_type, entity_id::text, action FROM public.audit_trail "
             " WHERE causation_id = %s ORDER BY id;", (causation,))
         self.assertEqual(self.cur.fetchall(), [("devices", DEVICE, "UPDATE"),
                                                ("devices", DEVICE, "PROPOSAL_APPLIED")])
@@ -545,7 +545,7 @@ class TestDeciding(ProposalCase):
         # digits can also match inside a uuid, so only the rows of this act are asserted on.
         as_user(self.cur, MANAGER)
         self.cur.execute(
-            "SELECT public.digital_thread_page(p_search => %s, p_entity_ids => %s::uuid[]) "
+            "SELECT public.audit_trail_page(p_search => %s, p_entity_ids => %s::uuid[]) "
             "  -> 'events';", (str(causation), [DEVICE]))
         events = [e for e in self.cur.fetchone()[0] if e["causation_id"] == causation]
         self.assertEqual(sorted(e["action"] for e in events), ["PROPOSAL_APPLIED", "UPDATE"])
@@ -643,7 +643,7 @@ class TestTheNameplateLane(ProposalCase):
     def test_updated_by_names_the_proposer_not_the_approver(self):
         # The column's own comment settles it: a nameplate is an assertion ABOUT an asset, so who
         # made it is part of the record -- that is the proposer. Who AUTHORISED it is the
-        # digital_thread row.
+        # audit_trail row.
         proposal = self.propose({"serial_number": "SN-0002"}, entity_type="device_nameplate")
         as_user(self.cur, MANAGER)
         self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
@@ -708,13 +708,13 @@ class TestWhoAsked(ProposalCase):
                 ("someone.else@example.com", proposal))
 
     def test_the_audit_row_carries_it_beside_the_uuid(self):
-        proposal = self.propose({"name": "Named In The Thread"})
+        proposal = self.propose({"name": "Named In The Trail"})
         as_user(self.cur, MANAGER)
         self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
         as_owner(self.cur)
         self.cur.execute(
             "SELECT new_data->>'proposed_by_email', new_data->>'proposed_by' "
-            "  FROM public.digital_thread "
+            "  FROM public.audit_trail "
             " WHERE action = 'PROPOSAL_APPLIED' AND new_data->>'proposal_id' = %s;", (str(proposal),))
         email, uuid_value = self.cur.fetchone()
         # Both: the uuid is what everything resolves through, the email is what a person reads.
@@ -907,7 +907,7 @@ class TestTheAreaLane(ProposalCase):
         self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
         as_owner(self.cur)
         self.cur.execute(
-            "SELECT audit_domain FROM public.digital_thread "
+            "SELECT audit_domain FROM public.audit_trail "
             " WHERE entity_type = 'areas' AND entity_id = %s AND action = 'PROPOSAL_APPLIED' "
             " ORDER BY id DESC LIMIT 1;", (AREA,))
         self.assertEqual(self.cur.fetchone()[0], "asset")
@@ -1069,7 +1069,7 @@ class TestTheWithdrawnDocumentLanes(ProposalCase):
 
     def test_the_audit_domain_still_reads_asset_for_the_old_lanes(self):
         # Kept deliberately. A deployment that approved a link proposal before 0108 holds
-        # digital_thread rows carrying these entity_types; dropping the arms would move that
+        # audit_trail rows carrying these entity_types; dropping the arms would move that
         # history into the fail-closed security domain and narrow who may read it.
         as_owner(self.cur)
         for lane in ("cell_links", "gateway_links", "device_links"):
@@ -1198,7 +1198,7 @@ class TestTheTimer(ProposalCase):
             " WHERE id = %s;", (proposal,))
         self.cur.execute("SELECT public.expire_open_proposals();")
         self.cur.execute(
-            "SELECT actor_source, changed_by, audit_domain FROM public.digital_thread "
+            "SELECT actor_source, changed_by, audit_domain FROM public.audit_trail "
             " WHERE action = 'PROPOSAL_EXPIRED' AND entity_id = %s;", (proposal,))
         row = self.cur.fetchone()
         self.assertIsNotNone(row, "the expiry wrote no audit row")
@@ -1217,7 +1217,7 @@ class TestTheTimer(ProposalCase):
             " WHERE id = %s;", (proposal,))
         self.cur.execute("SELECT public.expire_open_proposals();")
         self.cur.execute(
-            "SELECT causation_id, txid_current() FROM public.digital_thread "
+            "SELECT causation_id, txid_current() FROM public.audit_trail "
             " WHERE action = 'PROPOSAL_EXPIRED' AND entity_id = %s;", (proposal,))
         causation, txid = self.cur.fetchone()
         self.assertIsNotNone(causation, "the PROPOSAL_EXPIRED row carries no causation_id")

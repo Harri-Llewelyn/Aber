@@ -1,10 +1,10 @@
 -- =============================================================================================
 -- Migration: 0010_a_metric_deprecation_reaches_the_thread.sql
--- Deprecating or restoring a metric is a Digital Thread event (#468)
+-- Deprecating or restoring a metric is an Audit Trail event (#468)
 -- =============================================================================================
 --
 -- `metric_catalog` carried no audit trigger, so a deprecation recorded neither who made it nor
--- when, and neither would its reversal. log_digital_thread_event() is attached for INSERT, UPDATE
+-- when, and neither would its reversal. log_audit_trail_event() is attached for INSERT, UPDATE
 -- and DELETE, as on `schemas`: deprecate and restore arrive as UPDATEs whose diff moves
 -- `deprecated`, the way archive and restore arrive for the asset tables.
 --
@@ -45,20 +45,20 @@ $$;
 
 ALTER FUNCTION public.audit_domain_for(p_entity_type text, p_action text) OWNER TO postgres;
 
-COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane a digital_thread row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070 -- with `schemas` (0120) and `metric_catalog` (0010) the exceptions, because their own tables are readable by every authenticated user. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
+COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane an audit_trail row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070 -- with `schemas` (0120) and `metric_catalog` (0010) the exceptions, because their own tables are readable by every authenticated user. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
 
 -- 0001's ACL, restated; CREATE OR REPLACE keeps it either way.
 REVOKE ALL ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) FROM PUBLIC, anon;
 GRANT ALL ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) TO service_role;
 
-DROP TRIGGER IF EXISTS trg_metric_catalog_digital_thread ON public.metric_catalog;
-CREATE TRIGGER trg_metric_catalog_digital_thread AFTER INSERT OR DELETE OR UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.log_digital_thread_event();
+DROP TRIGGER IF EXISTS trg_metric_catalog_audit_trail ON public.metric_catalog;
+CREATE TRIGGER trg_metric_catalog_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 -- A row written earlier in the same boot -- a seed in 0002 once this trigger exists -- was stamped
 -- by 0001's classifier, which files `metric_catalog` as security. audit_domain is the routing this
 -- file changes, not a fact about the act, and the append-only trigger exempts `postgres`, which
 -- db-init applies the chain as. A settled database matches nothing.
-UPDATE public.digital_thread
+UPDATE public.audit_trail
    SET audit_domain = 'asset'
  WHERE entity_type = 'metric_catalog'
    AND audit_domain IS DISTINCT FROM 'asset';
@@ -94,16 +94,16 @@ BEGIN
 
     IF NOT EXISTS (
         SELECT 1 FROM pg_trigger
-         WHERE tgname = 'trg_metric_catalog_digital_thread'
+         WHERE tgname = 'trg_metric_catalog_audit_trail'
            AND tgrelid = 'public.metric_catalog'::regclass
-           AND tgfoid = 'public.log_digital_thread_event()'::regprocedure
+           AND tgfoid = 'public.log_audit_trail_event()'::regprocedure
            AND NOT tgisinternal
     ) THEN
         RAISE EXCEPTION '0010 self-check: the metric_catalog audit trigger is not attached.';
     END IF;
 
     SELECT count(*) INTO v_stranded
-      FROM public.digital_thread
+      FROM public.audit_trail
      WHERE entity_type = 'metric_catalog'
        AND audit_domain IS DISTINCT FROM public.audit_domain_for(entity_type, action);
     IF v_stranded > 0 THEN

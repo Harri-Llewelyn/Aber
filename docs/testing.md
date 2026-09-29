@@ -193,7 +193,7 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects and the forge,
-# digests matching the row, a manifest restore-databases.sh reads -- and the thread names who asked
+# digests matching the row, a manifest restore-databases.sh reads -- and the trail names who asked
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
 # backup is released once; a job that fails is followed by a prune that leaves the newest three
 # backups alone (0017); a backup is copied off site, age-encrypted, to a MinIO the test starts, and a
@@ -227,7 +227,7 @@ npm run test:lib
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
 # time against it. There is no migrations ledger, so "a second run must match no rows" is what
 # the whole schema rests on, and it used to be upheld by review alone. Asserts only what a
-# migration can move (the schema digest, and digital_thread's `migration` lane) and treats a FALL
+# migration can move (the schema digest, and audit_trail's `migration` lane) and treats a FALL
 # in operator row counts as failure while ignoring a rise, so a live daemon cannot make it flaky.
 # DID THE CHAIN FINISH? There is no migrations ledger, and an aborted db-init leaves the stack
 # running on a partially-migrated database -- with the telemetry read surface DROPPED rather than
@@ -266,12 +266,12 @@ python supabase/migrations/test_change_proposals.py
 # documents: a blocked INSERT raises 42501, a blocked UPDATE or DELETE reports success over zero
 # rows, so those pair the refusal with an Administrator reaching the same row.
 python supabase/migrations/test_role_permission_split.py
-# The digital thread's two lanes (0070): the classifier, the stamp a caller cannot override, and
+# The audit trail's two lanes (0070): the classifier, the stamp a caller cannot override, and
 # the reads. Every test rolls back -- the rows they provoke are audit rows and 0003 makes the table
 # append-only, so a committed fixture is permanent.
 python supabase/migrations/test_audit_domain.py
 python supabase/migrations/test_schema_versioning.py
-python supabase/migrations/test_digital_thread_guard.py
+python supabase/migrations/test_audit_trail_guard.py
 # The keyset cursor (0077). THE CONTROL TEST IS THE ONE THAT MATTERS: it runs the naive
 # recorded_at-only cursor against the same fixture and asserts it LOSES rows. Without that,
 # every other test in the file would pass just as well against a broken cursor on a fixture
@@ -283,21 +283,21 @@ python supabase/migrations/test_digital_thread_guard.py
 # And the two labels no audit payload carries (0115, 0118): a person, and a backup job's note
 # and produced stamp. Both matchers are gated on has_role(), so this suite asserts their shape
 # rather than their answers -- it connects as the owner, which holds no role.
-python supabase/migrations/test_digital_thread_paging.py
+python supabase/migrations/test_audit_trail_paging.py
 # The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
 # its place is that a REAL gateway is not a delivery target, because a true there writes a real
 # machine's broker password into a file the replay worker reads -- and its broker role would then
 # let it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
-# The monthly partitioning of digital_thread (0079). THE INTERESTING TESTS ARE THE BORING ONES:
+# The monthly partitioning of audit_trail (0079). THE INTERESTING TESTS ARE THE BORING ONES:
 # converting a populated table to partitioned means rebuilding by hand every object PostgreSQL
 # does not carry across -- the primary key, the FK, three indexes, two triggers, RLS and its two
 # policies, and the ACL -- and a missing ENABLE ROW LEVEL SECURITY would publish the security
 # audit lane to every logged-in user with nothing else in the stack saying so. It also pins the
 # one hole partitioning opens: a partition does not inherit the parent's ACL, gets the image's
 # default grants instead, and TRUNCATE raises no row trigger.
-python supabase/migrations/test_digital_thread_partitioning.py
+python supabase/migrations/test_audit_trail_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
@@ -341,8 +341,8 @@ python supabase/migrations/test_archive_purge_cascade.py
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,
 # because the job is one transaction; a replay lane is archived, restored and deleted with its
 # original; a deleted row that was archived leaves a tombstone in retired_entities pointing at the
-# thread's DELETE row, and one that was never archived leaves none; the tombstone table has one
-# SELECT policy and no way in for authenticated; an export reaches the thread as EXPORTED.
+# trail's DELETE row, and one that was never archived leaves none; the tombstone table has one
+# SELECT policy and no way in for authenticated; an export reaches the trail as EXPORTED.
 python supabase/migrations/test_archiving_is_a_lifecycle.py
 # How far behind the cold archive is (0133), and chiefly the property the rest of the platform's
 # alerting rests on. `platform_health_rows()` is ONE UNION and postgres_fdw raises on CONNECT, not
@@ -459,7 +459,7 @@ npm run dev:test -- --filter=i3x
 
 Nothing, when its check 16 passes. The run deletes what it created: the Directory rows its `SEEDED`
 map names, plus any an interrupted run left under a VALIDATE name; their audit rows, through the owner
-connection because `digital_thread` is append-only for every API role; their birth parameters in
+connection because `audit_trail` is append-only for every API role; their birth parameters in
 `asset_config`; and in the historian, the telemetry and `assets` rows of exactly those devices. A
 step that fails fails check 16, and the steps after it still run.
 
@@ -492,7 +492,7 @@ self-check each migration runs at the end of itself. A migration that asserts ov
 rows* is invisible to all three, and the first thing it meets is a deployment.
 
 `0120` is the worked example. It moved `schemas` into the audit-domain asset lane, backfilled the
-rows already recorded, and then asserted that **no row in `digital_thread`** disagreed with the
+rows already recorded, and then asserted that **no row in `audit_trail`** disagreed with the
 classifier. True of an empty database. False of any stack with history: a retired entity type's
 rows keep the lane they were stamped with, nothing backfills them, and the classifier's answer
 about them is its fail-closed default rather than a judgement. The dev cluster carried ten
@@ -525,7 +525,7 @@ no migration reads.
 **What the suites do against history, and the one that does not.** Twenty-eight of the twenty-nine
 database suites pass unchanged against a real stack's rows — most scope their assertions to ids
 they seeded and genuinely do not care what else is in the table.
-`test_digital_thread_paging.py` is the exception, and not because paging is broken. Its `walk()`
+`test_audit_trail_paging.py` is the exception, and not because paging is broken. Its `walk()`
 follows at most 100 pages of 7, and its fixture is stamped `2026-01-01`, older than every real
 row; on a stack carrying 4,075 events the newest-first walk spends its whole budget before
 reaching the rows it seeded. The same bound quietly costs that file its control — the test
@@ -606,13 +606,13 @@ hid a stale assertion that was red on `main` for days (#207). `REQUIRE_SEEDED_AC
 database on 54322. So the documented invocation — `python
 supabase/migrations/test_audit_domain.py`, nothing set — connected to the running stack.
 
-Most of the suites roll back, which helps less than it sounds. `digital_thread` is append-only by
+Most of the suites roll back, which helps less than it sounds. `audit_trail` is append-only by
 `0003`, so the rows a rolled-back test provokes are exactly the ones a *committed* fixture leaves
 behind for good. Measured on a development stack:
 
 | | rows |
 | :--- | ---: |
-| `digital_thread` total | 525 |
+| `audit_trail` total | 525 |
 | stamped `actor_source = 'migration'` | 346 (66%) |
 | …of those, written by an actual migration | **0** |
 

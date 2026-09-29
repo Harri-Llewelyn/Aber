@@ -1,6 +1,6 @@
 /**
- * Digital Thread: the action filter, and the two vocabularies this page speaks.
- * `digital_thread.action` is what the database did (INSERT / UPDATE / DELETE plus the
+ * Audit Trail: the action filter, and the two vocabularies this page speaks.
+ * `audit_trail.action` is what the database did (INSERT / UPDATE / DELETE plus the
  * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, derived
  * client-side and colouring the timeline. The filter must use the first vocabulary. The allow-list
  * in api.js must refuse an unknown action rather than apply no predicate, because "returns
@@ -9,8 +9,8 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { DigitalThreadTab, MARKERS } from '../components/tabs/DigitalThreadTab'
-import { DIGITAL_THREAD_ACTIONS } from '../constants'
+import { AuditTrailTab, MARKERS } from '../components/tabs/AuditTrailTab'
+import { AUDIT_TRAIL_ACTIONS } from '../constants'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -31,19 +31,19 @@ const EVENTS = [{
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation((path) => {
-    if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+    if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(EVENTS)
     if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
     return Promise.resolve([])
   })
 })
 
 const show = async () => {
-  render(<DigitalThreadTab />)
+  render(<AuditTrailTab />)
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
 const filter = () => screen.getByTitle(/Filter by the database action/)
-const threadUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes('/digital-thread'))
+const trailUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes('/audit-trail'))
 
 
 describe('the action filter offers every action the database can record', () => {
@@ -69,7 +69,7 @@ describe('the action filter offers every action the database can record', () => 
     await show()
     const values = [...filter().querySelectorAll('option')].map(o => o.value).filter(Boolean)
 
-    expect(values).toEqual(Object.keys(DIGITAL_THREAD_ACTIONS))
+    expect(values).toEqual(Object.keys(AUDIT_TRAIL_ACTIONS))
   })
 
   it('pushes the selected action down as a query parameter', async () => {
@@ -77,7 +77,7 @@ describe('the action filter offers every action the database can record', () => 
     fireEvent.change(filter(), { target: { value: 'SCHEMA_REJECTION' } })
 
     await waitFor(() =>
-      expect(threadUrls().some(u => u.includes('action=SCHEMA_REJECTION'))).toBe(true))
+      expect(trailUrls().some(u => u.includes('action=SCHEMA_REJECTION'))).toBe(true))
   })
 })
 
@@ -114,7 +114,7 @@ describe('an unrecognised action must not widen the query', () => {
      returns nothing or everything. */
   it('returns no rows rather than every row', async () => {
     const { api: realApi } = await vi.importActual('../api')
-    const rows = await realApi.get('/api/v1/digital-thread?action=NOT_AN_ACTION')
+    const rows = await realApi.get('/api/v1/audit-trail?action=NOT_AN_ACTION')
 
     expect(rows).toEqual([])
   })
@@ -124,12 +124,12 @@ describe('an unrecognised action must not widen the query', () => {
        option reads as "no such events". Asserted on whether a query was built, not on what came
        back, so the test is deterministic offline. */
     vi.resetModules()
-    // The stub follows the mechanism: this page is served by the `digital_thread_page` RPC, so the
+    // The stub follows the mechanism: this page is served by the `audit_trail_page` RPC, so the
     // recognised action arrives as an argument rather than a `.eq()` on a builder.
     const built = []
     vi.doMock('../lib/supabaseClient', () => ({
       supabase: {
-        from: () => { throw new Error('the digital thread page must go through the RPC') },
+        from: () => { throw new Error('the audit trail page must go through the RPC') },
         rpc: (fn, args) => {
           built.push([fn, args])
           return Promise.resolve({
@@ -143,16 +143,16 @@ describe('an unrecognised action must not widen the query', () => {
 
     const { api: realApi } = await vi.importActual('../api')
 
-    for (const action of Object.keys(DIGITAL_THREAD_ACTIONS)) {
+    for (const action of Object.keys(AUDIT_TRAIL_ACTIONS)) {
       built.length = 0
-      await realApi.get(`/api/v1/digital-thread?action=${action}`)
+      await realApi.get(`/api/v1/audit-trail?action=${action}`)
       expect(built.length, `${action} should have reached the RPC`).toBe(1)
-      expect(built[0][0]).toBe('digital_thread_page')
+      expect(built[0][0]).toBe('audit_trail_page')
       expect(built[0][1].p_action, `${action} should have become an argument`).toBe(action)
     }
 
     built.length = 0
-    await expect(realApi.get('/api/v1/digital-thread?action=NOT_AN_ACTION')).resolves.toEqual([])
+    await expect(realApi.get('/api/v1/audit-trail?action=NOT_AN_ACTION')).resolves.toEqual([])
     expect(built, 'an unrecognised action must not reach the database at all').toEqual([])
 
     vi.doUnmock('../lib/supabaseClient')

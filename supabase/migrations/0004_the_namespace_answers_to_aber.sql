@@ -19,7 +19,7 @@
 --
 -- Nothing else holds a minted id. AAS shell and submodel identifiers and the i3X type ids are
 -- derived at request time from AAS_BASE_IRI and the daemon's namespace constants, which the same
--- release moves. History is not rewritten: digital_thread rows carry what they carried.
+-- release moves. History is not rewritten: audit_trail rows carry what they carried.
 --
 -- Idempotent: the second run matches nothing.
 -- =============================================================================================

@@ -10,7 +10,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab'
+import { AuditTrailTab } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { downloadCSV } from '../utils/downloadCSV'
 
@@ -34,14 +34,14 @@ const EVENTS = [{
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation((path) => {
-    if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+    if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve(EVENTS)
     if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
     return Promise.resolve([])
   })
 })
 
 const show = async () => {
-  render(<DigitalThreadTab />)
+  render(<AuditTrailTab />)
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
@@ -78,13 +78,13 @@ describe('each id in the drawer says what it is for', () => {
   })
 
   it('names the SQL column, so an id carried into a query lands on the right one', async () => {
-    /* Neither UI name is the column name: Mutation ID is `digital_thread.id` and Transaction ID is
+    /* Neither UI name is the column name: Mutation ID is `audit_trail.id` and Transaction ID is
        `causation_id`. Without the mapping the tooltip renames a column rather than explaining it. */
     await show()
     await openDrawer()
 
     fireEvent.focus(screen.getByRole('button', { name: 'What Transaction ID means' }))
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/digital_thread\.causation_id/)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/audit_trail\.causation_id/)
   })
 })
 
@@ -133,7 +133,7 @@ describe('one name per id, across the drawer and the export', () => {
 describe('the search box takes a numeric id', () => {
 
   it('sends a bare integer to the database as the search term', async () => {
-    /* The page does not decide which id it is -- `digital_thread_page()` matches the row id and the
+    /* The page does not decide which id it is -- `audit_trail_page()` matches the row id and the
        causation id in one predicate, so the box stays one box. */
     await show()
     fireEvent.change(searchBox(), { target: { value: String(TXN) } })

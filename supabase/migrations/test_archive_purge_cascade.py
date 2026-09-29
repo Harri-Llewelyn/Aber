@@ -142,7 +142,7 @@ class PurgeCascadeTests(unittest.TestCase):
         self.conn.commit()
         self.cur.execute(
             """
-            SELECT 1 FROM public.digital_thread
+            SELECT 1 FROM public.audit_trail
              WHERE entity_type = 'gateways' AND entity_id = %s AND action = 'UPDATE'
                AND old_data ->> 'cell_id' = %s AND new_data ->> 'cell_id' IS NULL
              LIMIT 1;
@@ -151,7 +151,7 @@ class PurgeCascadeTests(unittest.TestCase):
         )
         self.assertIsNotNone(
             self.cur.fetchone(),
-            "nothing in the digital thread says which cell the gateway was un-filed from",
+            "nothing in the audit trail says which cell the gateway was un-filed from",
         )
 
     def test_the_purge_job_still_deletes_children_before_parents(self):

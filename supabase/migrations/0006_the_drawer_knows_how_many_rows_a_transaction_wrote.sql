@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Migration: 0006_the_drawer_knows_how_many_rows_a_transaction_wrote.sql
--- Each Digital Thread event says how many rows its transaction wrote (#431)
+-- Each Audit Trail event says how many rows its transaction wrote (#431)
 -- =============================================================================================
 --
 -- The drawer's "Same transaction" section is drawn from the loaded, filtered events, and a
@@ -16,7 +16,7 @@
 
 SET search_path TO public;
 
-CREATE OR REPLACE FUNCTION public.digital_thread_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text) RETURNS jsonb
+CREATE OR REPLACE FUNCTION public.audit_trail_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text) RETURNS jsonb
     LANGUAGE sql STABLE
     SET search_path TO 'public'
     AS $_$
@@ -25,7 +25,7 @@ WITH term AS (
 ),
 pattern AS (
     -- The search as a LIKE pattern, built once. THE METACHARACTERS ARE ESCAPED: the box promises
-    -- a substring of a name or an id, and an unescaped '%' would silently return the whole thread
+    -- a substring of a name or an id, and an unescaped '%' would silently return the whole trail
     -- to somebody who typed a percentage into it. Backslash is the default LIKE escape, so the
     -- backslashes have to be doubled first or an escape would be introduced by the escaping.
     SELECT CASE
@@ -43,12 +43,12 @@ pattern AS (
 -- MATERIALIZED, AND MEASURED. Without it Postgres inlines this CTE and the helper lands in the
 -- per-row Filter of every partition scan -- a STABLE function is allowed to be called once and is
 -- not promised to be. On 4,065 rows that took a search from 53ms to 583ms, which is the shape of
--- cost that looks like "the thread got big" rather than like a query doing the wrong thing.
+-- cost that looks like "the trail got big" rather than like a query doing the wrong thing.
 q AS MATERIALIZED (
     SELECT p.pattern,
            p.id_term,
-           public.digital_thread_user_ids_matching(p.pattern)        AS user_ids,
-           public.digital_thread_backup_job_ids_matching(p.pattern)  AS job_ids
+           public.audit_trail_user_ids_matching(p.pattern)        AS user_ids,
+           public.audit_trail_backup_job_ids_matching(p.pattern)  AS job_ids
       FROM pattern p
 ),
 matching AS (
@@ -67,7 +67,7 @@ matching AS (
        AND NOT EXISTS (SELECT 1 FROM public.devices  d WHERE d.id = t.entity_id)
        AND NOT EXISTS (SELECT 1 FROM public.schemas  s WHERE s.id = t.entity_id)
                AS is_purged
-      FROM public.digital_thread t
+      FROM public.audit_trail t
      CROSS JOIN q
      WHERE (p_entity_type IS NULL OR t.entity_type = p_entity_type)
        AND (p_action      IS NULL OR t.action      = p_action)
@@ -117,20 +117,20 @@ SELECT jsonb_build_object(
                   -- HOW MANY ROWS THE TRANSACTION WROTE (0006), over the whole table and not the
                   -- page, so the drawer can tell a single-row act from a group whose other rows
                   -- the filters hide or a later page holds. One probe of
-                  -- idx_digital_thread_causation per row on the page. Under the caller's own
+                  -- idx_audit_trail_causation per row on the page. Under the caller's own
                   -- policies, like the rows themselves: it is the number a reader could load.
                   -- Null where there is no causation: NULL is not a group, and counting it would
                   -- make every legacy row one act.
                   || jsonb_build_object('transaction_rows',
                        CASE WHEN v.causation_id IS NULL THEN NULL
-                            ELSE (SELECT count(*) FROM public.digital_thread d
+                            ELSE (SELECT count(*) FROM public.audit_trail d
                                    WHERE d.causation_id = v.causation_id)
                        END)
                   ORDER BY v.recorded_at DESC, v.id DESC)
            FROM visible v),
         '[]'::jsonb),
     'purged_assets', (SELECT count(DISTINCT entity_id) FROM matching WHERE is_purged),
-    -- HOW LONG THE THREAD IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
+    -- HOW LONG THE TRAIL IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
     -- of it that is. Counted under the SAME predicate `visible` opens with, minus the cursor and
     -- the limit -- so it does not move as the reader pages, and a page can never report more rows
     -- than the total it is a fraction of.
@@ -139,7 +139,7 @@ SELECT jsonb_build_object(
     -- the same thing when there was no way to ask for more. Callers that only ever showed a banner
     -- keep working unchanged.
     'truncated', (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000)),
-    -- WHERE THE READER GOT TO, or null at the end of the thread. Null is the ONLY end-of-data
+    -- WHERE THE READER GOT TO, or null at the end of the trail. Null is the ONLY end-of-data
     -- signal a caller should trust: an empty `events` array with a non-null cursor cannot happen,
     -- but a full page that happens to be the last one is ordinary, so "fewer rows than I asked
     -- for" is not a reliable test and callers must not invent one.
@@ -152,11 +152,11 @@ SELECT jsonb_build_object(
 );
 $_$;
 
-ALTER FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) OWNER TO postgres;
+ALTER FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) OWNER TO postgres;
 
-COMMENT ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) IS 'One page of the Digital Thread, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the thread they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. `transaction_rows` on each event is how many rows share its causation_id, counted over the whole table under the caller''s own policies rather than over the page, and null where there is no causation (0006). Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
+COMMENT ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) IS 'One page of the Audit Trail, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the trail they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. `transaction_rows` on each event is how many rows share its causation_id, counted over the whole table under the caller''s own policies rather than over the page, and null where there is no causation (0006). Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
 
 -- Stated here as rule 3 of the fold asks, although CREATE OR REPLACE keeps the ACL 0001 set.
-REVOKE ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) FROM PUBLIC, anon;
-GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO authenticated;
-GRANT ALL ON FUNCTION public.digital_thread_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO service_role;
+REVOKE ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) FROM PUBLIC, anon;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO authenticated;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO service_role;

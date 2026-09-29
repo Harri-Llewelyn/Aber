@@ -63,10 +63,10 @@ def ensure_auth_user(cur, user_id, label):
     """
     Make `user_id` exist in `auth.users`.
 
-    NOT BOILERPLATE, AND EASY TO MISTAKE FOR IT. `log_digital_thread_event()` writes
+    NOT BOILERPLATE, AND EASY TO MISTAKE FOR IT. `log_audit_trail_event()` writes
     `changed_by = auth.uid()` under a foreign key to `auth.users`, so a fixture that fakes a
     session without an account fails on the AUDIT insert -- with an FK error naming
-    `digital_thread`, which reads like a fault in the audit trail rather than a missing fixture.
+    `audit_trail`, which reads like a fault in the audit trail rather than a missing fixture.
 
     IT ONLY STARTED MATTERING WHEN THE TABLE UNDER TEST BECAME AUDITED. `0070` attached the
     trigger to `system_settings`, `schemas` and `user_roles`, so suites that had been writing to
@@ -101,7 +101,7 @@ def ensure_auth_user(cur, user_id, label):
         except psycopg2.Error:
             cur.execute("ROLLBACK TO SAVEPOINT ensure_user;")
     raise RuntimeError(
-        f"could not create auth.users row {user_id}; digital_thread.changed_by is an FK to it, "
+        f"could not create auth.users row {user_id}; audit_trail.changed_by is an FK to it, "
         "so the tests that act as this user cannot run"
     )
 
@@ -119,7 +119,7 @@ def drop_fixture_principals(user_ids):
     THE ROLE_REVOKED ROWS THIS WRITES ARE LEFT IN PLACE. Dropping the grants is audited by
     `log_role_assignment()`, so cleanup adds two rows rather than removing any. Deleting those is
     possible here (the suite connects as `postgres`) and is refused on purpose:
-    `enforce_digital_thread_append_only()` says clearing audit rows should need the authority of
+    `enforce_audit_trail_append_only()` says clearing audit rows should need the authority of
     dropping a table, and a suite that quietly uses it every run is worse than the noise.
     """
     conn = get_connection()
@@ -486,16 +486,16 @@ class ReadingSurvived(RoleSplitFixture):
     def test_manager_can_read_metric_groups(self):
         self._readable("metric_groups")
 
-    def test_manager_still_reads_the_digital_thread(self):
+    def test_manager_still_reads_the_audit_trail(self):
         """
-        `digital_thread:read` is NOT one of the three, and the distinction matters: 0070 splits
+        `audit_trail:read` is NOT one of the three, and the distinction matters: 0070 splits
         that table into asset and security domains and takes the security lane away from this
         role. That is a separate change with its own argument, and it must not arrive by
         accident here.
         """
         with self.conn.cursor() as cur:
             as_user(cur, MANAGER_ID)
-            cur.execute("SELECT count(*) FROM public.digital_thread;")
+            cur.execute("SELECT count(*) FROM public.audit_trail;")
             self.assertIsNotNone(cur.fetchone()[0])
 
 

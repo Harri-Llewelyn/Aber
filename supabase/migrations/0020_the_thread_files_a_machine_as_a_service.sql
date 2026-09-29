@@ -3,7 +3,7 @@
 -- A caller's X-Aber-Actor header is believed only when it describes that caller (#534)
 -- =============================================================================================
 --
--- log_digital_thread_event() took actor_source from the caller's X-Aber-Actor header for any
+-- log_audit_trail_event() took actor_source from the caller's X-Aber-Actor header for any
 -- caller that is not a person, and accepted 'ingestion', 'service' and 'migration' from anyone.
 -- Since 0013 a machine identity may write (schema:manage, proposal:create), so a machine sending
 -- `X-Aber-Actor: migration` had its own fork_schema() INSERT filed as a migration.
@@ -22,7 +22,7 @@
 
 SET search_path TO public;
 
-CREATE OR REPLACE FUNCTION public.log_digital_thread_event() RETURNS trigger
+CREATE OR REPLACE FUNCTION public.log_audit_trail_event() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -69,10 +69,10 @@ BEGIN
     END IF;
 
     -- A mistyped trigger argument reads as NULL through `->>`; refused here so the error names
-    -- the trigger rather than digital_thread's NOT NULL.
+    -- the trigger rather than audit_trail's NOT NULL.
     IF v_entity_id IS NULL THEN
         RAISE EXCEPTION
-            'log_digital_thread_event: % has no % to name the entity by -- check the column named '
+            'log_audit_trail_event: % has no % to name the entity by -- check the column named '
             'in the trigger argument', TG_TABLE_NAME, v_key
             USING ERRCODE = 'null_value_not_allowed';
     END IF;
@@ -141,7 +141,7 @@ BEGIN
         END IF;
     END IF;
 
-    INSERT INTO public.digital_thread (
+    INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
     ) VALUES (
@@ -153,13 +153,13 @@ BEGIN
 END;
 $$;
 
-ALTER FUNCTION public.log_digital_thread_event() OWNER TO postgres;
+ALTER FUNCTION public.log_audit_trail_event() OWNER TO postgres;
 
-COMMENT ON FUNCTION public.log_digital_thread_event() IS 'AFTER trigger that appends to digital_thread. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names. The entity id is read from the column named in the trigger argument, defaulting to `id`. Attribution is auth.uid(), then aber.actor_id; a person is ''user''. Otherwise the X-Aber-Actor header is believed only from the caller it describes -- ''ingestion'' when is_ingestion_caller(), ''migration'' from the owner''s session with no JWT, ''service'' from any other non-person -- a machine identity is ''service'' whatever it declares, and anything else falls to the effective role.';
+COMMENT ON FUNCTION public.log_audit_trail_event() IS 'AFTER trigger that appends to audit_trail. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names. The entity id is read from the column named in the trigger argument, defaulting to `id`. Attribution is auth.uid(), then aber.actor_id; a person is ''user''. Otherwise the X-Aber-Actor header is believed only from the caller it describes -- ''ingestion'' when is_ingestion_caller(), ''migration'' from the owner''s session with no JWT, ''service'' from any other non-person -- a machine identity is ''service'' whatever it declares, and anything else falls to the effective role.';
 
 -- 0001's ACL, restated; CREATE OR REPLACE keeps it either way.
-REVOKE ALL ON FUNCTION public.log_digital_thread_event() FROM PUBLIC, anon;
-GRANT ALL ON FUNCTION public.log_digital_thread_event() TO service_role;
+REVOKE ALL ON FUNCTION public.log_audit_trail_event() FROM PUBLIC, anon;
+GRANT ALL ON FUNCTION public.log_audit_trail_event() TO service_role;
 
 -- ---------------------------------------------------------------------------------------------
 -- What this file did, and nothing wider
@@ -171,11 +171,11 @@ DECLARE
 BEGIN
     SELECT p.prosrc INTO v_src
       FROM pg_proc p
-     WHERE p.oid = 'public.log_digital_thread_event()'::regprocedure;
+     WHERE p.oid = 'public.log_audit_trail_event()'::regprocedure;
 
     -- The header is no longer believed as a set from anyone.
     IF v_src ~ 'v_declared\s+IN\s*\(' THEN
-        RAISE EXCEPTION '0020 self-check: log_digital_thread_event() still accepts a declared source from any caller.';
+        RAISE EXCEPTION '0020 self-check: log_audit_trail_event() still accepts a declared source from any caller.';
     END IF;
 
     -- Each value is tied to its caller, and a machine is a service.
@@ -186,7 +186,7 @@ BEGIN
         'v_declared = ''service'' OR v_actor IS NOT NULL'
     ] LOOP
         IF position(v_part IN v_src) = 0 THEN
-            RAISE EXCEPTION '0020 self-check: log_digital_thread_event() lost "%".', v_part;
+            RAISE EXCEPTION '0020 self-check: log_audit_trail_event() lost "%".', v_part;
         END IF;
     END LOOP;
 
@@ -197,16 +197,16 @@ BEGIN
         'public.is_machine_principal(v_actor)', 'txid_current()'
     ] LOOP
         IF position(v_part IN v_src) = 0 THEN
-            RAISE EXCEPTION '0020 self-check: log_digital_thread_event() lost "%".', v_part;
+            RAISE EXCEPTION '0020 self-check: log_audit_trail_event() lost "%".', v_part;
         END IF;
     END LOOP;
 
-    IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = 'public.log_digital_thread_event()'::regprocedure) THEN
-        RAISE EXCEPTION '0020 self-check: log_digital_thread_event() is not SECURITY DEFINER, and digital_thread refuses application roles.';
+    IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = 'public.log_audit_trail_event()'::regprocedure) THEN
+        RAISE EXCEPTION '0020 self-check: log_audit_trail_event() is not SECURITY DEFINER, and audit_trail refuses application roles.';
     END IF;
 
-    IF has_function_privilege('anon', 'public.log_digital_thread_event()', 'EXECUTE') THEN
-        RAISE EXCEPTION '0020 self-check: anon can execute log_digital_thread_event().';
+    IF has_function_privilege('anon', 'public.log_audit_trail_event()', 'EXECUTE') THEN
+        RAISE EXCEPTION '0020 self-check: anon can execute log_audit_trail_event().';
     END IF;
 END
 $check$;

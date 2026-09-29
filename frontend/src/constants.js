@@ -23,22 +23,22 @@ export const PERMISSION_UUIDS = {
   AUTHZ_MANAGE:       'e012c345-6789-4c1d-8706-933e08544e39',
   SCHEMA_MANAGE:      'f123d456-7890-4c1d-8706-933e08544e40',
   GITOPS_MANAGE:      'c234e567-8901-4c1d-8706-933e08544e41',
-  DIGITAL_THREAD_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
+  AUDIT_TRAIL_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
   // Added by 0086. The first WRITE grant Operator has ever held, and it is a write to a queue
   // rather than to an asset -- the asset write policies are unchanged.
   PROPOSAL_CREATE:    'b678f901-2345-4c1d-8706-933e08544e43',
 };
 
 /**
- * Every value `digital_thread.action` can hold, with the label the filter offers for it.
+ * Every value `audit_trail.action` can hold, with the label the filter offers for it.
  *
- * Shared because the Digital Thread filter renders these as options and `api.js` uses the same
+ * Shared because the Audit Trail filter renders these as options and `api.js` uses the same
  * keys as an allow-list before building a SQL predicate: an unlisted action would apply no
  * predicate and return every kind. The labels name the database action rather than reusing the
  * marker vocabulary (Created / Operational / Configuration / Lifecycle), so the filter and the
  * event drawer's badge name the same thing.
  */
-export const DIGITAL_THREAD_ACTIONS = {
+export const AUDIT_TRAIL_ACTIONS = {
   INSERT:           'Insert',
   UPDATE:           'Update',
   DELETE:           'Delete',
@@ -84,17 +84,17 @@ export const DIGITAL_THREAD_ACTIONS = {
 };
 
 /**
- * Every entity type the Digital Thread records, in the order the timeline draws them.
+ * Every entity type the Audit Trail records, in the order the timeline draws them.
  *
  * One list: the timeline's sections, the filter dropdown and `api.js` each held their own and
  * disagreed silently (a kind missing from the api.js map matched no row and read as "no events").
  * `table` is the string the trigger stores (TG_TABLE_NAME, or `service_principals` written by
  * hand for identities in GoTrue's schema). `kind` is the UI's spelling, which a handover from
  * another page arrives carrying; both forms normalise through here. Adding a kind here makes it
- * drawable, filterable and resolvable at once, and `digitalThreadEntityTypes.test.js` fails if
+ * drawable, filterable and resolvable at once, and `auditTrailEntityTypes.test.js` fails if
  * any consumer is left behind.
  */
-export const DIGITAL_THREAD_ENTITY_TYPES = [
+export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset' },
   { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },
   { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset' },
@@ -109,7 +109,7 @@ export const DIGITAL_THREAD_ENTITY_TYPES = [
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
   // `device_nameplate` is keyed by the device id, so a nameplate approval also belongs to that
-  // device's own history (the entity thread in api.js unions the two).
+  // device's own history (the entity trail in api.js unions the two).
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
   // The backup lane (0101): the act and the artefact, both filed under security by
@@ -119,29 +119,29 @@ export const DIGITAL_THREAD_ENTITY_TYPES = [
 ];
 
 /**
- * The roles the `digital_thread_select_security` policy admits to the security domain. The asset
- * domain is readable by every role that holds `digital_thread:read`.
+ * The roles the `audit_trail_select_security` policy admits to the security domain. The asset
+ * domain is readable by every role that holds `audit_trail:read`.
  */
-export const DIGITAL_THREAD_SECURITY_ROLES = ['Administrator', 'Auditor'];
+export const AUDIT_TRAIL_SECURITY_ROLES = ['Administrator', 'Auditor'];
 
 /**
- * The entity types a role may ask the Digital Thread for. A kind the policy would return no rows
+ * The entity types a role may ask the Audit Trail for. A kind the policy would return no rows
  * for is left out of the filter, so a Shopfloor_Manager is not offered a lane that always reads
  * "no events". An unknown role (still loading) is offered everything.
  */
-export function digitalThreadEntityTypesFor(userRole) {
-  if (!userRole || DIGITAL_THREAD_SECURITY_ROLES.includes(userRole)) return DIGITAL_THREAD_ENTITY_TYPES;
-  return DIGITAL_THREAD_ENTITY_TYPES.filter(e => e.domain !== 'security');
+export function auditTrailEntityTypesFor(userRole) {
+  if (!userRole || AUDIT_TRAIL_SECURITY_ROLES.includes(userRole)) return AUDIT_TRAIL_ENTITY_TYPES;
+  return AUDIT_TRAIL_ENTITY_TYPES.filter(e => e.domain !== 'security');
 }
 
 /** Stored `entity_type` -> the UI's spelling. What the timeline reads rows through. */
 export const ENTITY_KIND_BY_TABLE = Object.fromEntries(
-  DIGITAL_THREAD_ENTITY_TYPES.map(e => [e.table, e.kind])
+  AUDIT_TRAIL_ENTITY_TYPES.map(e => [e.table, e.kind])
 );
 
 /** The UI's spelling -> stored `entity_type`. What a filter has to become before it is a query. */
 export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
-  DIGITAL_THREAD_ENTITY_TYPES.map(e => [e.kind, e.table])
+  AUDIT_TRAIL_ENTITY_TYPES.map(e => [e.kind, e.table])
 );
 
 /**
@@ -150,7 +150,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */
 export const VALID_TABS = [
-  'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'metrics', 'vocabulary', 'directory',
+  'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'directory',
   'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings'
 ];
 

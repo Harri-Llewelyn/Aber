@@ -137,7 +137,7 @@ against another is corrected on the next start instead of failing at connect tim
 ### What you should see
 
 The gateway goes `ONLINE` on the Gateways tab within a heartbeat. The device appears on Devices with
-telemetry flowing into TimescaleDB. The Digital Thread records every step you just took — which is
+telemetry flowing into TimescaleDB. The Audit Trail records every step you just took — which is
 the argument for doing it by hand: on a fresh stack that log is your own work and nothing else.
 
 ---
@@ -486,7 +486,7 @@ onboarding flow, not an error.
 The device keeps publishing under the id it announced; the platform records that on the row rather
 than demanding the device be reconfigured. Approval runs through the atomic
 `public.approve_quarantined_device()` RPC, so a merge cannot half-complete, and the approving
-operator is recorded in the Digital Thread.
+operator is recorded in the Audit Trail.
 
 ---
 

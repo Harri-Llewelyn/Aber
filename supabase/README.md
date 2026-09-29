@@ -43,7 +43,7 @@ candidate files left nine functions, two comments and a lane list at their older
 which is exactly what the equivalence check reported the first time it was run against the fold.
 
 So the subtractions were lifted out into `0000`, which holds nothing else. It sorts **before**
-`0001` rather than after, and has to: it converts `digital_thread` from an ordinary table into a
+`0001` rather than after, and has to: it converts `audit_trail` from an ordinary table into a
 partitioned one, and the baseline describes it already partitioned — `CREATE TABLE … PARTITION OF`
 fails against a database that has not been converted. Once the first block has to run early they
 all may as well, and running early is what makes the `archive.bucket` block correct: it decides by
@@ -87,7 +87,7 @@ on every boot while `0098` dropped it again.
 
 `0001` is produced from a `pg_dump` of a database the whole chain built, mechanically rewritten
 into idempotent form. That is what makes every function appear **exactly once, in its final form**
-— `log_digital_thread_event()` was declared five times across the chain, so four of the five bodies
+— `log_audit_trail_event()` was declared five times across the chain, so four of the five bodies
 a reader could find were dead, with nothing in the file to say which.
 
 `scripts/generate-baseline-section.mjs` performs the rewrite, and exists because the first two
@@ -120,7 +120,7 @@ failing run rather than by inspection:
    is set; pg_dump sees the resulting ACL and writes a bare `GRANT` that fails with
    `role "grafana_reader" does not exist` on exactly the deployments the condition exists for.
 3. **Privilege *absences*.** A dump says what IS granted. The image's default privileges hand
-   `anon`, `authenticated` and `service_role` everything, so append-only on `digital_thread` and
+   `anon`, `authenticated` and `service_role` everything, so append-only on `audit_trail` and
    `one_shot_migrations` exists only as four missing words in one ACL line.
 4. **Ordering.** `ALTER DEFAULT PRIVILEGES` applies only to objects created after it runs. The old
    baseline had those three lines *after* the tables they govern, where they narrowed nothing.
@@ -131,7 +131,7 @@ failing run rather than by inspection:
 ### Seeding is audited now
 
 The baseline creates every trigger before `0002` runs, so a fresh install records 12 rows in
-`digital_thread` with `actor_source = 'migration'` describing what the seed inserted. The old chain
+`audit_trail` with `actor_source = 'migration'` describing what the seed inserted. The old chain
 recorded 2, because its ordering meant most seeding happened before the triggers existed.
 
 They are written **once, on first boot** — every statement is `ON CONFLICT`, so a replay matches no
@@ -147,7 +147,7 @@ declaration that changes nothing writes nothing — no row version, no stamp tri
 
 That guard does not make a **second declaration** safe, and nothing can. Two files declaring the
 same key with different prose both write a real change, in file order, on every boot: the later
-sentence lands, the next boot puts the earlier one back, and `digital_thread` — append-only and
+sentence lands, the next boot puts the earlier one back, and `audit_trail` — append-only and
 partitioned by month because it only grows — accumulates two edits a boot to a setting nobody
 touched. `archive.enabled` did this between `0002` and `0132` until the sentence was folded back
 into `0002` (#356). Correct a setting's prose **where it is declared**; a second `seed_setting()`
@@ -155,7 +155,7 @@ for a key already declared is the defect, not the fix.
 
 Two guards report it. `scripts/check-docs-drift.mjs` reads the declarations out of the chain and
 fails on a key declared twice, which is the one that runs at pull-request time and needs no cluster;
-`scripts/check-migration-idempotency.mjs` catches it as rows appended to `digital_thread` across a
+`scripts/check-migration-idempotency.mjs` catches it as rows appended to `audit_trail` across a
 replay, which is later but does not depend on the declaration being recognisable to a regex.
 
 ### Prefixes must be unique, and the order is the filename
@@ -320,7 +320,7 @@ while every existing database kept working, because `CREATE TABLE IF NOT EXISTS`
 
 ### Audit signal and attribution (archived migration 0005)
 
-On a stack running **one** simulated gateway and **one** device, `digital_thread` was taking
+On a stack running **one** simulated gateway and **one** device, `audit_trail` was taking
 **175 rows/hour**, of which 123 in the first hour had `changed_by IS NULL`:
 
 | entity | action | what actually differed | rows |
@@ -360,7 +360,7 @@ and starts meaning **"we lost track of this"** — a reportable defect rather th
 
 Re-measured on the same topology (one simulated gateway, one device) against the shipped stack:
 
-| Window | `digital_thread` rows added | Traffic in the window |
+| Window | `audit_trail` rows added | Traffic in the window |
 | :--- | ---: | :--- |
 | 7 min 6 s steady state | **0** | 14 heartbeats, 8 rebirths, 60 telemetry samples |
 
@@ -368,9 +368,9 @@ Re-measured on the same topology (one simulated gateway, one device) against the
 the same measurement holds at 50 gateways.
 
 **The guard now has a test, which it did not before.**
-[`test_digital_thread_guard.py`](migrations/test_digital_thread_guard.py) pins both directions: the
+[`test_audit_trail_guard.py`](migrations/test_audit_trail_guard.py) pins both directions: the
 two non-events stay unlogged, and — the case a careless per-column implementation drops — a
-heartbeat that *also* carries a status change is still logged. `log_digital_thread_event()` is
+heartbeat that *also* carries a status change is still logged. `log_audit_trail_event()` is
 re-declared by three migrations (`0001`, `0003`, `0005`), all replayed on every boot with no ledger,
 so a fourth one omitting the suppression block would silently revert it and the only symptom would
 be the table quietly growing again.
@@ -459,7 +459,7 @@ the fix in its HINT.
 Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate and refused by
 `metric_catalog_update_privileged` for anyone but an Administrator. A draft schema's pair, which
 `fork_schema()` copies from its parent, is edited in the draft editor and saved with the draft.
-`log_digital_thread_event()` already records both as UPDATEs, so neither needed a trigger change.
+`log_audit_trail_event()` already records both as UPDATEs, so neither needed a trigger change.
 
 ### A local extension carries no minted id (`0016_a_local_extension_carries_no_minted_id.sql`)
 
@@ -476,11 +476,11 @@ still exactly the one minted for it, so an id an Administrator has set since sta
 asserts that neither metric still holds its minted id, which is its own work; a replay matches
 nothing.
 
-**The clear is on the Digital Thread as the platform's own act.** It is an UPDATE on
+**The clear is on the Audit Trail as the platform's own act.** It is an UPDATE on
 `metric_catalog`, whose audit trigger `0010` attaches earlier in the chain, so each clear is an
 `UPDATE` row in the asset lane with `actor_source = 'migration'`, `changed_by` NULL, and the
 minted id in `old_data`. Nothing else was needed: db-init applies the chain as `postgres`, which
-`log_digital_thread_event()` files as `migration`. `test_metric_catalog_seed.py` puts the minted
+`log_audit_trail_event()` files as `migration`. `test_metric_catalog_seed.py` puts the minted
 ids back in a rolled-back transaction and holds `0016` to clearing them, recording both clears that
 way, keeping an id an Administrator set, writing nothing on a replay, and naming a metric its
 self-check finds.
@@ -671,7 +671,7 @@ reading the ledger is how an operator answers *"why did the purge not run"*, it 
 and a timestamp, and the finding was about the writes. Migrations are unaffected — db-init connects
 as `postgres`, which owns the table.
 
-This is the same narrowing `0026` applied to `digital_thread`, on the argument that *"a convention
+This is the same narrowing `0026` applied to `audit_trail`, on the argument that *"a convention
 is not what an audit trail rests on"*. The table guarding a destructive replay had been left out of
 it.
 
@@ -699,7 +699,7 @@ the door an API caller uses rather than the one the UI happens to.
 cannot race it. Widening it to the subject is how concurrency would arrive, and would turn the
 page's single running card into a list — a deliberate change rather than a default.
 
-**Neither job table gets a digital-thread trigger.** That trigger is opt-in per table, and both
+**Neither job table gets an audit-trail trigger.** That trigger is opt-in per table, and both
 tables carry a progress column the workers update roughly once a second. Adding it would look like
 consistency while writing a row per tick into an append-only table no application role can prune,
 which is `0005`'s heartbeat problem. Both tables *are* added to the `supabase_realtime` publication
@@ -873,7 +873,7 @@ and no sweep is needed.
 ### What is stale, and what is merely quiet (`0029`, `0061`)
 
 `platform_health` is the view most of Grafana's platform rules read (the others read
-`gateway_health`, `backup_health` and `digital_thread_partition_health`), and its `gateway_stale`
+`gateway_health`, `backup_health` and `audit_trail_partition_health`), and its `gateway_stale`
 arm is the only thing standing between an appliance going quiet and somebody being told. It is
 therefore also the arm most easily ruined, and it was: `0029` excluded archived gateways and
 nothing else, which was correct until `0060` seeded a gateway that is *never* expected to
@@ -945,7 +945,7 @@ call.
 | `gateways` | Edge gateways. `sparkplug_id` generated column, `location_scope`, `last_heartbeat` |
 | `devices` | `sparkplug_id`, `is_quarantined`, quarantine diagnostics, `last_birth_metrics`, `model_3d_path`, `cell_id`, `conformance_policy` (`0050`: `'audit'` records a schema violation and writes the sample anyway, `'enforce'` drops the offending metric) |
 | `links` | Arbitrary labelled URLs against any entity: `(entity_type, entity_id, display_name, url, link_tag)`. Renamed from `documents` / `document_tag` by `0049` — nothing about the model was ever document-specific |
-| `digital_thread` | **Append-only** audit log, written only by trigger |
+| `audit_trail` | **Append-only** audit log, written only by trigger |
 | `metric_catalog` | What devices publish. `name` is **immutable** |
 | `metric_groups` | Registry of approved group *spellings* — membership is always derived from the name |
 | `schemas` | Versioned. `version` / `parent_schema_id` / `status` / `change_description` |
@@ -976,8 +976,8 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | :--- | :--- | :--- |
 | `cells`, `gateways`, `devices`, `links`, `asset_config`, `device_submodels`, `directory_services` | `authenticated` | `Administrator`, `Shopfloor_Manager` |
 | `schemas`, `metric_catalog`, `metric_groups` | `authenticated` | `Administrator` — see below (`0069`) |
-| `digital_thread` (`asset` lane) | `Administrator`, `Shopfloor_Manager`, `Auditor`, or a machine holding `digital_thread:read` (`0013`) | **nobody** — see below |
-| `digital_thread` (`security` lane) | `Administrator`, `Auditor` | **nobody** — see below (`0070`) |
+| `audit_trail` (`asset` lane) | `Administrator`, `Shopfloor_Manager`, `Auditor`, or a machine holding `audit_trail:read` (`0013`) | **nobody** — see below |
+| `audit_trail` (`security` lane) | `Administrator`, `Auditor` | **nobody** — see below (`0070`) |
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
 | `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
@@ -1004,7 +1004,7 @@ direction. Three permissions moved:
 | `gitops:manage` | what gets deployed to the edge | `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) |
 
 A manager keeps devices, cells, gateways, links, quarantine approval, telemetry, archives and the
-digital thread, and goes on **reading** every table above: publishing a schema is a platform act,
+audit trail, and goes on **reading** every table above: publishing a schema is a platform act,
 resolving what a device conforms to is not.
 
 **The withdrawal had to reach PostgreSQL, and the reason is worth stating.** *No RLS policy in this
@@ -1229,9 +1229,9 @@ the meaning of a revocation.
 
 ---
 
-## Audit Trail (`digital_thread`)
+## Audit Trail (`audit_trail`)
 
-Written by `log_digital_thread_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger on `areas`,
+Written by `log_audit_trail_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger on `areas`,
 `cells`, `gateways`, `devices`, `device_nameplate`, `system_settings`, `schemas` and
 `metric_catalog` (`0010`); by `log_role_assignment()` on `user_roles`;
 and by eight RPCs that record acts which are not row mutations at all.
@@ -1246,7 +1246,7 @@ the single policy that used to cover the table.
 | `asset` | `Administrator`, `Shopfloor_Manager`, `Auditor` | `cells`, `devices`, `gateways`, `links` — the shopfloor's own history, **`CREDENTIAL_ISSUED` included** |
 | `security` | `Administrator`, `Auditor` | `service_principals`, `user_roles`, `system_settings`, `schemas` |
 
-**`Auditor` stops being a synonym here.** The role holds one permission, `digital_thread:read`, and
+**`Auditor` stops being a synonym here.** The role holds one permission, `audit_trail:read`, and
 until `0070` did nothing a read-only Administrator could not. Reviewing privileged acts without
 being able to perform them is separation of duties, which is what the role was named for.
 
@@ -1263,7 +1263,7 @@ only honest when the rows in it belong to somebody else.
 
 **The domain is stamped by trigger, never supplied by a caller.** Nine writers insert into this
 table. Asking each to pass a domain is asking nine call sites to agree forever, with the failure
-being a security row filed as an asset row. `trg_digital_thread_stamp_domain` overwrites whatever
+being a security row filed as an asset row. `trg_audit_trail_stamp_domain` overwrites whatever
 arrives, from `audit_domain_for()` — the same assertion `actor_source` refuses to accept off a
 request header.
 
@@ -1299,7 +1299,7 @@ guarantee and matches no rows on a settled database.
 2. **`TRUNCATE`, `REFERENCES` and `TRIGGER` revoked.** These were left behind by an original
    `REVOKE INSERT, UPDATE, DELETE` issued against a prior `GRANT ALL` — and **`TRUNCATE` bypasses
    RLS entirely**, so the SELECT policy did not constrain it.
-3. **`enforce_digital_thread_append_only()`** — a `BEFORE UPDATE OR DELETE` trigger that raises for
+3. **`enforce_audit_trail_append_only()`** — a `BEFORE UPDATE OR DELETE` trigger that raises for
    every application role, `service_role` included. The service key is in the release Secret and is held by
    ingestion and all four edge functions, so an audit trail that key could rewrite was not much of
    an audit trail.
@@ -1315,7 +1315,7 @@ guarantee and matches no rows on a settled database.
 carries no `sub` — so **every privileged write used to be logged anonymously** (58 of 65 rows on
 the audited database had `changed_by IS NULL`).
 
-`log_digital_thread_event()` now falls back to a session-local GUC, `aber.actor_id`, which
+`log_audit_trail_event()` now falls back to a session-local GUC, `aber.actor_id`, which
 `approve_quarantined_device()` sets with `SET LOCAL`. `auth.uid()` still wins when present — a
 direct PostgREST write by a signed-in user is already correctly attributed, and the GUC must not be
 able to override it.
@@ -1341,7 +1341,7 @@ an ingestion write records `'ingestion'` **and** names the identity, where it us
 only `user` was refused. That was harmless while machine identities could not write. `0013` let
 them hold `schema:manage` and `proposal:create`, and a machine sending `X-Aber-Actor: migration`
 then had its own `fork_schema()` INSERT filed as a migration. `changed_by` still named it, but the
-thread's lanes and filters read `actor_source`, and a reviewer scanning for machine activity would
+trail's lanes and filters read `actor_source`, and a reviewer scanning for machine activity would
 not have found that row.
 
 Each value is now believed only from the caller it describes:
@@ -1363,8 +1363,8 @@ believed.
 
 ### Reading past the first page (`0077`)
 
-**The page had a cap and no way to say so.** `digital_thread_page()` has returned `truncated`
-alongside every response since `0039`, and the Digital Thread tab has stored it in state since then
+**The page had a cap and no way to say so.** `audit_trail_page()` has returned `truncated`
+alongside every response since `0039`, and the Audit Trail tab has stored it in state since then
 and *never rendered it* — so a page answering a question about the whole plant with its newest 200
 rows was indistinguishable from one showing everything.
 
@@ -1375,17 +1375,17 @@ page; a bigger page costs more JSON and more DOM without touching that, and only
 `next_cursor`, with the page size unchanged at 200.
 
 **`recorded_at` is not a key, and that is the whole difficulty.**
-`log_digital_thread_event()` stamps one transaction's rows with one `now()`, and a batch relocation
+`log_audit_trail_event()` stamps one transaction's rows with one `now()`, and a batch relocation
 of six devices is deliberately one transaction (`0033`). A cursor of *"older than T"* skips the rest
 of the batch; *"T or older"* repeats its first row forever. The cursor is therefore the pair
 `(recorded_at, id)`, `id` being the primary key and monotonic, and `ORDER BY` matches it exactly —
-as does `idx_digital_thread_recorded_id`, because a cursor walking one order against an index in
+as does `idx_audit_trail_recorded_id`, because a cursor walking one order against an index in
 another is *correct* while degrading to a full sort per page, which nothing notices until the table
 is large.
 
 Measured on a fixture of same-timestamp batches: the composite cursor walked **35 of 35** rows
 exactly once; the `recorded_at`-only cursor reached **28**, silently dropping seven.
-`test_digital_thread_paging.py` runs both, and the naive one is the control — without it the rest of
+`test_audit_trail_paging.py` runs both, and the naive one is the control — without it the rest of
 the suite would pass against a broken cursor on any fixture whose timestamps happened to be
 distinct.
 
@@ -1397,7 +1397,7 @@ already loaded rather than replacing it — append-only means held rows cannot c
 only belong at the top — and starts again only when the two ranges no longer overlap, which is the
 one case where prepending would splice a hole into the middle of the list.
 
-### Saying how much of the thread this is (`0115`)
+### Saying how much of the trail this is (`0115`)
 
 **A page that can be paged still has to say what fraction of the whole it is.** `0077` gave the tab
 a way to ask for more; it did not give it anything to say. The legend read "200 events" above a
@@ -1417,48 +1417,48 @@ areas. Server and page disagreed about what the reader was looking at. That cost
 neither prints a number and becomes a wrong number the moment one does — on the development stack,
 467 rows drawn under a total of 471.
 
-**A deleted asset could not be searched for.** The thread stores `entity_id` and nothing else about
+**A deleted asset could not be searched for.** The trail stores `entity_id` and nothing else about
 the entity, so the tab resolved a typed name against its own lookups of the *live* tables and sent
 the matching ids as `p_entity_ids`. A name that had been deleted matched no live row, sent an empty
-id list, and rendered as an empty thread — the one question the page exists to answer, answered
+id list, and rendered as an empty trail — the one question the page exists to answer, answered
 "nothing happened". **`p_search` matches the id and the same audit-snapshot fields the lane label
 falls back to** (`name`, `sparkplug_id`, `schema_name`, `label`, `key`, `role`, `stamp`), so the
 search finds what the timeline draws. That list is shared with `snapshotIdentity()` in
-`DigitalThreadTab.jsx`; a field in one and not the other is a lane you can see and cannot search
+`AuditTrailTab.jsx`; a field in one and not the other is a lane you can see and cannot search
 for, or the reverse.
 
 **LIKE metacharacters in the search are literal.** The field promises a substring of a name or an
-id, and an unescaped `%` would hand the whole thread to somebody who typed a percentage into it. A
+id, and an unescaped `%` would hand the whole trail to somebody who typed a percentage into it. A
 self-check asserts a bare `%` does not select every row.
 
 **One label is not in the payload, and it is matched separately.** A role-assignment row is keyed by
 `user_roles.user_id` and names the *role*, so the search cannot read a person out of the snapshot
 the way it reads a device — and the dashboard labels that lane from `auth.users` (`0116`). A lane
 the timeline draws and the search cannot match is exactly the drift the shared field list exists to
-prevent, so `digital_thread_user_ids_matching()` supplies that one disjunct. It is SECURITY DEFINER,
+prevent, so `audit_trail_user_ids_matching()` supplies that one disjunct. It is SECURITY DEFINER,
 Administrator and Auditor only, and returns an **empty array rather than an error** for anybody
 else: it is part of a query, and raising would turn "your search matched nothing here" into "the
-Digital Thread is broken" for a reader who cannot see that lane anyway.
+Audit Trail is broken" for a reader who cannot see that lane anyway.
 
 **Its CTE is `MATERIALIZED`, and that is measured rather than stylistic.** Inlined, Postgres put the
 helper in the per-row `Filter` of every partition scan — a `STABLE` function is *allowed* to be
 evaluated once and is not promised to be. On the development stack's 4,065 rows that took a search
 from 53 ms to **583 ms**; materialised it is 32 ms. That is the shape of cost that reads as "the
-thread got big" rather than as a query doing the wrong thing, which is why the suite asserts the
+trail got big" rather than as a query doing the wrong thing, which is why the suite asserts the
 keyword is still there.
 
 **The search is a scan and that is the right shape here.** No index serves `ILIKE`, and a search
 matching nothing reads the whole match before the `LIMIT` discards it — but `matching` is already
 scanned in full on every call, so this adds a predicate to a scan rather than a scan. Measured on
 the development stack, 4,065 rows: a default page 18 ms, a search matching nothing — the worst case,
-a full scan the `LIMIT` then discards — 32 ms. `pg_trgm` is the answer if a thread ever outgrows
+a full scan the `LIMIT` then discards — 32 ms. `pg_trgm` is the answer if a trail ever outgrows
 that.
 
 **A migration that adds an argument breaks the one before it, on the second boot.** `0077` named a
 single argument list in its `DROP` and then created its own — correct while it was the last word on
 the function, and wrong the moment `0115` came after it. On every replay `0077` recreated the
 nine-argument form beside the ten-argument one `0115` had left, and `0077`'s own self-check calls
-`digital_thread_page()` **by argument name**, which cannot choose between two candidates. The chain
+`audit_trail_page()` **by argument name**, which cannot choose between two candidates. The chain
 aborted *inside `0077`*, leaving a half-migrated database — and the first boot could not show it,
 because there was nothing yet for `0115` to have left behind. Both files now drop **every**
 declaration of the name before creating theirs, so each owns the function at its point in the chain
@@ -1495,7 +1495,7 @@ qualified was left out for a release. `0117` names six types against five probes
 | `device_nameplate` | `public.devices` | a nameplate is keyed by its device's id, so it is gone precisely when the device is. No rows carry the type yet; it is listed so it does not inherit this bug the first time one does |
 
 **`user_roles` and `service_principals` stay out.** Both are `auth.users` rows, which a
-`SECURITY INVOKER` function cannot read — `digital_thread_user_ids_matching()` exists because of
+`SECURITY INVOKER` function cannot read — `audit_trail_user_ids_matching()` exists because of
 that. A kind the server can never hide must never be flagged deleted either, so the tab's
 `DELETABLE_KINDS` drops `ACCESS` in the same change: **the flag and the filter are now one set on
 both sides**, which is the invariant whose absence caused this. `area_floors` stays out for the
@@ -1528,13 +1528,13 @@ Backups page calls one, and the order of that list is the only thing deciding it
 requested in the same minute — which the development stack has twice over — would be one label
 drawn twice, and a label you cannot tell apart is worse than the uuid it replaced. So a lane named
 from a category carries its short id as the qualifier chip, the same element a schema's `v2` uses.
-`CATEGORY_IDENTITY_FIELDS` in `DigitalThreadTab.jsx` is that list, and it holds one field.
+`CATEGORY_IDENTITY_FIELDS` in `AuditTrailTab.jsx` is that list, and it holds one field.
 
 **The note and the stamp are on two other tables**, and both are what an operator would type into
 the search: the note is theirs, and the stamp is what the Backups page shows. Neither is in the
-payload, so `digital_thread_backup_job_ids_matching()` supplies that disjunct — the same shape as
+payload, so `audit_trail_backup_job_ids_matching()` supplies that disjunct — the same shape as
 the person matcher `0115` added, and **SECURITY DEFINER for the same reason**. `backup_jobs` and
-`backups` are Administrator-only while `digital_thread_select_security` admits Administrator *and*
+`backups` are Administrator-only while `audit_trail_select_security` admits Administrator *and*
 Auditor, so a plain join in a `SECURITY INVOKER` function would let an Auditor see a backup lane and
 never search it — silently, an empty disjunct being indistinguishable from no match. The gate inside
 is that same pair, and anybody else gets an empty array rather than an error.
@@ -1553,7 +1553,7 @@ one identity and wrong here, where every unnamed principal would draw the same l
 
 **This is the one place the search cannot reach a drawn name**, and it is a known exception rather
 than an oversight. The three pinned names are held in frontend source and have nothing in the
-database to match; the names in `machine_principals` are in the database, and `digital_thread_page()`
+database to match; the names in `machine_principals` are in the database, and `audit_trail_page()`
 does not join them, because a search across one lane's names is not worth a redeclaration of the
 function that pages every lane. A service principal is findable by its id, which an operator
 reaches through Access Control anyway.
@@ -1591,15 +1591,15 @@ never alive.
 
 **The event drawer hands a reader three copyable ids and only one of them went anywhere.** Entity ID
 had a single consumer in the platform — the global search's `resolveId`, which probes five tables
-(areas, cells, gateways, devices, schemas) while the Digital Thread recorded **twelve** kinds. So a
+(areas, cells, gateways, devices, schemas) while the Audit Trail recorded **twelve** kinds. So a
 setting, a backup, a backup job, a proposal, a service identity or a person had a copyable id in the
 drawer and nothing in the app that would take it. Mutation ID and the transaction had no consumer at
 all: no filter, no search, no RPC argument.
 
-**A search term that is nothing but digits now also matches `digital_thread.id` and `causation_id`.**
+**A search term that is nothing but digits now also matches `audit_trail.id` and `causation_id`.**
 It is an additional disjunct, so the name and entity-id matching is untouched and an entity whose
 name happens to be digits still matches by name — nothing is taken away, rows are only added. Both
-columns are indexed: `digital_thread_pkey` leads on `id`, `idx_digital_thread_causation` covers the
+columns are indexed: `audit_trail_pkey` leads on `id`, `idx_audit_trail_causation` covers the
 other.
 
 The term is **bounded to 18 digits**. `raw::bigint` on a longer run raises `numeric_value_out_of_range`,
@@ -1624,21 +1624,21 @@ half of it under a count that reads as the whole.
 render only when a sibling was loaded — which meant a group whose other members were outside the
 filter looked identical to a single-row act *and* hid the one control that resolves the difference.
 
-**RLS is unchanged.** `digital_thread_page()` is `SECURITY INVOKER`, so a Shopfloor_Manager searching
-a mutation id reads what `digital_thread_select_asset` admits and nothing more.
+**RLS is unchanged.** `audit_trail_page()` is `SECURITY INVOKER`, so a Shopfloor_Manager searching
+a mutation id reads what `audit_trail_select_asset` admits and nothing more.
 
 **One word per id.** The drawer said *Transaction*, the CSV column said `causation_id`, and the
 database column is `causation_id` — so one thing read as two, which is how it was reported as four
 ids in a drawer that shows three. The UI and the export now both say **Transaction ID**, the same
-precedent `mutation_id` already set for `digital_thread.id`, and each tooltip names its SQL column so
+precedent `mutation_id` already set for `audit_trail.id`, and each tooltip names its SQL column so
 an id can be carried into a query without guessing.
 
 
 ### The drawer knows how many rows a transaction wrote (`0006`)
 
-`digital_thread_page()` returns `transaction_rows` with each event: how many rows share its
+`audit_trail_page()` returns `transaction_rows` with each event: how many rows share its
 `causation_id`, counted over the whole table rather than the page, and `NULL` where there is no
-causation. `idx_digital_thread_causation` covers the lookup, so it is one index probe per row on
+causation. `idx_audit_trail_causation` covers the lookup, so it is one index probe per row on
 the page.
 
 **Why the page could not work it out.** The drawer's "Same transaction" list is drawn from the
@@ -1651,7 +1651,7 @@ is the transaction's size minus one, whatever is loaded. A server without the fi
 back, because a bare sibling list is a lower bound again.
 
 **Counted under the caller's own policies.** The function is `SECURITY INVOKER`, so the subquery
-sees what `digital_thread_select_asset` and `digital_thread_select_security` admit. A
+sees what `audit_trail_select_asset` and `audit_trail_select_security` admit. A
 Shopfloor_Manager's count omits the security lane, which is the number of rows "Show whole
 transaction" could load for them.
 
@@ -1661,11 +1661,11 @@ transaction" turns the deleted-entities toggle on along with clearing the entity
 otherwise a reader would be told a row is missing and shown no way to reach it.
 
 The CSV export carries the number as `transaction_rows` beside `transaction_id`.
-`test_digital_thread_paging.py` covers the field; `digitalThreadCausation.test.jsx` the drawer.
+`test_audit_trail_paging.py` covers the field; `auditTrailCausation.test.jsx` the drawer.
 
 ### An approval and the change it made are one act (`0021`)
 
-**Two of the thread's writers stamped no transaction.** `approve_proposal()` writes a
+**Two of the trail's writers stamped no transaction.** `approve_proposal()` writes a
 `PROPOSAL_APPLIED` row naming both parties, and the target's audit trigger records the `UPDATE`
 the approval made. The trigger stamps `causation_id = txid_current()`; the `PROPOSAL_APPLIED`
 INSERT named no `causation_id`, and the column has no default. The drawer groups an event's rows
@@ -1682,15 +1682,15 @@ id. Rows written before `0021` keep their NULL.
 said it refuses a schema-lane proposal whose target is "not a draft", a check archived migration
 0090 withdrew with the lane, and `approve_proposal()`'s described the link lanes archived migration
 0108 withdrew. `test_change_proposals.py` approves a proposal and finds both rows under one id, and
-`digital_thread_page()` counting them as two.
+`audit_trail_page()` counting them as two.
 
 
 ### The lane a Manager was offered and denied (`0120`)
 
 **`audit_domain_for()` classifies every audit row into `asset` or `security`**, and
-`digital_thread_select_security` admits Administrator and Auditor alone. `schemas` had never been
-listed in either arm, so it took the fail-closed `ELSE 'security'` — while `DIGITAL_THREAD_ENTITY_TYPES`
-in `frontend/src/constants.js` declares the kind `asset`, and `digitalThreadEntityTypesFor()` uses
+`audit_trail_select_security` admits Administrator and Auditor alone. `schemas` had never been
+listed in either arm, so it took the fail-closed `ELSE 'security'` — while `AUDIT_TRAIL_ENTITY_TYPES`
+in `frontend/src/constants.js` declares the kind `asset`, and `auditTrailEntityTypesFor()` uses
 that to decide which filters a role is offered. A Shopfloor_Manager was therefore shown a **Schemas**
 filter that the policy could only ever answer with an empty timeline.
 
@@ -1707,7 +1707,7 @@ already see that a schema had been bound to a machine — just not that the sche
 written.
 
 **Existing rows are re-stamped.** `audit_domain` is written once, at INSERT, by
-`trg_digital_thread_stamp_domain`, so recorded rows would otherwise keep `security` while new ones
+`trg_audit_trail_stamp_domain`, so recorded rows would otherwise keep `security` while new ones
 land in `asset`. That split is not free: `test_audit_domain.py` holds the stored column and the
 classifier equal for every kind the platform records, and buying the exception means weakening that
 invariant — so the correction is the cheaper option. It is **not** the history-rewriting the
@@ -1726,7 +1726,7 @@ An empty database has none of that, so the assertion passed in CI, passed in eve
 run, and **aborted the chain the first time it met a real deployment** — the `db-init` Job failed
 four times and took the Helm upgrade down with it. The scope error was copied from
 `test_every_row_in_the_table_agrees_with_it`, which had the same blind spot for the same reason and
-is now scoped to the kinds `DIGITAL_THREAD_ENTITY_TYPES` declares. The lesson is cheap to state and
+is now scoped to the kinds `AUDIT_TRAIL_ENTITY_TYPES` declares. The lesson is cheap to state and
 was not cheap to find: **a throwaway database cannot exercise an assertion about history.**
 
 **Nothing compared the two sides, which is why this survived twelve migrations.** The lane a kind
@@ -1736,12 +1736,12 @@ entries. Only the JS side is parsed as text; the SQL side is the function itself
 cannot drift into agreeing with a regex instead of with the database.
 
 
-### A metric's deprecation reaches the thread (`0010`)
+### A metric's deprecation reaches the trail (`0010`)
 
 **Deprecating is the only way to retire a metric, and it left no record.** `metric_catalog.name`
 is immutable, so deprecate-and-supersede is the exit the catalog assumes, and the Metrics page's
 Deprecated Metrics card can now undo it with a confirmed Restore (#468). The table carried no audit
-trigger, so neither act said who made it or when. `0010` attaches `log_digital_thread_event()` for
+trigger, so neither act said who made it or when. `0010` attaches `log_audit_trail_event()` for
 INSERT, UPDATE and DELETE, as on `schemas`. Deprecate and restore are UPDATEs whose diff moves
 `deprecated` (and `superseded_by`), the shape archive and restore already have on the asset tables;
 the timeline paints `deprecated` rising as Lifecycle, as it paints `is_archived`. No new action
@@ -1766,14 +1766,14 @@ A replay writes nothing: `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, 
 `permitted_values` UPDATE writes the value the row holds, which the function's no-op rule drops. A
 restored seed row stays restored for the first of those reasons: no file re-asserts `deprecated`
 (`OEE/PERFORMANCE` is seeded deprecated and can be restored). The metric's lane is
-labelled from `name` in the snapshot and searchable by it; `digital_thread_page()` needs no change,
+labelled from `name` in the snapshot and searchable by it; `audit_trail_page()` needs no change,
 and does not call a catalog row deleted (the catalog has no DELETE policy).
-`test_digital_thread_guard.py`, `test_audit_domain.py` and `test_role_permission_split.py` cover it.
+`test_audit_trail_guard.py`, `test_audit_domain.py` and `test_role_permission_split.py` cover it.
 
 
-### The thread draws every lane (`0128`)
+### The trail draws every lane (`0128`)
 
-**The Digital Thread no longer caps its lanes, so the setting that sized the cap has no reader.**
+**The Audit Trail no longer caps its lanes, so the setting that sized the cap has no reader.**
 `ui.digital_thread_lane_limit` folded every lane past the thirtieth behind a "Show all lanes"
 button at the foot of the page. Lanes are ordered busiest-first across the whole page, so the
 hidden ones belonged to every section, and pressing a button at the bottom expanded rows at the
@@ -1786,21 +1786,21 @@ declaring one. The row is removed here rather than left as a dead control on the
 `0002` no longer declares it, but `0002` replays on every boot and `seed_setting()` would not
 re-create a row that was never there — the problem is the stacks that already hold it, and this
 migration is the `DELETE` for those. Its self-check asserts the key is absent and that the poll
-interval, the thread's remaining setting, is still present: properties, not a count of rows.
+interval, the trail's remaining setting, is still present: properties, not a count of rows.
 
-The deletion is audited like any other write to `system_settings` — the thread records its own
+The deletion is audited like any other write to `system_settings` — the trail records its own
 control being retired, under the `migration` actor.
 
 ### A lane nothing wrote (`0122`)
 
-**`device_nameplate` was a Digital Thread filter that could only ever answer empty.**
-`audit_domain_for()` classified it, `DIGITAL_THREAD_ENTITY_TYPES` listed it, `api.js` unions its
+**`device_nameplate` was an Audit Trail filter that could only ever answer empty.**
+`audit_domain_for()` classified it, `AUDIT_TRAIL_ENTITY_TYPES` listed it, `api.js` unions its
 rows into the timeline of the device they name, and the approvals page reads `entity_id` as a
 device id. Every consumer was built. The table carried **no trigger of any kind**, so no row was
 ever written: a live stack held 4,075 audit rows across eleven entity types and not one was a
 nameplate.
 
-**The obstacle was the key.** `log_digital_thread_event()` read `NEW.id`, and `device_nameplate` is
+**The obstacle was the key.** `log_audit_trail_event()` read `NEW.id`, and `device_nameplate` is
 keyed by `device_id` with no `id` column at all — so the trigger could not be attached, and would
 not have failed at write time but at `CREATE TRIGGER` time. That is the same shape that made
 `log_role_assignment()` a separate function for `user_roles`, whose key is `(user_id, role_id)`.
@@ -1815,10 +1815,10 @@ and a table keyed differently needs a trigger rather than a function.
 **The cost of that is a silent failure mode, so it is asserted twice.** A trigger argument naming a
 column that is not there reads as NULL through `->>` rather than raising, which would file every
 row under no entity. `0122`'s self-check walks every trigger bound to the function and checks the
-column it names exists on the table it is attached to; `test_digital_thread_guard.py` asserts the
+column it names exists on the table it is attached to; `test_audit_trail_guard.py` asserts the
 same thing against whatever is actually attached, which is what a later migration can change. The
 function also raises by name rather than letting `entity_id`'s `NOT NULL` report it, because that
-constraint names `digital_thread` and not the trigger that is wrong.
+constraint names `audit_trail` and not the trigger that is wrong.
 
 **The UPDATE arm is gated the way `system_settings`' is.** The nameplate editor upserts the whole
 row and stamps `updated_at` on every save, so an operator who opens the form and saves it unchanged
@@ -1880,10 +1880,10 @@ both classes of machine non-event — an UPDATE that changes nothing, and one th
 heartbeats and rebirths flowing added *zero* rows. That bounds the rate of noise and does nothing
 about the total: every row that survives is a real change, every real change is kept forever.
 
-`0079` range-partitions `digital_thread` by month on `recorded_at`, so retiring history is
+`0079` range-partitions `audit_trail` by month on `recorded_at`, so retiring history is
 `DETACH PARTITION` — instant, barely logged, and leaving the data queryable as a standalone table —
 instead of a `DELETE` that is fully logged, bloats the heap and needs a `VACUUM` afterwards. The
-runbook is in [`deploy/k8s/README.md`](../deploy/k8s/README.md#trimming-the-digital-thread).
+runbook is in [`deploy/k8s/README.md`](../deploy/k8s/README.md#trimming-the-audit-trail).
 
 **Nothing about who may clear audit rows changes.** `0003` already settles it: the append-only
 trigger exempts `postgres` and `supabase_admin` and refuses everyone else, on the stated grounds
@@ -1896,17 +1896,17 @@ trigger on `cells`, `gateways` and `devices`, a refused audit row **fails the as
 caused it**. "Create partitions ahead of need and alert if the next is missing" makes that outage
 less likely without making it less severe: the alert fires at the moment the platform stops
 accepting writes. The default partition turns the whole failure class into a slow, observable
-degradation instead, and `digital_thread_partition_health` is what observes it. A daily `pg_cron`
+degradation instead, and `audit_trail_partition_health` is what observes it. A daily `pg_cron`
 job keeps three months of headroom, so the default stays empty in every state that has not already
 gone wrong.
 
 **A partition does not inherit the parent's ACL, and the default it gets instead is wrong.** The
-first conversion produced `digital_thread` as `service_role=rxtm` — correct — beside
-`digital_thread_2026_09` as `service_role=arwdDxtm`, which is everything, from the image's default
+first conversion produced `audit_trail` as `service_role=rxtm` — correct — beside
+`audit_trail_2026_09` as `service_role=arwdDxtm`, which is everything, from the image's default
 privileges. The append-only trigger covers a direct `DELETE`, because a row trigger on the parent
 fires for every partition; **`TRUNCATE` is not a row operation and raises no trigger at all**, so a
 month of audit history was erasable through a table name as a role the platform hands out.
-`secure_digital_thread_partition()` strips every application-role privilege at both creation
+`secure_audit_trail_partition()` strips every application-role privilege at both creation
 sites — the conversion and the monthly job — because otherwise the hole reopens every month.
 
 ---
@@ -1921,7 +1921,7 @@ here rather than left on a checklist.
 | :--- | :--- | :--- |
 | `Service_Ingestor` (`0046`) | `telemetry:read` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
 | `Service_Playback` (`0056`) | `telemetry:read` | Nothing directly. The `playback_*` gates, each checking `is_playback_caller()` |
-| MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `digital_thread` |
+| MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `audit_trail` |
 | `aber_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Adds one broker account and nothing else |
 
@@ -1938,7 +1938,7 @@ model could not read the audit trail. The role was chosen for the shape it had.
 **The shape was not theirs.** `Operator` is a *person's* role — the read-only shopfloor user — and it
 is the role that changes whenever somebody asks for an operator to be able to do one more thing.
 Every one of those requests silently re-granted three machine identities, and it had already
-happened once: a request to let an `Operator` read the asset lane of `digital_thread` was refused by
+happened once: a request to let an `Operator` read the asset lane of `audit_trail` was refused by
 `0034`'s own self-check. **A change about people was blocked by a property of a machine.**
 
 `0080` gives each principal grants of its own on `principal_permissions` — the machine-side twin of
@@ -1978,7 +1978,7 @@ for it is whatever consults that permission through `has_authority()`:
 | :--- | :--- | :--- |
 | `telemetry:read` | Nothing it could not already read: the inventory and the `telemetry` view are open to every authenticated caller, so the grant records what the identity is for | `USING (true)` on the inventory tables; a grant on the view |
 | `quarantine:view` | Nothing, for the same reason: the queue is `devices` rows | `devices_select_authenticated` |
-| `digital_thread:read` | The thread's asset lane, and the record of deleted assets | `digital_thread_select_asset`, `retired_entities_select_privileged` |
+| `audit_trail:read` | The trail's asset lane, and the record of deleted assets | `audit_trail_select_asset`, `retired_entities_select_privileged` |
 | `archive:manage` | The record of deleted assets. Archiving and restoring check the role pair, so no write | `retired_entities_select_privileged` |
 | `proposal:create` | **A write**: files change proposals, which a person decides | `change_proposals_insert_proposer` |
 | `schema:manage` | **A write**: forks, publishes and discards schema versions. The `schemas` write policies name `Administrator`, so not a direct edit | `fork_schema()`, `publish_schema_version()`, `discard_schema_draft()` |
@@ -1999,10 +1999,10 @@ check the two writes open is a database check reached through PostgREST. Storage
 edge runtime still honour a withdrawn token until it expires, and none of them consults these
 permissions. `service_token_max_days()`'s COMMENT said the same thing and is restated.
 
-**`digital_thread:read` opened nothing on the thread for a machine.** Both lanes named roles, so a
-machine granted it read no thread rows while the page said it could; only `retired_entities`
+**`audit_trail:read` opened nothing on the trail for a machine.** Both lanes named roles, so a
+machine granted it read no trail rows while the page said it could; only `retired_entities`
 consulted it. The asset lane is now `has_role(Administrator, Shopfloor_Manager, Auditor) OR
-has_authority(digital_thread:read)`. For a person nothing moves, because those three roles are the
+has_authority(audit_trail:read)`. For a person nothing moves, because those three roles are the
 ones that hold the permission. The security lane is unchanged.
 
 **`may_decide_proposal()` now says what its cell and gateway lanes check.** Its comments said they
@@ -2015,7 +2015,7 @@ today and lose what `0090` wanted: withdrawing the grant closes the lane.
 **Two guards hold it.** `check-docs-drift.mjs` 11e keeps the page's menu equal to the allow-list.
 11f names, for each allowed permission, the policy or function it is meant to open, and requires
 that check's latest definition to consult it through `has_authority()`. "Consulted somewhere" would
-have passed `digital_thread:read` on `retired_entities` alone. `telemetry:read` and
+have passed `audit_trail:read` on `retired_entities` alone. `telemetry:read` and
 `quarantine:view` are stated as what they are: 11f asserts that what they describe is open to
 every authenticated caller and that nothing consults them. It also holds the refusal reasons that
 are facts, and `may_decide_proposal()`'s three premises. `test_machine_principal_naming.py` acts as
@@ -2045,7 +2045,7 @@ and an Operator, an Auditor and the machine itself get nothing.
 ### A person has a name the dashboard can read (`0116`)
 
 **The audit trail could not say who.** `log_role_assignment()` keys a role-assignment row by
-`user_roles.user_id`, so a lane on the Digital Thread is one *person's* history — and nothing
+`user_roles.user_id`, so a lane on the Audit Trail is one *person's* history — and nothing
 served to the browser could turn that id into anybody. `auth.users` is not exposed by PostgREST,
 `public.user_roles` is not published to clients, and `list_machine_principals()` returns only the
 identities that *cannot* sign in. The lane that answers "who was given what, and when" drew a
@@ -2056,7 +2056,7 @@ shortened uuid, which answers two thirds of the question.
 second definition of "is this a service account" would be worse than the bug it fixed, and this is
 where a second one would have gone. The two would agree until the day they did not.
 
-**The gate matches the policy on the rows these names label.** `digital_thread_select_security`
+**The gate matches the policy on the rows these names label.** `audit_trail_select_security`
 admits Administrator and Auditor, and a role assignment is stamped into that lane — so anybody who
 can read the lane can read the names in it, and nobody else learns anything.
 Administrator-only, as `list_machine_principals()` is, would leave an Auditor reading a lane of
@@ -2091,7 +2091,7 @@ any row, in any shape. This one can do exactly eight things.
 
 `record_ingestion_rejection()` is the daemon's ninth RPC by call count and was not one of `0047`'s
 seven, because it already existed: `0026` built it as the narrow gate replacing `service_role`'s
-direct INSERT on `digital_thread`. Its access control was its **grant**, which was correct while
+direct INSERT on `audit_trail`. Its access control was its **grant**, which was correct while
 `service_role` was the only thing that could call it.
 
 `0046` took that key away from the daemon and nobody re-granted this one. Every payload conformance
@@ -3073,8 +3073,8 @@ Built by `0041`–`0044`, `0074`, `0075`, `supabase/functions/gateway-credential
 
 | Trigger | Table | Purpose |
 | :--- | :--- | :--- |
-| `trg_*_digital_thread` | `cells`, `gateways`, `devices` | Audit logging |
-| `trg_digital_thread_append_only` | `digital_thread` | Rejects UPDATE/DELETE |
+| `trg_*_audit_trail` | `cells`, `gateways`, `devices` | Audit logging |
+| `trg_audit_trail_append_only` | `audit_trail` | Rejects UPDATE/DELETE |
 | `trg_metric_catalog_immutability` | `metric_catalog` | `name` and `datatype` are wire contracts |
 | `trg_metric_group_spelling` | `metric_catalog` | Rejects a group differing only in case |
 | `trg_enforce_schema_version_provenance` | `schemas` | A version may only be created by `fork_schema()` |
@@ -3095,7 +3095,7 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | Function | Roles | Notes |
 | :--- | :--- | :--- |
 | [`approve-quarantine`](functions/approve-quarantine) | `Administrator`, `Shopfloor_Manager` | Calls the atomic approval RPC |
-| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `digital_thread:read`, because it carries the thread |
+| [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `audit_trail:read`, because it carries the trail |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; since `deploy-nodered` was retired this is the sole enforcement point for `gitops:manage` |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
@@ -3111,7 +3111,7 @@ Grafana is notifying, not somebody clicking. It authorises on `GRAFANA_ALERT_WEB
 writes with its own service-role client.
 
 **Grafana is deliberately not given the service-role key.** That key bypasses RLS entirely and can
-rewrite `digital_thread`, and this stack has already corrected the same shape once — Grafana used to
+rewrite `audit_trail`, and this stack has already corrected the same shape once — Grafana used to
 reach the historian as the `postgres` superuser, and the fix was the read-only `grafana_reader` role.
 A service fronted by browser SSO gets the narrowest credential that does its job, which here is
 "record an alert". Same arrangement as `nodered_webhook_jwt_secret` for the quarantine webhook, in the
@@ -3133,7 +3133,7 @@ alert. The dashboard reads `platform_alerts_active`, which is `DISTINCT ON (fing
 change *events*, not persistence. The telemetry that breached the threshold is retained
 independently in the historian, so the alert row is derived data whose evidence outlives it.
 
-That is the opposite answer to `digital_thread`, deliberately — one is an audit trail the platform
+That is the opposite answer to `audit_trail`, deliberately — one is an audit trail the platform
 sells as permanent, the other is a derived record of something already kept elsewhere.
 
 **The predicate is not a flat age cutoff, and this is the part worth reading before changing it.**
@@ -3348,7 +3348,7 @@ open it and add to it.
 
 **Who the record names.** `device_nameplate.updated_by` becomes the **proposer** — the column's own
 comment says a nameplate is an assertion about an asset, so who made it is part of the record —
-while the `digital_thread` row names the **approver** in `changed_by` and carries `proposed_by` in
+while the `audit_trail` row names the **approver** in `changed_by` and carries `proposed_by` in
 its payload. Both are in the record; neither column has to hold both.
 
 **The timer is not a person.** An open proposal nobody acts on closes after
@@ -3365,7 +3365,7 @@ Both would otherwise take the fail-closed `security` branch, which would hide a
 ### A proposal says who asked, in something a person can read (`0089`)
 
 `change_proposals.proposed_by` is a uuid and is the right thing to key on — it is what the policy
-compares, what the per-person cap counts, and what `digital_thread.changed_by` carries. **It is also
+compares, what the per-person cap counts, and what `audit_trail.changed_by` carries. **It is also
 unreadable.** An approver sees `a0000000` and there is nowhere in this stack to resolve it:
 `auth.users` is not exposed to the browser and `list_machine_principals()` returns machines with no
 email at all. So the queue could not answer the first question anybody asks about a request — who is
@@ -3436,10 +3436,10 @@ its approval.
 
 **The audit row landed in the `security` domain**, because `audit_domain_for('schemas')` said so and
 `0070`'s rule is who may perform the act. [`0120`](#the-lane-a-manager-was-offered-and-denied-0120)
-moves `schemas` to the asset lane, which does not change the conclusion here: `digital_thread_select_asset`
+moves `schemas` to the asset lane, which does not change the conclusion here: `audit_trail_select_asset`
 admits Administrator, Shopfloor_Manager and Auditor, so the proposing `Operator` still cannot read
 it. What they can read is their own proposal row, carrying `status`, `decided_by` and
-`applied_thread_id`. The queue is the proposer's record; the thread is the platform's.
+`applied_trail_id`. The queue is the proposer's record; the trail is the platform's.
 
 ### The queue moves to the assets an Operator can see (`0090`)
 
@@ -3473,7 +3473,7 @@ directly, through `link:manage`, which is how every link that exists got there, 
 would have filed a proposal was exported, unit-tested and called by nothing. The withdrawal goes
 further than the one `schemas` got — the CHECK constraint no longer admits the strings at all — and
 every row in those lanes was deleted. `link:manage` is untouched: it gates the direct edit.
-`audit_domain_for()` keeps its three link arms, so `digital_thread` rows written before `0108`
+`audit_domain_for()` keeps its three link arms, so `audit_trail` rows written before `0108`
 stay in the asset domain instead of silently becoming security-domain history.
 
 **The new lanes resolve authority, not role names**, and `0087` is why: it found two predicates
@@ -3541,7 +3541,7 @@ Those rows are what the cascade removes, and the count is surfaced so the toast 
 
 **The parent is untouched**, which is the whole point: discarding v2 leaves v1 active, attached and
 unarchived, and the lineage returns to the state it was in before the fork. The `DELETE` writes its
-own `digital_thread` row, because `schemas` has been in the audit trigger since `0070`. The gate is
+own `audit_trail` row, because `schemas` has been in the audit trigger since `0070`. The gate is
 `schema:manage`, matching what [`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087)
 put on `fork_schema()` and `publish_schema_version()` — a `SECURITY DEFINER` function bypasses RLS
 entirely, so its own check is the only one there is.
@@ -3623,8 +3623,8 @@ transaction, which is the only reason it exists.
 
 **The audit trail is the point, not the request count.** Device writes go through PostgREST per
 row, so reassigning six machines one row at a time was six `UPDATE`s: six transactions,
-six `causation_id`s, and six rows in `digital_thread` describing one decision an operator took
-once. Nothing in `0033` stamps an audit row — `log_digital_thread_event()` already writes
+six `causation_id`s, and six rows in `audit_trail` describing one decision an operator took
+once. Nothing in `0033` stamps an audit row — `log_audit_trail_event()` already writes
 `txid_current()` on every row, and the shared causation is a *consequence* of the updates sharing
 a transaction. That is deliberate: a causation a caller could supply would be an assertion rather
 than a fact.
@@ -3644,7 +3644,7 @@ Four properties that are easy to lose and hard to notice losing:
   that omitted the key silently clear `site_wide` off an asset an operator deliberately asserted
   has no single cell.
 - **A no-op is reported as `unchanged`, not `applied`.** `0005` suppresses the no-op `UPDATE`, so
-  counting it would promise a thread row that deliberately does not exist — and the UI would
+  counting it would promise a trail row that deliberately does not exist — and the UI would
   offer a "Same transaction" link into an empty result. The returned `causation_id` is `NULL`
   when nothing changed, for the same reason.
 
@@ -4134,16 +4134,16 @@ stays silent about a lane already orphaned: a lane whose original went before `0
 `shadow_of` was cleared by hand, is still a legal state, and the suite for `0083` now asserts the
 orphan is *edited* rather than *made* by a delete.
 
-**A tombstone is written on the way out, not derived later.** The digital thread's `DELETE` row
-carries the whole row as `old_data`, but the thread is month-partitioned for an eventual
+**A tombstone is written on the way out, not derived later.** The audit trail's `DELETE` row
+carries the whole row as `old_data`, but the trail is month-partitioned for an eventual
 `DETACH` that would take the oldest tombstones with it, so `retired_entities` is a small table of
 its own: type, id, the name and `sparkplug_id` the row had, when it was archived and retired, who
-retired it (nobody, when the timer did), the id of the thread's `DELETE` row, and `old_data`.
+retired it (nobody, when the timer did), the id of the trail's `DELETE` row, and `old_data`.
 `record_retired_entity()` writes it from an `AFTER DELETE` trigger on all four tables **and only
 for a row that was archived**: a delete that skipped the archive stage is still recorded by the
-thread, but it is not a retirement. Readable by `archive:manage` or `digital_thread:read`; no
+trail, but it is not a retirement. Readable by `archive:manage` or `audit_trail:read`; no
 write policy exists, and the trigger runs as definer. The Archived Entities page gains its second
-card from this table, and each tombstone links to what survives it: the digital thread (opened with
+card from this table, and each tombstone links to what survives it: the audit trail (opened with
 deleted entities shown), a gateway's repository in the forge (derived from the id as everywhere
 else; `0114` archived it and nothing deletes it), any bundle exported while the device was alive,
 and the historian id its readings are still keyed by. The vocabulary stayed in the UI: the first
@@ -4151,13 +4151,13 @@ card is *Archived* and the second *Retired*, and no column was added to say so.
 
 **An asset can be taken away before it is taken out of service.** `aas-export?format=bundle`
 returns the same AASX as `format=aasx`, the same Environment and OPC chain, with supplementary
-parts under `aasx/files/aber/`: the device's digital thread as JSON, the readings still in
+parts under `aasx/files/aber/`: the device's audit trail as JSON, the readings still in
 the live historian at raw and hourly resolution as CSV, and a manifest
 (`aber/asset-bundle/1`) that says what each part holds, where it was cut, and which cold-tier
 objects hold what the live historian no longer does. **The bundle states rather than reaches for.**
 Cold telemetry keeps its no-read-back rule, so the manifest names the objects whose range overlaps
 the device's life and fetches none of them; both telemetry parts are capped, newest first
-(`ASSET_EXPORT_MAX_TELEMETRY_ROWS`, `ASSET_EXPORT_MAX_THREAD_ROWS`, defaults in the function),
+(`ASSET_EXPORT_MAX_TELEMETRY_ROWS`, `ASSET_EXPORT_MAX_TRAIL_ROWS`, defaults in the function),
 and a cap that was hit is a sentence under `not_included` rather than a silent tail. The hourly
 rollup is included because it reaches years further back than raw (`0111`); the minute rollups
 are not, and the manifest says so. A copy is stored in the cold tier's bucket under
@@ -4165,23 +4165,23 @@ are not, and the manifest says so. A copy is stored in the cold tier's bucket un
 tombstone can still offer the download; it is **not** a row in the cold manifest, which is keyed by
 chunk and exists to make dropping a chunk safe, and a per-asset bundle has no chunk. A storage
 failure does not fail the export: the file is still returned, the response says it was not stored,
-and the page says to keep the file. Every export is an `EXPORTED` row on the thread, written by a
+and the page says to keep the file. Every export is an `EXPORTED` row on the trail, written by a
 trigger on the insert. Readable by the three roles the bucket admits (Administrator,
 Shopfloor_Manager, Auditor), and the export itself is offered to `archive:manage`.
 
-**The bundle is for the roles that may read what it holds.** Its thread part names who changed
+**The bundle is for the roles that may read what it holds.** Its trail part names who changed
 what, with the values from before each change, and every earlier export of the device with its
-taker's email: rows `digital_thread_select_asset` and `asset_exports_select_privileged` close to
+taker's email: rows `audit_trail_select_asset` and `asset_exports_select_privileged` close to
 an Operator. It was first built with the plain export's role list, so an Operator could download
 what RLS refused them everywhere else (#527). `format=bundle` now also asks `has_authority()` for
-`digital_thread:read`, as the caller, and a caller without it gets `403` naming the thread; JSON
+`audit_trail:read`, as the caller, and a caller without it gets `403` naming the trail; JSON
 and AASX keep the four-role list. The permission rather than a second role list, because it is
-one name the Devices page already gates View Digital Thread on and now gates Export Bundle on too,
+one name the Devices page already gates View Audit Trail on and now gates Export Bundle on too,
 and `role_permissions`, written only by the seed, decides who holds it: today exactly the three
 roles both policies admit. `test_aas_export.py` reads the seed and the two policies and fails if
-the holders and that intersection ever differ. The thread part is read through the caller's client,
+the holders and that intersection ever differ. The trail part is read through the caller's client,
 as the cold catalogue already was, so RLS decides its rows and the part no longer depends on the
-service key; `loadThread()` also filters on `audit_domain = 'asset'`, so a bundle taken by an
+service key; `loadTrail()` also filters on `audit_domain = 'asset'`, so a bundle taken by an
 Administrator or an Auditor, who may read the security lane, never carries a row from it.
 
 ### A machine has a name an operator gave it (`0125`)
@@ -4202,7 +4202,7 @@ was asked for at the time rather than what the identity is for now. The function
 and purpose and writes the row **in the same transaction** as the identity, so a principal created
 from the page cannot exist without a name, and a blank or duplicate name is refused before
 anything exists. Read is Administrator and Auditor, matching `list_user_accounts()`: a name here
-labels digital-thread rows both roles may read, and holds nothing a token could be derived from.
+labels audit-trail rows both roles may read, and holds nothing a token could be derived from.
 No write policy; the function is the only write path.
 
 **The two-argument form is dropped, not overloaded.** PostgREST resolves an RPC by the argument
@@ -4228,7 +4228,7 @@ asserts it equals `c_allowed` in the last migration that declares the function, 
 added to one side without the other fails the build rather than the click. What each entry
 reaches is held by 11f; see [Machines propose, people decide](#machines-propose-people-decide-0013). Check 11d is
 unchanged: it requires a registry entry for every id a migration pins, and a principal created at
-runtime has no id to write down ahead of time, which is what the table is for. The Digital Thread
+runtime has no id to write down ahead of time, which is what the table is for. The Audit Trail
 reads the same table to label the *Service identities* lane, so a principal created from the page
 is named there too; the search still cannot reach that name, for the reason stated under
 [Naming the last two lanes](#naming-the-last-two-lanes-0118).
@@ -4749,7 +4749,7 @@ BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 ```
 
 Writes three timestamped artefacts plus a manifest into `./backups/` (gitignored — a dump holds
-`auth.users`, hashed OAuth client secrets and the whole `digital_thread`). It runs a local `pg_dump`
+`auth.users`, hashed OAuth client secrets and the whole `audit_trail`). It runs a local `pg_dump`
 against whatever `SUPABASE_DB_HOST`/`TIMESCALE_HOST` name; the defaults are the dev loop's
 port-forwards (`npm run dev:forward`), and the passwords come from `POSTGRES_PASSWORD` /
 `DB_PASSWORD` in the environment.
@@ -4795,7 +4795,7 @@ Eight things about these dumps are not obvious and each has bitten someone:
   which is what lets it replace the `auth` and `storage` schemas the image ships. It cannot,
   however, drop a partition's *inherited* primary key, and a fresh stack always has partitions:
   Realtime creates its daily `realtime.messages_*` on every start, and `0001` creates
-  `digital_thread`'s monthly ones and its DEFAULT. So `restore-databases.sh` drops every partition
+  `audit_trail`'s monthly ones and its DEFAULT. So `restore-databases.sh` drops every partition
   of every partitioned table first, and the dump recreates each with its rows. The first rehearsal
   to reach the restore step found that; before it, the runbook failed on every fresh stack with
   `cannot drop inherited constraint`.
@@ -4823,7 +4823,7 @@ Eight things about these dumps are not obvious and each has bitten someone:
   registered but never refreshing. The script runs `post_restore()` even when the restore fails,
   because the alternative is a database whose retention, compression and refresh jobs are all
   silently stopped.
-- **`digital_thread` is why this matters most.** Telemetry can be re-derived from a rebirth; an
+- **`audit_trail` is why this matters most.** Telemetry can be re-derived from a rebirth; an
   append-only audit trail cannot.
 
 **This is not PITR.** Recovery is to the last run and no finer. A real RPO wants WAL archiving or
@@ -4835,7 +4835,7 @@ The distinction the decision rests on is what a log is FOR here: the store answe
 somebody is asking during or shortly after a fault — which device, under which edge node, and why —
 and a restored copy of last month's logs answers a question nobody is still asking. Everything from
 those lines that matters beyond the incident is already kept as a row and already in the dump:
-`digital_thread` is the audit trail and carries the conformance record as well, and
+`audit_trail` is the audit trail and carries the conformance record as well, and
 `platform_alerts` is the alert history. Backing up the logs too would be a second, weaker copy of
 records that are captured properly, plus a great deal of noise the retention window exists to
 expire.
@@ -4938,7 +4938,7 @@ floor: both prune last in a script that stops at the first failure. The page's R
 reads the window from `backup.retentionDays` through the frontend's runtime configuration, and
 `check-docs-drift.mjs` holds its `BACKUP_RETENTION_FLOOR` equal to the SQL's.
 
-**Every act is a thread row.** `BACKUP_REQUESTED`, `BACKUP_CANCELLED` and `BACKUP_RELEASED` as the
+**Every act is a trail row.** `BACKUP_REQUESTED`, `BACKUP_CANCELLED` and `BACKUP_RELEASED` as the
 user who did it; `BACKUP_TAKEN`, `BACKUP_FAILED` and `BACKUP_PRUNED` as `service`, with no user.
 `audit_domain_for()` files both entity types under `security` by its fail-closed default, which is
 where an act on the whole database belongs.
@@ -4967,7 +4967,7 @@ fires past 36 hours; its reasoning is in [`grafana/README.md`](../grafana/README
   one is ever wanted, is a signed URL from an edge function over a bucket the service does not
   write; it is not built, and the page says so.
 - *No download, no restore button.* A dump holds `auth.users`, every OAuth secret's hash, the whole
-  `digital_thread` and the historian's password; a download lowers "shell access on the host" to
+  `audit_trail` and the historian's password; a download lowers "shell access on the host" to
   "any Administrator session". Restore is the runbook below: it needs nine roles no dump creates
   and cannot be replayed over a previous restore.
 - *`pg_dump`, not pgBackRest or CloudNativePG.* Either changes what the privilege is and what the
@@ -5196,7 +5196,7 @@ stack can turn a row into a backup: `pg_dump` against both databases, a tar of t
 objects and a consistent copy of the forge's volume need a process beside the volumes holding a
 superuser credential, which is neither an edge function nor a browser. `scripts/backup-service.mjs`
 is that process and does that one thing. It serves nothing but `/healthz` and hands no bytes to
-anybody: a dump holds `auth.users`, every OAuth secret's hash, the whole `digital_thread` and the
+anybody: a dump holds `auth.users`, every OAuth secret's hash, the whole `audit_trail` and the
 historian's password, and "any Administrator session" is a wider audience than "a shell on the
 host". Restore is the runbook above, run from that shell against the volume. The chart projects
 the script through a ConfigMap over an image built from the database's own
@@ -5352,7 +5352,7 @@ buffer about to be freed. The three job caps are mutually consistent so that the
 first (100,000 messages at a few hundred bytes is roughly 40 MB), leaving headroom above the size
 cap. Anything raising the job cap in `capture_jobs_caps_are_bounded` has to raise the bucket limit
 too. The export bucket's 256 MiB is likewise above the largest bundle the row caps in
-`supabase/functions/_shared/aas/bundle.ts` admit (200,000 telemetry rows and 20,000 thread rows);
+`supabase/functions/_shared/aas/bundle.ts` admit (200,000 telemetry rows and 20,000 trail rows);
 the row caps are the real limit, and the bucket limit is what stops a bug from becoming a disk.
 
 **The MIME lists are the control, and two of them are deliberately loose.** The client-side
@@ -5399,7 +5399,7 @@ bucket: `public: true` would make storage-api serve the objects without consulti
 
 An auditor's job is to see what the plant did and when, and a capture is the record of what the
 edge actually published — so `SELECT` is the point of the role. `INSERT` would let an auditor
-rewrite the record they exist to examine, which is the same objection that makes `digital_thread`
+rewrite the record they exist to examine, which is the same objection that makes `audit_trail`
 append-only.
 
 Operator gets nothing: nothing on the operator dashboard reads or writes a capture, and a role that

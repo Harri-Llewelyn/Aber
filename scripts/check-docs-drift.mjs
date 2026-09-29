@@ -688,7 +688,7 @@ function edgeFunctionNames() {
     // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
     // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
     // the pre-0006 form and folds forward at the next squash.
-    'public.digital_thread_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
+    'public.audit_trail_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
 
     // 0010 files `metric_catalog` in the asset lane (#468), the same signature and return type.
     // The baseline's copy fails it closed to security and folds forward at the next squash.
@@ -709,7 +709,7 @@ function edgeFunctionNames() {
 
     // 0020 believes each X-Aber-Actor value only from the caller it describes, and files a machine
     // identity as 'service' whatever it declares. The same signature and return type.
-    'public.log_digital_thread_event': '0020 ties each declared actor_source to its caller; the baseline accepts ingestion, service and migration from anyone',
+    'public.log_audit_trail_event': '0020 ties each declared actor_source to its caller; the baseline accepts ingestion, service and migration from anyone',
 
     // 0021 stamps causation_id = txid_current() on the row each writes, as the audit trigger does
     // on the target's row. The same signatures and return types.
@@ -940,13 +940,13 @@ function edgeFunctionNames() {
       + 'connection, never over PostgREST. The browser reads the same facts from `gateways` and '
       + '`gateway_status` with RLS applied, which is why publishing a second, RLS-free path to '
       + 'them would be a downgrade rather than a convenience',
-  digital_thread_partition_health:
+  audit_trail_partition_health:
       'Partition counts and default-partition depth for the audit table (0079), granted to '
       + '`grafana_reader` alone and revoked from anon/authenticated -- the same arrangement as '
       + 'platform_health and storage_footprint above. It is read by the Grafana `supabase` '
       + 'datasource over a direct connection so an alert can see that the monthly partition job '
       + 'has stopped, and it counts audit rows: a published path would be a way to size the '
-      + 'security lane without holding digital_thread:read',
+      + 'security lane without holding audit_trail:read',
   backup_health:
       'How long since the platform backup last succeeded (0011), granted to `grafana_reader` alone '
       + 'and revoked from anon/authenticated -- the same arrangement as the views above. It reads '
@@ -957,15 +957,15 @@ function edgeFunctionNames() {
       + '`grafana_reader` alone and revoked from anon/authenticated, like backup_health above. It '
       + 'reads backups, the destination settings and the vault through an owner-run function so '
       + 'the Off-site Backup Stale rule can see a number and nothing behind it',
-  digital_thread_default:
-      'The DEFAULT partition of digital_thread (0079), which exists so that a lapsed partition '
+  audit_trail_default:
+      'The DEFAULT partition of audit_trail (0079), which exists so that a lapsed partition '
       + 'job degrades instead of refusing every audit write -- and therefore every asset write, '
       + 'since the audit INSERT is a trigger on cells/gateways/devices. Not an endpoint in its '
       + 'own right: readers use the parent, where the RLS policies are, and 0079 revokes every '
       + 'application-role privilege on partitions precisely so that this name is unreachable',
-  digital_thread_partitioned:
+  audit_trail_partitioned:
       'SCAFFOLDING, AND IT DOES NOT OUTLIVE ITS OWN TRANSACTION. 0079 builds the partitioned '
-      + 'table under this name, copies into it, then renames it to digital_thread inside one DO '
+      + 'table under this name, copies into it, then renames it to audit_trail inside one DO '
       + 'block -- so no database ever has a relation called this. Listed only because this check '
       + 'reads CREATE statements out of the migration text rather than the live catalogue',
   one_shot_migrations:
@@ -1243,8 +1243,8 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 10f. The API reference and the Digital Thread filter name every action the thread records, and
-// no other. `digital_thread.action` has no CHECK, so the set is read from what the applied
+// 10f. The API reference and the Audit Trail filter name every action the trail records, and
+// no other. `audit_trail.action` has no CHECK, so the set is read from what the applied
 // migrations INSERT: each action is a literal, `TG_OP` (the audit trigger's INSERT, UPDATE and
 // DELETE), or a variable its function assigns only literals. Any other shape fails rather than
 // passing with an action unread.
@@ -1293,7 +1293,7 @@ function edgeFunctionNames() {
   const files = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   for (const file of files) {
     const sql = uncommented(read(`supabase/migrations/${file}`));
-    for (const m of sql.matchAll(/INSERT\s+INTO\s+(?:public\.)?digital_thread\b/gi)) {
+    for (const m of sql.matchAll(/INSERT\s+INTO\s+(?:public\.)?audit_trail\b/gi)) {
       sites += 1;
       const at = `${file}:${sql.slice(0, m.index).split('\n').length}`;
       const open = sql.indexOf('(', m.index + m[0].length);
@@ -1303,7 +1303,7 @@ function edgeFunctionNames() {
       const rest = sql.slice(closing(sql, open) + 1);
       const values = /^\s*VALUES\s*\(/i.exec(rest);
       if (!columns.includes('action') || !values) {
-        unread.push(`${at}: not \`INSERT INTO digital_thread (..., action, ...) VALUES (...)\``);
+        unread.push(`${at}: not \`INSERT INTO audit_trail (..., action, ...) VALUES (...)\``);
         continue;
       }
       const tupleAt = closing(sql, open) + 1 + values[0].length - 1;
@@ -1332,11 +1332,11 @@ function edgeFunctionNames() {
 
   // The schema's own block: from its key to the next key at the same indentation.
   const spec = read('docs/openapi.yaml');
-  const entryAt = spec.indexOf('\n    DigitalThreadEntry:\n');
+  const entryAt = spec.indexOf('\n    AuditTrailEntry:\n');
   const entry = entryAt < 0 ? '' : spec.slice(entryAt + 1).split(/\n(?= {4}\S)/)[0];
   const specEnum = entry.match(/\n {8}action:\n {10}type: string\n {10}enum: \[([^\]]*)\]/);
   const constants = read('frontend/src/constants.js');
-  const blockAt = constants.indexOf('export const DIGITAL_THREAD_ACTIONS = {');
+  const blockAt = constants.indexOf('export const AUDIT_TRAIL_ACTIONS = {');
   const block = blockAt < 0 ? '' : constants.slice(blockAt, constants.indexOf('};', blockAt));
   const offered = [...block.matchAll(/^\s+([A-Z][A-Z_]*):/gm)].map((k) => k[1]);
 
@@ -1350,25 +1350,25 @@ function edgeFunctionNames() {
   };
 
   if (!sites) {
-    fail('found no `INSERT INTO public.digital_thread` in the applied migrations; the shape this check '
+    fail('found no `INSERT INTO public.audit_trail` in the applied migrations; the shape this check '
       + 'reads has changed, so it is checking nothing.');
   } else if (unread.length) {
-    fail(`could not read the action of ${unread.length} digital_thread INSERT(s):\n`
+    fail(`could not read the action of ${unread.length} audit_trail INSERT(s):\n`
       + unread.map((u) => `        ${u}`).join('\n')
       + '\n      Write the action as a literal, or teach check 10f the new shape.');
   } else if (!specEnum || !offered.length) {
-    fail(`could not read ${specEnum ? 'DIGITAL_THREAD_ACTIONS in frontend/src/constants.js'
-      : 'the enum of DigitalThreadEntry.action in docs/openapi.yaml'}, so the actions were not compared.`);
+    fail(`could not read ${specEnum ? 'AUDIT_TRAIL_ACTIONS in frontend/src/constants.js'
+      : 'the enum of AuditTrailEntry.action in docs/openapi.yaml'}, so the actions were not compared.`);
   } else {
     const problems10f = [
-      ...drift('DigitalThreadEntry.action in docs/openapi.yaml', specEnum[1].split(',').map((s) => s.trim()).filter(Boolean)),
-      ...drift('DIGITAL_THREAD_ACTIONS in frontend/src/constants.js', offered),
+      ...drift('AuditTrailEntry.action in docs/openapi.yaml', specEnum[1].split(',').map((s) => s.trim()).filter(Boolean)),
+      ...drift('AUDIT_TRAIL_ACTIONS in frontend/src/constants.js', offered),
     ];
     if (problems10f.length) {
-      fail(`the Digital Thread's actions disagree with what the migrations write:\n`
+      fail(`the Audit Trail's actions disagree with what the migrations write:\n`
         + problems10f.map((p) => `        ${p}`).join('\n'));
     } else {
-      pass(`the API reference and the dashboard name the ${written.size} actions ${sites} thread INSERTs write`);
+      pass(`the API reference and the dashboard name the ${written.size} actions ${sites} trail INSERTs write`);
     }
   }
 }
@@ -1724,7 +1724,7 @@ function edgeFunctionNames() {
   const elsewhere = {
     ABER_CA_PEM: 'the image entrypoint reads it from the mounted platform root',
     ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
-    ASSET_EXPORT_MAX_THREAD_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+    ASSET_EXPORT_MAX_TRAIL_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
   };
 
   const set = new Set([
@@ -1876,7 +1876,7 @@ function edgeFunctionNames() {
 // has_authority() and never has_role(). MACHINE_REACH names, for each allowed permission, the
 // policies and functions it is meant to open, and each must consult it through has_authority() in
 // its LAST definition in the chain. "Consulted somewhere" is not enough: `retired_entities` consulted
-// digital_thread:read while the thread itself admitted no machine.
+// audit_trail:read while the trail itself admitted no machine.
 //
 // telemetry:read and quarantine:view open nothing by design: what they describe is open to every
 // authenticated caller. Their entries name those reads and assert both halves of that sentence:
@@ -1978,10 +1978,10 @@ function edgeFunctionNames() {
       grantedToAll: 'telemetry',
     },
     'quarantine:view': { openToAll: ['devices.devices_select_authenticated'] },
-    'digital_thread:read': {
-      gates: ['policy digital_thread.digital_thread_select_asset', 'policy retired_entities.retired_entities_select_privileged'],
-      never: ['policy digital_thread.digital_thread_select_security'],
-      people: 'digital_thread.digital_thread_select_asset',
+    'audit_trail:read': {
+      gates: ['policy audit_trail.audit_trail_select_asset', 'policy retired_entities.retired_entities_select_privileged'],
+      never: ['policy audit_trail.audit_trail_select_security'],
+      people: 'audit_trail.audit_trail_select_asset',
     },
     'archive:manage': { gates: ['policy retired_entities.retired_entities_select_privileged'] },
     'proposal:create': { gates: ['policy change_proposals.change_proposals_insert_proposer'] },
@@ -2192,7 +2192,7 @@ function edgeFunctionNames() {
     fail(
       'the Grafana contact point references a SERVICE_ROLE credential. Grafana is deliberately\n' +
         '      given only GRAFANA_ALERT_WEBHOOK_SECRET, which authorises recording an alert and\n' +
-        '      nothing else; service_role bypasses RLS entirely and can rewrite digital_thread.'
+        '      nothing else; service_role bypasses RLS entirely and can rewrite audit_trail.'
     );
   } else {
     pass('the Grafana contact point holds only the scoped webhook secret');
@@ -3281,7 +3281,7 @@ function edgeFunctionNames() {
 // `seed_setting()` preserves an operator's value on a replay and refreshes only the metadata, which
 // makes a second declaration of the same key look harmless. It is not. Both run on every boot, in
 // file order: the later sentence lands, the next boot puts the earlier one back, and the trigger on
-// `system_settings` records each flip as an edit by `migration`. `digital_thread` is append-only to
+// `system_settings` records each flip as an edit by `migration`. `audit_trail` is append-only to
 // every application role and partitioned by month because it only grows, so what accumulates is a
 // setting nobody touched, edited twice a day, forever. `archive.enabled` was declared by both
 // `0002` and `0132` and did exactly that until the sentence was folded back into `0002` (#356).
@@ -3349,7 +3349,7 @@ function edgeFunctionNames() {
     fail(
       `${key} is declared ${where.length} times, in ${[...new Set(where)].join(' and ')}. Both ` +
         'run on every boot, so the later declaration lands and the next boot puts the earlier one ' +
-        'back -- two digital_thread rows a boot recording a change nobody made. Correct a ' +
+        'back -- two audit_trail rows a boot recording a change nobody made. Correct a ' +
         "setting's metadata where it is declared, rather than declaring it again."
     );
   }

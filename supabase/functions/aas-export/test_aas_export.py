@@ -260,7 +260,7 @@ def evaluate_aas_export_authorization(user: dict | None, auth_header: str | None
     if not role or role not in allowed:
         return 403, "Forbidden: Insufficient privileges"
     if fmt == "bundle" and bundle_permission not in seeded_role_permissions().get(role, set()):
-        return 403, "Forbidden: the bundle carries this device's Digital Thread"
+        return 403, "Forbidden: the bundle carries this device's Audit Trail"
     return 200, "Authorized"
 
 
@@ -702,13 +702,13 @@ class TestAasExportAuthorization(unittest.TestCase):
                 self.assertEqual(status, 200, f"{role} should be allowed to export {fmt}")
 
     def test_the_bundle_refuses_an_operator(self):
-        # The bundle carries the device's thread, which the asset lane's policy closes to Operator.
+        # The bundle carries the device's trail, which the asset lane's policy closes to Operator.
         status, message = evaluate_aas_export_authorization(
             {"app_metadata": {"role": "Operator"}}, "Bearer x", "bundle")
         self.assertEqual(status, 403)
-        self.assertIn("Digital Thread", message)
+        self.assertIn("Audit Trail", message)
 
-    def test_the_bundle_admits_the_roles_that_read_the_thread_and_the_exports(self):
+    def test_the_bundle_admits_the_roles_that_read_the_trail_and_the_exports(self):
         for role in ("Administrator", "Shopfloor_Manager", "Auditor"):
             status, _ = evaluate_aas_export_authorization(
                 {"app_metadata": {"role": role}}, "Bearer x", "bundle")
@@ -716,27 +716,27 @@ class TestAasExportAuthorization(unittest.TestCase):
 
     def test_the_bundle_permission_is_held_by_the_roles_both_policies_admit(self):
         """
-        The function gates on one permission; the rule is the roles that may read the thread's
-        asset lane AND the export records the thread repeats. A migration that grants the
+        The function gates on one permission; the rule is the roles that may read the trail's
+        asset lane AND the export records the trail repeats. A migration that grants the
         permission to another role, or narrows either policy, fails here.
         """
         _, permission = export_gate()
         holders = {role for role, held in seeded_role_permissions().items() if permission in held}
-        both = (roles_a_policy_admits("digital_thread_select_asset")
+        both = (roles_a_policy_admits("audit_trail_select_asset")
                 & roles_a_policy_admits("asset_exports_select_privileged"))
         self.assertEqual(holders, both)
         self.assertEqual(holders, {"Administrator", "Shopfloor_Manager", "Auditor"})
 
-    def test_the_refusal_names_the_thread_and_comes_before_the_service_key(self):
+    def test_the_refusal_names_the_trail_and_comes_before_the_service_key(self):
         text = TS_INDEX.read_text(encoding="utf-8")
         gate = text.index('format === "bundle" && !(await callerHolds(supabaseUser, BUNDLE_PERMISSION))')
-        self.assertIn("Digital Thread", text[gate:gate + 400])
+        self.assertIn("Audit Trail", text[gate:gate + 400])
         self.assertLess(gate, text.index("serviceRoleClient(supabaseUrl"))
 
-    def test_the_thread_part_is_read_as_the_caller(self):
+    def test_the_trail_part_is_read_as_the_caller(self):
         text = TS_INDEX.read_text(encoding="utf-8")
-        self.assertIn("loadThread(supabaseUser,", text)
-        self.assertNotIn("loadThread(supabaseAdmin", text)
+        self.assertIn("loadTrail(supabaseUser,", text)
+        self.assertNotIn("loadTrail(supabaseAdmin", text)
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)
@@ -1445,15 +1445,15 @@ def run_bundle_helpers(script: str) -> dict:
     return json.loads(completed.stdout)
 
 
-def run_thread_loader() -> list:
+def run_trail_loader() -> list:
     """
-    Run bundle.ts's own loadThread() in Node against a client that records every call made on it,
+    Run bundle.ts's own loadTrail() in Node against a client that records every call made on it,
     and return those calls. The query is what decides which rows the part can hold.
     """
     source = TS_BUNDLE.read_text(encoding="utf-8")
-    loader = re.search(r"^export async function loadThread\(.*?^\}", source, re.S | re.M)
+    loader = re.search(r"^export async function loadTrail\(.*?^\}", source, re.S | re.M)
     if not loader:
-        raise AssertionError(f"loadThread() not found in {TS_BUNDLE}")
+        raise AssertionError(f"loadTrail() not found in {TS_BUNDLE}")
     harness = loader.group(0) + """
 const calls = [];
 const query = new Proxy({}, { get: (_, name) => (...args) => {
@@ -1461,10 +1461,10 @@ const query = new Proxy({}, { get: (_, name) => (...args) => {
   return name === "limit" ? Promise.resolve({ data: [], error: null }) : query;
 } });
 const client = { from: (table) => { calls.push(["from", table]); return query; } };
-loadThread(client, "dev-1", 5).then(() => console.log(JSON.stringify(calls)));
+loadTrail(client, "dev-1", 5).then(() => console.log(JSON.stringify(calls)));
 """
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "thread_harness.ts"
+        path = Path(tmp) / "trail_harness.ts"
         path.write_text(harness, encoding="utf-8")
         completed = subprocess.run(
             [shutil.which("node"), "--experimental-strip-types", str(path)],
@@ -1491,10 +1491,10 @@ const base = {
   takenBy: { id: "user-1", email: "ops@example.test" },
   device: { id: "dev-1", name: "CNC_01", sparkplug_id: "abc123", created_at: "2026-01-01T00:00:00Z", is_archived: true, archived_at: "2026-09-01T00:00:00Z", model_3d_path: null },
   gateway: { name: "Line_A", sparkplug_id: "gw1" },
-  caps: { telemetry: 3, thread: 2 },
+  caps: { telemetry: 3, trail: 2 },
   raw: part(2, "2026-09-01T10:00:00Z", "2026-09-01T10:00:01Z"),
   hourly: part(1, "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z"),
-  thread: { rows: [{ id: 1 }], truncated: false },
+  trail: { rows: [{ id: 1 }], truncated: false },
   horizons: { telemetry: "2026-08-01T00:00:00Z", telemetry_1h: null },
   cold: { objects: [{ object_key: "2026/08/telemetry-x.parquet" }], unavailable: null },
   bundled3dModel: false,
@@ -1502,7 +1502,7 @@ const base = {
 const capped = {
   ...base,
   raw: part(3, "2026-09-01T10:00:00Z", "2026-09-01T10:00:02Z", { truncated: true }),
-  thread: { rows: [{ id: 1 }, { id: 2 }], truncated: true },
+  trail: { rows: [{ id: 1 }, { id: 2 }], truncated: true },
   cold: { objects: [], unavailable: "cold_storage_rows refused: permission denied" },
   device: { ...base.device, model_3d_path: "models/x.glb" },
 };
@@ -1572,7 +1572,7 @@ console.log(JSON.stringify({
         for name, path in self.out["parts"].items():
             self.assertTrue(path.startswith("aasx/files/aber/"), f"{name}: {path}")
         self.assertEqual(m["parts"]["environment"], "aasx/aasenv-root.json")
-        self.assertEqual(m["parts"]["digital_thread"], self.out["parts"]["thread"])
+        self.assertEqual(m["parts"]["audit_trail"], self.out["parts"]["trail"])
         self.assertEqual(m["parts"]["telemetry_raw"], self.out["parts"]["raw"])
         self.assertEqual(m["parts"]["telemetry_1h"], self.out["parts"]["hourly"])
 
@@ -1582,7 +1582,7 @@ console.log(JSON.stringify({
         self.assertEqual(m["telemetry"]["raw"]["rows"], 2)
         self.assertEqual(m["telemetry"]["raw"]["relation_reaches_back_to"], "2026-08-01T00:00:00Z")
         self.assertIsNone(m["telemetry"]["hourly"]["relation_reaches_back_to"])
-        self.assertEqual(m["digital_thread"], {"rows": 1, "cap": 2, "truncated": False})
+        self.assertEqual(m["audit_trail"], {"rows": 1, "cap": 2, "truncated": False})
         self.assertEqual(m["device"]["gateway"], {"name": "Line_A", "sparkplug_id": "gw1"})
         self.assertEqual(m["taken_by"], {"id": "user-1", "email": "ops@example.test"})
 
@@ -1603,17 +1603,17 @@ console.log(JSON.stringify({
         m = self.out["manifest_capped"]
         sentences = m["not_included"]
         self.assertTrue(any(s.startswith("raw telemetry older than 2026-09-01T10:00:00Z") and "cap of 3 rows" in s for s in sentences), sentences)
-        self.assertTrue(any(s.startswith("digital thread rows after the first 2") for s in sentences), sentences)
+        self.assertTrue(any(s.startswith("audit trail rows after the first 2") for s in sentences), sentences)
         self.assertTrue(any(s.startswith("the cold catalogue: cold_storage_rows refused") for s in sentences), sentences)
         self.assertTrue(any(s.startswith("the 3D model: not bundled") for s in sentences), sentences)
         self.assertTrue(m["telemetry"]["raw"]["truncated"])
         self.assertFalse(m["telemetry"]["hourly"]["truncated"])
 
-    # -- loadThread: the asset lane of one device, whoever asks ----------------------------------
-    def test_the_thread_loader_asks_for_the_asset_lane_only(self):
+    # -- loadTrail: the asset lane of one device, whoever asks ----------------------------------
+    def test_the_trail_loader_asks_for_the_asset_lane_only(self):
         # An Administrator or an Auditor may read the security lane too; the part never holds it.
-        calls = run_thread_loader()
-        self.assertEqual(calls[0], ["from", "digital_thread"])
+        calls = run_trail_loader()
+        self.assertEqual(calls[0], ["from", "audit_trail"])
         filters = [c[1:] for c in calls if c[0] == "eq"]
         self.assertIn(["entity_id", "dev-1"], filters)
         self.assertIn(["audit_domain", "asset"], filters)
@@ -1687,7 +1687,7 @@ class TestAssetBundle(unittest.TestCase):
         names = self.zip.namelist()
         for part in (
             "aasx/files/aber/manifest.json",
-            "aasx/files/aber/digital-thread.json",
+            "aasx/files/aber/audit-trail.json",
             "aasx/files/aber/telemetry-raw.csv",
             "aasx/files/aber/telemetry-1h.csv",
         ):
@@ -1698,9 +1698,9 @@ class TestAssetBundle(unittest.TestCase):
         self.assertEqual(m["schema"], "aber/asset-bundle/1")
         self.assertEqual(m["device"]["id"], DEVICE_ID)
         self.assertEqual(m["telemetry"]["asset_id"], m["device"]["sparkplug_id"])
-        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
-        self.assertIsInstance(thread, list)
-        self.assertEqual(m["digital_thread"]["rows"], len(thread))
+        trail = json.loads(self.zip.read("aasx/files/aber/audit-trail.json"))
+        self.assertIsInstance(trail, list)
+        self.assertEqual(m["audit_trail"]["rows"], len(trail))
         # A CSV part's rows are its lines less the header; both parts are oldest-first.
         raw_lines = self.zip.read("aasx/files/aber/telemetry-raw.csv").decode().split("\r\n")
         self.assertEqual(raw_lines[0], "time,metric_name,val_double,val_string,val_bool")
@@ -1714,16 +1714,16 @@ class TestAssetBundle(unittest.TestCase):
         # two standing exclusions are stated on an otherwise empty bundle.
         self.assertTrue(any("never read back" in s for s in m["not_included"]))
 
-    def test_the_thread_part_holds_the_fixture_s_own_creation(self):
+    def test_the_trail_part_holds_the_fixture_s_own_creation(self):
         # The fixture INSERTed the device through PostgREST, which the audit trigger recorded, so
         # the part is never empty for a device that exists at all.
-        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
-        self.assertTrue(any(row.get("entity_id") == DEVICE_ID for row in thread), thread[:3])
+        trail = json.loads(self.zip.read("aasx/files/aber/audit-trail.json"))
+        self.assertTrue(any(row.get("entity_id") == DEVICE_ID for row in trail), trail[:3])
 
     def test_reports_the_stored_copy_in_the_stats_header(self):
         self.assertIn("bundle", self.stats, self.stats)
         b = self.bundle
-        for key in ("raw_rows", "hourly_rows", "thread_rows", "cold_objects", "truncated", "stored", "bucket", "object_key", "taken_at"):
+        for key in ("raw_rows", "hourly_rows", "trail_rows", "cold_objects", "truncated", "stored", "bucket", "object_key", "taken_at"):
             self.assertIn(key, b, b)
         self.assertTrue(b["stored"], f"the bundle was not stored: {b.get('reason')}")
         self.assertTrue(b["object_key"].startswith("assets/"), b["object_key"])
@@ -1740,15 +1740,15 @@ class TestAssetBundle(unittest.TestCase):
         self.assertEqual(row["sha256"], self.bundle["sha256"])
         self.assertEqual(row["stats"]["raw_rows"], self.bundle["raw_rows"])
 
-    def test_the_export_is_on_the_digital_thread(self):
-        rows = self.rest_get(f"/digital_thread?entity_id=eq.{DEVICE_ID}&action=eq.EXPORTED&select=action,entity_type,new_data")
+    def test_the_export_is_on_the_audit_trail(self):
+        rows = self.rest_get(f"/audit_trail?entity_id=eq.{DEVICE_ID}&action=eq.EXPORTED&select=action,entity_type,new_data")
         self.assertTrue(rows, "no EXPORTED row for the device")
         self.assertTrue(any((r.get("new_data") or {}).get("object_key") == self.bundle["object_key"] for r in rows), rows)
 
-    def test_the_thread_part_holds_the_asset_lane_only(self):
+    def test_the_trail_part_holds_the_asset_lane_only(self):
         # Taken as an Administrator, who may read the security lane as well.
-        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
-        self.assertEqual({row.get("audit_domain") for row in thread}, {"asset"})
+        trail = json.loads(self.zip.read("aasx/files/aber/audit-trail.json"))
+        self.assertEqual({row.get("audit_domain") for row in trail}, {"asset"})
 
 
 DEMO_PASSWORD_FOR_ROLES = os.getenv("ABER_DEMO_PASSWORD", DEMO_PASSWORD)
@@ -1785,7 +1785,7 @@ def take_bundle(token: str) -> tuple[int, bytes, dict]:
 class TestAssetBundleByRole(unittest.TestCase):
     """
     The bundle is for the roles that may read what it holds. A Shopfloor_Manager takes one whose
-    thread is the asset lane; an Operator is refused the bundle and still gets the shell. Signs in
+    trail is the asset lane; an Operator is refused the bundle and still gets the shell. Signs in
     as the seeded demo accounts, and skips where they do not exist.
     """
 
@@ -1814,14 +1814,14 @@ class TestAssetBundleByRole(unittest.TestCase):
 
     def test_a_shopfloor_manager_takes_a_bundle_of_the_asset_lane(self):
         self.assertEqual(self.status, 200, self.payload[:300])
-        thread = json.loads(zipfile.ZipFile(io.BytesIO(self.payload)).read("aasx/files/aber/digital-thread.json"))
-        self.assertTrue(thread, "the fixture's own creation is on the thread")
-        self.assertEqual({row.get("audit_domain") for row in thread}, {"asset"})
+        trail = json.loads(zipfile.ZipFile(io.BytesIO(self.payload)).read("aasx/files/aber/audit-trail.json"))
+        self.assertTrue(trail, "the fixture's own creation is on the trail")
+        self.assertEqual({row.get("audit_domain") for row in trail}, {"asset"})
 
     def test_an_operator_is_refused_the_bundle_with_a_reason(self):
         status, body, _ = take_bundle(self.operator)
         self.assertEqual(status, 403, body[:300])
-        self.assertIn("Digital Thread", json.loads(body).get("error", ""))
+        self.assertIn("Audit Trail", json.loads(body).get("error", ""))
 
     def test_an_operator_still_takes_the_shell(self):
         status, body, _ = post_json(

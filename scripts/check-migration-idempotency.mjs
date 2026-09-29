@@ -4,7 +4,7 @@
  * There is no migrations ledger: db-init replays every file on every install and upgrade, so a
  * second run must match no rows. A live stack is not quiet, so the checks are things only a
  * migration can move. Strict: the schema itself, as a filtered `pg_dump --schema-only` digest; and
- * `digital_thread` rows with `actor_source = 'migration'`, which only a migration writes. Reported:
+ * `audit_trail` rows with `actor_source = 'migration'`, which only a migration writes. Reported:
  * operator-facing row counts, where a fall across a replay is the signature of a destructive
  * one-shot re-running. The dump is filtered because modern pg_dump wraps its output in a `\restrict
  * <nonce>` pair that differs every run. The digest includes function bodies verbatim, so it is
@@ -72,7 +72,7 @@ function schemaDigest() {
 }
 
 const AUDIT_SQL =
-  "SELECT count(*) FROM public.digital_thread WHERE actor_source = 'migration'";
+  "SELECT count(*) FROM public.audit_trail WHERE actor_source = 'migration'";
 
 // Operator-facing tables whose rows a replay must never delete. `one_shot_migrations` decides
 // whether the destructive ones run at all, so losing its claim row is the failure.
@@ -209,16 +209,16 @@ if (before.schema.digest !== after.schema.digest) {
 // -- 2. The audit trail ----------------------------------------------------------------------------
 const delta = after.migrationAuditRows - before.migrationAuditRows;
 if (delta > 0) {
-  fail(`a replay appended ${delta} row(s) to digital_thread as 'migration'.`);
-  note('digital_thread is append-only to every application role and cannot be pruned, so a ' +
+  fail(`a replay appended ${delta} row(s) to audit_trail as 'migration'.`);
+  note('audit_trail is append-only to every application role and cannot be pruned, so a ' +
        'migration that writes to it on every boot grows the audit trail forever and fills it with ');
   note('synthetic entities. This is what 0037 and 0038 did before their self-checks were wrapped ' +
        'in a rolled-back sub-block -- see 0048 for the idiom.');
 } else if (delta < 0) {
-  fail(`a replay REMOVED ${-delta} row(s) from digital_thread. That table is append-only; ` +
+  fail(`a replay REMOVED ${-delta} row(s) from audit_trail. That table is append-only; ` +
        `something bypassed the trigger that enforces it.`);
 } else {
-  pass("a replay wrote no 'migration' rows to digital_thread");
+  pass("a replay wrote no 'migration' rows to audit_trail");
 }
 
 // 3. Operator data. A rise is ordinary on a live stack; a fall is the signature of a destructive

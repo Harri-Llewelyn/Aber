@@ -89,7 +89,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
             style={{ resize: 'vertical' }}
           />
           <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
-            The change is recorded in the Digital Thread with what it replaced.
+            The change is recorded in the Audit Trail with what it replaced.
           </div>
         </div>
 

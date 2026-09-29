@@ -585,7 +585,7 @@ describe('the nav entry', () => {
 
   /**
    * Where it sits in the rail: under History rather than Assets, because a capture is a recording
-   * of what a device already said, in the same tense as Digital Thread. Cold Storage used to be
+   * of what a device already said, in the same tense as Audit Trail. Cold Storage used to be
    * the third page here and is now filed by retention instead -- it is telemetry kept against a
    * timer, not an account of what happened.
    */
@@ -593,7 +593,7 @@ describe('the nav entry', () => {
     const visible = TABS.filter(t => tabIsVisible(t, () => true, 'Administrator'))
     const history = groupedNav(visible).find(g => g.id === 'history')
 
-    expect(history.tabs.map(t => t.id)).toEqual(['digital-thread', 'capture'])
+    expect(history.tabs.map(t => t.id)).toEqual(['audit-trail', 'capture'])
   })
 })
 

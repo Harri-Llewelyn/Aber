@@ -608,7 +608,7 @@
       },
       "type": "stat",
       "title": "Audit Trail (never pruned)",
-      "description": "public.digital_thread, the one relation here with no retention policy: append-only, with UPDATE and DELETE blocked since migration 0003, so this number only rises.",
+      "description": "public.audit_trail, the one relation here with no retention policy: append-only, with UPDATE and DELETE blocked since migration 0003, so this number only rises.",
       "gridPos": {
         "h": 5,
         "w": 6,
@@ -624,7 +624,7 @@
             "type": "postgres",
             "uid": "supabase"
           },
-          "rawSql": "SELECT total_bytes AS \"Audit\" FROM public.storage_footprint\n WHERE source = 'platform' AND relation = 'digital_thread'"
+          "rawSql": "SELECT total_bytes AS \"Audit\" FROM public.storage_footprint\n WHERE source = 'platform' AND relation = 'audit_trail'"
         }
       ],
       "fieldConfig": {

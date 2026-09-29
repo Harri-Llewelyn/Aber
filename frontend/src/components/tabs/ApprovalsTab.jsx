@@ -17,7 +17,7 @@ import { PageHeading } from '../common/PageHeading'
  */
 
 /**
- * The lanes and their labels. `entity_type` holds the table name, the vocabulary `digital_thread`
+ * The lanes and their labels. `entity_type` holds the table name, the vocabulary `audit_trail`
  * speaks; the label is presentation only.
  */
 /**
@@ -432,7 +432,7 @@ function ProposalFilters({ rows, lane, onLane, query, onQuery, placeholder, labe
 }
 
 export function ApprovalsTab({
-  showToast, hasPermission, userRole, currentUserId, onViewThread,
+  showToast, hasPermission, userRole, currentUserId, onViewTrail,
   // Arrives from another page, one-shot: `initialSubject` points the working queue at one asset.
   // Cleared through `onClearFocus` so returning later does not reapply it.
   initialSubject = '', onClearFocus,
@@ -564,15 +564,15 @@ export function ApprovalsTab({
         onClick: () => setRejecting(selected)
       }
     ] : []),
-    // Only when there is a row to open: `applied_thread_id` is set by an approval and by nothing
+    // Only when there is a row to open: `applied_trail_id` is set by an approval and by nothing
     // else.
-    ...(selected.applied_thread_id && onViewThread ? [{
-      label: 'View in Digital Thread', icon: <IconHistory size={13} />,
+    ...(selected.applied_trail_id && onViewTrail ? [{
+      label: 'View in Audit Trail', icon: <IconHistory size={13} />,
       title: 'The audit row this approval wrote, naming both the proposer and the approver',
-      // Filtered to the subject's own kind: `digital_thread_page()` compares `entity_type` exactly,
+      // Filtered to the subject's own kind: `audit_trail_page()` compares `entity_type` exactly,
       // and the approval row is filed under the lane's table. A deleted subject's rows are purged,
-      // so the thread is asked to show those.
-      onClick: () => onViewThread({
+      // so the trail is asked to show those.
+      onClick: () => onViewTrail({
         id: selected.entity_id,
         type: ENTITY_KIND_BY_TABLE[selected.entity_type] || '',
         purged: Boolean(selected.target_missing)
@@ -647,7 +647,7 @@ export function ApprovalsTab({
               Decided
               <HelpTip
                 label="About decided proposals"
-                text="What was applied, rejected, withdrawn or left to expire, kept for the retention period an Administrator sets. What an approval actually changed lives in the Digital Thread, so pruning here destroys no record."
+                text="What was applied, rejected, withdrawn or left to expire, kept for the retention period an Administrator sets. What an approval actually changed lives in the Audit Trail, so pruning here destroys no record."
               />
             </h3>
           </div>
@@ -722,9 +722,9 @@ export function ApprovalsTab({
             ? [{ label: 'Why it was asked for', value: selected.rationale, full: true }]
             : []),
           { label: 'Proposal UUID', value: selected.id, mono: true, copyable: true },
-          ...(selected.applied_thread_id ? [{
-            label: 'Digital Thread row',
-            value: String(selected.applied_thread_id),
+          ...(selected.applied_trail_id ? [{
+            label: 'Audit Trail row',
+            value: String(selected.applied_trail_id),
             mono: true,
             title: 'The audit row this approval wrote, naming both the proposer and the approver.'
           }] : [])

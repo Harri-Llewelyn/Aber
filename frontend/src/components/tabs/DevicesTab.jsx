@@ -79,7 +79,7 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewThread, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
@@ -352,14 +352,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const exportAas = async (asset, format = 'json') => {
     setExportingAas(asset.asset_id)
     try {
-      // THE BUNDLE IS THE AASX WITH THE DEVICE'S HISTORY IN IT: the thread, the telemetry still in
+      // THE BUNDLE IS THE AASX WITH THE DEVICE'S HISTORY IN IT: the trail, the telemetry still in
       // the live historian, and a manifest naming the cold objects. Stored beside the cold tier
       // and recorded, so the Archived Entities page can offer it after the row is gone.
       if (format === 'bundle') {
         const result = await api.post('/api/v1/devices/asset-export', { device_id: asset.asset_id })
         downloadBlob(result.blob, result.filename || `${asset.asset_name}-bundle.aasx`)
         const b = result.stats?.bundle || {}
-        const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.thread_rows ?? 0} thread rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
+        const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
         if (b.stored === false) {
           showToast(`Bundle downloaded for '${asset.asset_name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
         } else if (b.truncated) {
@@ -515,7 +515,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   )
   const [editingProposal, setEditingProposal] = useState(null)
   const withheldFields = nonProposableFields('device')
-  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
 
   // Metrics declared at the last birth that the schema does not model. Derived, so adding the
   // metric to the schema clears it on the next poll. See utils/deviceTags.js.
@@ -1305,7 +1305,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   <div style={{ fontSize: '11px', color: 'var(--danger-text)', marginTop: '6px' }}>
                     From the next message, a value contradicting this device's schema will not be
                     written to the historian and cannot be recovered. The violation is still
-                    recorded in the Digital Thread. Schema changes take up to five minutes to take
+                    recorded in the Audit Trail. Schema changes take up to five minutes to take
                     effect.
                   </div>
                 )}
@@ -1653,14 +1653,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
           /* Withheld from a replay lane, which is a recording of an asset rather than one: the
              bundle is for taking a machine away, and a lane goes with its original. Withheld too
-             from a reader without `digital_thread:read`: the bundle carries the thread, and
+             from a reader without `audit_trail:read`: the bundle carries the trail, and
              aas-export refuses it on the same permission. */
-          !selectedDevice.shadow_of && canReadThread && {
+          !selectedDevice.shadow_of && canReadTrail && {
             label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export Bundle (with history)',
             icon: <IconDownload size={13} />,
             onClick: () => exportAas(selectedDevice, 'bundle'),
             disabled: exportingAas === selectedDevice.asset_id,
-            title: 'Download the AASX with this device\'s digital thread, the telemetry still in the live historian and a manifest naming the cold objects; a copy is kept beside the cold tier'
+            title: 'Download the AASX with this device\'s audit trail, the telemetry still in the live historian and a manifest naming the cold objects; a copy is kept beside the cold tier'
           },
           /* Also withheld from a replay lane: links are resolved through `shadow_of` at read time,
              and a copy here would go stale. */
@@ -1671,11 +1671,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             onClick: () => setDocsForDevice(selectedDevice),
             title: 'Attach or edit links for this device — documents, an asset register, a file repository, any URL'
           },
-          /* Withheld from a reader who may not open the page: the nav hides Digital Thread without
-             `digital_thread:read`. `.filter(Boolean)` drops it. */
-          canReadThread && {
-            label: 'View Digital Thread', icon: <IconHistory size={13} />,
-            onClick: () => onViewThread?.(selectedDevice),
+          /* Withheld from a reader who may not open the page: the nav hides Audit Trail without
+             `audit_trail:read`. `.filter(Boolean)` drops it. */
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            onClick: () => onViewTrail?.(selectedDevice),
             title: 'Open the immutable audit trace for this device'
           },
           // Archive only, never beside Restore: the two are mutually exclusive states of the
