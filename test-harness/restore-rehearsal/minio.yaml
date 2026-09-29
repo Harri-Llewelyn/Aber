@@ -33,6 +33,8 @@ spec:
             periodSeconds: 5
           volumeMounts:
             - { name: data, mountPath: /data }
+          securityContext:
+            allowPrivilegeEscalation: false
       securityContext:
         fsGroup: 65532
       volumes:

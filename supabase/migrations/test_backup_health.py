@@ -24,6 +24,7 @@ import os
 import unittest
 
 import psycopg2
+from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", os.getenv("DB_PORT", "54322"))
@@ -309,7 +310,10 @@ class OffsiteFixture(unittest.TestCase):
             (stamp, stamp, hours_ago),
         )
         for column, value in offsite.items():
-            self.cur.execute(f"UPDATE public.backups SET {column} = %s WHERE stamp = %s", (value, stamp))
+            self.cur.execute(
+                sql.SQL("UPDATE public.backups SET {} = %s WHERE stamp = %s").format(sql.Identifier(column)),
+                (value, stamp),
+            )
 
 
 class TestOffsiteDestination(OffsiteFixture):
@@ -464,7 +468,7 @@ class TestOffsiteHealth(OffsiteFixture):
     VIEW = "public.backup_offsite_health"
 
     def rows(self):
-        self.cur.execute(f"SELECT newest_stamp, offsite_state, age_seconds FROM {self.VIEW}")
+        self.cur.execute("SELECT newest_stamp, offsite_state, age_seconds FROM public.backup_offsite_health")
         return self.cur.fetchall()
 
     def destination_changed(self, hours_ago):
