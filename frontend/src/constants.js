@@ -154,6 +154,12 @@ export const VALID_TABS = [
   'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings'
 ];
 
+/**
+ * Tab ids a release renamed, old -> new. The router opens the new tab at the old path and
+ * rewrites the address, so a bookmark or a link somebody shared keeps working.
+ */
+export const RENAMED_TABS = { 'digital-thread': 'audit-trail' };
+
 // Realtime rollout flag and the polling intervals paired with it. REALTIME_ENABLED gates every
 // supabase.channel() subscription; off, the tabs fall back to the 3s poll. With Realtime on,
 // polling becomes a reconciliation loop rather than the refresh mechanism, and it is kept because
