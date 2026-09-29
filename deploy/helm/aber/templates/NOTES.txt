@@ -20,8 +20,13 @@ Control plane
 
 Init hooks, in order (post-install and post-upgrade):
   0   db-roles-init    passwords for supabase_auth_admin / authenticator / supabase_storage_admin
+{{- if and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled }}
+  5   timescaledb-maintenance  the historian's retention, compression and rollups
+{{- end }}
   10  db-init          migrations + seed, replayed idempotently on every upgrade
-  20  storage-init     creates the {{ .Values.supabaseStorage.bucket }} bucket via the Storage REST API
+  18  storage-policies the RLS policies and grants on storage.objects
+  20  storage-init     creates or reconciles the four buckets via the Storage REST API:
+                       {{ .Values.supabaseStorage.bucket }}, {{ .Values.supabaseStorage.captureBucket }}, asset-exports, area-plans
 
 Messaging and edge
   mosquitto          :1883 :9001  broker; policy from a ConfigMap, credentials from a Secret

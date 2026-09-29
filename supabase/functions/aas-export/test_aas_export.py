@@ -8,9 +8,10 @@ Two layers, deliberately in one file:
     the ConceptDescriptions shell.ts builds for a fixture shell (run in Node, which strips the
     types). These need no stack, so they run in the edge-function CI job alongside the auth tests.
 
-  * Live checks invoke the deployed function against `Sim_CNC_Mill_01` and validate the emitted
-    document. They skip when no stack is reachable, so the same file is safe in both CI jobs; the
-    e2e job is the one that actually exercises them.
+  * Live checks invoke the deployed function against a device the suite provisions itself
+    (test-harness/aas_fixture.py) and validate the emitted document. They skip when no stack is
+    reachable, so the same file is safe in both CI jobs; the e2e job is the one that actually
+    exercises them.
 
 Run:  python supabase/functions/aas-export/test_aas_export.py
 """
@@ -59,7 +60,7 @@ DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
 #
 # A CONFORMANCE SUITE MUST NOT DEPEND ON SEEDED DEMONSTRATION DATA. A subject the seed stops
 # creating, or stops sending a DBIRTH for, leaves the suite naming a device that is not there and
-# reporting success anyway -- which is part of why 0020 exists.
+# reporting success anyway -- which is part of why archived migration 0020 exists.
 #
 # `AAS_TEST_DEVICE` still overrides it, and then NOTHING IS PROVISIONED -- the escape hatch for
 # pointing the suite at a real asset is deliberately not also a way to half-create a fixture.
@@ -1272,7 +1273,7 @@ class TestVisualRepresentation(unittest.TestCase):
     def test_json_export_references_an_absolute_public_url(self):
         # The JSON form has no package to be relative to, so the value must be dereferenceable on
         # its own -- and must be built from the configured public base, not from SUPABASE_URL,
-        # which inside Docker is a hostname no external consumer can resolve.
+        # which inside the cluster is a Service name no external consumer can resolve.
         submodel = next(s for s in self.body["aas"]["submodels"] if s["idShort"] == "VisualRepresentation")
         value = submodel["submodelElements"][0]["value"]
         self.assertTrue(value.startswith("http"), value)

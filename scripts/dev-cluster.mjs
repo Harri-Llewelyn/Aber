@@ -16,7 +16,9 @@
  * Options:  --no-build          reuse the images already built (`up`)
  *           --only=a,b          build and import only these images (`up`)
  *           --no-tls            skip cert-manager, the broker's TLS listener and the databases' TLS (`up`)
- *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`)
+ *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`); when `up`
+ *                               upgrades a release, the Jobs are created suspended and start once
+ *                               every workload has rolled out, so they test the new pods
  *           --no-validate       skip validate.py, run the lane only (`test`)
  *           --filter=<text>     only suites whose path contains the text (`test`)
  *           --no-dns-check      run the lane on a machine where the Ingress hosts do not resolve;
@@ -310,6 +312,21 @@ function restartWorkloadsUsing (refs) {
   }
 }
 
+const E2E_JOBS = [`${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`]
+
+/**
+ * Starts the e2e Jobs an upgrade created suspended (e2e.suspend), once every workload has rolled
+ * out. Helm creates them during the upgrade and the rebuilt workloads restart after it; a run
+ * started then meets the old pods, and deleting it later does not undo what it did.
+ */
+function resumeE2eJobs () {
+  step('start the e2e Jobs, now that every workload has rolled out')
+  for (const job of E2E_JOBS) {
+    must('kubectl', ['-n', NS, 'patch', 'job', job, '--type=merge', '-p', '{"spec":{"suspend":false}}'],
+      `${job} could not be resumed`)
+  }
+}
+
 function assertImagesPresent (version) {
   const present = imagesInNode()
   const missing = IMAGES.map(i => `${IMG_NS}/${i.name}:${version}`).filter(r => !present.includes(r))
@@ -350,7 +367,7 @@ function keptSecret (key) {
   return releaseValues().secrets?.[key] || crypto.randomBytes(32).toString('hex')
 }
 
-async function installChart ({ tls, e2e }) {
+async function installChart ({ tls, e2e, holdE2e = false }) {
   const domain = option('domain') || 'localhost'
   step(`helm upgrade --install ${RELEASE} on ${domain} (${tls ? 'broker TLS on' : 'no TLS'}${e2e ? ', e2e Jobs on' : ''})`)
   must('node', ['scripts/sync-helm-chart-files.mjs'], 'the chart files are not mirrored')
@@ -389,6 +406,7 @@ async function installChart ({ tls, e2e }) {
     // domain; hostAliases point them at Traefik instead.
     const ip = capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik', '-o', 'jsonpath={.spec.clusterIP}']).out
     sets.push('--set', 'e2e.enabled=true', '--set', `e2e.ingressIp=${ip}`)
+    if (holdE2e) sets.push('--set', 'e2e.suspend=true')
     // Plain Jobs, not hooks, and a Job's pod template is immutable: a completed run left in place
     // makes the next upgrade fail with `field is immutable` the moment their spec changes.
     run('kubectl', ['-n', NS, 'delete', 'job', `${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`, '--ignore-not-found'])
@@ -718,11 +736,15 @@ async function up () {
     buildImages(version, only)
     importImages(version, only)
   }
-  await installChart({ tls, e2e: flag('e2e') })
+  // An upgrade creates the e2e Jobs suspended, to start once the workloads have rolled out. An
+  // install has no older pods for them to meet, and creates them running, as CI's does.
+  const holdE2e = flag('e2e') && capture('helm', ['status', RELEASE, '-n', NS]).ok
+  await installChart({ tls, e2e: flag('e2e'), holdE2e })
   if (!flag('no-build')) {
     restartWorkloadsUsing(IMAGES.filter(i => !only || only.includes(i.name)).map(i => `${IMG_NS}/${i.name}:${version}`))
   }
   await waitForStack()
+  if (holdE2e) resumeE2eJobs()
   helmTest()
   if (flag('e2e')) await waitForE2e()
   status()

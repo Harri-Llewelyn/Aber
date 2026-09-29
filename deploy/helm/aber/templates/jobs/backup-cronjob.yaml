@@ -26,10 +26,10 @@ WHAT IS WORTH BACKING UP, AND WHAT IS NOT:
                 APPEND-ONLY audit table, which is why this matters most: telemetry can be
                 re-derived from a rebirth, an audit trail cannot.
   timescaledb   the telemetry hypertable. Large and growing; see the retention note below.
-  storage       the 3D model objects, WHEN `backup.includeStorage` is set. Neither dump covers
-                them, but `devices.model_3d_path` points at them, and the AAS exporter composes
-                that URL without fetching it -- so nothing detects the break until a viewer opens
-                the shell.
+  storage       every bucket's objects (3D models, area plans, broker captures, export
+                bundles), WHEN `backup.includeStorage` is set. Neither dump covers them, but rows
+                point at them: the AAS exporter composes `devices.model_3d_path`'s URL without
+                fetching it, so nothing detects the break until a viewer opens the shell.
 
 `pg_dump -Fc` (custom format), not plain SQL: compressed, and restorable SELECTIVELY with
 pg_restore. A plain dump can only be replayed whole, which on the historian is not a realistic
@@ -187,7 +187,7 @@ spec:
                   {{ if .Values.timescaledb.enabled }}dump timescaledb {{ include "aber.timescale.host" . }} {{ include "aber.timescale.port" . }} {{ .Values.timescaledb.username }} {{ .Values.timescaledb.database }} "$TS_PGPASSWORD"{{ end }}
                   {{- if $includeStorage }}
 
-                  echo '--- archive the 3D model objects'
+                  echo '--- archive the storage objects (every bucket)'
                   # Mounted READ-ONLY from the live storage PVC. Not a snapshot: storage-api may be
                   # writing while this runs, so an upload landing mid-tar is captured whole or not
                   # at all. That is acceptable here in a way it would not be for a database --

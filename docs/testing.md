@@ -244,6 +244,7 @@ node scripts/check-migration-idempotency.mjs
 #
 # Brings up a disposable supabase/postgres, applies the same auth fixture CI uses, replays
 # every migration, runs every suite, and destroys the container. `--keep` leaves it up;
+# `--reuse` replays the chain onto the one `--keep` left and runs again (the second boot, below);
 # `-k <substring>` runs a subset; `--no-run` migrates and stops.
 npm run test:db
 
@@ -539,6 +540,27 @@ about on `devices`, `schemas` and `metric_catalog`. `postgres` is not a superuse
 but Supabase grants it that setting. And the tables emptied first are chosen **by privilege, not by
 ownership**: `auth.users` is owned by `supabase_auth_admin` and `postgres` may still truncate it,
 while `auth.schema_migrations` it may not.
+
+### The second boot, without a cluster
+
+`db-init` replays the chain on every upgrade, onto a database that the chain and everything since
+have already written to. `--reuse` reproduces that without a cluster: it keeps the container a
+`--keep` run left, with every row that run committed, replays the chain onto it, lints the schema
+and runs the lane again.
+
+```bash
+npm run test:db -- --keep     # first boot: the chain onto an empty database, then the lane
+npm run test:db -- --reuse    # second boot: the chain onto what the first left, then the lane
+```
+
+Run both for a new migration. A statement that is not idempotent, or a self-check that counts a
+total rather than what its own migration did, passes the first boot and fails the second: archived
+migration 0069 counted Administrator's permissions, and failed every boot after the one on which
+archived migration 0086 added one. `--reuse` skips the auth fixture, which the container
+already holds, and uses the port the kept container was published on. Without `--keep` it removes
+the container at the end, as every other run does; add `--keep` to go round again or to look at a
+failure. The rows it replays onto are the suites' own; a deployed stack's rows are
+`--with-history`'s, above.
 
 
 ### The URLs that are names, not forwards

@@ -231,7 +231,7 @@ release is exactly when a backup is most wanted.
 - **Otherwise, the nightly CronJob.** A safety net to the last run and no finer, so it is not a
   substitute for taking one deliberately before an upgrade.
 
-Either way the two databases are always dumped, and the **3D model objects and the forge's volume
+Either way the two databases are always dumped, and the **storage objects and the forge's volume
 are not**: they are `backup.includeStorage` and `backup.includeForge`, both off by default, and each
 pins the pod to a ReadWriteOnce volume's node.
 [`deploy/k8s/README.md`](../deploy/k8s/README.md) has that caveat in full.
@@ -239,7 +239,7 @@ pins the pod to a ReadWriteOnce volume's node.
 From a host with a shell, against any reachable Postgres:
 
 ```bash
-bash scripts/backup-databases.sh          # both databases plus the 3D model objects
+bash scripts/backup-databases.sh          # both databases plus the storage objects
 bash scripts/restore-databases.sh         # the other half
 ```
 

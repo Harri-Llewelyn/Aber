@@ -32,7 +32,7 @@ export function TakeBackupModal({ onConfirm, onCancel }) {
         <div className="modal-title">Take a backup</div>
 
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '12px 0 0' }}>
-          Both databases, the 3D model objects and the forge, taken by the backup service onto its
+          Both databases, the stored files and the forge, taken by the backup service onto its
           own volume. A backup taken here is <strong>pinned</strong>: the retention window does not
           apply until you release it.
         </p>

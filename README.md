@@ -277,13 +277,13 @@ the rows it removes are rows an operator may deliberately want back, and a delet
 boot would silently undo every provisioning run — which is what `public.one_shot_migrations` is
 for — plus demo accounts (`supabase/seed.sql`).
 
-> **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
+> **The archive has no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because archived `0005` already implements one; a second declaration of
 > `log_digital_thread_event()` would win by filename order on every boot and would have regressed
 > the `actor_source` attribution it adds. The gap in the numbering is deliberate and the reasoning
-> is in [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
+> is in [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-archived-migration-0005).
 >
-> `0026` is that later declaration, written deliberately and on those terms: it reproduces
+> Archived `0026` is that later declaration, written deliberately and on those terms: it reproduces
 > archived `0005`'s body **in full** and adds two lines, rather than patching it. Its self-check
 > asserts that both the heartbeat suppression guard and the causation stamp are present in the
 > live definition, because

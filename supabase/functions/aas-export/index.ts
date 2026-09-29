@@ -75,8 +75,9 @@ async function callerHolds(client: SupabaseClient<any, any, any>, permission: st
 }
 
 /**
- * AAS Part 5 media type for an AASX package. The `+xml` suffix is correct: an AASX is an Open
- * Packaging Conventions container, and OPC's registered types carry it.
+ * The media type AAS Part 2 v3.0 and v3.1 give an AASX serialisation, the API version aas-api
+ * declares its profiles against. Part 2 and Part 5 v3.2 replace it with the IANA-registered
+ * `application/aas+zip`: change it with those profiles, and with docs/openapi.yaml.
  */
 const AASX_MEDIA_TYPE = "application/asset-administration-shell-package+xml";
 

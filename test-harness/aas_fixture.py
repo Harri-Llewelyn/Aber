@@ -3,8 +3,8 @@ The AAS conformance suites' own subject, provisioned at pinned ids.
 
 WHY THIS EXISTS. Both AAS suites used to export `Sim_CNC_Mill_01` -- a device seeded by
 `0002_seed_data.sql` as part of the demonstration shopfloor. That coupled a conformance suite to
-demo data, and the seed no longer creates it. It has also bitten once already:
-`0020_cleanup_legacy_simulator_seed.sql` exists partly because the suite's previous subject,
+demo data, and the seed no longer creates it. It has also bitten once already: archived
+`0020_cleanup_legacy_simulator_seed.sql` existed partly because the suite's previous subject,
 `Simulated_CNC_01`, quietly stopped receiving a DBIRTH while the suite went on naming it.
 
 THE PATTERN IS `ingestion/validate.py`'s, deliberately. That suite seeds its own gateway at a pinned
@@ -13,7 +13,7 @@ dependency on validate.py at all". A conformance suite that provisions its own s
 problem in this repository; the AAS one simply had not been moved onto it.
 
 WHAT IT DOES NOT PROVISION, and must not: `metric_catalog`. The metrics below are the platform's
-vocabulary, seeded by 0018 with their semantic ids and their `standard` values, and they
+vocabulary, seeded by 0002 with their semantic ids and their `standard` values, and they
 are what the exporter reads to decide provenance -- an ISO 22400 metric becomes a
 KeyPerformanceIndicators submodel, everything else becomes OperationalTelemetry. Inventing metrics
 here would make the suite assert against a catalogue no device could ever publish against.

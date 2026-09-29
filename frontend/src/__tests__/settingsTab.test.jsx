@@ -5,7 +5,7 @@
  * value is coerced to its declared type before it is sent.
  */
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SettingsTab, coerceValue, displayValue, groupByCategory } from '../components/tabs/SettingsTab'
 import { api } from '../api'
@@ -107,9 +107,13 @@ describe('the page', () => {
     api.patchSetting.mockResolvedValue({ key: 'x', value: 1 })
   })
 
+  /* Rendered inside an async act() so the settings read, the render it causes and that render's
+     effects have all run before a test touches the page. The label appears at commit, before
+     SettingRow's effect re-seeds the draft from the stored value; an edit made in between is
+     overwritten by it, and Save never appears. */
   const show = async () => {
-    render(<SettingsTab showToast={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Refresh interval (seconds)')).toBeInTheDocument())
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    expect(screen.getByText('Refresh interval (seconds)')).toBeInTheDocument()
   }
 
   /* One category is on screen at a time, so a test about a setting outside the first one has to
@@ -266,9 +270,10 @@ describe('a setting that is fixed at install', () => {
     api.patchSetting.mockResolvedValue({ key: 'x', value: 1 })
   })
 
+  // Settled inside act() for the reason given in the first describe.
   const show = async () => {
-    render(<SettingsTab showToast={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Sparkplug group')).toBeInTheDocument())
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    expect(screen.getByText('Sparkplug group')).toBeInTheDocument()
   }
 
   it('shows the value', async () => {
