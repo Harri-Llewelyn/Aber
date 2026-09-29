@@ -85,10 +85,12 @@ section moves with it. [`releases.md`](releases.md#major--1x--200) lists what mo
 
 ### What 1.0 renames, and what each rename asks of a site
 
-1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/Aber/issues/335)).
-Tiers 1 and 2 were prose and the chart; this is the third tier, the identifiers that exist outside
-the repository. Each row is a value a site already holds somewhere, and the right-hand column is
-what the site does about it. Nothing here is undone by `helm upgrade`, because no install below 1.0
+1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/Aber/issues/335)) and
+retires the names that outlived what they named
+([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)). The rows are the identifiers either
+one changes that exist outside the repository; the rename's first two tiers were prose and the
+chart, which no site holds. Each row is a value a site already holds somewhere, and the right-hand
+column is what the site does about it. Nothing here is undone by `helm upgrade`, because no install below 1.0
 reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its data comes
 by backup, reinstall and restore, and the restored database is what the rows below meet.
 
