@@ -17,7 +17,8 @@
  * Node from this file's own source; the loaders take a Supabase client.
  */
 
-export const BUNDLE_SCHEMA = "aber/asset-bundle/1";
+/** The manifest's layout. It moves whenever a part or a manifest key does, so a reader can tell. */
+export const BUNDLE_SCHEMA = "aber/asset-bundle/2";
 
 /** Where the parts sit inside the package. `aasx/files/` is where AASX readers expect supplements. */
 export const BUNDLE_PART_DIR = "aasx/files/aber";

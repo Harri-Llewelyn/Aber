@@ -1567,7 +1567,7 @@ console.log(JSON.stringify({
     # -- buildBundleManifest ----------------------------------------------------------------------
     def test_manifest_names_its_schema_and_every_part_under_the_supplement_directory(self):
         m = self.out["manifest"]
-        self.assertEqual(m["schema"], "aber/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/2")
         self.assertEqual(m["schema"], self.out["schema"])
         for name, path in self.out["parts"].items():
             self.assertTrue(path.startswith("aasx/files/aber/"), f"{name}: {path}")
@@ -1695,7 +1695,7 @@ class TestAssetBundle(unittest.TestCase):
 
     def test_manifest_describes_this_device_and_agrees_with_the_parts(self):
         m = self.manifest()
-        self.assertEqual(m["schema"], "aber/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/2")
         self.assertEqual(m["device"]["id"], DEVICE_ID)
         self.assertEqual(m["telemetry"]["asset_id"], m["device"]["sparkplug_id"])
         trail = json.loads(self.zip.read("aasx/files/aber/audit-trail.json"))

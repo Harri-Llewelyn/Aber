@@ -123,7 +123,7 @@ tags:
   - name: Telemetry
     description: Time-series metrics, served from the standalone TimescaleDB hypertable.
   - name: Audit
-    description: Append-only Audit Trail audit log.
+    description: The append-only Audit Trail.
   - name: Registry
     description: Schemas, metric catalog, reference vocabularies, links and services.
   - name: Storage
@@ -744,7 +744,7 @@ paths:
   /rest/v1/audit_trail:
     get:
       tags: [Audit]
-      summary: Read the Audit Trail audit log
+      summary: Read the Audit Trail
       description: |
         **Append-only.** Rows are written only by `log_audit_trail_event()` and its named
         siblings: triggers on the audited tables, and the `SECURITY DEFINER` functions behind
@@ -2843,7 +2843,7 @@ paths:
         `aasx/files/aber/` hold the audit trail's asset lane, read as the caller (JSON), the
         readings still in the live historian at raw and hourly resolution (CSV, oldest first,
         capped newest-first), and a
-        manifest (`aber/asset-bundle/1`) that says what each part holds, where it was cut,
+        manifest (`aber/asset-bundle/2`) that says what each part holds, where it was cut,
         and which cold-tier objects hold the rest — named, never read back. A copy is stored in the
         cold tier's bucket under `assets/<sparkplug_id>/<stamp>.aasx` and recorded in
         `asset_exports`; `X-AAS-Stats.bundle` says whether that copy was stored, and the file is
@@ -2910,7 +2910,7 @@ paths:
         runtime rather than by care.
 
         Every route is a `GET`. Writes would bypass the dashboard's role model and its
-        `audit_trail` audit trail, so the advertised profiles are the read-only SSP-002 pair.
+        `audit_trail` record, so the advertised profiles are the read-only SSP-002 pair.
       responses:
         '404':
           description: No resource at the root; the body names the routes that exist.

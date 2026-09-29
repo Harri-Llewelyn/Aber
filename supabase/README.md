@@ -4154,7 +4154,7 @@ card is *Archived* and the second *Retired*, and no column was added to say so.
 returns the same AASX as `format=aasx`, the same Environment and OPC chain, with supplementary
 parts under `aasx/files/aber/`: the device's audit trail as JSON, the readings still in
 the live historian at raw and hourly resolution as CSV, and a manifest
-(`aber/asset-bundle/1`) that says what each part holds, where it was cut, and which cold-tier
+(`aber/asset-bundle/2`) that says what each part holds, where it was cut, and which cold-tier
 objects hold what the live historian no longer does. **The bundle states rather than reaches for.**
 Cold telemetry keeps its no-read-back rule, so the manifest names the objects whose range overlaps
 the device's life and fetches none of them; both telemetry parts are capped, newest first
