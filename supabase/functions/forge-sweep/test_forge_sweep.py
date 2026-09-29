@@ -380,9 +380,10 @@ class TestRepositories(ForgeSweepBase):
                                 "status_check_contexts": [RETIRED_FLOW_SHAPE_CONTEXT, "site/extra-check"]})
         self.assertEqual(status, 200)
 
+        # The forge's rule, not which sweep reports repairing it: one the database asked for can
+        # land first.
         status, body = sweep()
         self.assertEqual(status, 200, body)
-        self.assertIn(self.repo, body["protected"], body)
         status, main = self.rule("main")
         self.assertEqual(status, 200)
         self.assertTrue(main["enable_status_check"], main)
