@@ -2884,6 +2884,9 @@ function edgeFunctionNames() {
     /\bone of two targets\b/i,
     /\bon Compose\b/,
     /\bsecond (?:deployment )?target\b/i,
+    // The platform's pods share no compose network. The appliance's does exist, and its files
+    // say "this compose network" or "the appliance's".
+    /\bthe compose network\b/i,
   ];
   const scanned = allFiles.filter(
     (f) =>
@@ -2944,6 +2947,188 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`the ${CURRENT.length} documents describing the running stack name no Kong artefact`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 19c. A name the platform retired does not come back.
+//
+// Every rename left the old name behind somewhere, and after 1.0 an identifier that survives the
+// release stays for good. RETIRED is one line a name: an example of the old name, the pattern that
+// finds it, and what it is now. KEPT is where an old name stays on purpose -- the code that moves
+// it, the tests that plant it, and history -- each with its reason.
+//
+// A KEPT phrase exempts the paragraph that holds it (the lines between blank lines, or one list
+// item), not the file, so a stale use elsewhere in the same file is still caught. A KEPT entry
+// that exempts nothing fails, so the list shrinks with the tree. A migration filename is not
+// scanned: it records what the change was.
+// -------------------------------------------------------------------------------------------------
+{
+  /** [an example of the old name, the pattern that finds it, what it is now]. */
+  const RETIRED = [
+    ['supabase-kong', /\bsupabase-kong\b(?!-init)/, 'supabase-envoy'],
+    ['supabaseEnvoy.serviceName', /\bsupabaseEnvoy\.serviceName\b/, 'nothing: the Service is always supabase-envoy'],
+    ['the Overview page', /\bOverviewTab\b|\bthe Overview\b|\bOverview (?:page|map|card|tab)\b|tab id `overview`/, 'the Site Map'],
+    ['floor-plans', /\bfloor-plans\b/, 'area-plans'],
+    ['floor_plans_read_authenticated', /\bfloor_plans_/, 'area_plans_*'],
+    ['is_floor_plan_path', /\bis_floor_plan_path\b/, 'is_area_plan_path'],
+    ['uploadFloorPlan', /FloorPlan|floorPlan|FLOOR_PLAN|FloorPlacement/, 'AreaPlan, areaPlan, AREA_PLAN, CellPlacement'],
+    ['.floor-pin-label', /\bfloor-(?:plan|pin|placement)\b/, '.area-plan…'],
+    ['a floor plan', /\bfloor plans?\b/i, 'an area plan'],
+    ['ACS-Cymru', /acs[-_ ]?cymru/i, 'Aber'],
+    // An escaped `\n` is a boundary too: JSON-encoded text, such as a flow's notes, has no space there.
+    ['acs/flow-shape', /(?<=^|[^\w-]|\\n)(?:acs[-_/.]|ACS_|X-ACS-)\w[\w./-]*|(?<=-n )acs\b/, 'aber…'],
+    ['factoryplus_ingestion', /\bfactoryplus_(?:ingestion|i3x|monitor)\b/, 'aber_ingestion, aber_i3x, aber_monitor'],
+    ['.factoryplus-seeded', /\.factoryplus-(?:seeded|editor-users)/, '.aber-seeded, .aber-editor-users.json'],
+    ['factoryplus-tls-config', /\bfactoryplus-tls-config\b/, 'aber-tls-config'],
+    ['supabase_anon_key', /\bsupabase_anon_key\b/, 'supabase_publishable_key'],
+    ['Node-RED (Virtual Edge Gateway Simulator)', /\b(?:virtual edge )?gateway simulator\b/i, 'Node-RED (Host-Run Gateways)'],
+    ['the demo simulator', /\bdemo(?:nstration)? simulator\b|\bsimulated shopfloor\b/i, 'nothing: no demonstration ships'],
+  ];
+
+  /** Text next to those names that is still right, and which no pattern may flag. */
+  const STILL_RIGHT = [
+    'the scheduling floor and the upgrade floor',
+    'A building with two floors is two areas; an overview of the chart',
+    '`factoryplus_payload_uuid`, the Factory+ payload marker, and the Factory+ Internal CA',
+    'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are the tokens the upstream images read',
+    'a simulated gateway beside a host-run one, inspired by the AMRC Connectivity Stack (ACS)',
+    'supabase-envoy, area-plans, aber-tls-config, aber/flow-shape, dacs-1 and MACS_ADDR',
+  ];
+
+  const STORAGE_POLICIES = ['supabase/storage-policies.sql', 'deploy/helm/aber/files/storage-policies/storage-policies.sql'];
+  /** [file or directory/, the phrase marking the paragraph kept (null: the whole file), why]. */
+  const KEPT = [
+    ['supabase/migrations/archive/', null, 'never executed: the record of what each archived migration did'],
+    ['docs/incidents.md', null, 'names what each incident happened to'],
+    ['docs/postgres-17-migration-plan.md', null, 'marked Historical'],
+    ['.gitleaksignore', null, 'its fingerprints name historical paths and must match them exactly'],
+    ['supabase/migrations/0000_a_database_from_before_the_fold.sql', null, 'moves a database from before the fold, so it names what it moves'],
+    ['supabase/migrations/0003_the_group_answers_to_aber.sql', null, 'moves the old Sparkplug group'],
+    ['supabase/migrations/0004_the_namespace_answers_to_aber.sql', null, 'moves the old semantic-id authority'],
+    ['supabase/migrations/0024_node_red_is_listed_for_the_gateways_it_runs.sql', null, 'renames the old Directory row'],
+    ['supabase/migrations/0002_seed_data.sql', ['One pair is not a disagreement', 'renamed from `supabase_anon_key`', 'The retired name'],
+      'the group check lets the old default through for 0003, and the vault deletes the old secret name'],
+    [['scripts/storage-init.mjs', 'deploy/helm/aber/files/scripts/storage-init.mjs'], "{ from: 'floor-plans', to: 'area-plans' }", 'RENAMED_BUCKETS moves the old bucket'],
+    [STORAGE_POLICIES, ['under its old name, floor-plans', "policyname LIKE 'floor_plans_%'", 'floor-plans policies gone'],
+      "drops the old bucket's policies and path check, and asserts they are gone"],
+    [['scripts/lib/mosquitto-dynsec.mjs', 'deploy/helm/aber/files/gateway-credential-lib/mosquitto-dynsec.mjs'], 'RETIRED_PLATFORM_USERNAMES =',
+      'the boot reconcile removes the old broker accounts'],
+    ['scripts/lib/mosquitto-dynsec.test.mjs', /factoryplus_/, 'tests that removal'],
+    ['scripts/check-broker-config.mjs', /factoryplus_/, 'plants the old accounts and asserts the broker refuses them'],
+    ['supabase/functions/_shared/forge.ts', 'RETIRED_FLOW_SHAPE_CONTEXTS =', 'the sweep removes the old status context from branch rules'],
+    ['supabase/functions/forge-sweep/test_forge_sweep.py', 'RETIRED_FLOW_SHAPE_CONTEXT =', 'tests that removal'],
+    ['node-red/node-red-init.mjs', ["['.factoryplus-seeded'", 'LEGACY_TLS_NODE ='], 'moves the old names on the volume'],
+    ['node-red/node-red-init.test.mjs', /factoryplus-tls-config/, 'plants the old tls-config node and asserts it moves'],
+    ['supabase/migrations/test_sparkplug_group_setting.py', /ACS-Cymru/, "tests 0003's move"],
+    ['supabase/migrations/test_directory_images.py', 'NODE_RED_OLD_NAME =', "tests 0024's rename"],
+    ['supabase/migrations/test_forge_follows_the_archive.py', "'supabase_anon_key'", 'asserts the old vault name is gone'],
+    ['frontend/src/searchIndex.js', /floor plan/, 'search keywords find a page by its old word'],
+    ['ingestion/README.md', "ACS's `acs-edge`", 'names the upstream ACS component'],
+    ['test-harness/load_generator.py', 'NOT the demonstration simulator', 'says what the load generator is not'],
+    ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
+    ['deploy/helm/aber/values.yaml', ['is moved to `Aber` by 0003', 'The demonstration simulator was removed'], 'history, beside the value it explains'],
+    ['deploy/k8s/README.md', 'There is no shared broker account.', 'the retired shared broker account'],
+    ['docs/upgrades.md', ['| Was | Is | What a site does |', 'the chart was `acs-cymru` until'], 'the 1.0 table: what each rename asks of a site'],
+    ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
+    ['mosquitto/README.md', 'RETIRED_PLATFORM_USERNAMES', 'the removal of the old accounts'],
+    ['README.md', ['The chain is how', 'It used to come up with a four-cell simulated shopfloor'],
+      'the archived chain, and what a fresh install used to hold'],
+    ['supabase/README.md', [
+      'defaulted to the literal `ACS-Cymru`', 'The default moved with the platform', 'The bucket and the check were `floor-plans`',
+      'rename to Aber, `acs/flow-shape`', 'The Node-RED row was seeded as', 'The same pass renamed the vault secret',
+      'It was `floor-plans` until 1.0.', 'The only entry is `floor-plans` to `area-plans`',
+    ], 'history: what each name was and how it moved'],
+  ];
+
+  const THIS_FILE = 'scripts/check-docs-drift.mjs';
+  const MIGRATION_FILENAME = /\b(?:\d{4}|\d{14})_\w+\.sql\b/g;
+  const matches = (marker, line) => (typeof marker === 'string' ? line.includes(marker) : marker.test(line));
+  const covers = (path, file) => (path.endsWith('/') ? file.startsWith(path) : file === path);
+  /** [start, end) of each paragraph: split at blank lines and at each list item. */
+  const paragraphs = (lines) => {
+    const out = [];
+    let start = null;
+    lines.forEach((line, i) => {
+      const blank = !line.trim();
+      if (start !== null && (blank || /^\s*(?:[-*+]|\d+\.)\s/.test(line))) { out.push([start, i]); start = null; }
+      if (!blank && start === null) start = i;
+    });
+    if (start !== null) out.push([start, lines.length]);
+    return out;
+  };
+
+  const broken = [
+    ...RETIRED.filter(([was, pattern]) => !pattern.test(was)).map(([was]) => `the pattern for "${was}" no longer finds it`),
+    ...STILL_RIGHT.flatMap((text) => RETIRED.filter(([, pattern]) => pattern.test(text)).map(([was]) => `the pattern for "${was}" flags "${text}"`)),
+    ...KEPT.flatMap(([paths]) => [paths].flat().filter((p) => !existsSync(join(REPO, p))).map((p) => `KEPT names ${p}, which is not in the tree`)),
+  ];
+
+  const offences = [];
+  const used = new Set();   // `${entry}:${marker}:${path}` for every KEPT marker that exempted a mention
+  const scanned = allFiles.filter(
+    (f) =>
+      f !== THIS_FILE &&
+      !f.startsWith('frontend/dist/') &&
+      !f.startsWith('.claude/') &&
+      !f.startsWith('backups/') &&
+      !/(^|\/)(?:package-lock\.json|deno\.lock)$/.test(f) &&
+      !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
+  );
+  for (const file of scanned) {
+    let text;
+    try { text = read(file); } catch { continue; }
+    if (text.includes('\0')) continue;
+    const lines = text.split('\n');
+    const found = lines.map((line) => {
+      const bare = line.replace(MIGRATION_FILENAME, '');
+      return RETIRED.map(([, pattern, now]) => [bare.match(pattern)?.[0], now]).filter(([hit]) => hit);
+    });
+    if (!found.some((hits) => hits.length)) continue;
+
+    const keptBy = lines.map(() => []);
+    KEPT.forEach(([paths, marker], entry) => {
+      for (const path of [paths].flat().filter((p) => covers(p, file))) {
+        if (marker === null) { lines.forEach((_, i) => keptBy[i].push(`${entry}:0:${path}`)); continue; }
+        const markers = Array.isArray(marker) ? marker : [marker];
+        for (const [start, end] of paragraphs(lines)) {
+          markers.forEach((m, n) => {
+            if (!lines.slice(start, end).some((line) => matches(m, line))) return;
+            for (let i = start; i < end; i += 1) keptBy[i].push(`${entry}:${n}:${path}`);
+          });
+        }
+      }
+    });
+
+    found.forEach((hits, i) => {
+      if (!hits.length) return;
+      if (keptBy[i].length) { keptBy[i].forEach((k) => used.add(k)); return; }
+      for (const [hit, now] of hits) offences.push(`${file}:${i + 1} "${hit}" is ${now}: ${lines[i].trim().slice(0, 80)}`);
+    });
+  }
+
+  KEPT.forEach(([paths, marker, why], entry) => {
+    const markers = marker === null ? [null] : Array.isArray(marker) ? marker : [marker];
+    for (const path of [paths].flat()) {
+      markers.forEach((m, n) => {
+        if (!used.has(`${entry}:${n}:${path}`)) {
+          broken.push(`KEPT ${path}${m === null ? '' : ` "${m}"`} (${why}) exempts no retired name any more; remove it`);
+        }
+      });
+    }
+  });
+
+  if (broken.length) {
+    fail('check 19c cannot be trusted as written:\n' + broken.map((b) => `        ${b}`).join('\n'));
+  }
+  if (offences.length) {
+    fail(
+      'a retired name is back:\n' +
+        offences.map((o) => `        ${o}`).join('\n') +
+        '\n        (a deliberate mention goes in check 19c\'s KEPT, with its reason)'
+    );
+  } else if (!broken.length) {
+    pass(`no retired name is back (${RETIRED.length} names, ${KEPT.length} kept on purpose, ${scanned.length} files scanned)`);
   }
 }
 

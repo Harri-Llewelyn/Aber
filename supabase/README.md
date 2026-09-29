@@ -3622,7 +3622,7 @@ self-check asserts that the two conditions reported even at zero still come back
 transaction, which is the only reason it exists.
 
 **The audit trail is the point, not the request count.** Device writes go through PostgREST per
-row, so reassigning six machines on the Overview page used to be six `UPDATE`s: six transactions,
+row, so reassigning six machines one row at a time was six `UPDATE`s: six transactions,
 six `causation_id`s, and six rows in `digital_thread` describing one decision an operator took
 once. Nothing in `0033` stamps an audit row — `log_digital_thread_event()` already writes
 `txid_current()` on every row, and the shared causation is a *consequence* of the updates sharing
