@@ -1,0 +1,50 @@
+# The restore rehearsal's off-site store: a MinIO in a namespace of its own, so it survives the
+# deletion of the release's namespace and the backup volume in it. Throwaway: its data is an
+# emptyDir, and the rehearsal cluster is deleted at the end of the run. Pinned by digest.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rehearsal-offsite
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: rehearsal-offsite
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: minio }
+  template:
+    metadata:
+      labels: { app: minio }
+    spec:
+      containers:
+        - name: minio
+          image: chainguard/minio@sha256:6a1d0b45c8669726bba580ced0bfa4cb9fdeed1ed636dfabd81d1577beb6937b
+          args: ["server", "/data"]
+          env:
+            - { name: MINIO_ROOT_USER, value: rehearsal }
+            - { name: MINIO_ROOT_PASSWORD, value: rehearsal-secret-key }
+          ports:
+            - { name: s3, containerPort: 9000 }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: s3 }
+            periodSeconds: 5
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      securityContext:
+        fsGroup: 65532
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: rehearsal-offsite
+spec:
+  selector: { app: minio }
+  ports:
+    - { name: s3, port: 9000, targetPort: s3 }

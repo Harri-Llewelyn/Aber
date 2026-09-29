@@ -1267,9 +1267,9 @@ The same code runs by hand against any cluster:
 ```bash
 export NS=aber POSTGRES_PASSWORD=... DB_PASSWORD=...
 scripts/rehearse-restore.sh seed
-scripts/rehearse-restore.sh snapshot before.txt
 kubectl apply -f test-harness/restore-rehearsal/minio.yaml     # the off-site store
-scripts/rehearse-restore.sh offsite-setup ./identity.txt
+scripts/rehearse-restore.sh offsite-setup ./identity.txt       # before the snapshot: it writes rows
+scripts/rehearse-restore.sh snapshot before.txt
 scripts/rehearse-restore.sh backup ./rehearsal
 scripts/rehearse-restore.sh offsite-wait <stamp>
 # ... destroy and reinstall ...

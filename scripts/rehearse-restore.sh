@@ -23,7 +23,15 @@
 #   assert                everything a count cannot catch, then a backup of the restored stack
 #   compare <a> <b>       diff two snapshots and explain what moved
 #
-# Needs kubectl, psql, pg_restore, curl, jq, tar and sha256sum on the machine it runs on.
+# And the off-site case, around them: the backup service copies the backup, encrypted, to a MinIO
+# that outlives the namespace, and the restore starts from the bucket.
+#
+#   offsite-setup <identity>        make an age key pair, the bucket, and set the destination
+#   offsite-wait <stamp>            wait until the service has copied <stamp>
+#   fetch <dir> <stamp> <identity>  every object of <stamp> from the bucket, decrypted and checked
+#
+# Needs kubectl, psql, pg_restore, curl, jq, tar and sha256sum on the machine it runs on, and for
+# the off-site case age and the aws CLI.
 #
 # Environment: NS (namespace, default aber), RELEASE (default aber), and the credentials
 # the chart was installed with. The defaults match values-dev.yaml, which is what CI installs;
@@ -65,6 +73,16 @@ REHEARSAL_BROKER_CLIENT="${REHEARSAL_BROKER_CLIENT:-gwy0e0000000000400080000}"
 REHEARSAL_BROKER_PASSWORD="${REHEARSAL_BROKER_PASSWORD:-rehearsal-broker-Passw0rd}"
 # How long a backup may take before the rehearsal gives up on it.
 BACKUP_TIMEOUT_SECONDS="${BACKUP_TIMEOUT_SECONDS:-600}"
+# The off-site store (test-harness/restore-rehearsal/minio.yaml): its namespace, the address the
+# backup service reaches it at, the local port of the tunnel, and the bucket's own credential.
+OFFSITE_NS="${OFFSITE_NS:-rehearsal-offsite}"
+OFFSITE_ENDPOINT="${OFFSITE_ENDPOINT:-http://minio.$OFFSITE_NS.svc.cluster.local:9000}"
+MINIO_PORT="${MINIO_PORT:-9397}"
+OFFSITE_REGION="${OFFSITE_REGION:-us-east-1}"
+OFFSITE_BUCKET="${OFFSITE_BUCKET:-aber-rehearsal}"
+OFFSITE_PREFIX="${OFFSITE_PREFIX:-rehearsal/backups}"
+OFFSITE_KEY_ID="${OFFSITE_KEY_ID:-rehearsal}"
+OFFSITE_SECRET="${OFFSITE_SECRET:-rehearsal-secret-key}"
 
 log()  { printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die()  { printf '::error::%s\n' "$*" >&2; exit 1; }
@@ -574,9 +592,134 @@ cmd_assert() {
     done
     [ "$status" = "COMPLETED" ] || die "the post-restore backup did not complete (status $status)"
     log "  ok: $(rest "$token" GET "/backups?job_id=eq.$job&select=stamp,components" | jq -r '.[0] | .stamp + " with " + ([.components[].name] | join(", "))')"
+
+    # With a destination in the restored database, the restored Vault must still decrypt its key.
+    if [ "$(rest "$token" POST /rpc/backup_offsite_credential_is_set '{}')" = "true" ]; then
+      log "asserting the restored stack copies its backup off site"
+      local stamp state
+      stamp=$(rest "$token" GET "/backups?job_id=eq.$job&select=stamp" | jq -r '.[0].stamp')
+      for _ in $(seq 1 120); do
+        state=$(rest "$token" GET "/backups?stamp=eq.$stamp&select=offsite_state" | jq -r '.[0].offsite_state')
+        [ "$state" = "COPIED" ] && break
+        sleep 5
+      done
+      [ "$state" = "COPIED" ] || die "the restored stack did not copy $stamp off site (state $state): $(rest "$token" GET "/backups?stamp=eq.$stamp&select=offsite_error" | jq -r '.[0].offsite_error')"
+      log "  ok: $stamp copied"
+    fi
   fi
 
   log "PASS: every assertion held after the restore"
+}
+
+# -------------------------------------------------------------------------------------------------
+# The off-site copy: a MinIO in its own namespace (test-harness/restore-rehearsal/minio.yaml), which
+# outlives the release's namespace and the backup volume in it.
+# -------------------------------------------------------------------------------------------------
+forward_minio() {
+  kubectl -n "$OFFSITE_NS" port-forward svc/minio "$MINIO_PORT:9000" >/tmp/pf-minio.log 2>&1 &
+  PF_PIDS+=("$!")
+  local i
+  for i in $(seq 1 60); do
+    if (exec 3<>"/dev/tcp/127.0.0.1/$MINIO_PORT") 2>/dev/null; then
+      exec 3<&- 3>&-
+      return 0
+    fi
+    sleep 1
+  done
+  cat /tmp/pf-minio.log >&2 || true
+  die "port-forward to $OFFSITE_NS/minio never accepted a connection on $MINIO_PORT"
+}
+
+# The aws CLI against the forwarded MinIO, path-style, with the bucket's own credential.
+offsite_aws() {
+  printf '[default]\ns3 =\n  addressing_style = path\n' > /tmp/rehearsal-aws-config
+  AWS_CONFIG_FILE=/tmp/rehearsal-aws-config AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+  AWS_ACCESS_KEY_ID="$OFFSITE_KEY_ID" AWS_SECRET_ACCESS_KEY="$OFFSITE_SECRET" \
+  AWS_DEFAULT_REGION="$OFFSITE_REGION" AWS_EC2_METADATA_DISABLED=true AWS_PAGER='' \
+    aws --endpoint-url "http://127.0.0.1:$MINIO_PORT" "$@"
+}
+
+# =================================================================================================
+# A key pair, the bucket, and the destination set the way the Backups page's dialog sets it. The
+# identity stays in <identity>, on this machine, as it must stay off the stack it decrypts.
+cmd_offsite_setup() {
+  local identity="${1:?usage: offsite-setup <identity file>}"
+  command -v age-keygen >/dev/null || die "age-keygen is not installed"
+  command -v aws >/dev/null || die "the aws CLI is not installed"
+  [ -s "$identity" ] || age-keygen -o "$identity" 2>/dev/null
+  local recipient
+  recipient=$(age-keygen -y "$identity")
+  log "the recipient is $recipient; its identity is $identity"
+
+  forward_minio
+  if ! offsite_aws s3api head-bucket --bucket "$OFFSITE_BUCKET" >/dev/null 2>&1; then
+    offsite_aws s3api create-bucket --bucket "$OFFSITE_BUCKET" >/dev/null || die "could not create bucket $OFFSITE_BUCKET"
+  fi
+  log "bucket $OFFSITE_BUCKET is ready"
+
+  forward supabase-auth "$AUTH_PORT" 9999
+  forward supabase-rest "$REST_PORT" 3000
+  local token
+  token="$(signin_token)"
+  rest "$token" POST /rpc/set_backup_offsite_destination "$(jq -n \
+    --arg e "$OFFSITE_ENDPOINT" --arg r "$OFFSITE_REGION" --arg b "$OFFSITE_BUCKET" \
+    --arg p "$OFFSITE_PREFIX" --arg k "$OFFSITE_KEY_ID" --arg c "$recipient" \
+    '{p_endpoint:$e, p_region:$r, p_bucket:$b, p_prefix:$p, p_access_key_id:$k, p_recipient:$c, p_path_style:true}')" >/dev/null
+  rest "$token" POST /rpc/set_backup_offsite_credential "$(jq -n --arg s "$OFFSITE_SECRET" '{p_secret:$s}')" >/dev/null
+  log "the destination is $OFFSITE_ENDPOINT/$OFFSITE_BUCKET/$OFFSITE_PREFIX/"
+}
+
+# =================================================================================================
+# Until the service has copied <stamp> and checked every object. A FAILED copy is retried by the
+# service, so it is reported and waited through, up to the timeout.
+cmd_offsite_wait() {
+  local stamp="${1:?usage: offsite-wait <stamp>}"
+  forward supabase-auth "$AUTH_PORT" 9999
+  forward supabase-rest "$REST_PORT" 3000
+  local token state waited=0
+  token="$(signin_token)"
+  while :; do
+    rest "$token" GET "/backups?stamp=eq.$stamp&select=offsite_state,offsite_error,offsite_location,offsite_objects" > /tmp/offsite.json
+    state=$(jq -r '.[0].offsite_state // empty' /tmp/offsite.json)
+    case "$state" in
+      COPIED) break ;;
+      FAILED) log "  the copy failed and will be retried: $(jq -r '.[0].offsite_error' /tmp/offsite.json)" ;;
+      PENDING) ;;
+      *) die "no backups row for $stamp is visible to the rehearsal user" ;;
+    esac
+    [ "$waited" -lt "$BACKUP_TIMEOUT_SECONDS" ] || die "the off-site copy of $stamp did not complete within ${BACKUP_TIMEOUT_SECONDS}s (state $state)"
+    sleep 5; waited=$((waited + 5))
+  done
+  log "copied in about ${waited}s to $(jq -r '.[0].offsite_location' /tmp/offsite.json): $(jq -r '[.[0].offsite_objects[].file] | join(", ")' /tmp/offsite.json)"
+}
+
+# =================================================================================================
+# The runbook's first step when the pod and its volume are gone: every object of <stamp> from the
+# bucket, each decrypted with the identity, and the plaintext checked against manifest.json.
+cmd_fetch() {
+  local dir="${1:?usage: fetch <dir> <stamp> <identity>}"
+  local stamp="${2:?usage: fetch <dir> <stamp> <identity>}"
+  local identity="${3:?usage: fetch <dir> <stamp> <identity>}"
+  command -v age >/dev/null || die "age is not installed"
+  forward_minio
+  rm -rf "${dir:?}/$stamp"
+  mkdir -p "$dir/$stamp"
+  log "fetching $stamp from s3://$OFFSITE_BUCKET/$OFFSITE_PREFIX/$stamp/"
+  offsite_aws s3 cp --recursive --only-show-errors "s3://$OFFSITE_BUCKET/$OFFSITE_PREFIX/$stamp/" "$dir/$stamp/"
+  [ -f "$dir/$stamp/manifest.json.age" ] || die "the bucket holds no manifest.json.age for $stamp: the copy is incomplete"
+  local f
+  for f in "$dir/$stamp"/*.age; do
+    age -d -i "$identity" -o "${f%.age}" "$f" || die "$(basename "$f") did not decrypt with $identity"
+    rm -f "$f"
+  done
+  log "verifying the decrypted files against the manifest"
+  local name file want have
+  while IFS=$'\t' read -r name file want; do
+    have=$(sha256sum "$dir/$stamp/$file" | cut -d' ' -f1)
+    [ "$have" = "$want" ] || die "$file: sha256 $have does not match the manifest's $want"
+    log "  ok $name ($file)"
+  done < <(jq -r '.components[] | [.name, .file, .sha256] | @tsv' "$dir/$stamp/manifest.json")
+  log "fetched: $dir/$stamp"
 }
 
 # =================================================================================================
@@ -602,5 +745,8 @@ case "${1:-}" in
   restore)  shift; cmd_restore "$@" ;;
   assert)   shift; cmd_assert "$@" ;;
   compare)  shift; cmd_compare "$@" ;;
-  *) die "usage: $0 {seed|snapshot <file>|backup <dir>|restore <dir> <stamp>|assert|compare <a> <b>}" ;;
+  offsite-setup) shift; cmd_offsite_setup "$@" ;;
+  offsite-wait)  shift; cmd_offsite_wait "$@" ;;
+  fetch)    shift; cmd_fetch "$@" ;;
+  *) die "usage: $0 {seed|snapshot <file>|backup <dir>|restore <dir> <stamp>|assert|compare <a> <b>|offsite-setup <identity>|offsite-wait <stamp>|fetch <dir> <stamp> <identity>}" ;;
 esac
