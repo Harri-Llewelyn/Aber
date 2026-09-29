@@ -791,7 +791,7 @@ cleanup deletes by those keys. Expected values come from the Directory or from w
 | :--- | :--- | :--- |
 | `I3X_PORT` | `8090` | |
 | `I3X_SERVER_VERSION` | `dev` | `GET /info` `serverVersion`. The chart sets it to its `appVersion` |
-| `SUPABASE_URL` | `http://supabase-kong:8000` | |
+| `SUPABASE_URL` | `http://supabase-envoy:8000` | |
 | `SUPABASE_PUBLISHABLE_KEY` | — | For the gateway's key check. **Not** the secret key |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | |
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | off | Fails closed: a missing CA stops startup |

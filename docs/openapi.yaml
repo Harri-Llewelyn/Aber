@@ -2183,7 +2183,7 @@ paths:
         out. Anything in this bucket is world-readable to whoever learns the path.
 
         Composed at read time from `AAS_MODEL_PUBLIC_BASE`. It **cannot** be derived from
-        `SUPABASE_URL`, which inside the cluster is `http://supabase-kong:8000` and resolves for
+        `SUPABASE_URL`, which inside the cluster is `http://supabase-envoy:8000` and resolves for
         nothing outside it.
       security: []
       parameters:

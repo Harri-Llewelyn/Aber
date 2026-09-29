@@ -13,7 +13,7 @@ contactPoints:
         type: webhook
         settings:
           # The gateway's Service name and port. No credential in the URL: both travel as headers.
-          url: http://supabase-kong:8000/functions/v1/grafana-alert-webhook
+          url: http://supabase-envoy:8000/functions/v1/grafana-alert-webhook
           httpMethod: POST
           authorization_scheme: Bearer
           authorization_credentials: __GRAFANA_ALERT_WEBHOOK_SECRET__

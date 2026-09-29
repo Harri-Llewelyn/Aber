@@ -1278,7 +1278,7 @@ class TestVisualRepresentation(unittest.TestCase):
         self.assertTrue(value.startswith("http"), value)
         self.assertIn(MODEL_BUCKET, value)
         self.assertTrue(value.endswith(self.MODEL_NAME), value)
-        self.assertNotIn("supabase-kong", value)
+        self.assertNotIn("supabase-envoy", value)
 
     def test_reports_the_model_in_stats(self):
         self.assertTrue(self.body["stats"]["has_3d_model"])

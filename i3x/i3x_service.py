@@ -75,7 +75,7 @@ SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "dev")
 LISTEN_HOST = os.getenv("I3X_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("I3X_PORT", "8090"))
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://supabase-kong:8000").rstrip("/")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "http://supabase-envoy:8000").rstrip("/")
 # The publishable key does no work here beyond getting past the gate: `_headers()` sends it as
 # `apikey` and puts the CALLER'S OWN token in Authorization, so RLS decides what the address
 # space contains.

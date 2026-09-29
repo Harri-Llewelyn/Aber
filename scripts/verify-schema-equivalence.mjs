@@ -116,7 +116,7 @@ const PSQL_VARS = {
   nodered_webhook_jwt_secret: 'probe-webhook-secret',
   nodered_redirect_uri: 'http://localhost:1880/auth/strategy/callback',
   bi_reader_password: 'probe-bi-reader',
-  supabase_functions_url: 'http://supabase-kong:8000/functions/v1',
+  supabase_functions_url: 'http://supabase-envoy:8000/functions/v1',
   supabase_anon_key: 'probe-anon-key',
   gateway_revoke_secret: 'probe-revoke-secret',
   forge_sweep_secret: 'probe-sweep-secret',

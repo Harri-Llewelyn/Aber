@@ -8399,7 +8399,7 @@ UPDATE public.webhook_endpoints
 
 \if :{?supabase_functions_url}
 \else
-\set supabase_functions_url 'http://supabase-kong:8000/functions/v1'
+\set supabase_functions_url 'http://supabase-envoy:8000/functions/v1'
 \endif
 \if :{?supabase_anon_key}
 \else

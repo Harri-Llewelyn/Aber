@@ -1709,7 +1709,7 @@ helm upgrade aber deploy/helm/aber -n aber \
 kubectl -n aber logs -f job/aber-e2e-validate
 ```
 
-**No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-kong` *are* the
+**No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-envoy` *are* the
 Service names, so the defaults are the configuration —
 there is nothing to rewrite and nothing to port-forward. The Job's environment states the topology
 explicitly all the same, so it reads as a complete description rather than relying on defaults.

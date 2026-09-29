@@ -198,7 +198,7 @@ spec:
             {{- include "aber.secretEnv" (dict "name" "FDW_READER_PASSWORD" "secretName" $secretName "key" "FDW_READER_PASSWORD") | nindent 12 }}
             {{- /* Stored in Vault by 0038 so a trigger on `gateways` can reach the
                    revoke-gateway-credential function through the gateway. `supabase-db ->
-                   supabase-kong` is already an admitted flow; `supabase-db -> gateway-credential`
+                   supabase-envoy` is already an admitted flow; `supabase-db -> gateway-credential`
                    deliberately is NOT, which is why revocation goes through a function rather than
                    dialling the credential service directly. The publishable key only gets past
                    the gateway's key check. */}}
