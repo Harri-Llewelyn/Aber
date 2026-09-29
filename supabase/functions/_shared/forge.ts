@@ -1168,7 +1168,8 @@ async function ensureWikiHome(
  * URL on re-enrolment and by the sweep. The secret is the one forge-events verifies with. The
  * branch filter admits `main` and `appliance`, so a push to a proposal branch is not delivered; a
  * found hook with another filter (one registered before the appliance branch existed) is patched.
- * Returns whether anything was changed.
+ * A second hook of ours, left by two registrations racing, is deleted so each push arrives once;
+ * the oldest with the right filter is kept. Returns whether anything was changed.
  */
 export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boolean> {
   if (!cfg.webhookUrl) {
@@ -1178,9 +1179,18 @@ export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boo
   const listed = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/hooks`);
   if (!listed.ok) throw await refused(`could not list the hooks on '${name}'`, listed);
   const hooks = await listed.json() as { id: number; branch_filter?: string; config?: { url?: string } }[];
-  const ours = hooks.find((h) => h.config?.url === cfg.webhookUrl);
+  const mine = hooks.filter((h) => h.config?.url === cfg.webhookUrl).sort((a, b) => a.id - b.id);
+  const ours = mine.find((h) => h.branch_filter === WEBHOOK_BRANCH_FILTER) ?? mine[0];
+  let changed = false;
+  for (const extra of mine.filter((h) => h !== ours)) {
+    const deleted = await forgeApi(cfg, "DELETE", `/repos/${FORGE_ORGANISATION}/${name}/hooks/${extra.id}`);
+    // 404 is a hook something else removed first, which is the outcome wanted.
+    if (!deleted.ok && deleted.status !== 404) throw await refused(`could not remove a second push webhook from '${name}'`, deleted);
+    console.log(`forge: removed a second push webhook (${extra.id}) from '${name}'`);
+    changed = true;
+  }
   if (ours) {
-    if (ours.branch_filter === WEBHOOK_BRANCH_FILTER) return false;
+    if (ours.branch_filter === WEBHOOK_BRANCH_FILTER) return changed;
     const patched = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}/hooks/${ours.id}`, {
       branch_filter: WEBHOOK_BRANCH_FILTER,
     });
