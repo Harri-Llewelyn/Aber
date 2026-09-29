@@ -691,8 +691,9 @@ function edgeFunctionNames() {
     'public.may_decide_proposal': '0013 restates what the cell and gateway lanes check and why no machine reaches them; the baseline holds the pre-0013 comments',
 
     // 0017 adds the floor, the same signature and return type: the newest three backups are
-    // never prunable. The baseline selects by age alone and folds forward at the next squash.
-    'public.backup_prunable': '0017 never returns the newest three backups; the baseline holds the pre-0017 form',
+    // never prunable. 0018 adds each row's off-site copy to what it returns, so the prune deletes
+    // the copy too. The baseline selects by age alone and folds forward at the next squash.
+    'public.backup_prunable': '0017 never returns the newest three backups and 0018 adds each one\'s off-site copy; the baseline holds the pre-0017 form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -926,6 +927,11 @@ function edgeFunctionNames() {
       + 'and revoked from anon/authenticated -- the same arrangement as the views above. It reads '
       + 'backup_jobs as its owner so the Backup Stale rule can see it; the Backups page reads the '
       + 'table itself, under the Administrator-only RLS a published path would bypass',
+  backup_offsite_health:
+      'How long the newest backup has gone without an off-site copy (0018), granted to '
+      + '`grafana_reader` alone and revoked from anon/authenticated, like backup_health above. It '
+      + 'reads backups, the destination settings and the vault through an owner-run function so '
+      + 'the Off-site Backup Stale rule can see a number and nothing behind it',
   digital_thread_default:
       'The DEFAULT partition of digital_thread (0079), which exists so that a lapsed partition '
       + 'job degrades instead of refusing every audit write -- and therefore every asset write, '

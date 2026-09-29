@@ -1489,18 +1489,25 @@ backup:
 
 # The backup service (apps/backup-service.yaml) in place of the CronJob: backups an
 # Administrator asks for on the Backups page, and `backup.schedule` through pg_cron, with
-# `backup.retentionDays` applied to scheduled backups only. Needs backup.enabled, destination=pvc
-# and the image below. Off until the image is built; with it off the CronJob runs as before.
+# `backup.retentionDays` applied to scheduled backups only, and an encrypted copy of every backup
+# off site once the Backups page names an S3 destination. Needs backup.enabled and the image below.
+# Off until the image is built; with it off the CronJob runs as before.
 backupService:
   enabled: false
   image:
-    # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar.
+    # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, age and the AWS CLI.
     repository: ghcr.io/harri-llewelyn/aber/backup-service
     tag: ""
     pullPolicy: IfNotPresent
   # custom -> .dump, the artefact the CronJob writes and pg_restore reads selectively;
   # plain -> .sql.gz, what scripts/restore-databases.sh replays.
   format: custom
+  # NetworkPolicy egress rules for the off-site destination, applied to this pod alone under
+  # networkPolicy.enabled. The destination is a page setting, so the chart cannot derive it; with
+  # none, every copy fails at connect time and Off-site Backup Stale fires. For example:
+  #   - to: [{ ipBlock: { cidr: 203.0.113.10/32 } }]
+  #     ports: [{ protocol: TCP, port: 443 }]
+  offsiteEgress: []
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 1Gi }
