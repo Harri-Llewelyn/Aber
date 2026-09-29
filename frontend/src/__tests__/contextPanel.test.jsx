@@ -487,7 +487,7 @@ describe('Tables shed what the panel now carries', () => {
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
     const card = document.querySelector('.page-main .card')
-    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Trail/i]) {
+    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Audit Trail/i]) {
       expect(within(card).queryByRole('button', { name })).toBeNull()
     }
     expect(within(card).queryByText('Attached Document Links')).toBeNull()

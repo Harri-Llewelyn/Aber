@@ -2538,7 +2538,7 @@ BEGIN
     'public.gateways with heartbeat staleness derived at read time. Mirrors '
     'frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state '
     'short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing '
-    'status would append to the immutable audit_trail audit table on every sweep and would be '
+    'status would append to the immutable audit_trail table on every sweep and would be '
     'stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a '
     'gateways column.';
 
@@ -10739,7 +10739,7 @@ ALTER VIEW public.gateway_status OWNER TO postgres;
 --
 
 -- VIEW gateway_status :: COMMENT
-COMMENT ON VIEW public.gateway_status IS 'public.gateways with heartbeat staleness derived at read time. Mirrors frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing status would append to the immutable audit_trail audit table on every sweep and would be stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a gateways column.';
+COMMENT ON VIEW public.gateway_status IS 'public.gateways with heartbeat staleness derived at read time. Mirrors frontend/src/utils/gatewayStatus.js -- keep the 90s threshold AND the pending-state short-circuit in step. Deliberately a view, not a stored column or a pg_cron writer: writing status would append to the immutable audit_trail table on every sweep and would be stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a gateways column.';
 
 --
 

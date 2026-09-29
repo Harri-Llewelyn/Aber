@@ -178,7 +178,7 @@ describe('the row and its drawer', () => {
     await ready()
 
     const row = rowFor('Assembly Line 1')
-    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Trail/i]) {
+    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Audit Trail/i]) {
       expect(within(row).queryByRole('button', { name })).toBeNull()
     }
 

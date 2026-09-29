@@ -131,8 +131,8 @@ describe('ranking', () => {
    */
   it('scores a single letter as a prefix, never as initials', () => {
     const trail = targets().find(t => t.label === 'Audit Trail')
-    expect(scoreTarget(trail, 'd')).toBe(80)
-    expect(scoreTarget(trail, 'dt')).toBe(70)
+    expect(scoreTarget(trail, 'a')).toBe(80)
+    expect(scoreTarget(trail, 'at')).toBe(70)
   })
 
   it('caps the list, so the panel is a shortlist and not a directory', () => {

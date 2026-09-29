@@ -359,7 +359,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         const result = await api.post('/api/v1/devices/asset-export', { device_id: asset.asset_id })
         downloadBlob(result.blob, result.filename || `${asset.asset_name}-bundle.aasx`)
         const b = result.stats?.bundle || {}
-        const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
+        const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} audit trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
         if (b.stored === false) {
           showToast(`Bundle downloaded for '${asset.asset_name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
         } else if (b.truncated) {

@@ -12,7 +12,7 @@ ingestion topology: telemetry from every gateway on the shopfloor converges on o
 historian, and leaves through one API, one Unified Namespace and one audit trail.
 
 An industrial, asset-centric platform: real-time telemetry streaming, shopfloor cell mapping,
-zero-touch edge device onboarding, row-level security, continuous Audit Trail audit logging,
+zero-touch edge device onboarding, row-level security, a continuous, append-only audit trail,
 AAS V3 export, and edge flow management. It speaks Factory+ Sparkplug B on the wire, and it was
 inspired by the **AMRC Connectivity Stack (ACS)**; [how far that goes](#relationship-to-acs) is below.
 

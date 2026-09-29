@@ -30,7 +30,7 @@ spec:
         whenever the timestamps differ by a microsecond -- which they do, because each replica
         stamps its own.
       * DUPLICATED QUARANTINE DECISIONS. Both replicas race to insert the same row and each writes
-        an audit_trail audit row via the trigger. That table is APPEND-ONLY, so the noise is
+        an audit_trail row via the trigger. That table is APPEND-ONLY, so the noise is
         permanent.
       * DOUBLED HEARTBEATS, firing the pg_net quarantine webhook's UPDATE trigger twice per beat.
 

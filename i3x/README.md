@@ -641,10 +641,9 @@ read-only MCP principal seeded by archived migration 0034. The ceiling is
 write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069`
 narrowed the schema and metric-catalog policies to the former — so it writes nothing. What it must
 also not have is `audit_trail:read`: the difference the old choice of `Operator` **over**
-`Auditor` was making is `audit_trail_select_privileged_or_auditor`, and an Auditor can read the
-audit trail. This client has no surface for the Audit Trail and deliberately never will, so that
-grant would leave a capability sitting on a long-lived credential that nothing can use and someone
-might later find.
+`Auditor` was making is the audit trail's read policy, which admits an Auditor. This client has
+no surface for the Audit Trail and deliberately never will, so that grant would leave a capability
+sitting on a long-lived credential that nothing can use and someone might later find.
 
 **It used to hold `Operator` itself, and `0080` ended that** — a person's role widening whenever
 somebody asked for a shopfloor user to see one more thing is not a thing a machine credential should

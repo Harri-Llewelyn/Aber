@@ -1,5 +1,5 @@
 """
-PostgreSQL integration tests for the Audit Trail audit guard in
+PostgreSQL integration tests for the Audit Trail's no-op guard in
 `0005_digital_thread_signal_and_attribution.sql`.
 
 WHAT THIS PROTECTS. `log_audit_trail_event()` suppresses two kinds of machine non-event: an

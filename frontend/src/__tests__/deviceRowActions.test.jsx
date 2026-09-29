@@ -79,7 +79,7 @@ describe('device row actions', () => {
     expect(inRow().queryByText('Telemetry')).not.toBeInTheDocument()
     expect(openPanel().getByText('View Realtime Telemetry')).toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
-    expect(inRow().queryByRole('button', { name: /^Trail/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
     expect(document.querySelector('[data-testid^="device-actions-"]')).toBeNull()
   })

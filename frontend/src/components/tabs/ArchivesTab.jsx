@@ -83,7 +83,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
       const result = await api.post('/api/v1/devices/asset-export', { device_id: item.entity_id })
       downloadBlob(result.blob, result.filename || `${item.name}-bundle.aasx`)
       const b = result.stats?.bundle || {}
-      const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
+      const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} audit trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
       if (b.stored === false) {
         showToast(`Bundle downloaded for '${item.name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
       } else if (b.truncated) {
@@ -145,7 +145,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
           key={x.id}
           className="btn btn-sm btn-ghost"
           onClick={() => downloadExport(x)}
-          title={`The bundle taken ${new Date(x.taken_at).toLocaleString()}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, trail, live telemetry and the cold-object manifest`}
+          title={`The bundle taken ${new Date(x.taken_at).toLocaleString()}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, audit trail, live telemetry and the cold-object manifest`}
         >
           <IconDownload size={12} /> Bundle {new Date(x.taken_at).toLocaleDateString()}
         </button>

@@ -178,7 +178,7 @@ describe('usePermissions hook', () => {
       expect(result.current.userRole).toBe('Auditor')
     })
 
-    // Audit Trail audit permission must be granted
+    // The Audit Trail permission must be granted
     expect(result.current.hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)).toBe(true)
 
     // Management & telemetry/quarantine permissions must be denied

@@ -534,9 +534,9 @@ class RecordViolationsTestCase(unittest.TestCase):
 
     def test_recovery_then_regression_is_recorded_again(self):
         """
-        A fault that returns after being fixed must reappear in the thread. Without the memo being
-        cleared on a clean payload, a repaired-then-regressed device stays silent forever -- which
-        is indistinguishable from health, the worst failure an audit trail can have.
+        A fault that returns after being fixed must reappear in the audit trail. Without the memo
+        being cleared on a clean payload, a repaired-then-regressed device stays silent forever --
+        which is indistinguishable from health, the worst failure an audit trail can have.
         """
         ingestion.record_payload_violations(device(), self.violation(), OBSERVED_AT)
         ingestion.record_payload_violations(device(), [], OBSERVED_AT)

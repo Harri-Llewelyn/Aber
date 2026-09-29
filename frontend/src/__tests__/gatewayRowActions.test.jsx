@@ -64,7 +64,7 @@ describe('gateway row actions', () => {
     expect(inRow().queryByRole('link', { name: /Launch UI/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
-    expect(inRow().queryByRole('button', { name: /^Trail/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Docs/i })).not.toBeInTheDocument()
     expect(screen.queryByTestId('gateway-actions-gw-1')).not.toBeInTheDocument()
   })

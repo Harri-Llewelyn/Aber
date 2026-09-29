@@ -1179,10 +1179,11 @@ appear where the hierarchy is being named: here, and in the Summary of each page
 standard lacks: a process cell is one of ISA-95's work center types, so the rename would have traded
 a concrete word operators recognise for the category it belongs to, and left the standard's own
 ambiguity (a work cell is a work unit type) where it was. It would also have been a table, its API
-routes, the `cell:manage` permission name, the proposal lane, the `CELL` thread kind and every page,
-across two releases and directly ahead of the migration squash. `devices` stays for the same reason
-it always did: it is Sparkplug's word and the row is a Sparkplug device. The topics were never at
-stake: a cell is not addressed on the wire, and `<cell>` is the cell's name, not the table's.
+routes, the `cell:manage` permission name, the proposal lane, the `CELL` kind on the Audit Trail
+and every page, across two releases and directly ahead of the migration squash. `devices` stays
+for the same reason it always did: it is Sparkplug's word and the row is a Sparkplug device. The
+topics were never at stake: a cell is not addressed on the wire, and `<cell>` is the cell's name,
+not the table's.
 
 **An incomplete path is skipped, never filled with a placeholder.** A device that is unassigned, a
 cell filed in no area, a site whose name is unset: none is published, each is counted under
