@@ -1933,6 +1933,6 @@ groups:
                 uid: __expr__
 
 deleteRules:
-  # The partitions rule before the Digital Thread was renamed; a Grafana that loaded it drops it.
+  # The partitions rule's uid before the page was renamed; a Grafana that loaded it drops it.
   - orgId: 1
     uid: aber-digital-thread-partitions
