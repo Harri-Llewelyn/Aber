@@ -1,9 +1,10 @@
 """
-Archiving a gateway asks the forge to follow (0114), and asking is gated where it should be.
+Archiving a gateway asks the forge to follow (0114), and asking is gated where it should be; and
+one forge sweep runs at a time (0025).
 
     python supabase/migrations/test_forge_follows_the_archive.py
 
-Requires the Supabase database (54322 by default) and 0114 applied.
+Requires the Supabase database (54322 by default) and 0114 applied; the lease tests need 0025.
 
 ---------------------------------------------------------------------------------------------
 WHAT IS UNDER TEST, AND WHAT IS NOT. forge-sweep is what archives the repository; this is the
@@ -25,6 +26,7 @@ such write would walk the whole forge; 0001 carries the same guard on two other 
 same reason, and each was written after the version without it.
 """
 import os
+import threading
 import unittest
 import uuid
 
@@ -166,6 +168,162 @@ class ForgeFollowsTheArchive(unittest.TestCase):
             "SELECT name FROM vault.secrets WHERE name IN ('supabase_publishable_key', 'supabase_anon_key');"
         )
         self.assertEqual([r[0] for r in self.cur.fetchall()], ["supabase_publishable_key"])
+
+
+class OnePassAtATime(unittest.TestCase):
+    """
+    The forge-sweep lease (0025): what a claim, a renewal and a release do to it. What the function
+    answers while another pass holds it needs the stack, and is test_forge_sweep.py's.
+
+    Each test frees the lease inside its own transaction and rolls back, which also un-queues the
+    pass a release asks for. The test with two sessions commits, and leaves the lease free.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT to_regprocedure('public.claim_forge_sweep(integer)');")
+            if not cur.fetchone()[0]:
+                raise unittest.SkipTest("0025 has not been applied")
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def setUp(self):
+        self.conn = get_connection()
+        self.cur = self.conn.cursor()
+        self.cur.execute(
+            "UPDATE public.forge_sweep_lease SET holder = NULL, held_until = '-infinity', requested = false;"
+        )
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.conn.close()
+
+    def one(self, sql, *args):
+        self.cur.execute(sql, args)
+        return self.cur.fetchone()[0]
+
+    def claim(self, seconds=300):
+        return self.one("SELECT public.claim_forge_sweep(%s);", seconds)
+
+    def renew(self, holder, seconds=300):
+        return self.one("SELECT public.renew_forge_sweep(%s, %s);", holder, seconds)
+
+    def release(self, holder):
+        return self.one("SELECT public.release_forge_sweep(%s);", holder)
+
+    def sweeps_queued(self):
+        return self.one("SELECT count(*) FROM net.http_request_queue WHERE url LIKE %s;", "%/forge-sweep")
+
+    def test_a_claim_while_the_lease_is_held_is_refused(self):
+        self.assertIsNotNone(self.claim())
+        self.assertIsNone(self.claim())
+
+    def test_a_released_lease_is_claimed_again_under_a_new_id(self):
+        first = self.claim()
+        self.assertTrue(self.release(first))
+        second = self.claim()
+        self.assertIsNotNone(second)
+        self.assertNotEqual(second, first)
+
+    def test_only_the_holder_releases(self):
+        self.claim()
+        self.assertFalse(self.release(str(uuid.uuid4())))
+        self.assertFalse(self.release(None))
+        self.assertIsNone(self.claim(), "a release by another id freed the lease")
+
+    def test_a_lapsed_lease_is_taken_over_and_its_old_holder_ends_nothing(self):
+        dead = self.claim()
+        self.cur.execute("UPDATE public.forge_sweep_lease SET held_until = clock_timestamp() - interval '1 second';")
+        successor = self.claim()
+        self.assertIsNotNone(successor, "a lapsed lease blocked the next pass")
+        self.assertNotEqual(successor, dead)
+        # A pass that outlived its lease can neither run under it nor end its successor's.
+        self.assertFalse(self.renew(dead))
+        self.assertFalse(self.release(dead))
+        self.assertIsNone(self.claim())
+
+    def test_the_holder_renews_and_nobody_else_does(self):
+        held = self.claim(seconds=1)
+        self.assertTrue(self.renew(held, 600))
+        self.assertTrue(self.one(
+            "SELECT held_until > clock_timestamp() + interval '500 seconds' FROM public.forge_sweep_lease;"))
+        self.assertFalse(self.renew(str(uuid.uuid4())))
+        self.assertFalse(self.renew(None))
+
+    def test_a_lease_lasts_between_a_second_and_an_hour(self):
+        for seconds in (0, 3601, None):
+            self.cur.execute("SAVEPOINT bound;")
+            with self.assertRaises(psycopg2.Error) as refused:
+                self.claim(seconds)
+            self.assertEqual(refused.exception.pgcode, "22023", seconds)
+            self.cur.execute("ROLLBACK TO SAVEPOINT bound;")
+
+    def test_calls_refused_during_a_pass_are_followed_by_one_more(self):
+        # An archive's call that meets a running pass may have come after the pass read the row.
+        held = self.claim()
+        self.assertIsNone(self.claim())
+        self.assertIsNone(self.claim())
+        before = self.sweeps_queued()
+        self.assertTrue(self.release(held))
+        self.assertEqual(self.sweeps_queued(), before + 1, "two refusals should come to one follow-up pass")
+        self.assertFalse(self.one("SELECT requested FROM public.forge_sweep_lease;"))
+
+    def test_a_pass_nobody_asked_for_during_queues_nothing(self):
+        held = self.claim()
+        before = self.sweeps_queued()
+        self.assertTrue(self.release(held))
+        self.assertEqual(self.sweeps_queued(), before)
+
+    def test_a_pass_started_under_a_held_lease_covers_the_calls_refused_before_it(self):
+        # A caller holding the lease (the stack suite) meets a refused call, then starts its own
+        # pass under the lease: that pass reads everything the refused call was about.
+        held = self.claim()
+        self.assertIsNone(self.claim())
+        self.assertTrue(self.renew(held))
+        before = self.sweeps_queued()
+        self.assertTrue(self.release(held))
+        self.assertEqual(self.sweeps_queued(), before)
+
+    def test_two_claims_at_the_same_instant_have_one_winner(self):
+        # The first claim keeps its transaction open, so the second waits on the row; once the
+        # first commits, the second re-reads held_until and is refused.
+        self.conn.rollback()
+        if self.one("SELECT held_until > clock_timestamp() FROM public.forge_sweep_lease;"):
+            self.skipTest("a pass holds the lease on this database")
+        first, second = get_connection(), get_connection()
+        first_cur, second_cur = first.cursor(), second.cursor()
+        answer = {}
+
+        def claim_second():
+            second_cur.execute("SELECT public.claim_forge_sweep(300);")
+            answer["holder"] = second_cur.fetchone()[0]
+            second.commit()
+
+        try:
+            first_cur.execute("SELECT public.claim_forge_sweep(300);")
+            winner = first_cur.fetchone()[0]
+            racer = threading.Thread(target=claim_second)
+            racer.start()
+            racer.join(1.0)
+            self.assertTrue(racer.is_alive(), "the second claim did not wait for the first")
+            first.commit()
+            racer.join(10)
+            self.assertFalse(racer.is_alive(), "the second claim is still waiting after the first committed")
+            self.assertIsNotNone(winner)
+            self.assertIn("holder", answer, "the second claim raised")
+            self.assertIsNone(answer["holder"])
+        finally:
+            first.rollback()
+            first_cur.execute(
+                "UPDATE public.forge_sweep_lease SET holder = NULL, held_until = '-infinity', requested = false;"
+            )
+            first.commit()
+            first.close()
+            second.close()
 
 
 if __name__ == "__main__":

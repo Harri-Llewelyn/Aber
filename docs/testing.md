@@ -184,8 +184,10 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # repository gets its appliance and catch-all rules back and main closed again; a key downgraded
 # to read-only is re-registered read-write; an archived gateway's key is removed from both
 # repositories; one sweep publishes the platform playbook, tags it and protects it, and a second
-# publishes nothing; and the database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the
-# release Secret's value. Skips without it.
+# publishes nothing; and the database's own sweep_forge() answers true. One pass at a time (0025):
+# each test holds the sweep lease and runs its passes under it, a call meeting a held lease answers
+# already_sweeping at once and pg_net records it as 200, a lapsed lease is taken over, and a second
+# push webhook of ours is removed. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
 
@@ -380,7 +382,9 @@ python supabase/migrations/test_credential_revocation.py
 # as the archive lands rather than leaving it to the quarter-hour timer, and the gates on that ask
 # are what this pins -- above all the transition guard, without which every ordinary edit to an
 # archived gateway would walk the whole forge. Asserted on the pg_net queue, which the rollback
-# un-queues; the sweep's own half needs a forge and lives in test_forge_sweep.py.
+# un-queues; the sweep's own half needs a forge and lives in test_forge_sweep.py. Also the sweep
+# lease (0025): one winner of two simultaneous claims, a lapsed lease taken over, only the holder
+# renewing or releasing, and one follow-up pass queued for any calls refused while it was held.
 python supabase/migrations/test_forge_follows_the_archive.py
 # Service-token revocation (0074): the denylist, and the PostgREST db-pre-request hook that reads
 # it. THE FAIL-OPEN TESTS ARE THE POINT and come first in the file -- auth_pre_request() runs

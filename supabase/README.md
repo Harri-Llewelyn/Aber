@@ -3947,7 +3947,8 @@ protected the same way, without the incident template, because a playbook a gate
 should have been reviewed from the start. A member who is not a dashboard identity was seated by
 hand and is left alone. Nothing is created that enrolment would not create, and nothing is deleted.
 An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_sweep.py` drives a
-role changed behind the door, a deleted hook and a hand-made repository.
+role changed behind the door, a deleted hook and a hand-made repository. One pass runs at a time
+([One pass at a time](#one-pass-at-a-time-0025)).
 
 ### The appliance reports on a branch of its own (`0104`)
 
@@ -4060,6 +4061,46 @@ any resolution, so there is no better one to offer.
 Readable by `authenticated` with no per-row policy, because it carries no metric values and no device
 identity: four relation names and four timestamps. Retention is a property of the chunk rather than
 of a device, so there is nothing to filter by either.
+
+### One pass at a time (`0025`)
+
+**Every step of a pass reads the forge and then writes**, so two passes that overlap both write.
+The webhook was the case seen: `ensureWebhook()` lists a repository's hooks and creates ours when
+none matches, and two passes that both listed before either created left two hooks, so
+`forge-events` received every push twice. Deploy keys, team seats and branch protection have the
+same shape. Passes began to overlap once the database's calls reached the function on Kubernetes:
+`sweep_forge()` asks every fifteen minutes and on every archive transition, one call per gateway
+row, and people and the stack suite call the function directly.
+
+**A pass is exclusive.** `forge_sweep_lease` is one row. Before it reads anything a pass calls
+`claim_forge_sweep(300)`, a conditional `UPDATE … WHERE held_until <= clock_timestamp()`, so two
+claims at the same instant serialise on the row lock and exactly one wins. It calls
+`release_forge_sweep()` in a `finally`, before it answers. A call that finds the lease held does
+nothing and answers **`200 {"already_sweeping": true}`** at once: 200 because pg_net records the
+status in `net._http_response`, which is the only record of a sweep the database asked for, and a
+call that met a running pass did not fail. **The lease lasts five minutes**, above the 60 seconds the
+edge runtime gives a worker (`main/index.ts`) and pg_net gives the call, so it outlasts a pass only
+when the pass died holding it, and the first claim after `held_until` takes it over. Raise it with
+either limit. Each claim returns a fresh holder id and only that id renews or releases, so a pass
+that outlived its lease cannot end its successor's.
+
+**Nothing asked for is lost.** A refused claim sets `requested`, and the release that ends the
+running pass queues one more through `sweep_forge()` when it is set. An archive whose call arrived
+after the running pass had read the gateway rows is followed within seconds rather than at the next
+quarter hour, and any number of calls refused during one pass come to that one follow-up. A pass
+that starts clears `requested`, because it reads everything committed before it.
+
+**A caller may hold the lease itself.** The three functions are `service_role`'s, and the table is
+readable by it and written only through them. A caller holding the lease names it in
+`x-sweep-lease`: the pass renews it, runs under it and leaves it held, and a lease the caller does
+not hold answers 409. `test_forge_sweep.py` holds it for each test, so the database's own asks (an
+archive's trigger, the schedule, one a previous test queued) are refused while a test changes the
+forge and reads its own pass's report. `test_forge_follows_the_archive.py` covers the claim, the
+takeover, the release and the follow-up on the throwaway database.
+
+**Duplicates converge.** `ensureWebhook()` deletes every hook of ours but one, the oldest with the
+right branch filter, so a repository that already has two, or gets two from an enrolment racing a
+pass, ends with one.
 
 ### Archiving is a lifecycle rather than a flag (`0124`)
 

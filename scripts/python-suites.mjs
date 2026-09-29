@@ -612,7 +612,9 @@ export const SUITES = {
       'The one worth a CI job is the TRANSITION guard: `UPDATE OF is_archived` fires on the ' +
       'column appearing in a SET list, not on its value changing, so losing it would make every ' +
       'ordinary edit to an archived gateway walk the whole forge -- an outcome visible only as ' +
-      "somebody else's API rate limit.",
+      "somebody else's API rate limit. Also the sweep lease (0025): two simultaneous claims have " +
+      'one winner, a lapsed lease is taken over, and a pass that outlived its lease cannot end ' +
+      "its successor's.",
   },
   'supabase/migrations/test_digital_thread_paging.py': {
     lanes: ['db'],
@@ -787,7 +789,9 @@ export const SUITES = {
       "without the incident template; and the database's sweep_forge() answers true. It also " +
       'covers the two repositories the platform publishes into its own organisation: the playbook, ' +
       'tagged per version, and the custom example, marked as a template and never tagged because ' +
-      'it is copied rather than converged to. Needs the ' +
+      'it is copied rather than converged to. One pass at a time (0025): a call meeting a held ' +
+      'lease does nothing and answers 200, and every test holds the lease so the report it reads ' +
+      'is its own pass\'s. Needs the ' +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
   },
   'backup-service/test_backup_service.py': {
