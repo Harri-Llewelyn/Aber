@@ -2,6 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
+import { POLL_INTERVAL_MS, RECONCILE_MS } from '../hooks/usePlatformAlerts'
 
 /**
  * The top bar's alert counter. What is pinned: it is permanent, including when healthy, because an
@@ -145,10 +146,13 @@ describe('AlertPill', () => {
       expect(screen.getByText(/Evaluated by Grafana/i)).toBeInTheDocument()
     })
 
-    /** The feed mode lives in this footer, beside the count whose freshness it describes. */
+    /**
+     * The feed mode lives in this footer, beside the count whose freshness it describes. The
+     * figures must be usePlatformAlerts' own intervals, not a literal that can drift from them.
+     */
     it.each([
-      [true, /Delivered live, reconciled every 60s/i],
-      [false, /Polled every 3s/i]
+      [true, new RegExp(`Delivered live, reconciled every ${RECONCILE_MS / 1000}s`, 'i')],
+      [false, new RegExp(`Polled every ${POLL_INTERVAL_MS / 1000}s \\(Realtime disabled\\)`, 'i')]
     ])('states how the count is delivered when realtime=%s', (realtime, expected) => {
       render(<AlertPill alerts={[alert()]} realtime={realtime} />)
       fireEvent.click(pill())
