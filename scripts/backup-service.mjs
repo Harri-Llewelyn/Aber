@@ -97,7 +97,11 @@ function sql(statement, vars = {}) {
     maxBuffer: 1 << 24,
   });
   if (r.status !== 0) {
-    throw new Error(`psql: ${(r.stderr || '').trim().split('\n').slice(-3).join(' ') || `exit ${r.status}`}`);
+    // The ERROR line says what failed; the CONTEXT after it can run to many lines of SQL.
+    const lines = (r.stderr || '').trim().split('\n');
+    const error = lines.find((line) => /\bERROR:/.test(line));
+    const detail = error ? [error, lines.at(-1)].filter((l, i, all) => all.indexOf(l) === i) : lines.slice(-3);
+    throw new Error(`psql: ${detail.join(' ').trim() || `exit ${r.status}`}`);
   }
   return (r.stdout || '').trim();
 }
