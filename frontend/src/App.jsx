@@ -50,7 +50,7 @@ import {
   RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle, releaseVersion,
 } from './utils/releaseVersion'
 
-import { Toast } from './components/common/Toast'
+import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { HelpPanel } from './components/common/HelpPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
@@ -444,7 +444,7 @@ function Dashboard({ session, onSignOut }) {
     return showDevice(proposal.entity_id)
   }
   const { theme, toggleTheme } = useTheme()
-  const { toast, showToast, clearToast } = useToast()
+  const { toasts, showToast, expireToast, dismissToast } = useToast()
   const { mode: sidebarMode, setMode: setSidebarMode } = useSidebarMode()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
@@ -658,7 +658,7 @@ function Dashboard({ session, onSignOut }) {
         <HelpPanel open={showHelp} tabId={tab} onClose={() => setShowHelp(false)} />
       </div>
 
-      {toast && <Toast msg={toast.msg} type={toast.type} onDone={clearToast} />}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} onExpire={expireToast} />
       {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} showToast={showToast} persona={persona} activeTab={tab} />}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
     </div>

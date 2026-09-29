@@ -359,6 +359,28 @@ nothing was keeping it out of the text.
 
 ---
 
+## Toasts
+
+`showToast(msg, type)` (`hooks/useToast.js`) is the one call every page makes, with `type` one of
+`success` (the default), `info`, `warning` or `error`. Each call puts a toast in the bottom-right
+corner.
+
+- **Each toast owns its timer.** Up to three stack, each keyed by its id; a fourth pushes the oldest
+  off. A message already on screen is replaced, restarting its timer, rather than shown twice. The
+  single slot this replaced let a second toast inherit what was left of the first one's 3.2 s.
+- **How long it stays.** Success and info 4 s, warning 8 s, or the reading time if that is longer:
+  1 s plus 60 ms a character, capped at 20 s (`toastDuration` in `common/Toast.jsx`). An error
+  stays until it is dismissed. The pointer or focus on a toast pauses it, and leaving resumes it
+  with at least 2 s left. Every toast has a Dismiss button. Escape is not bound to toasts, because
+  it already closes the modal or drawer beneath them. Pause, dismiss and sticky errors are what
+  WCAG 2.2 SC 2.2.1 (Timing Adjustable) asks for.
+- **Announced.** `ToastStack` renders two live regions all the time, empty when idle, because a
+  region inserted together with its first message is not announced: errors in `role="alert"`, the
+  rest in `role="status"`. A warning or an error is prefixed "Warning:" or "Error:" in text only a
+  screen reader reads.
+
+---
+
 ## Theming
 
 Colours come from **CSS variables in `App.css`** (`:root` / `[data-theme="light"]`). There is no
@@ -366,11 +388,11 @@ Tailwind in this project. Prefer `.card`, `.form-control`, `.form-label` over in
 
 Two rules that were each learned from a real bug:
 
-- **A floating surface needs an opaque background.** The toast is `position: fixed` over arbitrary
-  content, so its `rgba(…, 0.15)` tint composited against whatever table was underneath. It now
-  paints the tint as a `background-image` over an opaque `background-color: var(--bg-card)`.
+- **A floating surface needs an opaque background.** A toast floats over arbitrary content, so its
+  `rgba(…, 0.15)` tint composited against whatever table was underneath. Each of the four types
+  now paints its tint as a `background-image` over an opaque `background-color: var(--bg-card)`.
   **Never fold those into the `background:` shorthand** — that resets `background-color` and brings
-  the transparency straight back. `themeContrast.test.js` asserts both halves.
+  the transparency straight back. `themeContrast.test.js` asserts both halves for every toast type.
 - **Do not give `var()` a hardcoded fallback.** The sign-in card rendered white-on-white in light
   mode because it referenced `--text-main` / `--bg-main`, neither of which exists; the fallbacks
   made the typo look correct in dark mode and fail silently in light mode.

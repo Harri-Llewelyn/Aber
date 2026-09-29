@@ -170,6 +170,11 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['pending badge label',            '--accent-text',  tint([0,212,255], 0.15, card),     AA_TEXT],
     ['pending badge label on hover',   '--accent-text',  tint([0,212,255], 0.15, glass(card)), AA_TEXT],
     ['provisioned badge label',        '--accent-text',  tint([0,212,255], 0.07, card),     AA_TEXT],
+    // The four toast types, each ink on its own 0.15 tint over --bg-card.
+    ['info toast label',               '--accent-text',  tint([0,212,255], 0.15, card),     AA_TEXT],
+    ['warning toast label',            '--warning-text', tint([255,179,0], 0.15, card),     AA_TEXT],
+    ['success toast label',            '--success-text', tint([0,232,150], 0.15, card),     AA_TEXT],
+    ['error toast label',              '--danger-text',  tint([255,77,109], 0.15, card),    AA_TEXT],
   ]
 
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {
@@ -422,7 +427,9 @@ describe('toast opacity', () => {
     }
   })
 
-  it.each(['.toast-success', '.toast-error'])(
+  it.each([
+    '.toast-success', '.toast-info', '.toast-warning', '.toast-error'
+  ])(
     '%s tints with background-image and never resets the opaque colour',
     (selector) => {
       const rule = ruleFor(selector)
