@@ -53,12 +53,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
-# Empty until provision() names it. THE SUITE PROVISIONS ITS OWN SUBJECT
-# (test-harness/aas_fixture.py), and this is the point of it rather than a detail.
+# The machining cell's first CNC on the `Simulated Shopfloor` flow, seeded by 0002 and given its
+# schema and nameplate by 0020 -- so it exists wherever the migrations run, not only where
+# provision-gateways.mjs has been run. It replaced `Simulated_CNC_01`, which 0020 deletes.
+# THE SUITE PROVISIONS ITS OWN SUBJECT, and this is the point of it rather than a detail.
 #
 # A CONFORMANCE SUITE MUST NOT DEPEND ON SEEDED DEMONSTRATION DATA. A subject the seed stops
 # creating, or stops sending a DBIRTH for, leaves the suite naming a device that is not there and
-# reporting success anyway.
+# reporting success anyway -- which is part of why archived migration 0020 exists.
 #
 # `AAS_TEST_DEVICE` still overrides it, and then NOTHING IS PROVISIONED -- the escape hatch for
 # pointing the suite at a real asset is deliberately not also a way to half-create a fixture.
