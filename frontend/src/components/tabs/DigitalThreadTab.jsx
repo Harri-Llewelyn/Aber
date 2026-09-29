@@ -390,7 +390,7 @@ const MUTATION_ID_HELP =
 
 const TRANSACTION_ID_HELP =
   'The database transaction that wrote this row. Every audit row carrying the same one was written '
-  + 'by a SINGLE act -- an approval that also rebound a schema, a delete that cascaded. Where the '
+  + 'by a SINGLE act -- an approval and the change it applied, a delete that cascaded. Where the '
   + 'act wrote more than is loaded, "Show whole transaction" below loads all of them. It is unique '
   + 'within this database only, and is '
   + 'not preserved by a restore from a dump: group by it, never store it as a reference. It is '

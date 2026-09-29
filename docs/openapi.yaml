@@ -2883,7 +2883,7 @@ paths:
                   submodels: { type: array, items: { type: object } }
                   conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
                   stats: { type: object }
-            application/asset-administration-shell-package+zip:
+            application/asset-administration-shell-package+xml:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }

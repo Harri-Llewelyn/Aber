@@ -10389,7 +10389,7 @@ COMMENT ON COLUMN public.digital_thread.actor_source IS 'What kind of actor made
 --
 
 -- COLUMN digital_thread.causation_id :: COMMENT
-COMMENT ON COLUMN public.digital_thread.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an operator approval that also rebound a schema, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
+COMMENT ON COLUMN public.digital_thread.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an approval and the change it applied, a batch relocation, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
 
 --
 
