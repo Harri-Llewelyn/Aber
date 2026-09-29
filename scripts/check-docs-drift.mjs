@@ -3020,6 +3020,9 @@ function edgeFunctionNames() {
     ['supabase_anon_key', /\bsupabase_anon_key\b/, 'supabase_publishable_key'],
     ['Node-RED (Virtual Edge Gateway Simulator)', /\b(?:virtual edge )?gateway simulator\b/i, 'Node-RED (Host-Run Gateways)'],
     ['the demo simulator', /\bdemo(?:nstration)? simulator\b|\bsimulated shopfloor\b/i, 'nothing: no demonstration ships'],
+    ['the Digital Thread', /digital[_ -]?thread/i, 'the Audit Trail: audit_trail, audit-trail, AuditTrail, AUDIT_TRAIL'],
+    ['applied_thread_id', /\b(?:applied_)?thread_(?:id|rows)\b|MAX_THREAD_ROWS|\b(?:onView|onSelect|load|canRead)Thread\b|\bviewThreadFor\b/,
+      'applied_trail_id, trail_id, trail_rows, MAX_TRAIL_ROWS, onViewTrail, loadTrail'],
   ];
 
   /** Text next to those names that is still right, and which no pattern may flag. */
@@ -3030,6 +3033,7 @@ function edgeFunctionNames() {
     'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are the tokens the upstream images read',
     'a simulated gateway beside a host-run one, inspired by the AMRC Connectivity Stack (ACS)',
     'supabase-envoy, area-plans, aber-tls-config, aber/flow-shape, dacs-1 and MACS_ADDR',
+    'the writer thread, threading.Thread and daemon_threads beside the audit trail and audit_trail',
   ];
 
   const STORAGE_POLICIES = ['supabase/storage-policies.sql', 'deploy/helm/aber/files/storage-policies/storage-policies.sql'];
@@ -3074,7 +3078,15 @@ function edgeFunctionNames() {
       'defaulted to the literal `ACS-Cymru`', 'The default moved with the platform', 'The bucket and the check were `floor-plans`',
       'rename to Aber, `acs/flow-shape`', 'The Node-RED row was seeded as', 'The same pass renamed the vault secret',
       'It was `floor-plans` until 1.0.', 'The only entry is `floor-plans` to `area-plans`',
+      '`ui.digital_thread_lane_limit` folded every lane',
     ], 'history: what each name was and how it moved'],
+    ['supabase/migrations/0002_seed_data.sql', '`ui.digital_thread_lane_limit` was declared here', 'the retired setting 0000 deletes'],
+    ['frontend/src/__tests__/auditTrailPurgedEntity.test.jsx', /ui\.digital_thread_lane_limit/, 'an old row on the trail names the retired setting'],
+    ['frontend/src/constants.js', 'export const RENAMED_TABS', 'the old route opens the Audit Trail'],
+    ['frontend/src/__tests__/appRouting.test.jsx', /\/digital-thread/, 'tests the old route'],
+    ['frontend/src/searchIndex.js', /digital thread/, 'search keywords find the Audit Trail by its old name'],
+    [['grafana/provisioning/alerting/alert-rules.yaml', 'deploy/helm/aber/files/grafana-alerting/alert-rules.yaml'],
+      'uid: aber-digital-thread-partitions', 'deleteRules drops the old rule from a Grafana that loaded it'],
   ];
 
   const THIS_FILE = 'scripts/check-docs-drift.mjs';
