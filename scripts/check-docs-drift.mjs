@@ -41,6 +41,18 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 /** Every markdown file in the repository. Derived, so deleting one moves no check. */
 const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 
+/** Whether .gitignore's own patterns, read the way git reads them, ignore a path. Negations only
+ *  re-include, so they are skipped. */
+const IGNORED = read('.gitignore').split('\n').map((l) => l.trim())
+  .filter((l) => l && !l.startsWith('#') && !l.startsWith('!'))
+  .map((l) => {
+    const anchored = l.replace(/\/$/, '').includes('/');
+    const body = l.replace(/^\//, '').replace(/\/$/, '').split('**/').map((part) =>
+      part.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')).join('(?:.*/)?');
+    return new RegExp(`${anchored ? '^' : '(?:^|/)'}${body}(?:/|$)`);
+  });
+const gitignored = (path) => IGNORED.some((p) => p.test(path));
+
 // -------------------------------------------------------------------------------------------------
 // 1. Every local markdown link resolves.
 // -------------------------------------------------------------------------------------------------
@@ -2737,7 +2749,7 @@ function edgeFunctionNames() {
 // top-level directories that ends in a file extension or `/`. A bare two-part name such as
 // `supabase/postgres` or `deploy/ingestion` is an image or a kubectl resource more often than a
 // directory, so it is not read. A gitignored path (`values-local.yaml`, `frontend/dist/`) is
-// absent from the tree by design.
+// absent from the tree by design, so it is neither checked when cited nor read for citations.
 //
 // A DELIBERATE MENTION OF A DEAD PATH IS ALLOWED, and has to say so on its own line: a line
 // carrying "deleted", "retired", "removed", "replaced", "gone", "former" or "proposed" is history
@@ -2759,6 +2771,7 @@ function edgeFunctionNames() {
   const scanned = allFiles.filter(
     (f) =>
       !EXEMPT.includes(f) &&
+      !gitignored(f) &&
       !/(^|\/)\.(?:git|docker)ignore$/.test(f) &&
       !f.startsWith('supabase/migrations/archive/') &&
       !f.startsWith('frontend/dist/') &&
@@ -2772,15 +2785,6 @@ function edgeFunctionNames() {
     .map((e) => e.name.replace(/\./g, '\\.'));
   const REPO_PATH = new RegExp(String.raw`(?<![\w./@:$~-])((?:\.{1,2}/)*(?:${TOP.join('|')})/[\w.@/-]*)`, 'g');
   const SCRIPT_PATH = /((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g;
-  // .gitignore's own patterns, read the way git reads them; negations only re-include, so skipped.
-  const IGNORED = read('.gitignore').split('\n').map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#') && !l.startsWith('!'))
-    .map((l) => {
-      const anchored = l.replace(/\/$/, '').includes('/');
-      const body = l.replace(/^\//, '').replace(/\/$/, '').split('**/').map((part) =>
-        part.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')).join('(?:.*/)?');
-      return new RegExp(`${anchored ? '^' : '(?:^|/)'}${body}(?:/|$)`);
-    });
 
   const dead = [];
   let citations = 0;
@@ -2799,7 +2803,7 @@ function edgeFunctionNames() {
       for (const path of cited) {
         citations += 1;
         const bare = posix.normalize(path).replace(/\/$/, '');
-        if (IGNORED.some((p) => p.test(bare))) continue;
+        if (gitignored(bare)) continue;
         const candidates = [posix.normalize(posix.join(here, path))];
         if (!path.startsWith('../')) {
           candidates.push(bare);
@@ -2989,8 +2993,8 @@ function edgeFunctionNames() {
 //
 // A KEPT phrase exempts the paragraph that holds it (the lines between blank lines, or one list
 // item), not the file, so a stale use elsewhere in the same file is still caught. A KEPT entry
-// that exempts nothing fails, so the list shrinks with the tree. A migration filename is not
-// scanned: it records what the change was.
+// that exempts nothing fails, so the list shrinks with the tree. A gitignored file is not read,
+// and a migration filename is not scanned: it records what the change was.
 // -------------------------------------------------------------------------------------------------
 {
   /** [an example of the old name, the pattern that finds it, what it is now]. */
@@ -3098,6 +3102,7 @@ function edgeFunctionNames() {
   const scanned = allFiles.filter(
     (f) =>
       f !== THIS_FILE &&
+      !gitignored(f) &&
       !f.startsWith('frontend/dist/') &&
       !f.startsWith('.claude/') &&
       !f.startsWith('backups/') &&
