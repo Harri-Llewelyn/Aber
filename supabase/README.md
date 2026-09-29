@@ -71,7 +71,7 @@ on every boot while `0098` dropped it again.
 3. **A file that creates a function states its own `REVOKE ALL ON FUNCTION … FROM PUBLIC, anon`**
    rather than leaning on `0001`'s sweeper. The sweeper runs earlier in the same boot, so it
    corrects the ACL one boot late — the first-boot window described in
-   [the anon sweep](#the-anon-sweep-runs-after-the-functions-exist-0009-0071).
+   [the anon sweep](#the-anon-sweep-runs-after-the-functions-exist-archived-migrations-0009-and-0071).
 4. **No file re-asserts an absolute set that a later file widens.** A `CHECK` naming every legal
    value, or a self-check counting every expected permission, is correct on the boot it is written
    and wrong on the first boot after something is added.
@@ -272,7 +272,7 @@ have caught:
 
 See [`migrations/archive/README.md`](migrations/archive/README.md).
 
-### Dropping a `gateways` column (0004)
+### Dropping a `gateways` column (archived migration 0004)
 
 `ip_address` was captured on the gateway form and on quarantine approval, and shown as a column,
 but nothing ever acted on it: not in the search haystack, no view or function derived anything
@@ -318,7 +318,7 @@ while every existing database kept working, because `CREATE TABLE IF NOT EXISTS`
 > `ensure_gateway_status_view()`, because `CREATE OR REPLACE VIEW` cannot widen a `g.*` view in
 > place.
 
-### Audit signal and attribution (0005)
+### Audit signal and attribution (archived migration 0005)
 
 On a stack running **one** simulated gateway and **one** device, `digital_thread` was taking
 **175 rows/hour**, of which 123 in the first hour had `changed_by IS NULL`:
@@ -384,7 +384,7 @@ already used. `gateways.last_heartbeat` is deliberately **not** deduplicated for
 `public.gateway_status` derives staleness from it, so a suppressed heartbeat would report a live
 gateway as `STALE`.
 
-### Metric catalog standards seed (0018)
+### Metric catalog standards seed (archived migration 0018)
 
 `metric_catalog` is **curated, not accreted**: `ingestion.py` contains no reference to it at all,
 and the only insert path is the operator-facing form behind `POST /api/v1/metric-catalog`. Good
@@ -485,7 +485,7 @@ ids back in a rolled-back transaction and holds `0016` to clearing them, recordi
 way, keeping an id an Administrator set, writing nothing on a replay, and naming a metric its
 self-check finds.
 
-### Metric name format (0007)
+### Metric name format (archived migration 0007)
 
 Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics
 and the underscore: `^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$`. `.` is not a legal character.
@@ -517,7 +517,7 @@ keep-in-step obligation `deriveMetricGroup()` and `utils/sparkplugId.js` carry.
 
 All 15 seeded catalog names conform, so the constraint validates cleanly on a fresh database.
 
-### The Sparkplug group is part of the address (0008)
+### The Sparkplug group is part of the address (archived migration 0008)
 
 Ingestion parsed `spBv1.0/<group>/<type>/<node>/<device>` and **never read the group**, so two
 groups publishing the same edge node id resolved to one row — silently, each group's telemetry
@@ -1082,7 +1082,7 @@ page resolves a device's schema through them. `TestTheRpcsDoNotGoAroundThePolicy
 manager refused, and the administrator still able to fork and publish, because a fix that only
 broke the function would pass the first assertion alone.
 
-### The anon sweep runs after the functions exist (`0009`, `0071`)
+### The anon sweep runs after the functions exist (archived migrations 0009 and 0071)
 
 `0009` revokes EXECUTE from `PUBLIC` and `anon` on every function in `public`, restoring only what
 `authenticated` and `service_role` already held. **It runs at position nine.**

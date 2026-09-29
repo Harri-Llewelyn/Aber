@@ -670,8 +670,8 @@ function edgeFunctionNames() {
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
     // so every function appears in it exactly once, in its final form. Entries return as soon as
     // a migration added after the fold redeclares something the baseline holds, and each one
-    // records WHY that replacement is meant. See README.md, "There is no 0017", for the case
-    // where an unrecorded one would have regressed audit attribution.
+    // records WHY that replacement is meant. The README.md note "The archive has no 0017" is the
+    // case where an unrecorded one would have regressed audit attribution.
 
     // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
     // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
@@ -777,8 +777,8 @@ function edgeFunctionNames() {
     fail(
       'Every migration is replayed on every boot in filename order and there is no applied-migrations\n' +
         '      ledger, so the LAST declaration wins -- silently, with no error. A redeclaration is fine when\n' +
-        '      it is meant; record it in INTENDED_REDECLARATIONS with the reason. See README.md, "There is\n' +
-        '      no 0017", for the case where an unrecorded one would have regressed audit attribution.'
+        '      it is meant; record it in INTENDED_REDECLARATIONS with the reason. The README.md note "The\n' +
+        '      archive has no 0017" is the case where an unrecorded one would have regressed audit attribution.'
     );
   } else {
     pass(`${seen.size} function(s) declared across the chain; all ${Object.keys(INTENDED_REDECLARATIONS).length} redeclarations are recorded as intended`);
