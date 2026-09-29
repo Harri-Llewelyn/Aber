@@ -3,7 +3,7 @@ import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
 import { useTheme } from './hooks/useTheme'
-import { useToast } from './hooks/useToast'
+import { useToast, clearStoredHistory } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
@@ -52,6 +52,7 @@ import {
 
 import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
+import { NotificationHistory } from './components/common/NotificationHistory'
 import { HelpPanel } from './components/common/HelpPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { useNavSignals } from './hooks/useNavSignals'
@@ -444,7 +445,7 @@ function Dashboard({ session, onSignOut }) {
     return showDevice(proposal.entity_id)
   }
   const { theme, toggleTheme } = useTheme()
-  const { toasts, showToast, expireToast, dismissToast } = useToast()
+  const { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory } = useToast()
   const { mode: sidebarMode, setMode: setSidebarMode } = useSidebarMode()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
@@ -540,8 +541,9 @@ function Dashboard({ session, onSignOut }) {
           onSelectThread={(id) => viewThreadFor(id, '')}
         />
 
-        {/* The right-hand side holds the one control whose value moves, the alert pill, plus the
-            doors to everything else. Standing preferences live in the account menu. */}
+        {/* The right-hand side holds the two controls whose values move, the alert pill and the
+            notification bell, plus the doors to everything else. Standing preferences live in the
+            account menu. */}
         <div className="topbar-right">
           {/* A device alert goes to Devices and a gateway alert to Gateways, chosen by the alert's
               declared scope rather than its id prefix, through the same helpers every other surface
@@ -552,8 +554,12 @@ function Dashboard({ session, onSignOut }) {
             onSelectGateway={showGateway}
           />
 
-          {/* A discovery aid rather than a preference, so it stays in the bar. Beside the alert
-              glyph because the avatar must stay the last thing in the bar. */}
+          {/* What the toasts said, beside what is wrong now and separate from it: the pill's count
+              is a reason to act, and this list holds resolved and routine messages too. */}
+          <NotificationHistory entries={history} onMarkRead={markAllRead} onClear={clearHistory} />
+
+          {/* A discovery aid rather than a preference, so it stays in the bar, ahead of the avatar,
+              which must stay the last thing in it. */}
           <button
             className="topbar-icon-button"
             onClick={() => setShowShortcuts(true)}
@@ -734,6 +740,13 @@ export default function App() {
       subscription.unsubscribe()
     }
   }, [])
+
+  /* The notification history is one person's. It goes whenever the tab is left without a session,
+     whether by Sign Out, a sign-out from another tab or a rejected stored session, so the next
+     person to sign in here starts with an empty list. */
+  useEffect(() => {
+    if (!loading && !session) clearStoredHistory()
+  }, [loading, session])
 
   // OAuth consent, checked before the loading and auth branches. GoTrue redirects here from
   // /oauth/authorize because it ships no consent UI. The page reads the session itself and must not

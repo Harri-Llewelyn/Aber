@@ -1,16 +1,20 @@
 import React from 'react'
-import { render, screen, fireEvent, act, within } from '@testing-library/react'
+import { render, renderHook, screen, fireEvent, act, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   Toast, ToastStack, toastDuration,
   TOAST_MIN_MS, TOAST_MAX_MS, TOAST_NOTICE_MS, TOAST_MS_PER_CHAR, TOAST_RESUME_MIN_MS
 } from '../components/common/Toast'
-import { useToast, MAX_VISIBLE_TOASTS } from '../hooks/useToast'
+import {
+  useToast, readStoredHistory, clearStoredHistory,
+  HISTORY_LIMIT, HISTORY_STORAGE_KEY, MAX_VISIBLE_TOASTS
+} from '../hooks/useToast'
 
 /**
- * The toast. What is pinned: each toast owns its timer, so a second one never inherits what was
- * left of the first; how long a toast stays depends on its type and length, and an error stays
- * until dismissed; hover and focus hold it; and both live regions exist before any message arrives.
+ * The toast and the history behind it. What is pinned: each toast owns its timer, so a second one
+ * never inherits what was left of the first; how long a toast stays depends on its type and length,
+ * and an error stays until dismissed; hover and focus hold it; both live regions exist before any
+ * message arrives; and every `showToast` call lands in a capped, per-tab history.
  */
 
 let hook
@@ -250,5 +254,133 @@ describe('announcement', () => {
     render(<Toast id={7} msg="Saved" type="success" onExpire={onExpire} />)
     advance(TOAST_MIN_MS.success)
     expect(onExpire).toHaveBeenCalledWith(7)
+  })
+})
+
+describe('the history useToast keeps', () => {
+  it('records every showToast call, newest first and unread', () => {
+    const { result } = renderHook(() => useToast())
+    act(() => { result.current.showToast('Saved', 'success') })
+    act(() => { result.current.showToast('Save failed', 'error') })
+
+    const [newest, older] = result.current.history
+    expect(newest).toMatchObject({ msg: 'Save failed', type: 'error', read: false, count: 1 })
+    expect(older).toMatchObject({ msg: 'Saved', type: 'success', read: false })
+    expect(typeof newest.id).toBe('number')
+    expect(newest.id).not.toBe(older.id)
+    expect(newest.at).toBe(Date.now())
+  })
+
+  it(`keeps the latest ${HISTORY_LIMIT}`, () => {
+    const { result } = renderHook(() => useToast())
+    act(() => {
+      for (let i = 1; i <= HISTORY_LIMIT + 5; i++) result.current.showToast(`message ${i}`, 'success')
+    })
+    expect(result.current.history).toHaveLength(HISTORY_LIMIT)
+    expect(result.current.history[0].msg).toBe(`message ${HISTORY_LIMIT + 5}`)
+    expect(result.current.history.at(-1).msg).toBe('message 6')
+  })
+
+  it('counts a repeat of the newest entry on it rather than adding another', () => {
+    const { result } = renderHook(() => useToast())
+    act(() => { result.current.showToast('Refresh failed', 'error') })
+    act(() => { result.current.showToast('Refresh failed', 'error') })
+    act(() => { result.current.showToast('Refresh failed', 'error') })
+    expect(result.current.history).toHaveLength(1)
+    expect(result.current.history[0].count).toBe(3)
+
+    // Not consecutive, or not the same type: a new entry.
+    act(() => { result.current.showToast('Saved', 'success') })
+    act(() => { result.current.showToast('Refresh failed', 'error') })
+    expect(result.current.history.map(e => e.msg)).toEqual(['Refresh failed', 'Saved', 'Refresh failed'])
+  })
+
+  it('treats dismissing a toast as reading it, and a timeout as not', () => {
+    const { result } = renderHook(() => useToast())
+    act(() => { result.current.showToast('Saved', 'success') })
+    act(() => { result.current.showToast('Save failed', 'error') })
+    const [failed, saved] = result.current.history
+
+    act(() => { result.current.expireToast(saved.id) })
+    act(() => { result.current.dismissToast(failed.id) })
+
+    expect(result.current.toasts).toEqual([])
+    expect(result.current.history.find(e => e.id === failed.id).read).toBe(true)
+    expect(result.current.history.find(e => e.id === saved.id).read).toBe(false)
+  })
+
+  it('marks everything read, and clears', () => {
+    const { result } = renderHook(() => useToast())
+    act(() => { result.current.showToast('one', 'success') })
+    act(() => { result.current.showToast('two', 'warning') })
+    act(() => { result.current.markAllRead() })
+    expect(result.current.history.every(e => e.read)).toBe(true)
+
+    act(() => { result.current.clearHistory() })
+    expect(result.current.history).toEqual([])
+    expect(window.sessionStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull()
+  })
+
+  it('records an unknown type as info', () => {
+    const { result } = renderHook(() => useToast())
+    act(() => { result.current.showToast('Heads up', 'notice') })
+    expect(result.current.history[0].type).toBe('info')
+    expect(result.current.toasts[0].type).toBe('info')
+  })
+
+  it('survives a reload through sessionStorage, and carries on numbering after it', () => {
+    const first = renderHook(() => useToast())
+    act(() => { first.result.current.showToast('Saved', 'success') })
+    act(() => { first.result.current.showToast('Cap reached', 'warning') })
+    const ids = first.result.current.history.map(e => e.id)
+    first.unmount()
+
+    const stored = JSON.parse(window.sessionStorage.getItem(HISTORY_STORAGE_KEY))
+    expect(stored.map(e => e.msg)).toEqual(['Cap reached', 'Saved'])
+    // Message text and its bookkeeping, nothing else.
+    expect(Object.keys(stored[0]).sort()).toEqual(['at', 'count', 'id', 'msg', 'read', 'type'])
+
+    const second = renderHook(() => useToast())
+    expect(second.result.current.history.map(e => e.msg)).toEqual(['Cap reached', 'Saved'])
+    // Toasts are not replayed: only the history comes back.
+    expect(second.result.current.toasts).toEqual([])
+    act(() => { second.result.current.showToast('Again', 'success') })
+    expect(ids).not.toContain(second.result.current.history[0].id)
+  })
+
+  it('ignores a stored value it did not write', () => {
+    window.sessionStorage.setItem(HISTORY_STORAGE_KEY, '{not json')
+    expect(readStoredHistory()).toEqual([])
+
+    window.sessionStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify({ msg: 'not a list' }))
+    expect(readStoredHistory()).toEqual([])
+
+    window.sessionStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify([
+      { id: 1, msg: 'kept', type: 'success', at: 1 },
+      { id: 2, msg: 42, type: 'success', at: 2 },
+      { id: 3, msg: 'bad type', type: 'shout', at: 3 },
+      null
+    ]))
+    expect(readStoredHistory()).toEqual([{ id: 1, msg: 'kept', type: 'success', at: 1, read: false, count: 1 }])
+  })
+
+  it('carries on in memory when storage throws', () => {
+    const blocked = () => { throw new DOMException('blocked', 'SecurityError') }
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked)
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(blocked)
+
+    const { result } = renderHook(() => useToast())
+    act(() => { result.current.showToast('Saved', 'success') })
+    expect(result.current.history.map(e => e.msg)).toEqual(['Saved'])
+    act(() => { result.current.clearHistory() })
+    expect(result.current.history).toEqual([])
+    expect(() => clearStoredHistory()).not.toThrow()
+  })
+
+  it('clearStoredHistory removes what a session left behind', () => {
+    window.sessionStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify([{ id: 1, msg: 'x', type: 'info', at: 1 }]))
+    clearStoredHistory()
+    expect(window.sessionStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull()
   })
 })

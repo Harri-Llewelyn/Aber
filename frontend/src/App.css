@@ -315,9 +315,9 @@ html, body, #root {
 .topbar-icon-button:hover { color: var(--accent); border-color: var(--accent); }
 .topbar-icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* THE ONLY TOPBAR CONTROL WITH A LIT STATE, because it is the only one that toggles something that
-   stays open. Without it the drawer can be closed by clicking anywhere else, leaving a button that
-   looks identical whether pressing it will open help or close it. */
+/* The lit state of a square bar control whose layer is open: the help drawer, and the notification
+   list while it is showing. Without it the drawer can be closed by clicking anywhere else, leaving
+   a button that looks identical whether pressing it will open help or close it. */
 .topbar-icon-button-active {
   color: var(--accent);
   border-color: var(--accent);
@@ -336,8 +336,9 @@ html, body, #root {
   height: 28px;
   padding: 0;
   flex-shrink: 0;
-  /* No fill: the shortcuts key, the help key and the resting alert pill all sit on the bar's own
-     ground, and this is one row of four controls. Round is what marks it as the identity control. */
+  /* No fill: the bell, the shortcuts key, the help key and the resting alert pill all sit on the
+     bar's own ground, and this is one row of five controls. Round is what marks it as the identity
+     control. */
   background: none;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -2784,6 +2785,179 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 }
 
 .alert-pill-foot {
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* The top bar's notification history: the bell, its unread badge and the list behind it. See
+   NotificationHistory.jsx. The wrapper anchors the panel to the bell, as .alert-pill-wrap does. */
+.notif-wrap { position: relative; display: flex; }
+.notif-button { position: relative; }
+
+/* The unread count on the bell's corner. Opaque, with each tone painted as a background-image
+   over --bg-card, so the ratios measured for the toasts hold here too. A routine success keeps the
+   neutral base: the tones are spent on what is worth opening the list for. */
+.notif-badge {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.notif-badge-info {
+  background-image: linear-gradient(rgba(0, 212, 255, 0.15), rgba(0, 212, 255, 0.15));
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.notif-badge-warning {
+  background-image: linear-gradient(rgba(255, 179, 0, 0.15), rgba(255, 179, 0, 0.15));
+  border-color: var(--warning);
+  color: var(--warning-text);
+}
+
+.notif-badge-error {
+  background-image: linear-gradient(rgba(255, 77, 109, 0.15), rgba(255, 77, 109, 0.15));
+  border-color: var(--danger);
+  color: var(--danger-text);
+}
+
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: 440px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* Focused programmatically as it opens, so a screen reader announces it; the ring would only
+   outline the whole panel. */
+.notif-panel:focus { outline: none; }
+
+/* Sticky, so Clear and Close stay in reach at the bottom of fifty entries. */
+.notif-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.notif-panel-actions { display: flex; align-items: center; gap: 4px; }
+
+.notif-clear {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.notif-clear:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.notif-clear:disabled { opacity: 0.5; cursor: default; }
+
+.notif-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.notif-close:hover { color: var(--text-primary); background: var(--bg-glass); }
+
+.notif-clear:focus-visible,
+.notif-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.notif-empty {
+  padding: 22px 18px 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notif-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 8px 0 2px;
+}
+
+.notif-list { list-style: none; margin: 0; padding: 0; }
+
+.notif-item {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notif-item:last-child { border-bottom: none; }
+
+/* The type's glyph in its signal colour, the icon tone each of these clears 3:1 in. */
+.notif-item-icon { display: flex; flex-shrink: 0; margin-top: 2px; }
+.notif-item-success .notif-item-icon { color: var(--success); }
+.notif-item-info .notif-item-icon    { color: var(--accent); }
+.notif-item-warning .notif-item-icon { color: var(--warning); }
+.notif-item-error .notif-item-icon   { color: var(--danger); }
+
+.notif-item-body { flex: 1; min-width: 0; }
+
+.notif-item-msg {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.notif-item-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+.notif-foot {
   padding: 9px 12px;
   border-top: 1px solid var(--border);
   font-size: 11px;
