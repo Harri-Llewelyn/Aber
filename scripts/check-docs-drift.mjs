@@ -2724,39 +2724,63 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 17. Every script path named anywhere in the tree names a script that exists.
+// 17. Every repository path named anywhere in the tree names a path that exists.
 //
 // A comment citing a deleted script is the shape #339 went looking for: internally coherent,
 // naming a real-looking path, and false. A reader auditing a coupling follows the pointer, finds
 // nothing, and cannot tell whether the guard moved or was dropped. Seven live files named
 // `scripts/check-image-tag-parity.mjs` when this check was written; it had gone with the second
 // deployment target, and four of the seven were the only statement of a coupling that still
-// mattered.
+// mattered. Two comments went on citing migrations by their path after the chain was archived.
 //
-// A DELIBERATE MENTION OF A DEAD SCRIPT IS ALLOWED, and has to say so on its own line: a line
-// carrying "deleted", "retired", "removed", "replaced" or "gone" is history rather than a
-// pointer. That is the whole exemption, so a stale citation cannot hide behind a file's reputation.
-// The two records that are history by definition are exempt wholesale -- `docs/incidents.md`,
-// where naming the script an incident happened to is the point, and `supabase/migrations/archive/`,
-// which is never executed. `backups/` is gitignored and holds artefacts, not prose.
+// WHAT IS A CITATION: a script path however it is rooted, and a path under one of the repository's
+// top-level directories that ends in a file extension or `/`. A bare two-part name such as
+// `supabase/postgres` or `deploy/ingestion` is an image or a kubectl resource more often than a
+// directory, so it is not read. A gitignored path (`values-local.yaml`, `frontend/dist/`) is
+// absent from the tree by design.
 //
-// A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `./` or `../` against the
-// citing file's own directory; anything else against the repository root and then against each
-// directory above the citing file, because a path can be written relative to a root that is not
-// this repository's -- a Helm template names `files/scripts/...` relative to the chart.
+// A DELIBERATE MENTION OF A DEAD PATH IS ALLOWED, and has to say so on its own line: a line
+// carrying "deleted", "retired", "removed", "replaced", "gone", "former" or "proposed" is history
+// rather than a pointer. That is the whole exemption, so a stale citation cannot hide behind a
+// file's reputation. Exempt wholesale: `docs/incidents.md`, where naming the path an incident
+// happened to is the point; `docs/roadmap.md` and `docs/postgres-17-migration-plan.md`, the
+// records of what retired; `supabase/migrations/archive/`, which is never executed; and
+// `supabase/config.toml`, the Supabase CLI's stock file.
+//
+// A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `../` against the citing
+// file's own directory; anything else against it, the repository root and each directory above
+// the citing file, because a path can be written relative to a root that is not this repository's
+// -- a Helm template names `files/scripts/...` relative to the chart. Last, as the tail of a path
+// in the tree: a layout drawn relative to `templates/` names `supabase/realtime-service.yaml`.
 // -------------------------------------------------------------------------------------------------
 {
-  const PAST = /\b(deleted|retired|removed|replaced|gone|superseded)\b/i;
-  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md'];
+  const PAST = /\b(deleted|retired|removed|replaced|gone|superseded|former|formerly|proposed)\b/i;
+  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md', 'docs/postgres-17-migration-plan.md', 'supabase/config.toml'];
   const scanned = allFiles.filter(
     (f) =>
       !EXEMPT.includes(f) &&
+      !/(^|\/)\.(?:git|docker)ignore$/.test(f) &&
       !f.startsWith('supabase/migrations/archive/') &&
       !f.startsWith('frontend/dist/') &&
       !f.startsWith('.claude/') &&
       !f.startsWith('backups/') &&
       !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
   );
+
+  const TOP = readdirSync(REPO, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !['.git', 'node_modules'].includes(e.name))
+    .map((e) => e.name.replace(/\./g, '\\.'));
+  const REPO_PATH = new RegExp(String.raw`(?<![\w./@:$~-])((?:\.{1,2}/)*(?:${TOP.join('|')})/[\w.@/-]*)`, 'g');
+  const SCRIPT_PATH = /((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g;
+  // .gitignore's own patterns, read the way git reads them; negations only re-include, so skipped.
+  const IGNORED = read('.gitignore').split('\n').map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#') && !l.startsWith('!'))
+    .map((l) => {
+      const anchored = l.replace(/\/$/, '').includes('/');
+      const body = l.replace(/^\//, '').replace(/\/$/, '').split('**/').map((part) =>
+        part.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')).join('(?:.*/)?');
+      return new RegExp(`${anchored ? '^' : '(?:^|/)'}${body}(?:/|$)`);
+    });
 
   const dead = [];
   let citations = 0;
@@ -2767,33 +2791,38 @@ function edgeFunctionNames() {
     const here = posix.dirname(file);
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i += 1) {
-      for (const m of lines[i].matchAll(/((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g)) {
-        const cited = m[1];
+      const cited = new Set([...lines[i].matchAll(SCRIPT_PATH)].map((m) => m[1]));
+      for (const m of lines[i].matchAll(REPO_PATH)) {
+        const path = m[1].replace(/\.+$/, '');
+        if (path.endsWith('/') || /\.\w+$/.test(path.split('/').pop())) cited.add(path);
+      }
+      for (const path of cited) {
         citations += 1;
-        const candidates = [];
-        if (/^\.{1,2}\//.test(cited)) {
-          candidates.push(posix.normalize(posix.join(here, cited)));
-        } else {
-          candidates.push(cited);
+        const bare = posix.normalize(path).replace(/\/$/, '');
+        if (IGNORED.some((p) => p.test(bare))) continue;
+        const candidates = [posix.normalize(posix.join(here, path))];
+        if (!path.startsWith('../')) {
+          candidates.push(bare);
           for (let d = here; d !== '.' && d !== '/'; d = posix.dirname(d)) {
-            candidates.push(posix.normalize(posix.join(d, cited)));
+            candidates.push(posix.normalize(posix.join(d, path)));
           }
         }
         if (candidates.some((c) => existsSync(join(REPO, c)))) continue;
+        if (allFiles.some((f) => `/${f}`.endsWith(`/${bare}`) || `/${f}`.includes(`/${bare}/`))) continue;
         if (PAST.test(lines[i])) continue;
-        dead.push(`${file}:${i + 1} cites ${cited}, which does not exist`);
+        dead.push(`${file}:${i + 1} cites ${path}, which does not exist`);
       }
     }
   }
 
   if (dead.length) {
     fail(
-      'a comment or document cites a script that is not in the tree:\n' +
+      'a comment or document cites a path that is not in the tree:\n' +
         [...new Set(dead)].map((d) => `        ${d}`).join('\n') +
-        '\n        (if the script is deliberately gone, say so on the same line)'
+        '\n        (if the path is deliberately gone, say so on the same line)'
     );
   } else {
-    pass(`all ${citations} script citation(s) name a script that exists`);
+    pass(`all ${citations} repository path citation(s) name a path that exists`);
   }
 }
 

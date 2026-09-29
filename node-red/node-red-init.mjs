@@ -370,7 +370,7 @@ const SETTINGS_JS = `/**
  *                          that deploy-nodered forwards from the operator who triggered it.
  *   httpNodeAuth        -- the http-in nodes (POST /hooks/quarantine). adminAuth does NOT
  *                          cover these: they mount under httpNodeRoot, a separate Express
- *                          mount (node-red/red.js:426), which is why the webhook stayed open
+ *                          mount (Node-RED's red.js:426), which is why the webhook stayed open
  *                          in every design that only set adminAuth.
  */
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});

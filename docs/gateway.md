@@ -145,8 +145,8 @@ The gateway was Kong until September 2026. Envoy replaced it because the `sb_pub
 equivalent by running the probe above against both before promotion. The legacy anon and
 service-role JWTs were accepted alongside the new pair while every consumer moved, then refused
 and Kong deleted from the chart on 2026-09-13, before any deployment existed. The migration
-protocol and its findings are in this file's git history under its former name,
-`docs/gateway-migration.md`.
+protocol and its findings are in the git history of `docs/gateway-migration.md`, this file's former
+name.
 
 Envoy kept the Kong Service's name, `supabase-kong`, until 2026-09-28. It adopted the name at
 promotion because Kubernetes has no Service aliasing, and a decision of 2026-09-11 kept it for two
