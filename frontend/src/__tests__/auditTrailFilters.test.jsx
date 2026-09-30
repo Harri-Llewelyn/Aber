@@ -42,7 +42,7 @@ const EVENTS = [
   {
     event_id: 2, entity_type: 'gateways', entity_id: 'gw-1', event_type: 'INSERT',
     timestamp: '2026-08-02T11:00:00Z', description: 'Action INSERT on gateways [gw-1]',
-    changed_by: null, actor_source: 'ingestion',
+    changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
     old_data: null, new_data: { id: 'gw-1', name: 'Host_Gateway_NodeRED', status: 'ONLINE' }
   },
   // A cell that no longer exists, which is what a DELETE means: absent from CELLS because
@@ -75,7 +75,7 @@ const EVENTS = [
   {
     event_id: 6, entity_type: 'devices', entity_id: '99999999-8888-7777-6666-555555555555',
     event_type: 'UPDATE', timestamp: '2026-08-02T07:00:00Z', description: 'Action UPDATE',
-    changed_by: null, actor_source: 'service', old_data: null, new_data: null
+    changed_by: 'service-principal-1', actor_source: 'service', old_data: null, new_data: null
   }
 ]
 const ENTITY_COUNT = new Set(EVENTS.map(e => e.entity_id)).size
@@ -462,7 +462,7 @@ describe('Audit Trail swimlanes', () => {
        by the devices lookup, so none reads as purged and hidden by default. */
     const many = Array.from({ length: 40 }, (_, i) => ({
       event_id: 100 + i, entity_type: 'devices', entity_id: `bulk-${i}`, event_type: 'UPDATE',
-      timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null, actor_source: 'service'
+      timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: 'service-principal-1', actor_source: 'service'
     }))
     const bulkDevices = Array.from({ length: 40 }, (_, i) => ({
       asset_id: `bulk-${i}`, asset_name: `Bulk_${i}`, last_birth_metrics: []
@@ -897,15 +897,26 @@ describe('Audit Trail attribution', () => {
       .toContain('Ingestion daemon')
   })
 
-  it('offers a user id only when there is one', async () => {
+  it('offers a user id on a user row and a machine identity on a machine row', async () => {
     await show()
     await selectEvent(/INSERT on Host_Gateway_NodeRED/)
-    // changed_by is NULL for every machine-originated write; an empty "Not set" row against the
-    // ingestion daemon's own change would read as a gap rather than the ordinary case it is.
     expect(screen.queryByText('User ID')).toBeNull()
+    expect(screen.getByText('Machine identity')).toBeInTheDocument()
 
     fireEvent.click(nodeFor(/UPDATE on Simulated_CNC_01/))
     await waitFor(() => expect(screen.getByText('User ID')).toBeInTheDocument())
+    expect(screen.queryByText('Machine identity')).toBeNull()
+  })
+
+  it('reads an ingestion row that names a principal as the daemon, never as a signed-in user', async () => {
+    await show()
+    await selectEvent(/INSERT on Host_Gateway_NodeRED/)
+    const drawer = document.querySelector('.context-panel') || document.body
+    expect(drawer.textContent).toContain('Ingestion daemon')
+    expect(drawer.textContent).toContain('ingestion-principal-1')
+    expect(drawer.querySelector('[title="The machine identity that made this change"]')).not.toBeNull()
+    expect(drawer.innerHTML).not.toMatch(/signed-in/i)
+    expect(drawer.textContent).not.toContain('Changed by user')
   })
 })
 
@@ -1273,7 +1284,7 @@ describe('Audit Trail — removed tag filter', () => {
       respondWith([{
         event_id: 23, entity_type: 'backups', entity_id: 'cccccccc-3333-4000-8000-000000000003',
         event_type: 'BACKUP_TAKEN', timestamp: '2026-08-02T13:41:00Z',
-        description: 'Action BACKUP_TAKEN on backups', changed_by: null, actor_source: 'service',
+        description: 'Action BACKUP_TAKEN on backups', changed_by: 'service-principal-1', actor_source: 'service',
         old_data: null, new_data: { stamp: '20260802T134100Z', origin: 'scheduled' },
       }])
       render(<AuditTrailTab />)

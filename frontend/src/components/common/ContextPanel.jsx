@@ -19,9 +19,10 @@ import { grafanaAlertUrl } from '../../constants'
  *
  * @param {node} subtitle Optional line under the title.
  *
- * @param {Array} fields [{ label, value, mono?, copyable?, title?, help?, full?, danger? }].
- * `copyable` renders a CopyableId; `danger` colours the value only; `help` puts a HelpTip beside
- * the label, for a field whose name does not say what it is for.
+ * @param {Array} fields [{ label, value, display?, mono?, copyable?, title?, help?, full?, danger? }].
+ * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger`
+ * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
+ * not say what it is for.
  *
  * @param {Array} actions [{ label, icon, onClick, href?, disabled?, title?, primary?, pending?,
  * pendingLabel? }]. `pending` puts that one action into the in-flight state.
@@ -142,7 +143,7 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                       /* Every identifier is copyable: this is where a UUID or topic path leaves the
                          app. `copyable-id-wrap` because a truncated identifier is useless. */
                       : f.copyable
-                        ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} title={f.title} onNotify={onCopy} className="copyable-id-wrap" />
+                        ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} title={f.title} onNotify={onCopy} display={f.display} className="copyable-id-wrap" />
                         : f.value}
                   </dd>
                 </div>

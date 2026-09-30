@@ -25,7 +25,7 @@ const DEVICES = [
 /** Three changes to one device an hour apart, and one to another so the lane is not the page. */
 const change = (event_id, entity_id, timestamp, status) => ({
   event_id, entity_type: 'devices', entity_id, event_type: 'UPDATE', timestamp,
-  description: `Action UPDATE on devices [${entity_id}]`, changed_by: null, actor_source: 'ingestion',
+  description: `Action UPDATE on devices [${entity_id}]`, changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
   old_data: { status: 'OFFLINE' }, new_data: { status }
 })
 const EVENTS = [
