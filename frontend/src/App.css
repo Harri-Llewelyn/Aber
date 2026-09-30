@@ -73,7 +73,7 @@
      not a number picked to win.
        1-5    inside one component (a sticky header, a marker on a plan, a timeline node)
        60     the alert and notification panels, anchored under the topbar
-       90     the sidebar, and the context panel when it is a drawer below 1100px (they sit on
+       90     the sidebar, and the context panel when it is a drawer below 800px (they sit on
               opposite edges, so the tie never overlaps)
        100    the topbar
        200    a popover under the topbar: the user menu, global search, the sidebar mode menu
@@ -1048,6 +1048,10 @@ html, body, #root {
 }
 
 .page-fill > .page-main > * { flex-shrink: 0; }
+
+/* Two cards in a row are a stack apart. A page heading and a page banner carry their own bottom
+   margin, so this is on card-after-card only, never a flex gap on the whole column. */
+.page-fill > .page-main > .card + .card { margin-top: var(--stack); }
 
 .page-fill > .page-main > .card-fill {
   flex-shrink: 1;
@@ -3470,7 +3474,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The app-level drawer, which is the help panel. It is a sibling of `.content` rather than inside
    `.page-layout`, so there is no scrolling ancestor for `position: sticky`; it takes the full
    height of the body and scrolls inside itself. Single-class specificity on purpose, placed above
-   the 1100px block so the overlay treatment still wins on a narrow viewport. */
+   the 800px block so the overlay treatment still wins on a narrow viewport. */
 .context-panel-app {
   position: relative;
   top: auto;
@@ -3545,7 +3549,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* Below this the drawer would leave the table too little room to be worth reading. It becomes an
    overlay instead -- still not modal, still dismissible, but no longer stealing half the list. */
-@media (max-width: 1100px) {
+/* Below 800px there is no room for the drawer beside the list, so it slides over the page. Above
+   that it keeps its column: at half a 1080p screen the list still gets about 540px beside it. */
+@media (max-width: 800px) {
   .context-panel-open {
     position: fixed;
     top: 52px;
@@ -3561,6 +3567,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     z-index: 90;
   }
   .context-panel-inner {
+    /* The desktop width would leave the overlay's extra width as an empty strip on the right. */
+    width: 100%;
     max-height: none;
     height: 100%;
     border-radius: 0;
@@ -4729,9 +4737,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* ===== Devices ===== */
-/* The Quarantine queue card, always the first card; the gap keeps it off the roster below. */
-.queue-card { margin-bottom: var(--stack); }
-
 /* A badge that follows a name in the same cell. */
 .cell-tag { margin-left: 8px; }
 

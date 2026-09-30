@@ -382,7 +382,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
         {/* Playback in a card of its own, above capture: it writes into the historian under a
             gateway's identity. It keeps its height; the Capture card below gives way. */}
-        <div className="card" style={{ marginBottom: 'var(--stack)' }}>
+        <div className="card">
           <div className="card-header">
             <h3 className="section-title">
               Playback

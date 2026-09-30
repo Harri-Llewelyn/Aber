@@ -42,6 +42,12 @@ describe('the page-fill rules', () => {
     expect(ruleFor('.page-fill > .page-main > .card-fill')).toMatch(/min-height:\s*0/)
   })
 
+  it('keep two cards in a row a stack apart, without a flex gap that would double the heading margin', () => {
+    // Cold Storage, Archived Entities, Capture and Devices stack a second card under the first.
+    expect(ruleFor('.page-fill > .page-main > .card + .card')).toMatch(/margin-top:\s*var\(--stack\)/)
+    expect(ruleFor('.page-fill > .page-main')).not.toMatch(/\bgap:/)
+  })
+
   it('make the card a column whose scroller alone shrinks and scrolls', () => {
     expect(ruleFor('.card-fill')).toMatch(/flex-direction:\s*column/)
     expect(ruleFor('.card-fill > *')).toMatch(/flex-shrink:\s*0/)
