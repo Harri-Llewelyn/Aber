@@ -1587,9 +1587,8 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
 }
 
-.semantic-id-picker-option:hover,
-.semantic-id-picker-option:focus-visible { background: var(--bg-glass); }
-.semantic-id-picker-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.semantic-id-picker-option:hover { background: var(--bg-glass); }
+.semantic-id-picker-option:focus-visible { background: var(--bg-glass); outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .semantic-id-picker-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
@@ -1982,6 +1981,7 @@ tbody tr:hover { background: var(--bg-glass); }
   text-align: left;
   cursor: pointer;
   transition: var(--transition);
+  --thumb-max-height: 260px;
 }
 
 .area-thumb:hover {
@@ -2080,13 +2080,9 @@ tbody tr:hover { background: var(--bg-glass); }
   .shopfloor-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* A plan is at most --thumb-max-height tall: a tall plan is a narrow column in its card rather
-   than a card the height of the page. It grows as the grid narrows, because the pins on it have
-   to stay apart at the spacing the database enforces. */
-.area-thumb {
-  --thumb-max-height: 260px;
-}
-
+/* A plan is at most --thumb-max-height tall (260px on .area-thumb): a tall plan is a narrow column
+   in its card rather than a card the height of the page. It grows as the grid narrows, because the
+   pins on it have to stay apart at the spacing the database enforces. */
 .shopfloor-grid[style*="--map-columns: 2"] .area-thumb { --thumb-max-height: 340px; }
 .shopfloor-grid[style*="--map-columns: 1"] .area-thumb { --thumb-max-height: 440px; }
 
@@ -2610,6 +2606,7 @@ tbody tr:hover { background: var(--bg-glass); }
   color: inherit;
   font-family: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition: var(--transition);
 }
@@ -2617,11 +2614,8 @@ tbody tr:hover { background: var(--bg-glass); }
 .alert-pill-item-link:hover { background: var(--bg-glass); }
 .alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* No underline; the colour carries the affordance. Two variants render this class, a <button> for
-   an asset alert and an <a> for a platform alert that opens Grafana, and only the anchor picked up
-   the browser underline. The title takes the accent, as .endpoint-open does; the summary and meta
-   keep their muted colours. */
-.alert-pill-item-link { text-decoration: none; }
+/* An <a> for a platform alert that opens Grafana: the title takes the accent, as .endpoint-open
+   does; the summary and meta keep their muted colours. */
 a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
@@ -4366,9 +4360,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 .help-tip:hover,
-.help-tip:focus-visible,
 .help-tip-pinned { color: var(--accent); }
-.help-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.help-tip:focus-visible { color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .help-tip-bubble {
   position: fixed;
