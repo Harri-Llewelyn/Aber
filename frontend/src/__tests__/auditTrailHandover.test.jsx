@@ -19,7 +19,7 @@ const DEVICE_ID = '11111111-2222-3333-4444-555555555555';
  */
 const events = [
   {
-    event_id: 'dt-1', entity_type: 'DEVICE', entity_id: DEVICE_ID, event_type: 'UPDATE',
+    event_id: 'trail-1', entity_type: 'DEVICE', entity_id: DEVICE_ID, event_type: 'UPDATE',
     description: 'Device renamed', timestamp: '2026-08-10T10:00:00Z',
     changed_by: 'admin@aber.local', actor_source: 'user',
     old_data: { id: DEVICE_ID, name: 'CNC_01' },
@@ -97,14 +97,14 @@ describe('AuditTrailTab handover', () => {
     // One lane, one marker. The description and the mutation id moved into the drawer -- they
     // describe one EVENT, and a lane is one ASSET.
     const marker = await screen.findByRole('button', { name: /UPDATE on Simulated_CNC_01/ });
-    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(1);
+    expect(document.querySelectorAll('.trail-lane:not(.trail-axis)').length).toBe(1);
     expect(marker.getAttribute('title')).not.toMatch(/Invalid Date/);
 
     fireEvent.click(marker);
 
     expect(await screen.findByText('Device renamed')).toBeInTheDocument();
     expect(screen.getByText('UPDATE')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Copy mutation id dt-1/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Copy mutation id trail-1/ })).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 

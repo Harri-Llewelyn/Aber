@@ -3069,6 +3069,8 @@ function edgeFunctionNames() {
     ['Node-RED (Virtual Edge Gateway Simulator)', /\b(?:virtual edge )?gateway simulator\b/i, 'Node-RED (Host-Run Gateways)'],
     ['the demo simulator', /\bdemo(?:nstration)? simulator\b|\bsimulated shopfloor\b/i, 'nothing: no demonstration ships'],
     ['the Digital Thread', /digital[_ -]?thread/i, 'the Audit Trail: audit_trail, audit-trail, AuditTrail, AUDIT_TRAIL'],
+    // A class, custom property or fixture id, not the <dt> element, a `dt {` selector or a word such as qudt-all.
+    ['.dt-lane', /(?<![\w-])(?:--|\.)?dt-[a-z0-9]/, 'trail-: .trail-lane, --trail-label-width, \'trail-1\''],
     ['applied_thread_id', /\b(?:applied_)?thread_(?:id|rows)\b|MAX_THREAD_ROWS|\b(?:onView|onSelect|load|canRead)Thread\b|\bviewThreadFor\b/,
       'applied_trail_id, trail_id, trail_rows, MAX_TRAIL_ROWS, onViewTrail, loadTrail'],
   ];

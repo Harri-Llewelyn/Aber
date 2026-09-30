@@ -52,17 +52,17 @@ describe('the timeline scrolls inside the card', () => {
     /* A chain of flex columns from the page down to the scroller, every link able to shrink and
        everything beside the scroller refusing to. A maximum, not a height: a short trail gets a
        short card. */
-    expect(ruleFor('.dt-page')).toMatch(/height:\s*100%/)
-    expect(ruleFor('.dt-page > .page-main')).toMatch(/max-height:\s*100%/)
-    expect(ruleFor('.dt-page > .page-main > .card')).toMatch(/min-height:\s*0/)
-    expect(ruleFor('.dt-page > .page-main > .card > :not(.dt-timeline)')).toMatch(/flex-shrink:\s*0/)
-    expect(ruleFor('.dt-timeline')).toMatch(/min-height:\s*0/)
-    expect(ruleFor('.dt-timeline > :not(.dt-scroll)')).toMatch(/flex-shrink:\s*0/)
-    expect(ruleFor('.dt-timeline > .dt-scroll')).toMatch(/min-height:\s*0/)
+    expect(ruleFor('.page-fill')).toMatch(/height:\s*100%/)
+    expect(ruleFor('.page-fill > .page-main')).toMatch(/max-height:\s*100%/)
+    expect(ruleFor('.page-fill > .page-main > .card-fill')).toMatch(/min-height:\s*0/)
+    expect(ruleFor('.card-fill > *')).toMatch(/flex-shrink:\s*0/)
+    expect(ruleFor('.card-fill > .trail-timeline')).toMatch(/flex-direction:\s*column/)
+    expect(ruleFor('.trail-timeline > :not(.trail-scroll)')).toMatch(/flex-shrink:\s*0/)
+    expect(ruleFor('.trail-timeline > .trail-scroll')).toMatch(/min-height:\s*0/)
   })
 
   it('scrolls the lanes in both directions rather than the page', () => {
-    const rule = ruleFor('.dt-scroll')
+    const rule = ruleFor('.trail-scroll')
     expect(rule).toMatch(/overflow-x:\s*auto/)
     expect(rule).toMatch(/overflow-y:\s*auto/)
     expect(rule).not.toMatch(/overflow-y:\s*hidden/)
@@ -71,39 +71,39 @@ describe('the timeline scrolls inside the card', () => {
   it('marks the page and the timeline body so the chain has something to hang from', async () => {
     render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText('Press_01')).toBeInTheDocument())
-    expect(document.querySelector('.page-layout')).toHaveClass('dt-page')
-    const body = document.querySelector('.dt-timeline')
-    expect(body).toHaveClass('card-body')
-    expect(body.querySelector('.dt-scroll')).toBeTruthy()
+    expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
+    const body = document.querySelector('.trail-timeline')
+    expect(body).toHaveClass('card-body', 'card-fill-scroll')
+    expect(body.querySelector('.trail-scroll')).toBeTruthy()
   })
 })
 
 describe('the axis row stays in view', () => {
   it('pins to the top of the scroller, opaque, above the labels that would ride over it', () => {
-    const axis = ruleFor('.dt-lane.dt-axis')
+    const axis = ruleFor('.trail-lane.trail-axis')
     expect(axis).toMatch(/position:\s*sticky/)
     expect(axis).toMatch(/top:\s*0/)
     // Opaque, or the rows show through the dates as they pass under.
     expect(axis).toMatch(/background:\s*var\(--bg-base\)/)
-    expect(zIndex(axis)).toBeGreaterThan(zIndex(ruleFor('.dt-lane-label')))
+    expect(zIndex(axis)).toBeGreaterThan(zIndex(ruleFor('.trail-lane-label')))
   })
 
   it('leaves the track inside it bare, because a scale is not a lane', () => {
     // The row is what is opaque; boxing the tick labels like data would make the ruler read as
     // another asset.
-    expect(ruleFor('.dt-axis-track')).not.toMatch(/background/)
-    expect(ruleFor('.dt-axis-track')).not.toMatch(/border/)
+    expect(ruleFor('.trail-axis-track')).not.toMatch(/background/)
+    expect(ruleFor('.trail-axis-track')).not.toMatch(/border/)
   })
 
   it('pins the section headings under it, from the one declared axis height', () => {
     /* The heading's offset and the axis track's height read one custom property, so a change to
        either cannot leave a heading pinned into the dates. Above the lane labels: its own lanes
        come after it in the DOM and would otherwise paint over it as they scroll under. */
-    const section = ruleFor('.dt-section')
-    expect(section).toMatch(/top:\s*calc\(var\(--dt-axis-height\)/)
-    expect(ruleFor('.dt-axis-track')).toMatch(/height:\s*var\(--dt-axis-height\)/)
-    expect(ruleFor('.dt-swimlanes')).toMatch(/--dt-axis-height:\s*\d+px/)
-    expect(zIndex(section)).toBeGreaterThan(zIndex(ruleFor('.dt-lane-label')))
+    const section = ruleFor('.trail-section')
+    expect(section).toMatch(/top:\s*calc\(var\(--trail-axis-height\)/)
+    expect(ruleFor('.trail-axis-track')).toMatch(/height:\s*var\(--trail-axis-height\)/)
+    expect(ruleFor('.trail-swimlanes')).toMatch(/--trail-axis-height:\s*\d+px/)
+    expect(zIndex(section)).toBeGreaterThan(zIndex(ruleFor('.trail-lane-label')))
     // A row of the grid, so only the row's own border box pins: no margin above it to pin dead
     // space under the axis, and no padding to hide a row of labels with.
     expect(section).not.toMatch(/margin/)
@@ -116,9 +116,9 @@ describe('the axis row stays in view', () => {
        label's 2, and in one stacking context the later element wins -- so a badge scrolling under
        a pinned heading or sideways under a sticky label painted over it. Each track is its own
        stacking context, which keeps those numbers inside the track. */
-    expect(ruleFor('.dt-track')).toMatch(/isolation:\s*isolate/)
-    expect(zIndex(ruleFor('.dt-track'))).toBeNaN()
-    expect(zIndex(ruleFor('.dt-track .dt-cluster'))).toBeGreaterThanOrEqual(zIndex(ruleFor('.dt-section')))
+    expect(ruleFor('.trail-track')).toMatch(/isolation:\s*isolate/)
+    expect(zIndex(ruleFor('.trail-track'))).toBeNaN()
+    expect(zIndex(ruleFor('.trail-track .trail-cluster'))).toBeGreaterThanOrEqual(zIndex(ruleFor('.trail-section')))
   })
 
   it('draws the header rows on the base surface, not the thead tint', () => {
@@ -128,7 +128,7 @@ describe('the axis row stays in view', () => {
        opaque in its own right and takes the same colour, or it would sit as a block of a
        different colour at the left of the row. */
     const base = /background:\s*var\(--bg-base\)/
-    for (const selector of ['.dt-lane.dt-axis', '.dt-axis .dt-lane-label', '.dt-section', '.dt-section .dt-lane-label']) {
+    for (const selector of ['.trail-lane.trail-axis', '.trail-axis .trail-lane-label', '.trail-section', '.trail-section .trail-lane-label']) {
       expect(ruleFor(selector), selector).toMatch(base)
       expect(ruleFor(selector), selector).not.toMatch(/background-image/)
     }

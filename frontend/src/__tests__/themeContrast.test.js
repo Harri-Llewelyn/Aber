@@ -86,7 +86,7 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ? tint([255, 255, 255], 0.04, base)
     : tint([0, 0, 0], 0.02, base)
 
-  /** --accent-dim composited onto a ground: the fill .badge-info and .dt-badge-operational paint. */
+  /** --accent-dim composited onto a ground: the fill .badge-info and .trail-badge-operational paint. */
   const accentDim = (base) => themeName === 'dark'
     ? tint([0, 212, 255], 0.15, base)
     : tint([2, 132, 199], 0.12, base)
@@ -265,7 +265,7 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
 
 /** The cases above measure --accent-text; this holds the four badges to it rather than to --accent. */
 describe('accent badges', () => {
-  it.each(['.badge-info', '.badge-pending', '.badge-provisioned', '.dt-badge-operational'])(
+  it.each(['.badge-info', '.badge-pending', '.badge-provisioned', '.trail-badge-operational'])(
     '%s labels in --accent-text', (selector) => {
       const rule = APP_CSS.match(new RegExp(`\\n\\${selector}\\s*\\{([^}]*)\\}`))
       expect(rule, `no rule for ${selector} in App.css`).toBeTruthy()

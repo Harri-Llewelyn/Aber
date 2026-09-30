@@ -209,7 +209,7 @@ describe('AuditTrailTab paging', () => {
     render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
     expect(screen.queryByText(/every event matching these filters is loaded/i)).not.toBeInTheDocument()
-    expect(document.querySelector('.dt-pagination')).toBeNull()
+    expect(document.querySelector('.trail-pagination')).toBeNull()
   })
 })
 
@@ -391,7 +391,7 @@ describe('AuditTrailTab total', () => {
     expect(await screen.findByText(/2 entities · 2\/467 events/)).toBeInTheDocument()
     // And nowhere else: the foot used to say it again in words, under a button offering more.
     expect(screen.queryByText(/2 of 467 events/)).not.toBeInTheDocument()
-    expect(document.querySelector('.dt-pagination-count')).toBeNull()
+    expect(document.querySelector('.trail-pagination-count')).toBeNull()
     expect(screen.getByRole('button', { name: /Load \d+ more/ })).toBeInTheDocument()
   })
 
@@ -411,17 +411,17 @@ describe('AuditTrailTab total', () => {
     render(<AuditTrailTab />)
     await screen.findByText(/2 entities · 2\/467 events/)
 
-    const count = document.querySelector('.dt-count')
+    const count = document.querySelector('.trail-count')
     expect(count).toBeTruthy()
     expect(count.textContent).toMatch(/2 entities · 2\/467 events/)
     // One row with the key: the count first, the key after it, and the scroller that holds the
     // tracks directly under the row.
     const header = count.parentElement
-    expect(header).toHaveClass('dt-header')
-    expect(count.nextElementSibling).toHaveClass('dt-legend')
-    expect(header.nextElementSibling).toHaveClass('dt-scroll')
+    expect(header).toHaveClass('trail-header')
+    expect(count.nextElementSibling).toHaveClass('trail-legend')
+    expect(header.nextElementSibling).toHaveClass('trail-scroll')
     // And gone from the corner, which is now only the spacer that lines the ticks up.
-    expect(document.querySelector('.dt-axis-corner').textContent).toBe('')
+    expect(document.querySelector('.trail-axis-corner').textContent).toBe('')
   })
 
   it('is larger than the key it shares a row with', async () => {
@@ -429,11 +429,11 @@ describe('AuditTrailTab total', () => {
     // is asserted as markup only, and the reason for it -- that the line was easy to miss -- is
     // not. The size is what carries that: the row puts it beside a muted 11px key, and at the same
     // size it would read as one more entry in the key.
-    const rule = APP_CSS.match(/\n\.dt-count \{([\s\S]*?)\n\}/)?.[1]
-    expect(rule, '.dt-count has no rule in App.css').toBeTruthy()
+    const rule = APP_CSS.match(/\n\.trail-count \{([\s\S]*?)\n\}/)?.[1]
+    expect(rule, '.trail-count has no rule in App.css').toBeTruthy()
 
     const size = (r) => Number(/font-size:\s*(\d+)px/.exec(r)?.[1])
-    const legend = APP_CSS.match(/\n\.dt-legend \{([\s\S]*?)\n\}/)?.[1]
+    const legend = APP_CSS.match(/\n\.trail-legend \{([\s\S]*?)\n\}/)?.[1]
     expect(size(rule)).toBeGreaterThan(size(legend))
   })
 

@@ -114,7 +114,7 @@ describe('naming the person a role assignment is about', () => {
 
   it('does not call the person deleted merely because the lane was named from a lookup', async () => {
     renderWith([{ user_id: USER, email: 'manager@aber.local' }])
-    const lane = (await screen.findByText('manager@aber.local')).closest('.dt-lane')
+    const lane = (await screen.findByText('manager@aber.local')).closest('.trail-lane')
     expect(within(lane).queryByText('deleted')).toBeNull()
   })
 

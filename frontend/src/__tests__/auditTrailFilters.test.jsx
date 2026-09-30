@@ -115,7 +115,7 @@ const showAll = async () => {
 }
 
 /** Every marker on the timeline, in DOM order. */
-const nodes = () => [...document.querySelectorAll('.dt-node')]
+const nodes = () => [...document.querySelectorAll('.trail-node')]
 const nodeFor = (pattern) => screen.getAllByRole('button', { name: pattern })[0]
 
 /** Open the drawer on one event. */
@@ -338,15 +338,15 @@ describe('Audit Trail swimlanes', () => {
   it('draws one lane per entity, not one row per event', async () => {
     await showAll()
 
-    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(ENTITY_COUNT)
+    expect(document.querySelectorAll('.trail-lane:not(.trail-axis)').length).toBe(ENTITY_COUNT)
     expect(nodes().length).toBe(EVENTS.length)
   })
 
   it('orders lanes by activity within a section, busiest first', async () => {
     await show()
     // Devices is the last section; dev-2 has two events to dev-1's one.
-    const deviceLanes = [...document.querySelectorAll('.dt-lane:not(.dt-axis)')]
-      .map(l => l.querySelector('.dt-lane-name').textContent)
+    const deviceLanes = [...document.querySelectorAll('.trail-lane:not(.trail-axis)')]
+      .map(l => l.querySelector('.trail-lane-name').textContent)
     expect(deviceLanes.indexOf('Press_02')).toBeLessThan(deviceLanes.indexOf('Simulated_CNC_01'))
   })
 
@@ -371,7 +371,7 @@ describe('Audit Trail swimlanes', () => {
 
   it('recovers a deleted entity name from its audit snapshot, and says it is deleted', async () => {
     await showAll()
-    const lane = screen.getByText('Decommissioned Line').closest('.dt-lane')
+    const lane = screen.getByText('Decommissioned Line').closest('.trail-lane')
     expect(lane).toBeTruthy()
     // Flagged, or the name reads as a live asset that simply is not in the list.
     expect(within(lane).getByText('deleted')).toBeInTheDocument()
@@ -388,7 +388,7 @@ describe('Audit Trail swimlanes', () => {
        where a LABEL comes from. The reader is also seeing this row because they turned Show
        deleted entities on, so the page saying "deleted" is the page agreeing with the control that
        revealed it. */
-    const lane = screen.getByText('99999999…5555').closest('.dt-lane')
+    const lane = screen.getByText('99999999…5555').closest('.trail-lane')
     const flag = within(lane).getByText('deleted')
     expect(flag).toBeInTheDocument()
     expect(flag.getAttribute('title')).toMatch(/carry no name to recover/)
@@ -414,21 +414,21 @@ describe('Audit Trail swimlanes', () => {
     render(<AuditTrailTab />)
 
     const label = await screen.findByText('Lanes drawn before folding')
-    expect(within(label.closest('.dt-lane')).queryByText('deleted')).toBeNull()
+    expect(within(label.closest('.trail-lane')).queryByText('deleted')).toBeNull()
   })
 
   /* Sections. The cap is applied before the cut, not per section, so one asset's history is
      comparable against its neighbours' without scrolling. */
   it('groups lanes under Cells, Gateways and Devices, in containment order', async () => {
     await showAll()
-    const headings = [...document.querySelectorAll('.dt-section .dt-section-name')]
+    const headings = [...document.querySelectorAll('.trail-section .trail-section-name')]
       .map(h => h.textContent)
     expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
   })
 
   it('counts what it draws in each heading', async () => {
     await showAll()
-    const counts = [...document.querySelectorAll('.dt-section')]
+    const counts = [...document.querySelectorAll('.trail-section')]
       .map(s => s.textContent.replace(/[^0-9]/g, ''))
     // One cell, one gateway, three devices (dev-1, dev-2, the unnamed one).
     expect(counts).toEqual(['1', '1', '3'])
@@ -441,7 +441,7 @@ describe('Audit Trail swimlanes', () => {
     // The fixture is unfiltered by the mock, so this asserts the grouping, not the query: with
     // only device lanes present, Cells and Gateways must not appear as empty headings.
     await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=DEVICE'))
-    const headings = [...document.querySelectorAll('.dt-section .dt-section-name')].map(h => h.textContent)
+    const headings = [...document.querySelectorAll('.trail-section .trail-section-name')].map(h => h.textContent)
     expect(headings).not.toContain('Cells (0)')
   })
 
@@ -474,7 +474,7 @@ describe('Audit Trail swimlanes', () => {
     })
     render(<AuditTrailTab />)
 
-    await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(40))
+    await waitFor(() => expect(document.querySelectorAll('.trail-lane:not(.trail-axis)').length).toBe(40))
     // The header names the whole set, as a plain count: nothing is held back to make a fraction.
     expect(screen.getByText(/40 entities/)).toBeInTheDocument()
     expect(screen.queryByText(/\d+\/40/)).not.toBeInTheDocument()
@@ -549,29 +549,29 @@ describe('Audit Trail event classification', () => {
 
   it('paints an INSERT as creation', async () => {
     await show()
-    expect(classOf(/INSERT on Host_Gateway_NodeRED/)).toContain('dt-node-creation')
+    expect(classOf(/INSERT on Host_Gateway_NodeRED/)).toContain('trail-node-creation')
   })
 
   it('paints a DELETE as lifecycle-critical', async () => {
     await showAll()
-    expect(classOf(/DELETE on Decommissioned Line/)).toContain('dt-node-critical')
+    expect(classOf(/DELETE on Decommissioned Line/)).toContain('trail-node-critical')
   })
 
   it('paints an ordinary status change as operational', async () => {
     await show()
-    expect(classOf(/UPDATE on Simulated_CNC_01/)).toContain('dt-node-operational')
+    expect(classOf(/UPDATE on Simulated_CNC_01/)).toContain('trail-node-operational')
   })
 
   it('paints a schema rebinding as governance, though its action is only UPDATE', async () => {
     await show()
-    const governance = nodes().filter(n => n.className.includes('dt-node-governance'))
+    const governance = nodes().filter(n => n.className.includes('trail-node-governance'))
     expect(governance.length).toBe(1)
   })
 
   it('paints an archival as critical, though its action is only UPDATE', async () => {
     await showAll()
     // Two UPDATEs on Press_02; exactly one of them flipped is_archived to true.
-    const critical = nodes().filter(n => n.className.includes('dt-node-critical'))
+    const critical = nodes().filter(n => n.className.includes('trail-node-critical'))
     // The DELETE, plus the archival.
     expect(critical.length).toBe(2)
   })
@@ -641,7 +641,7 @@ describe('Audit Trail event classification', () => {
 
   it('carries a legend, because nothing else in the UI says what amber means', async () => {
     await show()
-    const legend = document.querySelector('.dt-legend')
+    const legend = document.querySelector('.trail-legend')
     expect(within(legend).getByText('Configuration')).toBeInTheDocument()
     expect(within(legend).getByText('Lifecycle')).toBeInTheDocument()
   })
@@ -670,7 +670,7 @@ describe('Audit Trail event drawer', () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
-    const table = document.querySelector('.dt-diff-table')
+    const table = document.querySelector('.trail-diff-table')
     expect(within(table).getByText('status')).toBeInTheDocument()
     expect(within(table).getByText('OFFLINE')).toBeInTheDocument()
     expect(within(table).getByText('ONLINE')).toBeInTheDocument()
@@ -686,7 +686,7 @@ describe('Audit Trail event drawer', () => {
     // The trigger already suppresses heartbeat-only updates. This is the residue: a real edit that
     // also bumped the heartbeat, which would otherwise open every diff with a line nobody came to
     // read.
-    expect(within(document.querySelector('.dt-diff-table')).queryByText('last_heartbeat')).toBeNull()
+    expect(within(document.querySelector('.trail-diff-table')).queryByText('last_heartbeat')).toBeNull()
   })
 
   it('renders an INSERT as the properties it was created with', async () => {
@@ -695,7 +695,7 @@ describe('Audit Trail event drawer', () => {
 
     expect(screen.getByText('Initial properties')).toBeInTheDocument()
     // One-sided: there is no previous value to compare against, so no Previous column.
-    const headers = [...document.querySelectorAll('.dt-diff-table thead th')].map(h => h.textContent)
+    const headers = [...document.querySelectorAll('.trail-diff-table thead th')].map(h => h.textContent)
     expect(headers).toEqual(['Property', 'Created'])
   })
 
@@ -704,7 +704,7 @@ describe('Audit Trail event drawer', () => {
     await selectEvent(/DELETE on Decommissioned Line/)
 
     expect(screen.getByText('Final properties')).toBeInTheDocument()
-    const headers = [...document.querySelectorAll('.dt-diff-table thead th')].map(h => h.textContent)
+    const headers = [...document.querySelectorAll('.trail-diff-table thead th')].map(h => h.textContent)
     expect(headers).toEqual(['Property', 'Deleted'])
   })
 
@@ -722,7 +722,7 @@ describe('Audit Trail event drawer', () => {
      fix and is what these assert; jsdom does no layout, so the guard is on the rule. */
   const cssRule = (s) =>
     APP_CSS.match(new RegExp(`\\n${s.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
-  const CELL_RULE = '.dt-diff-table th,\n.dt-diff-table td'
+  const CELL_RULE = '.trail-diff-table th,\n.trail-diff-table td'
 
   it('resets the inherited header styling that caused the collision', async () => {
     await show()
@@ -745,7 +745,7 @@ describe('Audit Trail event drawer', () => {
     expect(cssRule(CELL_RULE)).toMatch(/overflow-wrap:\s*anywhere/)
     expect(cssRule(CELL_RULE)).toMatch(/word-break:\s*break-word/)
     expect(cssRule(CELL_RULE)).toMatch(/padding:\s*6px 12px/)
-    expect(cssRule('.dt-diff-table')).toMatch(/table-layout:\s*fixed/)
+    expect(cssRule('.trail-diff-table')).toMatch(/table-layout:\s*fixed/)
   })
 
   it('divides Previous from New, which hold the same property twice', async () => {
@@ -754,7 +754,7 @@ describe('Audit Trail event drawer', () => {
 
     // Two columns holding one property's two values, often differing by a character. A reader
     // comparing them has to know which side they are on.
-    const dividers = cssRule('.dt-diff-table tbody th:nth-child(1),\n.dt-diff-table tbody td:nth-child(1),\n.dt-diff-table tbody td:nth-child(2)')
+    const dividers = cssRule('.trail-diff-table tbody th:nth-child(1),\n.trail-diff-table tbody td:nth-child(1),\n.trail-diff-table tbody td:nth-child(2)')
     expect(dividers).toMatch(/border-right:\s*1px solid var\(--border\)/)
   })
 
@@ -763,18 +763,18 @@ describe('Audit Trail event drawer', () => {
     await selectEvent(/INSERT on Host_Gateway_NodeRED/)
 
     // Otherwise the three-column widths leave a third of a 360px drawer empty.
-    expect(document.querySelector('.dt-diff-table').className).toContain('dt-diff-onesided')
+    expect(document.querySelector('.trail-diff-table').className).toContain('trail-diff-onesided')
 
     fireEvent.click(nodeFor(/UPDATE on Simulated_CNC_01/))
     await waitFor(() =>
-      expect(document.querySelector('.dt-diff-table').className).not.toContain('dt-diff-onesided'))
+      expect(document.querySelector('.trail-diff-table').className).not.toContain('trail-diff-onesided'))
   })
 
   it('keeps the raw payload available but shut', async () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
-    const details = document.querySelector('.dt-raw')
+    const details = document.querySelector('.trail-raw')
     expect(details).toBeTruthy()
     // Shut by default, or it is the JSON dump this page was rebuilt to stop being.
     expect(details.open).toBe(false)
@@ -789,7 +789,7 @@ describe('Audit Trail event drawer', () => {
 describe('Audit Trail drawer navigation', () => {
   const prev = () => screen.getByRole('button', { name: /Previous/ })
   const next = () => screen.getByRole('button', { name: /Next/ })
-  const position = () => document.querySelector('.dt-drawer-nav-pos').textContent
+  const position = () => document.querySelector('.trail-drawer-nav-pos').textContent
 
   /* Targeted by tooltip, not by lane: Press_02's two markers carry the same aria-label prefix and
      sit newest-first, so "the first UPDATE on Press_02" would select the latest event. The tooltip
@@ -817,7 +817,7 @@ describe('Audit Trail drawer navigation', () => {
     fireEvent.click(next())
     await waitFor(() => expect(position()).toMatch(/^Event 2 of 2/))
     // The drawer is now describing the schema rebind, which is the amber one.
-    expect(within(document.querySelector('.dt-diff-table')).getByText('schema_id')).toBeInTheDocument()
+    expect(within(document.querySelector('.trail-diff-table')).getByText('schema_id')).toBeInTheDocument()
   })
 
   it('steps back to the older event', async () => {
@@ -827,7 +827,7 @@ describe('Audit Trail drawer navigation', () => {
 
     fireEvent.click(prev())
     await waitFor(() => expect(position()).toMatch(/^Event 1 of 2/))
-    expect(within(document.querySelector('.dt-diff-table')).getByText('is_archived')).toBeInTheDocument()
+    expect(within(document.querySelector('.trail-diff-table')).getByText('is_archived')).toBeInTheDocument()
   })
 
   it('disables Previous at the oldest event and Next at the newest', async () => {
@@ -847,12 +847,12 @@ describe('Audit Trail drawer navigation', () => {
   it('moves the highlight on the timeline as it steps', async () => {
     await show()
     await selectOldest()
-    const before = document.querySelector('.dt-node-selected')
+    const before = document.querySelector('.trail-node-selected')
 
     fireEvent.click(next())
-    await waitFor(() => expect(document.querySelector('.dt-node-selected')).not.toBe(before))
+    await waitFor(() => expect(document.querySelector('.trail-node-selected')).not.toBe(before))
     // Exactly one marker is ever the selected one.
-    expect(document.querySelectorAll('.dt-node-selected').length).toBe(1)
+    expect(document.querySelectorAll('.trail-node-selected').length).toBe(1)
   })
 
   it('is a single step on an asset with only one event', async () => {
@@ -1176,7 +1176,7 @@ describe('Audit Trail — removed tag filter', () => {
 
       expect(await screen.findByText('VALIDATE_Schema_Robot')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
-      expect(document.querySelector('.dt-lane-gone')).toBeNull()
+      expect(document.querySelector('.trail-lane-gone')).toBeNull()
     })
 
     it('never calls a role assignment deleted, because nothing here can probe auth.users', async () => {
@@ -1197,9 +1197,9 @@ describe('Audit Trail — removed tag filter', () => {
         return Promise.resolve([])
       })
       render(<AuditTrailTab />)
-      await waitFor(() => expect(document.querySelector('.dt-lane-label')).toBeTruthy())
+      await waitFor(() => expect(document.querySelector('.trail-lane-label')).toBeTruthy())
 
-      expect(document.querySelector('.dt-lane-gone')).toBeNull()
+      expect(document.querySelector('.trail-lane-gone')).toBeNull()
       expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
     })
   })
@@ -1240,8 +1240,8 @@ describe('Audit Trail — removed tag filter', () => {
 
     /** The lane label containing `text`, as one element. */
     const laneLabelled = (text) =>
-      [...document.querySelectorAll('.dt-lane-label')]
-        .find(el => el.querySelector('.dt-lane-name')?.textContent === text)
+      [...document.querySelectorAll('.trail-lane-label')]
+        .find(el => el.querySelector('.trail-lane-name')?.textContent === text)
 
     it('names a backup job for the act it was, not its uuid', async () => {
       respondWith(JOB_EVENTS)
@@ -1250,7 +1250,7 @@ describe('Audit Trail — removed tag filter', () => {
       await waitFor(() => expect(laneLabelled('On request')).toBeTruthy())
       expect(laneLabelled('Scheduled')).toBeTruthy()
       // The uuid is gone from the label; it is still in the title and the drawer.
-      expect(laneLabelled('On request').querySelector('.dt-lane-unnamed')).toBeNull()
+      expect(laneLabelled('On request').querySelector('.trail-lane-unnamed')).toBeNull()
     })
 
     it('keeps two jobs of the same kind apart with the short id', async () => {
@@ -1263,8 +1263,8 @@ describe('Audit Trail — removed tag filter', () => {
       ])
       render(<AuditTrailTab />)
 
-      await waitFor(() => expect(document.querySelectorAll('.dt-lane-qualifier').length).toBe(2))
-      const chips = [...document.querySelectorAll('.dt-lane-qualifier')].map(c => c.textContent)
+      await waitFor(() => expect(document.querySelectorAll('.trail-lane-qualifier').length).toBe(2))
+      const chips = [...document.querySelectorAll('.trail-lane-qualifier')].map(c => c.textContent)
       expect(new Set(chips).size).toBe(2)
       expect(chips.every(c => c.startsWith('aaaaaaaa') || c.startsWith('bbbbbbbb'))).toBe(true)
     })
@@ -1275,7 +1275,7 @@ describe('Audit Trail — removed tag filter', () => {
       render(<AuditTrailTab />)
 
       await waitFor(() => expect(laneLabelled('On request')).toBeTruthy())
-      expect(document.querySelector('.dt-lane-gone')).toBeNull()
+      expect(document.querySelector('.trail-lane-gone')).toBeNull()
     })
 
     it('leaves a backup reading its stamp, which it shares the origin field with', async () => {
@@ -1319,7 +1319,7 @@ describe('Audit Trail — removed tag filter', () => {
       }])
       render(<AuditTrailTab />)
 
-      await waitFor(() => expect(document.querySelector('.dt-lane-unnamed')).toBeTruthy())
+      await waitFor(() => expect(document.querySelector('.trail-lane-unnamed')).toBeTruthy())
       expect(screen.queryByText(/Undocumented principal/)).not.toBeInTheDocument()
     })
   })
@@ -1338,7 +1338,7 @@ describe('Audit Trail — removed tag filter', () => {
   describe('swimlanes render as a flat grid', () => {
     it('draws the track bare, with no box of its own', async () => {
       // The row's dividers are the lane's edges; a box inside them was a second set.
-      const rule = ruleFor('.dt-track')
+      const rule = ruleFor('.trail-track')
       expect(rule).not.toMatch(/background:/)
       expect(rule).not.toMatch(/border:/)
       expect(rule).not.toMatch(/border-radius:/)
@@ -1347,11 +1347,11 @@ describe('Audit Trail — removed tag filter', () => {
     it('draws no guideline along the middle of a track', async () => {
       /* With a rule under every row, a second line through each one made the page a stack of
          rules for the eye to follow instead of markers. */
-      expect(ruleFor('.dt-track::before')).toBeUndefined()
+      expect(ruleFor('.trail-track::before')).toBeUndefined()
     })
 
     it('separates lanes with a hairline divider and no padding', async () => {
-      const rule = ruleFor('.dt-lane')
+      const rule = ruleFor('.trail-lane')
       expect(rule).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
       expect(rule).not.toMatch(/padding:/)
       expect(rule).toMatch(/gap:/)
@@ -1360,49 +1360,49 @@ describe('Audit Trail — removed tag filter', () => {
     it('keeps the label opaque, and draws no pill inside it', async () => {
       /* The label is sticky so markers pass under it, which needs an opaque background in the
          card's colour. The pill that used to be drawn inside it by ::before is gone with the boxes. */
-      expect(ruleFor('.dt-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
-      expect(ruleFor('.dt-lane-label::before')).toBeUndefined()
+      expect(ruleFor('.trail-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
+      expect(ruleFor('.trail-lane-label::before')).toBeUndefined()
     })
 
     it('lights the row under the pointer, label column included', async () => {
       /* The row tint is translucent and the label is opaque, so the label takes the tint as an
          image over its own colour: the two match, and the label stays opaque. The axis row is not
          a lane and is left out. */
-      expect(ruleFor('.dt-lane:not(.dt-axis):hover')).toMatch(/background:\s*var\(--bg-glass\)/)
-      expect(ruleFor('.dt-lane:not(.dt-axis):hover .dt-lane-label'))
+      expect(ruleFor('.trail-lane:not(.trail-axis):hover')).toMatch(/background:\s*var\(--bg-glass\)/)
+      expect(ruleFor('.trail-lane:not(.trail-axis):hover .trail-lane-label'))
         .toMatch(/background-image:\s*linear-gradient\(var\(--bg-glass\)/)
     })
 
     it('renders the section heading as a row of the grid', async () => {
       await show()
-      const heading = document.querySelector('.dt-section')
+      const heading = document.querySelector('.trail-section')
       expect(heading).toBeTruthy()
       // The same two columns as a lane: a sticky label holding the name and its count, and an
       // empty track, so the heading takes the row's rule and the row's rhythm, and the first lane
       // under it has an edge above it.
-      const label = heading.querySelector('.dt-lane-label')
+      const label = heading.querySelector('.trail-lane-label')
       expect(label).toBeTruthy()
-      expect(label.querySelector('.dt-section-name')).toBeTruthy()
-      expect(label.querySelector('.dt-section-count')).toBeTruthy()
-      expect(heading.querySelector('.dt-track')).toBeTruthy()
+      expect(label.querySelector('.trail-section-name')).toBeTruthy()
+      expect(label.querySelector('.trail-section-count')).toBeTruthy()
+      expect(heading.querySelector('.trail-track')).toBeTruthy()
       // Not a pill: nothing draws a badge any more.
-      expect(ruleFor('.dt-section-badge')).toBeUndefined()
-      expect(ruleFor('.dt-section')).not.toMatch(/border-radius/)
-      expect(ruleFor('.dt-section')).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
+      expect(ruleFor('.trail-section-badge')).toBeUndefined()
+      expect(ruleFor('.trail-section')).not.toMatch(/border-radius/)
+      expect(ruleFor('.trail-section')).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
     })
 
     it('rules the edge of the label column on every row', async () => {
-      // The axis corner and the headings are .dt-lane-label too, so one rule draws the whole
+      // The axis corner and the headings are .trail-lane-label too, so one rule draws the whole
       // column edge; a rule on lanes alone would break at every heading.
-      expect(ruleFor('.dt-lane-label')).toMatch(/border-right:\s*1px solid var\(--border\)/)
+      expect(ruleFor('.trail-lane-label')).toMatch(/border-right:\s*1px solid var\(--border\)/)
     })
 
     it('carries the kind on the heading, not on every row under it', async () => {
       /* The heading is pinned in view since the axis was, so an icon on each lane repeated what
          was always on screen and cost the name its width. */
       await show()
-      expect(document.querySelector('.dt-section .dt-lane-label svg')).toBeTruthy()
-      const laneLabels = [...document.querySelectorAll('.dt-lane:not(.dt-axis) .dt-lane-label')]
+      expect(document.querySelector('.trail-section .trail-lane-label svg')).toBeTruthy()
+      const laneLabels = [...document.querySelectorAll('.trail-lane:not(.trail-axis) .trail-lane-label')]
       expect(laneLabels.length).toBeGreaterThan(0)
       expect(laneLabels.some(l => l.querySelector('svg'))).toBe(false)
     })
@@ -1412,21 +1412,21 @@ describe('Audit Trail — removed tag filter', () => {
     it('rings the active node in a solid accent rather than a halo', async () => {
       /* `--accent-glow` alone is translucent and almost disappears in a dense stretch of track; the
          inner gap in the card colour separates the selected mark. */
-      const rule = ruleFor('.dt-node-selected')
+      const rule = ruleFor('.trail-node-selected')
       expect(rule).toMatch(/var\(--accent\)/)
       expect(rule).toMatch(/var\(--bg-card\)/)
     })
 
-    it('is shared with the cluster badge rather than being a .dt-node compound', async () => {
+    it('is shared with the cluster badge rather than being a .trail-node compound', async () => {
       /* What lets a badge carry the ring while the drawer steps through the events inside it.
-         Written `.dt-node.dt-node-selected`, a selected group would show no highlight. */
-      expect(APP_CSS).toContain('\n.dt-node-selected {')
-      expect(APP_CSS).not.toContain('.dt-node.dt-node-selected {')
+         Written `.trail-node.trail-node-selected`, a selected group would show no highlight. */
+      expect(APP_CSS).toContain('\n.trail-node-selected {')
+      expect(APP_CSS).not.toContain('.trail-node.trail-node-selected {')
     })
 
     it('paints the cluster badge outside the four-colour classification', async () => {
       /* A badge is a count, not a kind of event, so it borrows none of the four fills. */
-      const rule = ruleFor('.dt-cluster')
+      const rule = ruleFor('.trail-cluster')
       expect(rule).toMatch(/var\(--cluster/)
       for (const kind of ['--accent', '--success', '--warning', '--danger']) {
         expect(rule).not.toContain(`var(${kind})`)
@@ -1435,8 +1435,8 @@ describe('Audit Trail — removed tag filter', () => {
 
     it('marks the node the drawer is showing, and moves it with Previous/Next', async () => {
       await show()
-      const nodes = () => [...document.querySelectorAll('.dt-node')]
-      const selected = () => document.querySelector('.dt-node-selected')
+      const nodes = () => [...document.querySelectorAll('.trail-node')]
+      const selected = () => document.querySelector('.trail-node-selected')
 
       expect(selected()).toBeNull()
       fireEvent.click(nodes()[0])
@@ -1489,20 +1489,20 @@ describe('Audit Trail — removed tag filter', () => {
        end of the string is what a fixed-width label ellipsises first -- sixteen versions of one
        schema drew sixteen lanes reading `VALIDATE_Schema_Robot_St…`. */
     await waitFor(() => expect(screen.getByText('Test-Schema')).toBeInTheDocument())
-    const label = screen.getByText('Test-Schema').closest('.dt-lane-label')
-    expect(within(label).getByText('v2')).toHaveClass('dt-lane-qualifier')
+    const label = screen.getByText('Test-Schema').closest('.trail-lane-label')
+    expect(within(label).getByText('v2')).toHaveClass('trail-lane-qualifier')
     // And still one string wherever one is wanted -- the hover, the export, the drawer.
     expect(label.getAttribute('title')).toContain('Test-Schema v2')
     expect(screen.queryByText(SCHEMA_ID)).toBeNull()
   })
 
   it('keeps the version out of the part that can be ellipsised away', async () => {
-    // The property, stated against the stylesheet: `.dt-lane-name` is the one element allowed to
+    // The property, stated against the stylesheet: `.trail-lane-name` is the one element allowed to
     // lose characters, so the qualifier must not be inside it and must not shrink.
-    const rule = APP_CSS.match(/\n\.dt-lane-qualifier \{([\s\S]*?)\n\}/)?.[1]
-    expect(rule, '.dt-lane-qualifier has no rule in App.css').toBeTruthy()
+    const rule = APP_CSS.match(/\n\.trail-lane-qualifier \{([\s\S]*?)\n\}/)?.[1]
+    expect(rule, '.trail-lane-qualifier has no rule in App.css').toBeTruthy()
     expect(rule).toMatch(/flex-shrink:\s*0/)
-    expect(APP_CSS.match(/\n\.dt-lane-name \{([\s\S]*?)\n\}/)?.[1])
+    expect(APP_CSS.match(/\n\.trail-lane-name \{([\s\S]*?)\n\}/)?.[1])
       .toMatch(/text-overflow:\s*ellipsis/)
   })
 
@@ -1524,21 +1524,21 @@ describe('Audit Trail timeline density', () => {
     APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
   it('keeps a lane to 28px', () => {
-    expect(rule('.dt-track')).toMatch(/height:\s*28px/)
+    expect(rule('.trail-track')).toMatch(/height:\s*28px/)
   })
 
   it('pins the lane label so it survives horizontal scrolling', () => {
-    expect(rule('.dt-lane-label')).toMatch(/position:\s*sticky/)
+    expect(rule('.trail-lane-label')).toMatch(/position:\s*sticky/)
     // Opaque, or the markers scroll over the label instead of under it.
-    expect(rule('.dt-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
+    expect(rule('.trail-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
   })
 
   it('scrolls the lanes horizontally rather than the page', () => {
-    expect(rule('.dt-scroll')).toMatch(/overflow-x:\s*auto/)
+    expect(rule('.trail-scroll')).toMatch(/overflow-x:\s*auto/)
   })
 
   it('caps the raw payload height so it cannot push the accordion off the drawer', () => {
-    expect(rule('.dt-raw-json')).toMatch(/max-height:\s*220px/)
+    expect(rule('.trail-raw-json')).toMatch(/max-height:\s*220px/)
   })
 })
 

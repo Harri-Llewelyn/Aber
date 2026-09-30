@@ -58,7 +58,7 @@ const selectOldest = async () => {
   await waitFor(() => expect(position()).toMatch(/^Event 1 of 3/))
 }
 
-const position = () => document.querySelector('.dt-drawer-nav-pos')?.textContent ?? ''
+const position = () => document.querySelector('.trail-drawer-nav-pos')?.textContent ?? ''
 const press = (key, target = document, init = {}) => fireEvent.keyDown(target, { key, ...init })
 
 
@@ -141,7 +141,7 @@ describe('the arrow keys step the drawer', () => {
     press('ArrowRight')
     await waitFor(() => expect(position()).toMatch(/^Event 2 of 3/))
 
-    const nav = document.querySelector('.dt-drawer-nav-btns')
+    const nav = document.querySelector('.trail-drawer-nav-btns')
     expect(nav.querySelector('button[title$="(←)"]')).toHaveTextContent('Previous')
     expect(nav.querySelector('button[title$="(→)"]')).toHaveTextContent('Next')
   })

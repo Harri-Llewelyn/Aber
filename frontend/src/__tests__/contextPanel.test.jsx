@@ -204,8 +204,8 @@ describe('Panel layout pushes rather than covers', () => {
   it('puts the list and the drawer in one flex row, with the list able to shrink', () => {
     // `min-width: 0` on the main column is what lets it give up width: a flex item defaults to
     // `min-width: auto` and refuses to shrink below its content.
-    const layout = APP_CSS.match(/\.page-layout \{([\s\S]*?)\n\}/)[1]
-    const main = APP_CSS.match(/\.page-main \{([\s\S]*?)\n\}/)[1]
+    const layout = APP_CSS.match(/\n\.page-layout \{([\s\S]*?)\n\}/)[1]
+    const main = APP_CSS.match(/\n\.page-main \{([\s\S]*?)\n\}/)[1]
     expect(layout).toMatch(/display:\s*flex/)
     expect(main).toMatch(/min-width:\s*0/)
 
