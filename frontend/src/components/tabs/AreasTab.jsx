@@ -58,7 +58,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [formError, setFormError] = useState(null)
   const [editing, setEditing]   = useState(null)
   // The area whose links are open.
-  const [docsForArea, setDocsForArea] = useState(null)
+  const [linksForArea, setLinksForArea] = useState(null)
 
   const blank = { area_name: '', description: '', icon: DEFAULT_AREA_ICON }
   const [formVal, setFormVal]   = useState(blank)
@@ -479,12 +479,12 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         />
       )}
 
-      {docsForArea && (
+      {linksForArea && (
         <EntityLinksModal
           entityType="area"
-          entityId={docsForArea.area_id}
-          entityName={docsForArea.area_name}
-          onClose={() => setDocsForArea(null)}
+          entityId={linksForArea.area_id}
+          entityName={linksForArea.area_name}
+          onClose={() => setLinksForArea(null)}
           showToast={showToast}
           hasPermission={hasPermission}
         />
@@ -565,7 +565,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           {
             // Attached directly: there is no proposal lane for a link.
             label: 'Attached Links', icon: <IconBookOpen size={13} />,
-            onClick: () => setDocsForArea(selectedArea),
+            onClick: () => setLinksForArea(selectedArea),
             title: 'Attach or edit links for this area — documents, a site plan, any URL'
           },
           // Archive or Restore, never both: the two are mutually exclusive states of the same row.
