@@ -7376,7 +7376,7 @@ ALTER FUNCTION public.revoke_credential_on_decommission() OWNER TO postgres;
 --
 
 -- FUNCTION revoke_credential_on_decommission() :: COMMENT
-COMMENT ON FUNCTION public.revoke_credential_on_decommission() IS 'Rotates a decommissioned gateway''s broker credential to a password nobody records. Gated on gateway_has_broker_credential() (0056), NOT gateway_holds_a_credential() (0038): the latter asks about Remote enrolment and therefore refused every host-run gateway, which is every gateway a provisioned stack has. The gate still cannot admit a gateway that never held an account, so 0040''s guarantee -- revocation never CREATES one -- is preserved.';
+COMMENT ON FUNCTION public.revoke_credential_on_decommission() IS 'Trigger function: when a gateway is archived or deleted, asks the gateway credential service to disable its Dynamic Security client, which drops the live broker session. Only a gateway that holds a broker account is asked (gateway_has_broker_credential), so revocation never creates one. On archive it stamps credential_revoked_at; the sweep clears the stamp if the call failed.';
 
 --
 
