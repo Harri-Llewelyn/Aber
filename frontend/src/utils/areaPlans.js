@@ -80,8 +80,8 @@ export function isSvgFile(file) {
 }
 
 /** The bounds of `areas.plan_aspect`, numeric(8,4); a plan outside them is refused before the upload. */
-export const PLAN_ASPECT_MIN = 0.0001
-export const PLAN_ASPECT_MAX = 9999.9999
+const PLAN_ASPECT_MIN = 0.0001
+const PLAN_ASPECT_MAX = 9999.9999
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
@@ -134,11 +134,6 @@ export function readSvgPlan(text) {
     return { problem: `The plan's proportions (${Number(aspect.toPrecision(3))} wide for every 1 tall) are beyond what an area plan can hold (${PLAN_ASPECT_MIN} to ${PLAN_ASPECT_MAX}).` }
   }
   return { aspect: rounded }
-}
-
-/** Width over height of an SVG plan, or null when it would be refused. */
-export function svgAspectFromText(text) {
-  return readSvgPlan(text).aspect ?? null
 }
 
 /** A length attribute in px, or null for a relative unit, a percentage, or no length at all. */

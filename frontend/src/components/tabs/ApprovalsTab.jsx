@@ -154,30 +154,6 @@ export function diffRows(proposal) {
   }))
 }
 
-/**
- * The message for a refused INSERT and the repair each needs. `23505` is the per-asset cap, and the
- * repair is to open the proposal you already have, so the caller is handed the row. `23514` is the
- * per-person ceiling.
- */
-export function refusalFor(error, existing) {
-  const code = error?.code
-  if (code === '23505') {
-    return {
-      message: existing
-        ? 'You already have an open proposal on this asset. Add to that one rather than opening a second.'
-        : 'You already have an open proposal on this asset.',
-      openExisting: Boolean(existing)
-    }
-  }
-  if (code === '23514') {
-    return { message: error?.message || 'You are at your limit for open proposals.', openExisting: false }
-  }
-  if (code === '42501') {
-    return { message: 'You are not permitted to do that.', openExisting: false }
-  }
-  return { message: error?.message || 'The proposal was refused.', openExisting: false }
-}
-
 function StatusBadge({ status }) {
   const cls = {
     open: 'badge-pending',

@@ -154,7 +154,3 @@ export function followSemanticIdType(previousId, previousType, nextId) {
 
 /** Display label for a `standard` value as stored (NULL/'' meaning a local extension). */
 export const LOCAL_EXTENSION_LABEL = 'Local extension'
-
-export function standardLabel(standard) {
-  return standard || LOCAL_EXTENSION_LABEL
-}

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 
 /** The toast types. Anything else a caller passes is shown as `info`. */
-export const TOAST_TYPES = ['success', 'info', 'warning', 'error']
+const TOAST_TYPES = ['success', 'info', 'warning', 'error']
 
 /** Toasts on screen at once. A fourth pushes the oldest off; it stays in the history. */
 export const MAX_VISIBLE_TOASTS = 3

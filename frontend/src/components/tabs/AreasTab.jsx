@@ -477,7 +477,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
       {archiveTarget && (
         <ArchiveModal
-          entityType="areas" entityId={archiveTarget.area_id} displayName={archiveTarget.area_name}
+          entityId={archiveTarget.area_id} displayName={archiveTarget.area_name}
           onArchive={archiveArea} onCancel={() => setArchiveTarget(null)}
         />
       )}

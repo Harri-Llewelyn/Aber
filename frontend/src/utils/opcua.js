@@ -21,12 +21,6 @@ export function browsePath(nodeId) {
   return match ? match[1].trim() : ''
 }
 
-/** The namespace URI out of an ExpandedNodeId string, or '' when it carries none. */
-export function namespaceUri(nodeId) {
-  const match = /(?:^|;)nsu=([^;]+)/.exec((nodeId || '').trim())
-  return match ? match[1].trim() : ''
-}
-
 /**
  * The metric group a data point implies: the first segment of its browse path, derived from the
  * data so a new vocabulary row needs no code change.

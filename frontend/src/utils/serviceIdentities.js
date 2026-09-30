@@ -68,7 +68,7 @@ export const GATEWAY_ROLES = {
  * gateway claims it. Declared so the Access Control page lists it with the other platform accounts
  * rather than as a stray; a gateway-shaped username not here and not a gateway's is an orphan.
  */
-export const FIXTURE_ACCOUNTS = {
+const FIXTURE_ACCOUNTS = {
   gwy110000000000400080000: {
     name: 'Validator test gateway',
     purpose: 'ingestion/validate.py publishes as this gateway (UUID 11000000-0000-4000-8000-000000000001). '

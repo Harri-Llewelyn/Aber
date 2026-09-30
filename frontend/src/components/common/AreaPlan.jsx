@@ -10,7 +10,7 @@ import { planAspect, planFractionsFromEvent } from '../../utils/areaPlans'
  */
 
 /** The blob URL for an area's plan, or null while loading or when the area has none. */
-export function useAreaPlanUrl(area) {
+function useAreaPlanUrl(area) {
   const path = area?.plan_path || null
   const [state, setState] = useState({ path: null, url: null, error: null })
 
@@ -26,7 +26,7 @@ export function useAreaPlanUrl(area) {
   return state.path === path ? state : { path, url: null, error: null }
 }
 
-export function AreaPlan({ area, onPlaceClick, children, className = '', title, compact = false }) {
+export function AreaPlan({ area, onPlaceClick, children, title }) {
   const aspect = planAspect(area)
   const { url, error } = useAreaPlanUrl(area)
   const hasPlan = !!area?.plan_path
@@ -45,7 +45,7 @@ export function AreaPlan({ area, onPlaceClick, children, className = '', title, 
 
   return (
     <div
-      className={`area-plan${onPlaceClick ? ' area-plan-interactive' : ''}${compact ? ' area-plan-compact' : ''}${className ? ' ' + className : ''}`}
+      className={`area-plan${onPlaceClick ? ' area-plan-interactive' : ''}`}
       style={{ aspectRatio: String(aspect), '--plan-aspect': aspect }}
       onClick={handleClick}
       title={title}
@@ -55,7 +55,7 @@ export function AreaPlan({ area, onPlaceClick, children, className = '', title, 
       {hasPlan && url && !broken ? (
         <img className="area-plan-image" src={url} alt="" draggable={false} onError={() => setUndrawable(url)} />
       ) : (
-        <DefaultOutline aspect={aspect} compact={compact} unavailable={hasPlan ? unavailable : null} />
+        <DefaultOutline aspect={aspect} unavailable={hasPlan ? unavailable : null} />
       )}
       {children}
     </div>
@@ -63,7 +63,7 @@ export function AreaPlan({ area, onPlaceClick, children, className = '', title, 
 }
 
 /** The outline an area gets until somebody uploads a plan: a dashed frame over a light grid. */
-function DefaultOutline({ aspect, compact, unavailable }) {
+function DefaultOutline({ aspect, unavailable }) {
   const w = 400
   const h = Math.round(w / aspect)
   const step = 50
@@ -76,11 +76,9 @@ function DefaultOutline({ aspect, compact, unavailable }) {
         {lines}
         <rect className="outline-frame" x={4} y={4} width={w - 8} height={h - 8} rx={6} />
       </svg>
-      {!compact && (
-        <span className="area-plan-caption">
-          {unavailable || 'No plan uploaded — the default outline'}
-        </span>
-      )}
+      <span className="area-plan-caption">
+        {unavailable || 'No plan uploaded — the default outline'}
+      </span>
     </>
   )
 }
@@ -90,7 +88,7 @@ function DefaultOutline({ aspect, compact, unavailable }) {
  * tile rollup (normal, attention, idle), `alert` when Grafana has raised one against a device
  * here, or `muted` for a pin that is context rather than the subject.
  */
-export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, hideLabel = false, iconSize = null }) {
+export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, iconSize = null }) {
   return (
     <button
       type="button"
@@ -103,7 +101,7 @@ export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selecte
       data-status={status}
     >
       <span className="area-plan-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>
-      {!hideLabel && <span className="area-plan-pin-label">{label}</span>}
+      <span className="area-plan-pin-label">{label}</span>
     </button>
   )
 }

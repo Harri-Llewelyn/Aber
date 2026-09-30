@@ -4,7 +4,6 @@ import {
   patchFromForm,
   formFromPatch,
   nonProposableFields,
-  isProposable,
   submitProposal,
 } from '../utils/proposeFromForm'
 import { api } from '../api'
@@ -101,7 +100,6 @@ describe('what a form would change', () => {
     // here even if that control were ever bypassed.
     const patch = patchFromForm('device', current, { ...current, active_gateway_id: 'gw-9' })
     expect(patch).toEqual({})
-    expect(isProposable('device', 'active_gateway_id')).toBe(false)
   })
 })
 

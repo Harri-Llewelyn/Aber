@@ -19,9 +19,6 @@ export const SCOPE_CELL = 'cell'
 export const SCOPE_AREA_WIDE = 'area_wide'
 export const SCOPE_SITE_WIDE = 'site_wide'
 
-/** Mirrors the devices_location_scope_valid / gateways_location_scope_valid CHECK constraints. */
-export const LOCATION_SCOPES = [SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE]
-
 /** The scopes that assert the asset has no single cell. */
 export const WIDE_SCOPES = new Set([SCOPE_AREA_WIDE, SCOPE_SITE_WIDE])
 
@@ -169,19 +166,6 @@ export function deviceLocationOf(device, gateway, cellsById) {
   return resolveDeviceLocation(device, gateway, cellsById)
 }
 
-/** The cell a device should be displayed under, or null for wide-scoped and unassigned. */
-export function effectiveCellId(device, gateway) {
-  return deviceLocationOf(device, gateway).effective_cell_id
-}
-
-export function isSiteWide(device, gateway) {
-  return deviceLocationOf(device, gateway).location_source === SOURCE_SITE_WIDE
-}
-
-export function isAreaWide(device, gateway) {
-  return deviceLocationOf(device, gateway).location_source === SOURCE_AREA_WIDE
-}
-
 export function isUnassigned(device, gateway) {
   return deviceLocationOf(device, gateway).location_source === SOURCE_UNASSIGNED
 }
@@ -251,18 +235,4 @@ export function groupCellsByArea(cells) {
     byArea.get(areaId).push(cell)
   }
   return byArea
-}
-
-/**
- * Resolve a whole list at once: a Map keyed by device id. For paths that hold devices and gateways
- * but no view read.
- */
-export function resolveDeviceLocations(devices, gateways, cellsById) {
-  const byId = new Map((gateways || []).map(g => [g.gateway_id ?? g.id, g]))
-  const out = new Map()
-  for (const device of devices || []) {
-    const gatewayId = device?.active_gateway_id ?? device?.gateway_id ?? null
-    out.set(device?.asset_id ?? device?.id, resolveDeviceLocation(device, byId.get(gatewayId) || null, cellsById))
-  }
-  return out
 }

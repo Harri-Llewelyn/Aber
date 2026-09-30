@@ -23,7 +23,7 @@ export const BACKUP_STALE_HOURS = 36
  * How many of the newest backups the retention prune never removes, whatever their age.
  * check-docs-drift.mjs holds it equal to the floor in backup_prunable().
  */
-export const BACKUP_RETENTION_FLOOR = 3
+const BACKUP_RETENTION_FLOOR = 3
 
 /** Runs per page of the list; "Show more" adds another page. */
 const PAGE_SIZE = 30
@@ -305,7 +305,7 @@ export function BackupsTab({ showToast }) {
  * covers a service that is not running, which records no failure. Same clock as the view the
  * Backup Stale rule reads (0011).
  */
-export function backupState(summary, now = Date.now()) {
+function backupState(summary, now = Date.now()) {
   if (!summary?.firstRecordedAt) return null
   const lastGoodAt = summary.lastSuccess?.started_at || null
   if (summary.latestOutcome?.status === 'FAILED') return { kind: 'failed', lastGoodAt }
@@ -508,7 +508,7 @@ const OFFSITE_REQUIRED = [
 ]
 
 /** What is still missing before the service copies anything, as backup_offsite_base() decides it. */
-export function offsiteMissing(destination) {
+function offsiteMissing(destination) {
   if (!destination) return []
   const missing = OFFSITE_REQUIRED.filter(([k]) => !String(destination[k] || '').trim()).map(([, label]) => label)
   if (!destination.credentialSet) missing.push('the secret access key')
@@ -516,7 +516,7 @@ export function offsiteMissing(destination) {
 }
 
 /** Where copies go, <endpoint>/<bucket>/<prefix>/, the form offsite_location starts with. */
-export function offsiteBase(destination) {
+function offsiteBase(destination) {
   if (!destination || offsiteMissing(destination).length) return null
   return `${destination.endpoint.trim().replace(/\/+$/, '')}/${destination.bucket.trim()}/${destination.prefix.trim()}/`
 }

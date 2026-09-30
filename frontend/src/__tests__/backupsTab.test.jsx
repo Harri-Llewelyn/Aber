@@ -2,7 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { BackupsTab, BACKUP_STALE_HOURS, keptBecause } from '../components/tabs/BackupsTab'
-import { tabIsVisible, TABS, groupedNav } from '../App'
+import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
 /**
  * The Backups page. What has to hold: the page never takes a backup itself, only queues one and

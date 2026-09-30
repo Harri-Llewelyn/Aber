@@ -50,12 +50,6 @@ export function hasUnmodelledMetrics(device, schemaOrSchemas) {
   return unmodelledMetrics(device, schemaOrSchemas).length > 0
 }
 
-/** Resolve the schema assigned to a device from a loaded schema list, keyed as `schema_uuid`. */
-export function schemaForDevice(device, schemas) {
-  if (!device?.schema_id) return null
-  return (schemas || []).find(s => s.schema_uuid === device.schema_id) || null
-}
-
 /**
  * Every schema attached to a device. Reads `submodel_schema_ids` (the device_submodels join) and
  * falls back to the 1:1 `schema_id`. Returns [] rather than [null] when nothing is attached.

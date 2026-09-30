@@ -8,7 +8,7 @@
  */
 
 /** flow-sync.mjs ticks every FLOW_SYNC_INTERVAL_SECONDS, 300 by default. */
-export const FLOW_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const FLOW_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
  * How long after a push a difference is called "deploying" rather than drift: two ticks, so one

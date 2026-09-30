@@ -8,7 +8,6 @@
  */
 
 import { METRIC_GROUP_SEPARATOR } from './metricGroup'
-import { STANDARDS } from './standards'
 
 const VOCABULARY_KINDS = {
   DATA_ITEM_TYPE: 'DATA_ITEM_TYPE',
@@ -17,12 +16,6 @@ const VOCABULARY_KINDS = {
   NATIVE_UNIT: 'NATIVE_UNIT',
   COMPONENT: 'COMPONENT'
 }
-
-/**
- * Provenance recorded on a catalog entry built from the standard vocabulary. Re-exported from the
- * standards registry so `metric_catalog.standard` has one definition.
- */
-export const MTCONNECT_STANDARD = STANDARDS.MTCONNECT
 
 /** Only SAMPLE observations are a continuously-varying measurement, so only they carry units. */
 export const CATEGORY_WITH_UNITS = 'SAMPLE'

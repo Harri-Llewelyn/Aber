@@ -275,13 +275,6 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               </div>
             )}
 
-            {credential.applied_to_running_broker === false && (
-              <div className="form-group" style={{ color: 'var(--warning-text)', fontSize: '12px' }}>
-                <IconShieldAlert size={12} /> The durable copy was written, but the running broker
-                has not reloaded it yet. The credential works after the broker next reloads.
-              </div>
-            )}
-
             {credential.audit_recorded === false && (
               <div className="form-group" style={{ color: 'var(--danger)', fontSize: '12px' }}>
                 <IconShieldAlert size={12} /> The credential was issued, but the Audit Trail entry

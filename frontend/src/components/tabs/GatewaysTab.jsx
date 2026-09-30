@@ -753,7 +753,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
 
       {archiveTarget && (
         <ArchiveModal
-          entityType="gateways" entityId={archiveTarget.gateway_id} displayName={archiveTarget.gateway_name}
+          entityId={archiveTarget.gateway_id} displayName={archiveTarget.gateway_name}
           onArchive={archiveGateway} onCancel={() => setArchiveTarget(null)}
         />
       )}

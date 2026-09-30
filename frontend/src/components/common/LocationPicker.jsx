@@ -15,7 +15,7 @@ export function locationIncomplete(form) {
  * choosing one clears what the others store. The only area is chosen for Area-Wide without
  * asking; several leave `area_id` empty for the dropdown.
  */
-export function locationFieldsFor(scope, form, areas = []) {
+function locationFieldsFor(scope, form, areas = []) {
   if (scope === SCOPE_SITE_WIDE) return { location_scope: SCOPE_SITE_WIDE, cell_id: '', area_id: '' }
   if (scope === SCOPE_AREA_WIDE) {
     const areaId = areas.some(a => a.area_id === form.area_id)

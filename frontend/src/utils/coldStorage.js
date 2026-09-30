@@ -149,7 +149,7 @@ export function backlogTone(seconds) {
  * that log against this page should not have to translate. Two languages, one list; a test asserts
  * the page's half and the migration seeds exactly these keys.
  */
-export const DESTINATION_FIELDS = [
+const DESTINATION_FIELDS = [
   { key: 'archive.endpoint', label: 'S3 endpoint' },
   { key: 'archive.region', label: 'S3 region' },
   { key: 'archive.bucket', label: 'S3 bucket' },

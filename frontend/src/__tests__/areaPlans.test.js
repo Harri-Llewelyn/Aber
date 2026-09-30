@@ -8,7 +8,6 @@ import {
   planFractionsFromEvent,
   formatPlace,
   isSvgFile,
-  svgAspectFromText,
   readSvgPlan,
   decodeSvgBytes,
   areaPlanPath
@@ -82,20 +81,21 @@ describe('plan files', () => {
   });
 
   const NS = 'xmlns="http://www.w3.org/2000/svg"';
+  const aspectOf = (text) => readSvgPlan(text).aspect ?? null;
 
   it('reads the aspect from the viewBox first, then width and height, else refuses', () => {
     // Rounded to four places: the column is numeric(8,4).
-    expect(svgAspectFromText(`<svg ${NS} viewBox="0 0 800 600"><rect/></svg>`)).toBe(1.3333);
-    expect(svgAspectFromText(`<?xml version="1.0"?><svg ${NS} viewBox="0,0,300,600" width="10" height="10"/>`)).toBe(0.5);
-    expect(svgAspectFromText(`<svg ${NS} width="1200px" height="400px"></svg>`)).toBe(3);
-    expect(svgAspectFromText(`<svg ${NS} viewBox="0 0 1.2e3 9e2"/>`)).toBe(1.3333);
-    expect(svgAspectFromText(`<svg ${NS} viewBox="0,0,\n  800,\n  600"/>`)).toBe(1.3333);
+    expect(aspectOf(`<svg ${NS} viewBox="0 0 800 600"><rect/></svg>`)).toBe(1.3333);
+    expect(aspectOf(`<?xml version="1.0"?><svg ${NS} viewBox="0,0,300,600" width="10" height="10"/>`)).toBe(0.5);
+    expect(aspectOf(`<svg ${NS} width="1200px" height="400px"></svg>`)).toBe(3);
+    expect(aspectOf(`<svg ${NS} viewBox="0 0 1.2e3 9e2"/>`)).toBe(1.3333);
+    expect(aspectOf(`<svg ${NS} viewBox="0,0,\n  800,\n  600"/>`)).toBe(1.3333);
     // Percent lengths say nothing about shape, and a plan with no stated size renders 300x150.
     expect(readSvgPlan(`<svg ${NS} width="100%" height="100%"></svg>`).problem).toMatch(/states no size/);
     expect(readSvgPlan(`<svg ${NS} style="width:800px;height:600px"></svg>`).problem).toMatch(/states no size/);
-    expect(svgAspectFromText(`<svg ${NS}></svg>`)).toBeNull();
-    expect(svgAspectFromText('not svg at all')).toBeNull();
-    expect(svgAspectFromText('')).toBeNull();
+    expect(aspectOf(`<svg ${NS}></svg>`)).toBeNull();
+    expect(aspectOf('not svg at all')).toBeNull();
+    expect(aspectOf('')).toBeNull();
   });
 
   it('reads the file the way a browser does, so what passes the check is what draws', () => {

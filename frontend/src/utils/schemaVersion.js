@@ -57,17 +57,6 @@ export const isSchemaEditable = (schema) => schemaStatus(schema) === SCHEMA_STAT
 /** Only the head of a lineage may be forked -- see fork_schema()'s status check. */
 export const canForkSchema = (schema) => schemaStatus(schema) === SCHEMA_STATUS.ACTIVE
 
-export const canPublishSchema = (schema) => schemaStatus(schema) === SCHEMA_STATUS.DRAFT
-
-/** The open draft hanging off a schema, if any; a partial unique index guarantees at most one. */
-export const draftFor = (schemas, schema) => {
-  const parentId = schema?.schema_uuid || schema?.id
-  if (!parentId) return null
-  return (schemas || []).find(s =>
-    s.parent_schema_id === parentId && schemaStatus(s) === SCHEMA_STATUS.DRAFT
-  ) || null
-}
-
 /**
  * The whole lineage a schema belongs to, oldest first, walked through `parent_schema_id` rather
  * than matched on the derived name. Guarded against a cycle by a visited set.

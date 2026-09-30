@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, DEFAULT_SEMANTIC_ID_TYPE,
-  inferSemanticIdType, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair, standardLabel,
-  LOCAL_EXTENSION_LABEL,
+  inferSemanticIdType, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair,
   LOCAL_SEMANTIC_NAMESPACE, MTCONNECT_SEMANTIC_NAMESPACE, ISO22400_SEMANTIC_NAMESPACE,
   mtconnectSemanticId, mtconnectVocabularySemanticId
 } from '../utils/standards'
-import { MTCONNECT_STANDARD } from '../utils/mtconnect'
 
 describe('standards registry', () => {
   it('stores a local extension as an empty standard, not the word "Custom"', () => {
@@ -23,11 +21,6 @@ describe('standards registry', () => {
     expect(values).toContain(STANDARDS.MTCONNECT)
     expect(values).toContain(STANDARDS.ISO22400)
     expect(values).toContain(STANDARDS.OPCUA)
-  })
-
-  it('keeps one definition of the MTConnect provenance string', () => {
-    // Two constants holding 'MTConnect' would silently fork the day one of them was corrected.
-    expect(MTCONNECT_STANDARD).toBe(STANDARDS.MTCONNECT)
   })
 
   it('mirrors the CHECK constraints on semantic_id_type (migration 0012)', () => {
@@ -191,13 +184,5 @@ describe('mtconnectVocabularySemanticId', () => {
 
   it('returns empty for an empty name', () => {
     expect(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', '')).toBe('')
-  })
-})
-
-describe('standardLabel', () => {
-  it('names the absence of a standard rather than rendering blank', () => {
-    expect(standardLabel(null)).toBe(LOCAL_EXTENSION_LABEL)
-    expect(standardLabel('')).toBe(LOCAL_EXTENSION_LABEL)
-    expect(standardLabel('ISO 22400')).toBe('ISO 22400')
   })
 })

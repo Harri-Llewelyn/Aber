@@ -109,11 +109,6 @@ export function nonProposableFields(kind) {
   return PROPOSAL_FORMS[kind]?.withheld || {}
 }
 
-/** Whether a form key can be proposed at all. */
-export function isProposable(kind, formKey) {
-  return Boolean(PROPOSAL_FORMS[kind]?.fields?.[formKey])
-}
-
 /**
  * What this form would change, as a patch of database columns. Only what actually moved, so an
  * approver can see which column the person changed and the patch does not revert anything that
