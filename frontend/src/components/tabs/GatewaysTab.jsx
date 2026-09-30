@@ -297,8 +297,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
 
   // Counted across the whole fleet: the toggle is offered whenever one exists, hidden or not.
   const shadowGatewayCount = gateways.filter(g => g.is_shadow).length
-  // Every gateway the list could show, for the count: the Playback gateway only once it is asked for.
-  const listable = gateways.filter(g => showShadowGateways || !g.is_shadow)
+  // The count's total: every gateway in the lifecycle lane the select names, so the page at rest
+  // reads a bare count and only the other filters narrow it to shown / total. The Playback gateway
+  // counts only once it is asked for.
+  const inLane = g => filterMode === 'all' || (filterMode === 'archived') === !!g.is_archived
+  const listable = gateways.filter(g => (showShadowGateways || !g.is_shadow) && inLane(g))
 
   const activeFilterCount =
     [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +

@@ -313,12 +313,15 @@ describe('the Gateways list', () => {
     expect(screen.queryByText('Retired_Gateway')).toBeNull()
   })
 
-  it('counts the rows on the card title, as shown / total while the list is narrowed', async () => {
+  it('counts the lifecycle lane on the card title, as shown / total only while another filter narrows it', async () => {
     await open([live(), retired()])
-    expect(document.querySelector('.section-count').textContent).toBe('1 / 2')
+    expect(document.querySelector('.section-count').textContent).toBe('1')
 
     fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
     expect(document.querySelector('.section-count').textContent).toBe('2')
+
+    fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: 'Retired' } })
+    expect(document.querySelector('.section-count').textContent).toBe('1 / 2')
   })
 
   it('shows a count of 0 on a stack with no gateways', async () => {
