@@ -4003,26 +4003,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 0 5px;
 }
 
-/* The foot of the timeline, present only when the trail continues past what is loaded or ended
-   at a page boundary. Separated by a rule, because it makes a claim about the data above it. */
-.trail-pagination {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-/* Muted and italic: it is a statement of completeness, not a warning. The truncated case gets the
-   button instead, and a button is louder than any colour would be here. */
-.trail-pagination-end {
-  font-size: 11px;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
 /* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
    above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
    borders and fills, not for text. */
@@ -4843,3 +4823,169 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 .gateway-cell-warning { color: var(--warning-text); }
 .gateway-cell-italic { font-style: italic; }
 .gateway-withheld { color: var(--warning-text); }
+
+/* METRICS, SCHEMAS, VOCABULARY. The Add Metric form: fields wrap, and each carries its own flex
+   basis. */
+.metric-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.metric-form .form-group { margin: 0; }
+
+/* A semantic id is a full IRI; the cap keeps it from widening the catalog table. */
+.metric-id-cell { max-width: 260px; }
+
+/* The label of a group header, on Metrics and on the Vocabulary sections. */
+.table-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.table-group-label-muted { color: var(--text-muted); }
+
+.metric-edit-facts {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.schema-change-cell { max-width: 280px; }
+
+.validate-payload-input {
+  height: 150px;
+  font-size: 12px;
+}
+
+.callout-success {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+/* The schema detail dialog's five footer buttons do not fit one row at its width. */
+.modal-lg .modal-actions { flex-wrap: wrap; }
+
+/* VOCABULARY. A section header reuses `.table-group-button` and `.table-group-label`; the strip
+   behind it is `.table-group-row`'s tint. */
+.vocab-sections { padding: 0 0 4px; }
+
+.vocab-section-head {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+}
+
+.vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+
+.vocab-in-use {
+  font-size: 11px;
+  color: var(--success-text);
+}
+
+.vocab-section-body { padding: 12px 16px; }
+
+.vocab-section-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vocab-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.vocab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-glass);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vocab-chip-used {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+.vocab-chip-action { cursor: pointer; }
+.vocab-chip-meta { opacity: 0.65; }
+
+.vocab-note {
+  display: block;
+  margin-top: 6px;
+}
+
+/* COLD STORAGE: the Destination card, the stat strip and the catalogue rows. */
+.cold-stat { min-width: 120px; }
+.cold-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cold-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.cold-stat-warning .cold-stat-value { color: var(--warning-text); }
+/* Alone above the empty state it is centred, with no column width to pad it off its label. */
+.cold-stat-center { min-width: 0; text-align: center; }
+.cold-stat-center .cold-stat-value { font-size: 26px; }
+.cold-backlog-lead { margin-bottom: var(--stack); }
+/* The two commands sit on their own lines so a wrapped command is one a reader can select. */
+.cold-empty-commands { margin-top: 16px; font-size: 11px; line-height: 2; }
+.cold-empty-commands > div:nth-of-type(2) { margin-top: 8px; }
+.cold-row-error {
+  margin-top: 4px;
+  max-width: 38ch;
+  font-size: 11px;
+  color: var(--warning-text);
+}
+.cold-destination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.cold-destination + .cold-destination { margin-top: 12px; }
+.cold-key-set { font-size: 12px; color: var(--text-primary); }
+/* A badge whose meaning is its tooltip: the dotted underline says so. */
+.badge-hint {
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+/* CAPTURE: the drop zones and the small gaps in the details panel. */
+.capture-drop {
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.capture-drop-play { margin-top: 12px; }
+.capture-drop-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.capture-drop-icon { vertical-align: -2px; margin-right: 6px; }
+.capture-badge-lead { margin-right: 6px; }
+.capture-label-count { margin-left: 6px; }

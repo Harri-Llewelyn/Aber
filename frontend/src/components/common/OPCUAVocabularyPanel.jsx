@@ -3,7 +3,7 @@ import { opcuaSections, dataPointTooltip, browsePath } from '../../utils/opcua'
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The OPC UA tab of the Standard Vocabulary Reference card: the vocabulary for the assets MTConnect
+ * The OPC UA tab of the Vocabulary page: the vocabulary for the assets MTConnect
  * does not cover (articulated arms, AGVs, general machinery identification). Sections are companion
  * specifications, because which spec a point comes from decides whether it applies to an asset.
  */

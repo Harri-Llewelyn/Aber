@@ -3,7 +3,7 @@ import { iso22400Sections, kpiTooltip } from '../../utils/iso22400'
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The ISO 22400 tab of the Standard Vocabulary Reference card. A distinct tab because ISO 22400
+ * The ISO 22400 tab of the Vocabulary page. A distinct tab because ISO 22400
  * gives whole computed KPIs with formulas, not words to build an observation name from; MTConnect's
  * `AVAILABILITY` is an EVENT meaning connected, not the ISO ratio. In use is decided by semantic id
  * where the catalog has one, falling back to the name token.

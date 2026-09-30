@@ -1,25 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
 import CopyableId from '../common/CopyableId'
-// No ActionButton or usePendingKey for restore and delete: both run from inside a ConfirmModal,
-// which owns its own pending state. The export is the one action that runs from the row.
+// Restore and delete run from inside a ConfirmModal, which owns its own pending state; the export
+// is the one action that runs from the row.
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { downloadBlob } from '../../utils/downloadBlob'
 import { PageHeading } from '../common/PageHeading'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { Badge } from '../common/Badge'
+import { SectionCount } from '../common/SectionCount'
+import { EmptyState } from '../common/EmptyState'
+import { LoadingState } from '../common/LoadingState'
+import { formatDate, formatDateTime } from '../../utils/format'
 
 /** The page's singular row type -> the Audit Trail page's handover type. */
 const TRAIL_TYPE = { area: 'AREA', cell: 'CELL', gateway: 'GATEWAY', device: 'DEVICE' }
 
 /**
  * Two cards, two stages of one lifecycle. The first is what archiving leaves: the row still in its
- * table, restorable, its retention timer running. The second is what deleting leaves: the row
- * gone, a tombstone written by the database on the DELETE, with links to what survives it -- the
- * audit trail, a gateway's repository in the forge, any bundle exported while it was alive, and
- * the historian id its readings are still keyed by.
+ * table, restorable, its retention timer running. It takes the page's spare height and scrolls.
+ * The second is what deleting leaves: the row gone, a tombstone written by the database on the
+ * DELETE, with links to what survives it -- the audit trail, a gateway's repository in the forge,
+ * any bundle exported while it was alive, and the historian id its readings are still keyed by. It
+ * keeps its natural height.
  */
 export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   const [archives, setArchives] = useState([])
@@ -32,7 +39,6 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   const [exporting, setExporting] = useState(null)
 
   const load = useCallback(() => {
-    setLoading(true)
     Promise.all([
       api.get('/api/v1/archives'),
       // Both tolerated: a reader admitted here by `archive:manage` may lack the roles the exports
@@ -52,22 +58,20 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   const restore = async (item) => {
     try {
       await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
-      // Dismissed after the write, for the same reason as purge() below.
       setConfirmRestore(null)
       load(); showToast(`Entity '${item.name}' restored to active service`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
   /**
-   * The manual half of the retention policy. `auto_delete_at` purges on a timer; this is the same
-   * destruction on demand. A real DELETE, not another soft flag: the row leaves the table, the
-   * audit trail keeps its history, and the database writes the tombstone the second card lists.
+   * The manual half of the retention policy: the same destruction the auto-purge timer does, on
+   * demand. A real DELETE: the row leaves the table, the audit trail keeps its history, and the
+   * database writes the tombstone the second card lists.
    */
   const purge = async (item) => {
     try {
       await api.delete(`/api/v1/${item.entity_type}s/${item.entity_id}`)
-      // Dismissed after the delete, not before, so the one irreversible action in the app runs
-      // while the confirmation is still on screen.
+      // Dismissed after the delete, so the action runs while the confirmation is on screen.
       setConfirmPurge(null)
       load(); showToast(`Entity '${item.name}' permanently deleted`, 'success')
     } catch (e) { showToast(e.message, 'error') }
@@ -107,6 +111,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   }
 
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  const deniedTitle = requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
   const latestExportOf = (entityId) => exports.find(x => x.entity_id === entityId) || null
 
   /** What survives a retired entity, as links; derived from the tombstone's row and its exports. */
@@ -125,7 +130,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
       )
     }
     if (r.entity_type === 'gateway' && r.old_data?.forge_repository_at && r.sparkplug_id) {
-      // Derived from the id as it is everywhere else; the sweep archived it, nothing deleted it.
+      // Derived from the id as it is everywhere else.
       items.push(
         <a
           key="forge"
@@ -145,9 +150,9 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
           key={x.id}
           className="btn btn-sm btn-ghost"
           onClick={() => downloadExport(x)}
-          title={`The bundle taken ${new Date(x.taken_at).toLocaleString()}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, audit trail, live telemetry and the cold-object manifest`}
+          title={`The bundle taken ${formatDateTime(x.taken_at)}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, audit trail, live telemetry and the cold-object manifest`}
         >
-          <IconDownload size={12} /> Bundle {new Date(x.taken_at).toLocaleDateString()}
+          <IconDownload size={12} /> Bundle {formatDate(x.taken_at)}
         </button>
       )
     }
@@ -155,15 +160,15 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   }
 
   return (
-    <>
-      <PageHeading icon={<IconArchive size={15} />} title="Archived entities">
-        Cells, gateways and devices taken out of commission without being deleted. An archived
+    <div className="page-layout page-fill">
+      <div className="page-main">
+      <PageHeading icon={<IconArchive size={15} />} title="Archived Entities">
+        Areas, cells, gateways and devices taken out of commission without being deleted. An archived
         entity keeps its identity and its history, leaves the asset pages, and runs a retention
         timer to an auto-purge date; Restore returns it to service with everything intact.
       </PageHeading>
 
-      {/* The count stays in the card header: it describes this table rather than the page. */}
-      <div className="card">
+      <div className="card card-fill">
         <div className="card-header">
           <h3 className="section-title">
             Archived Entities
@@ -171,51 +176,48 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
               label="About archived entities"
               text="Out of commission but not gone: identity and history kept, hidden from the asset pages, a timer running to auto-purge. Restore returns it intact. Export a device as a bundle before it is purged."
             />
+            <SectionCount total={archives.length} />
           </h3>
         </div>
-        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading archives…</div> :
+        {loading ? <LoadingState label="archived entities" /> :
          archives.length === 0 ? (
-           <div className="empty-state">
-             <div className="empty-icon"><IconArchive size={36} /></div>
-             <div className="empty-text">No decommissioned entities currently in archives.</div>
-           </div>
+           <EmptyState icon={<IconArchive size={36} />} message="Nothing is archived." />
          ) : (
            <div className="table-wrap">
              <table>
-               <thead><tr><th title="Entity Name">Name</th><th title="Entity ID">Entity ID</th><th title="Entity classification">Type</th><th title="Decommissioned timestamp">Archived At</th><th title="Retention compliance auto-purge timer">Auto-Purge Expiration</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+               <thead><tr><th title="Entity Name">Name</th><th title="Entity ID">Entity ID</th><th title="Entity classification">Type</th><th title="When it was archived">Archived At</th><th title="When the auto-purge timer deletes the archived record for good">Auto-Purge</th><th className="row-actions">Actions</th></tr></thead>
                <tbody>
-                 {archives.map((a, i) => {
+                 {archives.map(a => {
                    const latestExport = a.entity_type === 'device' ? latestExportOf(a.entity_id) : null
                    return (
-                   <tr key={i}>
+                   <tr key={`${a.entity_type}-${a.entity_id}`}>
                      <td>
                        <strong>{a.name}</strong>
                        {latestExport && (
-                         <div style={{ fontSize: '11px', color: 'var(--text-muted)' }} title={`A bundle of this device was taken ${new Date(latestExport.taken_at).toLocaleString()} and is kept beside the cold tier`}>
-                           Exported {new Date(latestExport.taken_at).toLocaleDateString()}
+                         <div className="cell-meta" title={`A bundle of this device was taken ${formatDateTime(latestExport.taken_at)} and is kept beside the cold tier`}>
+                           Exported {formatDate(latestExport.taken_at)}
                          </div>
                        )}
                      </td>
                      <td><CopyableId value={a.entity_id} label="entity id" onNotify={showToast} /></td>
-                     <td><span className="badge badge-warning">{a.entity_type.toUpperCase()}</span></td>
-                     <td className="cell-meta">{a.archived_at ? new Date(a.archived_at).toLocaleString() : '—'}</td>
+                     <td><Badge tone="warning" size="sm">{a.entity_type.toUpperCase()}</Badge></td>
+                     <td className="cell-meta">{formatDateTime(a.archived_at)}</td>
                      <td>
                        {a.auto_delete_at ? (
-                         <span className="mono cell-purge-date">Purges: {new Date(a.auto_delete_at).toLocaleDateString()}</span>
+                         <span className="mono cell-purge-date">Purges: {formatDate(a.auto_delete_at)}</span>
                        ) : (
-                         <span className="badge badge-neutral">Permanent (No Auto-Purge)</span>
+                         <Badge size="sm" title="No auto-purge timer is running; it stays archived until someone deletes it">Never auto-purged</Badge>
                        )}
                      </td>
                      {/* Restore is the ordinary move and Permanent Delete the irreversible one, so
-                         they are not peers: restore is a ghost button and delete only takes its
-                         danger colour when pointed at. Export sits between them for a device: it
-                         is the thing to do BEFORE the delete. */}
+                         they are not peers: delete only takes its danger colour when pointed at.
+                         Export Bundle, for a device, is what to do before the delete. */}
                      <td className="row-actions">
                        <button
                          className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
                          disabled={!canArchive}
                          onClick={() => canArchive && setConfirmRestore(a)}
-                         title={!canArchive ? 'Requires Admin permissions' : 'Restore entity back to active service'}
+                         title={!canArchive ? deniedTitle : 'Restore entity back to active service'}
                        >
                          <IconRefreshCw size={12} /> Restore
                        </button>
@@ -224,7 +226,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
                            className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
                            disabled={!canArchive || exporting === a.entity_id}
                            onClick={() => canArchive && exportBundle(a)}
-                           title={!canArchive ? 'Requires Admin permissions' : 'Download an AASX bundle of this device — its shell, audit trail, live telemetry and a manifest naming the cold objects — and keep a copy beside the cold tier'}
+                           title={!canArchive ? deniedTitle : 'Download an AASX bundle of this device — its shell, audit trail, live telemetry and a manifest naming the cold objects — and keep a copy beside the cold tier'}
                          >
                            <IconDownload size={12} /> {exporting === a.entity_id ? 'Exporting…' : 'Export Bundle'}
                          </button>
@@ -233,7 +235,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
                          className={`btn btn-sm btn-danger btn-danger-reveal ${!canArchive ? 'btn-disabled' : ''}`}
                          disabled={!canArchive}
                          onClick={() => canArchive && setConfirmPurge(a)}
-                         title={!canArchive ? 'Requires Admin permissions' : 'Delete this entity permanently — it cannot be restored'}
+                         title={!canArchive ? deniedTitle : 'Delete this entity permanently — it cannot be restored'}
                        >
                          <IconTrash size={12} /> Permanent Delete
                        </button>
@@ -247,8 +249,9 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
          )}
       </div>
 
-      {/* The second stage: the row is gone and this is what is left of it. */}
-      <div className="card" style={{ marginTop: 'var(--stack)' }}>
+      {/* The second stage: the row is gone and this is what is left of it. It keeps its natural
+          height while the card above gives way. */}
+      <div className="card">
         <div className="card-header">
           <h3 className="section-title">
             Retired Entities
@@ -256,29 +259,27 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
               label="About retired entities"
               text="Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the audit trail, a forge repository, any exported bundle. Readings stay in the historian under its id."
             />
+            <SectionCount total={retired.length} />
           </h3>
         </div>
-        {loading ? null :
+        {loading ? <LoadingState label="retired entities" /> :
          retired.length === 0 ? (
-           <div className="empty-state">
-             <div className="empty-icon"><IconTrash size={36} /></div>
-             <div className="empty-text">Nothing has been retired: no archived entity has been deleted yet.</div>
-           </div>
+           <EmptyState icon={<IconTrash size={36} />} message="Nothing has been retired: no archived entity has been deleted yet." />
          ) : (
            <div className="table-wrap">
              <table>
-               <thead><tr><th title="The name the entity had">Name</th><th title="Entity classification">Type</th><th title="Entity ID, as it was">Entity ID</th><th title="When the row was deleted">Retired At</th><th title="Who deleted it, or the retention job">By</th><th title="The historian keys this entity's readings by this id">Historian ID</th><th title="What survives the row">What Survives</th></tr></thead>
+               <thead><tr><th title="The name the entity had">Name</th><th title="Entity classification">Type</th><th title="Entity ID, as it was">Entity ID</th><th title="When the row was deleted">Retired At</th><th title="Who deleted it, or the retention job">By</th><th title="The historian keys this entity's readings by this id">Historian ID</th><th className="row-actions" title="What survives the row">What Survives</th></tr></thead>
                <tbody>
                  {retired.map(r => (
                    <tr key={`${r.entity_type}-${r.entity_id}`}>
                      <td><strong>{r.name || '—'}</strong></td>
-                     <td><span className="badge badge-neutral">{String(r.entity_type).toUpperCase()}</span></td>
+                     <td><Badge size="sm">{String(r.entity_type).toUpperCase()}</Badge></td>
                      <td><CopyableId value={r.entity_id} label="entity id" onNotify={showToast} /></td>
-                     <td className="cell-meta" title={r.archived_at ? `Archived ${new Date(r.archived_at).toLocaleString()}` : undefined}>
-                       {r.retired_at ? new Date(r.retired_at).toLocaleString() : '—'}
+                     <td className="cell-meta" title={r.archived_at ? `Archived ${formatDateTime(r.archived_at)}` : undefined}>
+                       {formatDateTime(r.retired_at)}
                      </td>
                      <td className="cell-meta">{r.retired_by_email || (r.retired_by ? <span className="mono">{String(r.retired_by).slice(0, 8)}…</span> : 'retention timer')}</td>
-                     <td>{r.sparkplug_id ? <CopyableId value={r.sparkplug_id} label="historian id" onNotify={showToast} /> : <span style={{ color: 'var(--text-dim)' }}>—</span>}</td>
+                     <td>{r.sparkplug_id ? <CopyableId value={r.sparkplug_id} label="historian id" onNotify={showToast} /> : <span className="cell-meta">—</span>}</td>
                      <td className="row-actions">{survivors(r)}</td>
                    </tr>
                  ))}
@@ -287,18 +288,11 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
            </div>
          )}
       </div>
+      </div>
 
-      {/* Named in the prompt, because the archives table is a mixed list of areas, cells, gateways
-          and devices. The name has to be typed back: this is the one irreversible action in the
-          application, and the only dialog that asks for it. */}
-      {/* Restore asks first but is not gated on typing the name, since it is recoverable. It names
-          the consequences that are not obvious: the retention timer is cleared, not paused
-          (`/restore` sets `auto_delete_at` to NULL and re-archiving computes a fresh window); a
-          gateway's broker credential does not come back (archiving rotated it; restore flips
-          `is_archived` only), reported from `credential_revoked_at`; and its repository comes out
-          of the forge's archive on the next sweep while its deploy key does not, reported from
-          `forge_archived_at` (0114). Both are the same shape of fact: restore returns the row, not
-          the credentials archiving withdrew. */}
+      {/* Restore is not gated on typing the name, since it is recoverable. It names what does not
+          come back: the timer is cleared, not paused, and a gateway's broker credential and deploy
+          key stay withdrawn. Restore returns the row, not the credentials archiving withdrew. */}
       {confirmRestore && (
         <ConfirmModal
           title={`Restore ${confirmRestore.entity_type}`}
@@ -339,8 +333,6 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
             'it does not wait for the retention timer. Its audit trail history is kept, and a ' +
             'tombstone is left on this page.' +
             // What happens to what was inside it, for the two types that hold other assets.
-            // Until 0112 a cell's children were deleted with it, on the cell's timer rather than
-            // their own.
             (confirmPurge.entity_type === 'cell'
               ? ' Anything still filed into it — gateways and devices alike — is un-filed rather' +
                 ' than deleted, and appears as Unassigned.'
@@ -362,6 +354,6 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
           onCancel={() => setConfirmPurge(null)}
         />
       )}
-    </>
+    </div>
   )
 }

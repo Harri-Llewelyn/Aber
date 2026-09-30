@@ -6,7 +6,7 @@ import {
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName, deriveMetricGroup } from '../utils/metricGroup'
 
-// A slice of what ashrae223_vocabulary holds once archived migration 0013 has run.
+// A slice of what ashrae223_vocabulary holds once its seed has run.
 const vocabulary = [
   {
     name: 'Fan', concept_kind: 'Class', label: 'Fan', subclass_of: 'Equipment',

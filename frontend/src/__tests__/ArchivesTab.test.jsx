@@ -103,8 +103,8 @@ describe('ArchivesTab permanent delete', () => {
     expect(await screen.findByText(/cannot be restored/i)).toBeInTheDocument()
   })
 
-  // The archives table is a mixed list of cells, gateways and devices and the rows look alike,
-  // so the prompt names the one about to go rather than saying "this entity".
+  // The archives table is a mixed list of areas, cells, gateways and devices and the rows look
+  // alike, so the prompt names the one about to go rather than saying "this entity".
   it('names the entity and its type in the confirmation', async () => {
     await showArchives()
     fireEvent.click(purgeButton())
@@ -176,11 +176,7 @@ describe('ArchivesTab permanent delete', () => {
   })
 })
 
-/**
- * The typed-name gate on permanent delete. Every other ConfirmModal caller guards something
- * recoverable, and friction only buys attention while it is rare, so the prop is opt-in and these
- * tests pin that.
- */
+/** The typed-name gate on permanent delete. It is opt-in on ConfirmModal, and these tests pin it. */
 describe('permanent delete asks for the name back', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
@@ -248,9 +244,8 @@ describe('permanent delete asks for the name back', () => {
 
 /**
  * Restore asks before it acts but is not gated on typing the name, since it is recoverable. The
- * wording names two consequences: the retention timer is cleared rather than paused, and an
- * archived gateway's broker credential was rotated away, so restore returns it looking active and
- * unable to authenticate.
+ * wording names what does not come back: the timer is cleared rather than paused, a gateway's
+ * broker credential and deploy key stay withdrawn, and a device's replay lanes return with it.
  */
 const ARCHIVED_GATEWAY = {
   entity_id: 'gwy-1', name: 'Line_A_Gateway', entity_type: 'gateway',
@@ -398,9 +393,7 @@ describe('ArchivesTab restore asks first', () => {
   })
 
   it('says a deleted cell un-files what was in it rather than deleting it', async () => {
-    // The dialog used to be silent about it while the database did the opposite: gateways were
-    // ON DELETE CASCADE, so a cell's timer could take a gateway marked Permanent with it. 0112
-    // made every child SET NULL, and this is the sentence that says so where it is decided.
+    // Every child is SET NULL in the database; this is the sentence that says so where it is decided.
     await showArchives()
     fireEvent.click(purgeButton())
 
@@ -440,7 +433,7 @@ describe('ArchivesTab restore asks first', () => {
 import { downloadBlob } from '../utils/downloadBlob'
 
 const ARCHIVED_AREA = {
-  entity_id: 'area-1', name: 'Building A', entity_type: 'area',
+  entity_id: 'area-1', name: 'North Hall', entity_type: 'area',
   archived_at: '2026-09-01T10:00:00Z', auto_delete_at: null, plan_path: 'area-1/plan.svg'
 }
 const ARCHIVED_DEVICE = {
@@ -581,7 +574,7 @@ describe('ArchivesTab shows what has been retired', () => {
 
   it('lists the tombstone with its name, type, who retired it and the historian id', async () => {
     await showLifecycle({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
-    const rows = [...document.querySelectorAll('.card')].pop().querySelectorAll('tbody tr')
+    const rows = screen.getByText('Retired Entities').closest('.card').querySelectorAll('tbody tr')
     expect(rows).toHaveLength(2)
     expect(rows[0].textContent).toContain('CNC_01')
     expect(rows[0].textContent).toContain('DEVICE')
@@ -632,5 +625,33 @@ describe('ArchivesTab shows what has been retired', () => {
     render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
     expect(screen.getByText(/Nothing has been retired/)).toBeInTheDocument()
+  })
+})
+
+describe('ArchivesTab layout', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('scrolls the Archived card and leaves Retired at its natural height, each with a count', async () => {
+    await showLifecycle({ archives: [ARCHIVED_CELL, ARCHIVED_AREA], retired: [RETIRED_DEVICE] })
+    expect(document.querySelector('.page-layout.page-fill > .page-main')).not.toBeNull()
+    const archived = screen.getAllByText('Archived Entities')
+      .map(el => el.closest('.card')).find(Boolean)
+    expect(archived).toHaveClass('card-fill')
+    expect(archived.querySelector('.section-count').textContent).toBe('2')
+    const retired = screen.getByText('Retired Entities').closest('.card')
+    expect(retired).not.toHaveClass('card-fill')
+    expect(retired.querySelector('.section-count').textContent).toBe('1')
+  })
+
+  it('right-aligns the What Survives header over its actions and names the timer Auto-Purge', async () => {
+    await showLifecycle({ archives: [ARCHIVED_CELL], retired: [RETIRED_DEVICE] })
+    expect(screen.getByText('What Survives')).toHaveClass('row-actions')
+    expect(screen.getByText('Auto-Purge')).toBeInTheDocument()
+  })
+
+  it('names the roles behind a disabled button', async () => {
+    await showArchives(() => false)
+    expect(screen.getByRole('button', { name: /Restore/i }).getAttribute('title')).toMatch(/^Requires /)
+    expect(screen.getByRole('button', { name: /Restore/i }).getAttribute('title')).not.toMatch(/Admin permissions/)
   })
 })

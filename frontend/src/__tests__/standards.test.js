@@ -9,7 +9,7 @@ import {
 describe('standards registry', () => {
   it('stores a local extension as an empty standard, not the word "Custom"', () => {
     // The column is provenance and NULL means "no standard behind this". A literal 'Custom' would
-    // read as a fourth standard and an AAS export would try to find a namespace for it.
+    // read as a fifth standard and an AAS export would try to find a namespace for it.
     expect(STANDARDS.CUSTOM).toBe('')
     const custom = STANDARD_OPTIONS.find(o => o.label.startsWith('Custom'))
     expect(custom.value).toBe('')

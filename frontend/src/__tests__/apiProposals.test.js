@@ -116,7 +116,7 @@ describe('the approvals queue names every subject', () => {
       expect(reads, table).toHaveLength(1);
       expect(reads[0].filters).toEqual([['in', 'id', [id]]]);
     }
-    // No row names a device or a schema, so neither table is read.
+    // No row names a device, a nameplate or a schema, so none of those tables is read.
     expect(readsOf('devices')).toHaveLength(0);
     expect(readsOf('device_nameplate')).toHaveLength(0);
     expect(readsOf('schemas')).toHaveLength(0);

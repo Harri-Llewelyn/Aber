@@ -10,7 +10,7 @@ const schema = (over = {}) => ({
   parent_schema_id: null, change_description: 'Initial release', ...over
 })
 
-describe('schemaVersion — defaults for a pre-0037 row', () => {
+describe('schemaVersion — defaults for a row from before versioning (archived migration 20260101000037_schema_versioning.sql)', () => {
   // The API layer defaults these, but the utils fail closed independently: a row whose status
   // could not be read must render read-only, never open an editor over a schema devices use.
   it('reads a row with no version or status as v1 / active', () => {

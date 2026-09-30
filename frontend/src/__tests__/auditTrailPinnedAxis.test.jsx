@@ -9,7 +9,7 @@ import { api } from '../api'
 /**
  * The date row stays in view. The timeline scrolls inside the card rather than with the page, and
  * the axis row pins to the top of that scroller with the section headings under it, so a reader
- * deep in an expanded section still has the dates and knows which section they are in.
+ * deep in a long section still has the dates and knows which section they are in.
  *
  * `position: sticky; top: 0` on its own would have done nothing: the lanes' scroller was already a
  * scroll container for the horizontal axis (overflow-y: hidden), so a sticky descendant resolved

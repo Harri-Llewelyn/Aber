@@ -154,12 +154,6 @@ describe('pages do not space a block sideways with a literal margin', () => {
    * behind after its fix also fails, so the list cannot go stale.
    */
   const BASELINE = {
-    'ApprovalsTab.jsx: marginLeft 8px': 1,
-    'CaptureTab.jsx: marginLeft 6px': 5,
-    'CaptureTab.jsx: marginRight 6px': 3,
-    'MetricsTab.jsx: marginLeft 6px': 1,
-    'MetricsTab.jsx: marginRight 6px': 1,
-    'SchemasTab.jsx: marginLeft 6px': 1
   }
 
   const files = jsxFiles(path.join(SRC, 'components', 'tabs'))

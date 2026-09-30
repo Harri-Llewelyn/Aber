@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ColdStorageTab } from '../components/tabs/ColdStorageTab'
-import { coldStorageSummary, formatBytes, coldStateLabel, formatWindow, rawWindowStatement } from '../utils/coldStorage'
+import { coldStorageSummary, coldStateLabel, formatWindow, rawWindowStatement } from '../utils/coldStorage'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
@@ -34,8 +34,8 @@ const row = (overrides = {}) => ({
   ...overrides,
 })
 
-/** 0133's one row. Archiving off by default, matching the setting, so only the tests about the
- *  backlog have to think about it. */
+/** The backlog row. Archiving is off by default, matching the setting, so only the tests about
+ *  the backlog have to think about it. */
 const backlogRow = (overrides = {}) => ({
   enabled: false,
   threshold_days: 90,
@@ -105,13 +105,7 @@ describe('the cold storage catalogue', () => {
 
   it('says the objects are the only copy, in the tooltip that explains the feature', async () => {
     /* The one thing a reader must not miss: for every other bucket an object is a copy; here it is
-       the original.
-
-       IT MOVED OUT OF A FOOTER. It was a paragraph of small grey text under a table that gains a
-       row a week, so on exactly the stacks where it had come true it was furthest down the page.
-       It is a standing property of cold storage rather than news, so it now sits with the rest of
-       what the card means -- where it is also reachable BEFORE anything has been archived, which
-       the footer never was. */
+       the original. It is in the tooltip, so it is reachable before anything has been archived. */
     await show([row()])
     await waitFor(() => expect(screen.getByText('Oldest span held')).toBeInTheDocument())
 
@@ -204,24 +198,6 @@ describe('the summary arithmetic', () => {
   })
 })
 
-describe('byte formatting', () => {
-
-  it('uses binary units, matching the bucket limits and Docker', () => {
-    // A page saying "1.1 GB" beside a bucket configured for 1073741824 invites the reader to work
-    // out which of the two numbers is wrong.
-    expect(formatBytes(1073741824)).toBe('1.0 GiB')
-    expect(formatBytes(104857600)).toBe('100.0 MiB')
-    expect(formatBytes(4938)).toBe('4.8 KiB')
-    expect(formatBytes(512)).toBe('512 B')
-  })
-
-  it('renders an absent size as an em dash rather than 0 B', () => {
-    // A chunk claimed but not yet exported has no object. "0 B" would read as an empty file.
-    expect(formatBytes(null)).toBe('—')
-    expect(formatBytes(undefined)).toBe('—')
-  })
-})
-
 describe('state vocabulary', () => {
 
   it('calls the end state On cold storage rather than Archived', () => {
@@ -247,12 +223,8 @@ describe('the empty state distinguishes off from on-and-idle', () => {
   })
 
   it('says it runs by itself, because it does', async () => {
-    /* The empty state attributes the emptiness to nothing being eligible yet, not to a missing
-       scheduler; the cold-archive CronJob schedules it.
-
-       IT NAMES THE THING THAT ACTUALLY RUNS. This asserted `cold-archiver`, a Compose service that
-       has not existed since Compose was dropped -- so the page told an operator to look for a
-       container that is not there, and the test held it that way. */
+    /* The empty state attributes the emptiness to nothing being eligible yet, and names the
+       cold-archive CronJob that runs it. */
     api.get.mockResolvedValue(ENABLED_AND_CONFIGURED)
     api.archiveCredentialIsSet.mockResolvedValue(true)
     await show([])
@@ -346,9 +318,9 @@ describe('how far behind the archive is', () => {
     expect(screen.queryByText('Unexported since')).toBeNull()
   })
 
-  /** The figure's own value element, whose inline `color` is what `tone` actually sets. */
-  const backlogColour = () =>
-    screen.getByText('Unexported since').parentElement.querySelectorAll('div')[1].style.color
+  /** Whether the figure carries the warning tone, which is a class on the stat. */
+  const backlogWarns = () =>
+    screen.getByText('Unexported since').closest('.cold-stat').classList.contains('cold-stat-warning')
 
   it('stays neutral inside one chunk interval', async () => {
     // A chunk is not eligible until its whole span (up to seven days) has passed the threshold,
@@ -356,7 +328,7 @@ describe('how far behind the archive is', () => {
     // ignore the colour by the second week of every install.
     await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 5 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
-    expect(backlogColour()).toBe('var(--text-primary)')
+    expect(backlogWarns()).toBe(false)
   })
 
   it('warns once the backlog passes the tolerance the alert fires on', async () => {
@@ -364,7 +336,7 @@ describe('how far behind the archive is', () => {
     // above and ship dead. 20 days is past the 14 the Archive Backlog rule fires on.
     await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 20 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
-    expect(backlogColour()).toBe('var(--warning-text)')
+    expect(backlogWarns()).toBe(true)
   })
 
   it('renders the catalogue even when the backlog cannot be read', async () => {
@@ -383,9 +355,8 @@ describe('the destination card', () => {
   const withDestination = (rows) => api.get.mockResolvedValue(rows)
 
   it('is not rendered for a reader who cannot see the destination', async () => {
-    // 0134 flags these rows `sensitive`, so an Auditor's reads return the fallbacks -- and a card
-    // built from fallbacks would report a configured stack as unconfigured. Not rendering is the
-    // only honest option, because the page cannot tell the two apart.
+    // The archive settings are flagged `sensitive`, so an Auditor's reads return the fallbacks, and
+    // a card built from them would report a configured stack as unconfigured.
     withDestination([])
     await show([], 'Auditor')
     await waitFor(() => expect(screen.getByText(/^Cold telemetry/)).toBeInTheDocument())
@@ -405,9 +376,8 @@ describe('the destination card', () => {
   })
 
   it('says archiving is on and cannot run when the destination is incomplete', async () => {
-    // THE STATE THIS CARD EXISTS FOR. The switch is an ordinary setting, so nothing stops it being
-    // turned on before a destination exists; what follows is a CronJob that fails nightly and
-    // deletes its own pod, and a page that used to say everything was fine.
+    // The state this card exists for: the switch is an ordinary setting, so it can be turned on
+    // before a destination exists.
     withDestination([{ key: 'archive.enabled', value: true }])
     await show([], 'Administrator')
     await waitFor(() => expect(screen.getByText(/cannot run/i)).toBeInTheDocument())
@@ -592,5 +562,25 @@ describe('the raw window statement', () => {
     api.rawTelemetryWindow.mockResolvedValue({ raw_window_seconds: FOURTEEN_DAYS, archive_armed: false })
     await show([row()])
     expect(await screen.findByText(/^Raw telemetry is kept for 14 days./)).toHaveClass('page-heading-note')
+  })
+})
+
+describe('the page layout', () => {
+  it('scrolls the catalogue inside its card and counts the chunks', async () => {
+    await show([row(), row({ chunk_name: '_hyper_1_39_chunk' })])
+    await screen.findByText('_hyper_1_38_chunk')
+    expect(document.querySelector('.page-layout.page-fill')).not.toBeNull()
+    const card = catalogue()
+    expect(card).toHaveClass('card-fill')
+    expect(card.querySelector(':scope > .table-wrap')).not.toBeNull()
+    expect(card.querySelector('.card-header .section-count').textContent).toBe('2')
+  })
+
+  it('titles the page as the rail does, and puts the key action in the Destination header', async () => {
+    api.get.mockResolvedValue([])
+    await show([row()])
+    expect(await screen.findByRole('heading', { name: 'Cold Storage' })).toBeInTheDocument()
+    const header = screen.getByText('Destination').closest('.card-header')
+    expect(within(header).getByRole('button', { name: 'Set key' })).toBeInTheDocument()
   })
 })

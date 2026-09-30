@@ -378,8 +378,8 @@ function Dashboard({ session, onSignOut }) {
   const [selectedSettingKey, setSelectedSettingKey] = useState('')
   // Set by an "Audit Trail" action on an asset row; consumed by AuditTrailTab as { id, type }.
   const [selectedTrailEntity, setSelectedTrailEntity] = useState(null)
-  // Set by Use on the Vocabulary page; consumed by MetricsTab, which resolves it against the
-  // vocabularies it already holds and opens its Add Metric form.
+  // Set by clicking an entry on the Vocabulary page; consumed by MetricsTab, which resolves it
+  // against the vocabularies it already holds and opens its Add Metric dialog.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
@@ -628,7 +628,7 @@ function Dashboard({ session, onSignOut }) {
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from
                 auth.uid(). */}
-            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} hasPermission={hasPermission} userRole={userRole} currentUserId={session?.user?.id}
+            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id}
               initialSubject={proposalFocus?.subject || ''}
               onClearFocus={() => setProposalFocus(null)}
               onOpenSubject={openProposalSubject}

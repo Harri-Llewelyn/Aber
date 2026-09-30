@@ -3,11 +3,11 @@ import { ashrae223Sections, conceptTooltip, isMetricConcept } from '../../utils/
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The ASHRAE 223P tab of the Standard Vocabulary Reference card. 223P names a thing (`Fan`,
+ * The ASHRAE 223P tab of the Vocabulary page. 223P names a thing (`Fan`,
  * `Damper`, `Sensor`), not a reading, so a selected concept names what the point is attached to and
  * the operator still says what is measured and in what type. In use is decided on semantic id
  * alone: 223P's names are ordinary English words that collide with local naming. Relations are
- * listed, since they are part of the standard, but carry no Use: the Metrics page's Concept picker
+ * listed, since they are part of the standard, but cannot be clicked: the Metrics page's Concept picker
  * does not offer them either, and the two follow the one rule in `isMetricConcept()`.
  */
 export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {

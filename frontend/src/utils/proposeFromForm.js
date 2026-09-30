@@ -1,9 +1,9 @@
 /**
  * Proposing a change from the form that makes it.
  *
- * There is one form per asset, the Edit Details dialog, and this module lets it end in a proposal
- * instead of a write for somebody who may not make the change. The footer button is the only thing
- * that differs.
+ * Each kind of entity has one form, its Edit Details dialog (a device's nameplate has its own,
+ * Digital Nameplate), and this module lets it end in a proposal instead of a write for somebody who
+ * may not make the change. The footer button is the only thing that differs.
  *
  * The mapping table translates form field names to column names, as api.js does on the way to a
  * PUT, so the two paths out of one form agree. It is deliberately not derived from
@@ -16,7 +16,7 @@
 import { api } from '../api'
 
 /**
- * One entry per asset kind: the proposal lane, and how the form's fields map onto its columns. A
+ * One entry per form: the kind of change it files (`lane`, the table name), and how the form's fields map onto its columns. A
  * form key absent from `fields` is not proposable.
  */
 export const PROPOSAL_FORMS = {
@@ -31,7 +31,7 @@ export const PROPOSAL_FORMS = {
       area_id: 'area_id',
       location_scope: 'location_scope'
     },
-    // WHY EACH ONE IS OUT, in the words the form shows the reader.
+    // Why each one is out, in the words the form shows the reader.
     withheld: {
       active_gateway_id: 'The gateway is this device’s data path — an Administrator moves it.',
       schema_id: 'The schema is what this device’s telemetry is judged against — an Administrator changes it.',
@@ -104,7 +104,7 @@ export const PROPOSAL_FORMS = {
   }
 }
 
-/** The form keys this asset kind cannot propose, with the sentence to show beside each. */
+/** The form keys this form cannot propose, with the sentence to show beside each. */
 export function nonProposableFields(kind) {
   return PROPOSAL_FORMS[kind]?.withheld || {}
 }
@@ -158,12 +158,12 @@ export function formFromPatch(kind, patch) {
 
 /**
  * File the proposal, or update one already open. `proposalId` is how the per-asset cap stays
- * livable: one open proposal per asset per person, so a second field is added to the existing
+ * livable: one open proposal per entity per person, so a second field is added to the existing
  * request.
  */
 export async function submitProposal({ kind, entityId, patch, rationale, proposalId }) {
   const def = PROPOSAL_FORMS[kind]
-  if (!def) throw new Error(`No proposal lane for "${kind}"`)
+  if (!def) throw new Error(`No kind of proposal for "${kind}"`)
   if (!Object.keys(patch).length) {
     // Refused here rather than by the database's own patch-is-not-empty constraint, because this
     // one can say the useful half: nothing on the form was changed.

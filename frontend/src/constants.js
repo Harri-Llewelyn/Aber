@@ -16,9 +16,8 @@ export const PERMISSION_UUIDS = {
   GATEWAY_MANAGE:     'e789a012-3456-4c1d-8706-933e08544e35',
   TELEMETRY_READ:     'f012a345-6789-4c1d-8706-933e08544e36',
   ARCHIVE_MANAGE:     'b345c678-9012-4c1d-8706-933e08544e37',
-  // Renamed from DOCUMENT_MANAGE by 0049. THE UUID IS UNCHANGED and must stay so:
-  // role_permissions references it by id, so this is a variable rename, not an authorisation
-  // change. Only the permission's `name` string moved, in 0049.
+  // Renamed from DOCUMENT_MANAGE (archive/0049_documents_become_links.sql). The UUID is unchanged
+  // and must stay so: role_permissions references it by id, so only the permission's `name` moved.
   LINK_MANAGE:        'a012b345-6789-4c1d-8706-933e08544e38',
   AUTHZ_MANAGE:       'e012c345-6789-4c1d-8706-933e08544e39',
   SCHEMA_MANAGE:      'f123d456-7890-4c1d-8706-933e08544e40',
@@ -26,8 +25,8 @@ export const PERMISSION_UUIDS = {
   // database.
   GITOPS_MANAGE:      'c234e567-8901-4c1d-8706-933e08544e41',
   AUDIT_TRAIL_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
-  // Added by 0086. The first WRITE grant Operator has ever held, and it is a write to a queue
-  // rather than to an asset -- the asset write policies are unchanged.
+  // The first write grant Operator holds, and it is a write to a queue rather than to an entity:
+  // the entity write policies are unchanged.
   PROPOSAL_CREATE:    'b678f901-2345-4c1d-8706-933e08544e43',
 };
 
@@ -45,16 +44,16 @@ export const AUDIT_TRAIL_ACTIONS = {
   UPDATE:           'Update',
   DELETE:           'Delete',
   SCHEMA_REJECTION: 'Schema rejection',
-  // NOT WRITTEN BY THE AUDIT TRIGGER, like SCHEMA_REJECTION above. 0041 records a broker credential
-  // minted for a gateway; 0043 records a long-lived token signed for a service principal. Both are
-  // filterable because both are the reason somebody opens this page -- "who was given what, when".
+  // Not written by the audit trigger, like SCHEMA_REJECTION above. A broker credential minted for a
+  // gateway (archive/0041_virtual_gateway_credential.sql) and a long-lived token signed for a machine
+  // identity (archive/0043_record_service_token_issued.sql) each file one: "who was given what, when".
   CREDENTIAL_ISSUED: 'Credential issued',
   TOKEN_MINTED:      'Token minted',
   // The pair is the question: "who was given what" is only half an answer without "and when was
   // it taken away".
   TOKEN_REVOKED:     'Token revoked',
-  // The service principal's own lifecycle, written by the functions that withdraw, reinstate and
-  // rename one. Its creation is an INSERT.
+  // A machine identity's own lifecycle, written by the functions that withdraw, reinstate and
+  // describe one. Its creation is an INSERT. The stored names keep "principal".
   PRINCIPAL_REVOKED:    'Principal revoked',
   PRINCIPAL_REINSTATED: 'Principal reinstated',
   PRINCIPAL_DESCRIBED:  'Principal described',
@@ -71,12 +70,13 @@ export const AUDIT_TRAIL_ACTIONS = {
   // Named rather than INSERT/DELETE because what happened is that somebody became an Administrator.
   ROLE_GRANTED:      'Role granted',
   ROLE_REVOKED:      'Role revoked',
-  // Written by `ingest_record_gateway_health()` (0100) when an appliance reports a different flow
-  // hash: the digest before and after, and what the forge's main held at that moment. Actor
-  // `ingestion`, no user: the daemon witnessed what the appliance reported.
+  // Written by `ingest_record_gateway_health()` (archive/0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql)
+  // when an appliance reports a different flow hash: the digest before and after, and what the
+  // forge's main held at that moment. Actor `ingestion`, no user.
   FLOW_DEPLOYED:     'Flow deployed',
-  // The backup lane (0101). The first three are a person's acts and name them; the last three are
-  // the backup service's, actor `service`, no user.
+  // The backup lane (archive/0101_a_backup_an_operator_can_take_without_a_shell.sql). The first
+  // three are a person's acts and name them; the last three are the backup service's, actor
+  // `service`, no user.
   BACKUP_REQUESTED:  'Backup requested',
   BACKUP_CANCELLED:  'Backup cancelled',
   BACKUP_RELEASED:   'Backup released',
@@ -101,10 +101,11 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },
   { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset' },
   { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset' },
-  // The security lane (0070), in the order a reader meets it: who holds what, what the machines
-  // are, then the contracts and settings that shape both.
+  // The security lane (archive/0070_audit_domain_and_the_acts_nothing_recorded.sql), in the order a
+  // reader meets it: who holds what, what the machines are, then the contracts and settings that
+  // shape both.
   { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
-  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Service identities', domain: 'security' },
+  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
   // Deprecate and restore are UPDATEs on the catalog row (0010, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
@@ -112,8 +113,8 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
-  // The backup lane (0101): the act and the artefact, both filed under security by
-  // audit_domain_for()'s fail-closed default, which is where an act on the whole database belongs.
+  // The backup lane: the act and the artefact, both filed under security by audit_domain_for()'s
+  // fail-closed default, which is where an act on the whole database belongs.
   { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security' },
   { kind: 'BACKUP',           table: 'backups',            label: 'Backups',            domain: 'security' },
 ];
