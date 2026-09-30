@@ -4778,3 +4778,45 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 6px 0;
   color: var(--text-muted);
 }
+
+/* GATEWAYS: the setup and credential dialogs. */
+
+/* Exempts the typed-name label's uppercasing, so the operator is not told to type capitals that
+   are not in the name. */
+.gateway-typed-name { text-transform: none; color: var(--text-primary); }
+
+.gateway-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gateway-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A block of commands or values to copy. `pre` keeps it ahead of .mono's colour and size. */
+pre.gateway-code {
+  margin: 6px 0 0;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-glass);
+  font-size: 12px;
+  white-space: pre;
+  word-break: break-all;
+}
+
+pre.gateway-code-wrap { white-space: pre-wrap; }
+
+.gateway-delivered { color: var(--success-text); font-size: 12px; }
+
+.gateway-delivery-failed {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--warning-text);
+}

@@ -1,22 +1,9 @@
 /**
- * Whether this page is the release the stack deployed.
- *
- * Two facts, two sources. `src/version.js` is what this BUNDLE is, baked into the image at build
- * time. `VITE_RELEASE_VERSION` is what the RELEASE says it is, the chart's appVersion arriving
- * through the mounted `config.js`.
- *
- * A POD IS SELF-CONSISTENT, so this is not a rollout progress indicator: `config.js` is mounted
- * with `subPath` and never updates in place, and the chart's `checksum/config` annotation rolls the
- * pod when it changes. The two disagree in two situations:
- *
- *   - the running image is not the chart's appVersion, which means `frontend.image.tag` is pinned
- *     or overridden;
- *   - the browser is running an `index.html` and bundle cached from before an upgrade, while
- *     `config.js` -- served `no-store` -- came fresh from the new pod. This is the common one, and
- *     a forced reload is the fix.
- *
- * Nothing here reaches the network. It cannot see a version published upstream, only the one this
- * stack was told to run.
+ * Whether this page is the release the stack deployed: `src/version.js` is what this bundle is,
+ * `VITE_RELEASE_VERSION` (the chart's appVersion, through the mounted `config.js`) is what the
+ * release says it is. They disagree when `frontend.image.tag` is pinned or overridden, or when the
+ * browser holds a bundle cached from before an upgrade; a forced reload fixes the second. Nothing
+ * here reaches the network.
  */
 import { readSetting } from '../config'
 

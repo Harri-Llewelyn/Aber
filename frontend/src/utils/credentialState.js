@@ -1,22 +1,13 @@
 /**
- * What the platform recorded about a gateway's broker credential, and what the broker says.
- *
- * Two columns, two sources. The platform's record is what the database wrote: `enrolled_at` (an
- * appliance redeemed a bundle), `credential_revoked_at` (archive or delete disabled it), or a
- * CREDENTIAL_ISSUED row (minted for a host-run gateway through the UI). The broker's state is read
- * live from its Dynamic Security plugin (api.listBrokerInventory): whether an account exists and
- * whether it is disabled.
- *
- * The two can disagree, and the page shows both rather than merging them: an account issued on the
- * host by script is `unrecorded` here and Active at the broker, which is exactly the fact an
- * operator wants to see.
+ * What the platform recorded about a gateway's broker credential, and what the broker says. The
+ * platform's record is `enrolled_at` (an appliance enrolled), `credential_revoked_at` (archive or
+ * delete disabled the account) or a CREDENTIAL_ISSUED row (issued to a host-run gateway through the
+ * UI). The broker's state is read live from its Dynamic Security plugin
+ * (api.listBrokerInventory). The two can disagree and both are shown: an account issued by script
+ * is `unrecorded` here and Active at the broker.
  */
 
-/**
- * The states, in the order a reader should think about them. `revoked` outranks everything,
- * including a later issue record: the revocation sweep can clear an optimistic stamp, so a gateway
- * carrying both is one whose issue came first.
- */
+/** The states, in the order a reader should think about them: `revoked` outranks everything. */
 export const CREDENTIAL_STATES = {
   REVOKED: 'revoked',
   ISSUED: 'issued',
@@ -39,13 +30,12 @@ const TONES = {
 };
 
 /**
- * `issuedAt` is the latest CREDENTIAL_ISSUED row for this gateway, or null. Passed in so this stays
- * a pure function of two plain values.
+ * `issuedAt` is the latest CREDENTIAL_ISSUED row for this gateway, or null.
  */
 export function credentialState(gateway, issuedAt = null) {
   if (!gateway) return CREDENTIAL_STATES.UNRECORDED;
 
-  // Ordered deliberately -- see the note on CREDENTIAL_STATES.
+  // Ordered deliberately: a gateway carrying both a revocation and an issue record was issued first.
   if (gateway.credential_revoked_at) return CREDENTIAL_STATES.REVOKED;
 
   // A host-run gateway's only record is the audit row: enroll-gateway refuses it, so `enrolled_at`
@@ -54,8 +44,7 @@ export function credentialState(gateway, issuedAt = null) {
 
   if (gateway.enrolled_at) return CREDENTIAL_STATES.ISSUED;
 
-  // Remote and mid-enrolment. PENDING_ENROLLMENT means a bundle was issued and not redeemed;
-  // AWAITING_BIRTH means it was redeemed, which `enrolled_at` above already covers.
+  // PENDING_ENROLLMENT means setup was issued and not used; AWAITING_BIRTH is covered by `enrolled_at`.
   if (gateway.deployment === 'remote' && gateway.status === 'PENDING_ENROLLMENT') {
     return CREDENTIAL_STATES.AWAITING_ENROLMENT;
   }
@@ -81,12 +70,11 @@ export function credentialStateExplanation(state, gateway) {
         + 'dropped and its next connection is refused. Issuing a new credential re-enables it.';
     case CREDENTIAL_STATES.ISSUED:
       return gateway?.deployment === 'host'
-        ? 'Minted through the dashboard and shown once. The password is not recoverable.'
-        : 'Minted on the appliance when it redeemed its enrolment bundle. The password never '
-          + 'left the device.';
+        ? 'Issued through the dashboard and shown once. The password is not recoverable.'
+        : 'Issued to the appliance when it enrolled. The password never passes through a browser.';
     case CREDENTIAL_STATES.AWAITING_ENROLMENT:
-      return 'A bundle has been issued and not yet redeemed. The credential is minted on the '
-        + 'appliance at first boot, not here.';
+      return 'An install command or bundle has been issued and not yet used. The credential is '
+        + 'issued to the appliance when it enrols, not here.';
     default:
       return 'The platform has not issued a credential for this gateway. The Broker column says '
         + 'whether an account exists anyway — one issued on the host with '
@@ -156,7 +144,7 @@ export function brokerStateExplanation(state) {
 
 /**
  * Which credential action, if any, the Access Control page offers this gateway: a remote gateway
- * gets a bundle, a host-run one gets a mint, an archived one neither. `deployment` is the axis.
+ * gets setup, a host-run one gets a credential, an archived one neither.
  */
 export function credentialAction(gateway) {
   if (!gateway || gateway.is_archived) return null;

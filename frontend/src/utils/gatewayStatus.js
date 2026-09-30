@@ -33,7 +33,7 @@ export function isGatewayPending(gateway) {
 export const GATEWAY_STATUS_LABELS = {
   [GATEWAY_STATUS_PENDING_ENROLMENT]: 'AWAITING SETUP',
   [GATEWAY_STATUS_AWAITING_BIRTH]: 'ENROLLED — NO DATA YET',
-  OFFLINE: 'OFFLINE / DDEATH',
+  OFFLINE: 'OFFLINE',
 };
 
 export function isHeartbeatStale(lastHeartbeat, now = Date.now()) {
@@ -130,16 +130,9 @@ export function isCertExpiring(certExpiresAt, now = Date.now()) {
 }
 
 /**
- * A gateway that has not been given the root the platform is publishing.
- *
- * THE QUESTION BETWEEN THE TWO HALVES OF A ROTATION. The root is re-issued, the sweep publishes
- * the new bundle, and each appliance installs it within the hour of its next convergence. Only
- * once every appliance has it is it safe to switch the broker's leaf to the new root; until then
- * this says who has not converged yet. An appliance that never reported an expiry is not counted:
- * unknown is not the same as behind.
- *
- * A DAY'S TOLERANCE, because the two dates come from different clocks and a re-issue that moves
- * `notAfter` by hours is not a rotation anybody has to wait for.
+ * A gateway that has not been given the root the platform is publishing. An appliance that never
+ * reported an expiry is not counted: unknown is not behind. The tolerance is a day, because the two
+ * dates come from different clocks.
  */
 const ROOT_LAG_TOLERANCE_DAYS = 1;
 
