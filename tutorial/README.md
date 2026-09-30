@@ -477,10 +477,10 @@ The first time a `DBIRTH` arrives for an unrecognised Sparkplug ID, ingestion au
 onboarding flow, not an error.
 
 1. Open the **Devices** tab.
-2. Find the **Zero-Touch Onboarding Quarantine Queue** banner — the device is listed with the id it
-   published under and why it was held.
-3. As **Administrator** or **Shopfloor_Manager**, approve it (assigning a gateway, and optionally a
-   cell) or reject it.
+2. Find the **Quarantine queue** card, the first card on the page — the device is listed with the id
+   it published under and why it was held.
+3. As **Administrator** or **Shopfloor_Manager**, use **Approve & Onboard** (assigning a gateway,
+   and optionally a cell) or reject it.
 4. Subsequent `DDATA` starts flowing into TimescaleDB.
 
 The device keeps publishing under the id it announced; the platform records that on the row rather

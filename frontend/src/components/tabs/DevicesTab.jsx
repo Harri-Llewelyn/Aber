@@ -686,7 +686,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             Quarantine queue
             <HelpTip
               label="About the Quarantine queue"
-              text="A birth arrived from a device this platform does not know, so its readings are held, not recorded. Approve & Onboard admits it, or accept the suggested match to an existing device. Reject discards it."
+              text="A birth arrived from an unknown device, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match to an existing device. Reject discards it."
             />
             <SectionCount total={quarantine.length} />
           </h3>
@@ -763,7 +763,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             Devices
             <HelpTip
               label="About devices"
-              text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet. Devices not yet let in are in the Quarantine queue."
+              text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet."
             />
             <SectionCount total={laneTotal} shown={filteredAssets.length} />
           </h3>

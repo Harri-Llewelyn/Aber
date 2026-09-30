@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
