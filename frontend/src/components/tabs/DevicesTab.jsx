@@ -686,7 +686,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             Quarantine queue
             <HelpTip
               label="About the Quarantine queue"
-              text="A birth arrived from an unknown device, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match to an existing device. Reject discards it."
+              text="A birth arrived that matches no registered device on its gateway, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match. Reject discards it."
             />
             <SectionCount total={quarantine.length} />
           </h3>
