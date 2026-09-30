@@ -583,7 +583,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               </thead>
               <tbody>
                 {rows.length === 0 && (
-                  <tr><td colSpan={4} style={{ color: 'var(--text-muted)', padding: '14px' }}>
+                  <tr><td colSpan={subjectKind === 'device' ? 5 : 4} style={{ color: 'var(--text-muted)', padding: '14px' }}>
                     {allRows.length === 0
                       ? (subjectKind === 'gateway'
                         ? 'No gateways registered. Create one on the Gateways tab.'

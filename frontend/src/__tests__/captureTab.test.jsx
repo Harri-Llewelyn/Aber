@@ -1127,6 +1127,20 @@ describe('the filter bar', () => {
     expect(screen.getByText(/No subject matches these filters/)).toBeInTheDocument()
   })
 
+  it('spans every column of the subject view with the empty row', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    const span = () => document.querySelector('tbody td[colspan]').getAttribute('colspan')
+    const headers = () => document.querySelectorAll('thead th').length
+
+    fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
+    expect(span()).toBe(String(headers()))
+
+    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    expect(span()).toBe(String(headers()))
+    expect(headers()).toBe(5)
+  })
+
   it('clears every filter at once, and only offers to when there is something to clear', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
