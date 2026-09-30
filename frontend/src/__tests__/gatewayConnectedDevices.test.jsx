@@ -58,7 +58,7 @@ describe('gateway connected devices column', () => {
   })
 
   it('collapses a large fleet instead of rendering one chip per device', async () => {
-    // Unlike the Devices Type column this count is unbounded, so it collapses past a limit.
+    // Past three tags, the Online / Offline summary counting as one, the rest collapse into +N.
     await show(twenty)
 
     expect(screen.getByText('CNC_01')).toBeInTheDocument()

@@ -288,7 +288,7 @@ describe('GatewaysTab filters', () => {
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
     // Both rows have status: 'ONLINE' stored; only one is live.
-    fireEvent.change(screen.getByTitle(/live heartbeat status/i), { target: { value: 'STALE' } })
+    fireEvent.change(screen.getByTitle(/Stale is a heartbeat older than 90 seconds/i), { target: { value: 'STALE' } })
     await waitFor(() => expect(screen.queryByText('Line_A_Gateway')).toBeNull())
     expect(screen.getByText('Sim_Gateway')).toBeTruthy()
   })
