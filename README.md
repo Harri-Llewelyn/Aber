@@ -540,7 +540,7 @@ checks the caller is that principal. Its `telemetry:read` grant being insufficie
 an oversight: it makes those gates the only route rather than the tidy one.
 
 **Tokens are revocable at PostgREST** (`0074`–`0076`): `auth_pre_request` runs before every request
-and refuses a JWT whose `jti` has been revoked, and a whole service principal can be put beyond use.
+and refuses a JWT whose `jti` has been revoked, and a whole machine identity can be withdrawn.
 Expiry still bounds everything else — 90 days for any token naming a **principal**, ten years only
 for the anon and service-role keys, which name nobody. Storage, Realtime, the edge runtime and Studio
 verify the signature for themselves and are not reached by a revocation (see

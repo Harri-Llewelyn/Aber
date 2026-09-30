@@ -4231,7 +4231,7 @@ added to one side without the other fails the build rather than the click. What 
 reaches is held by 11f; see [Machines propose, people decide](#machines-propose-people-decide-0013). Check 11d is
 unchanged: it requires a registry entry for every id a migration pins, and a principal created at
 runtime has no id to write down ahead of time, which is what the table is for. The Audit Trail
-reads the same table to label the *Service identities* lane, so a principal created from the page
+reads the same table to label the *Machine identities* category, so a principal created from the page
 is named there too; the search still cannot reach that name, for the reason stated under
 [Naming the last two lanes](#naming-the-last-two-lanes-0118).
 
@@ -4244,7 +4244,7 @@ p_purpose)` is the one write path after creation: Administrator only, machine pr
 **rows that exist only**, so the three identities a migration pinned are refused with a message
 saying their name lives in the dashboard's registry rather than *not found*. The name stays
 unique ignoring case, excluding the row being renamed. An unchanged save writes nothing and
-returns `NULL`; a change is a `PRINCIPAL_DESCRIBED` row on the *Service identities* lane carrying
+returns `NULL`; a change is a `PRINCIPAL_DESCRIBED` row on the *Machine identities* category carrying
 the old and new name and purpose, and the function returns that row's id.
 
 **Permissions are not editable, on purpose.** Widening what a principal holds is a change of
