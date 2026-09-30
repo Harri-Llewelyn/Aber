@@ -31,7 +31,7 @@ import {
   IconRadio,
   IconShieldAlert
 } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
@@ -288,26 +288,26 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       {/* One card, composed as every card is: title, primary action, then the filters that narrow
           what is below. */}
       <div className="card card-fill">
-        <div className="card-header">
-          <h3 className="section-title">
-            Cells
-            <HelpTip
-              label="About cells"
-              text="A line, bay or other group of assets within an area. A gateway belongs to one cell; a device inherits its gateway's unless it names its own. A cell is filed in an area and placed on its plan."
-            />
-            <SectionCount total={inLifecycle.length} shown={filteredCells.length} />
-          </h3>
-          {/* The primary action in the header, where every card keeps its. */}
-          <ActionButton
-            className="btn btn-primary btn-sm"
-            permitted={canManage}
-            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
-            title="Configure new cell"
-            onClick={() => openForm(null, blank)}
-          >
-            <IconPlus size={14} /> New Cell
-          </ActionButton>
-        </div>
+        <CardHeading
+          icon={<IconLayoutDashboard size={15} />}
+          title="Cells"
+          description="A line, bay or group of assets within an area. Gateways belong to a cell, and each cell is placed on its area’s plan."
+          count={<SectionCount total={inLifecycle.length} shown={filteredCells.length} />}
+          actions={(
+            <>
+              {/* The primary action in the header, where every card keeps its. */}
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManage}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
+                title="Configure new cell"
+                onClick={() => openForm(null, blank)}
+              >
+                <IconPlus size={14} /> New Cell
+              </ActionButton>
+            </>
+          )}
+        />
 
         <div className="card-body">
           <div className="filter-bar">

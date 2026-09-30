@@ -7,7 +7,7 @@ import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag
 } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { ListFoot } from '../common/ListFoot'
@@ -1368,31 +1368,28 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
        card, so the axis row has a scroller to pin to. See .page-fill in App.css. */
     <div className="page-layout page-fill">
       <div className="page-main">
-        {/* The description is a tip on the title; Export sits in the header with the other actions
-            and states the filtered count it will write. */}
+        {/* Export sits in the header with the other actions and states the filtered count it will
+            write. */}
         <div className="card card-fill">
-          <div className="card-header">
-            <h3 className="section-title">
-              Audit Trail
-              <HelpTip
-                label="About the Audit Trail"
-                text="Every attributed change to an area, cell, gateway, device, nameplate, schema, metric or proposal, in order and with its cause. Rows cannot be edited; an owner retires whole months. Administrators and Auditors also see roles, machine identities, settings and backups."
-              />
-            </h3>
-            {/* Export writes the events the page is holding, not everything that matches, and the
-                tooltip says so. */}
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ marginLeft: 'auto' }}
-              onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
-              title={hasMoreToLoad
-                ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
-                  + 'the current filters -- load the rest first to export them all.'
-                : 'Download the events matching the current filters as CSV'}
-            >
-              <IconDownload size={13} /> Export CSV ({eventRatio})
-            </button>
-          </div>
+          <CardHeading
+            icon={<IconHistory size={15} />}
+            title="Audit Trail"
+            description="Every attributed change to the stack's entities, in order and with its cause. Rows cannot be edited; an owner retires whole months."
+            actions={(
+              /* Export writes the events the page is holding, not everything that matches, and
+                 the tooltip says so. */
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
+                title={hasMoreToLoad
+                  ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
+                    + 'the current filters -- load the rest first to export them all.'
+                  : 'Download the events matching the current filters as CSV'}
+              >
+                <IconDownload size={13} /> Export CSV ({eventRatio})
+              </button>
+            )}
+          />
 
           <div className="card-body">
 

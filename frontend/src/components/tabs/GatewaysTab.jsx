@@ -54,7 +54,7 @@ import {
   IconDownload,
   IconLock
 } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
@@ -366,25 +366,25 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       )}
 
       <div className="card card-fill">
-        <div className="card-header">
-          <h3 className="section-title">
-            Gateways
-            <HelpTip
-              label="About gateways"
-              text="An edge node: what publishes to the broker, and the identity its topics are pinned to. Status is what the gateway last reported, shown as STALE once its heartbeat is over 90 seconds old."
-            />
-            <SectionCount total={listable.length} shown={filteredGateways.length} />
-          </h3>
-          <ActionButton
-            className="btn btn-primary btn-sm"
-            permitted={canManage}
-            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)}
-            onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}
-            title="Register new gateway"
-          >
-            <IconPlus size={14} /> New Gateway
-          </ActionButton>
-        </div>
+        <CardHeading
+          icon={<IconRadio size={15} />}
+          title="Gateways"
+          description="The edge nodes that publish to the broker, each pinned to its own identity, with the status each last reported."
+          count={<SectionCount total={listable.length} shown={filteredGateways.length} />}
+          actions={(
+            <>
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManage}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)}
+                onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}
+                title="Register new gateway"
+              >
+                <IconPlus size={14} /> New Gateway
+              </ActionButton>
+            </>
+          )}
+        />
 
         <div className="card-body">
       <div className="filter-bar">

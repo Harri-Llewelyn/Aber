@@ -15,7 +15,7 @@ import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
 import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
 import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
@@ -279,25 +279,25 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       )}
 
       <div className="card card-fill">
-        <div className="card-header">
-          <h3 className="section-title">
-            Areas
-            <HelpTip
-              label="About areas"
-              text="The ISA-95 level between the site and its cells: one part of the campus, such as a hall or a yard. Cells are filed into areas so the Unified Namespace can say where a reading came from."
-            />
-            <SectionCount total={inLifecycle.length} shown={filteredAreas.length} />
-          </h3>
-          <ActionButton
-            className="btn btn-primary btn-sm"
-            permitted={canManage}
-            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
-            title="Add an area"
-            onClick={() => openForm(null, blank)}
-          >
-            <IconPlus size={14} /> New Area
-          </ActionButton>
-        </div>
+        <CardHeading
+          icon={<IconFactory size={15} />}
+          title="Areas"
+          description="The ISA-95 level between the site and its cells, such as a hall or a yard, so readings can say where they came from."
+          count={<SectionCount total={inLifecycle.length} shown={filteredAreas.length} />}
+          actions={(
+            <>
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManage}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
+                title="Add an area"
+                onClick={() => openForm(null, blank)}
+              >
+                <IconPlus size={14} /> New Area
+              </ActionButton>
+            </>
+          )}
+        />
 
         <div className="card-body">
           <div className="filter-bar">

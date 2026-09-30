@@ -10,6 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 /* Newlines normalised on read, because `cssRule()` matches multi-line selectors with `\n` and
    .gitattributes checks this file out with the platform's native ending, CRLF on Windows. */
@@ -125,6 +126,14 @@ const selectEvent = async (pattern) => {
 }
 
 const rangeSelect = () => screen.getByTitle('Limit the timeline to a time range')
+
+describe('Audit Trail card header', () => {
+  it('names the page with its icon, title and description, and Export on the right', async () => {
+    await show()
+    const header = expectCardHeading('Audit Trail', /attributed change/)
+    expect(header).toHaveTextContent('Export CSV')
+  })
+})
 
 describe('Audit Trail filter bar', () => {
   it('offers entity type, entity name, event type and time range, in the shared filter bar', async () => {
