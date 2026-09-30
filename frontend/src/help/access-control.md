@@ -27,6 +27,9 @@ Who and what may reach this platform, and with which credential, for the machine
 
 **Withdrawing a machine identity reaches further than revoking its tokens.** A token is revoked one at a time. Withdrawing the identity refuses every token that names it, including ones nobody remembered were issued and ones issued afterwards. When the question is "make this stop", the identity is the answer. Neither reaches everything: revocation stops a token at the API, and storage, realtime, the edge functions and Studio check only its signature, so a revoked token keeps working there until it expires. Reinstating an identity restores the identity, not the tokens revoked with it.
 
+A machine identity lives on one of two planes, and nothing here holds both. A database identity is a set of permissions; a broker identity is an ACL entry. A gateway authenticates to the broker as an account issued against it.
+
+
 ## What this page is not
 
 **It does not show who is connected.** It reads the broker's accounts and roles, live, but not its sessions, so an account that is Active is one that may connect, not one that has. When the broker cannot be read, the Broker column says **Not read** and the two broker cards say so, and only the database half of the page is left.

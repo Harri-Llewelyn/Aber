@@ -40,8 +40,9 @@ import { LoadingState } from '../common/LoadingState'
 import { SemanticIdField } from '../common/SemanticIdField'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
-  IconPencil, IconBookOpen
+  IconPencil, IconBookOpen, IconTag
 } from '../common/Icons'
+import { PageHeading } from '../common/PageHeading'
 import { HelpTip } from '../common/HelpTip'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
@@ -649,6 +650,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   return (
     <div className="page-layout">
       <div className="page-main stack">
+        <PageHeading icon={<IconTag size={15} />} title="Metrics">
+          The catalog of metrics that schemas are built from, and the ones since deprecated.
+        </PageHeading>
+
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">

@@ -75,6 +75,7 @@ import {
   IconRadio,
   IconLayoutDashboard
 } from '../common/Icons'
+import { PageHeading } from '../common/PageHeading'
 import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
@@ -678,6 +679,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     <div className="page-layout page-fill">
       <div className="page-main">
 
+      <PageHeading icon={<IconCpu size={15} />} title="Devices">
+        Shopfloor devices that publish through a gateway, and the births still waiting to be let in.
+      </PageHeading>
+
       {/* The Quarantine queue: always the first card, so the roster below never moves when a device
           arrives. It wears the attention border only while it holds one. */}
       <div className={`card queue-card${quarantine.length > 0 ? ' card-attention' : ''}`}>
@@ -760,9 +765,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       <div className="card card-fill">
         <div className="card-header">
           <h3 className="section-title">
-            Devices
+            Registered devices
             <HelpTip
-              label="About devices"
+              label="About registered devices"
               text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet."
             />
             <SectionCount total={laneTotal} shown={filteredAssets.length} />

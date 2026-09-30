@@ -15,6 +15,9 @@ Platform settings an administrator owns: retention windows, thresholds, and the 
 
 A setting shows the value in force now. Where a setting bounds a background job -- pruning, tiering, retention -- changing it changes what that job does next time it runs; it does not reach back and undo what it already did.
 
+A setting takes effect without a restart and overrides the environment default it names. The list is fixed: a setting appears here because code reads it, so new ones arrive with the feature that needs them and are never added by hand.
+
+
 ## What is not here
 
 **Nothing secret is stored on this page.** Passwords, keys and broker credentials are not settings: they live in the deployment's own secret store. The S3 secret keys are set on Cold Storage and in the Backups destination dialog, and broker credentials are issued on Access Control. A page that mixed the two would make every routine settings change look like a credential change in the audit trail, and make the audit trail worth less.

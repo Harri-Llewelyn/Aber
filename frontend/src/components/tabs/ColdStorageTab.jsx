@@ -106,10 +106,8 @@ export function ColdStorageTab({ showToast, userRole }) {
           title="Cold Storage"
           note={rawWindowStatement(rawWindow, archiveEnabled)}
         >
-          Telemetry that has aged out of the historian and been written to object storage, and the
-          catalogue of what went where. The objects are held off this cluster and are the only
-          remaining copy of the spans they cover: nothing on this page deletes one, and there is no
-          restore button.
+          Telemetry that has aged out of the historian into object storage, with no delete or restore
+          on this page.
         </PageHeading>
 
         {isAdmin && !loading && (

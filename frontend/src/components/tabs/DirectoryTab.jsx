@@ -390,10 +390,8 @@ export function DirectoryTab({ showToast }) {
     <div className="page-layout">
       <div className="page-main">
         <PageHeading icon={<IconBookOpen size={15} />} title="Directory">
-          Every service this deployment runs, grouped by what it is for: which version the release
-          deploys, where to reach it, whether anything in the stack observes it, and whether that
-          address works from anywhere but the deployment host. The rows are registered by the
-          deployment, not added here.
+          Every service this deployment runs, grouped by purpose, with its version, its address and
+          whether that address works beyond the deployment host.
         </PageHeading>
 
         {/* No search box or type picker: the grouping solves the scanning problem those controls

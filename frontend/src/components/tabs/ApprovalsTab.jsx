@@ -548,9 +548,8 @@ export function ApprovalsTab({
 
         {/* No Propose a Change card: the act starts on the entity's own page. */}
         <PageHeading icon={<IconInbox size={15} />} title="Approvals">
-          A proposal is a request, not a change: nothing is written until somebody who may make
-          it approves. To ask for one, open the entity on its own page and use Propose a Change —
-          the same dialog that edits it.
+          Changes people have proposed but may not make themselves; nothing is written until someone
+          who may make the change approves it.
         </PageHeading>
 
         <div className={`card approvals-card${open.length > 0 ? ' card-attention' : ''}`}>

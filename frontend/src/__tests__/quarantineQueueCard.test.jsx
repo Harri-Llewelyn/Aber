@@ -77,6 +77,26 @@ const titleCount = (card) => card.querySelector('.section-title .section-count')
 
 beforeEach(() => vi.clearAllMocks())
 
+describe('the Devices page heading', () => {
+  it('opens the page with the rail icon, title and one sentence, above the queue', async () => {
+    await show([device()])
+
+    const heading = document.querySelector('.page-heading')
+    expect(heading.querySelector('h2.section-title').textContent).toBe('Devices')
+    expect(heading.querySelector('h2 svg')).toBeTruthy()
+    expect(heading.querySelector('p').textContent.match(/[.!?]/g)).toHaveLength(1)
+    expect(heading.compareDocumentPosition(queueCard()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('retitles the roster card Registered devices, keeping its tooltip', async () => {
+    await show([device()])
+
+    const title = rosterCard().querySelector('h3.section-title')
+    expect(title.textContent).toMatch(/^Registered devices/)
+    expect(within(rosterCard()).getByRole('button', { name: 'About registered devices' })).toBeInTheDocument()
+  })
+})
+
 describe('the Quarantine queue card', () => {
   it('is the first card and says so with a zero and one line while nothing is waiting', async () => {
     await show([device()])

@@ -155,6 +155,21 @@ beforeEach(() => {
   })
 })
 
+describe('Metrics page heading', () => {
+  it('opens with the rail icon, the rail label and a one-sentence description, above the cards', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    const heading = document.querySelector('.page-heading')
+    expect(heading.querySelector('h2.section-title').textContent).toBe('Metrics')
+    expect(heading.querySelector('h2 svg')).toBeTruthy()
+    expect(heading.querySelector('p').textContent.match(/[.!?]/g)).toHaveLength(1)
+    expect(heading.compareDocumentPosition(document.querySelector('.page-main .card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The cards keep their own titles.
+    expect(screen.getByRole('button', { name: 'About the metric catalog' })).toBeTruthy()
+  })
+})
+
 describe('Metric Catalog — collapsible groups', () => {
   it('opens COLLAPSED, showing each group header and its count rather than every row', async () => {
     // Collapsed on arrival: the catalog outgrew being unrolled, and the header count says what is

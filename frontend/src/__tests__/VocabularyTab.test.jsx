@@ -230,13 +230,14 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
 })
 
 describe('Vocabulary page — the pointer to Metrics', () => {
-  it('names the Metrics page and says an entry is clicked, not "used"', async () => {
+  it('says an entry is clicked to start a catalog metric, not "used"', async () => {
     renderTab()
     await ready()
 
     const text = document.querySelector('.page-heading p').textContent
-    expect(text).toMatch(/Metric Catalog on the Metrics page/)
-    expect(text).toMatch(/Click an entry to start a catalog metric from it/)
+    expect(text).toMatch(/click an entry to start a catalog metric from it/)
+    expect(text.match(/[.!?](\s|$)/g)).toHaveLength(1)
+    expect(text.split(' ').length).toBeLessThanOrEqual(28)
     expect(text).not.toMatch(/\bUse\b/)
   })
 

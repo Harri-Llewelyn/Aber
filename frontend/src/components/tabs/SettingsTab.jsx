@@ -250,9 +250,8 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
         {/* The page states its own limit, because it is surprising and deliberate: the list cannot
             be added to from here. */}
         <PageHeading icon={<IconSettings size={15} />} title="Settings">
-          These take effect without a restart and override the environment defaults they name. The
-          list is fixed: a setting appears here because code reads it, so new ones arrive with the
-          feature that needs them rather than being added by hand.
+          Values that take effect without a restart and override the environment defaults they name;
+          the list is fixed, not added to by hand.
         </PageHeading>
 
         {/* The second thing to say is a warning rather than a description, so it keeps the shape a

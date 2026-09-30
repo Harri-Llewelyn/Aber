@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
-import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
+import { PERMISSION_UUIDS } from '../../constants'
 import { LoadingState } from '../common/LoadingState'
 import { STANDARDS } from '../../utils/standards'
 import { VocabularyPanel } from '../common/VocabularyPanel'
@@ -60,10 +60,9 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
       {!loading && (
         <VocabularyPanel
           subtitle={<>
-            What the standards define, not what this deployment publishes: a row here is a concept the standard names. The Metric Catalog on the Metrics page is the other half, what devices actually report. Entries already in your catalog are marked.
-            {canUse
-              ? ' Click an entry to start a catalog metric from it.'
-              : ` ${requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)} to start a catalog metric from an entry.`}
+            What the standards define, not what devices publish{canUse
+              ? '; click an entry to start a catalog metric from it.'
+              : `; ${requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)} to start a catalog metric from an entry.`}
           </>}
           canAddMetric={canUse}
           tabs={[

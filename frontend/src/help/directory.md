@@ -17,6 +17,9 @@ A service listed here is one this platform knows it deploys. Nothing on this pag
 
 **Local identifiers are marked as local.** The directory can serve service and schema identifiers to other systems, and those identifiers are minted here rather than registered in a shared namespace. The qualification travels with them: a consumer that receives one is told it is local, because a bare identifier with the note stripped off is exactly how an interoperability claim becomes false.
 
+The rows are registered by the deployment at each install and upgrade, not added here.
+
+
 ## What this page cannot tell you
 
 Whether a service is **healthy** in the sense that matters to its users -- only whether it answers. A service that is up and answering wrongly looks the same here as one that is up and correct.
