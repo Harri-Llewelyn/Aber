@@ -94,7 +94,7 @@ beforeEach(() => {
 })
 
 /** The card whose title starts with `title`. */
-const cardOf = (title) => screen.getByRole('heading', { name: new RegExp(`^${title}`) }).closest('.card')
+const cardOf = (title) => screen.getByRole('heading', { name: (name) => name.startsWith(title) }).closest('.card')
 
 /** The page opens on Gateways; the machine identities are the other section. */
 async function renderServices() {
