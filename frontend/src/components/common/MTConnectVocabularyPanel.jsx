@@ -3,9 +3,8 @@ import { vocabularySections, adoptedVocabulary } from '../../utils/mtconnect'
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The MTConnect tab of the Standard Vocabulary Reference card (common/VocabularyPanel): how
- * sections are derived, what an entry's tooltip says, and what counts as adopted. A reference view;
- * it never writes anything.
+ * The MTConnect tab of the Vocabulary page (common/VocabularyPanel): how sections are derived, what
+ * an entry's tooltip says, and what counts as adopted. A reference view; it never writes anything.
  */
 export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
   // vocabularySections() returns plain name lists; the panel takes item objects, so each section is
@@ -17,8 +16,8 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
 
   const adopted = adoptedVocabulary(catalog)
 
-  // Concept-level semantic ids, keyed by name. Looked up rather than re-derived so the panel shows
-  // exactly what archived migration 20260101000032_effectiveness_and_mtconnect_semantics.sql stored, and shows nothing if the backfill has not run.
+  // Concept-level semantic ids, keyed by name. Looked up rather than re-derived, so the panel shows
+  // exactly what live migration 0002 seeded and nothing if it has not run.
   const semanticIds = new Map()
   for (const entry of vocabulary || []) {
     if (entry?.semantic_id) semanticIds.set(entry.name, entry.semantic_id)
@@ -35,8 +34,6 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
         <span className="mono">mtconnect/schema</span> repository.
       </>
     ),
-    // The run-on paragraph this replaced buried its two load-bearing facts -- "these are words,
-    // not your metrics" and "a name is composed, not picked" -- in the middle of six sentences.
     notes: [
       {
         label: 'Reference only.',

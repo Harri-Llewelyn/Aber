@@ -378,8 +378,8 @@ function Dashboard({ session, onSignOut }) {
   const [selectedSettingKey, setSelectedSettingKey] = useState('')
   // Set by an "Audit Trail" action on an asset row; consumed by AuditTrailTab as { id, type }.
   const [selectedTrailEntity, setSelectedTrailEntity] = useState(null)
-  // Set by Use on the Vocabulary page; consumed by MetricsTab, which resolves it against the
-  // vocabularies it already holds and opens its Add Metric form.
+  // Set by clicking an entry on the Vocabulary page; consumed by MetricsTab, which resolves it
+  // against the vocabularies it already holds and opens its Add Metric dialog.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)

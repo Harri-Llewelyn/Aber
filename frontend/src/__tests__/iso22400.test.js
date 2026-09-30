@@ -9,7 +9,8 @@ import { composeMetricName } from '../utils/metricGroup'
 const vocabulary = [
   { name: 'QUALITY', kpi_id: 'Q', category: 'OEE', unit: 'PERCENT', formula: 'Q = GQ / PQ', description: 'Quality ratio', semantic_id: 'https://aber.local/semantics/iso22400/QUALITY' },
   // ISO 22400-2's own term for the factor industry calls Performance. The catalog's
-  // OEE/PERFORMANCE was superseded by OEE/EFFECTIVENESS in archived migration 0032.
+  // OEE/PERFORMANCE was superseded by OEE/EFFECTIVENESS in archived migration
+  // 20260101000032_effectiveness_and_mtconnect_semantics.sql.
   { name: 'EFFECTIVENESS', kpi_id: 'E', category: 'OEE', unit: 'PERCENT', formula: 'E = (PRI x PQ) / APT', description: 'Effectiveness ratio', semantic_id: 'https://aber.local/semantics/iso22400/EFFECTIVENESS' },
   { name: 'AVAILABILITY', kpi_id: 'A', category: 'OEE', unit: 'PERCENT', formula: 'A = APT / PBT', description: 'Availability ratio', semantic_id: 'https://aber.local/semantics/iso22400/AVAILABILITY' },
   { name: 'MTBF', kpi_id: 'MTBF', category: 'Maintenance', unit: 'HOUR', formula: 'MTBF = APT / number of failures', description: 'Mean operating time between failures', semantic_id: 'https://aber.local/semantics/iso22400/MTBF' },
@@ -44,8 +45,9 @@ describe('iso22400Sections', () => {
   })
 
   it('uses ISO 22400-2 terminology — EFFECTIVENESS, not PERFORMANCE', () => {
-    // Archived migration 0032 aligned the vocabulary with the standard's own wording and superseded the
-    // catalog's OEE/PERFORMANCE metric. The old token must not reappear as a KPI definition.
+    // Archived migration 20260101000032_effectiveness_and_mtconnect_semantics.sql aligned the vocabulary
+    // with the standard's own wording and superseded the catalog's OEE/PERFORMANCE metric. The old
+    // token must not reappear as a KPI definition.
     expect(kpis(vocabulary).map(k => k.name)).toContain('EFFECTIVENESS')
     expect(kpis(vocabulary).map(k => k.name)).not.toContain('PERFORMANCE')
     expect(kpiByName(vocabulary, 'EFFECTIVENESS').kpi_id).toBe('E')
@@ -63,8 +65,9 @@ describe('iso22400Prefill', () => {
   })
 
   it('suggests the KPI family as the group, so the composed name matches the live catalog', () => {
-    // The catalog already holds OEE/AVAILABILITY (archived migration 0019). A prefill that suggested any
-    // other group would fork the taxonomy against immutable names.
+    // The catalog already holds OEE/AVAILABILITY (archived migration
+    // 20260101000019_mtconnect_catalog_migration.sql). A prefill that suggested any other group
+    // would fork the taxonomy against immutable names.
     const prefill = iso22400Prefill(availability)
     expect(composeMetricName(prefill.group, '', prefill.type, '')).toBe('OEE/AVAILABILITY')
   })

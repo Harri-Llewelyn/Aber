@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
+import { requiresRolesTitle } from '../hooks/usePermissions'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -112,7 +113,6 @@ const renderTab = () => render(
   <MetricsTab showToast={vi.fn()} hasPermission={() => true} />
 )
 
-/** The catalog table is the first one on the page; the vocabulary panel below it is not a table. */
 /**
  * Located by its heading, not by its position: the two cards have swapped order before, and a
  * positional query silently points at the wrong table.
@@ -125,10 +125,19 @@ const cardTable = (heading) => {
 
 const catalogTable = () => cardTable('Metric Catalog')
 
+/** The metric drawer, open while a row is selected. */
+const drawer = () => document.querySelector('.context-panel')
+const drawerButton = (name) => within(drawer()).getByRole('button', { name })
+
+/** Selecting a row opens the drawer. `table` scopes the name, which the drawer title repeats. */
+const selectMetric = (table, name) => {
+  fireEvent.click(within(table).getByText(name).closest('tr'))
+  return within(drawer())
+}
+
 /**
  * Waits for the catalog to render, then opens every group. The groups default to collapsed, so the
- * gate waits on a group header and then expands the sections the assertions read. Scoped to the
- * catalog table because the vocabulary panel has its own collapsible sections.
+ * gate waits on a group header and then expands the sections the assertions read.
  */
 const waitForCatalog = async () => {
   await waitFor(() => expect(catalogTable()).toBeTruthy())
@@ -194,7 +203,8 @@ describe('Metric Catalog — collapsible groups', () => {
     const row = screen.getByText('Axes/DISPLACEMENT').closest('tr')
     expect(within(row).getByText('SAMPLE')).toBeTruthy()
     expect(within(row).getByText('MILLIMETER')).toBeTruthy()
-    expect(within(row).getByRole('button', { name: /Deprecate/ })).toBeTruthy()
+    // Actions live in the drawer, not in the row.
+    expect(within(row).queryByRole('button')).toBeNull()
   })
 })
 
@@ -256,13 +266,34 @@ describe('Deprecated Metrics card', () => {
     render(<MetricsTab showToast={vi.fn()} hasPermission={(p) => p !== PERMISSION_UUIDS.SCHEMA_MANAGE} />)
     await waitFor(() => expect(deprecatedTable()).toBeTruthy())
 
-    const restore = within(deprecatedTable()).getByRole('button', { name: /Restore/ })
+    selectMetric(deprecatedTable(), 'temperature')
+    const restore = drawerButton('Restore')
     expect(restore.disabled).toBe(true)
-    expect(restore.title).toBe('Requires Admin permissions')
+    expect(restore.title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
     await waitForCatalog()
-    const deprecate = within(catalogTable()).getAllByRole('button', { name: /Deprecate/ })
-    expect(deprecate.length).toBeGreaterThan(0)
-    for (const button of deprecate) expect(button.disabled).toBe(true)
+    selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
+    const deprecate = drawerButton('Deprecate')
+    expect(deprecate.disabled).toBe(true)
+    expect(deprecate.title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+  })
+
+  it('keeps the card and its rows on screen while the catalog reloads', async () => {
+    renderTab()
+    await waitFor(() => expect(deprecatedTable()).toBeTruthy())
+
+    let release
+    api.get.mockImplementation((path) => (path.startsWith('/api/v1/metric-catalog')
+      ? new Promise(resolve => { release = () => resolve(CATALOG) })
+      : Promise.resolve(routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    api.post.mockResolvedValue({})
+    selectMetric(deprecatedTable(), 'temperature')
+    fireEvent.click(drawerButton('Restore'))
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Metric' }))
+    await waitFor(() => expect(release).toBeTruthy())
+
+    expect(within(deprecatedTable()).getByText('temperature')).toBeTruthy()
+    expect(screen.queryByText('Loading catalog…')).toBeNull()
+    release()
   })
 })
 
@@ -279,8 +310,8 @@ describe('Restore Metric', () => {
   }
 
   const openRestore = (name) => {
-    const row = within(cardTable('Deprecated Metrics')).getByText(name).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Restore/ }))
+    selectMetric(cardTable('Deprecated Metrics'), name)
+    fireEvent.click(drawerButton('Restore'))
     return document.querySelector('.modal')
   }
 
@@ -338,8 +369,8 @@ describe('Restore Metric', () => {
   it('names Restore in the toast a deprecation leaves', async () => {
     const showToast = await setup()
     await waitForCatalog()
-    const row = within(catalogTable()).getByText('Axes/DISPLACEMENT').closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Deprecate/ }))
+    selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
+    fireEvent.click(drawerButton('Deprecate'))
     fireEvent.click(screen.getByRole('button', { name: 'Deprecate Metric' }))
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/deprecated.*restore it/), 'success'))
@@ -375,31 +406,27 @@ describe('Edit Metric — correcting a semantic id', () => {
     return showToast
   }
 
-  const editButtonFor = (name) =>
-    within(within(catalogTable()).getByText(name).closest('tr')).getByRole('button', { name: /Edit/ })
-
   const openEdit = (name) => {
-    fireEvent.click(editButtonFor(name))
+    selectMetric(catalogTable(), name)
+    fireEvent.click(drawerButton('Edit'))
     return within(document.querySelector('.modal'))
   }
 
-  it('offers Edit on every row, disabled for a Shopfloor Manager as Deprecate is', async () => {
+  it('offers Edit in the drawer, disabled for a Shopfloor Manager as Deprecate is', async () => {
     await setup((p) => p !== PERMISSION_UUIDS.SCHEMA_MANAGE)
 
-    const edits = within(catalogTable()).getAllByRole('button', { name: /Edit/ })
-    expect(edits.length).toBe(within(catalogTable()).getAllByRole('button', { name: /Deprecate/ }).length)
-    for (const button of edits) {
-      expect(button.disabled).toBe(true)
-      expect(button.title).toBe('Requires Admin permissions')
-    }
-    fireEvent.click(edits[0])
+    selectMetric(catalogTable(), 'Controller/EXECUTION')
+    const edit = drawerButton('Edit')
+    expect(edit.disabled).toBe(true)
+    expect(edit.title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+    fireEvent.click(edit)
     expect(document.querySelector('.modal')).toBeNull()
   })
 
   it('offers Edit on a deprecated metric too, which still carries its id into schemas', async () => {
     await setup()
-    const row = within(cardTable('Deprecated Metrics')).getByText('temperature').closest('tr')
-    expect(within(row).getByRole('button', { name: /Edit/ }).disabled).toBe(false)
+    selectMetric(cardTable('Deprecated Metrics'), 'temperature')
+    expect(drawerButton('Edit').disabled).toBe(false)
   })
 
   it('shows the name and datatype as text, and the stored pair in the field', async () => {
@@ -617,62 +644,44 @@ describe('Metric Catalog — search', () => {
   })
 })
 
-describe('Metric Catalog — Add Metric toggle', () => {
-  const addButton = () => screen.getByRole('button', { name: /Add Metric|Cancel/ })
+describe('Metric Catalog — Add Metric dialog', () => {
+  const addButton = () => screen.getByRole('button', { name: /Add Metric/ })
 
-  it('reads "Add Metric" while the form is closed', async () => {
+  it('is a filled header button that opens no form until pressed', async () => {
     renderTab()
     await waitForCatalog()
 
     expect(addButton().textContent).toContain('Add Metric')
-    expect(addButton().getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByText('Data Item Type')).toBeNull()
-  })
-
-  it('reads "Cancel" once the form is open', async () => {
-    renderTab()
-    await waitForCatalog()
-
-    fireEvent.click(addButton())
-
-    expect(addButton().textContent).toContain('Cancel')
-    expect(addButton().getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByText('Data Item Type')).toBeTruthy()
-  })
-
-  it('closes the form again and returns the label', async () => {
-    renderTab()
-    await waitForCatalog()
-
-    fireEvent.click(addButton())
-    fireEvent.click(addButton())
-
-    expect(addButton().textContent).toContain('Add Metric')
-    expect(screen.queryByText('Data Item Type')).toBeNull()
-  })
-
-  it('is filled while it opens the form and ghost while it cancels one', async () => {
-    /* Filled is what a create action looks like on every other page -- Build Schema from Catalog,
-       New Area, New Cell. It cannot STAY filled once the form is open: the label is Cancel by
-       then, and the form's own submit is the filled one, so two would compete. */
-    renderTab()
-    await waitForCatalog()
-
     expect(addButton().className).toContain('btn-primary')
-    expect(addButton().className).not.toContain('btn-ghost')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByText('Data Item Type')).toBeNull()
+  })
+
+  it('opens a dialog carrying the form', async () => {
+    renderTab()
+    await waitForCatalog()
 
     fireEvent.click(addButton())
 
-    expect(addButton().className).toContain('btn-ghost')
-    expect(addButton().className).not.toContain('btn-primary')
-    // Exactly one filled button on screen: the form's own, which commits the metric.
-    const filled = [...document.querySelectorAll('.btn-primary')]
-    expect(filled).toHaveLength(1)
-    expect(filled[0].textContent.trim()).toBe('Add')
+    const dialog = screen.getByRole('dialog', { name: 'Add Metric' })
+    expect(within(dialog).getByText('Data Item Type')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeTruthy()
   })
 
-  it('discards what was typed, so a reopened form does not inherit stale input', async () => {
-    // The label says Cancel, so it has to mean cancel.
+  it('closes on Cancel and on Escape', async () => {
+    renderTab()
+    await waitForCatalog()
+
+    fireEvent.click(addButton())
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.click(addButton())
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('discards what was typed, so a reopened dialog does not inherit stale input', async () => {
     renderTab()
     await waitForCatalog()
 
@@ -681,20 +690,73 @@ describe('Metric Catalog — Add Metric toggle', () => {
     fireEvent.change(description, { target: { value: 'half-finished note' } })
     expect(description.value).toBe('half-finished note')
 
-    fireEvent.click(addButton())
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     fireEvent.click(addButton())
 
     expect(screen.getByPlaceholderText('What this metric represents').value).toBe('')
   })
 
-  it('disables the control without the manage permission, in either state', async () => {
+  it('disables the control without the manage permission, and names the role that holds it', async () => {
     render(<MetricsTab showToast={vi.fn()} hasPermission={() => false} />)
     await waitForCatalog()
 
-    const button = screen.getByRole('button', { name: /Add Metric/ })
-    expect(button.disabled).toBe(true)
-    fireEvent.click(button)
-    expect(screen.queryByText('Data Item Type')).toBeNull()
+    expect(addButton().disabled).toBe(true)
+    expect(addButton().title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+    fireEvent.click(addButton())
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('shows a refused add in the dialog, which stays open', async () => {
+    api.post.mockRejectedValueOnce(new Error('duplicate key'))
+    await openFormForError()
+    expect(screen.getByRole('alert').textContent).toMatch(/duplicate key/)
+    expect(screen.getByRole('dialog', { name: 'Add Metric' })).toBeTruthy()
+  })
+})
+
+// Fills the smallest valid MTConnect metric and presses Add.
+const openFormForError = async () => {
+  renderTab()
+  await waitForCatalog()
+  fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
+  fireEvent.change(screen.getByTitle(/The MTConnect data item type/), { target: { value: 'ANGLE' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+  await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+}
+
+describe('Metric drawer', () => {
+  it('opens on a row with its fields and closes on a second click', async () => {
+    renderTab()
+    await waitForCatalog()
+
+    const inDrawer = selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
+    expect(drawer().getAttribute('aria-hidden')).toBe('false')
+    expect(inDrawer.getByText('MILLIMETER')).toBeTruthy()
+    expect(inDrawer.getByRole('button', { name: 'Edit' })).toBeTruthy()
+    expect(inDrawer.getByRole('button', { name: 'Deprecate' })).toBeTruthy()
+    expect(inDrawer.queryByRole('button', { name: 'Restore' })).toBeNull()
+
+    fireEvent.click(within(catalogTable()).getByText('Axes/DISPLACEMENT').closest('tr'))
+    expect(drawer().getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('offers Restore, not Deprecate, on a deprecated metric', async () => {
+    renderTab()
+    await waitFor(() => expect(cardTable('Deprecated Metrics')).toBeTruthy())
+
+    const inDrawer = selectMetric(cardTable('Deprecated Metrics'), 'temperature')
+    expect(inDrawer.getByRole('button', { name: 'Restore' })).toBeTruthy()
+    expect(inDrawer.queryByRole('button', { name: 'Deprecate' })).toBeNull()
+  })
+
+  it('shows a count on both cards', async () => {
+    renderTab()
+    await waitFor(() => expect(cardTable('Deprecated Metrics')).toBeTruthy())
+
+    const count = (heading) => [...document.querySelectorAll('.card-header .section-title')]
+      .find(h => h.textContent.includes(heading)).querySelector('.section-count').textContent
+    expect(count('Metric Catalog')).toBe('4')
+    expect(count('Deprecated Metrics')).toBe('1')
   })
 })
 
@@ -705,22 +767,21 @@ const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is 
 const semanticIdInput = () => screen.getByRole('textbox', { name: /Semantic ID/ })
 const referenceTypeSelect = () => screen.getByRole('combobox', { name: 'Reference Type' })
 const useSuggestedButton = () => screen.queryByRole('button', { name: 'Use suggested' })
-const datatypeSelect = () => screen.getByTitle(/How the value is encoded on the wire/)
+// The Datatype column header shares the picker's first sentence, so the query names the element kind.
+const datatypeSelect = () =>
+  screen.getAllByTitle(/How the value is encoded on the wire/).find(el => el.tagName === 'SELECT')
 const conceptSelect = () => screen.getByTitle(/The ASHRAE 223P concept this point is attached to/)
 const addMetricButton = () => screen.getByRole('button', { name: /^Add$/ })
 
-// The Units column header carries the same title text as the Units picker, so the query has to
-// say which element kind it wants.
+// The Units column header has a title of its own, but a query by title text can still match the
+// wrong element kind, so it names the select.
 const unitsSelect = () =>
-  screen.getAllByTitle(/MTConnect units|Only SAMPLE data items carry units/).find(el => el.tagName === 'SELECT')
+  screen.getAllByTitle(/The unit of measure|Only SAMPLE data items carry units/).find(el => el.tagName === 'SELECT')
 
-/** The card a panel or section lives in, for scoping queries away from its neighbours. */
+/** The card a section lives in, for scoping queries away from its neighbours. */
 const cardFor = (heading) => screen.getByRole('heading', { name: heading }).closest('.card')
 
-/**
- * The "Devices will publish this metric as …" line. Scoped because every vocabulary panel's
- * description quotes example metric names in the same mono markup.
- */
+/** The "Devices will publish this metric as …" line. */
 const namePreview = () => screen.getByText(/Devices will publish this metric as/)
 
 const openForm = async () => {
@@ -841,7 +902,7 @@ describe('Metric builder — vocabulary prefill', () => {
     )
     expect(datatypeSelect().value).toBe('10')
 
-    fireEvent.change(screen.getByTitle(/The category this metric belongs to/), { target: { value: 'Machine' } })
+    fireEvent.change(screen.getByTitle(/The component this metric belongs to/), { target: { value: 'Machine' } })
 
     expect(datatypeSelect().value).toBe('')
     expect(screen.getByText(/Choose a Sparkplug datatype/)).toBeTruthy()
@@ -862,7 +923,7 @@ describe('Metric builder — OPC UA points that share a browse name', () => {
     semantic_id: 'http://opcfoundation.org/UA/AdditiveManufacturing/Manufacturer'
   }
   const AM_KEY = 'OPC 40540 Additive Manufacturing::Manufacturer'
-  const groupSelect = () => screen.getByTitle(/The category this metric belongs to/)
+  const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
   const dataPointSelect = () => screen.getByTitle(/OPC UA companion specification data point/)
 
   // FeedstockType is registered, so the prefill selects it as a group rather than typing it new.
@@ -998,7 +1059,7 @@ describe('Metric builder — ASHRAE 223P', () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
 
-    const groupSelect = screen.getByTitle(/The category this metric belongs to/)
+    const groupSelect = screen.getByTitle(/The component this metric belongs to/)
     const bms = [...groupSelect.querySelectorAll('option')].find(o => o.value === 'BMS')
     expect(bms.closest('optgroup').label).toBe('ASHRAE 223P (1)')
   })
@@ -1075,7 +1136,7 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
   it('derives the data item type vocabulary id, in the local namespace', async () => {
     await openForm()
     fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
-    fireEvent.change(screen.getByTitle(/The category this metric belongs to/), { target: { value: 'Axes' } })
+    fireEvent.change(screen.getByTitle(/The component this metric belongs to/), { target: { value: 'Axes' } })
 
     expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
     expect(referenceTypeSelect().value).toBe('IRI')
@@ -1084,7 +1145,7 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
   it('derives nothing until a type is chosen', async () => {
     // With only a group picked the composed name is `Axes`, which names a group, not a metric.
     await openForm()
-    fireEvent.change(screen.getByTitle(/The category this metric belongs to/), { target: { value: 'Axes' } })
+    fireEvent.change(screen.getByTitle(/The component this metric belongs to/), { target: { value: 'Axes' } })
     expect(semanticIdInput().value).toBe('')
   })
 
@@ -1137,13 +1198,13 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
 /**
  * The suggestion is what the metric's own standard gives it. It shows until the operator replaces
  * it and Use suggested brings it back. The latch users hit: touching Reference Type or the field
- * before choosing a type used to end the derivation until Cancel, so the form suggested nothing.
+ * before choosing a type ended the derivation until Cancel, so the form suggested nothing.
  */
 describe('Metric builder — the suggested semantic id', () => {
   const ACCELERATION_ID = 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ACCELERATION'
   const ANGLE_ID = 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE'
   const ECLASS = '0173-1#02-AAO677#002'
-  const groupSelect = () => screen.getByTitle(/The category this metric belongs to/)
+  const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
   const typePicker = () => screen.getByTitle(/MTConnect data item type/)
   const chooseActuatorAcceleration = () => {
     fireEvent.change(groupSelect(), { target: { value: 'Actuator' } })
@@ -1425,7 +1486,7 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     />
   )
 
-  it('opens the form on an ISO 22400 KPI, resolved from its name', async () => {
+  it('opens the dialog on an ISO 22400 KPI, resolved from its name', async () => {
     renderWith({ standard: 'ISO 22400', name: 'AVAILABILITY' })
     await waitForCatalog()
 
@@ -1434,7 +1495,7 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     expect(within(namePreview()).getByText('OEE/AVAILABILITY')).toBeTruthy()
   })
 
-  it('opens the form on an OPC UA point, resolved from spec and name together', async () => {
+  it('opens the dialog on an OPC UA point, resolved from spec and name together', async () => {
     renderWith({ standard: 'OPC UA', companionSpec: 'OPC 40010 Robotics', name: 'ActualPosition' })
     await waitForCatalog()
 
@@ -1442,14 +1503,14 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     expect(within(namePreview()).getByText('MotionDevice/ActualPosition')).toBeTruthy()
   })
 
-  it('opens the form on an MTConnect data item type', async () => {
+  it('opens the dialog on an MTConnect data item type', async () => {
     renderWith({ standard: 'MTConnect', type: 'ANGLE' })
     await waitForCatalog()
 
     expect(standardSelect().value).toBe('MTConnect')
   })
 
-  it('opens the form on a 223P concept and waits for a datatype before it can be added', async () => {
+  it('opens the dialog on a 223P concept and waits for a datatype before it can be added', async () => {
     // The path #455 was found on: the form arrived filled, showed "Double", and posted no datatype.
     renderWith({ standard: 'ASHRAE 223P', name: 'TemperatureSensor' })
     await waitForCatalog()
@@ -1464,7 +1525,7 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     expect(addMetricButton().disabled).toBe(false)
   })
 
-  it('consumes the handover so returning here later does not reopen the form', async () => {
+  it('consumes the handover so returning here later does not reopen the dialog', async () => {
     const onConsume = vi.fn()
     renderWith({ standard: 'ISO 22400', name: 'AVAILABILITY' }, onConsume)
     await waitForCatalog()
@@ -1491,7 +1552,7 @@ describe('Add Metric — Group picker follows the Standard', () => {
     await waitForCatalog()
     fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
   }
-  const groupSelect = () => screen.getByTitle(/The category this metric belongs to/)
+  const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
   // The catalog table also has a Standard column header, so match the form control's own text.
   const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
   const groupNames = () =>
