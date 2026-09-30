@@ -83,7 +83,7 @@ describe('rows and utilities', () => {
     expect(inline('.row-actions .btn + .btn')).toMatch(/margin-left:\s*8px/)
   })
 
-  it.each(['.form-hint', '.modal-lead', '.eyebrow', '.truncate', '.hint-underline'])('%s exists after .cell-meta', (sel) => {
+  it.each(['.form-hint', '.eyebrow', '.truncate', '.hint-underline'])('%s exists after .cell-meta', (sel) => {
     expect(rule(sel)).toBeTruthy()
     expect(APP_CSS.indexOf(`\n${sel} {`)).toBeGreaterThan(APP_CSS.indexOf('\n.cell-meta {'))
   })

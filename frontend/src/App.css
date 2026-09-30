@@ -1150,14 +1150,6 @@ tbody tr:hover { background: var(--bg-glass); }
   margin-top: 4px;
 }
 
-/* The paragraph that opens a dialog, before its form. */
-.modal-lead {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  margin-bottom: 16px;
-}
-
 /* A small uppercase label over a value or a group of controls. */
 .eyebrow {
   font-size: 11px;
