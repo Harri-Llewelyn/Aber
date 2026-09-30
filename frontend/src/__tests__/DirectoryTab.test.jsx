@@ -63,8 +63,7 @@ describe('DirectoryTab claims nothing it cannot observe', () => {
     api.get.mockResolvedValue(SERVICES)
   })
 
-  // The card used to render a hardcoded SYNCED / a8f3e4b status. Nothing in the
-  // stack can observe what Node-RED is running, so any such claim is fabricated.
+  // Nothing in the stack can observe what Node-RED is running, so any such claim is fabricated.
   it('claims no deployment status', async () => {
     await renderTab()
 
@@ -74,8 +73,7 @@ describe('DirectoryTab claims nothing it cannot observe', () => {
     expect(api.get).not.toHaveBeenCalledWith(expect.stringContaining('/gitops/status'))
   })
 
-  // The retirement, asserted from the page rather than from the source: no control offers a
-  // deploy, and nothing posts to the route the removed edge function served.
+  // No control offers a deploy, and nothing posts to a deploy route.
   it('offers no edge-flow deployment', async () => {
     await renderTab()
 
@@ -85,7 +83,7 @@ describe('DirectoryTab claims nothing it cannot observe', () => {
   })
 })
 
-/** Three named sections replace a flat table with a search box and a type picker. */
+/** Three named sections, one table each. */
 describe('DirectoryTab service groups', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -154,15 +152,41 @@ describe('DirectoryTab service groups', () => {
     expect(card(INGEST)).toBeTruthy()
   })
 
-  it('explains each category behind a tip on its heading, and counts nothing', async () => {
+  it('explains each category behind a tip on its heading, and counts its services', async () => {
     await renderTab()
 
+    const expected = { [APPS]: '4', [INGEST]: '3', [DATA]: '5' }
     for (const title of [APPS, INGEST, DATA]) {
       const heading = screen.getByRole('heading', { name: new RegExp(title) })
-      // No badge: the rows below are the count.
-      expect(heading.querySelector('.section-count')).toBeNull()
       expect(heading.querySelector('.help-tip')).toHaveAttribute('aria-label', `About ${title}`)
+      // The count follows the tip, and equals the rows in the card.
+      expect(heading.querySelector('.section-count').textContent).toBe(expected[title])
+      expect(card(title).querySelectorAll('tbody tr')).toHaveLength(Number(expected[title]))
     }
+  })
+
+  it('sits in the page layout like every other page', async () => {
+    await renderTab()
+    expect(document.querySelector('.page-layout > .page-main .directory-group')).toBeTruthy()
+  })
+
+  it('says loading and none registered inside a card', async () => {
+    api.get.mockReturnValue(new Promise(() => {}))
+    const { unmount } = render(<DirectoryTab showToast={vi.fn()} />)
+    expect(screen.getByText(/Loading directory/).closest('.card')).toBeTruthy()
+    unmount()
+
+    api.get.mockResolvedValue([])
+    render(<DirectoryTab showToast={vi.fn()} />)
+    const empty = await screen.findByText('No services are registered in the directory.')
+    expect(empty.closest('.card')).toBeTruthy()
+  })
+
+  it('names no migration in any text an operator reads', async () => {
+    await renderTab()
+    const text = [...document.querySelectorAll('[title]')].map(e => e.getAttribute('title')).join(' ')
+      + document.body.textContent
+    expect(text).not.toMatch(/migration/i)
   })
 
   it('opens a browsable endpoint in a new tab, with the opener not reachable from it', async () => {
@@ -388,7 +412,7 @@ describe('DirectoryTab refresh', () => {
  * so `viewerIsOnDeploymentHost` is true for all of them and the exposure column's case has to be
  * asked for explicitly.
  */
-describe('Directory reachability (archived migration 0084)', () => {
+describe('Directory reachability', () => {
   describe('viewerIsOnDeploymentHost', () => {
     it('recognises every spelling of this machine, including the bracketed IPv6 form', () => {
       for (const h of ['localhost', '127.0.0.1', '::1', '[::1]']) {
@@ -486,7 +510,7 @@ describe('Directory reachability (archived migration 0084)', () => {
   })
 })
 
-describe('the Version column (migration 0007)', () => {
+describe('the Version column', () => {
   describe('imageVersion', () => {
     it('reads the tag of a repository:tag reference', () => {
       expect(imageVersion('grafana/grafana:13.2.0')).toBe('13.2.0')
