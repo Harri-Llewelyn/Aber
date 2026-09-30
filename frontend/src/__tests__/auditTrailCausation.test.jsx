@@ -210,7 +210,7 @@ describe('the Same transaction control', () => {
     fireEvent.click(control())
 
     await waitFor(() =>
-      expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/).value)
+      expect(screen.getByPlaceholderText('Search a name or any ID…').value)
         .toBe(String(TXN)))
     await waitFor(() =>
       expect(api.get.mock.calls.some(([url]) => url.includes(`search=${TXN}`))).toBe(true))
@@ -221,7 +221,7 @@ describe('the Same transaction control', () => {
        on one table and a PROPOSAL_APPLIED row on another. Leaving either filter set would show
        part of the act under a count that reads as the whole of it. */
     await show()
-    fireEvent.change(screen.getByTitle(/Show only events against one kind of asset/),
+    fireEvent.change(screen.getByTitle(/Show only events against one kind of entity/),
       { target: { value: 'DEVICE' } })
     // The filter is a query parameter, so the page refetches; selecting before that lands picks
     // an event out of the list that is about to be replaced.
@@ -233,7 +233,7 @@ describe('the Same transaction control', () => {
     fireEvent.click(control())
 
     await waitFor(() =>
-      expect(screen.getByTitle(/Show only events against one kind of asset/).value).toBe(''))
+      expect(screen.getByTitle(/Show only events against one kind of entity/).value).toBe(''))
   })
 
   it('shows deleted entities, whose rows the count includes', async () => {

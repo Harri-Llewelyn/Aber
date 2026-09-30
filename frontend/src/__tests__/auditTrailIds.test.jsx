@@ -51,7 +51,7 @@ const openDrawer = async () => {
 }
 
 const searchBox = () =>
-  screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/)
+  screen.getByPlaceholderText('Search a name or any ID…')
 
 
 describe('each id in the drawer says what it is for', () => {
@@ -144,6 +144,6 @@ describe('the search box takes a numeric id', () => {
 
   it('says so on the control, because a box that takes three things must name them', async () => {
     await show()
-    expect(searchBox().title).toMatch(/only digits also matches a mutation id and a transaction id/i)
+    expect(searchBox().getAttribute('aria-label')).toMatch(/entity id.*mutation id.*transaction id/i)
   })
 })

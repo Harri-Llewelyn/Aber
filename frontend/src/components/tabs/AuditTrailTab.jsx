@@ -4,10 +4,15 @@ import { downloadCSV } from '../../utils/downloadCSV'
 import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { ContextPanel } from '../common/ContextPanel'
 import {
-  IconHistory, IconDownload, IconX, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
+  IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
+import { SearchInput } from '../common/SearchInput'
+import { ClearFilters } from '../common/ClearFilters'
+import { ListFoot } from '../common/ListFoot'
+import { LoadingState } from '../common/LoadingState'
+import { EmptyState } from '../common/EmptyState'
 import {
   AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, auditTrailEntityTypesFor
 } from '../../constants'
@@ -395,7 +400,7 @@ const ENTITY_ID_HELP =
   'The row this change was made to -- a device, a schema, a setting -- in the table this lane '
   + 'names. It is the id the rest of the platform knows that entity by. Paste it into the search '
   + 'box above for everything that has ever happened to it, or into the global search (Ctrl+K), '
-  + 'which opens the asset itself where it has a page and offers this one where it does not.'
+  + 'which opens the entity itself where it has a page and offers this one where it does not.'
 
 const MUTATION_ID_HELP =
   'This audit row, not the thing it changed. It is the value to quote in a ticket or an incident '
@@ -1393,7 +1398,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
               Audit Trail
               <HelpTip
                 label="About the Audit Trail"
-                text="Every attributed change to a cell, gateway, device, schema or proposal, in order and with its cause. Append-only and unprunable. Administrators and Auditors also see the security lane: roles, service identities, settings and backups."
+                text="Every attributed change to an area, cell, gateway, device, nameplate, schema, metric or proposal, in order and with its cause. Rows cannot be edited; an owner retires whole months. Administrators and Auditors also see roles, machine identities, settings and backups."
               />
             </h3>
             {/* WHAT IS LOADED, not what matches. Export writes the events the page is holding,
@@ -1416,11 +1421,10 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
 
         <div className="filter-bar">
           <select
-            className="form-control"
-            style={{ width: '150px' }}
+            className="form-control control-sm"
             value={entityTypeFilter}
             onChange={e => setEntityTypeFilter(e.target.value)}
-            title="Show only events against one kind of asset"
+            title="Show only events against one kind of entity"
           >
             <option value="">All entities</option>
             {/* Every kind this role may ask for, from the same table the sections are built from,
@@ -1430,20 +1434,15 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             ))}
           </select>
 
-          <input
-            className="form-control"
-            style={{ width: '220px' }}
+          <SearchInput
             value={nameFilter}
-            onChange={e => setNameFilter(e.target.value)}
-            placeholder="Search by name, entity, mutation or transaction ID…"
-            title={'Filter by the name or id of an entity. A term that is only digits also matches '
-                 + 'a mutation id and a transaction id, so any of the three ids the event drawer '
-                 + 'shows can be pasted here.'}
+            onChange={setNameFilter}
+            placeholder="Search a name or any ID…"
+            ariaLabel="Search by name, entity ID, mutation ID or transaction ID"
           />
 
           <select
-            className="form-control"
-            style={{ width: '150px' }}
+            className="form-control control-sm"
             value={actionFilter}
             onChange={e => setActionFilter(e.target.value)}
             title="Filter by the database action recorded on the audit row, as the event drawer's badge shows it. The coloured markers below are a separate classification; see the key beside the timeline."
@@ -1457,8 +1456,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
           {/* All time is the default (see timeWindow). The window is a query parameter, so a
               narrower range does not spend the row budget outside it. */}
           <select
-            className="form-control"
-            style={{ width: '150px' }}
+            className="form-control control-sm"
             value={rangePreset}
             onChange={e => setRangePreset(e.target.value)}
             title="Limit the timeline to a time range"
@@ -1509,16 +1507,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             </button>
           )}
 
-          {activeFilterCount > 0 && (
-            <button className="btn btn-ghost btn-sm" onClick={resetFilters} title="Clear every filter">
-              <IconX size={13} /> Clear filters ({activeFilterCount})
-            </button>
-          )}
-
-          {/* The spacer moved off Clear Filters and onto this group, so the right-hand end of the
-              bar holds the same thing whether or not a filter happens to be set. */}
-          <div className="filter-bar-spacer filter-bar-actions">
-          </div>
+          <ClearFilters count={activeFilterCount} onClear={resetFilters} />
         </div>
           </div>{/* .card-body */}
 
@@ -1526,90 +1515,80 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             `trail-timeline` is the one part of the card that gives way when the viewport is short; its own
             scroller is `trail-scroll`. */}
         <div className="card-body card-fill-scroll trail-timeline">
-          {loading ? (
-            <div className="loading-wrap"><div className="spinner" /> Loading audit trail trace sequence…</div>
-          ) : events.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon"><IconHistory size={36} /></div>
-              {/* THE DELETED CASE FIRST, because it is the one the reader can act on and the one
-                  they most often arrive at: `purged_assets` is counted over everything the filters
-                  select INCLUDING the search, so a search naming something deleted comes back with
-                  no events and a non-zero count. Without this the page says "nothing matches" while
-                  holding the answer behind a toggle the reader has no reason to try. */}
-              {!showPurged && purgedEntityCount > 0 ? (
-                <>
-                  <div className="empty-text">
-                    Nothing here matches, but {purgedEntityCount === 1
-                      ? 'one deleted entity does'
-                      : `${purgedEntityCount} deleted entities do`}. Their records are kept; this
-                    view just hides them.
-                  </div>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => setShowPurged(true)}
-                    title="Include events for entities that are no longer in the database"
-                  >
-                    <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
-                  </button>
-                </>
-              ) : (
-                <div className="empty-text">
-                  {rangeIsFiltering
-                    ? 'No audit trail events in this time range. Widen it, or switch back to All time.'
-                    : 'No audit trail events match the filter criteria.'}
-                </div>
+          {/* One row above the timeline, always drawn so the card keeps its shape: how much of the
+              trail is on screen at the left, the colour key at the right. A lane can be a
+              setting, a role assignment or a backup job, so the first number counts entities. */}
+          <div className="trail-header">
+            <div
+              className="trail-count"
+              title={[
+                `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
+                hasMoreToLoad
+                  ? `${events.length} of the ${totalMatching} events matching these filters `
+                    + 'are loaded; "Show more", at the foot of the card, loads the rest.'
+                  : 'Every event matching these filters is loaded.'
+              ].join('\n')}
+            >
+              {lanes.length}
+              {' '}{lanes.length === 1 ? 'entity' : 'entities'}
+              {' · '}{eventRatio} {events.length === 1 && !hasMoreToLoad ? 'event' : 'events'}
+            </div>
+
+            {/* The legend for a derived colour scale: nothing else on the page says what amber
+                means. */}
+            <div className="trail-legend">
+              {Object.entries(MARKERS).map(([kind, m]) => (
+                <span key={kind} className="trail-legend-item" title={m.hint}>
+                  <span className={`trail-node-dot trail-node-${kind}`} aria-hidden="true" />
+                  {m.label}
+                </span>
+              ))}
+
+              {/* Shown only while a badge is on screen. The sample is a real `.trail-cluster`,
+                  reading `n` as a placeholder for each badge's count. */}
+              {clusterCount > 0 && (
+                <span
+                  className="trail-legend-item"
+                  title={`Events too close together to draw separately are ONE badge carrying the count — `
+                       + `${clusterCount} on this timeline. Hover one for the breakdown, or narrow the `
+                       + `time range and they separate back into individual markers.`}
+                >
+                  <span className="trail-cluster trail-legend-cluster" aria-hidden="true">n</span>
+                  Grouped ({clusterCount})
+                </span>
               )}
             </div>
+          </div>
+
+          {loading ? (
+            <LoadingState label="the Audit Trail" />
+          ) : events.length === 0 ? (
+            <EmptyState
+              icon={<IconHistory size={36} />}
+              message={
+                /* A search naming something deleted comes back with no events and a non-zero
+                   deleted count, so that case says what is behind the toggle. */
+                !showPurged && purgedEntityCount > 0
+                  ? `Nothing here matches, but ${purgedEntityCount === 1
+                      ? 'one deleted entity does'
+                      : `${purgedEntityCount} deleted entities do`}. Their records are kept; this view just hides them.`
+                  : rangeIsFiltering
+                    ? 'No audit trail events in this time range. Widen it, or switch back to All time.'
+                    : 'No audit trail events match the filter criteria.'
+              }
+            >
+              {!showPurged && purgedEntityCount > 0 && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setShowPurged(true)}
+                  title="Include events for entities that are no longer in the database"
+                >
+                  <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
+                </button>
+              )}
+            </EmptyState>
           ) : (
             <>
-              {/* One row above the timeline: how much of the trail is on screen at the left, the
-                  colour key at the right. */}
-              <div className="trail-header">
-                {/* ENTITIES, not assets: a lane can be a setting, a role assignment or a backup
-                    job, and `asset` is the shopfloor class. Every lane is drawn, so the first
-                    number is the whole set and a reader adding up the section counts gets it; the
-                    second is what is loaded over what matched. */}
-                <div
-                  className="trail-count"
-                  title={[
-                    `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
-                    hasMoreToLoad
-                      ? `${events.length} of the ${totalMatching} events matching these filters `
-                        + 'are loaded; the rest are behind Load more, at the foot of the page.'
-                      : 'Every event matching these filters is loaded.'
-                  ].join('\n')}
-                >
-                  {lanes.length}
-                  {' '}{lanes.length === 1 ? 'entity' : 'entities'}
-                  {' · '}{eventRatio} {events.length === 1 && !hasMoreToLoad ? 'event' : 'events'}
-                </div>
-
-                {/* The legend for a derived colour scale: nothing else on the page says what
-                    amber means. */}
-                <div className="trail-legend">
-                  {Object.entries(MARKERS).map(([kind, m]) => (
-                    <span key={kind} className="trail-legend-item" title={m.hint}>
-                      <span className={`trail-node-dot trail-node-${kind}`} aria-hidden="true" />
-                      {m.label}
-                    </span>
-                  ))}
-
-                  {/* Shown only while a badge is on screen. The sample is a real `.trail-cluster`,
-                      reading `n` as a placeholder for each badge's count. */}
-                  {clusterCount > 0 && (
-                    <span
-                      className="trail-legend-item"
-                      title={`Events too close together to draw separately are ONE badge carrying the count — `
-                           + `${clusterCount} on this timeline. Hover one for the breakdown, or narrow the `
-                           + `time range and they separate back into individual markers.`}
-                    >
-                      <span className="trail-cluster trail-legend-cluster" aria-hidden="true">n</span>
-                      Grouped ({clusterCount})
-                    </span>
-                  )}
-                </div>
-              </div>
-
               <div className="trail-scroll">
                 <div className="trail-swimlanes">
                   <div className="trail-lane trail-axis">
@@ -1759,36 +1738,28 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                 </div>
               </div>
 
-              {/* Where the trail's end is, drawn only when there is something to say about it: a
-                  page still to load, a cut-off, or an end met at a page boundary. The count is on
-                  the header row and is not said twice. A first response holding the whole trail
-                  has no end to announce, so on a stack smaller than one page there is no foot. */}
-              {(nextCursor || truncated || allEvents.length >= PAGE_SIZE) && (
-                <div className="trail-pagination">
-                  {nextCursor ? (
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={loadMore}
-                      disabled={loadingMore}
-                      title={`Fetch the next ${PAGE_SIZE} events, older than the oldest one loaded`}
-                    >
-                      {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
-                    </button>
-                  ) : truncated ? (
-                    /* Cut off with no way forward: `truncated` and `next_cursor` come from the same
-                       response, but a database without the paging RPC returns only the first. The
-                       view is still incomplete and the reader is told so. */
-                    <span className="trail-pagination-end">
-                      Showing the newest {allEvents.length}
-                      {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
-                      older ones this view cannot reach.
-                    </span>
-                  ) : (
-                    <span className="trail-pagination-end">
-                      End of the trail — every event matching these filters is loaded.
-                    </span>
-                  )}
+              {/* `totalMatching` is the whole match; without it the foot claims only what is known:
+                  another page while a cursor exists, otherwise the rows held. */}
+              {truncated && !nextCursor ? (
+                /* Cut off with no way forward: the response was limited and named no next page, so
+                   the view is incomplete and the reader is told so. */
+                <div className="list-foot">
+                  <span className="list-foot-end">
+                    Showing the newest {allEvents.length}
+                    {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
+                    older ones this view cannot reach.
+                  </span>
                 </div>
+              ) : (
+                <ListFoot
+                  shown={events.length}
+                  total={typeof totalMatching === 'number'
+                    ? totalMatching
+                    : events.length + (nextCursor ? PAGE_SIZE : 0)}
+                  step={PAGE_SIZE}
+                  onMore={loadMore}
+                  pending={loadingMore}
+                />
               )}
             </>
           )}
@@ -1810,7 +1781,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
           <div className="trail-drawer-nav">
             {/* Above the thing it changes. The subtitle slot is the only one ContextPanel offers
                 above the metadata. */}
-            <div className="trail-drawer-nav-pos" title="Position in this asset's history, oldest first">
+            <div className="trail-drawer-nav-pos" title="Position in this entity's history, oldest first">
               Event {selectedIndex + 1} of {selectedLaneEvents.length}
               {' · '}
               {entityNames.get(selected.entity_id)
@@ -1826,8 +1797,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                 onClick={() => stepTo(selectedIndex - 1)}
                 disabled={selectedIndex <= 0}
                 title={selectedIndex <= 0
-                  ? 'This is the oldest recorded change to this asset'
-                  : 'Step back to the previous change to this asset (←)'}
+                  ? 'This is the oldest recorded change to this entity'
+                  : 'Step back to the previous change to this entity (←)'}
               >
                 ◀ Previous
               </button>
@@ -1836,8 +1807,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                 onClick={() => stepTo(selectedIndex + 1)}
                 disabled={selectedIndex >= selectedLaneEvents.length - 1}
                 title={selectedIndex >= selectedLaneEvents.length - 1
-                  ? 'This is the most recent change to this asset'
-                  : 'Step forward to the next change to this asset (→)'}
+                  ? 'This is the most recent change to this entity'
+                  : 'Step forward to the next change to this entity (→)'}
               >
                 Next ▶
               </button>
@@ -1877,7 +1848,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             value: selected.entity_id,
             copyable: true,
             mono: true,
-            title: 'The asset this change was made to',
+            title: 'The entity this change was made to',
             help: ENTITY_ID_HELP
           },
           // The audit row's own id. It identifies THIS mutation rather than the asset it touched,

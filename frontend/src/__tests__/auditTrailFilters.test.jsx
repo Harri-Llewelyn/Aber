@@ -111,7 +111,7 @@ const show = async () => {
 const showAll = async () => {
   await show()
   fireEvent.click(screen.getByRole('button', { name: /Show deleted entities/i }))
-  await waitFor(() => expect(screen.getByTitle('Clear every filter')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByRole('button', { name: /Clear filters/ })).toBeInTheDocument())
 }
 
 /** Every marker on the timeline, in DOM order. */
@@ -133,8 +133,8 @@ describe('Audit Trail filter bar', () => {
     // The same `.filter-bar` the Gateways and Devices pages use, not a row of controls wedged
     // into the section header.
     expect(document.querySelector('.filter-bar')).toBeTruthy()
-    expect(screen.getByTitle(/Show only events against one kind of asset/)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/)).toBeInTheDocument()
+    expect(screen.getByTitle(/Show only events against one kind of entity/)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Search a name or any ID…')).toBeInTheDocument()
     // The wording is load-bearing: this control filters `audit_trail.action`, while the coloured
     // markers show a derived classification. See auditTrailActionFilter.test.jsx.
     expect(screen.getByTitle(/Filter by the database action/)).toBeInTheDocument()
@@ -143,7 +143,7 @@ describe('Audit Trail filter bar', () => {
 
   it('filters by entity type', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Show only events against one kind of asset/), { target: { value: 'GATEWAY' } })
+    fireEvent.change(screen.getByTitle(/Show only events against one kind of entity/), { target: { value: 'GATEWAY' } })
 
     await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=GATEWAY'))
   })
@@ -161,7 +161,7 @@ describe('Audit Trail filter bar', () => {
      audit snapshots are, which is the only place a deleted entity still has a name. */
   it('sends an entity NAME to the database to match', async () => {
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Simulated' } })
+    fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Simulated' } })
 
     await waitFor(() => expect(lastTrailUrl()).toContain('search=Simulated'))
     // And no longer resolves it against the live lists first, which is what made a deleted entity
@@ -171,7 +171,7 @@ describe('Audit Trail filter bar', () => {
 
   it('still matches on a raw id, so an id pasted from elsewhere works', async () => {
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'gw-1' } })
+    fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'gw-1' } })
 
     await waitFor(() => expect(lastTrailUrl()).toContain('search=gw-1'))
   })
@@ -182,7 +182,7 @@ describe('Audit Trail filter bar', () => {
        list is not "no filter", it is "these, of which there are none". The page asked for nothing
        and drew nothing, on the one question it exists to answer. */
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/),
+    fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'),
       { target: { value: 'Decommissioned' } })
 
     await waitFor(() => expect(lastTrailUrl()).toContain('search=Decommissioned'))
@@ -192,10 +192,10 @@ describe('Audit Trail filter bar', () => {
   it('counts the active filters and clears them together, the time range included', async () => {
     await show()
     fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'UPDATE' } })
-    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Press' } })
+    fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
     fireEvent.change(rangeSelect(), { target: { value: '7d' } })
 
-    const clear = await screen.findByTitle('Clear every filter')
+    const clear = await screen.findByRole('button', { name: /Clear filters/ })
     expect(clear.textContent).toContain('(3)')
 
     fireEvent.click(clear)
@@ -436,7 +436,7 @@ describe('Audit Trail swimlanes', () => {
 
   it('omits a section with nothing in it rather than drawing an empty heading', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Show only events against one kind of asset/), { target: { value: 'DEVICE' } })
+    fireEvent.change(screen.getByTitle(/Show only events against one kind of entity/), { target: { value: 'DEVICE' } })
 
     // The fixture is unfiltered by the mock, so this asserts the grouping, not the query: with
     // only device lanes present, Cells and Gateways must not appear as empty headings.
@@ -933,10 +933,8 @@ describe('Audit Trail — removed tag filter', () => {
   it('leaves exactly four filter controls, six in the custom range mode', async () => {
     await show()
 
-    // Direct children only: Export and auto-refresh fold into `.filter-bar-actions`, and the
-    // refresh interval is a <select>, so a descendant selector would count a control that filters
-    // nothing.
-    const controls = () => document.querySelectorAll('.filter-bar > select, .filter-bar > input')
+    // The bar's own controls: three selects and the search box. Export sits in the card header.
+    const controls = () => document.querySelectorAll('.filter-bar select, .filter-bar input')
     expect(controls().length).toBe(4)
 
     // The date pickers are not present until they mean something. Two controls sitting inert
@@ -1012,7 +1010,7 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
 
       expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)')
-      expect(screen.queryByTitle('Clear every filter')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Clear filters/ })).not.toBeInTheDocument()
     })
 
     it('showing them is the deviation, so Clear filters appears', async () => {
@@ -1021,13 +1019,13 @@ describe('Audit Trail — removed tag filter', () => {
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
-      expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+      expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (1)')
     })
 
     it('Clear filters returns them to hidden', async () => {
       await show()
       fireEvent.click(toggle())
-      fireEvent.click(await screen.findByTitle('Clear every filter'))
+      fireEvent.click(await screen.findByRole('button', { name: /Clear filters/ }))
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)'))
@@ -1508,7 +1506,7 @@ describe('Audit Trail — removed tag filter', () => {
 
   it('still filters by name, which was sharing the id-restriction path with tags', async () => {
     await show()
-    fireEvent.change(screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/), { target: { value: 'Press' } })
+    fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
 
     await waitFor(() => expect(lastTrailUrl()).toContain('search=Press'))
   })

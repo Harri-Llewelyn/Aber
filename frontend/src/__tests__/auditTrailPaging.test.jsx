@@ -62,7 +62,7 @@ const SCHEMAS = [
 
 /**
  * A page as api.get resolves it: the array IS the resource, with the page facts attached.
- * `totalMatching` defaults to null, which is what a server without 0115 returns and what every
+ * `totalMatching` defaults to null, which is what a server that gives no total returns and what every
  * fixture here that is not about the total leaves it as.
  */
 function page (events, {
@@ -142,12 +142,12 @@ describe('mergeFirstPage', () => {
 
 // The control, and what it asks the server for.
 describe('AuditTrailTab paging', () => {
-  it('offers no Load more when the first page is the whole trail', async () => {
+  it('offers no Show more when the first page is the whole trail', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null }))
     render(<AuditTrailTab />)
     await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0))
-    await waitFor(() => expect(screen.queryByText(/Loading audit trail/)).not.toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: /Load \d+ more/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/Loading the Audit Trail/)).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /Show \d+ more/ })).not.toBeInTheDocument()
   })
 
   it('sends BOTH halves of the cursor, because recorded_at alone is not unique', async () => {
@@ -157,7 +157,7 @@ describe('AuditTrailTab paging', () => {
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true }))
 
     render(<AuditTrailTab />)
-    const button = await screen.findByRole('button', { name: /Load \d+ more/ })
+    const button = await screen.findByRole('button', { name: /Show \d+ more/ })
     fireEvent.click(button)
 
     await waitFor(() => expect(trailCalls().some(u => u.includes('before_id'))).toBe(true))
@@ -176,7 +176,7 @@ describe('AuditTrailTab paging', () => {
         }))
 
     render(<AuditTrailTab />)
-    fireEvent.click(await screen.findByRole('button', { name: /Load \d+ more/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Show \d+ more/ }))
 
     // Four events across two pages, and the count is the page's own claim about itself.
     await waitFor(() => expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument())
@@ -190,26 +190,49 @@ describe('AuditTrailTab paging', () => {
     ))
     render(<AuditTrailTab />)
     expect(await screen.findByText(/there are older ones this view cannot reach/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Load \d+ more/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show \d+ more/ })).not.toBeInTheDocument()
   })
 
-  it('announces the end only once a page boundary was actually met', async () => {
+  it('says All N shown once every matching event is loaded', async () => {
     respond(() => page(
       Array.from({ length: 200 }, (_, i) => event(200 - i)),
-      { nextCursor: null, truncated: false }
+      { nextCursor: null, truncated: false, totalMatching: 200 }
     ))
     render(<AuditTrailTab />)
-    expect(await screen.findByText(/every event matching these filters is loaded/i)).toBeInTheDocument()
+    expect(await screen.findByText('All 200 shown.')).toBeInTheDocument()
   })
 
-  it('draws no foot at all on a stack smaller than one page', async () => {
-    // Nothing to load, nothing cut off, no boundary met: a foot here could only repeat the count
-    // the header row already carries.
+  it('names the step the button takes, then closes with All N shown', async () => {
+    const cursor = { recorded_at: '2026-01-01T00:00:00.000Z', id: 41 }
+    respond((url) => url.includes('before_id')
+      ? page([event(40)], { nextCursor: null, totalMatching: 3 })
+      : page([event(42), event(41)], { nextCursor: cursor, truncated: true, totalMatching: 3 }))
+    render(<AuditTrailTab />)
+    const button = await screen.findByRole('button', { name: 'Show 1 more' })
+    fireEvent.click(button)
+    expect(await screen.findByText('All 3 shown.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show d+ more/ })).toBeNull()
+  })
+
+  it('reads All N shown on a stack smaller than one page', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, truncated: false }))
     render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
-    expect(screen.queryByText(/every event matching these filters is loaded/i)).not.toBeInTheDocument()
+    expect(screen.getByText('All 2 shown.')).toBeInTheDocument()
     expect(document.querySelector('.trail-pagination')).toBeNull()
+  })
+
+  it('draws the count row, reading zero, while loading and when nothing matches', async () => {
+    let release
+    const pending = new Promise(resolve => { release = resolve })
+    respond(() => pending)
+    render(<AuditTrailTab />)
+    expect(await screen.findByText('Loading the Audit Trail…')).toBeInTheDocument()
+    expect(document.querySelector('.trail-count')).toHaveTextContent('0 entities · 0 events')
+    release(page([], { nextCursor: null, totalMatching: 0 }))
+    await waitFor(() => expect(screen.queryByText('Loading the Audit Trail…')).toBeNull())
+    expect(document.querySelector('.trail-count')).toHaveTextContent('0 entities · 0 events')
+    expect(screen.queryByText(/All d+ shown/)).toBeNull()
   })
 })
 
@@ -234,7 +257,7 @@ describe('AuditTrailTab section coverage', () => {
     render(<AuditTrailTab />)
     // The headings are what say a lane was drawn at all.
     expect(await screen.findByLabelText('Role assignments lanes')).toBeInTheDocument()
-    expect(screen.getByLabelText('Service identities lanes')).toBeInTheDocument()
+    expect(screen.getByLabelText('Machine identities lanes')).toBeInTheDocument()
     expect(screen.getByLabelText('Schemas lanes')).toBeInTheDocument()
     expect(screen.getByLabelText('Gateways lanes')).toBeInTheDocument()
   })
@@ -259,7 +282,7 @@ describe('AuditTrailTab section coverage', () => {
     render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
 
-    const select = screen.getByTitle('Show only events against one kind of asset')
+    const select = screen.getByTitle('Show only events against one kind of entity')
     const options = [...select.querySelectorAll('option')]
 
     for (const { kind, label } of AUDIT_TRAIL_ENTITY_TYPES) {
@@ -392,7 +415,7 @@ describe('AuditTrailTab total', () => {
     // And nowhere else: the foot used to say it again in words, under a button offering more.
     expect(screen.queryByText(/2 of 467 events/)).not.toBeInTheDocument()
     expect(document.querySelector('.trail-pagination-count')).toBeNull()
-    expect(screen.getByRole('button', { name: /Load \d+ more/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Show \d+ more/ })).toBeInTheDocument()
   })
 
   it('counts one event as one event', async () => {
@@ -462,7 +485,7 @@ describe('AuditTrailTab total', () => {
 
     render(<AuditTrailTab />)
     await screen.findByText(/2 entities · 2\/4 events/)
-    fireEvent.click(screen.getByRole('button', { name: /Load \d+ more/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Show \d+ more/ }))
 
     // Four of four is the whole match, so the fraction goes.
     await waitFor(() => expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument())
