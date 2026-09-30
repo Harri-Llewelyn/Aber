@@ -40,7 +40,7 @@
   --brand-sharepoint: #0078d4;
   --brand-drive:      #0f9d58;
   /* --danger clears AA on a bare card but only 4.45:1 on the 0.15 rose tint the error toast and
-     .badge-offline sit on; one step lighter clears it at 5.3:1. */
+     .badge-danger sit on; one step lighter clears it at 5.3:1. */
   --danger-text:  #ff6b85;
   /* The cluster badge: a fifth colour outside the four-colour event classification, because a badge
      says how many events are here, not what kind. Violet is the nearest unused hue to the accent.
@@ -51,6 +51,8 @@
   /* The monospace stack as a token, so `var(--font-mono, monospace)` resolves to JetBrains Mono
      rather than the bare generic. Structural, so the light theme does not restate it. */
   --font-mono:    'JetBrains Mono', monospace;
+  /* The interface face, written once. Structural, like --font-mono. */
+  --font-display: 'Outfit', sans-serif;
   /* Spacing. --inset is the horizontal inset from a container's edge to its content, one value
      shared by the page, the card, the card header and the table cell, so their left edges align.
      --inset-tight is for chrome already on a panel (a filter bar inside a card, the context panel's
@@ -62,8 +64,23 @@
   --stack:        16px;
   --radius:       12px;
   --radius-sm:    8px;
+  /* The small radius: a callout, a compact chip. --radius-pill is a badge or a count. */
+  --radius-xs:    6px;
+  --radius-pill:  999px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
   --transition:   all 0.2s ease;
+  /* The z-index ladder. A layer sits above the ones listed before it; a new layer takes a rung,
+     not a number picked to win.
+       1-5    inside one component (a sticky header, a marker on a plan, a timeline node)
+       60     the alert and notification panels, anchored under the topbar
+       90     the sidebar, and the context panel when it is a drawer below 1100px (they sit on
+              opposite edges, so the tie never overlaps)
+       100    the topbar
+       200    a popover under the topbar: the user menu, global search, the sidebar mode menu
+       1000   the modal overlay
+       above 1000, the dialog confirm layer: set in the .modal block, above the modal it confirms
+       1200   the help-tip bubble, above any dialog
+       2000   the toast stack, above everything */
 }
 
 [data-theme="light"] {
@@ -118,7 +135,7 @@ html, body, #root {
   height: 100%;
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -776,7 +793,7 @@ html, body, #root {
   padding: 0 6px;
   background: var(--accent-dim);
   color: var(--accent);
-  border-radius: 100px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   margin-left: 10px;
@@ -1005,7 +1022,7 @@ tbody tr:hover { background: var(--bg-glass); }
   align-items: flex-start;
   margin: 12px var(--inset) 0;
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
   background: var(--bg-glass);
   font-size: 12px;
@@ -1024,14 +1041,52 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .callout-warning .callout-icon { color: var(--warning); }
+
+/* An error or a refusal that stands on the page: the same subtle tint as the warning, in the danger
+   hue. The text is --danger-text because --danger is below AA on the tint in the light theme. */
+.callout-danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--danger-text);
+}
+
+.callout-danger .callout-icon { color: var(--danger); }
+
+/* A note that explains rather than warns. */
+.callout-info {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.callout-info .callout-icon { color: var(--accent-text); }
 .callout strong { color: var(--text-primary); }
 
-/* A callout that qualifies a whole page rather than the card it sits in. AFTER `.callout`, not
-   before: the two selectors have equal specificity, so the one declared later is the one that wins
-   the margin. `.callout` insets itself by `--inset` to line up with a card's contents and leaves no
-   gap beneath, both of which are wrong out on the page. */
+/* `.callout`'s own margin lines it up with a card's contents when it is a direct child of `.card`.
+   Inside a card body, or a dialog, the container has already inset it, so the inline margin goes.
+   The top margin stays, as the gap above. */
+.card-body > .callout, .modal .callout { margin-inline: 0; }
+
+/* The page banner: a callout above a page's first card, as `callout callout-warning callout-page`
+   with an icon element first and ONE body element (a div or span) after it. Full width, wraps, and
+   the icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later
+   rule wins the margin, and `.callout`'s inset and missing bottom gap are wrong out on the page.
+   The warning form is the stronger tint here: a finding on arrival, not a standing property. */
 .callout-page {
+  align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
   margin: 0 0 var(--stack);
+  padding: 10px var(--inset);
+  font-size: 13px;
+}
+
+.callout-page > :not(.callout-icon) { flex: 1; min-width: 0; }
+.callout-page .callout-icon { margin-top: 0; }
+
+.callout-warning.callout-page {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning-text);
 }
 
 /* Group header row: a collapsible category inside a table body. `--bg-card` mixed toward the text
@@ -1067,7 +1122,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 
 .mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--accent);
 }
@@ -1088,8 +1143,54 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--danger);
 }
 
-/* Buttons in a table cell, held to the right-hand edge of the row. */
-.row-actions {
+/* The note under a form field: muted, small, and a fixed 4px below the control. */
+.form-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* The paragraph that opens a dialog, before its form. */
+.modal-lead {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+/* A small uppercase label over a value or a group of controls. */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+/* One line, cut off with an ellipsis. Needs a width from its container to cut against. */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The dotted underline that says "hover for the meaning". */
+.hint-underline {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+/* Stacks its direct children with the page gap. The one way to space cards, banners and blocks;
+   a wrapper that also holds a directory-group keeps that group's own rule. */
+.stack > * + * { margin-top: var(--stack); }
+
+/* A table row whose entity is archived: the amber tint. The generic row hover paints over it. */
+tr.row-archived { background: rgba(255, 179, 0, 0.06); }
+
+/* Buttons in a table cell, held to the right-hand edge of the row. The header cell over them takes
+   the same class so the column title lines up. */
+td.row-actions, th.row-actions {
   text-align: right;
   white-space: nowrap;
 }
@@ -1230,15 +1331,17 @@ tbody tr:hover { background: var(--bg-glass); }
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
-  border-radius: 100px;
+  border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
+/* The table-cell size: 11px, so a row does not mix two badge sizes. */
+.badge-sm { font-size: 11px; }
+
 .badge-online  { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
-.badge-offline { background: rgba(255, 77, 109, 0.15); color: var(--danger);  }
 .badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning-text); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
 
@@ -1268,6 +1371,12 @@ tbody tr:hover { background: var(--bg-glass); }
   background: rgba(0, 212, 255, 0.07);
   color: var(--accent-text);
   border: 1px dashed rgba(0, 212, 255, 0.45);
+}
+
+/* Out of commission: the warning badge with a border, and an icon in front. See ArchivedBadge. */
+.badge-archived {
+  border: 1px solid var(--warning);
+  gap: 4px;
 }
 
 .badge-dot {
@@ -1326,6 +1435,8 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 .btn-icon:hover { color: var(--accent); background: transparent; }
+/* 28px is the default; -sm is for a dense row. */
+.btn-icon-sm { width: 24px; height: 24px; }
 
 /* The count pill inside a selected filter button. `.section-count` paints --accent on --accent-dim,
    which is invisible on a `.btn-primary` fill, so the pill takes the button's ink as its fill and
@@ -2389,7 +2500,7 @@ tbody tr:hover { background: var(--bg-glass); }
    Above the metadata because it is the only item in that panel with a deadline on it -- see the note
    in ContextPanel.jsx. */
 .context-alert {
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   padding: 10px 12px;
   margin-bottom: 14px;
   border: 1px solid var(--warning);
@@ -4310,7 +4421,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 9px 12px;
   margin-bottom: 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--bg-glass);
   color: var(--text-muted);
   font-size: 12px;

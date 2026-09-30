@@ -393,7 +393,8 @@ describe('type scale floor', () => {
 
   // System identifiers and numeric readouts stay monospace.
   it('keeps identifiers monospace', () => {
-    expect(APP_CSS.match(/\n\.mono \{([\s\S]*?)\n\}/)[1]).toMatch(/JetBrains Mono/)
+    expect(APP_CSS.match(/\n\.mono \{([\s\S]*?)\n\}/)[1]).toMatch(/var\(--font-mono\)/)
+    expect(APP_CSS).toMatch(/--font-mono:\s*'JetBrains Mono'/)
   })
 })
 

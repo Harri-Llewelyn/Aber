@@ -143,3 +143,67 @@ describe('components do not reintroduce an inset of their own', () => {
     expect(offenders, `use var(--stack) instead:\n  ${offenders.join('\n  ')}`).toEqual([])
   })
 })
+
+describe('pages do not space a block sideways with a literal margin', () => {
+
+  /**
+   * A literal horizontal margin on a page is a second opinion about where an edge is: the container
+   * or a shared class owns it. Every offender that existed when this guard landed is named here with
+   * its count, so a NEW one fails and a fix lowers the count. The pages of the consistency audit
+   * remove their entries as they adopt the shared badge, callout and row classes; an entry left
+   * behind after its fix also fails, so the list cannot go stale.
+   */
+  const BASELINE = {
+    'AccessControlTab.jsx: margin 12px 20px 0': 4,
+    'AccessControlTab.jsx: marginLeft 4px': 1,
+    'AreasTab.jsx: marginLeft 6px': 1,
+    'AreasTab.jsx: marginLeft 8px': 1,
+    'ApprovalsTab.jsx: marginLeft 8px': 1,
+    'BackupsTab.jsx: marginRight 4px': 1,
+    'CaptureTab.jsx: marginLeft 6px': 5,
+    'CaptureTab.jsx: marginRight 6px': 3,
+    'CellsTab.jsx: marginLeft 8px': 2,
+    'DevicesTab.jsx: marginLeft 8px': 2,
+    'GatewaysTab.jsx: marginLeft 8px': 1,
+    'MetricsTab.jsx: marginLeft 6px': 1,
+    'MetricsTab.jsx: marginRight 6px': 1,
+    'SchemasTab.jsx: marginLeft 6px': 1
+  }
+
+  const files = jsxFiles(path.join(SRC, 'components', 'tabs'))
+
+  // A horizontal term that is `auto`, zero or a token is not a hand-picked value.
+  const isLiteral = (term) => /^-?\d+(\.\d+)?(px|rem|em)$/.test(term) && parseFloat(term) !== 0
+
+  const found = () => {
+    const counts = {}
+    for (const file of files) {
+      const source = fs.readFileSync(file, 'utf8')
+      for (const [, prop, value] of source.matchAll(/\b(margin(?:Left|Right|Inline)?):\s*'([^']*)'/g)) {
+        const parts = value.trim().split(/\s+/)
+        const terms = prop === 'margin' ? [parts.length === 1 ? parts[0] : parts[1], parts[3]] : [parts[0]]
+        if (terms.some(t => t && isLiteral(t))) {
+          const key = `${path.basename(file)}: ${prop} ${value}`
+          counts[key] = (counts[key] || 0) + 1
+        }
+      }
+    }
+    return counts
+  }
+
+  it('has no offender beyond the named baseline', () => {
+    const counts = found()
+    const fresh = Object.entries(counts)
+      .filter(([key, n]) => n > (BASELINE[key] || 0))
+      .map(([key, n]) => `${key} (x${n})`)
+    expect(fresh, `use a shared class or the container's own spacing instead:\n  ${fresh.join('\n  ')}`).toEqual([])
+  })
+
+  it('names no offender that has since been fixed', () => {
+    const counts = found()
+    const stale = Object.entries(BASELINE)
+      .filter(([key, n]) => (counts[key] || 0) < n)
+      .map(([key]) => key)
+    expect(stale, `lower or remove these baseline entries:\n  ${stale.join('\n  ')}`).toEqual([])
+  })
+})
