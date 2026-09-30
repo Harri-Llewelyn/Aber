@@ -24,7 +24,7 @@ function sourceFiles(dir) {
   })
 }
 
-// The lookbehind keeps `dt-badge-*`, a separate family, out of the match.
+// The lookbehind keeps `trail-badge-*`, a separate family, out of the match.
 const WRITTEN = new Set(sourceFiles(SRC).flatMap(file =>
   [...fs.readFileSync(file, 'utf8').matchAll(/(?<![\w-])badge-[a-z]+(?:-[a-z]+)*/g)].map(m => m[0])
 ))

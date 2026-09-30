@@ -264,7 +264,7 @@ describe('the component draws the badges', () => {
     originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')
     Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
       configurable: true,
-      get() { return this.classList?.contains('dt-track') ? 1000 : 0 }
+      get() { return this.classList?.contains('trail-track') ? 1000 : 0 }
     })
   })
 
@@ -275,8 +275,8 @@ describe('the component draws the badges', () => {
   })
 
   /** Badges on the timeline, scoped to the track so the legend's sample is not counted. */
-  const badges = () => [...document.querySelectorAll('.dt-track .dt-cluster')]
-  const dots = () => [...document.querySelectorAll('.dt-node')]
+  const badges = () => [...document.querySelectorAll('.trail-track .trail-cluster')]
+  const dots = () => [...document.querySelectorAll('.trail-node')]
 
   /** The fraction out of `calc(14px + <f> * (100% - 28px))`, however jsdom reorders it. */
   const fractionOf = (left) => Number(/([\d.e-]+)\s*\*|\*\s*([\d.e-]+)/.exec(left)?.slice(1).find(Boolean) ?? NaN)
@@ -322,7 +322,7 @@ describe('the component draws the badges', () => {
     await draw()
 
     expect(screen.getByText('Grouped (1)')).toBeInTheDocument()
-    expect(document.querySelector('.dt-legend .dt-cluster')).toBeTruthy()
+    expect(document.querySelector('.trail-legend .trail-cluster')).toBeTruthy()
   })
 
   it('breaks the group down on hover, in the legend words', async () => {
@@ -346,17 +346,17 @@ describe('the component draws the badges', () => {
     fireEvent.click(badges()[0])
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
 
-    expect(badges()[0].className).toContain('dt-node-selected')
+    expect(badges()[0].className).toContain('trail-node-selected')
 
     const next = () => screen.getByRole('button', { name: /Next/ })
     fireEvent.click(next())
     await waitFor(() =>
       expect(screen.getByTitle(/Position in this asset's history/)).toHaveTextContent('Event 2 of 3'))
-    expect(badges()[0].className).toContain('dt-node-selected')
+    expect(badges()[0].className).toContain('trail-node-selected')
 
     fireEvent.click(next())
-    await waitFor(() => expect(dots()[0].className).toContain('dt-node-selected'))
-    expect(badges()[0].className).not.toContain('dt-node-selected')
+    await waitFor(() => expect(dots()[0].className).toContain('trail-node-selected'))
+    expect(badges()[0].className).not.toContain('trail-node-selected')
   })
 
   it('dissolves the badge into individual markers when the range is narrowed', async () => {

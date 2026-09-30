@@ -97,7 +97,7 @@ const GOVERNANCE_FIELDS = new Set([
    and it is provenance written by ingestion rather than operator configuration. `name` and `icon`
    are cosmetic, not governance. */
 
-/** The four marker classes. `kind` is a CSS suffix as well as a key -- see `.dt-node-*`. */
+/** The four marker classes. `kind` is a CSS suffix as well as a key -- see `.trail-node-*`. */
 export const MARKERS = {
   creation:    { label: 'Created',       hint: 'Row created — provisioning, or a first DBIRTH admitting the asset' },
   operational: { label: 'Operational',   hint: 'State change — status, cell, or another running-time property' },
@@ -562,7 +562,7 @@ const formatValue = (v) => {
   return String(v)
 }
 
-const EmptyValue = ({ label }) => <span className="dt-diff-empty">{label}</span>
+const EmptyValue = ({ label }) => <span className="trail-diff-empty">{label}</span>
 
 /**
  * The other audit rows written by the same transaction. Ordered by `event_id` ascending, the order
@@ -632,18 +632,18 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
   const chip = known ? others : ((isolated || loaded > 0) ? loaded : null)
 
   return (
-    <div className="dt-causation">
+    <div className="trail-causation">
       <div className="context-panel-section-label">
         Same transaction
         {chip !== null && <span className="section-count">{chip}</span>}
       </div>
 
-      <p className="dt-causation-hint">{hint}</p>
+      <p className="trail-causation-hint">{hint}</p>
 
       {offerControl && (
         <button
           type="button"
-          className="btn btn-ghost btn-sm dt-causation-all"
+          className="btn btn-ghost btn-sm trail-causation-all"
           onClick={() => onShowTransaction(event.causation_id)}
           title={`Search for transaction ${event.causation_id}, so every row it wrote is loaded `
                + 'whatever kind of entity it touched. Clears the entity and action filters and '
@@ -653,7 +653,7 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
         </button>
       )}
 
-      <ul className="dt-causation-list">
+      <ul className="trail-causation-list">
         {siblings.map(s => {
           // Same three falls as the lane label; a sibling may itself have been purged.
           const name = entityNames.get(s.entity_id) || snapshotIdentity(s)?.label
@@ -661,18 +661,18 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
             <li key={s.event_id}>
               <button
                 type="button"
-                className="dt-causation-item"
+                className="trail-causation-item"
                 onClick={() => onSelect(s.event_id)}
                 title={`Open this change to ${name || s.entity_id}`}
                 /* Explicit, because the computed name would read the spans in order without saying
                    that activating it opens the row. */
                 aria-label={`Open this change to ${name || s.entity_id}`}
               >
-                <span className="dt-causation-kind">{entityKind(s.entity_type)}</span>
-                <span className="dt-causation-name">
+                <span className="trail-causation-kind">{entityKind(s.entity_type)}</span>
+                <span className="trail-causation-name">
                   {name || <span className="mono">{shortId(s.entity_id)}</span>}
                 </span>
-                <span className="dt-causation-action">{s.event_type}</span>
+                <span className="trail-causation-action">{s.event_type}</span>
               </button>
             </li>
           )
@@ -694,7 +694,7 @@ function EventDiff({ event, diff }) {
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
 
   return (
-    <div className="dt-diff">
+    <div className="trail-diff">
       <div className="context-panel-section-label">
         {action === 'INSERT' ? 'Initial properties'
           : action === 'DELETE' ? 'Final properties'
@@ -713,11 +713,11 @@ function EventDiff({ event, diff }) {
       {diff.length === 0 ? (
         /* Either an UPDATE whose only changed column was on the noise denylist, or a row without
            snapshots. Neither is an error. */
-        <div className="dt-diff-none">
+        <div className="trail-diff-none">
           No property changes recorded outside the ignored timestamp columns.
         </div>
       ) : (
-        <table className={`dt-diff-table${oneSided ? ' dt-diff-onesided' : ''}`}>
+        <table className={`trail-diff-table${oneSided ? ' trail-diff-onesided' : ''}`}>
           <thead>
             <tr>
               <th>Property</th>
@@ -742,11 +742,11 @@ function EventDiff({ event, diff }) {
                 <tr key={d.field}>
                   <th scope="row" title={d.field}>{d.field}</th>
                   {!oneSided && (
-                    <td className="dt-diff-before" title={before || undefined}>
+                    <td className="trail-diff-before" title={before || undefined}>
                       {before === null ? <EmptyValue label="Not set" /> : before}
                     </td>
                   )}
-                  <td className="dt-diff-after" title={(action === 'DELETE' ? before : after) || undefined}>
+                  <td className="trail-diff-after" title={(action === 'DELETE' ? before : after) || undefined}>
                     {action === 'DELETE'
                       ? (before === null ? <EmptyValue label="Not set" /> : before)
                       : (after === null ? <EmptyValue label="Cleared" /> : after)}
@@ -769,13 +769,13 @@ function RawSnapshots({ event }) {
     try { return JSON.stringify(value, null, 2) } catch { return String(value) }
   }
   return (
-    <details className="dt-raw">
-      <summary className="dt-raw-summary">Raw audit payload</summary>
-      <div className="dt-raw-body">
-        <div className="dt-raw-label">old_data</div>
-        <pre className="dt-raw-json">{event.old_data ? dump(event.old_data) : 'null'}</pre>
-        <div className="dt-raw-label">new_data</div>
-        <pre className="dt-raw-json">{event.new_data ? dump(event.new_data) : 'null'}</pre>
+    <details className="trail-raw">
+      <summary className="trail-raw-summary">Raw audit payload</summary>
+      <div className="trail-raw-body">
+        <div className="trail-raw-label">old_data</div>
+        <pre className="trail-raw-json">{event.old_data ? dump(event.old_data) : 'null'}</pre>
+        <div className="trail-raw-label">new_data</div>
+        <pre className="trail-raw-json">{event.new_data ? dump(event.new_data) : 'null'}</pre>
       </div>
     </details>
   )
@@ -1381,9 +1381,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   })
 
   return (
-    /* `dt-page`: the page fills the viewport and the timeline scrolls inside the card, so the axis
-       row has a scroller to pin to. See .dt-page in App.css. */
-    <div className="page-layout dt-page">
+    /* `trail-page`: the page fills the viewport and the timeline scrolls inside the card, so the axis
+       row has a scroller to pin to. See .trail-page in App.css. */
+    <div className="page-layout trail-page">
       <div className="page-main">
         {/* The description is a tip on the title; Export sits in the header with the other actions
             and states the filtered count it will write. */}
@@ -1523,8 +1523,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
           </div>{/* .card-body */}
 
         {/* A second `.card-body`, so the controls and the trace get a divider from one rule.
-            `dt-timeline` is the one part of the card that gives way when the viewport is short. */}
-        <div className="card-body dt-timeline">
+            `trail-timeline` is the one part of the card that gives way when the viewport is short. */}
+        <div className="card-body trail-timeline">
           {loading ? (
             <div className="loading-wrap"><div className="spinner" /> Loading audit trail trace sequence…</div>
           ) : events.length === 0 ? (
@@ -1563,13 +1563,13 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             <>
               {/* One row above the timeline: how much of the trail is on screen at the left, the
                   colour key at the right. */}
-              <div className="dt-header">
+              <div className="trail-header">
                 {/* ENTITIES, not assets: a lane can be a setting, a role assignment or a backup
                     job, and `asset` is the shopfloor class. Every lane is drawn, so the first
                     number is the whole set and a reader adding up the section counts gets it; the
                     second is what is loaded over what matched. */}
                 <div
-                  className="dt-count"
+                  className="trail-count"
                   title={[
                     `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
                     hasMoreToLoad
@@ -1585,41 +1585,41 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
 
                 {/* The legend for a derived colour scale: nothing else on the page says what
                     amber means. */}
-                <div className="dt-legend">
+                <div className="trail-legend">
                   {Object.entries(MARKERS).map(([kind, m]) => (
-                    <span key={kind} className="dt-legend-item" title={m.hint}>
-                      <span className={`dt-node-dot dt-node-${kind}`} aria-hidden="true" />
+                    <span key={kind} className="trail-legend-item" title={m.hint}>
+                      <span className={`trail-node-dot trail-node-${kind}`} aria-hidden="true" />
                       {m.label}
                     </span>
                   ))}
 
-                  {/* Shown only while a badge is on screen. The sample is a real `.dt-cluster`,
+                  {/* Shown only while a badge is on screen. The sample is a real `.trail-cluster`,
                       reading `n` as a placeholder for each badge's count. */}
                   {clusterCount > 0 && (
                     <span
-                      className="dt-legend-item"
+                      className="trail-legend-item"
                       title={`Events too close together to draw separately are ONE badge carrying the count — `
                            + `${clusterCount} on this timeline. Hover one for the breakdown, or narrow the `
                            + `time range and they separate back into individual markers.`}
                     >
-                      <span className="dt-cluster dt-legend-cluster" aria-hidden="true">n</span>
+                      <span className="trail-cluster trail-legend-cluster" aria-hidden="true">n</span>
                       Grouped ({clusterCount})
                     </span>
                   )}
                 </div>
               </div>
 
-              <div className="dt-scroll">
-                <div className="dt-swimlanes">
-                  <div className="dt-lane dt-axis">
+              <div className="trail-scroll">
+                <div className="trail-swimlanes">
+                  <div className="trail-lane trail-axis">
                     {/* The corner is a spacer now: it holds the lane labels' width so the ticks
                         line up with the tracks beside them, and nothing else. */}
-                    <div className="dt-lane-label dt-axis-corner" aria-hidden="true" />
-                    <div className="dt-track dt-axis-track" ref={axisTrackRef}>
+                    <div className="trail-lane-label trail-axis-corner" aria-hidden="true" />
+                    <div className="trail-track trail-axis-track" ref={axisTrackRef}>
                       {ticks.map(t => (
                         <span
                           key={t.f}
-                          className="dt-tick"
+                          className="trail-tick"
                           style={{ left: offsetForFraction(t.f) }}
                           title={t.title}
                         >
@@ -1631,29 +1631,29 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
 
                   {/* Everything under the axis. Its own box, so the gridlines can span exactly the
                       rows and nothing above them. */}
-                  <div className="dt-body">
+                  <div className="trail-body">
                     {sections.map(section => (
                       <React.Fragment key={section.kind}>
                         {/* The count is what is drawn, not what exists: the lane cap may fold some,
                             and the toggle below names the remainder. */}
-                        <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
+                        <div className="trail-section" role="separator" aria-label={`${section.label} lanes`}>
                           {/* A row of the grid: the heading in the label column and an empty track
                               beside it, so it takes the row's rule and the row's rhythm. */}
-                          <div className="dt-lane-label">
-                            <section.Icon size={12} className="dt-section-icon" />
-                            <span className="dt-section-name">{section.label}</span>
-                            <span className="dt-section-count">{section.lanes.length}</span>
+                          <div className="trail-lane-label">
+                            <section.Icon size={12} className="trail-section-icon" />
+                            <span className="trail-section-name">{section.label}</span>
+                            <span className="trail-section-count">{section.lanes.length}</span>
                           </div>
-                          <div className="dt-track" aria-hidden="true" />
+                          <div className="trail-track" aria-hidden="true" />
                         </div>
 
                         {section.lanes.map(lane => (
-                          <div className="dt-lane" key={lane.key}>
+                          <div className="trail-lane" key={lane.key}>
                             {/* No type badge and no icon: the section heading carries the kind and
                                 is pinned in view, so the width goes to the name. The UUID is
                                 copyable in the drawer's Entity ID field. */}
                             <div
-                              className="dt-lane-label"
+                              className="trail-lane-label"
                               title={[
                                 lane.name
                                   ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
@@ -1662,15 +1662,15 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                               ].filter(Boolean).join(' — ')}
                             >
                               {lane.name
-                                ? <strong className="dt-lane-name">{lane.name}</strong>
+                                ? <strong className="trail-lane-name">{lane.name}</strong>
                                 /* Neither the join nor a snapshot could name it: the shortened id,
                                    monospaced. */
-                                : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                                : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
                               {/* THE PART THAT MUST SURVIVE TRUNCATION. A schema lineage shares its
                                   name and differs only here, so ellipsising this away leaves a
                                   column of identical labels. */}
                               {lane.qualifier && (
-                                <span className="dt-lane-qualifier">{lane.qualifier}</span>
+                                <span className="trail-lane-qualifier">{lane.qualifier}</span>
                               )}
                               {/* A name recovered from the audit payload means the entity is gone;
                                   say so. */}
@@ -1679,7 +1679,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                                   that way while existing perfectly well. */}
                               {lane.gone && (
                                 <span
-                                  className="dt-lane-gone"
+                                  className="trail-lane-gone"
                                   title={lane.fromSnapshot
                                     ? 'This entity no longer exists — the name is the one recorded in its final audit snapshot'
                                     : 'This entity no longer exists, and its audit rows carry no name to recover'}
@@ -1689,7 +1689,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                               )}
                             </div>
 
-                            <div className="dt-track">
+                            <div className="trail-track">
                               {(laneClusters.get(lane.key) || []).map(item => {
                                 /* The ring follows the drawer: a badge is lit while the drawer shows
                                    any of its events, so the highlight stays put while Previous / Next
@@ -1702,7 +1702,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                                     <button
                                       key={`cluster-${item.event.event_id}`}
                                       type="button"
-                                      className={`dt-cluster${isSelected ? ' dt-node-selected' : ''}`}
+                                      className={`trail-cluster${isSelected ? ' trail-node-selected' : ''}`}
                                       style={{ left: offsetForFraction(item.xOffset) }}
                                       /* The oldest member (see clusterEvents on the tiebreak), so
                                          Next means and then what. */
@@ -1727,7 +1727,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                                   <button
                                     key={e.event_id}
                                     type="button"
-                                    className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
+                                    className={`trail-node trail-node-${kind}${isSelected ? ' trail-node-selected' : ''}`}
                                     style={{ left: offsetForFraction(item.xOffset) }}
                                     onClick={() => setSelectedEventId(e.event_id)}
                                     /* A plain `title`, as elsewhere: what, who, when. The rest is in
@@ -1749,9 +1749,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                         behind the rows, rather than once per lane; placed last so the first
                         section stays the body's first child. Positioned by the same helper as
                         the ticks and the markers. Nothing here is content. */}
-                    <div className="dt-gridlines" aria-hidden="true">
+                    <div className="trail-gridlines" aria-hidden="true">
                       {ticks.map(t => (
-                        <span key={t.f} className="dt-gridline" style={{ left: offsetForFraction(t.f) }} />
+                        <span key={t.f} className="trail-gridline" style={{ left: offsetForFraction(t.f) }} />
                       ))}
                     </div>
                   </div>
@@ -1763,7 +1763,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                   the header row and is not said twice. A first response holding the whole trail
                   has no end to announce, so on a stack smaller than one page there is no foot. */}
               {(nextCursor || truncated || allEvents.length >= PAGE_SIZE) && (
-                <div className="dt-pagination">
+                <div className="trail-pagination">
                   {nextCursor ? (
                     <button
                       className="btn btn-ghost btn-sm"
@@ -1777,13 +1777,13 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                     /* Cut off with no way forward: `truncated` and `next_cursor` come from the same
                        response, but a database without the paging RPC returns only the first. The
                        view is still incomplete and the reader is told so. */
-                    <span className="dt-pagination-end">
+                    <span className="trail-pagination-end">
                       Showing the newest {allEvents.length}
                       {typeof totalMatching === 'number' && ` of ${totalMatching}`} events — there are
                       older ones this view cannot reach.
                     </span>
                   ) : (
-                    <span className="dt-pagination-end">
+                    <span className="trail-pagination-end">
                       End of the trail — every event matching these filters is loaded.
                     </span>
                   )}
@@ -1806,10 +1806,10 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
         subtitle={selected && (
           /* One flex item laid out internally as rows; `.context-panel-subtitle` is a wrapping row
              shared with other pages. */
-          <div className="dt-drawer-nav">
+          <div className="trail-drawer-nav">
             {/* Above the thing it changes. The subtitle slot is the only one ContextPanel offers
                 above the metadata. */}
-            <div className="dt-drawer-nav-pos" title="Position in this asset's history, oldest first">
+            <div className="trail-drawer-nav-pos" title="Position in this asset's history, oldest first">
               Event {selectedIndex + 1} of {selectedLaneEvents.length}
               {' · '}
               {entityNames.get(selected.entity_id)
@@ -1817,11 +1817,11 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                 || shortId(selected.entity_id)}
             </div>
 
-            <div className="dt-drawer-nav-btns">
+            <div className="trail-drawer-nav-btns">
               {/* Previous is older. Disabled rather than hidden at the ends, so the row does not
                   reflow under the cursor. */}
               <button
-                className={`btn btn-ghost btn-sm dt-nav-btn${selectedIndex <= 0 ? ' btn-disabled' : ''}`}
+                className={`btn btn-ghost btn-sm trail-nav-btn${selectedIndex <= 0 ? ' btn-disabled' : ''}`}
                 onClick={() => stepTo(selectedIndex - 1)}
                 disabled={selectedIndex <= 0}
                 title={selectedIndex <= 0
@@ -1831,7 +1831,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                 ◀ Previous
               </button>
               <button
-                className={`btn btn-ghost btn-sm dt-nav-btn${selectedIndex >= selectedLaneEvents.length - 1 ? ' btn-disabled' : ''}`}
+                className={`btn btn-ghost btn-sm trail-nav-btn${selectedIndex >= selectedLaneEvents.length - 1 ? ' btn-disabled' : ''}`}
                 onClick={() => stepTo(selectedIndex + 1)}
                 disabled={selectedIndex >= selectedLaneEvents.length - 1}
                 title={selectedIndex >= selectedLaneEvents.length - 1
@@ -1842,9 +1842,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
               </button>
             </div>
 
-            <div className="dt-drawer-nav-badges">
+            <div className="trail-drawer-nav-badges">
               <span className="badge badge-warning" title="Audit event type">{selected.event_type}</span>
-              <span className={`badge dt-badge-${selectedAnalysis?.kind}`} title={MARKERS[selectedAnalysis?.kind]?.hint}>
+              <span className={`badge trail-badge-${selectedAnalysis?.kind}`} title={MARKERS[selectedAnalysis?.kind]?.hint}>
                 {MARKERS[selectedAnalysis?.kind]?.label}
               </span>
             </div>

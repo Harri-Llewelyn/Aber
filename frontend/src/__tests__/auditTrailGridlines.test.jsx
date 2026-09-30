@@ -62,8 +62,8 @@ const show = async () => {
 describe('the gridlines under the axis ticks', () => {
   it('draws one line per tick, at exactly the position of its tick', async () => {
     await show()
-    const ticks = [...document.querySelectorAll('.dt-tick')]
-    const lines = [...document.querySelectorAll('.dt-gridline')]
+    const ticks = [...document.querySelectorAll('.trail-tick')]
+    const lines = [...document.querySelectorAll('.trail-gridline')]
     expect(ticks.length).toBe(5)
     expect(lines.length).toBe(ticks.length)
     ticks.forEach((tick, i) => {
@@ -75,14 +75,14 @@ describe('the gridlines under the axis ticks', () => {
 
   it('draws the lines once behind the rows, not once per lane', async () => {
     await show()
-    const layers = document.querySelectorAll('.dt-gridlines')
+    const layers = document.querySelectorAll('.trail-gridlines')
     expect(layers.length).toBe(1)
     // Under the axis, inside the box that holds every row, and after them so the first section
     // stays the body's first child.
-    const body = document.querySelector('.dt-swimlanes > .dt-lane.dt-axis + .dt-body')
+    const body = document.querySelector('.trail-swimlanes > .trail-lane.trail-axis + .trail-body')
     expect(body).toBeTruthy()
     expect(body.lastElementChild).toBe(layers[0])
-    expect(body.firstElementChild).toHaveClass('dt-section')
+    expect(body.firstElementChild).toHaveClass('trail-section')
     expect(layers[0].getAttribute('aria-hidden')).toBe('true')
   })
 
@@ -90,18 +90,18 @@ describe('the gridlines under the axis ticks', () => {
     /* jsdom lays nothing out, so the agreement is asserted through the stylesheet: the layer's
        left edge is the label width plus the lane gap, the same two custom properties the label
        and the lane read, so the three cannot drift apart. */
-    expect(ruleFor('.dt-gridlines')).toMatch(/left:\s*calc\(var\(--dt-label-width\) \+ var\(--dt-lane-gap\)\)/)
-    expect(ruleFor('.dt-lane-label')).toMatch(/flex:\s*0 0 var\(--dt-label-width\)/)
-    expect(ruleFor('.dt-lane')).toMatch(/gap:\s*var\(--dt-lane-gap\)/)
-    expect(ruleFor('.dt-swimlanes')).toMatch(/--dt-label-width:\s*260px/)
+    expect(ruleFor('.trail-gridlines')).toMatch(/left:\s*calc\(var\(--trail-label-width\) \+ var\(--trail-lane-gap\)\)/)
+    expect(ruleFor('.trail-lane-label')).toMatch(/flex:\s*0 0 var\(--trail-label-width\)/)
+    expect(ruleFor('.trail-lane')).toMatch(/gap:\s*var\(--trail-lane-gap\)/)
+    expect(ruleFor('.trail-swimlanes')).toMatch(/--trail-label-width:\s*260px/)
   })
 
   it('is inert and behind everything', () => {
-    expect(ruleFor('.dt-gridlines')).toMatch(/pointer-events:\s*none/)
-    expect(ruleFor('.dt-gridlines')).toMatch(/z-index:\s*-1/)
+    expect(ruleFor('.trail-gridlines')).toMatch(/pointer-events:\s*none/)
+    expect(ruleFor('.trail-gridlines')).toMatch(/z-index:\s*-1/)
     // Which only works inside a stacking context of the body's own; without it, -1 is behind the
     // card and the lines vanish.
-    expect(ruleFor('.dt-body')).toMatch(/isolation:\s*isolate/)
-    expect(ruleFor('.dt-gridline')).toMatch(/dotted/)
+    expect(ruleFor('.trail-body')).toMatch(/isolation:\s*isolate/)
+    expect(ruleFor('.trail-gridline')).toMatch(/dotted/)
   })
 })

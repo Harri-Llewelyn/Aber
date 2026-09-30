@@ -85,11 +85,11 @@ const selectEvent = async (pattern) => {
 
 /** Steps the drawer to the ingestion status flip: its own transaction, one row. */
 const stepToSingleRowAct = () => {
-  const nav = document.querySelector('.dt-drawer-nav-btns')
+  const nav = document.querySelector('.trail-drawer-nav-btns')
   fireEvent.click(within(nav).getByRole('button', { name: /Next/ }))
 }
 
-const group = () => document.querySelector('.dt-causation')
+const group = () => document.querySelector('.trail-causation')
 const control = () => within(group()).queryByRole('button', { name: /Show whole transaction/ })
 const chip = () => group().querySelector('.section-count')
 
@@ -265,7 +265,7 @@ describe('the Same transaction control', () => {
         .toBeInTheDocument())
     expect(control()).toBeNull()
     expect(within(group()).getByText('Robot_03')).toBeInTheDocument()
-    expect(group().querySelectorAll('.dt-causation-item')).toHaveLength(2)
+    expect(group().querySelectorAll('.trail-causation-item')).toHaveLength(2)
     expect(chip()).toHaveTextContent('2')
   })
 
@@ -315,7 +315,7 @@ describe('the Same transaction control', () => {
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
     await waitFor(() => expect(group()).toBeTruthy())
-    const items = [...group().querySelectorAll('.dt-causation-item')]
+    const items = [...group().querySelectorAll('.trail-causation-item')]
     expect(items.length).toBe(1)
     items.forEach(el => expect(el.tagName).toBe('BUTTON'))
   })
