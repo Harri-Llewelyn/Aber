@@ -28,7 +28,7 @@ export function conceptByName(vocabulary, name) {
  * Whether a concept is one a metric can be attached to: everything but the relations. `hasProperty`
  * is a predicate between two things, so a metric named after it (`BMS/hasProperty`) would name
  * nothing. Classes, abstract classes and the root `Concept` all denote things. One rule for the
- * form's Concept picker and the Vocabulary page's Use action, so the two cannot disagree.
+ * dialog's Concept picker and the Vocabulary page's clickable entries, so the two cannot disagree.
  */
 export function isMetricConcept(concept) {
   return !!concept && concept.concept_kind !== 'Relation'

@@ -74,7 +74,7 @@ beforeEach(() => {
 })
 
 describe('Export AAS action', () => {
-  it('offers both formats on every device row', async () => {
+  it('offers both formats in the device drawer', async () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
     const items = openPanel().getAllByRole('button').map(i => i.textContent)
@@ -172,7 +172,7 @@ describe('Export AAS action', () => {
     expect(downloadJSON).not.toHaveBeenCalled()
   })
 
-  it('re-enables the menu after a failure, so the export can be retried', async () => {
+  it('re-enables the export after a failure, so it can be retried', async () => {
     api.post.mockRejectedValue(new Error('boom'))
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())

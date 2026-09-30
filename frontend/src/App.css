@@ -4898,3 +4898,59 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 
 /* The schema detail dialog's five footer buttons do not fit one row at its width. */
 .modal-lg .modal-actions { flex-wrap: wrap; }
+
+/* VOCABULARY. A section header reuses `.table-group-button` and `.table-group-label`; the strip
+   behind it is `.table-group-row`'s tint. */
+.vocab-sections { padding: 0 0 4px; }
+
+.vocab-section-head {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+}
+
+.vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+
+.vocab-in-use {
+  font-size: 11px;
+  color: var(--success-text);
+}
+
+.vocab-section-body { padding: 12px 16px; }
+
+.vocab-section-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vocab-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.vocab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-glass);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vocab-chip-used {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+.vocab-chip-action { cursor: pointer; }
+.vocab-chip-meta { opacity: 0.65; }
+
+.vocab-note {
+  display: block;
+  margin-top: 6px;
+}
