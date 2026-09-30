@@ -1,5 +1,3 @@
-import fs from 'fs'
-import path from 'path'
 import { describe, it, expect } from 'vitest'
 
 /**
@@ -8,18 +6,18 @@ import { describe, it, expect } from 'vitest'
  * Vocabulary page is held to it in its own test.
  */
 
-const SRC = path.resolve(__dirname, '..')
+const SOURCES = import.meta.glob('../components/tabs/*.jsx', { query: '?raw', import: 'default', eager: true })
 
 const PAGES = [
-  ['AccessControlTab', 'components/tabs/AccessControlTab.jsx'],
-  ['ApprovalsTab', 'components/tabs/ApprovalsTab.jsx'],
-  ['ArchivesTab', 'components/tabs/ArchivesTab.jsx'],
-  ['CaptureTab', 'components/tabs/CaptureTab.jsx'],
-  ['ColdStorageTab', 'components/tabs/ColdStorageTab.jsx'],
-  ['DevicesTab', 'components/tabs/DevicesTab.jsx'],
-  ['DirectoryTab', 'components/tabs/DirectoryTab.jsx'],
-  ['MetricsTab', 'components/tabs/MetricsTab.jsx'],
-  ['SettingsTab', 'components/tabs/SettingsTab.jsx'],
+  ['AccessControlTab', '../components/tabs/AccessControlTab.jsx'],
+  ['ApprovalsTab', '../components/tabs/ApprovalsTab.jsx'],
+  ['ArchivesTab', '../components/tabs/ArchivesTab.jsx'],
+  ['CaptureTab', '../components/tabs/CaptureTab.jsx'],
+  ['ColdStorageTab', '../components/tabs/ColdStorageTab.jsx'],
+  ['DevicesTab', '../components/tabs/DevicesTab.jsx'],
+  ['DirectoryTab', '../components/tabs/DirectoryTab.jsx'],
+  ['MetricsTab', '../components/tabs/MetricsTab.jsx'],
+  ['SettingsTab', '../components/tabs/SettingsTab.jsx']
 ]
 
 /** The literal text between `>` of the heading's opening tag and `</PageHeading>` or the subtitle. */
@@ -33,7 +31,7 @@ const description = (source) => {
 
 describe('page heading descriptions', () => {
   it.each(PAGES)('%s states one sentence of at most 28 words', (_name, rel) => {
-    const source = fs.readFileSync(path.join(SRC, rel), 'utf8')
+    const source = SOURCES[rel]
     const text = description(source)
     expect(text.length).toBeGreaterThan(0)
     expect(text.match(/[.!?](\s|$)/g)).toHaveLength(1)
