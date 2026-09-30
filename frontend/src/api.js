@@ -1072,21 +1072,21 @@ const apiMethods = {
   /**
    * One page of finished backup runs (`backup_jobs`), newest first. Each carries the backup it
    * produced as `backup`, null for a failed or cancelled run and for one the retention window has
-   * pruned. Fetches one row past `limit` so `more` says whether a next page exists.
+   * pruned. `total` is every run matching `statuses`, not only the page returned.
    */
   listBackupRuns: async ({ statuses = ['COMPLETED', 'FAILED', 'CANCELLED'], limit = 30 } = {}) => {
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from('backup_jobs')
-      .select('*, backups(*)')
+      .select('*, backups(*)', { count: 'exact' })
       .in('status', statuses)
       .order('finished_at', { ascending: false })
-      .limit(limit + 1);
+      .limit(limit);
     if (error) throw new Error(error.message || 'Could not list backup runs');
     // Embedded through backups.job_id, which is not unique, so PostgREST returns an array.
     const rows = (data || []).map(({ backups, ...job }) => ({
       ...job, backup: (Array.isArray(backups) ? backups[0] : backups) || null
     }));
-    return { runs: rows.slice(0, limit), more: rows.length > limit };
+    return { runs: rows, total: count ?? rows.length };
   },
 
   /**
