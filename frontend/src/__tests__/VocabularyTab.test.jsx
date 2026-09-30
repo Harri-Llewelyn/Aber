@@ -7,9 +7,9 @@ import { VocabularyTab } from '../components/tabs/VocabularyTab'
 import { api } from '../api'
 
 /**
- * The Standard Vocabulary Reference as a page of its own. Use hands the selection to the Schemas
- * page rather than filling a form here, so the contract to protect is the shape of that handover;
- * SchemasTab.test.jsx asserts the other half.
+ * The Vocabulary page. Clicking an entry hands the selection to the Metrics page rather than
+ * filling a form here, so the contract to protect is the shape of that handover; MetricsTab.test.jsx
+ * asserts the other half.
  */
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -55,7 +55,7 @@ const OPCUA_VOCABULARY = [
   }
 ]
 
-// One class and one relation, so the tab can show that only the class carries a Use action.
+// One class and one relation, so the tab can show that only the class can be clicked.
 const ASHRAE223_VOCABULARY = [
   {
     name: 'TemperatureSensor', concept_kind: 'Class', label: 'Temperature sensor', subclass_of: 'Sensor',
@@ -91,7 +91,7 @@ const renderTab = (props = {}) =>
   render(<VocabularyTab hasPermission={() => true} onUseEntry={vi.fn()} {...props} />)
 
 /* One card on the page: the entries of whichever standard is selected. The page's own heading sits
-   above it, outside every card, so it is no longer the way in. */
+   above it, outside every card. */
 const card = () => within(document.querySelector('.card'))
 
 /** The standard pills are the page's tablist, above the card. */
@@ -101,17 +101,18 @@ const ready = async () => {
 }
 
 describe('Vocabulary page', () => {
-  it('renders one card for all three standards, not three cards', async () => {
+  it('renders one card for all four standards, not four cards', async () => {
     renderTab()
     await ready()
 
     expect(screen.queryByRole('heading', { name: /MTConnect Vocabulary/ })).toBeNull()
     expect(screen.queryByRole('heading', { name: /ISO 22400 Vocabulary/ })).toBeNull()
     expect(screen.queryByRole('heading', { name: /OPC UA Vocabulary/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /ASHRAE 223P Vocabulary/ })).toBeNull()
   })
 
   it('offers every standard as a tab, with its entry count visible', async () => {
-    // All three counts visible at once is the point of a segmented control over a dropdown: it is
+    // All four counts visible at once is the point of a segmented control over a dropdown: it is
     // what shows the vocabularies are different sizes and different kinds of thing.
     renderTab()
     await ready()
@@ -119,6 +120,7 @@ describe('Vocabulary page', () => {
     expect(within(standardTab(/MTConnect/)).getByText('4')).toBeTruthy()
     expect(within(standardTab(/ISO 22400/)).getByText('2')).toBeTruthy()
     expect(within(standardTab(/OPC UA/)).getByText('2')).toBeTruthy()
+    expect(within(standardTab(/ASHRAE 223P/)).getByText('2')).toBeTruthy()
   })
 
   it('opens on MTConnect and marks only that tab selected', async () => {
@@ -153,7 +155,6 @@ describe('Vocabulary page', () => {
     renderTab()
     await ready()
 
-    // The search box is in the filter bar beside the pills now, not floating in the card header.
     fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: 'availability' } })
     fireEvent.click(standardTab(/ISO 22400/))
 
@@ -162,7 +163,7 @@ describe('Vocabulary page', () => {
   })
 })
 
-describe('Vocabulary page — Use hands off to the Schemas page', () => {
+describe('Vocabulary page — a click hands off to the Metrics page', () => {
   it('identifies a KPI by name', async () => {
     const onUseEntry = vi.fn()
     renderTab({ onUseEntry })
@@ -207,8 +208,8 @@ describe('Vocabulary page — Use hands off to the Schemas page', () => {
   })
 
   it('identifies a 223P class by name, and offers no Use on a relation', async () => {
-    // The Metrics page's Concept picker leaves relations out; if Use still handed one over, the
-    // form would compose `BMS/hasProperty`, a metric named after a predicate. Same rule, both
+    // The Metrics page's Concept picker leaves relations out; if a click still handed one over, the
+    // dialog would compose `BMS/hasProperty`, a metric named after a predicate. Same rule, both
     // doors: isMetricConcept().
     const onUseEntry = vi.fn()
     renderTab({ onUseEntry })
@@ -228,14 +229,58 @@ describe('Vocabulary page — Use hands off to the Schemas page', () => {
   })
 })
 
+describe('Vocabulary page — the pointer to Metrics', () => {
+  it('names the Metrics page and says an entry is clicked, not "used"', async () => {
+    renderTab()
+    await ready()
+
+    const text = document.querySelector('.page-heading p').textContent
+    expect(text).toMatch(/Metric Catalog on the Metrics page/)
+    expect(text).toMatch(/Click an entry to start a catalog metric from it/)
+    expect(text).not.toMatch(/\bUse\b/)
+  })
+
+  it('says who may click when the viewer cannot', async () => {
+    renderTab({ hasPermission: () => false })
+    await ready()
+
+    expect(document.querySelector('.page-heading p').textContent).toMatch(/Requires Administrator to start a catalog metric/)
+  })
+
+  it('counts the entries on the card, and shown / total while searching', async () => {
+    renderTab()
+    await ready()
+
+    const count = () => document.querySelector('.card-header .section-count').textContent
+    expect(count()).toBe('4')
+    fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'angle' } })
+    expect(count()).toBe('1 / 4')
+  })
+
+  it('says nothing matches with an icon, rather than an empty card', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'zzz' } })
+    expect(document.querySelector('.empty-state .empty-icon')).toBeTruthy()
+    expect(screen.getByText(/Nothing in the MTConnect vocabulary matches/)).toBeTruthy()
+  })
+
+  it('shows a spinner while the vocabularies load', () => {
+    api.get.mockImplementation(() => new Promise(() => {}))
+    renderTab()
+    expect(screen.getByRole('status').textContent).toMatch(/Loading vocabularies/)
+  })
+})
+
 describe('Vocabulary page — heading, tabs, then the card', () => {
-  it('states the page once, above a switch that changes only which card is shown', async () => {
+  it('states the page once, in the rail\'s word, above a switch that changes only which card is shown', async () => {
     /* The shape Access Control and Settings use. The heading names the page and does not move when
        a tab does; the tablist is a page control, so it is not inside the card it swaps. */
     renderTab()
     await ready()
 
-    const heading = screen.getByRole('heading', { name: /Standard Vocabulary Reference/ })
+    const heading = screen.getByRole('heading', { name: 'Vocabulary' })
     expect(heading.closest('.card')).toBeNull()
     expect(screen.getByRole('tablist').closest('.card')).toBeNull()
 
@@ -275,9 +320,8 @@ describe('Vocabulary page — heading, tabs, then the card', () => {
  * into six short lines on a page whose purpose is to get a long list on screen. jsdom does no
  * layout, so this is asserted against App.css directly.
  *
- * This page's standing text is now the shared `.page-heading` description, so the rule lives there
- * and guards every page carrying one. A cap was reintroduced once already: 88ch wrapped the
- * sentence across half a wide monitor and spent a row on nothing.
+ * This page's standing text is the shared `.page-heading` description, so the rule lives there and
+ * guards every page carrying one.
  */
 describe('A page description is not measure-capped', () => {
   const rule = (selector) =>
@@ -294,7 +338,7 @@ describe('A page description is not measure-capped', () => {
     // is a test that cannot fail.
     renderTab()
     await ready()
-    const heading = screen.getByRole('heading', { name: /Standard Vocabulary Reference/ })
+    const heading = screen.getByRole('heading', { name: 'Vocabulary' })
     expect(heading.closest('.page-heading')?.querySelector('p')).toBeTruthy()
   })
 })
