@@ -703,9 +703,10 @@ page's single running card into a list — a deliberate change rather than a def
 **Neither job table gets an audit-trail trigger.** That trigger is opt-in per table, and both
 tables carry a progress column the workers update roughly once a second. Adding it would look like
 consistency while writing a row per tick into an append-only table no application role can prune,
-which is `0005`'s heartbeat problem. Both tables *are* added to the `supabase_realtime` publication
-explicitly, which is how the page follows a running job at all, and `0055` self-checks that the
-publication membership survived.
+which is `0005`'s heartbeat problem. Both tables *are* in the `supabase_realtime` publication,
+which is how the page follows a running job at all. They are named in the baseline's `intended`
+list, because its absolute `SET TABLE` removes any table not on it, and a docs-drift check fails a
+subscription to a table that list omits.
 
 **`Service_Playback` (`0056`) is a machine principal in `0048`'s sense** — no user row, reached
 through `is_playback_caller()` — and it holds five gates and one storage object, not `service_role`.
