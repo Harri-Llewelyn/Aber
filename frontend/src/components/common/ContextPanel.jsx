@@ -9,7 +9,7 @@ import { grafanaAlertUrl } from '../../constants'
  * The right-hand context drawer: one entity at a time, beside the list it came from. Not an
  * overlay: `.page-layout` is a flex row and this panel is a sibling of the list, so opening it
  * narrows the table and rows stay clickable. Presentational only: it renders `fields` and `actions`
- * and knows nothing about the entity kinds. Why a drawer: ../../README.md, Migrated design notes.
+ * and knows nothing about the entity kinds. Why a drawer: frontend/README.md, Migrated design notes.
  *
  * @param {boolean} open Whether the drawer is expanded. Always rendered; see `aria-hidden` below.
  *
@@ -65,7 +65,7 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
           <div className="context-panel-heading">
             {/* No type badge: the kind is already established by the page, and is announced on the
                 region label. */}
-            {/* Titled as well as truncated: an entity name long enough to overrun 360px is exactly
+            {/* Titled as well as truncated: an entity name long enough to overrun the drawer is exactly
                 the kind you opened the panel to read. */}
             <div className="context-panel-title" title={title}>{title}</div>
             {subtitle && <div className="context-panel-subtitle">{subtitle}</div>}

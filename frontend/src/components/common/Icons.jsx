@@ -96,7 +96,7 @@ export const IconCpu = ({ size = 16, className = "", style = {} }) => (
   </svg>
 )
 
-// Accepts `style` like IconFileText: the telemetry drawer tints it with var(--accent) to match the
+// Accepts `style` like IconFileText: the telemetry modal tints it with var(--accent) to match the
 // document drawer's header icon.
 export const IconActivity = ({ size = 16, className = "", style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>

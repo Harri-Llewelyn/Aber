@@ -1,8 +1,7 @@
 /**
  * What the search bar can find, and how it ranks it. Pages are derived from the nav, never listed
  * here. Cards are the sections inside a page, listed below; a guard test asserts every entry names
- * a real page, and the entries carry the label verbatim. Assets are resolved from a UUID against
- * the database at search time. Matching is substring and initials, not fuzzy: everything here is a
+ * a real page. Assets are resolved from a UUID against the database at search time. Matching is substring and initials, not fuzzy: everything here is a
  * short label from a closed set, and a fuzzy matcher returns things the typed letters do not appear
  * in.
  */
@@ -12,12 +11,15 @@
  * the UI.
  */
 export const PAGE_KEYWORDS = {
+  // 'overview' and 'floor plan' are the page's old names; they stay findable.
   'site-map':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'floor plan', 'status'],
   // Every word somebody would reach for while holding the thing rather than its name: an
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
                      'change', 'review', 'publish'],
+  // 'building' and 'floor' are the old names for an area.
   'areas':          ['building', 'buildings', 'floor', 'isa-95', 'isa95', 'site', 'hierarchy', 'uns'],
+  // 'zone' is the old name for a cell.
   'cells':          ['zone', 'work center', 'work centre', 'shopfloor', 'location'],
   'gateways':       ['edge', 'node', 'edge node', 'mqtt', 'sparkplug', 'broker', 'bundle', 'enrolment', 'enrollment'],
   'devices':        ['asset', 'machine', 'equipment', 'work unit', 'sensor', 'robot', 'quarantine', 'nameplate'],
@@ -40,8 +42,9 @@ export const PAGE_KEYWORDS = {
 }
 
 /**
- * The sections inside each page, by the heading they render. One entry per heading somebody would
- * type; the Site Map's lanes have no heading and no anchor, so it is not listed.
+ * The sections inside each page. One entry per section somebody would type, usually the heading the
+ * page renders; the Site Map's lanes have entries of their own. 'floor plan', 'floors' and
+ * 'buildings' below are old names, and 'zones' is the old name for a cell.
  */
 export const CARDS = [
   { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
@@ -52,8 +55,7 @@ export const CARDS = [
   { id: 'shopfloor-cells',      label: 'Shopfloor Cells',      tab: 'cells',          keywords: ['cell list', 'zones'] },
   { id: 'edge-gateways',        label: 'Edge Gateways',        tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
-  /* No 'Archived Entities' card: the page took that name, and a card repeating its page's label
-     verbatim scores identically and renders as the same row twice. */
+  /* No 'Archived Entities' card: it would add no keyword the page entry does not have. */
 
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'fork'] },
   /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers
@@ -134,7 +136,7 @@ export function buildTargets(visibleTabs, settings = []) {
 
 const norm = (s) => String(s || '').toLowerCase().trim()
 
-/** The first letter of each word: "Metric Catalog" -> "mc", so `mc` finds it. */
+/** The first letter of each word: "Access Control" -> "ac", so `ac` finds it. */
 const initials = (label) =>
   norm(label).split(/[^a-z0-9]+/).filter(Boolean).map(w => w[0]).join('')
 
@@ -149,7 +151,7 @@ export function scoreTarget(target, query) {
   const label = norm(target.label)
   if (label === q) return 100
   if (label.startsWith(q)) return 80
-  /* Initials: mc for Metric Catalog. No minimum length: a single letter that matches the initials
+  /* Initials: ac for Access Control. No minimum length: a single letter that matches the initials
      also matches the prefix band above, which scores higher. */
   if (initials(target.label).startsWith(q)) return 70
   if (label.split(/[^a-z0-9]+/).some(w => w.startsWith(q))) return 60

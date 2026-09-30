@@ -145,7 +145,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
 );
 
 /**
- * Every tab id the router will accept. This list and `TABS` in App.jsx must agree:
+ * Every tab id the router will accept. This list and `TABS` in navigation.jsx must agree:
  * `handleNavClick` returns early on an id that is not here, so a tab declared there and forgotten
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */

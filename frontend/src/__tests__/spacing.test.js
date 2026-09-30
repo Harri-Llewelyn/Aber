@@ -110,7 +110,7 @@ describe('components do not reintroduce an inset of their own', () => {
   const files = jsxFiles(path.join(SRC, 'components', 'tabs'))
 
   it('sweeps every page, so a passing result means something', () => {
-    // Thirteen pages. A glob that silently matched nothing would pass every assertion below it.
+    // A glob that silently matched nothing would pass every assertion below it.
     expect(files.length).toBeGreaterThanOrEqual(13)
   })
 

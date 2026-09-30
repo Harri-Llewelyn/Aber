@@ -109,12 +109,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     // there is nothing to merge and a "nothing found" flash while the lookup runs would be the
     // only effect.
     //
-    // THE TRAIL IS OFFERED WHETHER OR NOT A PROBE ANSWERED. `resolveId` reads five tables, and
-    // the Audit Trail records more kinds -- a setting, a backup, a proposal, a person had a
-    // copyable id in the drawer and nowhere in the app that would take it. The trail's own search
-    // matches `entity_id` for every kind, so this one row is the answer for every kind it cannot
-    // name, and it stays offered for the five it can: an asset's history is the other question
-    // somebody pasting an id is asking.
+    // The trail row is offered whether or not a probe answered: `resolveId` reads five tables, the
+    // Audit Trail records more kinds, and its search matches `entity_id` for every kind.
     if (looksLikeId) {
       /* Not an entity hit: it opens a page with a filter rather than an asset, and `activate`
          tells them apart by `kind`. */
