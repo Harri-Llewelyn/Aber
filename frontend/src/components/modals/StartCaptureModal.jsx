@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
-import { IconShieldAlert } from '../common/Icons'
+import { Modal } from '../common/Modal'
+import { IconRecord, IconShieldAlert } from '../common/Icons'
+import { formatDateTime } from '../../utils/format'
 
 /**
  * Durations offered, rather than a free number. A capture stops at whichever of three caps is met
@@ -30,8 +31,6 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
 
-  useEscapeKey(pending ? () => {} : onCancel)
-
   const submit = () => run(async () => {
     setError(null)
     try {
@@ -44,86 +43,14 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
   })
 
   return (
-    <div className="modal-overlay">
-      <div className="modal modal-sm">
-        <div className="modal-title">
-          {existing ? 'Replace capture' : 'Record capture'} — {subject.name}
-        </div>
-
-        {existing && (
-          <div className="callout callout-warning" style={{ marginTop: '12px' }}>
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div style={{ fontSize: '12px' }}>
-              This replaces the capture recorded{' '}
-              <strong>{formatWhen(existing.recorded_at)}</strong>
-              {existing.note ? <> — <strong>{existing.note}</strong></> : null}.
-              {' '}That recording is destroyed once the new one succeeds, and cannot be recovered.
-              {/* Stated because it changes what a cautious operator does next: the old capture is
-                  NOT destroyed when this starts, so a recording that fails leaves it intact. */}
-              {' '}The existing capture survives until the replacement has been written.
-            </div>
-          </div>
-        )}
-
-        <div className="form-group" style={{ marginTop: '16px' }}>
-          <label className="form-label" htmlFor="capture-note">Note (optional)</label>
-          <input
-            id="capture-note"
-            className="form-control"
-            value={note}
-            onChange={e => setNote(e.target.value)}
-            disabled={pending}
-            maxLength={120}
-            placeholder="pre-trip bearing vibration baseline"
-            autoComplete="off"
-          />
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
-            Shown on the list, and inside the confirmation the next person sees before replacing
-            this capture. Worth a few words if the recording is of something hard to reproduce.
-          </p>
-        </div>
-
-        <div className="form-group" style={{ marginTop: '12px' }}>
-          <label className="form-label" htmlFor="capture-seconds">Record for</label>
-          <select
-            id="capture-seconds"
-            className="form-control"
-            value={seconds}
-            onChange={e => setSeconds(Number(e.target.value))}
-            disabled={pending}
-          >
-            {DURATIONS.map(d => (
-              <option key={d.seconds} value={d.seconds}>{d.label}</option>
-            ))}
-          </select>
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
-            A ceiling, not a promise — recording also stops at 100,000 messages or 50&nbsp;MiB,
-            whichever comes first. You can stop it early at any point.
-          </p>
-        </div>
-
-        {/* The subject is stated in full, because the two tabs make it easy to press Capture on the
-            device row of a gateway you meant, or the reverse. */}
-        <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '14px 0 0' }}>
-          Recording{' '}
-          {subject.kind === 'gateway'
-            ? <>everything published by <strong>{subject.name}</strong> and every device beneath it</>
-            : <>only <strong>{subject.name}</strong>, plus its gateway's birth certificate — which is
-              where the alias table lives, and without it the capture cannot be replayed</>}
-          .
-        </p>
-
-        {error && (
-          <div
-            className="callout"
-            style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)', marginTop: '12px' }}
-          >
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div style={{ fontSize: '12px' }}>{error}</div>
-          </div>
-        )}
-
-        <div className="modal-actions">
+    <Modal
+      title={`${existing ? 'Replace capture' : 'Record capture'} — ${subject.name}`}
+      icon={<IconRecord size={18} />}
+      size="sm"
+      onClose={pending ? () => {} : onCancel}
+      error={error}
+      footer={
+        <>
           <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
           <ActionButton
             className={existing ? 'btn btn-danger' : 'btn btn-primary'}
@@ -133,18 +60,70 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
           >
             {existing ? 'Replace and record' : 'Start recording'}
           </ActionButton>
+        </>
+      }
+    >
+      {existing && (
+        <div className="callout callout-warning">
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div>
+            This replaces the capture recorded <strong>{formatDateTime(existing.recorded_at)}</strong>
+            {existing.note ? <> — <strong>{existing.note}</strong></> : null}.
+            {' '}That recording is destroyed once the new one succeeds, and cannot be recovered.
+            {/* The old capture is not destroyed when this starts, so a failed recording leaves it
+                intact. */}
+            {' '}The existing capture survives until the replacement has been written.
+          </div>
         </div>
-      </div>
-    </div>
-  )
-}
+      )}
 
-/** Duplicated from CaptureTab rather than imported, to keep the modal free of a page-level import. */
-function formatWhen(iso) {
-  if (!iso) return 'at an unknown time'
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return 'at an unknown time'
-  return date.toLocaleString(undefined, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  })
+      <div className="form-group">
+        <label className="form-label" htmlFor="capture-note">Note (optional)</label>
+        <input
+          id="capture-note"
+          className="form-control"
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          disabled={pending}
+          maxLength={120}
+          placeholder="pre-trip bearing vibration baseline"
+          autoComplete="off"
+        />
+        <p className="form-hint">
+          Shown on the list, and inside the confirmation the next person sees before replacing
+          this capture. Worth a few words if the recording is of something hard to reproduce.
+        </p>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="capture-seconds">Record for</label>
+        <select
+          id="capture-seconds"
+          className="form-control"
+          value={seconds}
+          onChange={e => setSeconds(Number(e.target.value))}
+          disabled={pending}
+        >
+          {DURATIONS.map(d => (
+            <option key={d.seconds} value={d.seconds}>{d.label}</option>
+          ))}
+        </select>
+        <p className="form-hint">
+          A ceiling, not a promise — recording also stops at 100,000 messages or 50&nbsp;MiB,
+          whichever comes first. You can stop it early at any point.
+        </p>
+      </div>
+
+      {/* The subject is stated in full: a gateway's capture and a device's record different things. */}
+      <p className="form-hint">
+        Recording{' '}
+        {subject.kind === 'gateway'
+          ? <>everything published by <strong>{subject.name}</strong> and every device beneath it</>
+          : <>only <strong>{subject.name}</strong>, plus its gateway's birth certificate, which
+            carries the alias table. Without a birth certificate a playback loses every metric the
+            gateway sends by alias</>}
+        .
+      </p>
+    </Modal>
+  )
 }

@@ -297,7 +297,7 @@ describe('ArchiveModal while the archive runs', () => {
       />
     )
 
-    const btn = screen.getByRole('button', { name: /Archive & Set Timer/i })
+    const btn = screen.getByRole('button', { name: 'Archive' })
     fireEvent.click(btn)
     fireEvent.click(btn)
 

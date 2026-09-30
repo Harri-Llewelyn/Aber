@@ -19,7 +19,7 @@ const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-09-16T00:00:00Z')
 const daysAgo = n => new Date(now - n * DAY)
 
-/** A stack with the default policies: raw 90 days, then 180 days, 1 year, 5 years. */
+/** A stack whose raw window is 90 days, with rollups to 180 days, 1 year and 5 years. */
 const DEFAULTS = {
   telemetry: daysAgo(90),
   telemetry_1m: daysAgo(180),

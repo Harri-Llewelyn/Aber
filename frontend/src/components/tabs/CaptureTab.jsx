@@ -17,12 +17,19 @@ import {
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { PageHeading } from '../common/PageHeading'
+import { Badge } from '../common/Badge'
+import { SectionCount } from '../common/SectionCount'
+import { SearchInput } from '../common/SearchInput'
+import { ClearFilters } from '../common/ClearFilters'
+import { EmptyState } from '../common/EmptyState'
+import { LoadingState } from '../common/LoadingState'
+import { formatBytes, formatDateTime, plural } from '../../utils/format'
 
 /**
- * Recording the broker, and publishing a recording back.
+ * Recording the broker, and playing a recording back.
  *
- * Nothing on this page records or publishes: a browser cannot open an MQTT subscription, so the
- * page queues a row and the ingestion daemon (capture) or the playback worker (publication) does
+ * Nothing on this page records or plays back: a browser cannot open an MQTT subscription, so the
+ * page queues a row and the ingestion daemon (capture) or the playback worker (playback) does
  * the work, with results arriving over Realtime. Two cards, because capture reads the wire and
  * playback writes into the historian under a gateway's identity. One capture at a time and one
  * stored capture per subject are partial unique indexes, not rules of this component. The role
@@ -75,13 +82,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       api.get('/api/v1/schemas').catch(() => [])
     ])
     setSchemas(schemaList || [])
-    // WHAT IS NOT A CAPTURE SUBJECT, decided once here rather than per consumer -- the tab counts,
-    // the gateway filter and the upload dialog all read these two lists and must agree with the
-    // table. Archived: `start_capture_job()` refuses them, since an archived gateway publishes
-    // nothing. The playback lane: a shadow gateway publishes only while a playback runs, and its
-    // shadow devices exist to receive a replay, so recording one records a recording.
-    // `playbackTargets()` is a different query for a different question, and the RPC does not
-    // refuse a shadow subject -- this is the only thing that keeps one off the page.
+    // Not capture subjects, decided once here so the counts, the gateway filter and the upload
+    // dialog agree with the table: archived rows (`start_capture_job()` refuses them) and the
+    // Playback gateway with its replay lanes, since recording one records a recording. The RPC does
+    // not refuse a shadow subject, so this filter is what keeps one off the page.
     setGateways((gws || []).filter(g => !g.is_archived && !g.is_shadow))
     setDevices((devs || []).filter(d => !d.is_archived && d.gateway_id && !d.shadow_of))
   }, [])
@@ -122,10 +126,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }, [loadSubjects, loadCaptures, loadJobs])
 
   /**
-   * Progress arrives over Realtime, which is why both job tables are in the publication with
-   * REPLICA IDENTITY FULL. Paired with a timer because Realtime has no replay: a job finishing
-   * during a dropped socket would otherwise count up forever. The timer runs only while something
-   * is in flight.
+   * Progress arrives over Realtime: both job tables are in the publication with REPLICA IDENTITY
+   * FULL. The timer covers a dropped socket, since Realtime has no replay, and runs only while a
+   * job is in flight.
    */
   useRealtimeTable(['capture_jobs', 'playback_jobs'], refreshAll,
     { enabled: REALTIME_ENABLED, debounceMs: 400 })
@@ -160,8 +163,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     return map
   }, [gateways])
 
-  // THE ROW, not just the name: a device's Type is its gateway's, and deciding it needs all three
-  // of `is_shadow`, `is_simulated` and `deployment` rather than a label.
+  // The row, not just the name: a device's Type is its gateway's, decided from `is_simulated` and
+  // `deployment`.
   const gatewayById = useMemo(() => {
     const map = new Map()
     for (const g of gateways) map.set(g.id, g)
@@ -175,14 +178,13 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       kind: subjectKind,
       name: subject.name,
       sparkplugId: subject.sparkplug_id,
-      // Only meaningful for a device row; a gateway's simulated flag is a badge on its name.
+      // The gateway a device row sits under; null for a gateway row.
       context: subjectKind === 'device'
         ? (gatewayName.get(subject.gateway_id) || 'Unbound')
         : null,
       gatewayId: subjectKind === 'device' ? subject.gateway_id : subject.id,
       // The type of the gateway, for a device row as much as a gateway one: a device's readings are
-      // as synthetic as the edge node publishing them. `gatewayType()` applies the lane precedence
-      // so Shadow does not present as Simulated.
+      // as synthetic as the edge node publishing them.
       type: gatewayType(
         subjectKind === 'gateway' ? subject : gatewayById.get(subject.gateway_id)
       ),
@@ -190,7 +192,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       device: subjectKind === 'device' ? subject : null,
       capture: captureBySubject.get(`${subjectKind}:${subject.id}`) || null
     }))
-  }, [subjectKind, gateways, devices, captureBySubject, gatewayName])
+  }, [subjectKind, gateways, devices, captureBySubject, gatewayName, gatewayById])
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -209,6 +211,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const activeFilterCount = (storedFilter !== 'all' ? 1 : 0)
     + (search.trim() ? 1 : 0)
     + (subjectKind === 'device' && gatewayFilter ? 1 : 0)
+  const clearFilters = () => { setStoredFilter('all'); setSearch(''); setGatewayFilter('') }
   const withCapture = allRows.filter(r => r.capture).length
 
   /** Every subject the upload dialog can file a capture against, both tabs at once. */
@@ -256,7 +259,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const onPlay = async ({ targetGatewayId, deviceMap, speed }) => {
     await api.startPlayback({ captureId: playFor.id, targetGatewayId, deviceMap, speed })
     setPlayFor(null)
-    showToast('Publishing the capture…', 'success')
+    showToast('Playing back the capture…', 'success')
     await refreshAll()
   }
 
@@ -305,7 +308,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }
 
   /**
-   * A file dropped on the Playback card: store it, then publish it. The subject is inferred from
+   * A file dropped on the Playback card: store it, then play it back. The subject is inferred from
    * the file's `identities` and offered, not assumed. The file is read twice on purpose:
    * UploadCaptureModal does the validation, so this guess is not a second definition of a valid
    * capture.
@@ -347,10 +350,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     const chain = playAfterUpload
     setUploadFile(null)
     setPlayAfterUpload(false)
-    showToast(`Uploaded ${messages} message${messages === 1 ? '' : 's'} for ${subject.name}.`, 'success')
+    showToast(`Uploaded ${plural(messages, 'message')} for ${subject.name}.`, 'success')
     await refreshAll()
 
-    // Straight into the playback dialog when the file arrived on the Playback card. Built from what
+    // Straight into the playback dialog when the file arrived on the Playback card, built from what
     // the upload returned rather than found in the refreshed list.
     if (chain) {
       setPlayFor({
@@ -365,31 +368,27 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }
 
   // ------------------------------------------------------------------------------------------
-  if (loading) {
-    return <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading captures…</div>
-  }
-
   const capture = selected?.capture || null
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
 
-        <PageHeading icon={<IconRecord size={15} />} title="Capture and playback">
-          What the plant actually published, kept verbatim and replayed on demand. A capture is one
-          recording per subject, so a new one replaces it; a playback republishes a stored capture
-          through the real broker and the real ingestion path, as a simulated gateway.
+        <PageHeading icon={<IconRecord size={15} />} title="Capture">
+          What the plant actually published, kept verbatim and played back on demand. A capture is one
+          recording per subject, so a new one replaces it; a playback publishes a stored capture
+          through the real broker and the real ingestion path, as the Playback gateway.
         </PageHeading>
 
         {/* Playback in a card of its own, above capture: it writes into the historian under a
-            gateway's identity. */}
+            gateway's identity. It keeps its height; the Capture card below gives way. */}
         <div className="card" style={{ marginBottom: 'var(--stack)' }}>
           <div className="card-header">
             <h3 className="section-title">
               Playback
               <HelpTip
                 label="About playback"
-                text="Publish a stored capture back into the stack as a simulated gateway, through the real broker and ingestion path, rebased onto now. Captured identities are rewritten onto the target's own assets."
+                text="Play a stored capture back into the stack as the Playback gateway, through the real broker and ingestion path, rebased onto now. Captured identities are rewritten onto the gateway's own devices."
               />
             </h3>
           </div>
@@ -404,15 +403,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             <RecentFailures jobs={recentPlaybacks} kind="playback" />
             <RecentDiscards jobs={recentPlaybacks} />
 
-            {/* Publish a file straight from disk, chaining the two dialogs: file in, subject
-                confirmed, then the playback dialog with the new capture selected. It cannot skip
-                the storing step, because a playback reads its capture out of Storage and the worker
-                is confined by RLS to the object its job names. */}
+            {/* Play back a file straight from disk, chaining the two dialogs: file in, subject
+                confirmed, then the playback dialog with the new capture selected. The file is
+                stored first because the worker reads its capture out of Storage. */}
             {canManage && (
               <div
                 role="button"
                 tabIndex={0}
-                aria-label="Publish a capture file"
+                aria-label="Store a capture file and play it back"
                 onClick={() => playFileRef.current?.click()}
                 onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') playFileRef.current?.click() }}
                 onDragOver={e => { e.preventDefault(); setDraggingPlay(true) }}
@@ -423,39 +421,33 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   const dropped = e.dataTransfer?.files?.[0]
                   if (dropped) onPlayFileChosen(dropped)
                 }}
-                style={{
-                  marginTop: '12px', padding: '12px', textAlign: 'center', cursor: 'pointer',
-                  border: `1px dashed ${draggingPlay ? 'var(--accent)' : 'var(--border)'}`,
-                  borderRadius: '8px',
-                  background: draggingPlay ? 'rgba(0,212,255,0.06)' : 'transparent',
-                  fontSize: '12px', color: 'var(--text-muted)'
-                }}
-                title="Store a capture file and go straight to publishing it"
+                className={`capture-drop capture-drop-play${draggingPlay ? ' capture-drop-active' : ''}`}
+                title="Store a capture file and go straight to playing it back"
               >
-                <IconPlay size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
-                Drop an edited capture here to store and publish it
+                <IconPlay size={13} className="capture-drop-icon" />
+                Drop an edited capture here to store it and play it back
               </div>
             )}
           </div>
         </div>
 
         {/* ==================================================================================== */}
-        <div className="card">
+        <div className="card card-fill">
           <div className="card-header">
             <h3 className="section-title">
               Capture
               <HelpTip
                 label="About capture"
-                text="Record what a gateway or a single device actually said, and keep it. One capture per subject; recording again replaces it. Select a row to inspect, upload or publish."
+                text="Record what a gateway or a single device actually said, and keep it. One capture per subject; recording again replaces it. Select a row to inspect, upload or play back."
               />
+              <SectionCount total={allRows.length} shown={rows.length} />
             </h3>
 
             {/* The subject switch lives in the header because it changes what is listed rather than
-                narrowing it. Same markup the Vocabulary panel uses for its standards. */}
+                narrowing it. */}
             <div
               role="tablist"
               aria-label="Capture subject"
-              // 8px, so the two pills read as two buttons rather than a broken segmented control.
               style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}
             >
               <button
@@ -481,17 +473,17 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
           <div className="card-body">
             {error && (
-              <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
+              <div className="callout callout-danger">
                 <IconShieldAlert size={14} className="callout-icon" />
                 <div>{error}</div>
               </div>
             )}
 
             {!canManage && (
-              <div className="callout">
+              <div className="callout callout-info">
                 <IconShieldAlert size={14} className="callout-icon" />
                 <div>
-                  You can read captures and download them. Recording, replacing, publishing and
+                  You can read captures and download them. Recording, replacing, playing back and
                   deleting require Administrator or Shopfloor Manager.
                 </div>
               </div>
@@ -502,8 +494,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
             <div className="filter-bar">
               <select
-                className="form-control"
-                style={{ width: '190px' }}
+                className="form-control control-md"
                 value={storedFilter}
                 onChange={e => setStoredFilter(e.target.value)}
                 title="Filter by whether a capture is stored for the subject"
@@ -518,8 +509,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   one machine are found. */}
               {subjectKind === 'device' && (
                 <select
-                  className="form-control"
-                  style={{ width: '210px' }}
+                  className="form-control control-lg"
                   value={gatewayFilter}
                   onChange={e => setGatewayFilter(e.target.value)}
                   title="Filter devices by the gateway they publish through"
@@ -534,28 +524,29 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 </select>
               )}
 
-              <input
-                className="form-control"
-                style={{ width: '220px' }}
+              <SearchInput
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={setSearch}
                 placeholder="Search name or Sparkplug ID…"
-                aria-label="Search subjects"
-                title="Filter by display name or wire identity"
+                ariaLabel="Search subjects"
               />
 
-              {activeFilterCount > 0 && (
-                <button
-                  className="btn btn-ghost btn-sm filter-bar-spacer"
-                  onClick={() => { setStoredFilter('all'); setSearch(''); setGatewayFilter('') }}
-                  title="Clear every filter"
-                >
-                  <IconX size={13} /> Clear filters ({activeFilterCount})
-                </button>
-              )}
+              <ClearFilters count={activeFilterCount} onClear={clearFilters} />
             </div>
           </div>
 
+          {loading ? (
+            <LoadingState label="captures" />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={<IconRecord size={36} />}
+              filtered={allRows.length > 0}
+              message={subjectKind === 'gateway'
+                ? 'No gateways yet. Create one on the Gateways page.'
+                : 'No devices are bound to a gateway. A device with no gateway has no edge node to record from.'}
+              filteredMessage="No subjects match these filters."
+            />
+          ) : (
           <div className="table-wrap">
             <table>
               <thead>
@@ -573,7 +564,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   <th title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
                     Sparkplug ID
                   </th>
-                  <th title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Shadow (republishes recorded captures)">
+                  <th title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Host (inside this stack) or Simulated (readings generated)">
                     Type
                   </th>
                   <th title="The one capture stored for this subject. Recording again replaces it">
@@ -582,15 +573,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 && (
-                  <tr><td colSpan={subjectKind === 'device' ? 5 : 4} style={{ color: 'var(--text-muted)', padding: '14px' }}>
-                    {allRows.length === 0
-                      ? (subjectKind === 'gateway'
-                        ? 'No gateways registered. Create one on the Gateways tab.'
-                        : 'No devices bound to a gateway. A device with no gateway has no edge node to record from.')
-                      : 'No subject matches these filters.'}
-                  </td></tr>
-                )}
                 {rows.map(row => (
                   <SubjectRow
                     key={row.id}
@@ -602,6 +584,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               </tbody>
             </table>
           </div>
+          )}
         </div>
       </div>
 
@@ -616,15 +599,16 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         title={selected?.name || ''}
         subtitle={selected && (
           <>
-            <span
-              className={`badge badge-${gatewayTypeTone(selected.type)}`}
-              style={{ fontSize: '11px', marginRight: '6px' }}
+            <Badge
+              tone={gatewayTypeTone(selected.type)}
+              size="sm"
+              className="capture-badge-lead"
               title={gatewayTypeDescription(selected.type)}
             >
               {gatewayTypeLabel(selected.type)}
-            </span>
+            </Badge>
             {capture
-              ? `${capture.message_count} message${capture.message_count === 1 ? '' : 's'} stored`
+              ? `${plural(capture.message_count, 'message')} stored`
               : 'No capture stored'}
           </>
         )}
@@ -652,7 +636,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                           disabled={!onSelectSchema}
                         >
                           {s.schema_name}
-                          {s.version ? <span className="badge badge-neutral" style={{ marginLeft: '6px' }}>v{s.version}</span> : null}
+                          {s.version ? <Badge size="sm" className="badge-follow">v{s.version}</Badge> : null}
                         </button>
                       ))}
                     </div>
@@ -668,8 +652,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             ]
             : []),
           ...(capture ? [
-            { label: 'Recorded', value: formatWhen(capture.recorded_at) },
-            { label: 'Size', value: formatSize(capture.size_bytes) },
+            { label: 'Recorded', value: formatDateTime(capture.recorded_at) },
+            { label: 'Size', value: formatBytes(capture.size_bytes) },
             { label: 'Messages', value: String(capture.message_count) },
             /* The rate answers how long a replay will take, which the message count alone does not.
                Recorded rather than derived: an average over the window would flatten a burst
@@ -716,25 +700,23 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             <div style={{ marginBottom: '12px' }}>
               <div className="context-panel-section-label">
                 Devices In This Capture
-                <span className="section-count" style={{ marginLeft: '6px' }}>
+                <span className="section-count capture-label-count">
                   {capture.manifest.device_ids.length}
                 </span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 {capture.manifest.device_ids.map(id => (
-                  <span key={id} className="badge badge-neutral mono" style={{ fontSize: '11px' }}
-                        title={`A playback of this capture creates one replay lane for ${id}`}>
+                  <Badge key={id} size="sm" className="mono"
+                         title={`A playback of this capture creates one replay lane for ${id}`}>
                     {id}
-                  </span>
+                  </Badge>
                 ))}
               </div>
               {capture.manifest.edge_node_ids?.length > 0 && (
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
                   Recorded under{' '}
                   <span className="mono">{capture.manifest.edge_node_ids.join(', ')}</span>
-                  {/* Named rather than implied: a replay publishes as the Playback gateway, not as
-                      whatever recorded it. */}
-                  {' '}— a replay republishes under the Playback gateway, not under this.
+                  {' '}— a playback publishes under the Playback gateway, not under this.
                 </div>
               )}
             </div>
@@ -743,7 +725,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           <div>
             <div className="context-panel-section-label">
               Captured Metrics
-              <span className="section-count" style={{ marginLeft: '6px' }}>
+              <span className="section-count capture-label-count">
                 {capture.manifest.metric_name_count ?? capture.manifest.metric_names.length}
               </span>
             </div>
@@ -751,25 +733,17 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 pill is one metric. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {capture.manifest.metric_names.map(name => (
-                <span
-                  key={name}
-                  className="badge badge-neutral"
-                  style={{ fontSize: '11px' }}
-                  title={name}
-                >
-                  {name}
-                </span>
+                <Badge key={name} size="sm" title={name}>{name}</Badge>
               ))}
-              {/* The cap is the database's, not this list's -- see capped_capture_manifest(). Said
-                  out loud so a short list is not read as a short capture. */}
+              {/* The cap is the database's, not this list's; said out loud so a short list is not read
+                  as a short capture. */}
               {capture.manifest.metric_name_count > capture.manifest.metric_names.length && (
-                <span
-                  className="badge"
-                  style={{ fontSize: '11px', color: 'var(--text-dim)' }}
-                  title="capped_capture_manifest() keeps the first 50 names and records the true total beside them, so a chatty device cannot put a thousand into one column"
+                <Badge
+                  size="sm"
+                  title="Only the first 50 metric names are listed; the capture holds them all"
                 >
                   +{capture.manifest.metric_name_count - capture.manifest.metric_names.length} more
-                </span>
+                </Badge>
               )}
             </div>
           </div>
@@ -795,7 +769,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             disabled: !!activePlayback,
             title: activePlayback
               ? 'A playback is already running'
-              : 'Publish this capture onto a simulated gateway',
+              : 'Play this capture back onto the Playback gateway',
             onClick: () => setPlayFor(capture)
           },
           capture && {
@@ -836,16 +810,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 const dropped = e.dataTransfer?.files?.[0]
                 if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
               }}
-              style={{
-                padding: '12px', textAlign: 'center', cursor: 'pointer',
-                border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: '8px',
-                background: dragging ? 'rgba(0,212,255,0.06)' : 'transparent',
-                fontSize: '12px', color: 'var(--text-muted)'
-              }}
+              className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
               title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
             >
-              <IconUpload size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
+              <IconUpload size={14} className="capture-drop-icon" />
               Drop a capture file here, or click to choose one
             </div>
           </div>
@@ -853,8 +821,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       </ContextPanel>
 
       {/* Two inputs, because the two drop zones do different things with a file: one stores it, the
-          other stores and publishes it. A shared input with a flag could publish a file somebody
-          meant only to store. */}
+          other stores it and plays it back. A shared input could play back a file somebody meant
+          only to store. */}
       <input
         ref={fileRef}
         type="file"
@@ -903,7 +871,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         <ConfirmModal
           title="Delete capture"
           icon={<IconTrash size={18} />}
-          message={`Delete the capture recorded ${formatWhen(deleteFor.recorded_at)}${deleteFor.note ? ` — ${deleteFor.note}` : ''}? The file is removed from storage and cannot be recovered.`}
+          message={`Delete the capture recorded ${formatDateTime(deleteFor.recorded_at)}${deleteFor.note ? ` — ${deleteFor.note}` : ''}? The file is removed from storage and cannot be recovered.`}
           confirmLabel="Delete capture"
           pendingLabel="Deleting…"
           onCancel={() => setDeleteFor(null)}
@@ -924,7 +892,7 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
   const pending = job.status === 'PENDING'
 
   return (
-    <div className="callout" style={{ borderColor: 'var(--accent)', marginBottom: '12px' }}>
+    <div className="callout callout-info">
       <IconRecord size={14} className="callout-icon" />
       <div style={{ flex: 1 }}>
         <div>
@@ -954,7 +922,7 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
               // title is cosmetic and must not be the thing that throws if one is ever absent.
               title={`${job.elapsed_seconds}s of the ${job.max_seconds}s duration cap.`
                 + (job.max_messages && job.max_bytes
-                  ? ` The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatSize(job.max_bytes)}, whichever comes first.`
+                  ? ` The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatBytes(job.max_bytes)}, whichever comes first.`
                   : '')}
             >
               <div
@@ -966,20 +934,18 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
               {job.elapsed_seconds}s of {job.max_seconds}s ·{' '}
-              {job.messages} message{job.messages === 1 ? '' : 's'} · {formatSize(job.bytes)}
+              {plural(job.messages, 'message')} · {formatBytes(job.bytes)}
               {' · '}
               {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
             </div>
           </>
         )}
-        {/* The banner settles rather than vanishing: it also resolves into `birth_captured` on the
-            finished record, where a file that cannot replay properly stops looking identical to one
-            that can. */}
+        {/* Settles into `birth_captured` on the finished record. */}
         {!pending && !job.birth_captured && job.elapsed_seconds > 10 && (
           <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
-            No <code>NBIRTH</code> or <code>DBIRTH</code> has arrived. A capture without one replays
-            as <code>unresolved_alias</code> against an alias-optimised gateway and drops every
-            metric. The finished capture will be marked <strong>no birth</strong>.
+            No <code>NBIRTH</code> or <code>DBIRTH</code> has arrived. A playback of a capture without
+            one loses every metric the gateway sends by alias; metrics sent by name still play back.
+            The finished capture will be marked <strong>no birth</strong>.
           </div>
         )}
       </div>
@@ -998,17 +964,14 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
   )
 }
 
-/**
- * The playback in flight, or the reason there is not one. It renders an empty state rather than
- * nothing: this card owns its own box, and the empty state explains the select-then-publish step.
- */
+/** The playback in flight, or a line saying how to start one. */
 function PlaybackCard({ job, onStop, stopPending, canManage }) {
   if (!job) {
     return (
       <div style={{ color: 'var(--text-dim)', fontSize: '12px', padding: '10px 0' }}>
-        Nothing is publishing. Select a subject with a stored capture below, then choose
-        <strong> Play back</strong> — the dialog asks which simulated gateway to publish as, and
-        maps each captured device onto one of that gateway's own.
+        Nothing is playing back. Select a subject with a stored capture below, then choose
+        <strong> Play back</strong> — the dialog publishes it as the Playback gateway and maps each
+        captured device onto one of that gateway's own.
       </div>
     )
   }
@@ -1018,11 +981,11 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
   const total = job.messages_total || 0
 
   return (
-    <div className="callout" style={{ borderColor: 'var(--accent)' }}>
+    <div className="callout callout-info">
       <IconPlay size={14} className="callout-icon" />
       <div style={{ flex: 1 }}>
         <div>
-          <strong>{pending ? 'Queued' : 'Publishing'} as {target}</strong>
+          <strong>{pending ? 'Queued' : 'Playing back'} as {target}</strong>
           <span style={{ color: 'var(--text-muted)' }}> · {job.speed}× speed</span>
         </div>
         {/* A bar is unambiguous here, unlike the capture card: a playback has exactly one total.
@@ -1038,8 +1001,8 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
             aria-valuemin={0}
             aria-valuemax={total}
             aria-valuenow={Math.min(job.messages_sent, total)}
-            aria-label="Messages published against the capture's total"
-            title={`${job.messages_sent} of ${total} messages published at ${job.speed}× speed.`}
+            aria-label="Messages played back against the capture's total"
+            title={`${job.messages_sent} of ${total} messages played back at ${job.speed}× speed.`}
           >
             <div
               style={{
@@ -1052,7 +1015,7 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
         <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
           {pending
             ? 'Waiting for the playback worker to pick it up. If this does not start within a few seconds, the worker is not running.'
-            : `${job.messages_sent}${total ? ` of ${total}` : ''} message${job.messages_sent === 1 ? '' : 's'} published · ${job.elapsed_seconds}s`}
+            : `${job.messages_sent}${total ? ` of ${total}` : ''} message${job.messages_sent === 1 ? '' : 's'} played back · ${job.elapsed_seconds}s`}
         </div>
       </div>
       {canManage && (
@@ -1061,7 +1024,7 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
           pending={stopPending}
           pendingLabel="Stopping…"
           onClick={onStop}
-          title="Stop publishing now. What has already been published stays in the historian."
+          title="Stop the playback now. What has already been published stays in the historian."
         >
           Stop
         </ActionButton>
@@ -1128,9 +1091,9 @@ function RecentFailures({ jobs, kind = 'capture' }) {
   if (failed.length === 0) return null
 
   return (
-    <div style={{ marginBottom: '12px' }}>
+    <>
       {failed.map(job => (
-        <div key={job.id} className="callout" style={{ borderColor: 'var(--danger)', marginTop: '6px' }}>
+        <div key={job.id} className="callout callout-danger">
           <IconShieldAlert size={14} className="callout-icon" />
           <div style={{ fontSize: '12px', flex: 1 }}>
             <strong>
@@ -1151,22 +1114,15 @@ function RecentFailures({ jobs, kind = 'capture' }) {
           </button>
         </div>
       ))}
-    </div>
+    </>
   )
 }
 
 /**
- * A playback that succeeded and lost some of its readings on the way in.
- *
- * WHY THIS IS NOT A FAILURE AND NOT NOTHING. The ingestion daemon discards a metric stamped outside
- * its sanity window by COUNTING it, not by refusing it, and nothing travels back to the publisher.
- * So the worker computes, from the plan it is about to publish, how many messages will lose a
- * reading to it, and records that on the job (0109). The job genuinely completed and some readings genuinely
- * arrived — reporting it red would be wrong, and reporting it as an unqualified success is what
- * issue #216 was about. A playback that would have written NOTHING never reaches here: the worker
- * refuses it, and it shows in RecentFailures above with the reason.
- *
- * Shares the dismissal store with RecentFailures, so one notice per job however it is categorised.
+ * A playback that completed but lost some readings to the ingestion daemon's timestamp window.
+ * The worker records how many messages that affects on the job, so this is a warning, not a
+ * failure. A playback that would have written nothing is refused and shows in RecentFailures.
+ * Shares that component's dismissal store.
  */
 function RecentDiscards({ jobs }) {
   const [dismissed, setDismissed] = useState(readDismissed)
@@ -1190,17 +1146,17 @@ function RecentDiscards({ jobs }) {
   if (lossy.length === 0) return null
 
   return (
-    <div style={{ marginBottom: '12px' }}>
+    <>
       {lossy.map(job => {
         const lost = job.messages_out_of_window
         const total = job.messages_sent || job.messages_total || 0
         return (
-          <div key={job.id} className="callout" style={{ borderColor: 'var(--warning)', marginTop: '6px' }}>
+          <div key={job.id} className="callout callout-warning">
             <IconShieldAlert size={14} className="callout-icon" />
             <div style={{ fontSize: '12px', flex: 1 }}>
               <strong>{job.gateways?.name || job.target_edge_node_id}</strong>
               {' — '}
-              {lost} of {total} published message{total === 1 ? '' : 's'} carried timestamps too old
+              {lost} of {plural(total, 'published message')} carried timestamps too old
               for the historian, and those readings were discarded on ingest. The playback itself
               succeeded.
               {' '}
@@ -1217,7 +1173,7 @@ function RecentDiscards({ jobs }) {
           </div>
         )
       })}
-    </div>
+    </>
   )
 }
 
@@ -1234,71 +1190,43 @@ function SubjectRow({ row, selected, onSelect }) {
         <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{row.context}</td>
       )}
       <td><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
-      {/* A column rather than a badge on the name, matching the Gateways page: on this page the
-          kind decides something, since only a simulated gateway may be a playback target. */}
+      {/* A column rather than a badge on the name, matching the Gateways page. */}
       <td>
-        <span
-          className={`badge badge-${gatewayTypeTone(row.type)}`}
-          style={{ fontSize: '11px' }}
-          title={gatewayTypeDescription(row.type)}
-        >
+        <Badge tone={gatewayTypeTone(row.type)} size="sm" title={gatewayTypeDescription(row.type)}>
           {gatewayTypeLabel(row.type)}
-        </span>
+        </Badge>
       </td>
       <td>
         {!capture && <span style={{ color: 'var(--text-dim)' }}>—</span>}
         {capture && (
           <div style={{ fontSize: '12px' }}>
             <div>
-              {capture.message_count} message{capture.message_count === 1 ? '' : 's'} ·{' '}
-              {formatSize(capture.size_bytes)}
+              {plural(capture.message_count, 'message')} ·{' '}
+              {formatBytes(capture.size_bytes)}
               {capture.source === 'uploaded' && (
-                <span className="badge badge-neutral" style={{ fontSize: '11px', marginLeft: '6px' }}>
-                  UPLOADED
-                </span>
+                <Badge size="sm" className="badge-follow">UPLOADED</Badge>
               )}
-              {/* THE ONE BADGE IN THIS TABLE THAT CHANGES A DECISION. Everything else here is
-                  provenance; this says whether the file will actually replay. */}
-              {/* A missing birth certificate costs metrics only when the recording depends on the
-                  alias table; `uses_aliases` is recorded at capture time so the two cases are told
-                  apart rather than assumed. */}
+              {/* The one badge here that changes a decision: whether the file will play back. A
+                  missing birth costs metrics only when `uses_aliases` is set. */}
               {capture.manifest?.birth_captured === false && (
-                <span
-                  className={`badge ${capture.manifest?.uses_aliases ? 'badge-warning' : 'badge-neutral'}`}
-                  style={{ fontSize: '11px', marginLeft: '6px' }}
+                <Badge
+                  tone={capture.manifest?.uses_aliases ? 'warning' : 'neutral'}
+                  size="sm"
+                  className="badge-follow"
                   title={capture.manifest?.uses_aliases
                     ? 'No NBIRTH or DBIRTH was recorded and this capture uses metric aliases, so a playback cannot resolve them: every aliased metric is dropped on ingest.'
                     : 'No NBIRTH or DBIRTH was recorded. Every metric here carries its full name, so a playback still resolves them — but it will not announce the devices, which stay OFFLINE until they birth on their own.'}
                 >
                   NO BIRTH
-                </span>
+                </Badge>
               )}
             </div>
             <div style={{ color: 'var(--text-muted)' }}>
-              {formatWhen(capture.recorded_at)}{capture.note ? ` — ${capture.note}` : ''}
+              {formatDateTime(capture.recorded_at)}{capture.note ? ` — ${capture.note}` : ''}
             </div>
           </div>
         )}
       </td>
     </tr>
   )
-}
-
-/** Bytes → a short human string. Local rather than shared: the only other one is the 3D uploader's,
- *  and that is tuned for megabyte models. */
-function formatSize(bytes) {
-  if (bytes === null || bytes === undefined) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-/** A timestamp an operator can compare with their own memory of the shift. */
-function formatWhen(iso) {
-  if (!iso) return 'at an unknown time'
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return 'at an unknown time'
-  return date.toLocaleString(undefined, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  })
 }

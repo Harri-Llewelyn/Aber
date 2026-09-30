@@ -4934,3 +4934,65 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
   display: block;
   margin-top: 6px;
 }
+
+/* COLD STORAGE: the Destination card, the stat strip and the catalogue rows. */
+.cold-stat { min-width: 120px; }
+.cold-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cold-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.cold-stat-warning .cold-stat-value { color: var(--warning-text); }
+/* Alone above the empty state it is centred, with no column width to pad it off its label. */
+.cold-stat-center { min-width: 0; text-align: center; }
+.cold-stat-center .cold-stat-value { font-size: 26px; }
+.cold-backlog-lead { margin-bottom: var(--stack); }
+/* The two commands sit on their own lines so a wrapped command is one a reader can select. */
+.cold-empty-commands { margin-top: 16px; font-size: 11px; line-height: 2; }
+.cold-empty-commands > div:nth-of-type(2) { margin-top: 8px; }
+.cold-row-error {
+  margin-top: 4px;
+  max-width: 38ch;
+  font-size: 11px;
+  color: var(--warning-text);
+}
+.cold-destination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.cold-destination + .cold-destination { margin-top: 12px; }
+.cold-key-set { font-size: 12px; color: var(--text-primary); }
+/* A badge whose meaning is its tooltip: the dotted underline says so. */
+.badge-hint {
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+/* CAPTURE: the drop zones and the small gaps in the details panel. */
+.capture-drop {
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.capture-drop-play { margin-top: 12px; }
+.capture-drop-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.capture-drop-icon { vertical-align: -2px; margin-right: 6px; }
+.capture-badge-lead { margin-right: 6px; }
+.capture-label-count { margin-left: 6px; }

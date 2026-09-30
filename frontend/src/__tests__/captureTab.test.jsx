@@ -242,7 +242,7 @@ describe('the playback lane', () => {
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
-    fireEvent.drop(screen.getByLabelText('Publish a capture file'), {
+    fireEvent.drop(screen.getByLabelText('Store a capture file and play it back'), {
       dataTransfer: { files: [new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' })] }
     })
     const values = [...(await screen.findByLabelText('File it against')).options].map(o => o.value)
@@ -379,7 +379,7 @@ describe('starting a capture', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     const row = (await screen.findByText('CNC Spindle')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
-    expect(await screen.findByText(/where the alias table lives/)).toBeInTheDocument()
+    expect(await screen.findByText(/which carries the alias table/)).toBeInTheDocument()
   })
 })
 
@@ -418,7 +418,7 @@ describe('the running card', () => {
     renderTab()
     // Matched on a contiguous fragment: the sentence is broken up by <code>NBIRTH</code>, so a
     // pattern spanning those tags finds nothing even though the warning is on screen.
-    expect(await screen.findByText(/A capture without one replays as/)).toBeInTheDocument()
+    expect(await screen.findByText(/A playback of a capture without/)).toBeInTheDocument()
   })
 
   it('says a queued job is waiting for the daemon, not that it is recording', async () => {
@@ -567,7 +567,7 @@ describe('the read-only role', () => {
 describe('the nav entry', () => {
   const capture = TABS.find(t => t.id === 'capture')
 
-  it('is offered to the three roles 0055 grants read to, and to no others', () => {
+  it('is offered to the three roles that can read captures, and to no others', () => {
     const has = () => true
     expect(tabIsVisible(capture, has, 'Administrator')).toBe(true)
     expect(tabIsVisible(capture, has, 'Shopfloor_Manager')).toBe(true)
@@ -583,12 +583,7 @@ describe('the nav entry', () => {
     expect(tabIsVisible(settings, () => true, 'Auditor')).toBe(false)
   })
 
-  /**
-   * Where it sits in the rail: under History rather than Assets, because a capture is a recording
-   * of what a device already said, in the same tense as Audit Trail. Cold Storage used to be
-   * the third page here and is now filed by retention instead -- it is telemetry kept against a
-   * timer, not an account of what happened.
-   */
+  /** Under History rather than Assets: a capture is a recording of what a device already said. */
   it('is filed under History in the rail, beside the other page about the past', () => {
     const visible = TABS.filter(t => tabIsVisible(t, () => true, 'Administrator'))
     const history = groupedNav(visible).find(g => g.id === 'history')
@@ -658,24 +653,20 @@ describe('the manifest the browser builds for an uploaded capture', () => {
 })
 
 // =============================================================================================
-describe('publishing a capture back', () => {
+describe('playing a capture back', () => {
   const open = async () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     const rendered = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    await screen.findByLabelText('Publish as')
+    await screen.findByLabelText('Playback gateway')
     return rendered
   }
 
-  /**
-   * Only simulated gateways are offered, because `start_playback_job()` refuses anything else, and
-   * the refusal is the last line of defence against synthetic telemetry on a real machine's
-   * identity.
-   */
+  /** Only the Playback gateway is offered: `start_playback_job()` refuses any other target. */
   it('offers only the targets the gate will accept', async () => {
     await open()
-    const select = screen.getByLabelText('Publish as')
+    const select = screen.getByLabelText('Playback gateway')
     expect(within(select).getByText(/Playback Target/)).toBeInTheDocument()
     expect(within(select).queryByText(/Line 1 Gateway/)).not.toBeInTheDocument()
     await waitFor(() => expect(api.playbackTargets).toHaveBeenCalled())
@@ -689,19 +680,19 @@ describe('publishing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/only target a capture can be published/)).toBeInTheDocument()
+    expect(await screen.findByText(/only place a capture can be played back/)).toBeInTheDocument()
     expect(screen.getByText(/Archived Entities/)).toBeInTheDocument()
-    expect(screen.getByText(/only target a capture can be published/).textContent).not.toMatch(/simulated/i)
-    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+    expect(screen.getByText(/only place a capture can be played back/).textContent).not.toMatch(/simulated/i)
+    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
 
   /** The credential check, shown before the click rather than arriving as a refusal after it. */
   it('names a target that holds no broker credential, and refuses to start', async () => {
     api.playbackTargets.mockResolvedValue([{ ...TARGET, gateway_has_broker_credential: false }])
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/holds no broker credential/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
 
   /**
@@ -710,7 +701,7 @@ describe('publishing a capture back', () => {
    */
   it('builds the device map from the devices bound to the target', async () => {
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     const mapSelect = await screen.findByLabelText('Target device for dev270000000000400080000')
     expect(within(mapSelect).getByText(/Sim Spindle/)).toBeInTheDocument()
   })
@@ -725,7 +716,7 @@ describe('publishing a capture back', () => {
     api.ensureShadowLanes.mockResolvedValue({ dev270000000000400080000: 'dev990000000000400080000' })
 
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     await screen.findByLabelText('Target device for dev270000000000400080000')
 
     // The second resolve matters: the dropdown renders `target.devices`, read before the lane
@@ -737,23 +728,23 @@ describe('publishing a capture back', () => {
     await waitFor(() => expect(
       screen.getByLabelText('Target device for dev270000000000400080000')
     ).toHaveValue('dev990000000000400080000'))
-    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Play back' })).toBeEnabled()
   })
 
   it('does not prepare lanes until asked', async () => {
     // It WRITES -- a device row appearing in the directory because someone opened a modal is the
     // kind of surprise that makes people stop trusting the table.
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     await screen.findByLabelText('Target device for dev270000000000400080000')
     expect(api.ensureShadowLanes).not.toHaveBeenCalled()
   })
 
   it('will not start while a captured device is unmapped', async () => {
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     await screen.findByLabelText('Target device for dev270000000000400080000')
-    const publish = screen.getByRole('button', { name: /Publish capture/ })
+    const publish = screen.getByRole('button', { name: 'Play back' })
     expect(publish).toBeDisabled()
     expect(publish).toHaveAttribute('title', expect.stringContaining('to map'))
   })
@@ -761,11 +752,11 @@ describe('publishing a capture back', () => {
   it('passes the target, the map and the speed to the gate', async () => {
     api.startPlayback.mockResolvedValue('play-1')
     const { props } = await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
     fireEvent.change(screen.getByLabelText('Speed'), { target: { value: '4' } })
-    fireEvent.click(screen.getByRole('button', { name: /Publish capture/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play back' }))
 
     await waitFor(() => expect(api.startPlayback).toHaveBeenCalledWith({
       captureId: 'cap-1',
@@ -786,12 +777,12 @@ describe('publishing a capture back', () => {
       { ...TARGET, id: 'gw-sim2', name: 'Other Target', sparkplug_id: 'gwy140000000000400080000' }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     const mapSelect = await screen.findByLabelText('Target device for dev270000000000400080000')
     fireEvent.change(mapSelect, { target: { value: 'dev310000000000400080000' } })
     expect(mapSelect.value).toBe('dev310000000000400080000')
 
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim2' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim2' } })
     const after = await screen.findByLabelText('Target device for dev270000000000400080000')
     expect(after.value).toBe('')
   })
@@ -814,18 +805,18 @@ describe('publishing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    await screen.findByLabelText('Publish as')
+    await screen.findByLabelText('Playback gateway')
     expect(screen.queryByText(/dropped on ingest/)).toBeNull()
-    expect(screen.getByText(/will replay normally/)).toBeInTheDocument()
+    expect(screen.getByText(/will play back normally/)).toBeInTheDocument()
   })
 
   it('shows the gate refusal in the dialog', async () => {
     api.startPlayback.mockRejectedValue(new Error('gateway X is not marked simulated'))
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
-    fireEvent.click(screen.getByRole('button', { name: /Publish capture/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play back' }))
     expect(await screen.findByText(/not marked simulated/)).toBeInTheDocument()
   })
 
@@ -837,9 +828,9 @@ describe('publishing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    fireEvent.change(await screen.findByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
   })
 
   /**
@@ -851,11 +842,11 @@ describe('publishing a capture back', () => {
       held_edge_nodes: [], reported_at: new Date().toISOString()
     })
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
 
     expect(await screen.findByText(/was not given/)).toBeInTheDocument()
-    expect(screen.getByText(/MQTT_PLAYBACK_CREDENTIALS/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+    expect(screen.getByText(/secrets\.mqttPlaybackCredentials/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
 
   /**
@@ -870,10 +861,10 @@ describe('publishing a capture back', () => {
         issued_at: new Date().toISOString() }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
 
     expect(await screen.findByText(/was re-issued after the playback/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
 
   /** Nothing for the operator to do, so the message must not read like the missing-password one. */
@@ -884,10 +875,10 @@ describe('publishing a capture back', () => {
         issued_at: new Date().toISOString() }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
 
     expect(await screen.findByText(/nothing needs\s+doing here/)).toBeInTheDocument()
-    expect(screen.queryByText(/MQTT_PLAYBACK_CREDENTIALS/)).toBeNull()
+    expect(screen.queryByText(/secrets\.mqttPlaybackCredentials/)).toBeNull()
   })
 
   /** The dropdown says which state a target is in before it is chosen. */
@@ -906,12 +897,12 @@ describe('publishing a capture back', () => {
   it('offers what it always did when the staleness read fails', async () => {
     api.playbackStaleCredentials.mockRejectedValue(new Error('nope'))
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
 
     expect(screen.queryByText(/was re-issued after the playback/)).toBeNull()
-    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
   })
 
   /**
@@ -924,12 +915,12 @@ describe('publishing a capture back', () => {
       { ...TARGET, last_heartbeat: new Date().toISOString(), status: 'ONLINE' }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/is publishing right now/)).toBeInTheDocument()
     // A warning, so the button is still reachable once the mapping is done.
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
-    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
   })
 
   it('says nothing about live traffic for a quiet target', async () => {
@@ -937,19 +928,21 @@ describe('publishing a capture back', () => {
       { ...TARGET, last_heartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(), status: 'OFFLINE' }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(screen.queryByText(/is publishing right now/)).toBeNull()
   })
 
   /** The message named a variable and not where it lives, and the first reader asked if it went in the capture file. */
-  it('says where MQTT_PLAYBACK_CREDENTIALS actually goes', async () => {
+  it('names the Helm value and the automatic delivery, not a .env file', async () => {
     api.playbackWorkerStatus.mockResolvedValue({
       held_edge_nodes: [], reported_at: new Date().toISOString()
     })
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
-    expect(await screen.findByText(/server-side setting, not part of the capture file/)).toBeInTheDocument()
-    expect(screen.getByText(/kubectl rollout restart deploy\/playback/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByText(/was not given its password/)).toBeInTheDocument()
+    expect(screen.getByText(/secrets\.mqttPlaybackCredentials/)).toBeInTheDocument()
+    expect(screen.getByText(/delivers the password to the worker automatically/)).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/\.env|kubectl/)
   })
 
   /** "Holds nothing" and "is not running" are different problems, and only the heartbeat tells them apart. */
@@ -969,10 +962,10 @@ describe('publishing a capture back', () => {
   it('still allows a playback when the worker status is unknown', async () => {
     api.playbackWorkerStatus.mockResolvedValue(null)
     await open()
-    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
-    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
   })
 
   it('does not offer Play to an Auditor', async () => {
@@ -994,7 +987,7 @@ describe('the playback card', () => {
   it('names the gateway it is publishing as', async () => {
     api.activePlaybackJob.mockResolvedValue(JOB)
     renderTab()
-    expect(await screen.findByText(/Publishing as Playback Target/)).toBeInTheDocument()
+    expect(await screen.findByText(/Playing back as Playback Target/)).toBeInTheDocument()
     expect(screen.getByText(/30 of 120 messages/)).toBeInTheDocument()
   })
 
@@ -1026,10 +1019,8 @@ describe('the playback card', () => {
   })
 
   // ==========================================================================================
-  // A COMPLETED playback that lost readings on ingest (#216). The ingestion daemon discards an
-  // out-of-window metric by counting it, so nothing travels back to the publisher and the job is
-  // recorded COMPLETED with its full messages_sent. Before 0109 the page could not tell that
-  // apart from a playback that worked.
+  // A COMPLETED playback that lost readings on ingest: the daemon counts an out-of-window metric
+  // rather than refusing it, so the job is COMPLETED with its full messages_sent.
   // ==========================================================================================
   const lossy = (overrides = {}) => ({
     id: 'play-ooo', status: 'COMPLETED', target_edge_node_id: 'gwy130000000000400080000',
@@ -1049,16 +1040,16 @@ describe('the playback card', () => {
     // noise is what makes the real one unreadable.
     api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: 0 })])
     renderTab()
-    await screen.findByText(/Nothing is publishing/i)
+    await screen.findByText(/Nothing is playing back/i)
     expect(screen.queryByText(/timestamps too old/i)).toBeNull()
   })
 
   it('says nothing for a job written before the column existed', async () => {
-    // Every row predating 0109 reads 0, which means "nobody counted" and not "none were
-    // discarded". Undefined arrives the same way through a worker too old to send the argument.
+    // A row with no count reads 0 or undefined, which means "nobody counted", not "none were
+    // discarded".
     api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: undefined })])
     renderTab()
-    await screen.findByText(/Nothing is publishing/i)
+    await screen.findByText(/Nothing is playing back/i)
     expect(screen.queryByText(/timestamps too old/i)).toBeNull()
   })
 
@@ -1082,7 +1073,7 @@ describe('the playback card', () => {
 
     unmount()
     renderTab()
-    await screen.findByText(/Nothing is publishing/i)
+    await screen.findByText(/Nothing is playing back/i)
     expect(screen.queryByText(/timestamps too old/i)).toBeNull()
   })
 })
@@ -1126,21 +1117,35 @@ describe('the filter bar', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
-    expect(screen.getByText(/No subject matches these filters/)).toBeInTheDocument()
+    expect(screen.getByText(/No subjects match these filters/)).toBeInTheDocument()
   })
 
-  it('spans every column of the subject view with the empty row', async () => {
+  it('scrolls the Capture card inside the page, and counts the rows of the current tab', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    const span = () => document.querySelector('tbody td[colspan]').getAttribute('colspan')
-    const headers = () => document.querySelectorAll('thead th').length
+    expect(document.querySelector('.page-layout.page-fill')).not.toBeNull()
+    const card = document.querySelector('.card.card-fill')
+    expect(card.querySelector(':scope > .table-wrap')).not.toBeNull()
+    const total = document.querySelectorAll('tbody tr').length
+    const count = () => card.querySelector('.card-header .section-count').textContent
+    expect(count()).toBe(String(total))
 
     fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
-    expect(span()).toBe(String(headers()))
+    expect(count()).toBe(`0 / ${total}`)
+    const clear = screen.getByRole('button', { name: /Clear filters \(1\)/ })
+    expect(clear.className).toContain('filter-bar-clear')
+    expect(clear.className).not.toContain('filter-bar-spacer')
+  })
+
+  it('shows the empty state outside the table, whichever subject tab is open', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
+    expect(screen.getByText(/No subjects match these filters/).closest('table')).toBeNull()
+    expect(document.querySelector('tbody td[colspan]')).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
-    expect(span()).toBe(String(headers()))
-    expect(headers()).toBe(5)
+    expect(screen.getByText(/No subjects match these filters/).closest('table')).toBeNull()
   })
 
   it('clears every filter at once, and only offers to when there is something to clear', async () => {
@@ -1218,23 +1223,23 @@ describe('the playback card', () => {
   it('explains how to start one when nothing is publishing', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.getByText(/Nothing is publishing/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing is playing back/)).toBeInTheDocument()
   })
 
   it('offers a drop zone for an edited capture', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.getByLabelText('Publish a capture file')).toBeInTheDocument()
+    expect(screen.getByLabelText('Store a capture file and play it back')).toBeInTheDocument()
   })
 
   it('offers an Auditor no such zone', async () => {
     renderTab({ userRole: 'Auditor' })
     await screen.findByText('Line 1 Gateway')
-    expect(screen.queryByLabelText('Publish a capture file')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Store a capture file and play it back')).not.toBeInTheDocument()
   })
 
   /**
-   * Drop, store, publish. The subject is guessed from the identities in the file and offered, never
+   * Drop, store, play back. The subject is guessed from the identities in the file and offered, never
    * filed silently.
    */
   it('guesses the subject from the file and goes on to the playback dialog', async () => {
@@ -1250,7 +1255,7 @@ describe('the playback card', () => {
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
     const file = new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' })
-    fireEvent.drop(screen.getByLabelText('Publish a capture file'), {
+    fireEvent.drop(screen.getByLabelText('Store a capture file and play it back'), {
       dataTransfer: { files: [file] }
     })
 
@@ -1262,8 +1267,8 @@ describe('the playback card', () => {
     await waitFor(() => expect(api.uploadCapture).toHaveBeenCalledWith(
       expect.objectContaining({ subjectKind: 'gateway', subjectId: 'gw-1' })
     ))
-    // …and then straight into publishing it, rather than back to the table to find it.
-    expect(await screen.findByLabelText('Publish as')).toBeInTheDocument()
+    // …and then straight into playing it back, rather than back to the table to find it.
+    expect(await screen.findByLabelText('Playback gateway')).toBeInTheDocument()
   })
 
   it('leaves the subject unchosen when the file names nothing this stack knows', async () => {
@@ -1275,7 +1280,7 @@ describe('the playback card', () => {
       identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
     }
     const file = new File([JSON.stringify(doc)], 'foreign.json', { type: 'application/json' })
-    fireEvent.drop(screen.getByLabelText('Publish a capture file'), {
+    fireEvent.drop(screen.getByLabelText('Store a capture file and play it back'), {
       dataTransfer: { files: [file] }
     })
     const subject = await screen.findByLabelText('File it against')
@@ -1398,13 +1403,13 @@ describe('the capture preview', () => {
     expect(screen.getByText('dev230000000000400080000')).toBeInTheDocument()
   })
 
-  it('says a replay republishes under the Playback gateway, not the recorded edge node', async () => {
+  it('says a playback publishes under the Playback gateway, not the recorded edge node', async () => {
     // The property that stops a recording being mistaken for live plant data. An operator reading
     // the recorded edge node could otherwise reasonably expect the replay to appear under it.
     await openCapture(withManifest({
       device_ids: ['dev220000000000400080000'], edge_node_ids: ['gwy120000000000400080000'],
     }))
-    expect(await screen.findByText(/republishes under the Playback gateway/i)).toBeInTheDocument()
+    expect(await screen.findByText(/publishes under the Playback gateway/i)).toBeInTheDocument()
   })
 
   it('reports the recorded rate, which is what says how long a replay takes', async () => {
@@ -1454,7 +1459,7 @@ describe('the playback progress bar', () => {
     // bars only the clock. A playback has one total, so the fraction means what it looks like.
     api.activePlaybackJob.mockResolvedValue(running())
     renderTab()
-    const bar = await screen.findByRole('progressbar', { name: /Messages published/i })
+    const bar = await screen.findByRole('progressbar', { name: /Messages played back/i })
     expect(bar.getAttribute('aria-valuenow')).toBe('25')
     expect(bar.getAttribute('aria-valuemax')).toBe('100')
   })
@@ -1465,7 +1470,7 @@ describe('the playback progress bar', () => {
     api.activePlaybackJob.mockResolvedValue(running({ status: 'PENDING', messages_total: 0, messages_sent: 0 }))
     renderTab()
     await screen.findByText(/Waiting for the playback worker/i)
-    expect(screen.queryByRole('progressbar', { name: /Messages published/i })).toBeNull()
+    expect(screen.queryByRole('progressbar', { name: /Messages played back/i })).toBeNull()
   })
 
   it('does not overflow when the worker reports more than the plan held', async () => {
@@ -1473,7 +1478,7 @@ describe('the playback progress bar', () => {
     // arrive after the last publish. The bar must clamp rather than render past its track.
     api.activePlaybackJob.mockResolvedValue(running({ messages_sent: 140, messages_total: 100 }))
     renderTab()
-    const bar = await screen.findByRole('progressbar', { name: /Messages published/i })
+    const bar = await screen.findByRole('progressbar', { name: /Messages played back/i })
     expect(bar.getAttribute('aria-valuenow')).toBe('100')
     expect(bar.firstChild.style.width).toBe('100%')
   })

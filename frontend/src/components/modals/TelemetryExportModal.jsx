@@ -10,25 +10,15 @@ import { IconDownload, IconAlertTriangle } from '../common/Icons'
 import { Modal } from '../common/Modal'
 
 /**
- * CSV export for a selection of one device's metrics over a chosen time range. Paginated and
- * bounded: `postgres_fdw` pushes WHERE down to TimescaleDB but not LIMIT, so this pages in
- * TELEMETRY_PAGE_SIZE batches and stops at TELEMETRY_EXPORT_MAX_ROWS. On hitting the ceiling it
- * still downloads the most recent rows and says so, in the dialog and in a comment line at the top
- * of the file. One metric per request, run sequentially, since concurrent range scans over the FDW
- * are the load pattern to avoid.
+ * CSV export for a selection of one device's metrics over a chosen time range. It pages each metric
+ * in TELEMETRY_PAGE_SIZE batches, one request at a time, and stops at TELEMETRY_EXPORT_MAX_ROWS
+ * rows for the whole export, not per metric. Once the cap is reached the rest of that metric and
+ * every later metric are left out, and the dialog and a comment line at the top of the file say so.
  *
- * RESOLUTION IS A CHOICE, AND RAW IS THE DEFAULT. An export is an export of observations, so a
- * bucket average is never substituted for one silently. But the raw hypertable is retained for a
- * fraction of the time the rollups are -- 90 days against the hourly rollup's five years by
- * default -- and a range older than that used to return nothing under the sentence "No telemetry
- * in that range for the selected metrics." That describes a device that published nothing, when
- * what actually happened is that the chunks were dropped and the data is still held in a rollup
- * (issue #160).
- *
- * BOTH HALVES, INFORM AND CONTROL. The picker alone would not be found by the person who needs it;
- * the warning alone would be a dead end. So each resolution is labelled with how far back it
- * actually reaches, and a range starting before the chosen resolution's horizon raises a warning
- * that names the finest resolution which does cover it and offers to switch.
+ * Raw is the default resolution and a bucket average is never substituted silently. Each
+ * resolution is labelled with how far back it reaches, and a range starting before the chosen
+ * resolution's horizon raises a warning that names the finest resolution which covers it and
+ * offers to switch.
  */
 
 const PRESETS = [
@@ -161,10 +151,9 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
       }
 
       if (rows.length === 0) {
-        // NOT "the device published nothing", unless that is actually what happened. When the
-        // range starts before this resolution's horizon the true answer is that the rows were
-        // dropped by the retention policy and another resolution still holds the period — saying
-        // otherwise sends the reader to look for a fault in the device.
+        // Not "the device published nothing" unless that is what happened: a range before this
+        // resolution's horizon was dropped by the retention policy and another resolution may
+        // still hold it.
         const better = horizons ? bestResolutionFor(horizons, range.from) : null
         if (!coverage) {
           // The range IS covered by this resolution and still came back empty, so the plain
@@ -190,17 +179,15 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
       }))
 
       if (truncated) {
-        // Carried IN THE FILE, not only in the dialog -- the dialog is gone the moment it is
-        // dismissed, and the file is what gets forwarded to someone else.
+        // In the file as well as the dialog: the file is what gets forwarded.
         flat.unshift(commentRow(
           entry.key,
           `# TRUNCATED at ${TELEMETRY_EXPORT_MAX_ROWS} rows`,
-          '# most recent rows in range; narrow the range or select fewer metrics'
+          '# the cap is shared across metrics, so later metrics are missing; narrow the range or select fewer metrics'
         ))
       }
 
-      // Above the truncation notice, so the first line of the file says what the file IS. Same
-      // argument, applied to the question a rollup export raises and a raw one does not.
+      // Above the truncation notice, so the first line of the file says what the file is.
       flat.unshift(provenanceRow(entry.key))
 
       const stamp = range.from.slice(0, 10)
@@ -349,10 +336,11 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
         </div>
       )}
 
-      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-        Capped at {TELEMETRY_EXPORT_MAX_ROWS.toLocaleString()} rows per export. A wider range
-        returns the most recent rows and marks the file as truncated.
-      </div>
+      <p className="form-hint">
+        Capped at {TELEMETRY_EXPORT_MAX_ROWS.toLocaleString()} rows per export, shared across the
+        selected metrics. Once it is reached, later metrics are skipped and the file is marked as
+        truncated.
+      </p>
     </Modal>
   )
 }
