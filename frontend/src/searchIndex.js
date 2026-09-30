@@ -75,11 +75,10 @@ export const CARDS = [
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },
 
   { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
-  { id: 'service-identities',   label: 'Service identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human'] },
-  { id: 'database-principals',  label: 'Database principals',  tab: 'access-control', keywords: ['auth users', 'cannot sign in', 'service role'] },
+  { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
+  { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', keywords: ['mqtt users', 'platform accounts'] },
   { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', keywords: ['dynamic security', 'mosquitto roles', 'topic access', 'orphaned accounts'] },
-  { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] },
-  { id: 'runtime-configuration', label: 'Runtime configuration', tab: 'settings',     keywords: ['system settings', 'retention', 'thresholds'] }
+  { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] }
 ]
 
 /**

@@ -154,8 +154,6 @@ describe('pages do not space a block sideways with a literal margin', () => {
    * behind after its fix also fails, so the list cannot go stale.
    */
   const BASELINE = {
-    'AccessControlTab.jsx: margin 12px 20px 0': 4,
-    'AccessControlTab.jsx: marginLeft 4px': 1,
     'ApprovalsTab.jsx: marginLeft 8px': 1,
     'CaptureTab.jsx: marginLeft 6px': 5,
     'CaptureTab.jsx: marginRight 6px': 3,
