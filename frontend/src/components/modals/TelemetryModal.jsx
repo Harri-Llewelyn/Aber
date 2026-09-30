@@ -4,6 +4,8 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { formatTelemetryValue, telemetryValueClass } from '../../utils/telemetryValue'
 import { IconActivity, IconDownload, IconLock } from '../common/Icons'
 import { Modal } from '../common/Modal'
+import { Badge } from '../common/Badge'
+import { formatDateTime } from '../../utils/format'
 
 /**
  * Per-device telemetry inspector: what each of this device's metrics last read, and when. A modal
@@ -56,8 +58,7 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId, declared.join('|')])
 
-  // On open rather than on expand: the modal has no collapsed state to defer the request to, and
-  // opening it is already the deliberate act the accordion used its first expand for.
+  // Read once, on open.
   useEffect(() => { if (canRead) load() }, [canRead, load])
 
   const toggleMetric = (name) => {
@@ -79,9 +80,7 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
     <Modal
       title={<>
         <span>Telemetry — {device?.asset_name}</span>
-        <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-          {loading ? declared.length : metrics.length}
-        </span>
+        <Badge size="sm">{loading ? declared.length : metrics.length}</Badge>
       </>}
       icon={<IconActivity size={17} style={{ color: 'var(--accent)' }} />}
       size="wide"
@@ -144,8 +143,8 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
                     />
                   </td>
                   <td><strong>{m.name}</strong></td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                    {m.row ? new Date(m.row.time).toLocaleString() : '—'}
+                  <td className="cell-meta">
+                    {m.row ? formatDateTime(m.row.time) : '—'}
                   </td>
                   <td className={m.row ? telemetryValueClass(m.row) : undefined}
                       style={m.row ? undefined : { color: 'var(--text-dim)', fontStyle: 'italic' }}>

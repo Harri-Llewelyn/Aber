@@ -1,11 +1,7 @@
 /**
  * A device's lifecycle status, and how it is drawn: one definition for every render site (the
- * Site Map, the Devices table and the context drawer).
- *
- * The map used to run a client-side rule engine over the latest telemetry with literal
- * thresholds, no persistence and exact metric names, and conflated process condition with
- * connectivity lifecycle. Threshold and condition alerting belongs in Grafana; what is left here
- * is what the platform knows about the device, from the database.
+ * Site Map, the Devices table and the context drawer). It reads only what the platform knows about
+ * the device, from the database; threshold and condition alerting belongs in Grafana.
  */
 import { isNeverSeen, isProvisioningOverdue } from './deviceProvisioning';
 
@@ -34,7 +30,7 @@ export function deviceLifecycleStatus(device) {
   return device.status === DEVICE_STATUS.ONLINE ? DEVICE_STATUS.ONLINE : DEVICE_STATUS.OFFLINE;
 }
 
-/** Chip class for the shopfloor map. */
+/** Chip class for the Site Map. */
 export function deviceStatusChipClass(status) {
   if (status === DEVICE_STATUS.ONLINE) return 'chip-success';
   if (status === DEVICE_STATUS.QUARANTINED) return 'chip-warning';
@@ -42,7 +38,7 @@ export function deviceStatusChipClass(status) {
 }
 
 /**
- * The chip class for a device on the shopfloor map, alert state included.
+ * The chip class for a device on the Site Map, alert state included.
  *
  * Red is allowed here and nowhere else in this file: `deviceStatusChipClass` never returns a
  * danger treatment, because this dashboard has no authority over process conditions. An alert is
@@ -89,7 +85,8 @@ export function deviceStatusDotColor(status) {
 /**
  * The badge one device wears: the lifecycle state, plus the distinction the three states cannot
  * draw between a device that went quiet and one never heard from. Read `first_dbirth_at`, which is
- * write-once, so the answer does not flicker with the last message.
+ * write-once, so the answer does not flicker with the last message. `tone` is a <Badge> tone;
+ * `badgeClass` is the same choice as a CSS class.
  *
  * Not a fourth DEVICE_STATUS: the rollup, the map chip and the cell tile ask whether the cell is
  * talking to the platform, and for that question the two are one answer. `status` here is that
@@ -104,6 +101,7 @@ export function deviceStatusBadge(device) {
       awaitingBirth: true,
       overdue,
       badgeClass: overdue ? 'badge-warning' : 'badge-neutral',
+      tone: overdue ? 'warning' : 'neutral',
       title: overdue
         ? 'Awaiting first birth — provisioned more than 24h ago and has never sent a Sparkplug B '
           + 'DBIRTH. Check that the device is powered, reachable and publishing under the Sparkplug '
@@ -120,6 +118,7 @@ export function deviceStatusBadge(device) {
     awaitingBirth: false,
     overdue: false,
     badgeClass: deviceStatusBadgeClass(status),
+    tone: status === DEVICE_STATUS.ONLINE ? 'success' : status === DEVICE_STATUS.QUARANTINED ? 'warning' : 'neutral',
     title: deviceStatusTitle(status),
   };
 }

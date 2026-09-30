@@ -7,7 +7,7 @@ import { REALTIME_ENABLED } from '../constants'
 const POLL_INTERVAL_MS = 10000
 
 /**
- * Toast when a device newly appears in the quarantine queue. Event-driven with Realtime (a filtered
+ * Toast when a device newly appears in the Quarantine queue. Event-driven with Realtime (a filtered
  * subscription on devices where is_quarantined = true), polled otherwise. The initial fetch primes
  * the set of already-known quarantined devices so a page load does not re-toast the queue.
  *
@@ -46,7 +46,7 @@ export function useQuarantineAlerts(showToast) {
       if (!key || knownQuarantineIds.current.has(key)) return
       knownQuarantineIds.current.add(key)
       showToastRef.current?.(
-        `New device '${describe(device)}' discovered in quarantine queue`,
+        `New device '${describe(device)}' discovered in the Quarantine queue`,
         'info'
       )
     }
