@@ -159,7 +159,6 @@ describe('pages do not space a block sideways with a literal margin', () => {
     'AreasTab.jsx: marginLeft 6px': 1,
     'AreasTab.jsx: marginLeft 8px': 1,
     'ApprovalsTab.jsx: marginLeft 8px': 1,
-    'BackupsTab.jsx: marginRight 4px': 1,
     'CaptureTab.jsx: marginLeft 6px': 5,
     'CaptureTab.jsx: marginRight 6px': 3,
     'CellsTab.jsx: marginLeft 8px': 2,

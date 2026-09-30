@@ -4,12 +4,18 @@ import { usePolling } from '../../hooks/usePolling'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { ConfirmModal } from '../modals/ConfirmModal'
+import { Badge } from '../common/Badge'
+import { ClearFilters } from '../common/ClearFilters'
+import { EmptyState } from '../common/EmptyState'
+import { ListFoot } from '../common/ListFoot'
+import { LoadingState } from '../common/LoadingState'
+import { SectionCount } from '../common/SectionCount'
 import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import CopyableId from '../common/CopyableId'
 import { HelpTip } from '../common/HelpTip'
 import { IconAlertTriangle, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
-import { formatBytes } from '../../utils/coldStorage'
+import { formatBytes, formatDateTime, NO_VALUE } from '../../utils/format'
 import { readSetting } from '../../config'
 
 /**
@@ -25,12 +31,15 @@ export const BACKUP_STALE_HOURS = 36
  */
 const BACKUP_RETENTION_FLOOR = 3
 
-/** Runs per page of the list; "Show more" adds another page. */
+/** Runs per page of the list; the list foot adds another page. */
 const PAGE_SIZE = 30
 
-/** The list's filter. A cancelled run is listed under All only: it neither failed nor completed. */
+/**
+ * The list's filter. A cancelled run is listed under All only: it neither failed nor completed.
+ * `empty` is what the list says when the filter matches nothing.
+ */
 const FILTERS = {
-  all: { label: 'All runs', statuses: ['COMPLETED', 'FAILED', 'CANCELLED'], empty: 'No run has finished yet.' },
+  all: { label: 'All runs', statuses: ['COMPLETED', 'FAILED', 'CANCELLED'] },
   completed: { label: 'Completed', statuses: ['COMPLETED'], empty: 'No run has completed yet.' },
   failed: { label: 'Failed', statuses: ['FAILED'], empty: 'No run has failed.' }
 }
@@ -46,12 +55,13 @@ const FILTERS = {
  */
 export function BackupsTab({ showToast }) {
   const [runs, setRuns] = useState([])
-  const [more, setMore] = useState(false)
+  const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState(null)
   const [activeJob, setActiveJob] = useState(null)
   const [filter, setFilter] = useState('all')
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [loading, setLoading] = useState(true)
+  const [paging, setPaging] = useState(false)
   const [error, setError] = useState(null)
   const [asking, setAsking] = useState(false)
   const [releaseFor, setReleaseFor] = useState(null)
@@ -69,15 +79,15 @@ export function BackupsTab({ showToast }) {
       api.listBackupRuns({ statuses: FILTERS[filter].statuses, limit }),
       api.activeBackupJob(),
       api.backupRunSummary(),
-      // Soft: without it the Retention cells say what they said before the floor existed.
+      // Soft: without it the Retention cells cannot say a backup is kept as one of the newest.
       api.newestBackupIds(BACKUP_RETENTION_FLOOR).catch(() => []),
-      // Soft too: the list is worth showing without it, and the line above it then says nothing.
+      // Soft too: the list is worth showing without it, and the callout above it then says nothing.
       api.backupOffsiteDestination().catch(() => null)
     ])
     // A response for an earlier filter or page size that lands after a later one is dropped.
     if (call !== lastCall.current) return
     setRuns(page.runs)
-    setMore(page.more)
+    setTotal(page.total)
     setActiveJob(active)
     setSummary(sum)
     setFloorIds(new Set(floor))
@@ -89,7 +99,7 @@ export function BackupsTab({ showToast }) {
     let cancelled = false
     refresh()
       .catch(err => { if (!cancelled) setError(err.message) })
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .finally(() => { if (!cancelled) { setLoading(false); setPaging(false) } })
     return () => { cancelled = true }
   }, [refresh])
 
@@ -122,7 +132,7 @@ export function BackupsTab({ showToast }) {
     await runKeyed(backup.id, async () => {
       try {
         const released = await api.releaseBackup(backup.id)
-        showToast(released ? `Released the backup from ${formatWhen(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info')
+        showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info')
         await refresh()
       } catch (err) {
         showToast(err.message, 'error')
@@ -152,18 +162,14 @@ export function BackupsTab({ showToast }) {
     setLimit(PAGE_SIZE)
   }
 
-  if (loading) {
-    return <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading backups…</div>
-  }
-
   // No job row at all is a stack that has never run the backup service: the empty state, no warning.
   const neverRun = !summary?.firstRecordedAt
   const retentionDays = configuredRetentionDays()
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
-        <div className="card">
+        <div className="card card-fill">
           <div className="card-header">
             <h3 className="section-title">
               Backups
@@ -171,10 +177,11 @@ export function BackupsTab({ showToast }) {
                 label="About backups"
                 text="Every backup run, newest first, and why any failed. A requested backup is kept until released. Scheduled ones follow the retention window, but the newest three backups are always kept."
               />
+              <SectionCount total={total} shown={runs.length} />
             </h3>
             {/* The primary action in the header, where every card keeps its. Disabled rather than
-                hidden while one is in flight: the gate refuses a second anyway, and the card
-                above the table says why. */}
+                hidden while one is in flight: the gate refuses a second anyway, and the callout
+                below says why. */}
             <button
               className="btn btn-primary btn-sm"
               style={{ marginLeft: 'auto' }}
@@ -186,9 +193,9 @@ export function BackupsTab({ showToast }) {
             </button>
           </div>
 
-          <div className="card-body">
+          <div className="card-body stack">
             {error && (
-              <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
+              <div className="callout callout-danger">
                 <IconShieldAlert size={14} className="callout-icon" />
                 <div>{error}</div>
               </div>
@@ -198,76 +205,76 @@ export function BackupsTab({ showToast }) {
             <CurrentState summary={summary} />
             <OffsiteLine destination={offsite} onEdit={() => setEditingDestination(true)} showToast={showToast} />
 
-            {neverRun ? (
-              <div style={{ color: 'var(--text-dim)', fontSize: '12px', padding: '10px 0' }}>
-                No backups exist yet. Take one above, or wait for the schedule.
+            {!loading && !neverRun && (
+              <div className="filter-bar">
+                <select
+                  className="form-control control-sm"
+                  value={filter}
+                  onChange={e => onFilter(e.target.value)}
+                  aria-label="Run status filter"
+                  title="Show every run, or only the ones that completed or failed"
+                >
+                  {Object.entries(FILTERS).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
+                </select>
+                <ClearFilters count={filter === 'all' ? 0 : 1} onClear={() => onFilter('all')} />
               </div>
-            ) : (
-              <>
-                <div className="filter-bar" style={{ marginTop: '12px' }}>
-                  <select
-                    className="form-control"
-                    style={{ width: '160px' }}
-                    value={filter}
-                    onChange={e => onFilter(e.target.value)}
-                    aria-label="Run status filter"
-                    title="Show every run, or only the ones that completed or failed"
-                  >
-                    {Object.entries(FILTERS).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
-                  </select>
-                </div>
-
-                {runs.length === 0 ? (
-                  <div style={{ color: 'var(--text-dim)', fontSize: '12px', padding: '10px 0' }}>
-                    {FILTERS[filter].empty}
-                  </div>
-                ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>When</th>
-                          <th>Status</th>
-                          <th>Origin</th>
-                          <th>Note</th>
-                          <th>Size</th>
-                          <th>Holds</th>
-                          <th>Retention</th>
-                          <th>Off site</th>
-                          <th aria-label="Actions" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {runs.map(run => (
-                          <RunRow
-                            key={run.id}
-                            run={run}
-                            inFloor={!!run.backup && floorIds.has(run.backup.id)}
-                            offsiteBase={offsiteBase(offsite)}
-                            retentionDays={retentionDays}
-                            releasing={pendingKey === run.backup?.id}
-                            onRelease={setReleaseFor}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {more && (
-                  <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setLimit(l => l + PAGE_SIZE)}
-                      title={`List the next ${PAGE_SIZE} older runs`}
-                    >
-                      Show more
-                    </button>
-                  </div>
-                )}
-              </>
             )}
           </div>
+
+          {loading ? (
+            <LoadingState label="backups" />
+          ) : neverRun ? (
+            <EmptyState message="No backups yet.">
+              <p className="form-hint">Take one with the button above, or wait for the schedule.</p>
+            </EmptyState>
+          ) : runs.length === 0 ? (
+            <EmptyState
+              message="No backups yet."
+              filtered={filter !== 'all'}
+              filteredMessage={FILTERS[filter].empty}
+            />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th title="When the backup was taken, or when a run without one ended. Hover a row for the queued, started and finished times.">When</th>
+                    <th title="How the run ended, with the reason when it failed or was withdrawn">Status</th>
+                    <th title="Whether a person asked for the run or the schedule started it">Origin</th>
+                    <th title="The note kept with the backup, saying why it was taken">Note</th>
+                    <th title="The size of every file in the backup together">Size</th>
+                    <th title="The components the backup holds. Hover a row for each file and its size.">Holds</th>
+                    <th title="Why the backup is still kept, or that the retention window applies">Retention</th>
+                    <th title="Whether the encrypted copy has reached the off-site bucket">Off site</th>
+                    <th className="row-actions" aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map(run => (
+                    <RunRow
+                      key={run.id}
+                      run={run}
+                      inFloor={!!run.backup && floorIds.has(run.backup.id)}
+                      offsiteBase={offsiteBase(offsite)}
+                      retentionDays={retentionDays}
+                      releasing={pendingKey === run.backup?.id}
+                      onRelease={setReleaseFor}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!loading && !neverRun && (
+            <ListFoot
+              shown={runs.length}
+              total={total}
+              step={PAGE_SIZE}
+              pending={paging}
+              onMore={() => { setPaging(true); setLimit(l => l + PAGE_SIZE) }}
+            />
+          )}
         </div>
       </div>
 
@@ -282,14 +289,14 @@ export function BackupsTab({ showToast }) {
       )}
 
       {asking && (
-        <TakeBackupModal onConfirm={onRequest} onCancel={() => setAsking(false)} />
+        <TakeBackupModal holds={componentSentence()} onConfirm={onRequest} onCancel={() => setAsking(false)} />
       )}
 
       {releaseFor && (
         <ConfirmModal
           title="Release backup"
           icon={<IconHardDrive size={18} />}
-          message={`Release the backup from ${formatWhen(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window and not one of the newest ${floorWord}.`}
+          message={`Release the backup from ${formatDateTime(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window and not one of the newest ${floorWord}.`}
           confirmLabel="Release"
           pendingLabel="Releasing…"
           confirmClassName="btn btn-primary"
@@ -321,20 +328,19 @@ function CurrentState({ summary }) {
   if (!state) return null
   const failed = state.kind === 'failed'
   const lastGood = state.lastGoodAt
-    ? `The last good backup was taken ${formatWhen(state.lastGoodAt)}.`
+    ? `The last good backup was taken ${formatDateTime(state.lastGoodAt)}.`
     : failed
       ? 'No backup has succeeded yet.'
-      : `None has succeeded since the first was queued ${formatWhen(summary.firstRecordedAt)}.`
+      : `None has succeeded since the first was queued ${formatDateTime(summary.firstRecordedAt)}.`
 
   return (
     <div
-      className={failed ? 'callout' : 'callout callout-warning'}
-      style={{ margin: '12px 0 0', ...(failed ? { borderColor: 'var(--danger)' } : {}) }}
+      className={failed ? 'callout callout-danger' : 'callout callout-warning'}
       role="status"
       data-testid="backup-state"
     >
       {failed
-        ? <span className="callout-icon" style={{ display: 'inline-flex', color: 'var(--danger)' }}><IconShieldAlert size={14} /></span>
+        ? <IconShieldAlert size={14} className="callout-icon" />
         : <IconAlertTriangle size={14} className="callout-icon" />}
       <div>
         <strong>{failed ? 'The last backup failed' : `No backup has succeeded in ${BACKUP_STALE_HOURS} hours`}</strong>
@@ -356,7 +362,7 @@ function RunningCard({ job, onCancel, cancelPending }) {
   const stale = pending && waitedMs > 2 * 60 * 1000
 
   return (
-    <div className="callout" style={{ borderColor: stale ? 'var(--warning)' : 'var(--accent)', margin: '12px 0' }}>
+    <div className={stale ? 'callout callout-warning' : 'callout callout-info'}>
       <IconHardDrive size={14} className="callout-icon" />
       <div style={{ flex: 1 }}>
         <div>
@@ -369,7 +375,7 @@ function RunningCard({ job, onCancel, cancelPending }) {
             ? 'No backup service has claimed this. Nothing will take it until the service is running; cancel it or start the service.'
             : pending
               ? 'Waiting for the backup service to claim it.'
-              : `Started ${formatWhen(job.started_at)}. Both databases, the storage objects and the forge are being written.`}
+              : `Started ${formatDateTime(job.started_at)}. Being written: ${componentSentence()}.`}
         </div>
       </div>
       {pending && (
@@ -380,7 +386,7 @@ function RunningCard({ job, onCancel, cancelPending }) {
           onClick={onCancel}
           title="Withdraw this request before the service claims it"
         >
-          <IconX size={13} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
+          <IconX size={13} />
           Cancel
         </ActionButton>
       )}
@@ -389,9 +395,9 @@ function RunningCard({ job, onCancel, cancelPending }) {
 }
 
 const STATUS_BADGES = {
-  COMPLETED: { className: 'badge badge-online', label: 'Completed' },
-  FAILED: { className: 'badge badge-danger', label: 'Failed' },
-  CANCELLED: { className: 'badge badge-neutral', label: 'Cancelled' }
+  COMPLETED: { tone: 'success', label: 'Completed' },
+  FAILED: { tone: 'danger', label: 'Failed' },
+  CANCELLED: { tone: 'neutral', label: 'Cancelled' }
 }
 
 /** Shown on the row; the whole error is in the cell's tooltip. The service caps it at 2000. */
@@ -399,11 +405,12 @@ const ERROR_SHOWN = 200
 
 /**
  * One finished run. A completed run shows its backup while the files exist; once the retention
- * window has pruned them the run stays, saying so. A failed run shows the service's reason.
+ * window has pruned them the run stays, saying so. A run with no backup shows its outcome under the
+ * status badge and a dash in the columns that describe the files.
  */
 function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onRelease }) {
   const b = run.backup
-  const badge = STATUS_BADGES[run.status] || { className: 'badge badge-neutral', label: run.status }
+  const badge = STATUS_BADGES[run.status] || { tone: 'neutral', label: run.status }
   // Taken for a backup (its data is as of the start); ended for a run that produced none.
   const when = run.status === 'COMPLETED' ? (b?.taken_at || run.started_at) : run.finished_at
 
@@ -411,7 +418,7 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
   if (!b) {
     if (run.status === 'COMPLETED') {
       outcome = (
-        <span style={{ color: 'var(--text-muted)' }} title="The service removed its files once they were older than the retention window. The run stays here as history.">
+        <span title="The service removed its files once they were older than the retention window. The run stays here as history.">
           Pruned by the retention window
         </span>
       )
@@ -423,19 +430,24 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
         </span>
       )
     } else {
-      outcome = <span style={{ color: 'var(--text-muted)' }}>Withdrawn before the service claimed it</span>
+      outcome = <span>Withdrawn before the service claimed it</span>
     }
   }
+
+  const none = <td className="cell-meta">{NO_VALUE}</td>
 
   return (
     <tr data-testid={`run-${run.id}`}>
       <td title={b ? b.location : runTimes(run)}>
-        {formatWhen(when)}
-        {b && <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{b.stamp}</div>}
+        {formatDateTime(when)}
+        {b && <div className="mono cell-meta">{b.stamp}</div>}
       </td>
-      <td><span className={badge.className}>{badge.label}</span></td>
+      <td>
+        <Badge tone={badge.tone} size="sm">{badge.label}</Badge>
+        {outcome && <div className="cell-meta" style={{ maxWidth: '38ch' }}>{outcome}</div>}
+      </td>
       <td>{run.origin === 'requested' ? 'On request' : 'Scheduled'}</td>
-      <td style={{ color: run.note ? undefined : 'var(--text-dim)' }}>{run.note || '—'}</td>
+      <td className={run.note ? undefined : 'cell-meta'}>{run.note || NO_VALUE}</td>
       {b ? (
         <>
           <td>{formatBytes(b.size_bytes)}</td>
@@ -444,9 +456,9 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
           <td><OffsiteCell backup={b} base={base} /></td>
         </>
       ) : (
-        <td colSpan={4}>{outcome}</td>
+        <>{none}{none}{none}{none}</>
       )}
-      <td style={{ textAlign: 'right' }}>
+      <td className="row-actions">
         {b?.pinned && (
           <ActionButton
             className="btn btn-ghost btn-sm"
@@ -485,22 +497,21 @@ export function keptBecause(backup, { inFloor, retentionDays, now = Date.now() }
 }
 
 function RetentionCell({ backup, kept, retentionDays }) {
-  const muted = { color: 'var(--text-muted)' }
   if (backup.pinned) {
-    return <span className="badge badge-info" title="The retention window does not apply until this backup is released">Pinned</span>
+    return <Badge tone="info" size="sm" title="The retention window does not apply until this backup is released">Pinned</Badge>
   }
   if (kept === 'floor') {
     return (
-      <span style={muted} title={`Older than the ${retentionDays}-day retention window. The prune never removes the newest ${floorWord} backups, so this one stays until newer backups succeed.`}>
+      <span className="cell-meta" title={`Older than the ${retentionDays}-day retention window. The prune never removes the newest ${floorWord} backups, so this one stays until newer backups succeed.`}>
         Kept: one of the newest {floorWord}
       </span>
     )
   }
   if (kept === 'off') {
-    return <span style={muted} title="backup.retentionDays is 0, so the service prunes nothing">Kept: pruning is off</span>
+    return <span className="cell-meta" title="backup.retentionDays is 0, so the service prunes nothing">Kept: pruning is off</span>
   }
-  if (backup.released_at) return <span style={muted}>Released {formatWhen(backup.released_at)}</span>
-  return <span style={muted}>Retention window</span>
+  if (backup.released_at) return <span className="cell-meta">Released {formatDateTime(backup.released_at)}</span>
+  return <span className="cell-meta">Retention window</span>
 }
 
 /** The destination fields the service needs before it copies anything, in the dialog's words. */
@@ -533,11 +544,7 @@ function OffsiteLine({ destination, onEdit, showToast }) {
   const missing = offsiteMissing(destination)
   const untouched = missing.length === OFFSITE_REQUIRED.length + 1
   return (
-    <div
-      className={base ? 'callout' : 'callout callout-warning'}
-      style={{ margin: '12px 0 0', ...(base ? { borderColor: 'var(--border)' } : {}) }}
-      data-testid="offsite-line"
-    >
+    <div className={base ? 'callout' : 'callout callout-warning'} data-testid="offsite-line">
       {base
         ? <IconHardDrive size={14} className="callout-icon" />
         : <IconAlertTriangle size={14} className="callout-icon" />}
@@ -567,35 +574,32 @@ function OffsiteLine({ destination, onEdit, showToast }) {
 
 /** One backup's copy: where it is, why it is not there yet, or that nothing is configured. */
 function OffsiteCell({ backup, base }) {
-  const muted = { color: 'var(--text-muted)' }
   if (backup.offsite_state === 'COPIED' && (!base || backup.offsite_location?.startsWith(base))) {
     return (
-      <span className="badge badge-online" title={`${backup.offsite_location}\nCopied ${formatWhen(backup.offsite_copied_at)}`}>
+      <Badge tone="success" size="sm" title={`${backup.offsite_location}\nCopied ${formatDateTime(backup.offsite_copied_at)}`}>
         Copied
-      </span>
+      </Badge>
     )
   }
   if (!base) {
-    return backup.offsite_state === 'COPIED'
-      ? <span style={muted} title={backup.offsite_location}>Copied earlier</span>
-      : <span style={muted} title="No off-site destination is set">—</span>
+    return <span className="cell-meta" title="No off-site destination is set">{NO_VALUE}</span>
   }
   if (backup.offsite_state === 'FAILED') {
     const reason = backup.offsite_error || 'The service recorded no reason.'
     return (
-      <span style={{ color: 'var(--danger-text)' }} title={`${reason}\nTried ${backup.offsite_attempts} time(s), last ${formatWhen(backup.offsite_attempted_at)}; the service tries again.`}>
+      <span style={{ color: 'var(--danger-text)' }} title={`${reason}\nTried ${backup.offsite_attempts} time(s), last ${formatDateTime(backup.offsite_attempted_at)}; the service tries again.`}>
         Failed, retrying
       </span>
     )
   }
-  return <span style={muted} title="The service copies it on a coming poll, newest first">Waiting</span>
+  return <span className="cell-meta" title="The service copies it on a coming poll, newest first">Waiting</span>
 }
 
 function runTimes(run) {
   return [
-    `Queued ${formatWhen(run.created_at)}`,
-    run.started_at && `Started ${formatWhen(run.started_at)}`,
-    `Finished ${formatWhen(run.finished_at)}`
+    `Queued ${formatDateTime(run.created_at)}`,
+    run.started_at && `Started ${formatDateTime(run.started_at)}`,
+    `Finished ${formatDateTime(run.finished_at)}`
   ].filter(Boolean).join('\n')
 }
 
@@ -603,25 +607,24 @@ const COMPONENT_LABELS = {
   'supabase-db': 'platform database',
   'timescaledb': 'historian',
   'vault-key': 'Vault root key',
-  'storage-objects': '3D models',
+  'storage-objects': 'stored files',
   'forge': 'forge',
   'broker': 'broker accounts',
   'ca': 'internal CA'
 }
 
+/** Every component a run writes, as a sentence fragment: "the platform database, ... and the internal CA". */
+function componentSentence() {
+  const names = Object.values(COMPONENT_LABELS).map(label => `the ${label}`)
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
 function componentSummary(components) {
-  if (!Array.isArray(components) || components.length === 0) return '—'
+  if (!Array.isArray(components) || components.length === 0) return NO_VALUE
   return components.map(c => COMPONENT_LABELS[c.name] || c.name).join(', ')
 }
 
 function componentDetail(components) {
   if (!Array.isArray(components)) return ''
   return components.map(c => `${c.file}: ${formatBytes(c.size_bytes)}`).join('\n')
-}
-
-function formatWhen(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
