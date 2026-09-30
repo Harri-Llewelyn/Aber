@@ -369,7 +369,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         <CardHeading
           icon={<IconRadio size={15} />}
           title="Gateways"
-          description="The edge nodes that publish to the broker, each pinned to its own identity, with the status each last reported."
+          description="The edge nodes that publish to the broker, each with its own broker credential, and the status each last reported."
           count={<SectionCount total={listable.length} shown={filteredGateways.length} />}
           actions={(
             <>

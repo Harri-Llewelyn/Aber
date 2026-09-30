@@ -291,7 +291,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         <CardHeading
           icon={<IconLayoutDashboard size={15} />}
           title="Cells"
-          description="A line, bay or group of assets within an area. Gateways belong to a cell, and each cell is placed on its area’s plan."
+          description="A line, bay or group of assets within an area. Gateways and devices are filed in cells, which can be pinned on the area’s plan."
           count={<SectionCount total={inLifecycle.length} shown={filteredCells.length} />}
           actions={(
             <>
