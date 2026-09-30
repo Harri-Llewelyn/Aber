@@ -106,7 +106,7 @@ describe('Model3DUploader', () => {
 
     expect(screen.getByText(/Model attached: cnc_machine\.glb/)).toBeInTheDocument()
     // Fetched by HEAD so a 40 MB model is not downloaded merely to be labelled.
-    await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
     expect(global.fetch.mock.calls[0][1]).toEqual({ method: 'HEAD' })
   })
 
@@ -134,7 +134,7 @@ describe('Model3DUploader', () => {
 
     expect(screen.getByText(/Model attached: cnc\.glb/)).toBeInTheDocument()
     // Let the size HEAD settle before asserting, so its state update lands inside the test.
-    await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
     expect(screen.queryByTitle(/Detach this model/i)).not.toBeInTheDocument()
     expect(screen.queryByTitle(/Upload a different model/i)).not.toBeInTheDocument()
   })
@@ -157,7 +157,7 @@ describe('Model3DUploader', () => {
   describe('downloading the attached model', () => {
     it('offers Download as a button rather than a label beside the size', async () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
-      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
       expect(screen.getByTitle(/Download this model file/i)).toBeInTheDocument()
       // The old affordance is gone, not merely demoted -- two ways to fetch the same file, one of
@@ -170,7 +170,7 @@ describe('Model3DUploader', () => {
          the `download` attribute cross-origin, so without it a .gltf, being JSON, would open in the
          tab. */
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
-      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
       const link = screen.getByTitle(/Download this model file/i)
       expect(link).toHaveAttribute('href', expect.stringContaining('?download=cnc.glb'))
@@ -179,7 +179,7 @@ describe('Model3DUploader', () => {
     it('is the first of the three controls', async () => {
       // The issue asks for it first and visually strongest, because it is the one most used.
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
-      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
       const download = screen.getByTitle(/Download this model file/i)
       const row = download.parentElement
@@ -193,7 +193,7 @@ describe('Model3DUploader', () => {
       /* Download sits outside the `canManage` gate: reading a public-read object is not a write,
          and Operators and Auditors are the roles most likely to want a model. */
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage={false} showToast={vi.fn()} />)
-      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
       expect(screen.getByTitle(/Download this model file/i)).toBeInTheDocument()
       expect(screen.queryByTitle(/Upload a different model/i)).not.toBeInTheDocument()

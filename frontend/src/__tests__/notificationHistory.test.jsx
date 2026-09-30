@@ -43,13 +43,13 @@ const badge = () => document.querySelector('.notif-badge')
 describe('relativeTime', () => {
   it.each([
     [0, 'just now'],
-    [59, 'just now'],
-    [60, '1 min ago'],
-    [125, '2 min ago'],
-    [3600, '1 h ago'],
-    [86399, '23 h ago'],
-    [86400, 'yesterday'],
-    [3 * 86400, '3 days ago']
+    [59, '59s ago'],
+    [60, '1m ago'],
+    [125, '2m ago'],
+    [3600, '1h ago'],
+    [86399, '23h ago'],
+    [86400, '1d ago'],
+    [3 * 86400, '3d ago']
   ])('%is ago reads as "%s"', (seconds, expected) => {
     expect(relativeTime(NOW - seconds * 1000, NOW)).toBe(expected)
   })
@@ -150,19 +150,19 @@ describe('NotificationHistory', () => {
       expect(items[0].querySelector('.notif-item-icon svg')).toBeTruthy()
 
       const time = items[1].querySelector('time')
-      expect(time).toHaveTextContent('5 min ago')
+      expect(time).toHaveTextContent('5m ago')
       expect(time).toHaveAttribute('dateTime', new Date(NOW - 5 * 60 * 1000).toISOString())
       expect(time.getAttribute('title')).toBe(new Date(NOW - 5 * 60 * 1000).toLocaleString())
       expect(items[1]).toHaveTextContent('4 times in a row')
-      expect(items[2].querySelector('time')).toHaveTextContent('2 h ago')
+      expect(items[2].querySelector('time')).toHaveTextContent('2h ago')
     })
 
     it('refreshes the relative times while it is open', () => {
       render(<NotificationHistory entries={[entry({ at: NOW - 30 * 1000 })]} />)
       fireEvent.click(bell())
-      expect(screen.getByText('just now')).toBeInTheDocument()
+      expect(screen.getByText('30s ago')).toBeInTheDocument()
       act(() => { vi.advanceTimersByTime(60 * 1000) })
-      expect(screen.getByText('1 min ago')).toBeInTheDocument()
+      expect(screen.getByText('1m ago')).toBeInTheDocument()
     })
 
     it('says what it is for when empty, and disables Clear', () => {

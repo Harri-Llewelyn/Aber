@@ -6,6 +6,8 @@
  * the raw rows are gone.
  */
 
+import { formatBytes as formatBytesBase } from './format'
+
 export const COLD_STATES = {
   CLAIMED: 'claimed',
   EXPORTED: 'exported',
@@ -73,15 +75,7 @@ export function coldStateTone(state) {
  * limits in and what Docker reports.
  */
 export function formatBytes(bytes) {
-  if (bytes === null || bytes === undefined) return '—'
-  const n = Number(bytes)
-  if (!Number.isFinite(n)) return '—'
-  if (n < 1024) return `${n} B`
-  const units = ['KiB', 'MiB', 'GiB', 'TiB']
-  let value = n / 1024
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1 }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+  return formatBytesBase(bytes)
 }
 
 /**
