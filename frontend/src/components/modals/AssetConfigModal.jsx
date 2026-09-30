@@ -4,6 +4,7 @@ import { SPARKPLUG_TYPES } from '../../constants'
 import { modelledMetricsAcross, schemasForDevice } from '../../utils/deviceTags'
 import { IconFileText, IconShieldAlert, IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { isNeverSeen } from '../../utils/deviceProvisioning'
 
 // showToast/hasPermission are gone with the 3D uploader: this modal now only reads. Everything
 // it displays comes from asset_config and the device's own row.
@@ -101,7 +102,9 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
             display: 'flex', alignItems: 'center', gap: '8px'
           }}>
             <IconShieldAlert size={16} />
-            <span><strong>Device Offline (DDEATH Received):</strong> This asset received a Sparkplug B disconnect payload via gateway <strong>{asset.active_gateway_id || '—'}</strong>. Telemetry ingestion is suspended.</span>
+            {isNeverSeen(asset)
+              ? <span><strong>Awaiting first birth</strong> — this device has not published yet.</span>
+              : <span><strong>Device Offline (DDEATH Received):</strong> This asset received a Sparkplug B disconnect payload via gateway <strong>{asset.active_gateway_id || '—'}</strong>. Telemetry ingestion is suspended.</span>}
           </div>
         )}
 

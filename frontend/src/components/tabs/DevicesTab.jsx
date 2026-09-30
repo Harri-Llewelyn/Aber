@@ -293,6 +293,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       // (api.js only patches keys present in the body) rather than nulling it on every edit.
       const payload = {
         asset_name: form.asset_name,
+        description: form.description || '',
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
         schema_id: form.schema_id || null,
@@ -1593,7 +1594,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             // Not `primary`: the Gateways and Cells drawers style their edit action as a secondary,
             // and editing is not what a device panel is opened to do.
             title: selectedDevice.status === 'OFFLINE'
-              ? 'Device is offline (DDEATH received)'
+              ? (isNeverSeen(selectedDevice)
+                ? 'Awaiting first birth — this device has not published yet.'
+                : 'Device is offline (DDEATH received)')
               : proposeMode
                 ? 'Ask for a change to this device — an approver applies it, or says why not'
                 : !canManage && !canPropose
