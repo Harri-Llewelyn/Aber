@@ -163,9 +163,8 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
     <div className="page-layout page-fill">
       <div className="page-main">
       <PageHeading icon={<IconArchive size={15} />} title="Archived Entities">
-        Areas, cells, gateways and devices taken out of commission without being deleted. An archived
-        entity keeps its identity and its history, leaves the asset pages, and runs a retention
-        timer to an auto-purge date; Restore returns it to service with everything intact.
+        Areas, cells, gateways and devices taken out of commission without being deleted; Restore
+        returns one to service intact.
       </PageHeading>
 
       <div className="card card-fill">

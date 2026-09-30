@@ -2,7 +2,7 @@
 
 Devices are what the gateways publish. Most are not created here: they appear because something published a birth certificate underneath a gateway, and this page is where that arrival becomes a modelled asset -- named, located, classified against a schema, and documented. In ISA-95 terms a device is a work unit, the bottom of the hierarchy, inside the cell it is located in.
 
-The **Quarantine queue** is the first card, above the **Devices** roster. It is always there, with a count, so the roster does not move when a device arrives. The roster opens on **Active** devices and scrolls inside its own card.
+The **Quarantine queue** is the first card, above the **Registered devices** roster. It is always there, with a count, so the roster does not move when a device arrives. The roster opens on **Active** devices and scrolls inside its own card.
 
 ## What the controls do
 

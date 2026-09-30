@@ -264,10 +264,8 @@ export function AccessControlTab({ showToast }) {
     <div className="page-layout">
       <div className="page-main">
         <PageHeading icon={<IconLock size={15} />} title="Access Control">
-          Who and what may reach this stack, and with which credential. A gateway authenticates to
-          the broker as an account issued against it; the stack's own processes hold machine
-          identities on two separate planes — a database identity is a set of permissions, a broker
-          identity is an ACL entry, and nothing here holds both.
+          The credentials that let gateways and the stack's own processes reach the broker and the
+          database, kept on two separate planes.
         </PageHeading>
 
         {/* Two sections, one page: a gateway's credential and a machine identity are different
