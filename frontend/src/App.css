@@ -955,8 +955,6 @@ html, body, #root {
 .table-scroll thead tr {
   position: sticky;
   top: 0;
-  /* Above the rows it covers, and nothing else -- `.action-menu` portals to <body> precisely so
-     it is not competing at this level. */
   z-index: 2;
 }
 
@@ -1005,48 +1003,6 @@ tbody tr {
 }
 
 tbody tr:hover { background: var(--bg-glass); }
-
-/* Table summary footer: a counts bar under a table, for totals that describe the whole list.
-   `--bg-glass` matches `thead tr`, so the table is bracketed by the same tint at both ends. */
-.table-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 16px;
-  background: var(--bg-glass);
-  border-top: 1px solid var(--border);
-}
-
-/* A count and its label as one pill, so the pair cannot be split across a wrap -- which is what
-   made the loose-text version hard to scan at width: "0 issued 0 bundle outstanding 0 revoked"
-   reads as six tokens rather than three facts. */
-.table-summary-pill {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 11px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.table-summary-pill strong {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  /* Tabular figures so a column of counts does not jitter as it updates, the same reason
-     `.alert-pill-count` carries it. */
-  font-variant-numeric: tabular-nums;
-}
-
-/* ZERO IS DIMMED RATHER THAN HIDDEN. "0 revoked" is a fact worth reading -- it is the difference
-   between "nothing has been revoked" and "revocation is not shown here" -- but it should not
-   compete with a count that is not zero. */
-.table-summary-pill-zero strong { color: var(--text-dim); font-weight: 500; }
 
 /* Callout: a bordered, tinted banner for a caveat the reader must not miss, inside the card it
    qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue. */
@@ -1431,68 +1387,6 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .btn-group { display: flex; gap: 8px; }
 
-/* Overflow action menu, portalled to <body> because .table-wrap is overflow-x:auto and would clip
-   it. The z-index clears the page but stays under .modal-overlay (1000). */
-.action-menu {
-  z-index: 900;
-  min-width: 200px;
-  padding: 4px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-hover);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: fadeIn 0.12s ease;
-}
-
-.action-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.action-menu-item:hover:not(:disabled),
-.action-menu-item:focus-visible {
-  background: var(--bg-glass);
-  outline: none;
-}
-
-.action-menu-item:disabled {
-  color: var(--text-dim);
-  cursor: not-allowed;
-}
-
-.action-menu-item-danger:hover:not(:disabled) {
-  background: rgba(255, 82, 82, 0.12);
-  color: var(--danger);
-}
-
-.action-menu-icon {
-  display: inline-flex;
-  width: 14px;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.action-menu-separator {
-  height: 1px;
-  margin: 4px 2px;
-  background: var(--border);
-}
-
 /* A document provider's badge: the provider's colour tints the fill and draws the border, while the
    label takes --text-primary, because the brand colours are not legible as text. `color-mix` keeps
    the tint derived from the one place the colour is written. */
@@ -1548,7 +1442,7 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-primary);
 
   /* Caps the height of every modal so a long dialog scrolls inside itself rather than growing past
-     both edges of the viewport. ActionMenu portals to <body>, so this cannot clip it. */
+     both edges of the viewport. */
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
@@ -1961,18 +1855,6 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* The area thumbnails: three to a row at most, so each plan is legible. The track minimum is a
-   third of the width less its share of the gaps, or 320px, whichever is larger; the 320px floor
-   keeps them readable on a narrow window, where the row holds fewer. `min(…, 100%)` so a track
-   never overflows a container narrower than 320px. `auto-fill`, not `auto-fit`: the tracks stay
-   put when there are fewer areas than columns, so the grid keeps its shape as areas are added. */
-.shopfloor-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(max(320px, calc(33.333% - 8px)), 100%), 1fr));
-  gap: 12px;
-  align-items: start;
-}
-
 /* The rungs above the map: enterprise, then site. Small caps for the level, the name beside it. */
 .site-hierarchy {
   display: flex;
@@ -2188,7 +2070,10 @@ tbody tr:hover { background: var(--bg-glass); }
    area takes the row, two split it, three or more settle on thirds. Below the breakpoint every
    area takes the row, whatever the count. */
 .shopfloor-grid {
+  display: grid;
   grid-template-columns: repeat(var(--map-columns, 3), minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
 }
 
 @media (max-width: 900px) {
@@ -2478,15 +2363,6 @@ tbody tr:hover { background: var(--bg-glass); }
 /* The same border and fill as `.chip-danger`, quoted rather than shared: a swatch that drifts from
    the chip it describes is a legend that lies. */
 .legend-chip-danger { border-color: var(--danger); background: rgba(255, 77, 109, 0.15); }
-
-/* --text-muted, not --text-dim: --text-dim measures exactly 4.50:1 on a bare card; --text-muted
-   stays clear over the lane fills too. See themeContrast.test.js. */
-.zone-empty {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-style: italic;
-  line-height: 1.35;
-}
 
 /* A chip that navigates, used in the context drawers for Serving Gateway, Cell Zone and Schema. A
    <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs.

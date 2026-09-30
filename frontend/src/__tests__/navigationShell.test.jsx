@@ -46,9 +46,7 @@ import { supabase } from '../lib/supabaseClient'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
-// Every page reachable from the rail. The mocked session has no permission rows, so every
-// permission-gated page is absent: Archived Entities, Approvals and Audit Trail. Capture stays visible
-// because it is gated on role, and the mocked session is an Administrator.
+// Pages with no permission or role gate: the rail shows them to any session.
 const ALWAYS_VISIBLE = [
   'Site Map', 'Cells', 'Gateways', 'Devices',
   'Schemas', 'Vocabulary', 'Directory'
@@ -478,70 +476,18 @@ describe('Merged navigation shell', () => {
 })
 
 /**
- * The area thumbnails across the viewports. One track expression does the work of a stack of media
- * queries: the minimum is a third of the row less its share of the gaps, or a fixed floor,
- * whichever is larger, so a row holds three at most and fewer as the window narrows. What is checked
- * is the arithmetic. jsdom computes no layout, so the count is derived as
- * floor((available + gap) / (track + gap)).
+ * The area thumbnails: one track per column, --map-columns of them (three when unset), and one
+ * column below 900px. The Site Map sets --map-columns from the number of areas.
  */
-describe('area thumbnail grid across viewports', () => {
+describe('area thumbnail grid', () => {
   const gridRule = APP_CSS.match(/\n\.shopfloor-grid \{([\s\S]*?)\n\}/)[1]
-  const track = gridRule.match(/minmax\(min\(max\((\d+)px, calc\(33\.333% - (\d+)px\)\), 100%\), 1fr\)/)
-  const floorWidth = Number(track[1])
-  const thirdLess = Number(track[2])
-  const gap = Number(gridRule.match(/gap:\s*(\d+)px/)[1])
 
-  /* What the grid's container measures: the viewport less the rail, the content padding and the
-     scrollbar gutter. Every term is read from the stylesheet rather than written down here, because
-     a copied number stops tracking the thing it was copied from. */
-  const block = (re) => APP_CSS.match(re)[1]
-
-  const rail = Number(block(/\n\.sidebar \{([\s\S]*?)\n\}/).match(/flex:\s*0 0 (\d+)px/)[1])
-  const inset = Number(block(/:root, \[data-theme="dark"\] \{([\s\S]*?)\n\}/).match(/--inset:\s*(\d+)px/)[1])
-  // The reserved scrollbar track: `scrollbar-gutter: stable` holds it open on every page, so it is
-  // part of the width arithmetic.
-  const gutter = Number(block(/::-webkit-scrollbar \{([^}]*)\}/).match(/width:\s*(\d+)px/)[1])
-
-  const availableAt = (viewport) => viewport - rail - inset * 2 - gutter
-  const columnsAt = (viewport) => {
-    const available = availableAt(viewport)
-    // The track is capped at the container, so a container narrower than the floor yields one
-    // full-width column rather than an overflow.
-    const min = Math.min(Math.max(floorWidth, available / 3 - thirdLess), available)
-    return Math.floor((available + gap) / (min + gap))
-  }
-
-  // Three tracks share two gaps, so each gives up two thirds of one.
-  it('takes each track\'s share of the gaps off its third', () => {
-    expect(thirdLess).toBe(Math.round(gap * 2 / 3))
+  it('takes its column count from --map-columns, three when unset', () => {
+    expect(gridRule).toMatch(/grid-template-columns:\s*repeat\(var\(--map-columns, 3\), minmax\(0, 1fr\)\)/)
   })
 
-  it('fills three columns at 1920x1080, the primary target, and never more at any width', () => {
-    expect(columnsAt(1920)).toBe(3)
-    for (const w of [2560, 3440, 3840]) expect(columnsAt(w), `${w}px exceeds three`).toBe(3)
-  })
-
-  it('still fills three at 1366x768, and degrades below three at 1024 without overflowing', () => {
-    expect(columnsAt(1366)).toBe(3)
-    const cols = columnsAt(1024)
-    expect(cols).toBeLessThan(3)
-    expect(cols).toBeGreaterThanOrEqual(1)
-    // The check that matters: whatever the count, the row still fits.
-    const used = cols * floorWidth + (cols - 1) * gap
-    expect(used).toBeLessThanOrEqual(availableAt(1024))
-  })
-
-  it('keeps at least one column at every width down to a phone', () => {
-    for (const w of [1920, 1600, 1440, 1366, 1280, 1024, 768, 480, 360]) {
-      expect(columnsAt(w), `${w}px yields no column`).toBeGreaterThanOrEqual(1)
-    }
-  })
-
-  // auto-fill, not auto-fit. With auto-fit a single area would stretch across the entire row and
-  // the grid would change shape as areas are added.
-  it('uses auto-fill so one area does not stretch across the row', () => {
-    expect(gridRule).toMatch(/auto-fill/)
-    expect(gridRule).not.toMatch(/auto-fit/)
+  it('collapses to one column on a narrow window', () => {
+    expect(APP_CSS).toMatch(/@media \(max-width: 900px\) \{\s*\.shopfloor-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/)
   })
 })
 
@@ -555,15 +501,7 @@ describe('sidebar warning tone', () => {
   })
 })
 
-/**
- * The KPI ribbon was a clickable 48px bar of figures above the shopfloor map, retired when the Site
- * Map became one view. This guard stops its stylesheet coming back and quietly re-enabling it.
- *
- * MOVED OUT OF THE TEST ABOVE, where it was one line with nothing to do with the sidebar's warning
- * tone: an unrelated page adding a `.kpi-` class failed a test named "colours a flagged item, and
- * never the current page", which says nothing about what was actually wrong or what to do about it.
- * Same assertion, somewhere it can explain itself.
- */
+/** The KPI ribbon above the Site Map is retired; its stylesheet must not come back. */
 describe('the retired KPI ribbon', () => {
   it('does not come back', () => {
     expect(APP_CSS).not.toMatch(/\.kpi-/)
@@ -571,10 +509,8 @@ describe('the retired KPI ribbon', () => {
 })
 
 /**
- * Shopfloor tile variants must out-specify the base tile. `.shopfloor-zone` sets `background` and
- * the `border` shorthand, so every variant that repaints any of those has to win against it;
- * single-class lane rules tie at 0-1-0 and lose to source order, and every rendering assertion
- * still passes.
+ * Each lane variant must repaint what `.site-lane` sets (its background and border), or the hue is
+ * lost while every rendering assertion still passes.
  */
 describe('Site Map lane hues', () => {
   // Each lane is one button with its own hue: blue for Site-Wide, grey for Simulated, amber for

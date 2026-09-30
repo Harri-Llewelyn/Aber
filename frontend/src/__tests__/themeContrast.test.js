@@ -73,7 +73,7 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
   const card = rgb(t['--bg-card'])
   const base = rgb(t['--bg-base'])
   const surface = rgb(t['--bg-surface'])
-  // .stat-card-alert lays rgba(255,179,0,0.07) over the card.
+  // The lightest amber tint (0.07) over the card: a margin case for text on any amber-tinted surface.
   const alertCard = tint([255, 179, 0], 0.07, card)
 
   /**
@@ -98,11 +98,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--text-muted on card',         '--text-muted',   card,      AA_TEXT],
     ['--text-muted on base',         '--text-muted',   base,      AA_TEXT],
     ['--text-muted on surface',      '--text-muted',   surface,   AA_TEXT],
-    // Sub-text on the stat cards -- the reported dark-mode legibility bug.
+    // Sub-text on a bare card or the page ground.
     ['--text-dim on card',           '--text-dim',     card,      AA_TEXT],
     ['--text-dim on base',           '--text-dim',     base,      AA_TEXT],
-    // The alert card tints its background, which costs contrast; its sub-text is stepped up
-    // to --text-muted precisely so this still clears AA.
+    // An amber tint costs contrast, so sub-text on it is --text-muted, which still clears AA.
     ['--text-muted on alert card',   '--text-muted',   alertCard, AA_TEXT],
     // Warning used as text must clear AA; --warning itself is only safe for borders and icons.
     // Warning text sits on an amber-tinted fill (.badge-warning at 0.15, the banners at 0.08 and
@@ -128,9 +127,8 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
     ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
-    // The two derived lanes tint their own ground, and `.zone-empty` is the only text that sits
-    // directly on it. It is set in --text-muted because --text-dim measures exactly 4.50:1 on a
-    // bare card, so any tint pushes it under AA.
+    // The two derived lanes tint their own ground; --text-muted is the text on it, because
+    // --text-dim measures exactly 4.50:1 on a bare card, so any tint pushes it under AA.
     ['--text-muted on site-wide lane', '--text-muted',  tint([0,212,255], 0.05, card),     AA_TEXT],
     ['--text-muted on unassigned lane','--text-muted',  tint([255,179,0], 0.06, card),     AA_TEXT],
 

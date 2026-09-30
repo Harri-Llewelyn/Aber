@@ -25,7 +25,7 @@ src/
 ├── components/
 │   ├── tabs/                one file per tab, lazy-loaded
 │   ├── modals/              detail and edit dialogs
-│   └── common/              ActionMenu, TagList, Model3DUploader, VocabularyPanel
+│   └── common/              TagList, Model3DUploader, VocabularyPanel
 ├── help/                    one markdown file per page, bundled -- see Contextual help
 ├── hooks/                   usePermissions, usePolling, useRealtimeTable, useToast, …
 ├── utils/                   pure, unit-tested derivations
@@ -290,7 +290,7 @@ supplies no release version, is not evidence of drift.
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins, one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its plan, its unplaced cells and its Area-Wide assets) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin |
-| `GatewaysTab` | **Launch UI** and **Edit** visible, the rest in an `ActionMenu`; **Restore replaces Edit** on an archived row |
+| `GatewaysTab` | **Launch UI** and **Edit** visible, the rest in the details drawer; **Restore replaces Edit** on an archived row |
 | `DevicesTab` | Quarantined devices render **in the onboarding queue banner only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. Two visible actions, not seven |
 | `SchemasTab` | Metric catalog, the standard-vocabulary reference card, and the schema registry. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `TelemetryTab` | Time-series viewer over the FDW view. A time window is required whenever a tag filter is active |
@@ -425,14 +425,7 @@ Two rules that were each learned from a real bug:
 - **Constrain cells holding variable-length data.** `.table-wrap` scrolls horizontally, so an
   unconstrained cell pushes the row's action buttons off-screen. This has bitten the quarantine
   queue twice.
-- **A popover in a table row must be portalled.** Same cause, third symptom: `.table-wrap` is
-  `overflow-x: auto`, so a menu positioned inside the row is clipped to a sliver. `ActionMenu`
-  renders into `document.body` at `position: fixed` — which is why it closes on scroll and resize
-  rather than trying to follow. Its `z-index` (900) sits under `.modal-overlay` (1000)
-  deliberately; a menu floating over an open modal is unreachable.
-- **Row actions belong in `common/ActionMenu.jsx`.** The Devices cell reached seven controls and
-  over half the row's width. Keep one or two primary actions visible; a menu item can also carry
-  *why* it is disabled, which reads far better than a greyed-out button.
+- **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
   cut — the entry that matters most is not the one that sorts first.
 
