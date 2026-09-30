@@ -9,6 +9,7 @@ import { LoadingState } from '../common/LoadingState'
 import { PageHeading } from '../common/PageHeading'
 import { SectionCount } from '../common/SectionCount'
 import { copyText } from '../common/CopyableId'
+import { formatDateTime } from '../../utils/format'
 
 /**
  * Whether a browser can open this endpoint: an http(s) scheme and a host that is not a single-label
@@ -365,13 +366,21 @@ function ServiceTable({ rows, onNotify }) {
 export function DirectoryTab({ showToast }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
+  // The latest read's failure, cleared by the next success; `lastGoodAt` is when `services` was read.
+  const [loadError, setLoadError] = useState(null)
+  const [lastGoodAt, setLastGoodAt] = useState(null)
 
   const loadAll = useCallback(async (signal) => {
     try {
       setServices(await api.get('/api/v1/directory', { signal }))
+      setLastGoodAt(new Date())
+      setLoadError(null)
       setLoading(false)
     } catch (e) {
-      if (e.name !== 'AbortError') setLoading(false)
+      if (e.name !== 'AbortError') {
+        setLoadError(e.message || 'The request failed.')
+        setLoading(false)
+      }
       // Rethrown so usePolling can back off on a failing backend rather than hammering it.
       throw e
     }
@@ -400,6 +409,12 @@ export function DirectoryTab({ showToast }) {
             existed for. */}
         {loading ? (
           <div className="card"><LoadingState label="directory" /></div>
+        ) : loadError && !lastGoodAt ? (
+          <div className="card">
+            <div className="callout callout-danger">
+              {`The directory could not be read: ${loadError}`}
+            </div>
+          </div>
         ) : groups.length === 0 ? (
           <div className="card">
             <EmptyState
@@ -407,7 +422,13 @@ export function DirectoryTab({ showToast }) {
               message="No services are registered in the directory."
             />
           </div>
-        ) : groups.map(g => (
+        ) : (<>
+          {loadError && (
+            <div className="callout callout-warning">
+              {`The latest read of the directory failed (${loadError}). The list is as of ${formatDateTime(lastGoodAt)}.`}
+            </div>
+          )}
+          {groups.map(g => (
           <div className="card directory-group" key={g.title}>
             <div className="card-header">
               <h3 className="section-title">
@@ -418,7 +439,8 @@ export function DirectoryTab({ showToast }) {
             </div>
             <ServiceTable rows={g.rows} onNotify={showToast} />
           </div>
-        ))}
+          ))}
+        </>)}
       </div>
     </div>
   )

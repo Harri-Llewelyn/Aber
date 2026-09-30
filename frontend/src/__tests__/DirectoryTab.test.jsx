@@ -407,6 +407,50 @@ describe('DirectoryTab refresh', () => {
   })
 })
 
+describe('DirectoryTab read failures', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => { vi.useRealTimers() })
+
+  it('shows the error, not the empty message, when the first read fails', async () => {
+    api.get.mockRejectedValue(new Error('PostgREST is unreachable'))
+    render(<DirectoryTab showToast={vi.fn()} />)
+
+    expect(await screen.findByText(/could not be read: PostgREST is unreachable/)).toBeInTheDocument()
+    expect(document.querySelector('.card .callout-danger')).not.toBeNull()
+    expect(screen.queryByText(/No services are registered/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the last rows and says they may be out of date when a later poll fails, then clears on recovery', async () => {
+    api.get.mockResolvedValue(SERVICES)
+    await renderTab()
+    expect(document.querySelector('.callout')).toBeNull()
+
+    api.get.mockRejectedValue(new Error('gateway timeout'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+
+    expect(await screen.findByText(/latest read of the directory failed .gateway timeout./)).toBeInTheDocument()
+    expect(document.querySelector('.callout-warning')).not.toBeNull()
+    expect(document.querySelector('.callout-danger')).toBeNull()
+    expect(document.querySelector('tbody tr')).toBeTruthy()
+
+    api.get.mockResolvedValue(SERVICES)
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+    await waitFor(() => expect(document.querySelector('.callout')).toBeNull())
+    expect(document.querySelector('tbody tr')).toBeTruthy()
+  })
+
+  it('still says no services are registered for a successful empty read', async () => {
+    api.get.mockResolvedValue([])
+    render(<DirectoryTab showToast={vi.fn()} />)
+    expect(await screen.findByText(/No services are registered/)).toBeInTheDocument()
+    expect(document.querySelector('.callout')).toBeNull()
+  })
+})
+
 /**
  * Every fixture carries a `localhost` address and jsdom serves tests from `http://localhost:3000`,
  * so `viewerIsOnDeploymentHost` is true for all of them and the exposure column's case has to be
