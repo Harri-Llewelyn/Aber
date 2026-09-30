@@ -19,6 +19,7 @@ import { HelpTip } from '../common/HelpTip'
 import { PageHeading } from '../common/PageHeading'
 import { Badge } from '../common/Badge'
 import { SectionCount } from '../common/SectionCount'
+import { TabStrip } from '../common/TabStrip'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -445,30 +446,16 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
             {/* The subject switch lives in the header because it changes what is listed rather than
                 narrowing it. */}
-            <div
-              role="tablist"
-              aria-label="Capture subject"
-              style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}
-            >
-              <button
-                role="tab"
-                aria-selected={subjectKind === 'gateway'}
-                className={`btn btn-sm ${subjectKind === 'gateway' ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => { setSubjectKind('gateway'); setSelectedId(null) }}
-                title="Record everything one gateway publishes, every device beneath it included"
-              >
-                Gateways <span className="section-count">{gateways.length}</span>
-              </button>
-              <button
-                role="tab"
-                aria-selected={subjectKind === 'device'}
-                className={`btn btn-sm ${subjectKind === 'device' ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => { setSubjectKind('device'); setSelectedId(null) }}
-                title="Record one device, plus its gateway's birth certificate"
-              >
-                Devices <span className="section-count">{devices.length}</span>
-              </button>
-            </div>
+            <TabStrip
+              ariaLabel="Capture subject"
+              placement="card"
+              value={subjectKind}
+              onChange={kind => { setSubjectKind(kind); setSelectedId(null) }}
+              tabs={[
+                { id: 'gateway', label: 'Gateways', count: gateways.length, title: 'Record everything one gateway publishes, every device beneath it included' },
+                { id: 'device', label: 'Devices', count: devices.length, title: "Record one device, plus its gateway's birth certificate" },
+              ]}
+            />
           </div>
 
           <div className="card-body">

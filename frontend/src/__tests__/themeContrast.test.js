@@ -396,6 +396,15 @@ describe('type scale floor', () => {
     expect(APP_CSS.match(/\n\.mono \{([\s\S]*?)\n\}/)[1]).toMatch(/var\(--font-mono\)/)
     expect(APP_CSS).toMatch(/--font-mono:\s*'JetBrains Mono'/)
   })
+
+  // The two faces are written once, as tokens; every font-family elsewhere reads them.
+  it('writes no literal font stack outside the token definitions', () => {
+    const outside = APP_CSS.replace(/--font-(?:mono|display):[^;]*;/g, '')
+    expect(outside).not.toMatch(/Outfit|JetBrains/)
+    const families = [...outside.matchAll(/font-family:\s*([^;]+);/g)].map(m => m[1].trim())
+    expect(families.length).toBeGreaterThan(10)
+    for (const f of families) expect(f).toMatch(/^(var\(--font-(display|mono)\)|inherit)$/)
+  })
 })
 
 /**
