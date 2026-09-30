@@ -224,6 +224,8 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     api.get.mockImplementation(routeGet({ gateways: [looseGw], cells: [], devices: [] }))
     await renderSiteMap()
     expect(lanes()[2].querySelector('.site-lane-counts').textContent.trim()).toBe('1 Gateway · 0 Devices')
+    // A narrow card shows only the icon, so the button names the lane and its tally itself.
+    expect(lanes()[2]).toHaveAttribute('aria-label', 'Unassigned: 1 gateway, 0 devices')
   })
 
   it('opens a lane into the details panel listing its assets, one lane at a time', async () => {
@@ -324,7 +326,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
   it('opens an area from its name, listing what its plan cannot show', async () => {
     await renderSiteMap()
     fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'North Shop' }))
-    expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
+    expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
     // Area-Wide has no place on any plan, so the panel is where it lives.
     expect(within(panel()).getByText('BMS_A')).toBeInTheDocument()
     // Everything in A is placed, so nothing is listed as unplaced.
@@ -343,11 +345,11 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
   it('opens the area from the card itself, and leaves a pin to its own cell', async () => {
     await renderSiteMap()
     fireEvent.click(areaCards()[0].querySelector('.area-plan'))
-    expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
+    expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
 
     // A pin stops its own click, so the cell wins over the area behind it.
     fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' }))
-    expect(within(panel()).queryByText('2 Cells · 2 Devices')).toBeNull()
+    expect(within(panel()).queryByText('2 Cells · 1 Gateway · 2 Devices')).toBeNull()
     expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
 
     // And the name still closes what it opened, rather than the card reopening it behind.

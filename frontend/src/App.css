@@ -2156,17 +2156,17 @@ td.row-actions, th.row-actions {
 .site-hierarchy-sep { color: var(--text-dim); }
 
 /* ===== The Site Map card: the three lanes, side by side across the width ===== */
-/* One track each so the three always share the width evenly; below 720px they stack. Each lane is
-   a button that opens the panel, so the whole strip is the target. */
+/* The lanes and the area grid are laid out against the card's body, not the window: a drawer
+   docked beside the page narrows the card without narrowing the window. */
+.site-map-body { container: site-map / inline-size; }
+
+/* One track each so the three always share the width evenly. Each lane is a button that opens the
+   panel, so the whole strip is the target. */
 .site-lanes {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
-}
-
-@media (max-width: 720px) {
-  .site-lanes { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Each lane keeps its own hue: blue is the infrastructure signal, grey is what not to trust, amber
@@ -2235,9 +2235,23 @@ td.row-actions, th.row-actions {
 /* The open lane is the one the panel shows: the same outline the selected pin gets. */
 .site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* As the card narrows a lane drops its counts, then its name, down to the dot and the icon. The
+   lane's panel lists what it holds, and the button's aria-label and title still name it. After the
+   lane rules, which set the padding these narrow. */
+@container site-map (max-width: 800px) {
+  .site-lane-counts { display: none; }
+}
+
+@container site-map (max-width: 440px) {
+  .site-lane { justify-content: center; padding-left: 6px; padding-right: 6px; }
+  .site-lane-name { display: none; }
+}
+
 /* ===== The Site Map card: area plans and pins ===== */
-/* Area cards sit in the tracks of `.shopfloor-grid`. */
+/* Area cards sit in the tracks of `.shopfloor-grid`. Each is a container so its header can drop
+   the counts when the card itself is narrow, whatever the window or the column count. */
 .area-card {
+  container: area-card / inline-size;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2291,8 +2305,14 @@ td.row-actions, th.row-actions {
    thing a flex row would squeeze when a long area name takes the line. */
 .area-card-header .help-tip { flex-shrink: 0; margin-left: 0; }
 
-/* The counts keep the right-hand end whether they share the name's line or take one below it. */
-.area-card-counts { flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+/* The counts keep the right-hand end whether they share the name's line or take one below it. On
+   a line of their own they wrap rather than overflow the card. */
+.area-card-counts { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+
+/* A card too narrow for the counts drops them: the area's panel gives the same tally. */
+@container area-card (max-width: 240px) {
+  .area-card-counts { display: none; }
+}
 
 /* The area's own assets, in the same line as the rest. Marked so the breakdown reads as one. */
 .area-card-wide { color: var(--text-primary); }
@@ -2335,8 +2355,8 @@ td.row-actions, th.row-actions {
 .area-card-aside-warn { color: var(--warning-text); }
 
 /* The grid is the map, so it follows the number of areas rather than a fixed minimum width: one
-   area takes the row, two split it, three or more settle on thirds. Below the breakpoint every
-   area takes the row, whatever the count. */
+   area takes the row, two split it, three or more settle on thirds. On a card under 760px wide
+   every area takes the row, whatever the count. */
 .shopfloor-grid {
   display: grid;
   grid-template-columns: repeat(var(--map-columns, 3), minmax(0, 1fr));
@@ -2344,7 +2364,7 @@ td.row-actions, th.row-actions {
   align-items: start;
 }
 
-@media (max-width: 900px) {
+@container site-map (max-width: 760px) {
   .shopfloor-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -3580,10 +3600,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .help-missing { color: var(--text-muted); font-style: italic; }
 
-/* Below this the drawer would leave the table too little room to be worth reading. It becomes an
-   overlay instead -- still not modal, still dismissible, but no longer stealing half the list. */
-/* Below 800px there is no room for the drawer beside the list, so it slides over the page. Above
-   that it keeps its column: at half a 1080p screen the list still gets about 540px beside it. */
+/* Below 800px there is no room for the drawer beside the list, so it slides over the page, still
+   not modal and still dismissible. Above that it keeps its column: at half a 1080p screen the list
+   still gets about 540px beside it. */
 @media (max-width: 800px) {
   .context-panel-open {
     position: fixed;
