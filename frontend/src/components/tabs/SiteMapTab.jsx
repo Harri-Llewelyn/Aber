@@ -458,6 +458,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const unplaced = areaCells.filter(c => !isPlaced(c))
     const wide = areaWideOf(selectedArea)
     const devices = [...areaCells.flatMap(cellDevicesOf), ...wide.devices]
+    const gateways = [...areaCells.flatMap(cellGatewaysOf), ...wide.gateways]
     const state = stateOf(devices)
     return {
       type: 'AREA',
@@ -465,7 +466,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       subtitle: (
         <>
           {stateBadge(state, devices)}
-          <Badge size="sm">{plural(areaCells.length, 'Cell')} · {plural(devices.length, 'Device')}</Badge>
+          {/* The card's own tally, which a narrow card drops. */}
+          <Badge size="sm">{plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}</Badge>
         </>
       ),
       fields: [
@@ -625,7 +627,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             )}
           />
 
-          <div className="card-body">
+          <div className="card-body site-map-body">
             {loading ? <LoadingState label="site map" /> : (
               <>
                 {/* The rungs: enterprise, then site. */}
@@ -652,6 +654,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                     const status = stateOf(laneAssets).status
                     const LaneIcon = lane.icon
                     const holds = laneAssets.length + laneGateways.length > 0
+                    // A narrow card hides the name and the counts, so the button says them itself.
+                    const tally = `${lane.title}: ${plural(laneGateways.length, 'gateway')}, ${plural(laneAssets.length, 'device')}`
                     return (
                       <button
                         key={lane.key}
@@ -661,7 +665,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                         className={`site-lane ${lane.className}${holds ? '' : ' is-empty'}${open ? ' is-open' : ''}`}
                         onClick={() => toggleLane(lane.key)}
                         aria-pressed={open}
-                        title={`${lane.hint} ${open ? 'Click to close.' : 'Click to list its assets.'}`}
+                        aria-label={tally}
+                        title={`${tally}. ${lane.hint} ${open ? 'Click to close.' : 'Click to list its assets.'}`}
                       >
                         {/* No dot on an empty lane: grey next to zero says nothing. */}
                         {holds && <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />}

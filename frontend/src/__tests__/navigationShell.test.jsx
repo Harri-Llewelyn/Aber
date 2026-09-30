@@ -477,7 +477,7 @@ describe('Merged navigation shell', () => {
 
 /**
  * The area cards: one track per column, --map-columns of them (three when unset), and one
- * column below 900px. The Site Map sets --map-columns from the number of areas.
+ * column on a card under 760px. The Site Map sets --map-columns from the number of areas.
  */
 describe('area card grid', () => {
   const gridRule = APP_CSS.match(/\n\.shopfloor-grid \{([\s\S]*?)\n\}/)[1]
@@ -486,8 +486,19 @@ describe('area card grid', () => {
     expect(gridRule).toMatch(/grid-template-columns:\s*repeat\(var\(--map-columns, 3\), minmax\(0, 1fr\)\)/)
   })
 
-  it('collapses to one column on a narrow window', () => {
-    expect(APP_CSS).toMatch(/@media \(max-width: 900px\) \{\s*\.shopfloor-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+  it('collapses to one column on a narrow card, not a narrow window', () => {
+    // A docked drawer narrows the card while the window stays wide, so the breakpoint is the card's.
+    expect(APP_CSS).toMatch(/\.site-map-body \{ container: site-map \/ inline-size; \}/)
+    expect(APP_CSS).toMatch(/@container site-map \(max-width: 760px\) \{\s*\.shopfloor-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+    expect(APP_CSS).not.toMatch(/@media[^{]*\{\s*\.shopfloor-grid/)
+  })
+
+  it('drops an area card\'s counts when the card itself is narrow', () => {
+    expect(APP_CSS).toMatch(/\.area-card \{\s*container: area-card \/ inline-size;/)
+    expect(APP_CSS).toMatch(/@container area-card \(max-width: 240px\) \{\s*\.area-card-counts \{ display: none; \}/)
+    // On a line of its own the tally wraps rather than overflowing the card.
+    const counts = APP_CSS.match(/\.area-card-counts \{([^}]*)\}/)[1]
+    expect(counts).not.toMatch(/flex-shrink:\s*0/)
   })
 })
 
@@ -546,6 +557,13 @@ describe('Site Map lane hues', () => {
   it('lays the three lanes side by side across the full width', () => {
     const lanes = APP_CSS.match(/\.site-lanes \{([\s\S]*?)\n\}/)[1]
     expect(lanes).toMatch(/grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/)
+  })
+
+  it('narrows to the icons on a narrow card rather than stacking or overflowing', () => {
+    // The counts go first, then the names; the three stay side by side at every width.
+    expect(APP_CSS).toMatch(/@container site-map \(max-width: 800px\) \{\s*\.site-lane-counts \{ display: none; \}/)
+    expect(APP_CSS).toMatch(/@container site-map \(max-width: 440px\) \{[^}]*\}\s*\.site-lane-name \{ display: none; \}/)
+    expect(APP_CSS).not.toMatch(/@media[^{]*\{\s*\.site-lanes/)
   })
 })
 
