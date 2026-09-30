@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import {
   SCOPE_AREA_WIDE, SOURCE_AREA_WIDE, groupCellsByArea, groupDevicesByCell
@@ -16,6 +16,14 @@ import { patchFromForm, formFromPatch, submitProposal } from '../../utils/propos
 import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { HelpTip } from '../common/HelpTip'
+import { Badge, ArchivedBadge } from '../common/Badge'
+import { SectionCount } from '../common/SectionCount'
+import { SearchInput } from '../common/SearchInput'
+import { ClearFilters } from '../common/ClearFilters'
+import { LoadingState } from '../common/LoadingState'
+import { EmptyState } from '../common/EmptyState'
+import { Modal } from '../common/Modal'
+import { plural } from '../../utils/format'
 import { AreaPlanPanel } from '../common/AreaPlanPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
@@ -29,18 +37,16 @@ import {
   IconBookOpen,
   IconShieldAlert,
   IconRadio,
-  IconCpu,
-  IconX
+  IconCpu
 } from '../common/Icons'
 
 /**
  * The ISA-95 areas: the parts of the one site. A cell files into at most one; the page's job
- * is to get every cell filed, so the unfiled cells sit in a banner above the card, as the Cells
- * and Gateways pages report their unfinished business, and the area rows are drop targets. The
- * banner is gone once the queue drains; a cell leaves its area from its own form on the Cells
- * page, or by being dragged onto another area. Devices are not filed here: a device's area is its
- * cell's, or its own when it is Area-Wide, which is set on the Devices page. An area's plan is
- * managed from its details panel.
+ * is to get every cell filed, so the unfiled cells sit in a banner above the card, and the area
+ * rows are drop targets. The banner is gone once the queue drains, and is itself the drop target
+ * that takes a cell out of its area; a cell also leaves its area from its own form on the Cells
+ * page. Devices are not filed here: a device's area is its cell's, or its own when it is
+ * Area-Wide, which is set on the Devices page. An area's plan is managed from its details panel.
  */
 export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewTrail, hasPermission, initialSearchFilter, onClearFilter }) {
   const [areas, setAreas]       = useState([])
@@ -49,17 +55,15 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [gateways, setGateways] = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
-  useEscapeKey(() => setShowForm(false), showForm)
+  const [formError, setFormError] = useState(null)
   const [editing, setEditing]   = useState(null)
-  /* The area whose links are open. `links.entity_type` is the singular noun and carries no CHECK,
-     so an area's links need no migration -- the same RLS and the same `link:manage` serve them. */
+  // The area whose links are open.
   const [docsForArea, setDocsForArea] = useState(null)
 
   const blank = { area_name: '', description: '', icon: DEFAULT_AREA_ICON }
   const [formVal, setFormVal]   = useState(blank)
-  // Archive, never delete, from this page: the delete is the Archived Entities page's, as it is
-  // for cells, gateways and devices. Archived areas are filtered out of the table by default and
-  // shown, muted, under their own filter.
+  // Archive, never delete, from this page: the delete is the Archived Entities page's. The table
+  // opens on Active; archived areas are shown, tinted, under the lifecycle filter.
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [filterMode, setFilterMode] = useState('active')
   const [searchQuery, setSearchQuery] = useState(() => {
@@ -82,8 +86,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   const loadAll = useCallback(async (signal) => {
     try {
-      // Cells come from their own endpoint rather than the areas embed: the embed carries no
-      // gateways, and the page reads a cell's gateway count for its chip.
+      // Cells come from their own endpoint, as the Cells page reads them.
       const [ar, c, a, g] = await Promise.all([
         api.get('/api/v1/areas', { signal }),
         api.get('/api/v1/cells', { signal }),
@@ -127,6 +130,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   // Every control that is off its default: the lifecycle select opens on Active.
   const activeFilterCount = (searchQuery ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
 
+  const openForm = (area, seed) => {
+    setEditing(area); setFormVal(seed); setFormError(null); setShowForm(true)
+  }
+
   const save = async () => {
     try {
       /* THE FORK IS AT THE END, not at the beginning: the fields and their validation are shared,
@@ -148,7 +155,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       if (editing) await api.put(`/api/v1/areas/${editing.area_id}`, formVal)
       else         await api.post('/api/v1/areas', formVal)
       setShowForm(false); loadAll(); showToast(editing ? 'Area saved' : 'Area created', 'success')
-    } catch (e) { showToast(e.message, 'error') }
+    } catch (e) { setFormError(e.message) }
   }
 
   /**
@@ -208,6 +215,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const areaWideDevices = (areaId) => assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === areaId)
   const areaWideGateways = (areaId) => gateways.filter(g => g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
 
+  // The lifecycle select scopes the list; the count reads scope-size, or `shown / scope` under a search.
+  const inLifecycle = areas.filter(a =>
+    filterMode === 'all' || (filterMode === 'archived' ? a.is_archived : !a.is_archived))
   const filteredAreas = areas.filter(a => {
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
@@ -245,45 +255,48 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   )
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
 
       {/* Above the card: the queue this page exists to drain, and the first thing worth knowing
           on arrival. Also the drop target for taking a cell out of its area. */}
       {unfiled.length > 0 && (
         <div
-          style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}
+          className="callout callout-warning callout-page"
           onDragOver={handleDragOver}
           onDrop={e => handleDrop(e, null)}
           title={canManage ? 'Drop a cell here to take it out of its area' : undefined}
         >
-          <IconShieldAlert size={18} style={{ flexShrink: 0 }} />
-          <strong>{unfiled.length} unfiled cell{unfiled.length === 1 ? '' : 's'}:</strong>
-          {unfiled.map(cellChip)}
-          <span style={{ color: 'var(--text-muted)' }}>
-            {canManage ? 'Drag each onto an area below.' : 'File them from the Cells page.'}
-          </span>
+          <IconShieldAlert size={18} className="callout-icon" />
+          <div>
+            <strong>{plural(unfiled.length, 'unfiled cell')}:</strong>{' '}
+            {unfiled.map(cellChip)}{' '}
+            <span className="cell-meta">
+              {canManage ? 'Drag each onto an area below.' : 'File them from the Cells page.'}
+            </span>
+          </div>
         </div>
       )}
 
-      <div className="card">
+      <div className="card card-fill">
         <div className="card-header">
           <h3 className="section-title">
             Areas
             <HelpTip
               label="About areas"
-              text="The ISA-95 level between the site and its cells: one part of the campus, such as a building. Cells are filed into areas so the Unified Namespace can say where a reading came from."
+              text="The ISA-95 level between the site and its cells: one part of the campus, such as a hall or a yard. Cells are filed into areas so the Unified Namespace can say where a reading came from."
             />
+            <SectionCount total={inLifecycle.length} shown={filteredAreas.length} />
           </h3>
-          <button
-            className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
-            style={{ marginLeft: 'auto' }}
-            disabled={!canManage}
-            onClick={() => canManage && (setEditing(null), setFormVal(blank), setShowForm(true))}
-            title={!canManage ? 'Requires Admin permissions' : 'Add an area'}
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canManage}
+            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
+            title="Add an area"
+            onClick={() => openForm(null, blank)}
           >
             <IconPlus size={14} /> New Area
-          </button>
+          </ActionButton>
         </div>
 
         <div className="card-body">
@@ -291,48 +304,35 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             {/* Lifecycle is a filter like the rest, as it is on the Cells page; the counts are in
                 the option labels. */}
             <select
-              className="form-control"
-              style={{ width: '150px' }}
+              className="form-control control-sm"
               value={filterMode}
               onChange={e => setFilterMode(e.target.value)}
               title="Filter by lifecycle state"
+              aria-label="Lifecycle"
             >
               <option value="all">All ({areas.length})</option>
               <option value="active">Active ({areas.filter(a => !a.is_archived).length})</option>
               <option value="archived">Archived ({areas.filter(a => a.is_archived).length})</option>
             </select>
-            <input
-              className="form-control"
-              style={{ width: '220px' }}
+            <SearchInput
               value={searchQuery}
-              onChange={e => { const v = e.target.value; v ? setSearchQuery(v) : clearSearch() }}
+              onChange={v => (v ? setSearchQuery(v) : clearSearch())}
               placeholder="Search by area ID or name…"
-              title="Filter areas by ID or name"
+              ariaLabel="Search areas"
             />
-            {/* The same control the other asset pages carry, worded and counted the same way. */}
-            {activeFilterCount > 0 && (
-              <button
-                className="btn btn-ghost btn-sm filter-bar-spacer"
-                onClick={() => { clearSearch(); setFilterMode('active') }}
-                title="Clear every filter"
-              >
-                <IconX size={13} /> Clear filters ({activeFilterCount})
-              </button>
-            )}
+            <ClearFilters count={activeFilterCount} onClear={() => { clearSearch(); setFilterMode('active') }} />
           </div>
         </div>
 
         {loading ? (
-          <div className="loading-wrap"><div className="spinner" /> Loading areas…</div>
+          <LoadingState label="areas" />
         ) : filteredAreas.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon"><IconFactory size={36} /></div>
-            <div className="empty-text">
-              {areas.length === 0
-                ? 'No areas yet. Add one, then file the cells into it.'
-                : 'No areas match the filters.'}
-            </div>
-          </div>
+          <EmptyState
+            icon={<IconFactory size={36} />}
+            filtered={areas.length > 0}
+            message="No areas yet. Add one, then file the cells into it."
+            filteredMessage="No areas match these filters."
+          />
         ) : (
           <div className="table-wrap">
             <table>
@@ -353,8 +353,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                   return (
                     <tr
                       key={a.area_id}
-                      className={`row-selectable${selectedId === a.area_id ? ' row-selected' : ''}`}
-                      style={{ background: a.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
+                      className={`row-selectable${selectedId === a.area_id ? ' row-selected' : ''}${a.is_archived ? ' row-archived' : ''}`}
                       onClick={rowSelectHandler(() => setSelectedId(id => id === a.area_id ? null : a.area_id))}
                       onDragOver={handleDragOver}
                       onDrop={e => handleDrop(e, a.area_id)}
@@ -364,33 +363,31 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                       <td>
                         <strong>{a.area_name}</strong>
                         {a.is_archived && (
-                          <span className="badge badge-warning" style={{ marginLeft: '8px', fontSize: '11px' }} title="Archived: out of commission, its cells still filed here, its topics unchanged">
-                            <IconArchive size={11} /> ARCHIVED
-                          </span>
+                          <ArchivedBadge size="sm" className="badge-follow" title="Archived: out of commission, its cells still filed here, its topics unchanged" />
                         )}
-                        {a.description && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{a.description}</div>}
+                        {a.description && <div className="cell-meta">{a.description}</div>}
                       </td>
                       <td>
-                        <span className="badge badge-neutral" title={a.plan_path ? 'An SVG plan is uploaded for this area' : 'No plan uploaded; the Site Map draws the default outline'}>
-                          {a.plan_path ? 'Plan' : 'Outline'}
-                        </span>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                          {placed === 0 ? 'No cells placed' : `${placed} cell${placed === 1 ? '' : 's'} placed`}
+                        <Badge size="sm" title={a.plan_path ? 'An SVG plan is uploaded for this area' : 'No plan uploaded; the Site Map draws the default outline'}>
+                          {a.plan_path ? 'Plan' : 'Default outline'}
+                        </Badge>
+                        <div className="cell-meta">
+                          {placed === 0 ? 'No cells placed' : `${plural(placed, 'cell')} placed`}
                         </div>
                       </td>
                       <td>
                         {areaCells.length === 0 ? (
-                          <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No cells filed here</span>
+                          <span className="cell-meta">No cells filed here</span>
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <div className="context-device-list">
                             {areaCells.map(cellChip)}
                           </div>
                         )}
                       </td>
                       <td>
-                        <span className="badge badge-neutral" title="Devices resolving to a cell in this area">{deviceCountOf(areaCells)}</span>
+                        <Badge size="sm" title="Devices resolving to a cell in this area">{deviceCountOf(areaCells)}</Badge>
                         {wide > 0 && (
-                          <span className="badge badge-neutral" style={{ marginLeft: '6px' }} title="Area-Wide assets: filed in the area rather than in any one cell">+{wide} area-wide</span>
+                          <Badge size="sm" className="badge-follow" title="Area-Wide assets: filed in the area rather than in any one cell">+{wide} Area-Wide</Badge>
                         )}
                       </td>
                     </tr>
@@ -403,57 +400,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       </div>
 
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-title">{editing ? 'Edit Area' : 'New Area'}</div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="area-name">Area Name</label>
-              <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Building 3" title="The area's name. It becomes a topic segment, so no / + or #" />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                Becomes the <span className="mono">&lt;area&gt;</span> segment of every <span className="mono">uns/</span> topic beneath it, so it cannot contain <span className="mono">/</span>, <span className="mono">+</span> or <span className="mono">#</span>.
-              </div>
-            </div>
-            <div className="form-group">
-              {/* A grid of buttons, as the cell form has: the choice is visual. */}
-              <label className="form-label">Area Icon</label>
-              <div className="icon-picker" role="radiogroup" aria-label="Area icon">
-                {AREA_ICONS.map(({ key, label, Icon }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    role="radio"
-                    aria-checked={(formVal.icon || DEFAULT_AREA_ICON) === key}
-                    className={`icon-picker-option ${(formVal.icon || DEFAULT_AREA_ICON) === key ? 'is-selected' : ''}`}
-                    onClick={() => setFormVal(f => ({ ...f, icon: key }))}
-                    title={label}
-                  >
-                    <Icon size={20} />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="area-description">Description (Optional)</label>
-              <input id="area-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. North campus, machining and assembly" />
-            </div>
-            {/* The rationale, only when proposing: it is written to an approver who has not stood
-                in front of the area and does not know why this was asked for. */}
-            {proposeMode && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="area-propose-rationale">Why (optional)</label>
-                <textarea
-                  id="area-propose-rationale"
-                  className="form-control"
-                  rows={2}
-                  value={formVal.__rationale || ''}
-                  onChange={e => setFormVal(f => ({ ...f, __rationale: e.target.value }))}
-                  placeholder="What prompted this — an approver sees it beside the change"
-                />
-              </div>
-            )}
-            <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel">Cancel</button>
+        <Modal
+          title={editing ? 'Edit Area' : 'New Area'}
+          onClose={() => { setShowForm(false); setEditingProposal(null) }}
+          error={formError}
+          footer={
+            <>
+              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving}>Cancel</button>
               <ActionButton
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
@@ -467,9 +420,56 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
+            </>
+          }
+        >
+          <div className="form-group">
+            <label className="form-label" htmlFor="area-name">Area Name</label>
+            <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" title="The area's name. It becomes a topic segment, so no / + or #" />
+            <div className="form-hint">
+              Becomes the <span className="mono">&lt;area&gt;</span> segment of every <span className="mono">uns/</span> topic beneath it, so it cannot contain <span className="mono">/</span>, <span className="mono">+</span> or <span className="mono">#</span>.
             </div>
           </div>
-        </div>
+          <div className="form-group">
+            {/* A grid of buttons, as the cell form has: the choice is visual. */}
+            <label className="form-label">Area Icon</label>
+            <div className="icon-picker" role="radiogroup" aria-label="Area icon">
+              {AREA_ICONS.map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="radio"
+                  aria-checked={(formVal.icon || DEFAULT_AREA_ICON) === key}
+                  className={`icon-picker-option ${(formVal.icon || DEFAULT_AREA_ICON) === key ? 'is-selected' : ''}`}
+                  onClick={() => setFormVal(f => ({ ...f, icon: key }))}
+                  title={label}
+                >
+                  <Icon size={20} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="area-description">Description (Optional)</label>
+            <input id="area-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Machining and assembly, north side" />
+          </div>
+          {/* The rationale, only when proposing: it is written to an approver who has not stood
+              in front of the area and does not know why this was asked for. */}
+          {proposeMode && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="area-propose-rationale">Why (optional)</label>
+              <textarea
+                id="area-propose-rationale"
+                className="form-control"
+                rows={2}
+                value={formVal.__rationale || ''}
+                onChange={e => setFormVal(f => ({ ...f, __rationale: e.target.value }))}
+                placeholder="What prompted this — an approver sees it beside the change"
+              />
+            </div>
+          )}
+        </Modal>
       )}
 
       {archiveTarget && (
@@ -498,9 +498,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         onCopy={showToast}
         title={selectedArea?.area_name || ''}
         subtitle={selectedArea && (
-          <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-            {selectedCells.length} CELL{selectedCells.length === 1 ? '' : 'S'} / {deviceCountOf(selectedCells)} DEV
-          </span>
+          <Badge size="sm">{plural(selectedCells.length, 'Cell')} · {plural(deviceCountOf(selectedCells), 'Device')}</Badge>
         )}
         fields={selectedArea ? [
           { label: 'Area UUID', value: selectedArea.area_id, mono: true, copyable: true },
@@ -539,26 +537,24 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           {
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
             onClick: () => {
-              setEditing(selectedArea)
               // Seeded with the open proposal's patch when there is one: one open proposal per
               // asset per person, so a second field extends the request.
               const mine = proposeMode
                 ? openProposals.find(pr => pr.entity_type === 'areas' && pr.entity_id === selectedArea.area_id)
                 : null
               setEditingProposal(mine || null)
-              setFormVal({
+              openForm(selectedArea, {
                 area_name: selectedArea.area_name,
                 description: selectedArea.description || '',
                 icon: selectedArea.icon || DEFAULT_AREA_ICON,
                 ...formFromPatch('area', mine?.patch)
               })
-              setShowForm(true)
             },
             disabled: !canManage && !canPropose,
             title: proposeMode
               ? 'Ask for a change to this area — an approver applies it, or says why not'
               : !canManage
-                ? 'Requires Admin permissions'
+                ? requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)
                 : 'Rename or describe this area'
           },
           canReadTrail && {
@@ -567,8 +563,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             title: 'Open the immutable audit trace for this area'
           },
           {
-            // An area's own documents: a site plan, a fire strategy, the register for the building.
-            // Attached directly, like every other asset's -- there is no proposal lane for a link.
+            // Attached directly: there is no proposal lane for a link.
             label: 'Attached Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForArea(selectedArea),
             title: 'Attach or edit links for this area — documents, a site plan, any URL'
@@ -580,7 +575,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               label: 'Restore Area', icon: <IconRefreshCw size={13} />,
               onClick: () => restoreArea(selectedArea),
               disabled: !canArchive,
-              title: !canArchive ? 'Requires Admin permissions' : 'Return this area to service; its retention timer is cleared'
+              title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Return this area to service; its retention timer is cleared'
             }
             : {
               label: 'Archive Area', icon: <IconArchive size={13} />,
@@ -588,7 +583,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               disabled: !canArchive,
               danger: true,
               title: !canArchive
-                ? 'Requires Admin permissions'
+                ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
                 : 'Take this area out of commission. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
             }
         ].filter(Boolean) : []}

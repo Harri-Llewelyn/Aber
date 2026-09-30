@@ -489,7 +489,7 @@ describe('AreasTab files cells into areas', () => {
     expect(within(rowA).getByText('Plan')).toBeInTheDocument()
     expect(within(rowA).getByText('2 cells placed')).toBeInTheDocument()
     const rowB = rowFor('Building B')
-    expect(within(rowB).getByText('Outline')).toBeInTheDocument()
+    expect(within(rowB).getByText('Default outline')).toBeInTheDocument()
     expect(within(rowB).getByText('No cells placed')).toBeInTheDocument()
   })
 
@@ -515,7 +515,7 @@ describe('AreasTab files cells into areas', () => {
     await renderAreas()
     const rowA = rowFor('Building A')
     expect(within(rowA).getByText('1')).toBeInTheDocument()
-    expect(within(rowA).getByText('+1 area-wide')).toBeInTheDocument()
+    expect(within(rowA).getByText('+1 Area-Wide')).toBeInTheDocument()
   })
 
   it('files a dropped cell with one write naming the area, and says so', async () => {
@@ -567,6 +567,62 @@ describe('AreasTab files cells into areas', () => {
     fireEvent.dragOver(rowB, { dataTransfer })
     await act(async () => { fireEvent.drop(rowB, { dataTransfer }) })
     expect(api.put).not.toHaveBeenCalled()
+  })
+})
+
+describe('AreasTab is the house list card', () => {
+  const renderAreas = async (route = {}) => {
+    api.get.mockImplementation(routeGet(route))
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await waitFor(() => expect(document.querySelector('.card-header')).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  }
+
+  it('scrolls inside its card and shows the count after the title', async () => {
+    await renderAreas()
+    expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
+    expect(document.querySelector('.card')).toHaveClass('card-fill')
+    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('2')
+    expect(document.querySelector('.card-fill > .table-wrap')).toBeInTheDocument()
+  })
+
+  it('reads shown / total while a search narrows the list', async () => {
+    await renderAreas()
+    fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'Building A' } })
+    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('1 / 2')
+  })
+
+  it('draws the unfiled banner as a page callout with one body element', async () => {
+    await renderAreas()
+    const banner = document.querySelector('.callout.callout-warning.callout-page')
+    expect(banner).toBeInTheDocument()
+    expect(banner.children).toHaveLength(2)
+    expect(banner.children[0]).toHaveClass('callout-icon')
+  })
+
+  it('tells none-yet from none-match', async () => {
+    await renderAreas({ areas: [] })
+    expect(screen.getByText('No areas yet. Add one, then file the cells into it.')).toBeInTheDocument()
+    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('0')
+
+    document.body.innerHTML = ''
+    await renderAreas()
+    fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'nothing-like-this' } })
+    expect(screen.getByText('No areas match these filters.')).toBeInTheDocument()
+  })
+
+  it('opens the New Area form in the shared modal, and names the roles when denied', async () => {
+    await renderAreas()
+    fireEvent.click(screen.getByRole('button', { name: /New Area/ }))
+    expect(screen.getByRole('dialog', { name: 'New Area' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    document.body.innerHTML = ''
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => false} onSelectCell={vi.fn()} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /New Area/ })).toBeDisabled())
+    expect(screen.getByRole('button', { name: /New Area/ })).toHaveAttribute('title', expect.stringMatching(/^Requires /))
+    expect(screen.getByRole('button', { name: /New Area/ }).title).not.toMatch(/Admin permissions/)
   })
 })
 
@@ -659,14 +715,14 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     const searchBox = screen.getByPlaceholderText(/Search by area ID or name/)
 
     // Nothing to clear on arrival, so nothing is offered.
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
 
     fireEvent.change(searchBox, { target: { value: 'Building A' } })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+    expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (1)')
 
-    fireEvent.click(screen.getByTitle('Clear every filter'))
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
     expect(searchBox).toHaveValue('')
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
   })
 
   it('counts the lifecycle select and resets it to Active', async () => {
@@ -676,13 +732,13 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(lifecycle).toHaveValue('active')
 
     fireEvent.change(lifecycle, { target: { value: 'archived' } })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+    expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (1)')
 
     fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'x' } })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (2)')
+    expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (2)')
 
-    fireEvent.click(screen.getByTitle('Clear every filter'))
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
     expect(lifecycle).toHaveValue('active')
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
   })
 })

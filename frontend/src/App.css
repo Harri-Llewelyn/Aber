@@ -2080,6 +2080,9 @@ td.row-actions, th.row-actions {
 
 .shopfloor-legend > span { display: flex; align-items: center; gap: 5px; }
 
+/* Areas and Cells tables: a badge that follows a name or another badge. */
+.badge-follow { margin-left: 8px; }
+
 /* The rungs above the map: enterprise, then site. Small caps for the level, the name beside it. */
 .site-hierarchy {
   display: flex;
