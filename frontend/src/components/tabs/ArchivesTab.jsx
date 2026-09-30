@@ -301,6 +301,8 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
           the credentials archiving withdrew. */}
       {confirmRestore && (
         <ConfirmModal
+          title={`Restore ${confirmRestore.entity_type}`}
+          icon={<IconRefreshCw size={18} />}
           message={
             `Restore the ${confirmRestore.entity_type} '${confirmRestore.name}' to active service? ` +
             'It reappears on the asset pages with its history intact, and its auto-purge timer is ' +
@@ -329,6 +331,8 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
 
       {confirmPurge && (
         <ConfirmModal
+          title={`Permanently delete ${confirmPurge.entity_type}`}
+          icon={<IconTrash size={18} />}
           message={
             `Permanently delete the ${confirmPurge.entity_type} '${confirmPurge.name}'? ` +
             'This removes the record from the database immediately. It cannot be restored, and ' +

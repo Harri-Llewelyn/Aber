@@ -2,8 +2,8 @@ import React, { useState, useCallback, useEffect } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { formatTelemetryValue, telemetryValueClass } from '../../utils/telemetryValue'
-import { IconActivity, IconDownload, IconLock, IconX } from '../common/Icons'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { IconActivity, IconDownload, IconLock } from '../common/Icons'
+import { Modal } from '../common/Modal'
 
 /**
  * Per-device telemetry inspector: what each of this device's metrics last read, and when. A modal
@@ -26,9 +26,6 @@ function sortMetrics(a, b) {
 }
 
 export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
-  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
-  useEscapeKey(onClose)
-
   const [metrics, setMetrics]   = useState([])
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(null)
@@ -78,104 +75,94 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
   const withData = metrics.filter(m => m.row).length
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      {/* Wide, because this is a table. `.modal`'s 480px default is sized for a form. */}
-      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
-        <div className="modal-header-row">
-          <div className="modal-title" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <IconActivity size={17} style={{ color: 'var(--accent)' }} />
-            <span>Telemetry — {device?.asset_name}</span>
-            <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-              {loading ? declared.length : metrics.length}
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {canRead && selected.size > 0 && (
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={() => onExport?.(device, [...selected])}
-                title={`Export ${selected.size} selected metric${selected.size === 1 ? '' : 's'} as CSV`}
-              >
-                <IconDownload size={12} /> Export CSV ({selected.size})
-              </button>
-            )}
-            <button className="context-panel-close" onClick={onClose} title="Close (Esc)" aria-label="Close telemetry">
-              <IconX size={15} />
-            </button>
-          </div>
+    // Read-only, so a click outside closes it. Wide, because this is a table.
+    <Modal
+      title={<>
+        <span>Telemetry — {device?.asset_name}</span>
+        <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
+          {loading ? declared.length : metrics.length}
+        </span>
+      </>}
+      icon={<IconActivity size={17} style={{ color: 'var(--accent)' }} />}
+      size="wide"
+      closeOnOverlay
+      onClose={onClose}
+      error={canRead && !loading && error ? `Telemetry query failed: ${error}` : null}
+      headerActions={canRead && selected.size > 0 && (
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => onExport?.(device, [...selected])}
+          title={`Export ${selected.size} selected metric${selected.size === 1 ? '' : 's'} as CSV`}
+        >
+          <IconDownload size={12} /> Export CSV ({selected.size})
+        </button>
+      )}
+    >
+    {!canRead ? (
+      // An explicit refusal, not an empty table that reads as "this device has never
+      // reported anything".
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-muted)', padding: '20px 4px' }}>
+        <IconLock size={14} /> <span>Your role does not include telemetry access.</span>
+      </div>
+    ) : loading ? (
+      <div className="loading-wrap" style={{ padding: '32px' }}>
+        <div className="spinner" /> Loading telemetry…
+      </div>
+    ) : error ? null : metrics.length === 0 ? (
+      <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '20px 4px' }}>
+        This device has not declared or reported any metrics yet.
+      </div>
+    ) : (
+      <>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: '32px' }}>
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    aria-label="Select all metrics"
+                    title="Select every metric"
+                  />
+                </th>
+                <th title="Metric name as published on the wire">Metric</th>
+                <th title="When this metric last reported">Last Updated</th>
+                <th title="Most recent value">Latest Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metrics.map(m => (
+                <tr key={m.name}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(m.name)}
+                      onChange={() => toggleMetric(m.name)}
+                      aria-label={`Select ${m.name}`}
+                    />
+                  </td>
+                  <td><strong>{m.name}</strong></td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                    {m.row ? new Date(m.row.time).toLocaleString() : '—'}
+                  </td>
+                  <td className={m.row ? telemetryValueClass(m.row) : undefined}
+                      style={m.row ? undefined : { color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                    {formatTelemetryValue(m.row, NO_DATA)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        {!canRead ? (
-          // An explicit refusal, not an empty table that reads as "this device has never
-          // reported anything".
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-muted)', padding: '20px 4px' }}>
-            <IconLock size={14} /> <span>Your role does not include telemetry access.</span>
-          </div>
-        ) : loading ? (
-          <div className="loading-wrap" style={{ padding: '32px' }}>
-            <div className="spinner" /> Loading telemetry…
-          </div>
-        ) : error ? (
-          <div style={{ fontSize: '13px', color: 'var(--danger-text)', padding: '20px 4px' }}>
-            Telemetry query failed: {error}
-          </div>
-        ) : metrics.length === 0 ? (
-          <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '20px 4px' }}>
-            This device has not declared or reported any metrics yet.
-          </div>
-        ) : (
-          <>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: '32px' }}>
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={toggleAll}
-                        aria-label="Select all metrics"
-                        title="Select every metric"
-                      />
-                    </th>
-                    <th title="Metric name as published on the wire">Metric</th>
-                    <th title="When this metric last reported">Last Updated</th>
-                    <th title="Most recent value">Latest Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {metrics.map(m => (
-                    <tr key={m.name}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(m.name)}
-                          onChange={() => toggleMetric(m.name)}
-                          aria-label={`Select ${m.name}`}
-                        />
-                      </td>
-                      <td><strong>{m.name}</strong></td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                        {m.row ? new Date(m.row.time).toLocaleString() : '—'}
-                      </td>
-                      <td className={m.row ? telemetryValueClass(m.row) : undefined}
-                          style={m.row ? undefined : { color: 'var(--text-dim)', fontStyle: 'italic' }}>
-                        {formatTelemetryValue(m.row, NO_DATA)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '10px' }}>
-              {withData} of {metrics.length} metric{metrics.length === 1 ? '' : 's'} reported in the
-              last 24 hours. Tick metrics and use Export CSV to download a longer history.
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '10px' }}>
+          {withData} of {metrics.length} metric{metrics.length === 1 ? '' : 's'} reported in the
+          last 24 hours. Tick metrics and use Export CSV to download a longer history.
+        </div>
+      </>
+    )}
+    </Modal>
   )
 }

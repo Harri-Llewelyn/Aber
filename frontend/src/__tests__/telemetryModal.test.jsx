@@ -57,7 +57,7 @@ describe('device telemetry drawer', () => {
     const onClose = vi.fn()
     render(<TelemetryModal device={device()} hasPermission={() => true} onClose={onClose} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /close telemetry/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }))
     expect(onClose).toHaveBeenCalledTimes(1)
 
     fireEvent.keyDown(document, { key: 'Escape' })

@@ -142,7 +142,7 @@ describe('NotificationHistory', () => {
       ]} />)
       fireEvent.click(bell())
 
-      const items = within(screen.getByRole('dialog')).getAllByRole('listitem')
+      const items = within(screen.getByRole('dialog', { name: 'Notifications' })).getAllByRole('listitem')
       expect(items.map(li => li.querySelector('.notif-item-msg').lastChild.textContent))
         .toEqual(['Save failed', 'Cap reached', 'Saved'])
       expect(items[0]).toHaveClass('notif-item-error')
@@ -168,7 +168,7 @@ describe('NotificationHistory', () => {
     it('says what it is for when empty, and disables Clear', () => {
       render(<NotificationHistory entries={[]} />)
       fireEvent.click(bell())
-      const panel = screen.getByRole('dialog')
+      const panel = screen.getByRole('dialog', { name: 'Notifications' })
       expect(within(panel).getByText('No notifications')).toBeInTheDocument()
       expect(within(panel).getByRole('button', { name: 'Clear' })).toBeDisabled()
     })
@@ -181,14 +181,14 @@ describe('NotificationHistory', () => {
       act(() => { clear.focus() })
       fireEvent.click(clear)
       expect(onClear).toHaveBeenCalledTimes(1)
-      expect(screen.getByRole('dialog')).toHaveFocus()
+      expect(screen.getByRole('dialog', { name: 'Notifications' })).toHaveFocus()
     })
 
     it('closes on Escape and hands focus back to the bell', () => {
       render(<NotificationHistory entries={[entry()]} />)
       fireEvent.click(bell())
       fireEvent.keyDown(document, { key: 'Escape' })
-      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull()
       expect(bell()).toHaveFocus()
     })
 
@@ -196,7 +196,7 @@ describe('NotificationHistory', () => {
       render(<NotificationHistory entries={[entry()]} />)
       fireEvent.click(bell())
       fireEvent.click(screen.getByRole('button', { name: 'Close notifications' }))
-      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull()
       expect(bell()).toHaveFocus()
     })
 
@@ -204,18 +204,18 @@ describe('NotificationHistory', () => {
       render(<><button>outside</button><NotificationHistory entries={[entry()]} /></>)
       fireEvent.click(bell())
       fireEvent.click(bell())
-      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull()
 
       fireEvent.click(bell())
       fireEvent.mouseDown(document.body)
-      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull()
     })
 
     it('closes when focus is tabbed out of it', () => {
       render(<><NotificationHistory entries={[entry()]} /><button>next control</button></>)
       fireEvent.click(bell())
       act(() => { screen.getByRole('button', { name: 'next control' }).focus() })
-      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull()
     })
   })
 })
@@ -240,7 +240,7 @@ describe('toasts feed the list', () => {
 
     fireEvent.click(bell())
     expect(badge()).toBeNull()
-    expect(within(screen.getByRole('dialog')).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(screen.getByRole('dialog', { name: 'Notifications' })).getAllByRole('listitem')).toHaveLength(2)
 
     // Arriving while the list is open is arriving in front of the reader.
     act(() => { hook.showToast('Saved again', 'success') })
@@ -253,7 +253,7 @@ describe('toasts feed the list', () => {
     expect(window.sessionStorage.getItem(HISTORY_STORAGE_KEY)).not.toBeNull()
     fireEvent.click(bell())
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
-    expect(within(screen.getByRole('dialog')).queryAllByRole('listitem')).toHaveLength(0)
+    expect(within(screen.getByRole('dialog', { name: 'Notifications' })).queryAllByRole('listitem')).toHaveLength(0)
     expect(window.sessionStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull()
   })
 })

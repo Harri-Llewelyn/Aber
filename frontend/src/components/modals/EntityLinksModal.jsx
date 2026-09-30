@@ -266,6 +266,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
         {confirmDelete && (
           <ConfirmModal
+            title="Remove link"
+            icon={<IconTrash size={18} />}
             message={`Are you sure you want to remove the link '${confirmDelete.display_name}'?`}
             pendingLabel="Removing…"
             onConfirm={() => removeLink(confirmDelete.id, confirmDelete.display_name)}
