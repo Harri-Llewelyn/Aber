@@ -383,33 +383,39 @@ describe('Merged navigation shell', () => {
   })
 
   it('keeps the brand the only flank that yields when the bar runs out of room', () => {
-    // `min-width: 0` lets a flex item shrink below its content width. Only the brand has it, so
-    // `.brand-name` truncates while the session controls hold at content size.
+    // A set min-width lets a flex item shrink below its content width. Only the brand has one, so
+    // its text goes while the session controls hold at content size. It is the mark's width, not 0:
+    // at 760px a 0 floor left the brand 21px and clipped the 28px mark while the search box kept 480.
     const brandRule = APP_CSS.match(/\.topbar-brand \{([\s\S]*?)\n\}/)[1]
     const rightRule = APP_CSS.match(/\.topbar-right \{([\s\S]*?)\n\}/)[1]
-    expect(brandRule).toMatch(/min-width:\s*0/)
-    expect(rightRule).not.toMatch(/min-width:\s*0/)
+    expect(brandRule).toMatch(/min-width:\s*42px/)
+    expect(rightRule).not.toMatch(/min-width/)
   })
 
   /**
    * The bands that are left, as a set. Navigation is in neither: the rail's collapse is a mode
    * rather than a width band, so no viewport can take a page away. The brand subtitle goes first;
-   * the wordmark is four letters and stays until the whole brand text goes.
+   * the wordmark is four letters and stays until the whole brand text goes. Both bands are the
+   * brand region's own width, not the window's: at a 960px window the region still has about 200px,
+   * room for the wordmark.
    */
   it('sheds only recoverable text now that navigation is not in the bar', () => {
-    const band = (px) => APP_CSS.match(new RegExp(`@media \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
+    const band = (px) => APP_CSS.match(new RegExp(`@container brand \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
-    const narrow = band(1399)
-    const narrowest = band(1099)
-    expect(narrow, 'the <1400px band is missing').toBeTruthy()
-    expect(narrowest, 'the <1100px band is missing').toBeTruthy()
+    expect(APP_CSS.match(/\.topbar-brand \{([\s\S]*?)\n\}/)[1]).toMatch(/container: brand \/ inline-size;/)
+    const narrow = band(250)
+    const narrowest = band(80)
+    expect(narrow, 'the strapline band is missing').toBeTruthy()
+    expect(narrowest, 'the wordmark band is missing').toBeTruthy()
+    // No window band hides any of the brand any more.
+    expect(APP_CSS).not.toMatch(/@media[^{]*\{\s*\.brand-(?:sub|text|name)/)
 
-    // <1400: the strapline goes and the wordmark stays. The bar's remaining controls are
-    // icons already, so there is no button label left to shed.
+    // Under 250px of brand: the strapline goes and the wordmark stays. The bar's remaining controls
+    // are icons already, so there is no button label left to shed.
     expect(narrow).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
     expect(narrow).not.toMatch(/\.brand-name/)
 
-    // <1100: the brand text entirely, leaving the mark.
+    // Under 80px: the brand text entirely, leaving the mark.
     expect(narrowest).toMatch(/\.brand-text\s*\{\s*display:\s*none/)
 
     // NAVIGATION IS IN NO BAND. The rail is the same width at every viewport, so a page cannot be
@@ -435,8 +441,8 @@ describe('Merged navigation shell', () => {
   it('never hides the alert control at any width', () => {
     // It has nothing to shed: a glyph plus at most two digits at every width. What it must never do
     // is disappear, because an absent alert control and a healthy one would look identical.
-    for (const band of [1399, 1099]) {
-      const rules = APP_CSS.match(new RegExp(`@media \\(max-width: ${band}px\\) \\{([\\s\\S]*?)\\n\\}`))[1]
+    for (const band of [250, 80]) {
+      const rules = APP_CSS.match(new RegExp(`@container brand \\(max-width: ${band}px\\) \\{([\\s\\S]*?)\\n\\}`))[1]
       expect(rules).not.toMatch(/\.alert-pill[\s\S]*?display:\s*none/)
     }
     expect(APP_CSS).not.toMatch(/\.alert-pill-label/)
@@ -506,6 +512,15 @@ describe('area card grid', () => {
  * The rail's warning tone, read from App.css: a page with work waiting is coloured, but the
  * current page keeps its accent, since which page you are on outranks what is waiting there.
  */
+/** The area plan row in the Areas drawer: at a narrow drawer its buttons take their own line. */
+describe('area plan row', () => {
+  it('wraps its buttons rather than squeezing the plan state to one word a line', () => {
+    expect(APP_CSS.match(/\.area-plan-panel-row \{([\s\S]*?)\n\}/)[1]).toMatch(/flex-wrap:\s*wrap/)
+    // A button group that may not shrink cannot wrap onto its own line and fit it.
+    expect(APP_CSS.match(/\.area-plan-panel-actions \{([^}]*)\}/)[1]).not.toMatch(/flex-shrink:\s*0/)
+  })
+})
+
 describe('sidebar warning tone', () => {
   it('colours a flagged item, and never the current page', () => {
     expect(APP_CSS).toMatch(/\.sidebar-item\.sidebar-item-warning:not\(\.active\) \{ color: var\(--warning-text\); \}/)

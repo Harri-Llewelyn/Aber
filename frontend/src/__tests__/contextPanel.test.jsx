@@ -226,7 +226,7 @@ describe('Panel layout pushes rather than covers', () => {
        applied whether or not the drawer had width, so every page with a drawer ended 16px short of
        the pages without one (Archives, Directory, Vocabulary) and the card edges disagreed. */
     expect(layout).not.toMatch(/gap:/)
-    expect(openRule).toMatch(/margin-left:\s*16px/)
+    expect(openRule).toMatch(/margin-left:\s*var\(--stack\)/)
   })
 
   it('keeps its column down to 800px, and as an overlay below that fills its own width', () => {

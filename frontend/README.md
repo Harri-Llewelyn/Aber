@@ -360,7 +360,7 @@ The same component the entity pages use, with `subject="help"` for its region la
 control. It is a sibling of `.content` rather than of a page's list, so it survives a tab switch,
 works on pages that have no drawer of their own, and cannot be unmounted by the page it describes —
 `tabId` follows the active tab, so it re-reads as you navigate. Both drawers can be open at once on
-Devices; the flex row narrows the table rather than stacking them, and below 1100px it takes the
+Devices; the flex row narrows the table rather than stacking them, and below 800px it takes the
 same dismissible overlay treatment every other drawer takes.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.

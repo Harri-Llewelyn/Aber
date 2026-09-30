@@ -53,11 +53,16 @@
   /* The interface face, written once. Structural, like --font-mono. */
   --font-display: 'Outfit', sans-serif;
   /* Spacing. --inset is the horizontal inset from a container's edge to its content, one value
-     shared by the page, the card, the card header and the table cell, so their left edges align.
+     shared by the card, the card header and the table cell, so their left edges align.
      --inset-tight is for chrome already on a panel (a filter bar inside a card, the context panel's
-     header). Vertical rhythm is deliberately not a token: it differs per element. */
+     header). --gutter is the page's own margin, from the window's edges to the outermost cards and
+     the help drawer: tighter than a card's inset, because it is space no content uses. Vertical
+     rhythm is deliberately not a token: it differs per element. */
   --inset:        16px;
   --inset-tight:  12px;
+  --gutter:       12px;
+  /* The scrollbar's width, which .content reserves on its right and takes back out of its padding. */
+  --scrollbar:    6px;
   /* Between stacked blocks: card to card, banner to card. Was 24px inline on three pages, 16px in
      the directory's rule and 12px inline on Access Control, for the same relationship. */
   --stack:        16px;
@@ -142,7 +147,7 @@ html, body, #root {
 }
 
 /* ===== Scrollbar ===== */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: var(--scrollbar); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
@@ -228,14 +233,18 @@ html, body, #root {
 
 /* The brand and the right-hand group are equal-weight sides, which is what centres the search box:
    both take `flex: 1 1 0` so they claim equal shares of free space whatever their content measures.
-   Only the brand carries `min-width: 0`, so when the bar runs out of room the brand truncates and
-   the right-hand group holds at content size. */
+   Only the brand may shrink below its content, so when the bar runs out of room the brand gives up
+   its text and the right-hand group holds at content size. It stops at the mark: below that the
+   search box, with its 150px floor, gives way instead of the mark being clipped. */
 .topbar-brand {
+  /* The breakpoints below are this region's width, which is what the text has to fit in. */
+  container: brand / inline-size;
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1 1 0;
-  min-width: 0;
+  /* The mark (28px) and this button's padding and border. */
+  min-width: 42px;
   overflow: hidden;
   /* It became a <button> when it became the way back to the Site Map, so everything a button
      brings with it has to be taken back off: the chrome, the centred text, the inherited-nothing
@@ -748,16 +757,17 @@ html, body, #root {
   color: var(--text-dim);
 }
 
-/* Top bar responsive collapse. Below 1400px the strapline goes; below 1100px the brand text goes
-   entirely. `.brand-text` is a stacked block as wide as its wider line, and the strapline is far
-   wider than the wordmark, so hiding it reclaims the space. */
-@media (max-width: 1399px) {
+/* Top bar responsive collapse, measured against the brand's own share of the bar rather than the
+   window: the strapline goes when it no longer fits beside the mark (about 240px), and the wordmark
+   only when there is no room for its four letters either. `.brand-text` is a stacked block as wide
+   as its wider line, so hiding the strapline gives the wordmark the whole of it. */
+@container brand (max-width: 250px) {
   .brand-sub { display: none; }
 }
 
-@media (max-width: 1099px) {
+@container brand (max-width: 80px) {
   /* The mark alone. The search box has a 150px floor and the session controls do not shrink at
-     all, so below this the brand is the only region with anything left to give. */
+     all, so on the narrowest bar the brand is the only region with anything left to give. */
   .brand-text { display: none; }
 }
 
@@ -772,7 +782,22 @@ html, body, #root {
      page that scrolls draws its cards narrower than one that does not. `stable` reserves the track
      on every page. Browsers without support ignore it. */
   scrollbar-gutter: stable;
-  padding: 12px var(--inset) var(--inset);
+  /* The right padding gives the reserved track back, so the gap beside the cards is --gutter on
+     both sides whether or not the page scrolls. */
+  padding: var(--gutter) calc(var(--gutter) - var(--scrollbar)) var(--gutter) var(--gutter);
+}
+
+/* Firefox does not read ::-webkit-scrollbar. With classic scrollbars it reserves its full platform
+   track (about 17px) beside every page, and with overlay scrollbars none. Its thin track is the
+   nearest it offers to the 6px one. */
+@supports not selector(::-webkit-scrollbar) {
+  .content {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    /* Its track is not --scrollbar wide (none at all with overlay scrollbars), so nothing is taken
+       back out of the padding. */
+    padding-right: var(--gutter);
+  }
 }
 
 /* Section header. `.section-header` as a full-width heading row above a card is gone;
@@ -2570,8 +2595,11 @@ td.row-actions, th.row-actions {
   flex-wrap: wrap;
 }
 
+/* Wraps: in a narrow drawer the two buttons take a line of their own rather than squeezing the
+   state beside them down to one word a line. */
 .area-plan-panel-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -2587,7 +2615,7 @@ td.row-actions, th.row-actions {
 
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-.area-plan-panel-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
+.area-plan-panel-actions { display: flex; gap: 4px; flex-wrap: wrap; }
 
 /* An area with no plan gets the target rather than a button: the file is usually already in a
    folder somebody is dragging from. */
@@ -3298,11 +3326,11 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s linear 0.25s;
 }
 
-/* The margin is the page's gutter, and it opens and closes with the drawer -- transitioned
+/* The margin is the gap between two cards, and it opens and closes with the drawer -- transitioned
    alongside the width so the table beside it reflows once rather than twice. */
 .context-panel-open {
   width: var(--context-panel-width);
-  margin-left: 16px;
+  margin-left: var(--stack);
   visibility: visible;
   transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s;
 }
@@ -3526,14 +3554,21 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The app-level drawer, which is the help panel. It is a sibling of `.content` rather than inside
    `.page-layout`, so there is no scrolling ancestor for `position: sticky`; it takes the full
-   height of the body and scrolls inside itself. Single-class specificity on purpose, placed above
-   the 800px block so the overlay treatment still wins on a narrow viewport. */
+   height of the body and scrolls inside itself. Closed it has no margin as well as no width: a
+   margin on the closed drawer was an empty strip down the right of every page. */
 .context-panel-app {
   position: relative;
   top: auto;
   max-height: none;
   align-self: stretch;
-  margin: var(--inset-tight) var(--inset-tight) var(--inset-tight) 0;
+  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s linear 0.25s;
+}
+
+/* Open, it keeps the page's gutter from the window's edges. On the page side `.content`'s padding
+   is already the gap, so it adds none there. */
+.context-panel-app.context-panel-open {
+  margin: var(--gutter) var(--gutter) var(--gutter) 0;
+  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s;
 }
 
 .context-panel-app .context-panel-inner {
@@ -3618,6 +3653,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     max-height: none;
     z-index: 90;
   }
+  /* The help drawer's docked margins would inset its overlay from the window's edges. */
+  .context-panel-app.context-panel-open { margin: 0; }
   .context-panel-inner {
     /* The desktop width would leave the overlay's extra width as an empty strip on the right. */
     width: 100%;
