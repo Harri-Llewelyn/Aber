@@ -6,8 +6,6 @@
  * the raw rows are gone.
  */
 
-import { formatBytes as formatBytesBase } from './format'
-
 export const COLD_STATES = {
   CLAIMED: 'claimed',
   EXPORTED: 'exported',
@@ -68,14 +66,6 @@ export function coldStateMeaning(state) {
 
 export function coldStateTone(state) {
   return STATE_TONES[state] || 'neutral'
-}
-
-/**
- * Bytes as something a person reads. Binary units, matching what `storage-init.mjs` sets the bucket
- * limits in and what Docker reports.
- */
-export function formatBytes(bytes) {
-  return formatBytesBase(bytes)
 }
 
 /**

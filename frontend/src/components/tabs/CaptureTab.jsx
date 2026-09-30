@@ -17,6 +17,7 @@ import {
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { PageHeading } from '../common/PageHeading'
+import { Badge } from '../common/Badge'
 import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
@@ -177,7 +178,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       kind: subjectKind,
       name: subject.name,
       sparkplugId: subject.sparkplug_id,
-      // Only meaningful for a device row; a gateway's simulated flag is a badge on its name.
+      // The gateway a device row sits under; null for a gateway row.
       context: subjectKind === 'device'
         ? (gatewayName.get(subject.gateway_id) || 'Unbound')
         : null,
@@ -191,7 +192,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       device: subjectKind === 'device' ? subject : null,
       capture: captureBySubject.get(`${subjectKind}:${subject.id}`) || null
     }))
-  }, [subjectKind, gateways, devices, captureBySubject, gatewayName])
+  }, [subjectKind, gateways, devices, captureBySubject, gatewayName, gatewayById])
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -420,16 +421,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   const dropped = e.dataTransfer?.files?.[0]
                   if (dropped) onPlayFileChosen(dropped)
                 }}
-                style={{
-                  marginTop: '12px', padding: '12px', textAlign: 'center', cursor: 'pointer',
-                  border: `1px dashed ${draggingPlay ? 'var(--accent)' : 'var(--border)'}`,
-                  borderRadius: '8px',
-                  background: draggingPlay ? 'rgba(0,212,255,0.06)' : 'transparent',
-                  fontSize: '12px', color: 'var(--text-muted)'
-                }}
+                className={`capture-drop capture-drop-play${draggingPlay ? ' capture-drop-active' : ''}`}
                 title="Store a capture file and go straight to playing it back"
               >
-                <IconPlay size={13} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
+                <IconPlay size={13} className="capture-drop-icon" />
                 Drop an edited capture here to store it and play it back
               </div>
             )}
@@ -604,13 +599,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         title={selected?.name || ''}
         subtitle={selected && (
           <>
-            <span
-              className={`badge badge-${gatewayTypeTone(selected.type)}`}
-              style={{ fontSize: '11px', marginRight: '6px' }}
+            <Badge
+              tone={gatewayTypeTone(selected.type)}
+              size="sm"
+              className="capture-badge-lead"
               title={gatewayTypeDescription(selected.type)}
             >
               {gatewayTypeLabel(selected.type)}
-            </span>
+            </Badge>
             {capture
               ? `${plural(capture.message_count, 'message')} stored`
               : 'No capture stored'}
@@ -640,7 +636,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                           disabled={!onSelectSchema}
                         >
                           {s.schema_name}
-                          {s.version ? <span className="badge badge-neutral" style={{ marginLeft: '6px' }}>v{s.version}</span> : null}
+                          {s.version ? <Badge size="sm" className="badge-follow">v{s.version}</Badge> : null}
                         </button>
                       ))}
                     </div>
@@ -704,16 +700,16 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             <div style={{ marginBottom: '12px' }}>
               <div className="context-panel-section-label">
                 Devices In This Capture
-                <span className="section-count" style={{ marginLeft: '6px' }}>
+                <span className="section-count capture-label-count">
                   {capture.manifest.device_ids.length}
                 </span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 {capture.manifest.device_ids.map(id => (
-                  <span key={id} className="badge badge-neutral mono" style={{ fontSize: '11px' }}
-                        title={`A playback of this capture creates one replay lane for ${id}`}>
+                  <Badge key={id} size="sm" className="mono"
+                         title={`A playback of this capture creates one replay lane for ${id}`}>
                     {id}
-                  </span>
+                  </Badge>
                 ))}
               </div>
               {capture.manifest.edge_node_ids?.length > 0 && (
@@ -729,7 +725,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           <div>
             <div className="context-panel-section-label">
               Captured Metrics
-              <span className="section-count" style={{ marginLeft: '6px' }}>
+              <span className="section-count capture-label-count">
                 {capture.manifest.metric_name_count ?? capture.manifest.metric_names.length}
               </span>
             </div>
@@ -737,25 +733,17 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 pill is one metric. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {capture.manifest.metric_names.map(name => (
-                <span
-                  key={name}
-                  className="badge badge-neutral"
-                  style={{ fontSize: '11px' }}
-                  title={name}
-                >
-                  {name}
-                </span>
+                <Badge key={name} size="sm" title={name}>{name}</Badge>
               ))}
               {/* The cap is the database's, not this list's; said out loud so a short list is not read
                   as a short capture. */}
               {capture.manifest.metric_name_count > capture.manifest.metric_names.length && (
-                <span
-                  className="badge"
-                  style={{ fontSize: '11px', color: 'var(--text-dim)' }}
+                <Badge
+                  size="sm"
                   title="Only the first 50 metric names are listed; the capture holds them all"
                 >
                   +{capture.manifest.metric_name_count - capture.manifest.metric_names.length} more
-                </span>
+                </Badge>
               )}
             </div>
           </div>
@@ -822,16 +810,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 const dropped = e.dataTransfer?.files?.[0]
                 if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
               }}
-              style={{
-                padding: '12px', textAlign: 'center', cursor: 'pointer',
-                border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: '8px',
-                background: dragging ? 'rgba(0,212,255,0.06)' : 'transparent',
-                fontSize: '12px', color: 'var(--text-muted)'
-              }}
+              className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
               title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
             >
-              <IconUpload size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
+              <IconUpload size={14} className="capture-drop-icon" />
               Drop a capture file here, or click to choose one
             </div>
           </div>
@@ -1210,13 +1192,9 @@ function SubjectRow({ row, selected, onSelect }) {
       <td><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
       {/* A column rather than a badge on the name, matching the Gateways page. */}
       <td>
-        <span
-          className={`badge badge-${gatewayTypeTone(row.type)}`}
-          style={{ fontSize: '11px' }}
-          title={gatewayTypeDescription(row.type)}
-        >
+        <Badge tone={gatewayTypeTone(row.type)} size="sm" title={gatewayTypeDescription(row.type)}>
           {gatewayTypeLabel(row.type)}
-        </span>
+        </Badge>
       </td>
       <td>
         {!capture && <span style={{ color: 'var(--text-dim)' }}>—</span>}
@@ -1226,22 +1204,21 @@ function SubjectRow({ row, selected, onSelect }) {
               {plural(capture.message_count, 'message')} ·{' '}
               {formatBytes(capture.size_bytes)}
               {capture.source === 'uploaded' && (
-                <span className="badge badge-neutral" style={{ fontSize: '11px', marginLeft: '6px' }}>
-                  UPLOADED
-                </span>
+                <Badge size="sm" className="badge-follow">UPLOADED</Badge>
               )}
               {/* The one badge here that changes a decision: whether the file will play back. A
                   missing birth costs metrics only when `uses_aliases` is set. */}
               {capture.manifest?.birth_captured === false && (
-                <span
-                  className={`badge ${capture.manifest?.uses_aliases ? 'badge-warning' : 'badge-neutral'}`}
-                  style={{ fontSize: '11px', marginLeft: '6px' }}
+                <Badge
+                  tone={capture.manifest?.uses_aliases ? 'warning' : 'neutral'}
+                  size="sm"
+                  className="badge-follow"
                   title={capture.manifest?.uses_aliases
                     ? 'No NBIRTH or DBIRTH was recorded and this capture uses metric aliases, so a playback cannot resolve them: every aliased metric is dropped on ingest.'
                     : 'No NBIRTH or DBIRTH was recorded. Every metric here carries its full name, so a playback still resolves them — but it will not announce the devices, which stay OFFLINE until they birth on their own.'}
                 >
                   NO BIRTH
-                </span>
+                </Badge>
               )}
             </div>
             <div style={{ color: 'var(--text-muted)' }}>
