@@ -4216,7 +4216,7 @@ that `0080`'s body never ran: its `ON CONFLICT (principal_id, permission_id)` is
 function whose first output column is also `principal_id`, and PL/pgSQL refuses it at the call.
 `0125` names the constraint instead. Nothing had called it since `0080` shipped.
 
-**The page creates, then mints.** *New Principal* on the Database principals card takes a name, a
+**The page creates, then mints.** *New Machine Identity* on the Machine identities card takes a name, a
 purpose and a set of permissions from the fixed menu, calls the RPC, and opens the existing token
 dialog for the new row so the first token is shown once the way every other is. No new edge
 function: `mint-service-token` already signs and records, and a principal left without a token is

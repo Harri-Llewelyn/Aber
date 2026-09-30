@@ -403,11 +403,11 @@ describe('the destination card', () => {
     await show([], 'Administrator')
     // Nothing to type into until the dialog is opened: the field is no longer sitting on the card.
     await waitFor(() => expect(screen.getByRole('button', { name: /set key/i })).toBeInTheDocument())
-    expect(screen.queryByLabelText(/secret access key/i)).toBeNull()
+    expect(screen.queryByLabelText('Secret access key')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /set key/i }))
     // Straight to the field: there is no key to destroy, so nothing to confirm.
-    const input = await screen.findByLabelText(/secret access key/i)
+    const input = await screen.findByLabelText('Secret access key')
     // A password field: nothing in the DOM ever holds the stored value, because no API returns it.
     expect(input).toHaveAttribute('type', 'password')
 
@@ -416,7 +416,7 @@ describe('the destination card', () => {
 
     await waitFor(() => expect(api.setArchiveCredential).toHaveBeenCalledWith('wJalrXUtnFEMI'))
     // The dialog closes, taking the typed key out of the DOM with it.
-    await waitFor(() => expect(screen.queryByLabelText(/secret access key/i)).toBeNull())
+    await waitFor(() => expect(screen.queryByLabelText('Secret access key')).toBeNull())
   })
 
   it('asks before replacing a key that already exists', async () => {
@@ -432,10 +432,10 @@ describe('the destination card', () => {
     fireEvent.click(screen.getByRole('button', { name: /^replace$/i }))
     await waitFor(() => expect(screen.getByText(/overwrites it in the vault/i)).toBeInTheDocument())
     // The gate is the point: no way to type a key while the warning is unanswered.
-    expect(screen.queryByLabelText(/secret access key/i)).toBeNull()
+    expect(screen.queryByLabelText('Secret access key')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /replace it/i }))
-    expect(await screen.findByLabelText(/secret access key/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText('Secret access key')).toBeInTheDocument()
   })
 
   it('lets a first key through without that question', async () => {
@@ -444,7 +444,7 @@ describe('the destination card', () => {
     withDestination([])
     await show([], 'Administrator')
     fireEvent.click(await screen.findByRole('button', { name: /set key/i }))
-    expect(await screen.findByLabelText(/secret access key/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText('Secret access key')).toBeInTheDocument()
     expect(screen.queryByText(/overwrites it in the vault/i)).toBeNull()
   })
 
@@ -460,12 +460,12 @@ describe('the destination card', () => {
     render(<ColdStorageTab showToast={toast} userRole="Administrator" />)
 
     fireEvent.click(await screen.findByRole('button', { name: /set key/i }))
-    const input = await screen.findByLabelText(/secret access key/i)
+    const input = await screen.findByLabelText('Secret access key')
     fireEvent.change(input, { target: { value: 'wJalrXUtnFEMI' } })
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith('not permitted', 'error'))
-    expect(screen.getByLabelText(/secret access key/i).value).toBe('wJalrXUtnFEMI')
+    expect(screen.getByLabelText('Secret access key').value).toBe('wJalrXUtnFEMI')
   })
 
   it('does not blame eligibility when the destination is the problem', async () => {
@@ -504,7 +504,7 @@ describe('the destination card', () => {
     fireEvent.click(await screen.findByRole('button', { name: /set key/i }))
     await waitFor(() => expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled())
     // Whitespace is not a key either.
-    fireEvent.change(screen.getByLabelText(/secret access key/i), { target: { value: '   ' } })
+    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: '   ' } })
     expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
     expect(api.setArchiveCredential).not.toHaveBeenCalled()
   })

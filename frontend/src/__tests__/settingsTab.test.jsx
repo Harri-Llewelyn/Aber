@@ -302,3 +302,51 @@ describe('a setting that is fixed at install', () => {
     expect(screen.queryByText(/falls back to/i)).not.toBeInTheDocument()
   })
 })
+
+describe('the page frame', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue(SETTINGS)
+  })
+
+  it('is headed Settings, above the category tabs', async () => {
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const heading = screen.getByRole('heading', { name: 'Settings' })
+    const tabs = screen.getByRole('tablist', { name: 'Settings category' })
+    expect(heading.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByText('Runtime configuration')).toBeNull()
+  })
+
+  it('gives the card a header naming the category, with a tip and a count', async () => {
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const card = document.querySelector('.settings-group')
+    const title = card.querySelector('.card-header .section-title')
+    expect(title.textContent).toMatch(/^Audit Trail/)
+    expect(title.querySelector('.help-tip')).toBeTruthy()
+    expect(title.querySelector('.section-count').textContent).toBe('1')
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
+    expect(document.querySelector('.settings-group .section-title').textContent).toMatch(/^Retention/)
+  })
+
+  it('shows a load error as a danger callout, not a card', async () => {
+    api.get.mockRejectedValue(new Error('permission denied for table system_settings'))
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const callout = screen.getByText(/permission denied/).closest('.callout')
+    expect(callout.className).toContain('callout-danger')
+    expect(document.querySelector('.settings-load-error')).toBeNull()
+  })
+
+  it('says loading inside a card while the read is out, with the heading already there', () => {
+    api.get.mockReturnValue(new Promise(() => {}))
+    render(<SettingsTab showToast={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.getByText(/Loading settings/).closest('.card')).toBeTruthy()
+  })
+
+  it('says none are declared, in the card, when the list is empty', async () => {
+    api.get.mockResolvedValue([])
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    expect(screen.getByText(/No settings are declared yet/).closest('.card')).toBeTruthy()
+  })
+})

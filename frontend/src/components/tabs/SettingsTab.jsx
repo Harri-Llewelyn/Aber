@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { IconSettings, IconX, IconAlertTriangle } from '../common/Icons'
+import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
+import { LoadingState } from '../common/LoadingState'
 import { PageHeading } from '../common/PageHeading'
+import { SectionCount } from '../common/SectionCount'
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -124,9 +127,10 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
       </div>
 
       <div className="setting-control">
-        {/* READ-ONLY IS RENDERED, NOT DISABLED-AND-HOPED. The database refuses the write either
-            way (0131's trigger), so this is about not offering an operator a control that cannot
-            work -- the group is fixed at install because changing it re-addresses every gateway. */}
+        {/* A read-only setting is rendered as such rather than left editable: the database refuses
+            the write either way, so an operator is not offered a control that cannot work. Two
+            settings are fixed: the Sparkplug group, which re-addresses every gateway if changed,
+            and the archive site key. */}
         {setting.read_only ? (
           <input
             id={`setting-${setting.key}`}
@@ -221,9 +225,6 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
 
   const groups = useMemo(() => groupByCategory(settings), [settings])
 
-  /* Falls back to the first category whenever the held one is not in the current list -- the first
-     read, and a category that disappears. Chosen during render rather than in an effect, so the page
-     never paints a tablist with nothing selected. */
   /* A setting arrived from the search bar. Its category is chosen once, when the read that can
      answer "which category?" lands -- not held, or the operator could never leave the category
      they were sent to. `onClearSetting` drops the key so a later return to the page starts where
@@ -236,25 +237,18 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
     onClearSetting?.()
   }, [initialSetting, settings, onClearSetting])
 
+  /* Falls back to the first category whenever the held one is not in the current list -- the first
+     read, and a category that disappears. Chosen during render rather than in an effect, so the page
+     never paints a tablist with nothing selected. */
   const activeCategory = groups.some(g => g.category === category) ? category : groups[0]?.category
   const activeGroup = groups.find(g => g.category === activeCategory)
-
-  if (loading) {
-    return (
-      <div className="page-layout"><div className="page-main">
-        <div className="card" style={{ padding: '12px var(--inset)' }}>
-          <div className="loading-wrap"><div className="spinner" /> Loading settings…</div>
-        </div>
-      </div></div>
-    )
-  }
 
   return (
     <div className="page-layout">
       <div className="page-main">
         {/* The page states its own limit, because it is surprising and deliberate: the list cannot
             be added to from here. */}
-        <PageHeading icon={<IconSettings size={15} />} title="Runtime configuration">
+        <PageHeading icon={<IconSettings size={15} />} title="Settings">
           These take effect without a restart and override the environment defaults they name. The
           list is fixed: a setting appears here because code reads it, so new ones arrive with the
           feature that needs them rather than being added by hand.
@@ -271,20 +265,25 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
           </div>
         </div>
 
-        {loadError && <div className="card settings-load-error">{loadError}</div>}
+        {loadError && (
+          <div className="callout callout-danger callout-page">
+            <IconAlertTriangle size={14} className="callout-icon" />
+            <div>{loadError}</div>
+          </div>
+        )}
 
-        {settings.length === 0 && !loadError ? (
-          <div className="card empty-state">
-            <div className="empty-icon"><IconSettings size={36} /></div>
-            <div className="empty-text">
-              No settings are declared yet. They arrive by migration, alongside the code that
-              reads them.
-            </div>
+        {loading ? (
+          <div className="card"><LoadingState label="settings" /></div>
+        ) : settings.length === 0 && !loadError ? (
+          <div className="card">
+            <EmptyState
+              icon={<IconSettings size={36} />}
+              message="No settings are declared yet. They arrive by migration, alongside the code that reads them."
+            />
           </div>
         ) : (<>
-          {/* One category at a time, the switch Access Control uses. The categories were stacked as
-              titled cards, which made a page of thirty settings a scroll to find the one being
-              changed. The tab is now the only place the category is named. */}
+          {/* One category at a time. The categories were stacked as titled cards, which made a page
+              of thirty settings a scroll to find the one being changed. */}
           <div
             role="tablist"
             aria-label="Settings category"
@@ -307,6 +306,16 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
 
           {activeGroup && (
             <div className="card settings-group" key={activeGroup.category}>
+              <div className="card-header">
+                <h3 className="section-title">
+                  {activeGroup.category}
+                  <HelpTip
+                    label={`About ${activeGroup.category} settings`}
+                    text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The ? beside a setting says what it controls, and a note beneath it names the default it overrides."
+                  />
+                  <SectionCount total={activeGroup.settings.length} />
+                </h3>
+              </div>
               {activeGroup.settings.map(s => (
                 <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} />
               ))}

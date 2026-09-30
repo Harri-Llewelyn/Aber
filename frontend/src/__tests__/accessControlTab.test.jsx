@@ -84,7 +84,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
   // An empty-but-read inventory: the Broker column resolves to "No account" rather than "Not read".
-  api.listBrokerInventory.mockResolvedValue({ clients: [], roles: [], read_at: '2026-09-12T00:00:00Z', target: 'compose' })
+  api.listBrokerInventory.mockResolvedValue({ clients: [], roles: [], read_at: '2026-09-12T00:00:00Z' })
   api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
   api.listServiceTokens.mockResolvedValue(new Map())
   // Empty by default, which is both the common case and the reading a caller who cannot see the
@@ -93,7 +93,10 @@ beforeEach(() => {
   api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
 
-/** The page opens on Gateways; the service identities are the other section. */
+/** The card whose title starts with `title`. */
+const cardOf = (title) => screen.getByRole('heading', { name: (name) => name.startsWith(title) }).closest('.card')
+
+/** The page opens on Gateways; the machine identities are the other section. */
 async function renderServices() {
   const result = render(<AccessControlTab showToast={vi.fn()} />)
   fireEvent.click(await screen.findByRole('tab', { name: /Services/ }))
@@ -103,7 +106,7 @@ async function renderServices() {
 describe('AccessControlTab', () => {
   /**
    * The case the page is designed around: a demonstration stack has working credentials issued by
-   * `provision-gateways.mjs` and no record of them. The page must say it has no record, not that
+   * `scripts/mosquitto-provision-gateway.mjs` and no record of them. The page must say it has no record, not that
    * the gateway has no credential.
    */
   it('reports a script-provisioned gateway as having no platform record, not no credential', async () => {
@@ -116,16 +119,18 @@ describe('AccessControlTab', () => {
     expect(screen.queryByText(/^No credential$/i)).toBeNull()
   })
 
-  /** The preamble names the two columns, so a reader knows the recorded state and the live one are
-   *  different things before reading a row. */
-  it('states the two sources in the preamble', async () => {
+  /** The card's tip names the two columns, so a reader knows the recorded state and the live one
+   *  are different things before reading a row. */
+  it('states the two sources in the card tip', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => {
-      expect(screen.getByText(/what the platform issued and recorded/i)).toBeTruthy()
-    })
-    expect(screen.getByText(/read live from its\s+Dynamic Security plugin/i)).toBeTruthy()
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: 'About broker credentials' }))
+    const tip = screen.getByRole('tooltip').textContent
+    expect(tip).toMatch(/what the platform issued and recorded/i)
+    expect(tip).toMatch(/read live from Dynamic Security/i)
+    // The tip replaced the paragraph, so the sentence is not also in the body.
+    expect(document.querySelector('.card-body p')).toBeNull()
   })
 
   /** When the broker cannot be read the Broker column reads Not read, and the page says why once. */
@@ -164,8 +169,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
   })
 
-  /** An account the broker holds that no gateway row claims gets its own section — the state the
-   *  old page could never show. */
+  /** An account the broker holds that no gateway row claims gets its own section. */
   it('lists a broker account with no gateway row as an orphan', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     api.listBrokerInventory.mockResolvedValue({
@@ -225,7 +229,8 @@ describe('AccessControlTab', () => {
     expect(screen.queryByText(/Broker column says whether an account exists/i)).toBeNull()
   })
 
-  /** Archived gateways are hidden by default and offer no action when shown — 0041 refuses them. */
+  /** Archived gateways are hidden by default and offer no action when shown: archiving rotated the
+   *  credential, so it can be issued a new one only after a restore. */
   it('hides archived gateways until asked, and offers them no action', async () => {
     api.listGatewayCredentials.mockResolvedValue([{ ...provisioned, is_archived: true }])
     render(<AccessControlTab showToast={vi.fn()} />)
@@ -235,7 +240,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText(/No gateway matches this filter/i)).toBeTruthy())
     const filter = screen.getByLabelText('Filter gateways by credential state')
     expect(within(filter).getByText('Archived (1)')).toBeTruthy()
-    expect(within(filter).getByText('Current (0)')).toBeTruthy()
+    expect(within(filter).getByText('Active (0)')).toBeTruthy()
     fireEvent.change(filter, { target: { value: 'archived' } })
 
     await waitFor(() => expect(screen.getByText(/Restore to issue/i)).toBeTruthy())
@@ -253,15 +258,17 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy())
     expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
     const filter = screen.getByLabelText('Filter gateways by credential state')
-    expect(within(filter).getByText('Current (2)')).toBeTruthy()
+    expect(within(filter).getByText('Active (2)')).toBeTruthy()
     expect(within(filter).getByText('Bundle outstanding (1)')).toBeTruthy()
     expect(within(filter).getByText('No platform record (1)')).toBeTruthy()
 
     fireEvent.change(filter, { target: { value: 'awaiting-enrolment' } })
     await waitFor(() => expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull())
     expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
-    // No summary pills under the table: the filter carries the counts.
+    // No summary pills under the table: the filter carries the counts, and the card's count reads
+    // "narrowed / total" while a filter is on.
     expect(screen.queryByText(/no record$/)).toBeNull()
+    expect(cardOf('Broker credentials').querySelector('.section-count').textContent).toBe('1 / 2')
   })
 
   it('heads the two action columns Actions', async () => {
@@ -294,14 +301,14 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Broker credentials')).toBeTruthy())
-    expect(screen.queryByText('Database principals')).toBeNull()
-    expect(screen.queryByText('Broker roles')).toBeNull()
+    await waitFor(() => expect(cardOf('Broker credentials')).toBeTruthy())
+    expect(screen.queryByText(/^Machine identities/)).toBeNull()
+    expect(screen.queryByText(/^Broker roles/)).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
-    await waitFor(() => expect(screen.getByText('Database principals')).toBeTruthy())
-    expect(screen.getByText('Broker roles')).toBeTruthy()
-    expect(screen.queryByText('Broker credentials')).toBeNull()
+    await waitFor(() => expect(cardOf('Machine identities')).toBeTruthy())
+    expect(cardOf('Broker roles')).toBeTruthy()
+    expect(screen.queryByText(/^Broker credentials/)).toBeNull()
   })
 
   /** A declared fixture is named rather than listed as a stray; anything undeclared is the stray. */
@@ -362,7 +369,7 @@ describe('AccessControlTab', () => {
     ])
     await renderServices()
 
-    await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Undocumented machine identity/i)).toBeTruthy())
     // Both origins, which is the assertion rather than the exact sentence: an unknown principal may
     // come from a migration or from an RLS suite that seeded a fixture and did not clean up.
     expect(screen.getByTitle(/by a migration, or by a test suite/i)).toBeTruthy()
@@ -387,7 +394,7 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText('Service_Playback')).toBeTruthy()
-    expect(screen.queryByText(/Undocumented principal/i)).toBeNull()
+    expect(screen.queryByText(/Undocumented machine identity/i)).toBeNull()
   })
 
   /**
@@ -413,7 +420,7 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * A principal `create_service_principal()` made at runtime has no entry in KNOWN_PRINCIPALS and
+   * A principal `create_machine_principal()` made at runtime has no entry in KNOWN_PRINCIPALS and
    * must still be mintable, so the button follows describePrincipal()'s fallback rather than a
    * hardcoded list.
    */
@@ -424,12 +431,12 @@ describe('AccessControlTab', () => {
     ])
     await renderServices()
 
-    await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Undocumented machine identity/i)).toBeTruthy())
     expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
   })
 
   /**
-   * A principal created from the page (0125) carries its name and purpose on the row, and the page
+   * A principal created from the page carries its name and purpose on the row, and the page
    * lists it by them rather than as undocumented.
    */
   it('names a principal from its machine_principals row', async () => {
@@ -444,12 +451,12 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText('Line 4 OEE report')).toBeTruthy())
     expect(screen.getByTitle('Reads the hourly rollup.')).toBeTruthy()
-    expect(screen.queryByText(/Undocumented principal/i)).toBeNull()
+    expect(screen.queryByText(/Undocumented machine identity/i)).toBeNull()
     expect(within(screen.getByText('Line 4 OEE report').closest('tr')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
   })
 
   /**
-   * Renaming is offered only where there is a row to rename (0126): a pinned identity is named in
+   * Renaming is offered only where there is a row to rename: a pinned identity is named in
    * the registry and the RPC refuses it, so a pencil on its row would open a dialog to fail.
    */
   it('offers Describe for a named principal and not for a pinned one', async () => {
@@ -469,20 +476,20 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByTestId('describe-modal').textContent).toBe('Line 4 OEE report'))
   })
 
-  it('offers New Principal on the database principals card, and not when the list was refused', async () => {
+  it('offers New Machine Identity on the machine identities card', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderServices()
-    await waitFor(() => expect(screen.getByRole('button', { name: /New Principal/i })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /New Machine Identity/i })).toBeTruthy())
     // Which plane, on the button itself.
-    expect(screen.getByRole('button', { name: /New Principal/i }).title).toMatch(/never the broker/)
+    expect(screen.getByRole('button', { name: /New Machine Identity/i }).title).toMatch(/never the broker/)
   })
 
-  it('withholds New Principal when the principal read was refused', async () => {
+  it('withholds New Machine Identity when the principal read was refused', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockRejectedValue(new Error('insufficient privileges to list machine principals'))
     await renderServices()
     await waitFor(() => expect(screen.getByText(/insufficient privileges/)).toBeTruthy())
-    expect(screen.queryByRole('button', { name: /New Principal/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /New Machine Identity/i })).toBeNull()
   })
 
   /**
@@ -492,9 +499,9 @@ describe('AccessControlTab', () => {
   it('opens the token dialog for a principal the moment it is created', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderServices()
-    await waitFor(() => expect(screen.getByRole('button', { name: /New Principal/i })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /New Machine Identity/i })).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: /New Principal/i }))
+    fireEvent.click(screen.getByRole('button', { name: /New Machine Identity/i }))
     await waitFor(() => expect(screen.getByTestId('create-modal')).toBeTruthy())
     fireEvent.click(screen.getByText('stub-create'))
 
@@ -517,10 +524,10 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * The badge is the way in: a principal has N tokens and `revoke_service_token()` takes one jti,
+   * The count is the way in: a principal has N tokens and `revoke_service_token()` takes one jti,
    * so a row-level Revoke button would have to guess.
    */
-  it('opens the token inventory from the count badge, carrying the rows it counted', async () => {
+  it('opens the token inventory from the count, carrying the rows it counted', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
       MCP_PRINCIPAL.principal_id,
@@ -540,8 +547,8 @@ describe('AccessControlTab', () => {
       .toBe('MCP read-only client:2'))
   })
 
-  /** The count must not include what has been withdrawn. */
-  it('excludes a withdrawn token from the active count', async () => {
+  /** The count must not include what has been revoked. */
+  it('excludes a revoked token from the active count', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
       MCP_PRINCIPAL.principal_id,
@@ -591,7 +598,8 @@ describe('AccessControlTab', () => {
     ]]))
     await renderServices()
 
-    await waitFor(() => expect(screen.getByText('REVOKED')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('WITHDRAWN')).toBeTruthy())
+    expect(screen.queryByText('REVOKED')).toBeNull()
     expect(screen.queryByRole('button', { name: /Issue Token/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Withdraw$/i })).toBeNull()
     expect(screen.getByRole('button', { name: /Reinstate/i })).toBeTruthy()
@@ -685,11 +693,10 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * Minting stays on the host (Machine Identities, supabase/README.md): these tokens cannot be
-   * revoked, so issuing one should cost more than a click. The whole command is copyable with the
-   * principal already in it.
+   * The break-glass path stays a copyable command with the principal already in it:
+   * `mint-mcp-token.mjs` works when nobody can sign in to this page.
    */
-  it('offers the mint command rather than a mint button', async () => {
+  it('offers the mint command as well as the Issue Token button', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderServices()
 
@@ -734,51 +741,19 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * The coverage note: the two environment keys are outstanding on every stack, and an unlabelled
-   * empty list reads as none. They are 90-day keys, so the exclusion is temporary: `npm run setup`
-   * signs the first pair before the database exists, and rotating records them.
+   * The two environment keys are outstanding on every stack from `npm run setup`, before the
+   * database exists, so an unlabelled empty list would read as none.
    */
   it('states the credentials it cannot see, so an empty list is not read as none', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderServices()
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
-    // On the row, not in a footer: the badge itself says an empty cell is a statement about the
-    // record.
+    // On the row: the badge itself says an empty cell is a statement about the record.
     expect(screen.getByText('No token on record').getAttribute('title'))
       .toMatch(/not the same as none existing/i)
     expect(screen.getByText('No token on record').getAttribute('title'))
       .toMatch(/before this database exists/i)
-  })
-
-  it('carries no second copy of that caveat under the table', async () => {
-    // The footer was removed deliberately: a page this dense should not state the same thing twice,
-    // and the row is where it belongs. Pinned so it does not creep back alongside the tooltip.
-    api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
-
-    await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
-    expect(screen.queryByText(/Why a row can show no token/i)).toBeNull()
-  })
-
-  /**
-   * The note goes away when it stops being true: after a rotation both principals show a recorded
-   * token, and a footer saying they cannot appear would contradict the rows above it.
-   */
-  it('drops the coverage note once every principal has a recorded token', async () => {
-    api.listGatewayCredentials.mockResolvedValue([])
-    api.listServicePrincipals.mockResolvedValue([
-      { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
-    ])
-    api.listServiceTokens.mockResolvedValue(new Map([
-      ['b0000000-0000-4000-8000-000000000002',
-        [{ jti: 'abc', expires_at: new Date(Date.now() + 60 * 86400000).toISOString() }]]
-    ]))
-    await renderServices()
-
-    await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
-    expect(screen.getByText(/1 active token/i)).toBeTruthy()
-    expect(screen.queryByText(/Why a row can show no token/i)).toBeNull()
   })
 
   /**
@@ -822,8 +797,8 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * `audit_trail:read` is separate from listing principals; a caller without it must still see
-   * the identities.
+   * The token history is the Audit Trail's security lane, which only an Administrator or Auditor
+   * may read; a caller without it must still see the identities.
    */
   it('still lists identities when the token history cannot be read', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -839,5 +814,153 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/permission denied/i)).toBeTruthy())
+  })
+})
+
+/** The house card: header (title, tip, count), a filter bar in the body, the table on the seam. */
+describe('AccessControlTab card composition', () => {
+  const countOf = (title) => cardOf(title).querySelector('.card-header .section-count').textContent
+
+  it('keeps the credential filter and Refresh in a filter bar inside the card body', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(cardOf('Broker credentials').querySelector('tbody tr')).toBeTruthy())
+    const card = cardOf('Broker credentials')
+    const bar = card.querySelector('.card-body > .filter-bar')
+    expect(bar).toBeTruthy()
+    expect(within(bar).getByLabelText('Filter gateways by credential state')).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: /Refresh/ })).toBeTruthy()
+    // Nothing but the title, its tip and its count in the header.
+    expect(card.querySelector('.card-header select')).toBeNull()
+    expect(card.querySelector('.card-header .help-tip')).toBeTruthy()
+    // The table sits on the body's seam, with no inline margin.
+    const wrap = card.querySelector('.card-body + .table-wrap')
+    expect(wrap).toBeTruthy()
+    expect(wrap.getAttribute('style')).toBeNull()
+  })
+
+  it('offers Clear filters only while the credential filter is off Active', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(cardOf('Broker credentials')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'issued' } })
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
+    expect(screen.getByLabelText('Filter gateways by credential state').value).toBe('active')
+  })
+
+  it('shows a count on every card, 0 included', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(countOf('Broker credentials')).toBe('0'))
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(countOf('Machine identities')).toBe('0'))
+    expect(countOf('Broker accounts')).toBe('0')
+    // The five declared roles, whether or not the broker was read.
+    expect(countOf('Broker roles')).toBe('5')
+  })
+
+  it('counts the orphan card and the machine identities', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+    await waitFor(() => expect(countOf('Accounts with no gateway')).toBe('1'))
+    expect(countOf('Broker credentials')).toBe('1')
+    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    await waitFor(() => expect(countOf('Machine identities')).toBe('1'))
+  })
+
+  it('gives every card its description as a tip and none as a paragraph', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    await renderServices()
+
+    for (const title of ['Machine identities', 'Broker accounts', 'Broker roles']) {
+      expect(cardOf(title).querySelector('.card-header .help-tip')).toBeTruthy()
+    }
+    expect(document.querySelector('.page-main .card p')).toBeNull()
+  })
+
+  it('draws a count that opens something as a count-link', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServiceTokens.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      [{ jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' }],
+    ]]))
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [],
+      roles: [{ rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] }],
+    })
+    await renderServices()
+
+    const tokens = await screen.findByRole('button', { name: /1 active token/ })
+    expect(tokens.className).toBe('count-link')
+    expect(screen.getByRole('button', { name: '1 rule' }).className).toBe('count-link')
+  })
+
+  it('puts row actions in a right-aligned Actions column at btn-sm, with Withdraw as the danger action', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    await renderServices()
+
+    await screen.findByRole('button', { name: /Issue Token/i })
+    expect(within(cardOf('Machine identities')).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
+    const row = screen.getByText('MCP read-only client').closest('tr')
+    const cell = row.querySelector('td.row-actions')
+    expect(cell).toBeTruthy()
+    for (const b of cell.querySelectorAll('button')) expect(b.className).toContain('btn-sm')
+    const withdraw = within(row).getByRole('button', { name: /^Withdraw$/ })
+    expect(withdraw.className).toContain('btn-danger')
+    expect(withdraw.className).toContain('btn-danger-reveal')
+
+    fireEvent.click(screen.getByRole('tab', { name: /Gateways/ }))
+    const credentials = cardOf('Broker credentials')
+    expect(within(credentials).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
+    expect(within(credentials).getByRole('button', { name: /Generate/ }).className).toContain('btn-sm')
+  })
+
+  it('says loading inside the card while the first read is out, then says none yet', async () => {
+    let resolve
+    api.listGatewayCredentials.mockReturnValue(new Promise(r => { resolve = r }))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    // The heading and the card are there; only the list is loading.
+    expect(cardOf('Broker credentials').textContent).toMatch(/Loading credentials/)
+    resolve([])
+    await waitFor(() => expect(screen.getByText(/No gateways registered\./)).toBeTruthy())
+    expect(screen.getByText(/Gateways page/)).toBeTruthy()
+    expect(screen.queryByText(/Gateways tab/)).toBeNull()
+  })
+
+  it('tells none registered from none matching', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(cardOf('Broker credentials')).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'revoked' } })
+    expect(screen.getByText('No gateway matches this filter.')).toBeTruthy()
+    expect(screen.queryByText(/No gateways registered/)).toBeNull()
+  })
+
+  it('says the broker was not read as a state, and keeps the declared roles', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockRejectedValue(new Error('unreachable'))
+    await renderServices()
+
+    await waitFor(() => expect(screen.getByText('The broker was not read, so its accounts cannot be listed.')).toBeTruthy())
+    expect(cardOf('Broker roles').querySelector('.callout-warning')).toBeTruthy()
+    expect(cardOf('Broker roles').querySelectorAll('tbody tr')).toHaveLength(5)
+  })
+
+  it('names the machine identity as the noun, never a principal or a service identity', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    await renderServices()
+    await screen.findByText('MCP read-only client')
+    expect(document.body.textContent).not.toMatch(/Database principals|service principal|Service identit|machine principal/i)
   })
 })

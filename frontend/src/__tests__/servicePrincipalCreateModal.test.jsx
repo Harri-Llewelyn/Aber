@@ -83,9 +83,9 @@ describe('describePrincipal with a machine_principals row', () => {
     expect(meta.name).toBe('MCP read-only client')
   })
 
-  it('falls back to Undocumented principal for a row with no name', () => {
-    expect(describePrincipal('c0000000-0000-4000-8000-000000000009', { name: null }).name).toBe('Undocumented principal')
-    expect(describePrincipal('c0000000-0000-4000-8000-000000000009').name).toBe('Undocumented principal')
+  it('falls back to Undocumented machine identity for a row with no name', () => {
+    expect(describePrincipal('c0000000-0000-4000-8000-000000000009', { name: null }).name).toBe('Undocumented machine identity')
+    expect(describePrincipal('c0000000-0000-4000-8000-000000000009').name).toBe('Undocumented machine identity')
   })
 })
 
@@ -115,28 +115,28 @@ describe('ServicePrincipalCreateModal', () => {
     open()
     const note = screen.getByText(/Machines propose, people decide: a machine may file proposals/)
     expect(note.textContent).toMatch(/never write a device, decide a proposal or a quarantine/)
-    expect(note.textContent).toMatch(/Withdrawing the identity or a token refuses it at the API/)
+    expect(note.textContent).toMatch(/Withdrawing the identity or revoking a token refuses it at the API/)
     expect(document.body.textContent).not.toMatch(/unrevocable|cannot be revoked/i)
   })
 
   it('cannot be submitted without a name', () => {
     open()
-    expect(screen.getByRole('button', { name: /Create Principal/i }).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(true)
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: '   ' } })
-    expect(screen.getByRole('button', { name: /Create Principal/i }).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(true)
   })
 
   it('cannot be submitted with every permission unticked', () => {
     open()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Line 4 OEE report' } })
-    expect(screen.getByRole('button', { name: /Create Principal/i }).disabled).toBe(false)
+    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(false)
     // The first is ticked by default; untick it.
     fireEvent.click(screen.getAllByRole('checkbox')[0])
-    expect(screen.getByRole('button', { name: /Create Principal/i }).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(true)
   })
 
   it('creates with the trimmed name, the chosen permissions in menu order, and hands the row on', async () => {
-    // 0080's return shape: no name. The dialog adds the one it sent.
+    // The RPC's return shape has no name. The dialog adds the one it sent.
     const created = { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['telemetry:read', 'audit_trail:read'] }
     api.createServicePrincipal.mockResolvedValue(created)
     const props = open()
@@ -148,7 +148,7 @@ describe('ServicePrincipalCreateModal', () => {
     fireEvent.click(boxes[2])
     fireEvent.click(boxes[1])
     fireEvent.click(boxes[1])
-    fireEvent.click(screen.getByRole('button', { name: /Create Principal/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Create Machine Identity/i }))
 
     await waitFor(() => expect(api.createServicePrincipal).toHaveBeenCalledWith(
       'Line 4 OEE report', ['telemetry:read', 'audit_trail:read'], 'Reads the hourly rollup.'
@@ -168,7 +168,7 @@ describe('ServicePrincipalCreateModal', () => {
     const boxes = screen.getAllByRole('checkbox')
     fireEvent.click(boxes[GRANTABLE_PERMISSIONS.indexOf('schema:manage')])
     fireEvent.click(boxes[GRANTABLE_PERMISSIONS.indexOf('proposal:create')])
-    fireEvent.click(screen.getByRole('button', { name: /Create Principal/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Create Machine Identity/i }))
 
     await waitFor(() => expect(api.createServicePrincipal).toHaveBeenCalledWith(
       'Schema sync', ['telemetry:read', 'proposal:create', 'schema:manage'], ''
@@ -180,7 +180,7 @@ describe('ServicePrincipalCreateModal', () => {
     const props = open()
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Line 4 OEE report' } })
-    fireEvent.click(screen.getByRole('button', { name: /Create Principal/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Create Machine Identity/i }))
 
     await waitFor(() => expect(screen.getByText(/already exists/)).toBeTruthy())
     expect(props.onCreated).not.toHaveBeenCalled()

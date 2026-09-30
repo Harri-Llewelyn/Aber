@@ -31,8 +31,7 @@ ${desc || 'No detailed steps provided.'}
 ---
 *Generated via the Aber dashboard bug reporter.*`
 
-    // Composed from the configured repository rather than a hardcoded one -- see
-    // GITHUB_REPO_URL in constants.js for why this was wrong and why it keeps a fallback.
+    // The repository is GITHUB_REPO_URL, which is configurable and has a fallback.
     const fullUrl = `${GITHUB_REPO_URL}/issues/new` +
       `?title=${encodeURIComponent(issueTitle)}&body=${encodeURIComponent(issueBody)}`
 
@@ -68,7 +67,6 @@ ${desc || 'No detailed steps provided.'}
           <select className="form-control" value={category} onChange={e => setCategory(e.target.value)}>
             <option value="UI Dashboard">UI Dashboard</option>
             <option value="Ingestion Pipeline">Ingestion Pipeline</option>
-            <option value="FastAPI Backend">FastAPI Backend</option>
             <option value="Node-RED Gateway">Node-RED Gateway</option>
             <option value="TimescaleDB">TimescaleDB</option>
             <option value="Other">Other</option>

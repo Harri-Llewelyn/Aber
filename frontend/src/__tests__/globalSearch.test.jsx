@@ -41,12 +41,12 @@ describe('what the index holds', () => {
   })
 
   it('drops a card whose page this session cannot open', () => {
-    // A card inherits its page's visibility and cannot narrow it further. Runtime configuration is
-    // on Settings, which an Operator does not have.
+    // A card inherits its page's visibility and cannot narrow it further. Broker credentials is on
+    // Access Control, which an Operator does not have.
     const operator = buildTargets(TABS.filter(t => tabIsVisible(t, () => false, 'Operator')))
-    expect(operator.map(t => t.label)).not.toContain('Runtime configuration')
+    expect(operator.map(t => t.label)).not.toContain('Broker credentials')
 
-    expect(targets().map(t => t.label)).toContain('Runtime configuration')
+    expect(targets().map(t => t.label)).toContain('Broker credentials')
   })
 
   /* THE GATE IS THE TAB, NOT RLS. `system_settings` is SELECT-able by every authenticated session

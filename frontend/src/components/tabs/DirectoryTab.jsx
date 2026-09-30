@@ -3,15 +3,13 @@ import { api } from '../../api'
 import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { IconExternalLink, IconCopy, IconCheck, IconBookOpen } from '../common/Icons'
+import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
+import { LoadingState } from '../common/LoadingState'
 import { PageHeading } from '../common/PageHeading'
+import { SectionCount } from '../common/SectionCount'
 import { copyText } from '../common/CopyableId'
 
-/**
- * The stack, in the order an operator looks for it: something to open, the path telemetry arrives
- * on, then the stores behind it. Keyed on service_type, not the editable name. The order of `types`
- * within a group is the render order; names break ties.
- */
 /**
  * Whether a browser can open this endpoint: an http(s) scheme and a host that is not a single-label
  * container name (`node-exporter`, `supabase-envoy`). Erring towards copy: a copyable address costs
@@ -134,14 +132,19 @@ function EndpointCell({ url, exposure, viewerOnHost, onNotify }) {
   )
 }
 
-// A description per group: each card is a different kind of thing.
+/**
+ * The stack, in the order an operator looks for it: something to open, the path telemetry arrives
+ * on, then the stores behind it. Keyed on service_type, not the editable name. The order of `types`
+ * within a group is the render order; names break ties. Each group has a description, since each
+ * card is a different kind of thing.
+ */
 const SERVICE_GROUPS = [
   {
     title: 'Applications & User Interfaces',
     description: 'The things with a front door. These are meant to be opened — a link here is where '
       + 'you go to do something the dashboard does not do itself.',
-    // SOURCE_CONTROL is the forge (0094): a place to review a change, which is a front door in
-    // exactly this sense and a different kind of thing from a database console.
+    // SOURCE_CONTROL is the forge: a place to review a change, which is a front door in exactly
+    // this sense and a different kind of thing from a database console.
     types: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'SOURCE_CONTROL', 'DOCUMENTATION']
   },
   {
@@ -197,18 +200,12 @@ function groupServices(services) {
 }
 
 /**
- * One group's table. `.table-directory` pins the column widths so the tables line up as one list
- * broken into sections.
- */
-/* The status column describes something observed: `refresh_directory_liveness()` writes it every
-   minute from Prometheus's `up` series. Services nothing scrapes render as UNKNOWN in words,
-   because a blank beside green badges invites the assumption that it is fine. They cannot be probed
-   from inside the stack: `endpoint_url` holds browser addresses, which name the wrong host from a
-   container. */
-/**
- * One service's observed liveness. ACTIVE and DOWN are observations; UNKNOWN means nothing scrapes
- * it, said in words with a tooltip. `last_heartbeat` is shown only beside ACTIVE; it is cleared for
- * the other two so a timestamp cannot read as last seen at.
+ * One service's observed liveness, written every minute by `refresh_directory_liveness()` from
+ * Prometheus's `up` series. ACTIVE and DOWN are observations; anything else means nothing scrapes
+ * it, said in words rather than left blank beside green badges. It cannot be probed from inside the
+ * stack: `endpoint_url` holds browser addresses, which name the wrong host from a container.
+ * `last_heartbeat` is shown only beside ACTIVE; it is cleared for the other two so a timestamp
+ * cannot read as last seen at.
  */
 function LivenessCell({ status, lastHeartbeat }) {
   if (status === 'ACTIVE') {
@@ -231,7 +228,7 @@ function LivenessCell({ status, lastHeartbeat }) {
     <span
       className="badge badge-neutral"
       style={{ opacity: 0.75 }}
-      title="Nothing in this stack observes this service. Its endpoint_url is a browser address, so a probe from inside a container would be asking about the wrong host — see archived migration 0054."
+      title="Nothing in this stack observes this service. Its endpoint_url is a browser address, so a probe from inside a container would be asking about the wrong host."
     >
       not observed
     </span>
@@ -266,7 +263,7 @@ function ExposureCell({ exposure }) {
     )
   }
   return (
-    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Nothing recorded where this service can be reached from. Registered by something that predates the exposure column, or by something that does not set it — see archived migration 0084.">
+    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Nothing recorded where this service can be reached from. It was registered by something that does not set it.">
       not recorded
     </span>
   )
@@ -289,8 +286,8 @@ export function imageVersion(ref) {
 
 /**
  * The version of the image this release deploys for the service, with the full reference in the
- * tooltip. db-init records it from the chart (migration 0007), so it is the release's pin rather
- * than an observation of the running container. No image is said in words.
+ * tooltip. db-init records it from the chart, so it is the release's pin rather than an
+ * observation of the running container. No image is said in words.
  */
 function VersionCell({ image }) {
   const version = imageVersion(image)
@@ -311,6 +308,10 @@ function VersionCell({ image }) {
   )
 }
 
+/**
+ * One group's table. `.table-directory` pins the column widths so the tables line up as one list
+ * broken into sections.
+ */
 function ServiceTable({ rows, onNotify }) {
   // Read once per render rather than per row. `window` is guarded because this module is imported
   // by tests that render without a location.
@@ -327,7 +328,7 @@ function ServiceTable({ rows, onNotify }) {
             <th title="Architecture category">Service Type</th>
             <th title="The image tag this release deploys for the service; hover a version for the full image reference. Recorded from the chart by db-init on every install and upgrade">Version</th>
             <th title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
-            <th title="Where the service can be reached from, as a property of its port binding. Set by archived migration 0084 and describing the seeded loopback bindings; a deployment that publishes differently updates it">Reach</th>
+            <th title="Where the service can be reached from, as a property of its port binding. Set when the service is registered, and describing the seeded loopback bindings; a deployment that publishes differently updates it">Reach</th>
             <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
           </tr>
         </thead>
@@ -386,35 +387,39 @@ export function DirectoryTab({ showToast }) {
   const groups = groupServices(services)
 
   return (
-    <>
-      <PageHeading icon={<IconBookOpen size={15} />} title="Directory">
-        Every service this deployment runs, grouped by what it is for: which version the release
-        deploys, where to reach it, whether anything in the stack observes it, and whether that
-        address works from anywhere but the deployment host. The rows are registered by migration,
-        not added here.
-      </PageHeading>
+    <div className="page-layout">
+      <div className="page-main">
+        <PageHeading icon={<IconBookOpen size={15} />} title="Directory">
+          Every service this deployment runs, grouped by what it is for: which version the release
+          deploys, where to reach it, whether anything in the stack observes it, and whether that
+          address works from anywhere but the deployment host. The rows are registered by the
+          deployment, not added here.
+        </PageHeading>
 
-      {/* No search box or type picker: the grouping solves the scanning problem those controls
-          existed for. */}
-      {loading ? <div className="loading-wrap"><div className="spinner" /> Loading directory…</div> : (
-        groups.map(g => (
+        {/* No search box or type picker: the grouping solves the scanning problem those controls
+            existed for. */}
+        {loading ? (
+          <div className="card"><LoadingState label="directory" /></div>
+        ) : groups.length === 0 ? (
+          <div className="card">
+            <EmptyState
+              icon={<IconBookOpen size={36} />}
+              message="No services are registered in the directory."
+            />
+          </div>
+        ) : groups.map(g => (
           <div className="card directory-group" key={g.title}>
             <div className="card-header">
               <h3 className="section-title">
                 {g.title}
                 {g.description && <HelpTip label={`About ${g.title}`} text={g.description} />}
+                <SectionCount total={g.rows.length} />
               </h3>
             </div>
             <ServiceTable rows={g.rows} onNotify={showToast} />
           </div>
-        ))
-      )}
-
-      {!loading && groups.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-text">No services are registered in the directory.</div>
-        </div>
-      )}
-    </>
+        ))}
+      </div>
+    </div>
   )
 }

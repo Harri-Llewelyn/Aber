@@ -16,8 +16,7 @@ const APP_CSS = fs.readFileSync(path.join(SRC, 'App.css'), 'utf8')
 const HOOKS = {
   'trail-axis-corner': 'a test finds the empty axis corner by it (auditTrailPaging.test.jsx)',
   'trail-diff-after': 'a structural marker on the diff cell; only its parent rules style it',
-  'location-picker': 'the root of the .location-picker-* family; the children carry the rules',
-  'table-wrapper': 'ServiceTokenInventoryModal wraps its table in it; nothing styles it yet'
+  'location-picker': 'the root of the .location-picker-* family; the children carry the rules'
 }
 
 const DEFINED = new Set([...APP_CSS.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map(m => m[1]))
