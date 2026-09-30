@@ -4,10 +4,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { AssetConfigModal } from '../components/modals/AssetConfigModal'
 import { api } from '../api'
+import { PERMISSION_UUIDS } from '../constants'
 
 /**
  * A device's Description reaches the API on create and on edit, and a device that has never
- * published is not described as having sent a DDEATH.
+ * published is not described as having sent a DDEATH, and it can still be edited.
  */
 
 vi.mock('../api', async () => {
@@ -83,17 +84,34 @@ describe('a device description', () => {
 describe('a device that has never published', () => {
   const NEVER = { status: 'OFFLINE', first_dbirth_at: null }
 
-  it('reads as awaiting its first birth in the drawer, not as a DDEATH', async () => {
+  it('can be edited from the drawer, and the save reaches the API', async () => {
     await show([device(NEVER)])
     const edit = openPanel().getByText('Edit Details').closest('button')
-    expect(edit.getAttribute('title')).toMatch(/Awaiting first birth/)
-    expect(edit.getAttribute('title')).not.toMatch(/DDEATH/)
+    expect(edit).not.toBeDisabled()
+    expect(edit.getAttribute('title')).toBe('Edit device parameters')
+    fireEvent.click(edit)
+    fireEvent.change(screen.getByPlaceholderText(/Spindle rebuilt 2026-03/), { target: { value: 'Installed Friday' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    expect(api.put.mock.calls[0][1]).toMatchObject({ description: 'Installed Friday' })
   })
 
-  it('keeps the DDEATH wording for a device that has published before', async () => {
+  it('opens Propose a Change for somebody who may only propose', async () => {
+    api.get.mockImplementation(routeGet([device(NEVER)]))
+    const only = (uuid) => uuid === PERMISSION_UUIDS.PROPOSAL_CREATE
+    render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={only} />)
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    const propose = openPanel().getByText('Propose a Change').closest('button')
+    expect(propose).not.toBeDisabled()
+    fireEvent.click(propose)
+    expect(await screen.findByRole('button', { name: 'Propose a change' })).toBeInTheDocument()
+  })
+
+  it('can be edited after it has published and gone offline', async () => {
     await show([device({ status: 'OFFLINE' })])
     const edit = openPanel().getByText('Edit Details').closest('button')
-    expect(edit.getAttribute('title')).toMatch(/DDEATH received/)
+    expect(edit).not.toBeDisabled()
+    expect(edit.getAttribute('title')).toBe('Edit device parameters')
   })
 
   it('reads as awaiting its first birth in the parameters dialog', async () => {

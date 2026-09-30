@@ -1553,18 +1553,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               setForm({ ...editFormFor(selectedDevice), ...formFromPatch('device', mine?.patch) })
               setShowForm(true)
             },
-            disabled: (!canManage && !canPropose) || selectedDevice.status === 'OFFLINE',
+            disabled: !canManage && !canPropose,
             // Not `primary`: the Gateways and Cells drawers style their edit action as a secondary,
             // and editing is not what a device panel is opened to do.
-            title: selectedDevice.status === 'OFFLINE'
-              ? (isNeverSeen(selectedDevice)
-                ? 'Awaiting first birth — this device has not published yet.'
-                : 'Device is offline (DDEATH received)')
-              : proposeMode
-                ? 'Ask for a change to this device — an approver applies it, or says why not'
-                : !canManage && !canPropose
-                  ? requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)
-                  : 'Edit device parameters'
+            title: proposeMode
+              ? 'Ask for a change to this device — an approver applies it, or says why not'
+              : !canManage && !canPropose
+                ? requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)
+                : 'Edit device parameters'
           },
           /* No separate Propose a Change action: the dialog above is the only form, and for
              somebody who may not save it its footer files a proposal. See `proposeMode`. */
