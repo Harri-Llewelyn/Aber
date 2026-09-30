@@ -33,8 +33,7 @@ const observed = [
   { time: new Date(NOW - 30_000).toISOString(), asset_id: 'dev1', metric_name: 'Controller/EXECUTION', val_double: null, val_string: 'ACTIVE', val_bool: null }
 ]
 
-// No expand step: a modal has no collapsed state to defer the request to, and opening it is
-// already the deliberate act the accordion used its first expand for.
+// The modal reads once on open, with no expand step.
 const showDrawer = async (props = {}) => {
   render(<TelemetryModal device={device()} hasPermission={() => true} onExport={vi.fn()} onClose={vi.fn()} {...props} />)
   await waitFor(() => expect(api.get).toHaveBeenCalled())
@@ -45,7 +44,7 @@ beforeEach(() => {
   api.get.mockResolvedValue(observed)
 })
 
-describe('device telemetry drawer', () => {
+describe('device telemetry modal', () => {
   it('names the device it is showing, and reads on open', async () => {
     render(<TelemetryModal device={device()} hasPermission={() => true} onClose={vi.fn()} />)
 

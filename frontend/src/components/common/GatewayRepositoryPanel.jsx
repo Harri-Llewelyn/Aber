@@ -3,11 +3,8 @@ import { FORGE_ORGANISATION, GITEA_URL } from '../../constants'
 import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch, IconGitCompare } from './Icons'
 
 /**
- * Where a gateway's flow lives and where a change to it is proposed: its own repository in the
- * forge, reached by the forge's door (supabase/README.md, "The forge's door"). The path is derived,
- * not stored: the repository is named from the `sparkplug_id` in _shared/forge.ts and lives in the
- * organisation named there and in constants.js. Pull requests are opened in the forge under the
- * author's own name; `main` is protected there.
+ * The address of a gateway's own repository in the forge. Derived, not stored: it is named from the
+ * `sparkplug_id` (_shared/forge.ts) and lives in the organisation named in constants.js.
  */
 export function gatewayRepositoryUrl(gateway) {
   return `${GITEA_URL}/${FORGE_ORGANISATION}/gateway-${gateway.sparkplug_id}`
@@ -15,26 +12,19 @@ export function gatewayRepositoryUrl(gateway) {
 
 /**
  * The forge's diff between what was approved and what the appliance reports it is running: `main`
- * against `appliance`, the branch only the appliance's deploy key writes (APPLIANCE_BRANCH in
- * _shared/forge.ts). Two dots, not three: the direct diff between the two heads, not the changes
- * since their common ancestor, which would list every file on the branch as added.
+ * against `appliance`. Two dots, the direct diff between the heads; three would list every file on
+ * the branch as added.
  */
 export function gatewayCompareUrl(gateway) {
   return `${gatewayRepositoryUrl(gateway)}/compare/main..appliance`
 }
 
 export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
-  // NOTHING AT ALL FOR A ROLE THE FORGE WOULD REFUSE. Not a disabled link: that invites a request
-  // for access that was never intended. Operators and Auditors land here.
+  // Nothing for a role the forge would refuse, rather than a disabled link.
   if (!canOpenForge) return null
 
-  /**
-   * A host-run gateway has no repository: repositories are created only when an appliance enrols
-   * with a deploy key. The panel says so rather than hiding. Simulated and shadow gateways arrive
-   * here too (the table holds simulated to 'host' and shadow to simulated), but Node-RED is not
-   * necessarily what publishes as them, so each type is described on its own. Shadow is tested
-   * first because a shadow gateway is also simulated.
-   */
+  // A host-run gateway has no repository: one is created only when an appliance enrols. Shadow is
+  // tested first because a shadow gateway is also simulated.
   if (gateway?.deployment === 'host') {
     let reason
     if (gateway.is_shadow) {
@@ -71,32 +61,21 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
     )
   }
 
-  /**
-   * A remote gateway that has never enrolled has no repository either: enroll-gateway creates it
-   * from the deploy key the appliance sends when it redeems its bundle, so before that every
-   * address here answers 404. `enrolled_at` is the column that records the redemption.
-   */
+  // Not enrolled yet: the repository is created when the appliance enrols, so every address 404s.
   if (!gateway?.enrolled_at) {
     return (
       <div>
         <div className="form-label" style={{ margin: 0 }}>Repository</div>
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
           This gateway has not enrolled yet, so it has no repository. One is created in the forge
-          when the appliance redeems its enrolment bundle and sends the key it will read the
-          repository with.
+          when the appliance enrols and sends the key it will read the repository with.
         </div>
       </div>
     )
   }
 
-  /**
-   * Enrolled is not the same as having a repository. enroll-gateway sets `enrolled_at` in step 3
-   * and creates the repository in step 4, and step 4 is non-fatal: it is skipped on a deployment
-   * with no forge, skipped when the appliance sent no usable SSH key, and survives its own failure.
-   * `forge_repository_at` records step 4 (0110), so this branch is the difference between a link
-   * that works and four that answer 404 — or, with no forge deployed, four that point at whatever
-   * address the frontend fell back to.
-   */
+  // Enrolled is not the same as having a repository: creating it can be skipped (no forge, no
+  // usable key) or fail, and `forge_repository_at` records that it happened.
   if (!gateway.forge_repository_at) {
     return (
       <div>
@@ -112,12 +91,8 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
 
   const url = gatewayRepositoryUrl(gateway)
 
-  /**
-   * Archiving a gateway archives its repository too (#197): forge-sweep marks it read-only in the
-   * forge and records that here. The links stay — the whole point of archiving rather than
-   * deleting is that the flow, the incident log and the wiki are still readable — so this replaces
-   * the paragraph about proposing changes rather than the buttons under it.
-   */
+  // An archived gateway's repository is read-only in the forge. The links stay, since the flow,
+  // incident log and wiki are still readable; only the paragraph above them changes.
   const archivedInForge = Boolean(gateway.forge_archived_at)
 
   return (
@@ -142,10 +117,8 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
           and the appliance never reads.
         </div>
       )}
-      {/* Real links, so middle-click and copy-link work. Three because the repository, its issues
-          and its wiki are three different acts: change the flow, record an incident, write down
-          what is known. A fourth, the compare view, once the appliance has reported: before its
-          first push the branch does not exist and the forge would answer with a 404. */}
+      {/* Real links, so middle-click and copy-link work. The compare view appears once the
+          appliance has pushed its branch. */}
       <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
         {gateway.forge_appliance_sha && (
           <a

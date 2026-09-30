@@ -4751,3 +4751,99 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 6px 0;
   color: var(--text-muted);
 }
+
+/* ===== Devices ===== */
+/* The Quarantine queue card, always the first card; the gap keeps it off the roster below. */
+.queue-card { margin-bottom: var(--stack); }
+
+/* A badge that follows a name in the same cell. */
+.cell-tag { margin-left: 8px; }
+
+/* Badges stacked in a cell: the status badge over the alert badge. */
+.badge-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* A one-line finding under a cell's value: an icon and a short sentence. */
+.cell-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.cell-flag > svg { flex-shrink: 0; margin-top: 1px; }
+.cell-flag-warning { color: var(--warning-text); }
+.cell-flag-danger { color: var(--danger-text); }
+
+/* A legacy free-text classification in the Type column. */
+.cell-legacy { font-style: italic; color: var(--text-dim); }
+
+/* A form note that is a finding rather than a definition. */
+.form-hint.hint-warning { color: var(--warning-text); }
+.form-hint.hint-danger { color: var(--danger-text); }
+.form-hint.hint-warning > svg,
+.form-hint.hint-danger > svg { vertical-align: -2px; }
+
+.form-hint-inline { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+
+/* The read-only preview of a device's derived type tags. */
+.derived-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-glass);
+}
+
+/* GATEWAYS: the setup and credential dialogs. */
+
+/* Exempts the typed-name label's uppercasing, so the operator is not told to type capitals that
+   are not in the name. */
+.gateway-typed-name { text-transform: none; color: var(--text-primary); }
+
+.gateway-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gateway-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A block of commands or values to copy. `pre` keeps it ahead of .mono's colour and size. */
+pre.gateway-code {
+  margin: 6px 0 0;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-glass);
+  font-size: 12px;
+  white-space: pre;
+  word-break: break-all;
+}
+
+pre.gateway-code-wrap { white-space: pre-wrap; }
+
+.gateway-delivered { color: var(--success-text); font-size: 12px; }
+
+.gateway-delivery-failed {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--warning-text);
+}
+
+/* GATEWAYS: the list page. */
+.gateway-name-badge { margin-left: 8px; }
+.gateway-cell-warning { color: var(--warning-text); }
+.gateway-cell-italic { font-style: italic; }
+.gateway-withheld { color: var(--warning-text); }

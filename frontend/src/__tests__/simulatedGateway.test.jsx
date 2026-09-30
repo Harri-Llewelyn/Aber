@@ -99,18 +99,28 @@ describe('the Type column', () => {
   })
 
   it('reports a row with no deployment as Remote rather than Host', async () => {
-    // A row with no deployment set: Host is the type with no appliance and no enrolment, so the
-    // safe direction is the one that says there may be hardware to install.
+    // Host is the type with no appliance to set up, so Remote is the safe reading of a missing value.
     const g = gateway()
     delete g.deployment
     await show([g])
     expect(typeCell().textContent).toBe('Remote')
   })
 
-  it('no longer shows the badges it replaced', async () => {
-    await show([gateway({ deployment: 'host', is_simulated: true })])
-    expect(screen.queryByText('VIRTUAL')).toBeNull()
-    expect(screen.queryByText('SIMULATED')).toBeNull()
+  // The drawer says the same one word as the column, in one badge. It once showed HOST-RUN and
+  // SIMULATED as two, so a Shadow gateway read as both.
+  it.each([
+    ['Simulated', { deployment: 'host', is_simulated: true }],
+    ['Host', { deployment: 'host' }],
+    ['Remote', { deployment: 'remote' }],
+    ['Shadow', { deployment: 'host', is_simulated: true, is_shadow: true }],
+  ])('shows one %s badge in the drawer', async (label, fields) => {
+    await show([gateway(fields)])
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('Playback_Lab'))
+    const panel = within(document.querySelector('.context-panel'))
+
+    expect(panel.getAllByText(/^(Host|Remote|Simulated|Shadow)$/).map(el => el.textContent)).toEqual([label])
+    expect(panel.queryByText('HOST-RUN')).toBeNull()
+    expect(panel.queryByText('SIMULATED')).toBeNull()
   })
 })
 
@@ -124,8 +134,7 @@ describe('the Type control', () => {
   })
 
   it('does not offer Shadow', async () => {
-    // The one shadow gateway is seeded and a BEFORE INSERT trigger refuses any other, so offering
-    // it here would be offering to fabricate the row that exists to be unique.
+    // The one Playback gateway is seeded and the database refuses any other.
     await show([gateway()])
     openEdit()
     expect([...typeSelect().options].map(o => o.value)).not.toContain('shadow')
@@ -138,8 +147,7 @@ describe('the Type control', () => {
   })
 
   it('writes both columns when Simulated is chosen', async () => {
-    // ONE CONTROL, TWO COLUMNS. The schema keeps them separate deliberately; this is the single
-    // place the translation happens, and the assertion is that it happens completely.
+    // One control, two columns: the translation happens in one place, and completely.
     api.put.mockResolvedValue({})
     await show([gateway()])
     openEdit()
@@ -153,8 +161,7 @@ describe('the Type control', () => {
   })
 
   it('clears the simulated flag when the type moves back to Remote', async () => {
-    // The combination the database refuses: leaving is_simulated set while deployment became
-    // 'remote' would send a write gateways_simulated_is_host rejects.
+    // A simulated gateway cannot be remote, so leaving is_simulated set would send a refused write.
     api.put.mockResolvedValue({})
     await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
@@ -168,16 +175,14 @@ describe('the Type control', () => {
   })
 
   it('says that ingestion is unchanged', async () => {
-    // THE MISREADING THIS PREVENTS: that choosing Simulated diverts or quarantines the data. It
-    // does not, and the sentence lives beside the control rather than in a migration header.
+    // Guards the misreading that choosing Simulated diverts or quarantines the data.
     await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
     expect(screen.getByText(/Ingestion is unchanged/i)).toBeInTheDocument()
   })
 
   it('says that devices inherit the mark', async () => {
-    // 0052's design decision, surfaced where somebody would otherwise go looking for a per-device
-    // setting that deliberately does not exist.
+    // Said beside the control, where somebody would look for a per-device setting that does not exist.
     await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
     expect(screen.getByText(/devices inherit the mark/i)).toBeInTheDocument()
@@ -185,18 +190,16 @@ describe('the Type control', () => {
 })
 
 /**
- * The Cell Zone control, which the Type control governs. `gateways_synthetic_has_no_cell` is CHECK
- * (((NOT is_simulated) AND (NOT is_shadow)) OR cell_id IS NULL), so everything here renders that
- * constraint.
+ * The Location control, which the Type control governs: a Simulated or Shadow gateway cannot hold
+ * a cell.
  */
-describe('the Cell Zone control', () => {
+describe('the Location control', () => {
 
   const cellSelect = () => document.querySelector('#gateway-cell-zone')
 
-  it('reports no cell zone for a simulated gateway, whatever scope is stored', async () => {
-    // The reported inconsistency in one assertion: simulated gateways must agree with each other
-    // about their cell zone, since device_locations resolves `simulated` ahead of any cell. The
-    // first keeps the harness's name so show() can wait on it.
+  it('reports no cell for a simulated gateway, whatever scope is stored', async () => {
+    // Simulated gateways must agree with each other about their location, since the Simulated lane
+    // resolves ahead of any cell. The first keeps the harness's name so show() can wait on it.
     await show([
       gateway({ gateway_id: 'gw-a', deployment: 'host', is_simulated: true,
                 cell_id: null, location_scope: 'site_wide' }),
@@ -210,8 +213,7 @@ describe('the Cell Zone control', () => {
   })
 
   it('still reports Site-Wide for a gateway that can hold a cell', async () => {
-    // The guard against over-correcting: Site-Wide is a real answer for every non-synthetic
-    // gateway, and must not read as the unanswered case or nobody stops trying to "fix" it.
+    // Site-Wide is a real answer for every gateway that can hold a cell.
     await show([gateway({ deployment: 'host', cell_id: null, location_scope: 'site_wide' })])
     expect(within(document.querySelector('table')).getByText('Site-Wide')).toBeInTheDocument()
   })
@@ -221,7 +223,6 @@ describe('the Cell Zone control', () => {
     openEdit()
     expect(screen.getByRole('radio', { name: /Site-Wide/i })).toBeInTheDocument()
     expect(within(cellSelect()).queryByRole('option', { name: /Site-Wide/i })).toBeNull()
-    // One question, one control: the tick box that had to reach over and clear the select is gone.
     expect(screen.queryByRole('checkbox', { name: /Site-Wide/i })).toBeNull()
   })
 
@@ -229,22 +230,20 @@ describe('the Cell Zone control', () => {
     await show([gateway({ deployment: 'host', is_simulated: true, cell_id: null })])
     openEdit()
     expect(cellSelect().disabled).toBe(true)
-    // A disabled control with no explanation is the version of this that generates support
-    // questions -- it has to say which lane the assets land in instead.
+    // A disabled control has to say which lane the devices land in instead.
     expect(screen.getByText(/resolve to the Simulated lane/i)).toBeInTheDocument()
   })
 
   it('does not show a stored site-wide scope on a gateway that cannot hold a cell', async () => {
-    // The same inconsistency one layer in: a disabled box reading "Site-Wide" above a note saying
-    // simulated gateways have no cell contradicts itself.
+    // A disabled box reading "Site-Wide" above a note saying simulated gateways have no cell would
+    // contradict itself.
     await show([gateway({ deployment: 'host', is_simulated: true, cell_id: null, location_scope: 'site_wide' })])
     openEdit()
     expect(cellSelect().value).toBe('')
   })
 
   it('clears a cell when the type changes to Simulated, rather than letting the save be refused', async () => {
-    // Without this the save is a constraint violation, and the offending field is disabled by the
-    // same change, so the operator cannot see or clear the value being rejected.
+    // Otherwise the save is refused and the field is disabled, so the value cannot be cleared by hand.
     api.put.mockResolvedValue({})
     await show([gateway({ deployment: 'remote', cell_id: 'cell-1' })])
     openEdit()
@@ -257,7 +256,7 @@ describe('the Cell Zone control', () => {
     expect(body.cell_id).toBeFalsy()
   })
 
-  it('asks for the type before the cell zone it governs', async () => {
+  it('asks for the type before the location it governs', async () => {
     // A control that disables the one above it makes an operator re-read a decision already taken.
     await show([gateway()])
     openEdit()

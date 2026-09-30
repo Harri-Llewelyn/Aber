@@ -6,16 +6,10 @@ import { useEffect, useRef } from 'react'
  *
  * Licence: Codrops permits the resource to be used freely where it is integrated into or built upon
  * in personal or commercial projects, including web apps, and forbids redistributing or selling it
- * as-is. The credit is kept as attribution. The bundled `noise.min.js` is not imported because this
- * effect never referenced it.
+ * as-is. The credit is kept as attribution.
  *
- * Changes from the original: it is a component whose animation loop stops on unmount; the trail
- * buffer is faded each frame rather than left to saturate; `checkBounds` actually wraps pipes; no
- * noise library.
- *
- * Colours are resolved from `--bg-base` and `--accent`, so this file holds no palette of its own.
- * Light mode is a different effect: dark ink at low alpha with no blur pass, where dark is additive
- * glow drawn twice.
+ * Colours are resolved from `--bg-base` and `--accent`. Light mode draws dark ink at low alpha with
+ * no blur pass; dark mode draws additive glow twice.
  */
 
 const PIPE_COUNT = 30

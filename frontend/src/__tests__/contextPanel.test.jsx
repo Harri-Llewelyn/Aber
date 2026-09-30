@@ -462,7 +462,7 @@ describe('Tables shed what the panel now carries', () => {
     expect(within(panel()).queryByText('Attached Document Links')).toBeNull()
     expect(within(panel()).queryByRole('table')).toBeNull()
 
-    fireEvent.click(within(panel()).getByText('View Realtime Telemetry'))
+    fireEvent.click(within(panel()).getByText('View Telemetry'))
     await waitFor(() => expect(document.querySelector('.modal-wide')).toBeTruthy())
     expect(within(document.querySelector('.modal-wide')).getByText(/Telemetry — Simulated_CNC_01/)).toBeTruthy()
   })
@@ -597,8 +597,8 @@ describe('A card is a composition: header, description, filters, table', () => {
    * The bar sits inside the card and the primary action in the header, asserted on every page that
    * has one. `.page-actions` must not come back.
    */
-  const composedCard = (label) => {
-    const card = document.querySelector('.page-main .card')
+  const composedCard = (label, cardSelector = '.page-main .card') => {
+    const card = document.querySelector(cardSelector)
     expect(card).toBeTruthy()
 
     // The primary action is in the header, not in the filter bar.
@@ -630,7 +630,8 @@ describe('A card is a composition: header, description, filters, table', () => {
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
-    composedCard(/New Device/i)
+    // The Quarantine queue is the first card; the roster is the one that scrolls.
+    composedCard(/New Device/i, '.page-main .card-fill')
     expect(screen.queryByRole('button', { name: /Export CSV/i })).toBeNull()
   })
 
