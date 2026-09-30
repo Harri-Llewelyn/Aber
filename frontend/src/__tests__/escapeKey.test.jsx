@@ -213,14 +213,17 @@ describe('every modal is dismissible', () => {
       return e.name.endsWith('.jsx') ? [p] : []
     })
 
-  const renderers = jsxFiles(SRC)
-    .map(p => [p, fs.readFileSync(p, 'utf8')])
-    .filter(([, s]) => s.includes('className="modal-overlay"'))
+  const sources = jsxFiles(SRC).map(p => [p, fs.readFileSync(p, 'utf8')])
+  const renderers = sources.filter(([, s]) => s.includes('className="modal-overlay"'))
+  // A dialog built on the shared frame gets Escape from Modal itself (modal.test.jsx), so it is
+  // counted here but not walked below.
+  const frameUsers = sources.filter(([, s]) => /from '\.\.?\/(common\/)?(Modal|ConfirmModal)'/.test(s))
 
   it('finds the modal renderers to check', () => {
     // A guard on the guard: if the class is ever renamed, the list silently empties and every
-    // assertion below passes by having nothing to assert.
-    expect(renderers.length).toBeGreaterThanOrEqual(15)
+    // assertion below passes by having nothing to assert. Converting a dialog to <Modal> moves it
+    // from one list to the other, so the floor is on the two together.
+    expect(renderers.length + frameUsers.length).toBeGreaterThanOrEqual(25)
   })
 
   it.each(renderers.map(([p]) => path.relative(SRC, p)))('%s closes on Escape', (rel) => {

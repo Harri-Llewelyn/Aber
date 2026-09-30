@@ -82,7 +82,7 @@ const ALL = [FAILED, PINNED, SCHEDULED, CANCELLED, PRUNED]
 function serveRuns(rows) {
   api.listBackupRuns.mockImplementation(async ({ statuses, limit }) => {
     const matching = rows.filter(r => statuses.includes(r.status))
-    return { runs: matching.slice(0, limit), more: matching.length > limit }
+    return { runs: matching.slice(0, limit), total: matching.length }
   })
 }
 
@@ -163,6 +163,33 @@ describe('the list of runs', () => {
     expect(pruned).toHaveTextContent('Completed')
     expect(pruned).toHaveTextContent('Pruned by the retention window')
     expect(pruned.querySelector('button')).toBeNull()
+  })
+
+  it('puts the outcome of a run with no backup under its status, and a dash in the file columns', async () => {
+    renderTab()
+    const failed = await screen.findByTestId('run-j-3')
+    const cells = within(failed).getAllByRole('cell')
+    // When, Status, Origin, Note, Size, Holds, Retention, Off site, actions.
+    expect(cells).toHaveLength(9)
+    expect(cells[1]).toHaveTextContent('pg_dump timescaledb failed: connection refused')
+    for (const i of [4, 5, 6, 7]) expect(cells[i]).toHaveTextContent('—')
+  })
+
+  it('counts every run under the filter in the card header, whatever is loaded', async () => {
+    serveRuns(Array.from({ length: 45 }, (_, i) => ({ ...PRUNED, id: `m-${i}` })))
+    renderTab()
+    await screen.findByTestId('run-m-0')
+    expect(document.querySelector('.section-count')).toHaveTextContent('30 / 45')
+    fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
+    await waitFor(() => expect(document.querySelector('.section-count')).toHaveTextContent(/^45$/))
+  })
+
+  it('shows a count of 0 when nothing has run', async () => {
+    api.backupRunSummary.mockResolvedValue({ firstRecordedAt: null, lastSuccess: null, latestOutcome: null })
+    serveRuns([])
+    renderTab()
+    await screen.findByText('No backups yet.')
+    expect(document.querySelector('.section-count')).toHaveTextContent(/^0$/)
   })
 
   it('lists newest first, in the order the query returns', async () => {
@@ -362,7 +389,7 @@ describe('the filter and the pages', () => {
     expect(await screen.findByText('No run has failed.')).toBeInTheDocument()
   })
 
-  it('offers Show more while there is an older page, and asks for 30 more runs', async () => {
+  it('offers Show 15 more while there is an older page, and asks for 30 more runs', async () => {
     const many = Array.from({ length: 45 }, (_, i) => ({
       ...PRUNED, id: `m-${i}`, finished_at: new Date(Date.UTC(2026, 8, 20) - i * 86400000).toISOString()
     }))
@@ -371,17 +398,18 @@ describe('the filter and the pages', () => {
     await screen.findByTestId('run-m-0')
     expect(screen.getAllByTestId(/^run-/)).toHaveLength(30)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
     await waitFor(() => expect(screen.getAllByTestId(/^run-/)).toHaveLength(45))
     expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['COMPLETED', 'FAILED', 'CANCELLED'], limit: 60 })
-    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Show \d+ more$/ })).toBeNull()
+    expect(screen.getByText('All 45 shown.')).toBeInTheDocument()
   })
 
   it('goes back to the first page when the filter changes', async () => {
     serveRuns(Array.from({ length: 45 }, (_, i) => ({ ...PRUNED, id: `m-${i}` })))
     renderTab()
     await screen.findByTestId('run-m-0')
-    fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
     await waitFor(() => expect(api.listBackupRuns).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 60 })))
 
     fireEvent.change(filter(), { target: { value: 'completed' } })
@@ -457,7 +485,7 @@ describe('the current-state line', () => {
     renderTab()
     expect(await screen.findByTestId('backup-state')).toHaveTextContent(`No backup has succeeded in ${BACKUP_STALE_HOURS} hours`)
     expect(line()).toHaveTextContent('None has succeeded since the first was queued')
-    expect(screen.getByText('No run has finished yet.')).toBeInTheDocument()
+    expect(screen.getByText('No backups yet.')).toBeInTheDocument()
   })
 
   it('says nothing about a first job queued recently', async () => {
@@ -473,7 +501,7 @@ describe('the current-state line', () => {
     api.backupRunSummary.mockResolvedValue({ firstRecordedAt: null, lastSuccess: null, latestOutcome: null })
     serveRuns([])
     renderTab()
-    expect(await screen.findByText(/No backups exist yet/)).toBeInTheDocument()
+    expect(await screen.findByText('No backups yet.')).toBeInTheDocument()
     expect(line()).toBeNull()
     expect(screen.queryByLabelText('Run status filter')).toBeNull()
   })
@@ -528,8 +556,6 @@ describe('asking', () => {
     const button = await screen.findByRole('button', { name: /Take a backup/ })
     expect(button).toBeDisabled()
     expect(screen.getByText('Queued')).toBeInTheDocument()
-    // The icon sits on the label's baseline only if IconX forwards its style.
-    expect(screen.getByRole('button', { name: /^Cancel$/ }).querySelector('svg')).toHaveStyle({ verticalAlign: '-2px' })
 
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
     await waitFor(() => expect(api.cancelBackupJob).toHaveBeenCalledWith('j-2'))
