@@ -4850,3 +4850,35 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 .gateway-cell-warning { color: var(--warning-text); }
 .gateway-cell-italic { font-style: italic; }
 .gateway-withheld { color: var(--warning-text); }
+
+/* METRICS, SCHEMAS, VOCABULARY. The Add Metric form: fields wrap, and each carries its own flex
+   basis. */
+.metric-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.metric-form .form-group { margin: 0; }
+
+/* A semantic id is a full IRI; the cap keeps it from widening the catalog table. */
+.metric-id-cell { max-width: 260px; }
+
+/* The label of a group header, on Metrics and on the Vocabulary sections. */
+.table-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.table-group-label-muted { color: var(--text-muted); }
+
+.metric-edit-facts {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}

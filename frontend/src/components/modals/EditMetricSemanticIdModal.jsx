@@ -4,7 +4,7 @@ import { ActionButton } from '../common/ActionButton'
 import { SemanticIdField } from '../common/SemanticIdField'
 import { datatypeLabel } from '../../utils/sparkplugDatatype'
 import { storedSemanticIdPair } from '../../utils/standards'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { Modal } from '../common/Modal'
 import { usePendingAction } from '../../hooks/usePendingAction'
 
 /**
@@ -20,8 +20,8 @@ export function EditMetricSemanticIdModal({
 }) {
   const [saving, runSave] = usePendingAction()
 
-  // Escape closes through the shared stack. Inert mid-flight; see ConfirmModal.
-  useEscapeKey(saving ? () => {} : onCancel)
+  // Escape, the close button and Cancel do nothing while the save runs, as in ConfirmModal.
+  const dismiss = saving ? () => {} : onCancel
 
   const stored = storedSemanticIdPair(metric.semantic_id, metric.semantic_id_type)
   const [pair, setPair] = useState(stored)
@@ -29,51 +29,16 @@ export function EditMetricSemanticIdModal({
   const changed = next.semanticId !== stored.semanticId || next.semanticIdType !== stored.semanticIdType
 
   return (
-    <div className="modal-overlay">
-      <div className="modal">
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <IconPencil size={18} />
-          <span>Edit Metric <span className="mono">{metric.name}</span></span>
-        </div>
-
-        <div className="form-group" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-          <div>
-            <div className="form-label">Name</div>
-            <div className="mono" style={{ fontSize: '12px' }}>{metric.name}</div>
-          </div>
-          <div>
-            <div className="form-label">Sparkplug Datatype</div>
-            <div style={{ fontSize: '12px' }}>{datatypeLabel(metric.datatype)}</div>
-          </div>
-        </div>
-
-        <SemanticIdField
-          idPrefix="metric-edit"
-          subject="metric"
-          semanticId={pair.semanticId}
-          semanticIdType={pair.semanticIdType}
-          suggestion={suggestion}
-          candidates={candidates}
-          ownStandard={metric.standard || ''}
-          onChange={setPair}
-        />
-
-        <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
-          {usageCount > 0 ? (
-            <>
-              <strong>{usageCount}</strong> schema{usageCount === 1 ? ' models' : 's model'} this
-              metric. Every AAS shell exported from {usageCount === 1 ? 'it' : 'them'} will carry the
-              new id, so a consumer matching on the old one stops finding it.
-            </>
-          ) : (
-            <>No schema models this metric yet, so no exported shell carries its id.</>
-          )} The name and datatype stay as they are: devices publish them.
-        </p>
-
-        <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onCancel} disabled={saving} title="Cancel">Cancel</button>
+    <Modal
+      title={<>Edit Metric <span className="mono">{metric.name}</span></>}
+      icon={<IconPencil size={18} />}
+      size="md"
+      onClose={dismiss}
+      footer={
+        <>
+          <button className="btn btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
           <ActionButton
-            className={`btn btn-primary ${!changed ? 'btn-disabled' : ''}`}
+            className="btn btn-primary"
             disabled={!changed}
             pending={saving}
             pendingLabel="Saving…"
@@ -85,8 +50,42 @@ export function EditMetricSemanticIdModal({
           >
             Save Semantic ID
           </ActionButton>
+        </>
+      }
+    >
+      <div className="form-group metric-edit-facts">
+        <div>
+          <div className="form-label">Name</div>
+          <div className="mono">{metric.name}</div>
+        </div>
+        <div>
+          <div className="form-label">Sparkplug Datatype</div>
+          <div>{datatypeLabel(metric.datatype)}</div>
         </div>
       </div>
-    </div>
+
+      <SemanticIdField
+        idPrefix="metric-edit"
+        subject="metric"
+        semanticId={pair.semanticId}
+        semanticIdType={pair.semanticIdType}
+        suggestion={suggestion}
+        candidates={candidates}
+        ownStandard={metric.standard || ''}
+        onChange={setPair}
+      />
+
+      <p className="form-hint">
+        {usageCount > 0 ? (
+          <>
+            <strong>{usageCount}</strong> schema{usageCount === 1 ? ' models' : 's model'} this
+            metric. Every AAS shell exported from {usageCount === 1 ? 'it' : 'them'} will carry the
+            new id, so a consumer matching on the old one stops finding it.
+          </>
+        ) : (
+          <>No schema models this metric yet, so no exported shell carries its id.</>
+        )} The name and datatype stay as they are: devices publish them.
+      </p>
+    </Modal>
   )
 }
