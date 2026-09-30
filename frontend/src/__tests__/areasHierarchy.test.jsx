@@ -77,8 +77,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const thumbs = () => [...document.querySelectorAll('.shopfloor-grid > .area-thumb')]
-const pins = () => [...document.querySelectorAll('.area-thumb .area-plan-pin')]
+const areaCards = () => [...document.querySelectorAll('.shopfloor-grid > .area-card')]
+const pins = () => [...document.querySelectorAll('.area-card .area-plan-pin')]
 const pinNames = () => pins().map(p => p.getAttribute('aria-label'))
 const lanes = () => [...document.querySelectorAll('.site-lanes > .site-lane')]
 const panel = () => document.querySelector('.context-panel')
@@ -88,7 +88,7 @@ const grid = () => document.querySelector('.shopfloor-grid')
 describe('SiteMapTab draws the areas on the Site Map', () => {
   const renderSiteMap = async () => {
     render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
-    await waitFor(() => expect(thumbs().length).toBeGreaterThan(0))
+    await waitFor(() => expect(areaCards().length).toBeGreaterThan(0))
   }
 
   it('names the enterprise and the site in the Site Map card, and says when the site is not set', async () => {
@@ -126,15 +126,15 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
   it('shows every area at once, with every placed cell pinned and the counts above it', async () => {
     await renderSiteMap()
-    expect(thumbs().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
+    expect(areaCards().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
     // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does,
     // and it is broken out in the same line rather than given one under the plan.
-    expect(thumbs()[0].querySelector('.area-thumb-counts').textContent.trim()).toBe('2 Cells · 1 Gateway · 2 Devices · 1 Area-Wide')
-    expect(thumbs()[1].querySelector('.area-thumb-counts').textContent.trim()).toBe('1 Cell · 0 Gateways · 0 Devices')
+    expect(areaCards()[0].querySelector('.area-card-counts').textContent.trim()).toBe('2 Cells · 1 Gateway · 2 Devices · 1 Area-Wide')
+    expect(areaCards()[1].querySelector('.area-card-counts').textContent.trim()).toBe('1 Cell · 0 Gateways · 0 Devices')
     // THE POINT OF THE ONE VIEW: both of Building A's cells are pinned, and the header's count
     // agrees with what is drawn. A floor selector used to show one of them at a time.
     expect(pinNames()).toEqual(['Bay 1', 'Bay 2'])
-    expect(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' }).querySelector('.area-plan-pin-label')).toHaveTextContent('Bay 1')
+    expect(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' }).querySelector('.area-plan-pin-label')).toHaveTextContent('Bay 1')
     // Nothing to enter and nothing to come back from.
     expect(screen.queryByRole('button', { name: 'All areas' })).toBeNull()
     expect(screen.queryByRole('group', { name: 'Zoom' })).toBeNull()
@@ -151,7 +151,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
        and a "?" there would be a question mark that answers nothing. */
     await renderSiteMap()
 
-    const withOne = thumbs()[1]
+    const withOne = areaCards()[1]
     const tip = within(withOne).getByRole('button', { name: 'About Building B' })
     expect(tip).toHaveClass('help-tip')
 
@@ -161,7 +161,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('The annexe')
 
     // Building A has none, so it gets none.
-    expect(within(thumbs()[0]).queryByRole('button', { name: /^About Building A$/ })).toBeNull()
+    expect(within(areaCards()[0]).queryByRole('button', { name: /^About Building A$/ })).toBeNull()
   })
 
   it('sizes the grid and its pins from the number of areas', async () => {
@@ -190,7 +190,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(document.querySelector('.site-lanes')).queryByText(/Area-Wide/)).toBeNull()
     // Every lane is empty on this fixture, so none draws a status dot.
     expect(lanes().every(l => !l.querySelector('.tile-dot'))).toBe(true)
-    // The thumbnails are the way into an area: no selector, no arrows.
+    // The area cards are the way into an area: no selector, no arrows.
     expect(document.querySelector('.shopfloor-areas')).toBeNull()
     expect(screen.queryByRole('button', { name: /Next area|Previous area/ })).toBeNull()
     // No drag-and-drop: nothing on the page is draggable and nothing offers to rearrange.
@@ -217,7 +217,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(unassigned.textContent).toContain('Unassigned')
     expect(unassigned.querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 0 Devices')
     // Counted once, under the area that owns it, and named as the area's own rather than a cell's.
-    expect(thumbs()[0].querySelector('.area-thumb-counts').textContent.trim())
+    expect(areaCards()[0].querySelector('.area-card-counts').textContent.trim())
       .toBe('0 Cells · 1 Gateway · 0 Devices · 1 Area-Wide')
   })
 
@@ -330,7 +330,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
   it('opens an area from its name, listing what its plan cannot show', async () => {
     await renderSiteMap()
-    fireEvent.click(within(thumbs()[0]).getByRole('button', { name: 'Building A' }))
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'Building A' }))
     expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
     // Area-Wide has no place on any plan, so the panel is where it lives.
     expect(within(panel()).getByText('BMS_A')).toBeInTheDocument()
@@ -338,7 +338,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).queryByText(/Not placed \(/)).toBeNull()
 
     // B's cell has no place, so it is named rather than lost.
-    fireEvent.click(within(thumbs()[1]).getByRole('button', { name: 'Building B' }))
+    fireEvent.click(within(areaCards()[1]).getByRole('button', { name: 'Building B' }))
     expect(within(panel()).getByText('Not placed (1)')).toBeInTheDocument()
     expect(within(panel()).getByText('Paint Shop')).toBeInTheDocument()
     expect(within(panel()).getByText(/No plan uploaded/)).toBeInTheDocument()
@@ -349,16 +349,16 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
      the cursor already says pointer, so the card takes the click as well. */
   it('opens the area from the card itself, and leaves a pin to its own cell', async () => {
     await renderSiteMap()
-    fireEvent.click(thumbs()[0].querySelector('.area-plan'))
+    fireEvent.click(areaCards()[0].querySelector('.area-plan'))
     expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
 
     // A pin stops its own click, so the cell wins over the area behind it.
-    fireEvent.click(within(thumbs()[0]).getByRole('button', { name: 'Bay 1' }))
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' }))
     expect(within(panel()).queryByText('2 Cells · 2 Devices')).toBeNull()
     expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
 
     // And the name still closes what it opened, rather than the card reopening it behind.
-    const name = within(thumbs()[0]).getByRole('button', { name: 'Building A' })
+    const name = within(areaCards()[0]).getByRole('button', { name: 'Building A' })
     fireEvent.click(name)
     expect(name).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(name)
@@ -370,15 +370,15 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
      rides in the header with the others. */
   it('spends a line under the card on unplaced cells alone, and none when there are none', async () => {
     await renderSiteMap()
-    expect(within(thumbs()[0]).getByText(/1 Area-Wide/)).toBeInTheDocument()
-    expect(thumbs()[0].querySelector('.area-thumb-aside')).toBeNull()
-    expect(within(thumbs()[1]).getByText('1 cell not placed')).toBeInTheDocument()
+    expect(within(areaCards()[0]).getByText(/1 Area-Wide/)).toBeInTheDocument()
+    expect(areaCards()[0].querySelector('.area-card-aside')).toBeNull()
+    expect(within(areaCards()[1]).getByText('1 cell not placed')).toBeInTheDocument()
 
     api.get.mockImplementation(routeGet({ cells: [cells[0]], devices: [device] }))
     render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
     await waitFor(() => expect(document.querySelectorAll('.shopfloor-grid').length).toBe(2))
-    const clean = [...document.querySelectorAll('.shopfloor-grid')][1].querySelector('.area-thumb')
-    expect(clean.querySelector('.area-thumb-aside')).toBeNull()
+    const clean = [...document.querySelectorAll('.shopfloor-grid')][1].querySelector('.area-card')
+    expect(clean.querySelector('.area-card-aside')).toBeNull()
   })
 
   it('keeps drawing an archived area, muted, with its plan and its pins', async () => {
@@ -387,20 +387,20 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
        the archive glyph, the way an archived cell's pin does. */
     api.get.mockImplementation(routeGet({ areas: [{ ...areaA, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }, areaB] }))
     await renderSiteMap()
-    const card = screen.getByRole('button', { name: 'Building A' }).closest('.area-thumb')
-    expect(card).toHaveClass('area-thumb-archived')
+    const card = screen.getByRole('button', { name: 'Building A' }).closest('.area-card')
+    expect(card).toHaveClass('area-card-archived')
     expect(within(card).getByText('ARCHIVED')).toBeInTheDocument()
-    expect(card.querySelector('.area-thumb-header .tile-dot')).toBeNull()
+    expect(card.querySelector('.area-card-header .tile-dot')).toBeNull()
     expect(screen.getByRole('button', { name: 'Building A' })).toHaveAttribute('title', expect.stringMatching(/archived/))
     expect(pinNames()).toEqual(expect.arrayContaining(['Bay 1', 'Bay 2']))
     // The one beside it is untouched.
-    expect(screen.getByRole('button', { name: 'Building B' }).closest('.area-thumb')).not.toHaveClass('area-thumb-archived')
+    expect(screen.getByRole('button', { name: 'Building B' }).closest('.area-card')).not.toHaveClass('area-card-archived')
   })
 
   it('draws the uploaded plan where there is one, and the default outline where there is not', async () => {
     await renderSiteMap()
-    expect(thumbs()[0].querySelector('.area-plan').getAttribute('data-plan')).toBe('uploaded')
-    expect(thumbs()[1].querySelector('.area-plan').getAttribute('data-plan')).toBe('outline')
+    expect(areaCards()[0].querySelector('.area-plan').getAttribute('data-plan')).toBe('uploaded')
+    expect(areaCards()[1].querySelector('.area-plan').getAttribute('data-plan')).toBe('outline')
   })
 
   it('opens a pin into the details panel, naming where the cell is and what it holds', async () => {
@@ -423,7 +423,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(/No areas yet/)).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'All areas' })).toBeNull()
-    expect(thumbs()).toHaveLength(0)
+    expect(areaCards()).toHaveLength(0)
     expect(document.querySelector('.shopfloor-grid')).toBeNull()
   })
 })

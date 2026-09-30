@@ -112,17 +112,17 @@ describe('shopfloor legend categories', () => {
      against a device in the area is the one thing the map must not hide. */
   it('turns the area card red while an alert fires against a device in it', async () => {
     renderMap({ devices: [device()], activeAlerts: [alert()] })
-    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-thumb')
-    expect(card).toHaveClass('area-thumb-alerting')
-    expect(card.querySelector('.area-thumb-header .tile-dot')).toHaveClass('tile-dot-alert')
-    expect(card.querySelector('.area-thumb-header .tile-dot')).toHaveAttribute('title', expect.stringMatching(/Alert firing/))
+    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-card')
+    expect(card).toHaveClass('area-card-alerting')
+    expect(card.querySelector('.area-card-header .tile-dot')).toHaveClass('tile-dot-alert')
+    expect(card.querySelector('.area-card-header .tile-dot')).toHaveAttribute('title', expect.stringMatching(/Alert firing/))
   })
 
   it('keeps the area card in the rollup colour while nothing is firing', async () => {
     renderMap({ devices: [device()] })
-    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-thumb')
-    expect(card).not.toHaveClass('area-thumb-alerting')
-    expect(card.querySelector('.area-thumb-header .tile-dot')).toHaveClass('tile-dot-normal')
+    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-card')
+    expect(card).not.toHaveClass('area-card-alerting')
+    expect(card.querySelector('.area-card-header .tile-dot')).toHaveClass('tile-dot-normal')
   })
 
   it('says who raised the alert, since that is what permits red here at all', async () => {

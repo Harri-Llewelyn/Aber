@@ -2223,8 +2223,8 @@ td.row-actions, th.row-actions {
 .site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ===== The Site Map card: area plans and pins ===== */
-/* Area thumbnails sit in the tracks of `.shopfloor-grid`. */
-.area-thumb {
+/* Area cards sit in the tracks of `.shopfloor-grid`. */
+.area-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2236,24 +2236,24 @@ td.row-actions, th.row-actions {
   text-align: left;
   cursor: pointer;
   transition: var(--transition);
-  --thumb-max-height: 260px;
+  --plan-max-height: 260px;
 }
 
-.area-thumb:hover {
+.area-card:hover {
   border-color: var(--border-hover);
   box-shadow: 0 0 14px var(--accent-dim);
 }
 
-/* Compounded so it keeps its border under `.area-thumb:hover`. */
-.area-thumb.area-thumb-alerting,
-.area-thumb.area-thumb-alerting:hover {
+/* Compounded so it keeps its border under `.area-card:hover`. */
+.area-card.area-card-alerting,
+.area-card.area-card-alerting:hover {
   border-color: var(--danger);
   box-shadow: 0 0 14px rgba(255, 77, 109, 0.25);
 }
 
 /* An archived area: still drawn, with its plan and its pins, and muted the way an archived cell's
    pin is. The border takes the warning colour so it reads as archived rather than as faded. */
-.area-thumb.area-thumb-archived {
+.area-card.area-card-archived {
   opacity: 0.7;
   border-color: var(--warning);
 }
@@ -2261,7 +2261,7 @@ td.row-actions, th.row-actions {
 /* Wraps, so a card too narrow for the name and the counts together gives the counts their own
    line rather than shrinking the name away to nothing. Four tallies and an open context panel is
    where that happens: the name is the one thing on the card that must survive. */
-.area-thumb-header {
+.area-card-header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -2271,20 +2271,20 @@ td.row-actions, th.row-actions {
   min-width: 0;
 }
 
-.area-thumb-header .zone-name { flex: 1 1 auto; }
+.area-card-header .zone-name { flex: 1 1 auto; }
 
 /* The description tip belongs to the name, not to the counts. `margin-left` is dropped because the
    header's own `gap` is already the spacing, and `flex-shrink` because an 18px circle is the first
    thing a flex row would squeeze when a long area name takes the line. */
-.area-thumb-header .help-tip { flex-shrink: 0; margin-left: 0; }
+.area-card-header .help-tip { flex-shrink: 0; margin-left: 0; }
 
 /* The counts keep the right-hand end whether they share the name's line or take one below it. */
-.area-thumb-counts { flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+.area-card-counts { flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
 
 /* The area's own assets, in the same line as the rest. Marked so the breakdown reads as one. */
-.area-thumb-wide { color: var(--text-primary); }
+.area-card-wide { color: var(--text-primary); }
 
-.area-thumb-name {
+.area-card-name {
   flex: 1 1 auto;
   min-width: 0;
   background: none;
@@ -2299,14 +2299,14 @@ td.row-actions, th.row-actions {
   white-space: nowrap;
 }
 
-.area-thumb-name:hover { color: var(--accent); }
-.area-thumb-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.area-card-name:hover { color: var(--accent); }
+.area-card-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
-.area-thumb.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+.area-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
 
 /* Only what the plan cannot draw: cells with no place on it, and the area-wide assets that have
    no place by definition. Absent when there is nothing to say, so the line means there is. */
-.area-thumb-aside {
+.area-card-aside {
   display: block;
   width: 100%;
   background: none;
@@ -2318,8 +2318,8 @@ td.row-actions, th.row-actions {
   cursor: pointer;
 }
 
-.area-thumb-aside:hover { color: var(--text-primary); }
-.area-thumb-aside-warn { color: var(--warning-text); }
+.area-card-aside:hover { color: var(--text-primary); }
+.area-card-aside-warn { color: var(--warning-text); }
 
 /* The grid is the map, so it follows the number of areas rather than a fixed minimum width: one
    area takes the row, two split it, three or more settle on thirds. Below the breakpoint every
@@ -2335,14 +2335,14 @@ td.row-actions, th.row-actions {
   .shopfloor-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* A plan is at most --thumb-max-height tall (260px on .area-thumb): a tall plan is a narrow column
+/* A plan is at most --plan-max-height tall (260px on .area-card): a tall plan is a narrow column
    in its card rather than a card the height of the page. It grows as the grid narrows, because the
    pins on it have to stay apart at the spacing the database enforces. */
-.shopfloor-grid[style*="--map-columns: 2"] .area-thumb { --thumb-max-height: 340px; }
-.shopfloor-grid[style*="--map-columns: 1"] .area-thumb { --thumb-max-height: 440px; }
+.shopfloor-grid[style*="--map-columns: 2"] .area-card { --plan-max-height: 340px; }
+.shopfloor-grid[style*="--map-columns: 1"] .area-card { --plan-max-height: 440px; }
 
-.area-thumb .area-plan {
-  width: min(100%, calc(var(--thumb-max-height) * var(--plan-aspect, 1.3333)));
+.area-card .area-plan {
+  width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333)));
   margin: 0 auto;
 }
 
@@ -2581,7 +2581,7 @@ td.row-actions, th.row-actions {
   white-space: nowrap;
 }
 
-/* Health rollup dot: one per lane and thumbnail, the worst state of the devices resolving to it.
+/* Health rollup dot: one per lane and area card, the worst state of the devices resolving to it.
    Never colour alone: the dot carries a `title` naming the state. */
 .tile-dot {
   width: 8px;

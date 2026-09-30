@@ -353,12 +353,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     return (
       <div
         key={ar.area_id}
-        className={`area-thumb${state.alert ? ' area-thumb-alerting' : ''}${archived ? ' area-thumb-archived' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
+        className={`area-card${state.alert ? ' area-card-alerting' : ''}${archived ? ' area-card-archived' : ''}${selectedAreaId === ar.area_id ? ' is-selected' : ''}`}
         data-area={ar.area_id}
         /* A pin stops its own click (AreaPlanPin), so a click that reaches here is the area's. */
         onClick={() => toggleArea(ar.area_id)}
       >
-        <div className="area-thumb-header">
+        <div className="area-card-header">
           {/* The one dot that goes red: an alert against a device here outranks the rollup. An
               archived area shows the archive glyph where the dot would be. */}
           {archived
@@ -367,7 +367,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
           <button
             type="button"
-            className="zone-name area-thumb-name"
+            className="zone-name area-card-name"
             /* Stopped, or the card behind it toggles the panel straight back shut. */
             onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
             aria-pressed={selectedAreaId === ar.area_id}
@@ -390,12 +390,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               the plan: it is a count, and the counts live here. It is a breakdown, not an addition
               -- the gateway and device figures beside it already include these. */}
           <span
-            className="area-thumb-counts mono"
+            className="area-card-counts mono"
             title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s)`
               + (wideCount > 0 ? `, of which ${wideCount} belong(s) to the area rather than to a cell in it` : '')}
           >
             {counted(areaCells.length, 'Cell')} · {counted(gateways.length, 'Gateway')} · {counted(devices.length, 'Device')}
-            {wideCount > 0 && <> · <span className="area-thumb-wide">{wideCount} Area-Wide</span></>}
+            {wideCount > 0 && <> · <span className="area-card-wide">{wideCount} Area-Wide</span></>}
           </span>
         </div>
         <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
@@ -407,11 +407,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         {unplaced.length > 0 && (
           <button
             type="button"
-            className="area-thumb-aside"
+            className="area-card-aside"
             onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
             title={`Open ${ar.area_name} to see which cells have no place on the plan`}
           >
-            <span className="area-thumb-aside-warn">{counted(unplaced.length, 'cell')} not placed</span>
+            <span className="area-card-aside-warn">{counted(unplaced.length, 'cell')} not placed</span>
           </button>
         )}
       </div>

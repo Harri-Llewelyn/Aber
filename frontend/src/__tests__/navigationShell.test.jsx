@@ -476,10 +476,10 @@ describe('Merged navigation shell', () => {
 })
 
 /**
- * The area thumbnails: one track per column, --map-columns of them (three when unset), and one
+ * The area cards: one track per column, --map-columns of them (three when unset), and one
  * column below 900px. The Site Map sets --map-columns from the number of areas.
  */
-describe('area thumbnail grid', () => {
+describe('area card grid', () => {
   const gridRule = APP_CSS.match(/\n\.shopfloor-grid \{([\s\S]*?)\n\}/)[1]
 
   it('takes its column count from --map-columns, three when unset', () => {
