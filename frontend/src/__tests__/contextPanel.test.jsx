@@ -228,6 +228,15 @@ describe('Panel layout pushes rather than covers', () => {
     expect(layout).not.toMatch(/gap:/)
     expect(openRule).toMatch(/margin-left:\s*16px/)
   })
+
+  it('keeps its column down to 800px, and as an overlay below that fills its own width', () => {
+    // At half a 1080p screen (about 960px) the drawer stays beside the list rather than over it.
+    expect(APP_CSS).not.toMatch(/@media \(max-width: 1100px\) \{\s*\.context-panel-open/)
+    const overlay = APP_CSS.match(/@media \(max-width: 800px\) \{([\s\S]*?)\n\}/)[1]
+    expect(overlay).toMatch(/\.context-panel-open \{[^}]*position:\s*fixed/)
+    // The inner shell fills the overlay; the desktop width left an empty strip on the right.
+    expect(overlay).toMatch(/\.context-panel-inner \{[^}]*width:\s*100%/)
+  })
 })
 
 describe('Gateways page drawer', () => {
