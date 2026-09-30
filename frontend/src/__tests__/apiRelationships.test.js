@@ -263,10 +263,6 @@ describe('device liveness is never asserted by the UI', () => {
     expect(callFor('devices').payload).not.toHaveProperty('is_quarantined');
   });
 
-  it('still writes a status the caller does state, so the quarantine paths keep working', async () => {
-    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', status: 'OFFLINE', is_quarantined: false });
-    expect(callFor('devices').payload).toMatchObject({ status: 'OFFLINE', is_quarantined: false });
-  });
 });
 
 describe('device DBIRTH parameters', () => {
@@ -458,39 +454,6 @@ describe('telemetry queries', () => {
   it('propagates query errors instead of returning placeholder rows', async () => {
     state.responses.telemetry = { data: null, error: { message: 'relation "telemetry" does not exist' } };
     await expect(api.get('/api/v1/telemetry')).rejects.toMatchObject({ message: expect.stringContaining('telemetry') });
-  });
-});
-
-describe('telemetry filtering by device tag', () => {
-  it('expands asset_ids into a single IN over the telemetry view', async () => {
-    // A tag filter resolves to a whole group of devices client-side, because a device's tags are
-    // derived from its schema and the database does not model them.
-    await api.get('/api/v1/telemetry?asset_ids=dev200000000000400080000,dev300000000000400080000');
-    expect(callFor('telemetry').filters).toContainEqual([
-      'in', 'asset_id', ['dev200000000000400080000', 'dev300000000000400080000']
-    ]);
-  });
-
-  it('translates device UUIDs in asset_ids to Sparkplug keys', async () => {
-    // telemetry.asset_id is keyed by sparkplug_id; the UI works in UUIDs. Same local derivation
-    // as the single-device path: 'dev' + the first 21 unhyphenated hex characters.
-    await api.get('/api/v1/telemetry?asset_ids=ccd19944-8805-4c11-ae66-ea0d2c50f40c');
-    const [, , keys] = callFor('telemetry').filters.find(f => f[0] === 'in');
-    expect(keys).toEqual(['devccd1994488054c11ae66e']);
-  });
-
-  it('returns nothing — not everything — for a tag that matches no device', async () => {
-    // The failure mode this guards: an empty IN list silently widening to the whole fleet.
-    const rows = await api.get('/api/v1/telemetry?asset_ids=');
-    expect(rows).toEqual([]);
-    expect(callFor('telemetry')).toBeUndefined();
-  });
-
-  it('lets an explicitly chosen device win over a tag', async () => {
-    await api.get('/api/v1/telemetry?asset_id=dev200000000000400080000&asset_ids=dev300000000000400080000');
-    const filters = callFor('telemetry').filters;
-    expect(filters).toContainEqual(['eq', 'asset_id', 'dev200000000000400080000']);
-    expect(filters.find(f => f[0] === 'in')).toBeUndefined();
   });
 });
 

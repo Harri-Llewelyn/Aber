@@ -245,7 +245,7 @@ function toTelemetryKey(assetId) {
  *
  * Every query leaves here with a lower time bound; see TELEMETRY_DEFAULT_WINDOW_MINUTES.
  */
-async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fromTime, to: toTime, limit, offset, resolution } = {}) {
+async function queryTelemetry({ assetId, metricName, minutes, from: fromTime, to: toTime, limit, offset, resolution } = {}) {
   const pageSize = Math.min(
     Number.isFinite(limit) && limit > 0 ? limit : TELEMETRY_PAGE_SIZE,
     TELEMETRY_MAX_ROWS
@@ -265,18 +265,9 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
   const timeColumn = rollup ? 'bucket' : 'time';
 
   const telemetryKey = toTelemetryKey(assetId);
-  // Set by a tag filter, which resolves to a whole group of devices. The Telemetry tab requires a
-  // time window on this path; the floor bounds the damage, it does not make a fleet query cheap.
-  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
-
-  // An empty set means "a tag that matches no device", which must return nothing rather than
-  // silently widening to the whole fleet. Checked before the query is built so no request is
-  // issued at all.
-  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
 
   let query = supabase.from(relation).select('*');
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  else if (assetIds) query = query.in('asset_id', telemetryKeys);
   if (metricName) query = query.eq('metric_name', metricName);
 
   // Absolute bounds win over the relative window -- see the parameter note above. `to` is
@@ -301,18 +292,8 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
  * the cost is bounded by how many series exist. `minutes` is honoured as a staleness bound, so a
  * machine that last reported in March does not reappear with a March reading as current state.
  */
-async function queryLatestTelemetry({ assetId, assetIds, metricName, minutes } = {}) {
-  const telemetryKey = toTelemetryKey(assetId);
-  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
-
-  // An empty set means "a tag that matches no device" -- return nothing rather than widening to
-  // the whole fleet. Checked before the query is built, as in queryTelemetry.
-  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
-
+async function queryLatestTelemetry({ minutes } = {}) {
   let query = supabase.from('telemetry_latest').select('*');
-  if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  else if (assetIds) query = query.in('asset_id', telemetryKeys);
-  if (metricName) query = query.eq('metric_name', metricName);
 
   const window = Number.isFinite(minutes) && minutes > 0 ? minutes : TELEMETRY_DEFAULT_WINDOW_MINUTES;
   query = query.gte('time', new Date(Date.now() - window * 60000).toISOString());
@@ -1584,34 +1565,6 @@ const apiMethods = {
   },
 
   get: async (path, _options = {}) => {
-    const entityAuditTrailMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/audit-trail/);
-    if (entityAuditTrailMatch) {
-      const rawEntityType = entityAuditTrailMatch[1];
-      const entityId = entityAuditTrailMatch[2];
-      const SINGULAR_MAP = { cells: 'cell', gateways: 'gateway', devices: 'device', assets: 'device' };
-      const singularType = SINGULAR_MAP[rawEntityType] || rawEntityType.replace(/s$/, '');
-
-      /**
-       * The entity types that belong to this entity's history as well as their own.
-       * `device_nameplate` rows are keyed by the device id, so a device's timeline includes them.
-       */
-      const ALSO_ABOUT = { device: ['device_nameplate'], devices: ['device_nameplate'] };
-      const alsoAbout = new Set(ALSO_ABOUT[singularType] || []);
-
-      let query = supabase.from('audit_trail').select('*').eq('entity_id', entityId);
-      const { data, error } = await query.order('recorded_at', { ascending: false });
-      if (error) throw error;
-
-      const filtered = (data || []).filter(t => {
-        if (!t.entity_type) return true;
-        const et = t.entity_type.toLowerCase();
-        return et === singularType || et === rawEntityType || et === `${singularType}s`
-          || alsoAbout.has(et);
-      });
-
-      return filtered.map(mapAuditTrailRow);
-    }
-
     /**
      * The tombstones: rows that were archived and then deleted, one per entity, written by the
      * database on the DELETE and readable by whoever may read the page or the trail's asset
@@ -1843,7 +1796,7 @@ const apiMethods = {
       return data || [];
     }
 
-    if (path.startsWith('/api/v1/devices') || path.startsWith('/api/v1/assets')) {
+    if (path.startsWith('/api/v1/devices')) {
       // Embed the serving gateway so each device carries its resolved gateway name, and read
       // device_locations for the effective cell. The gateway's own cell is what the local fallback
       // resolves from.
@@ -2208,17 +2161,6 @@ const apiMethods = {
       }));
     }
 
-    if (path.startsWith('/api/v1/stats')) {
-      const [qRes, docRes] = await Promise.all([
-        supabase.from('devices').select('id', { count: 'exact', head: true }).eq('is_quarantined', true),
-        supabase.from('links').select('id', { count: 'exact', head: true })
-      ]);
-      return {
-        quarantine_pending: qRes.count || 0,
-        links_attached: docRes.count || 0
-      };
-    }
-
     // Latest value per (device, metric) inside a bounded recent window. Used by the
     // Site Map, which only needs current state -- not the full history the
     // export dialog pages through.
@@ -2237,14 +2179,8 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/telemetry')) {
       const url = new URL(path, window.location.origin);
-      // asset_ids (plural) is how a tag filter asks for a whole group of devices at once. Absent
-      // means "no device restriction"; present but empty means "a tag nobody matches".
-      const assetIds = url.searchParams.has('asset_ids')
-        ? url.searchParams.get('asset_ids').split(',').filter(Boolean)
-        : undefined;
       return queryTelemetry({
         assetId: url.searchParams.get('asset_id'),
-        assetIds,
         metricName: url.searchParams.get('metric_name'),
         minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
         // Absolute bounds, used by the CSV export's custom range. Null when absent, so the
@@ -2342,18 +2278,6 @@ const apiMethods = {
       });
     }
 
-    /**
-     * Which keys a lane admits, asked of the database. `proposable_columns()` is the only place
-     * that answer exists (the validation trigger and the apply path both read it) and is granted to
-     * `authenticated` so the form can ask.
-     */
-    if (/^\/api\/v1\/proposals\/allowed-keys\/[^/]+$/.test(path)) {
-      const entityType = decodeURIComponent(path.split('/')[5]);
-      const { data, error } = await supabase.rpc('proposable_columns', { p_entity_type: entityType });
-      if (error) throw error;
-      return data || [];
-    }
-
     throw new Error('Unhandled API path: ' + path);
   },
 
@@ -2421,13 +2345,12 @@ const apiMethods = {
       const parts = path.split('/');
       const entityType = parts[3];
       const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
       const now = new Date().toISOString();
       const days = body?.auto_delete_days;
       const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
 
       let query = supabase
-        .from(table)
+        .from(entityType)
         .update({ is_archived: true, archived_at: now, auto_delete_at });
       query = query.eq('id', id);
 
@@ -2440,10 +2363,9 @@ const apiMethods = {
       const parts = path.split('/');
       const entityType = parts[3];
       const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
 
       let query = supabase
-        .from(table)
+        .from(entityType)
         .update({ is_archived: false, archived_at: null, auto_delete_at: null });
       query = query.eq('id', id);
 
@@ -2761,41 +2683,6 @@ const apiMethods = {
       return data;
     }
 
-    if (path.includes('/archive')) {
-      const parts = path.split('/');
-      const entityType = parts[3];
-      const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
-      const now = new Date().toISOString();
-      const days = body?.auto_delete_days;
-      const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-
-      let query = supabase
-        .from(table)
-        .update({ is_archived: true, archived_at: now, auto_delete_at });
-      query = query.eq('id', id);
-
-      const { data, error } = await query.select();
-      if (error) throw error;
-      return data[0] || {};
-    }
-
-    if (path.includes('/restore')) {
-      const parts = path.split('/');
-      const entityType = parts[3];
-      const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
-
-      let query = supabase
-        .from(table)
-        .update({ is_archived: false, archived_at: null, auto_delete_at: null });
-      query = query.eq('id', id);
-
-      const { data, error } = await query.select();
-      if (error) throw error;
-      return data[0] || {};
-    }
-
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
       const { data, error } = await supabase.from('links').update({
@@ -2939,11 +2826,6 @@ const apiMethods = {
       const patch = {
         name: body.asset_name
       };
-      // Guarded like the optional fields below, not assigned unconditionally: both are what the
-      // platform observed rather than what an operator asked for, and no edit form sends either.
-      if ('status' in body) patch.status = body.status;
-      if ('is_quarantined' in body) patch.is_quarantined = body.is_quarantined;
-      if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
       // emptyToNull, so clearing the field in the form stores NULL rather than ''. Absent and empty
       // are the same thing to every reader of a description, and two representations of one state is
       // how a `WHERE description IS NULL` starts missing rows.

@@ -74,8 +74,6 @@ const schemaProposal = (over = {}) => ({
 function mockLoad(proposals) {
   api.get.mockImplementation((path) => {
     if (path === '/api/v1/proposals') return Promise.resolve(proposals)
-    if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
-    if (path.startsWith('/api/v1/proposals/allowed-keys/')) return Promise.resolve(['name', 'description'])
     return Promise.resolve([])
   })
 }
@@ -852,7 +850,6 @@ describe('a relocation names the cells rather than their uuids', () => {
 
   const mockWithCells = () => api.get.mockImplementation((path) => {
     if (path === '/api/v1/proposals') return Promise.resolve([relocation])
-    if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
     if (path === '/api/v1/cells') return Promise.resolve([
       { cell_id: 'cell-weld', cell_name: 'Weld Bay' },
       { cell_id: 'cell-paint', cell_name: 'Paint Line' }

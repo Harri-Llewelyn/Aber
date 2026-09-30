@@ -108,8 +108,6 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
-  // `device_nameplate` is keyed by the device id, so a nameplate approval also belongs to that
-  // device's own history (the entity trail in api.js unions the two).
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
   // The backup lane (0101): the act and the artefact, both filed under security by
