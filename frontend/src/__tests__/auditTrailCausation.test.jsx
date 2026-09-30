@@ -5,10 +5,10 @@
  * fabricate a causal link), and the sibling list is drawn from the fetched, filtered set, so on its
  * own it is a lower bound.
  *
- * `transaction_rows` (0006) is what turns the bound into an answer: the server counts the
+ * `transaction_rows` is what turns the bound into an answer: the server counts the
  * transaction over the whole table, so the drawer can say a single-row act wrote nothing else, that
  * every row is loaded, or how many are missing and offer "Show whole transaction" for exactly
- * those. Without the count the section hedges, as it did before 0006.
+ * those. Without the count the section hedges, as it does for a row that carries no count.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
@@ -57,7 +57,7 @@ const EVENTS = [
   },
   rebind(4, 'dev-3', 'Robot_03')
 ]
-/** The same rows with no count, as a server without 0006 returns them. */
+/** The same rows with no count, as a row that lacks the count arrives. */
 const UNCOUNTED = EVENTS.map(e => { const c = { ...e }; delete c.transaction_rows; return c })
 
 const serve = (events) => (path) => {
@@ -153,7 +153,7 @@ describe('the Same transaction control', () => {
   })
 
   it('says how many of the rows the act wrote are not loaded, and offers the control', async () => {
-    /* Two of the act's three rows are on the page. Before 0006 the page could only say "one other
+    /* Two of the act's three rows are on the page. Without the count the page could only say "one other
        change, limited to what is loaded"; the count is what lets it say a row is missing. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
@@ -218,7 +218,7 @@ describe('the Same transaction control', () => {
 
   it('clears the entity and action filters, which each hide half of one act', async () => {
     /* A transaction crosses entity kinds and actions by definition -- an approval writes an UPDATE
-       on one table and a PROPOSAL_APPLIED row on another. Leaving either filter set would show
+       on the entity it changed and a PROPOSAL_APPLIED row on the proposal. Leaving either filter set would show
        part of the act under a count that reads as the whole of it. */
     await show()
     fireEvent.change(screen.getByTitle(/Show only events against one kind of entity/),
@@ -286,7 +286,7 @@ describe('the Same transaction control', () => {
   })
 
   it('hedges when the server did not say how many rows the act wrote', async () => {
-    /* A database without 0006. The list is a lower bound again, and the section says so rather
+    /* A row with no count. The list is a lower bound again, and the section says so rather
        than reporting a count it does not have; the control is offered because nothing else can
        tell a single-row act from a filtered group. */
     api.get.mockImplementation(serve(UNCOUNTED))

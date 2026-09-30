@@ -92,8 +92,7 @@ describe('each id in the drawer says what it is for', () => {
 describe('one name per id, across the drawer and the export', () => {
 
   it('calls it Transaction ID in the drawer, not Transaction', async () => {
-    // Reported as four ids in a drawer that shows three: the label said Transaction and the CSV
-    // column said causation_id, so one thing read as two.
+    // The label said Transaction and the CSV column said causation_id, so one thing read as two.
     await show()
     await openDrawer()
 
@@ -116,7 +115,7 @@ describe('one name per id, across the drawer and the export', () => {
   })
 
   it('exports how many rows the transaction wrote, beside its id', async () => {
-    // The count the drawer acts on (0006), so a reader of the export can tell a single-row act
+    // The count the drawer acts on, so a reader of the export can tell a single-row act
     // from a group the filters cut without re-deriving it from the transaction id column.
     await show()
     fireEvent.click(screen.getByTitle(/Download the events matching the current filters as CSV/))

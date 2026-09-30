@@ -54,7 +54,7 @@ const GATEWAYS = Array.from({ length: 300 }, (_, i) => ({
 
 /**
  * Every schema any fixture here refers to. Seeded for the same reason as GATEWAYS: a schema the
- * lookup cannot name reads as deleted (0117), and these fixtures are about sections and counts.
+ * lookup cannot name reads as deleted, and these fixtures are about sections and counts.
  */
 const SCHEMAS = [
   { id: 'c0000000-0000-4000-8000-000000000003', schema_name: 'Robot pose', version: 1 },
@@ -319,7 +319,7 @@ describe('AuditTrailTab section coverage', () => {
 // HOW MUCH OF THE TRAIL THIS IS
 //
 // "200 events" above a button offering 200 more is the same sentence whether the next page is the
-// last or the third of twelve. The server counts the whole match (0115) and the page names it.
+// last or the third of twelve. The server counts the whole match and the page names it.
 // =================================================================================================
 describe('the count ratio', () => {
   it('names the whole match when the page is a fraction of it', () => {
@@ -333,7 +333,7 @@ describe('the count ratio', () => {
   })
 
   it('names the drawn events alone when the server did not say how many match', () => {
-    // A server without 0115. The alternative is "200/null", which is what a bare-array fixture
+    // A response with no total. The alternative is "200/null", which is what a bare-array fixture
     // and an older database would both have produced.
     expect(countRatio(200, undefined)).toBe('200')
     expect(isPartial(200, null)).toBe(false)
@@ -347,7 +347,7 @@ describe('the count ratio', () => {
 })
 
 /**
- * Searching for something that has been deleted. Fixing the empty id list (0115) stopped the page
+ * Searching for something that has been deleted. Sending the search as text stopped the page
  * ASKING for nothing; it did not stop the page SHOWING nothing, because deleted entities are hidden
  * by default and a search naming one matches only hidden rows. The reader saw "no events match"
  * with the answer behind a toggle they had no reason to try.

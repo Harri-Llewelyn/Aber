@@ -641,9 +641,9 @@ describe('arriving from another page', () => {
     await waitFor(() => expect(onClearFocus).toHaveBeenCalled())
   })
 
-  it('hands back to the asset rather than opening a form of its own', async () => {
-    // THE COMPOSER IS GONE. Extending your own open proposal happens in the asset's Edit Details
-    // dialog -- one form per asset -- so this drawer action is a route there, not a dialog here.
+  it('hands back to the entity rather than opening a form of its own', async () => {
+    // Extending your own open proposal happens in the entity's own dialog (Edit Details, or
+    // Digital Nameplate), so this drawer action is a route there, not a dialog here.
     const onOpenSubject = vi.fn()
     mockLoad([deviceProposal({ proposed_by: OPERATOR_ID })])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID, onOpenSubject })

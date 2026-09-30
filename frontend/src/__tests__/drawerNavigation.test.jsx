@@ -386,9 +386,9 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
     await waitFor(() => expect(isOpen()).toBe(true))
   })
 
-  it('Schemas, by schema uuid -- a page with no search box at all', async () => {
-    // This one had nowhere to put an arriving id, so the device drawer's Schema chip switched tab
-    // and left the operator on an unfiltered list of every schema in the registry.
+  it('Schemas, by schema uuid', async () => {
+    // The device drawer's Schema chip must land on that one schema, not on an unfiltered list of
+    // every schema in the registry.
     render(<SchemasTab showToast={vi.fn()} hasPermission={() => true} onSelectSchema={vi.fn()}
       onSelectDevice={vi.fn()} initialSchemaId="sch-machining" />)
     await waitFor(() => expect(isOpen()).toBe(true))

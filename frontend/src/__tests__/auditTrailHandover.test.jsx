@@ -48,7 +48,7 @@ describe('AuditTrailTab handover', () => {
     await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0));
     // The id lands in the name filter because that filter matches on id as well as name, which is
     // what makes the handover exact rather than a name search that could match two devices. The
-    // database matches it now (0115), so a handover from a DELETED asset's page works too.
+    // database matches it now, so a handover from a DELETED asset's page works too.
     expect(screen.getByPlaceholderText('Search a name or any ID…').value).toBe(DEVICE_ID);
     await waitFor(() =>
       expect(trailCalls().some((url) => url.includes(`search=${DEVICE_ID}`))).toBe(true));

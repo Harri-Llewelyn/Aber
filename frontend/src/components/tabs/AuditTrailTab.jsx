@@ -61,18 +61,14 @@ function actorTitle(event, machinePrincipals) {
 const ENTITY_KIND = ENTITY_KIND_BY_TABLE
 /**
  * The kinds a deletion can be told about: this page fetches a lookup covering them, and
- * `audit_trail_page()` can probe a table for their rows (0117). Absence from `entityIdentities`
- * means the row is gone, for these and for nothing else. `NAMEPLATE` qualifies because
- * `device_nameplate` is keyed by the device's id, so the devices lookup names it and the devices
- * probe answers for it.
+ * `audit_trail_page()` can probe a table for their rows. Absence from `entityIdentities` means the
+ * row is gone, for these and for nothing else. `NAMEPLATE` qualifies because `device_nameplate` is
+ * keyed by the device's id, so the devices lookup names it and the devices probe answers for it.
  *
- * ONE SET FOR BOTH USES -- the "deleted" flag and the hide filter. As two sets, a schema sat in the
- * gap: flagged deleted, never hidden, never counted, and since the count is what draws the reveal
- * control, no way to hide it.
- *
- * ACCESS IS OUT, though `list_user_accounts()` does name that lane (0116): its subject is an
- * `auth.users` row the RPC cannot probe, so the server can never hide one and the page must not
- * claim a deletion it cannot act on. An unnameable person falls back to a shortened id, unflagged.
+ * One set serves both the "deleted" flag and the hide filter, so a kind cannot be flagged and
+ * never hidden. ACCESS is out, though `list_user_accounts()` names that lane: its subject is an
+ * `auth.users` row the RPC cannot probe, so the page must not claim a deletion the server cannot
+ * act on. An unnameable person falls back to a shortened id, unflagged.
  */
 const DELETABLE_KINDS = new Set(
   ['AREA', 'CELL', 'GATEWAY', 'DEVICE', 'SCHEMA', 'NAMEPLATE']
@@ -92,7 +88,7 @@ const entityKind = (t) =>
 const NOISE_FIELDS = new Set(['updated_at', 'last_heartbeat', 'last_seen'])
 
 /**
- * Fields whose change is a governance act (what the asset is declared to be) rather than an
+ * Fields whose change is a governance act (what the entity is declared to be) rather than an
  * operational one. `asset_config` names the concept even though it is its own, unaudited, table.
  */
 const GOVERNANCE_FIELDS = new Set([
@@ -104,7 +100,7 @@ const GOVERNANCE_FIELDS = new Set([
 
 /** The four marker classes. `kind` is a CSS suffix as well as a key -- see `.trail-node-*`. */
 export const MARKERS = {
-  creation:    { label: 'Created',       hint: 'Row created — provisioning, or a first DBIRTH admitting the asset' },
+  creation:    { label: 'Created',       hint: 'Row created — provisioning, or a first DBIRTH admitting the device' },
   operational: { label: 'Operational',   hint: 'State change — status, cell, or another running-time property' },
   governance:  { label: 'Configuration', hint: 'Governance change — schema binding or declared configuration' },
   critical:    { label: 'Lifecycle',     hint: 'Lifecycle event — deleted, archived, deprecated, or quarantined' }
@@ -167,15 +163,15 @@ export function classifyEvent(event, diff) {
   // TOKEN_MINTED and TOKEN_REVOKED record who may reach the stack: governance, not creation and not
   // critical. Named explicitly because rows without `audit_domain` still arrive.
   if (action === 'TOKEN_MINTED' || action === 'TOKEN_REVOKED') return 'governance'
-  // The same argument, arriving from `user_roles` (0070). A revocation is not `critical`: that
-  // marker is for an asset's lifecycle, and nothing on the shopfloor ended here.
+  // The same argument, arriving from `user_roles`. A revocation is not `critical`: that
+  // marker is for an entity's lifecycle, and nothing on the shopfloor ended here.
   if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
   if (action === 'DELETE') return 'critical'
   if (action === 'INSERT') return 'creation'
 
   const changed = new Set(diff.map(d => d.field))
   const roseTo = (field) => changed.has(field) && event.new_data?.[field] === true
-  // `deprecated` is a metric's retirement (#468), as `is_archived` is an asset's.
+  // `deprecated` is a metric's retirement, as `is_archived` is an entity's.
   if (roseTo('is_archived') || roseTo('is_quarantined') || roseTo('deprecated')) return 'critical'
 
   for (const field of changed) if (GOVERNANCE_FIELDS.has(field)) return 'governance'
@@ -197,7 +193,7 @@ const TIME_PRESETS = [
 
 /**
  * The preset or custom dates as the `since` / `until` the API takes. All time is the default: most
- * arrivals are a handover for one asset whose last edit may be years old. Called at fetch time
+ * arrivals are a handover for one entity whose last edit may be years old. Called at fetch time
  * rather than memoised, so a rolling window does not drift while the poll runs.
  */
 export function timeWindow(preset, customStart, customEnd) {
@@ -343,11 +339,6 @@ export function clusterSummary(events, kindOf) {
        + 'Click to open the first — narrow the time range to separate them'
 }
 
-/**
- * The sections, in the order a plant is organised, then the governance lane. Order and labels come
- * from `AUDIT_TRAIL_ENTITY_TYPES`; only the icons live here, so a kind added to the shared table
- * reaches the timeline and the filter together.
- */
 /** The icon for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
 const FALLBACK_SECTION_ICON = IconHistory
 
@@ -356,17 +347,21 @@ const SECTION_ICONS = {
   CELL:               IconLayoutDashboard,
   GATEWAY:            IconRadio,
   DEVICE:             IconCpu,
-  // THE SECURITY LANE (0070), in the order a reader meets it: who holds what, what the machines
-  // are, then the contracts and settings that shape both.
+  // The security lane, in the order a reader meets it: who holds what, what the machines are,
+  // then the contracts and settings that shape both.
   ACCESS:             IconShieldCheck,
   'SERVICE IDENTITY': IconLock,
   SCHEMA:             IconClipboardList,
-  // The Metrics page's own icon in the sidebar.
   METRIC:             IconTag,
   SETTING:            IconSettings
 }
 
-/** A kind without an icon here still gets a section, with the fallback icon. */
+/**
+ * The sections, in the order a plant is organised, then the security lane. Order and labels come
+ * from `AUDIT_TRAIL_ENTITY_TYPES`; only the icons live here, so a kind added to the shared table
+ * reaches the timeline and the filter together. A kind without an icon here still gets a section,
+ * with the fallback icon.
+ */
 const SECTIONS = AUDIT_TRAIL_ENTITY_TYPES.map(({ kind, label }) => ({
   kind,
   label,
@@ -375,7 +370,7 @@ const SECTIONS = AUDIT_TRAIL_ENTITY_TYPES.map(({ kind, label }) => ({
 
 /**
  * Is only some of what exists being drawn? `total` is null wherever the count is not known — a
- * server that returns no total (0115) — and not knowing is not a fraction.
+ * response that carries no total — and not knowing is not a fraction.
  */
 export const isPartial = (shown, total) => typeof total === 'number' && total > shown
 
@@ -393,11 +388,12 @@ export const shortId = (id) => {
 }
 
 /**
- * What the three copyable ids in the event drawer are for. Each one ends by saying where it can be
- * pasted, because an identifier a reader cannot spend is the thing they were asking about.
+ * What the entity, mutation and transaction ids in the event drawer are for. Each one ends by
+ * saying where it can be pasted, because an identifier a reader cannot spend is the thing they
+ * were asking about.
  */
 const ENTITY_ID_HELP =
-  'The row this change was made to -- a device, a schema, a setting -- in the table this lane '
+  'The row this change was made to -- a device, a schema, a setting -- in the table its lane '
   + 'names. It is the id the rest of the platform knows that entity by. Paste it into the search '
   + 'box above for everything that has ever happened to it, or into the global search (Ctrl+K), '
   + 'which opens the entity itself where it has a page and offers this one where it does not.'
@@ -419,16 +415,16 @@ const TRANSACTION_ID_HELP =
 /**
  * The fields an audit snapshot can name its subject with, in the order they are preferred.
  *
- * SHARED WITH `audit_trail_page()`'s `p_search` (0115). A field the search matches and this does
- * not is a row you can find and cannot identify; a field here that the search does not match is a
- * lane you can see and cannot search for. `sparkplug_id` is immutable and is what telemetry and
+ * Shared with `audit_trail_page()`'s `p_search`. A field the search matches and this does not is
+ * a row you can find and cannot identify; a field here that the search does not match is a lane
+ * you can see and cannot search for. `sparkplug_id` is immutable and is what telemetry and
  * alerts are keyed by, so it outranks the rest where a row carries both.
  *
- * `role` is deliberately absent even though `user_roles` rows carry one, and 0115 searches it: the
- * lane is a PERSON, keyed by `user_roles.user_id`, and the role is what happened to them rather
- * than who they are. Labelling the lane with it would give two Administrators one name and would
- * change under a reader as pages arrive, because `resolveLaneName()` takes whichever event it
- * meets first. `list_user_accounts()` (0116) is how that lane gets named.
+ * `role` is deliberately absent even though `user_roles` rows carry one and `p_search` matches it:
+ * the lane is a person, keyed by `user_roles.user_id`, and the role is what happened to them.
+ * Labelling the lane with it would give two Administrators one name and would change under a
+ * reader as pages arrive, because `resolveLaneName()` takes whichever event it meets first.
+ * `list_user_accounts()` is how that lane gets named.
  */
 const SNAPSHOT_IDENTITY_FIELDS = [
   'name',          // areas, cells, gateways, devices
@@ -437,9 +433,9 @@ const SNAPSHOT_IDENTITY_FIELDS = [
   'label',         // system_settings, the wording the Settings page shows
   'key',           // system_settings, when it has no label
   'stamp',         // backups, which is what the Backups page calls one
-  // LAST, because it is a category rather than an identity: a backup job has no name column, and
+  // Last, because it is a category rather than an identity: a backup job has no name column, and
   // `origin` is the only thing its payload carries that says what the act was. `backups` rows also
-  // carry one, and reach `stamp` first -- which is the reason the order of this list matters.
+  // carry one and reach `stamp` first, so the order of this list matters.
   'origin',        // backup_jobs; the short id is appended, see CATEGORY_IDENTITY_FIELDS
 ]
 
@@ -573,7 +569,7 @@ const EmptyValue = ({ label }) => <span className="trail-diff-empty">{label}</sp
  * The other audit rows written by the same transaction. Ordered by `event_id` ascending, the order
  * the rows were written; `recorded_at` is the transaction start time and identical across them.
  * Drawn from the fetched, filtered set, so a sibling outside the current filter is not listed;
- * `transaction_rows` on the event says how many there are in all (0006).
+ * `transaction_rows` on the event says how many there are in all.
  */
 export function causationSiblings(event, events) {
   // NULL is not a group: rows written before causation existed carry none, and matching NULLs would
@@ -590,11 +586,11 @@ export function causationSiblings(event, events) {
 /**
  * Rendered whenever the row carries a transaction, siblings or not. Two numbers decide what it
  * says: `event.transaction_rows`, how many rows the transaction wrote, counted by
- * audit_trail_page() over the whole table (0006); and `siblings`, drawn from the loaded,
+ * audit_trail_page() over the whole table; and `siblings`, drawn from the loaded,
  * filtered set. One row, and there is nothing to offer; every row loaded, and the list is
- * complete; rows missing, how many, and the control that loads them. Without the count (a server
- * without 0006) the section hedges instead, because a group whose other members are outside the
- * filter then looks identical to a single-row act.
+ * complete; rows missing, how many, and the control that loads them. Without the count (a row
+ * from a response that lacks it) the section hedges instead, because a group whose other members
+ * are outside the filter then looks identical to a single-row act.
  *
  * `isolated` means the search already IS this transaction, so the control would do what has been
  * done; rows still missing then are on pages not yet fetched.
@@ -693,8 +689,9 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
  */
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
-  // SCHEMA_REJECTION and TOKEN_MINTED are one-sided: `old_data` is NULL by construction, and a
-  // Previous column would invite a search for a prior state that does not exist.
+  // These acts are one-sided (INSERT, DELETE, SCHEMA_REJECTION, TOKEN_MINTED, BACKUP_REQUESTED,
+  // BACKUP_TAKEN): `old_data` is NULL by construction, and a Previous column would invite a search
+  // for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
 
@@ -799,10 +796,10 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   // Raw, from the API. `events` below is the displayed set, and every consumer reads that one so
   // the purged filter applies everywhere.
   const [allEvents, setAllEvents]     = useState([])
-  // Whether to include events whose asset is no longer in the database. Hidden by default, and
+  // Whether to include events whose entity is no longer in the database. Hidden by default, and
   // phrased as Show so the resting control is unlit, like the Gateways and Cells toggles.
   const [showPurged, setShowPurged]   = useState(false)
-  // Set once the asset lookups have landed; until then every id looks absent. Stays false if they
+  // Set once the entity lookups have landed; until then every id looks absent. Stays false if they
   // fail: unable to tell purged from live means hide nothing.
   const [lookupsLoaded, setLookupsLoaded] = useState(false)
   // The subset of DELETABLE_KINDS whose lookup actually landed, which is the set that may be called
@@ -820,9 +817,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   const [cells, setCells]             = useState([])
   const [areas, setAreas]             = useState([])
   const [schemas, setSchemas] = useState([])
-  // Empty for a role that may not ask (0116), which is also a role that cannot see the lane.
+  // Empty for a role that may not ask, which is also a role that cannot see the lane.
   const [userAccounts, setUserAccounts] = useState([])
-  // Principal id -> `machine_principals` row (0125), for the same roles as the accounts above.
+  // Principal id -> `machine_principals` row, for the same roles as the accounts above.
   const [machinePrincipals, setMachinePrincipals] = useState(() => new Map())
   const [selectedEventId, setSelectedEventId] = useState(null)
 
@@ -850,23 +847,21 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
       // and the uuid fallback below is exactly the behaviour that was there before.
       tolerated(() => api.get('/api/v1/schemas')),
       tolerated(() => api.get('/api/v1/areas')),
-      // A ROLE-ASSIGNMENT ROW IS ABOUT A PERSON. `log_role_assignment()` keys it by `user_id`, and
-      // this is the only way to turn that into anybody (0116). REFUSED FOR A SHOPFLOOR_MANAGER OR
-      // AN OPERATOR, deliberately -- and they cannot see the lane either, so the empty list they
-      // fall back to names nothing they were going to be shown.
+      // A role-assignment row is about a person: `log_role_assignment()` keys it by `user_id`, and
+      // this is the only way to turn that into anybody. It refuses a Shopfloor_Manager or an
+      // Operator, who cannot see the lane either, so the empty list they fall back to names
+      // nothing they were going to be shown.
       tolerated(() => api.listUserAccounts()),
-      // The names Administrators gave the principals they created from the Access Control page
-      // (0125). Same readers as the accounts above, same fallback.
+      // The names Administrators gave the machine identities they created on the Access Control
+      // page. Same readers as the accounts above, same fallback.
       tolerated(() => api.listMachinePrincipalNames()),
     ])
       .then(([d, g, c, sc, ar, us, mp]) => {
         setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setAreas(ar || [])
         setUserAccounts(us || [])
         setMachinePrincipals(mp instanceof Map ? mp : new Map())
-        // SUBTRACTED FROM THE CONSTANT, never listed again: a second list of kinds here is the
-        // same two-sources-of-truth defect `DELETABLE_KINDS` was written to end, and it would go
-        // stale silently the next time a kind joined. The required three landed or this branch did
-        // not run, so only the tolerated lookups can take a kind away.
+        // Subtracted from the constant, never listed again. The required three landed or this
+        // branch did not run, so only the tolerated lookups can take a kind away.
         const unanswerable = new Set([!sc && 'SCHEMA', !ar && 'AREA'].filter(Boolean))
         setLoadedKinds(new Set([...DELETABLE_KINDS].filter(k => !unanswerable.has(k))))
         setLookupsLoaded(true)
@@ -877,13 +872,11 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   /**
    * entity_id -> `{ name, qualifier }`, across every audited table this page can look one up in.
    *
-   * STRUCTURED RATHER THAN COMPOSED, because the lane label and everything else want different
-   * things from it. A schema's `version` is the only thing separating one member of a lineage from
-   * another, and it is at the END of the composed string -- which is what a fixed-width label
-   * ellipsises away first. The lane draws it as its own element; `entityNames` below composes it
-   * for every reader that wants one string.
+   * Structured rather than composed: a schema's `version` is what separates one member of a lineage
+   * from another, and at the end of a composed string a fixed-width label ellipsises it away. The
+   * lane draws it as its own element; `entityNames` below composes it for every other reader.
    *
-   * WHAT IS IN HERE ALSO DECIDES DELETION: `DELETABLE_KINDS` reads it to tell an absence that means
+   * What is in here also decides deletion: `DELETABLE_KINDS` reads it to tell an absence that means
    * "gone" from one that means "nothing ever looked this kind up".
    */
   const entityIdentities = useMemo(() => {
@@ -899,14 +892,12 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
         qualifier: sc.version ? `v${sc.version}` : undefined,
       })
     }
-    // The email, which is all `auth.users` carries here (0116). An account without one falls
-    // through to the id, as every unnamed entity did before.
+    // The email, which is all `auth.users` carries here. An account without one falls through to
+    // the id.
     for (const u of userAccounts) if (u?.user_id && u.email) m.set(u.user_id, { name: u.email })
-    // THE MACHINE IDENTITIES, FROM TWO PLACES. The three a migration pinned are named by the
-    // dashboard's own registry; one an Administrator created from the Access Control page has a
-    // `machine_principals` row (0125). An id in neither keeps its uuid rather than taking
-    // describePrincipal()'s "Undocumented principal", which would draw every unknown one as the
-    // same lane.
+    // Machine identities come from two places: the pinned ones are named by the dashboard's own
+    // registry, and one created on the Access Control page has a `machine_principals` row. An id
+    // in neither keeps its uuid, so unknown ones are not all drawn as one lane.
     for (const [id, meta] of Object.entries(KNOWN_PRINCIPALS)) {
       if (meta?.name) m.set(id, { name: meta.name })
     }
@@ -928,20 +919,14 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
     return m
   }, [entityIdentities])
 
-  /**
-   * Events whose asset has been purged: in the log, absent from every live table. The list
-   * endpoints do not filter `is_archived`, so absent means gone rather than retired. A DELETE event
-   * in the page would be a worse test, because the page is capped and windowed.
-   */
-  // From the server, counted over everything the filters select rather than over the page. Null
-  // means the server did not say, which must not render as zero.
+  // Deleted entities: in the log, absent from every live table. The list endpoints do not filter
+  // `is_archived`, so absent means gone rather than retired. The server counts them over everything
+  // the filters select, not over the page; null means it did not say, which must not render as zero.
   const [serverPurgedCount, setServerPurgedCount] = useState(null)
-  // How many events match the current filters in total (0115), so the page can say what fraction
-  // of them it is holding. Null on a server without it, and on a bare-array fixture: the counts
-  // below then fall back to naming the loaded events alone, which is what they said before.
+  // How many events match the current filters in total, so the page can say what fraction of them
+  // it is holding. Null when the response carries none: the counts then name the loaded events.
   const [totalMatching, setTotalMatching] = useState(null)
-  // Whether the row limit bit. The page cannot tell otherwise, and "showing the newest 200" is the
-  // difference between a quiet view and a quietly incomplete one -- which is how this was missed.
+  // Whether the row limit bit, which the page cannot tell otherwise.
   const [truncated, setTruncated] = useState(false)
 
   /**
@@ -952,10 +937,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   const purgedEntityCount = useMemo(() => {
     if (serverPurgedCount !== null) return serverPurgedCount
     if (!lookupsLoaded) return 0
-    // DISTINCT ENTITIES, not events. Counting rows answered a question nobody asked -- the button
-    // read "(54)" beside a page whose own header said 16 assets. Scoped to `loadedKinds` for the
-    // same reason the filter is: a kind nothing can answer for is unnamed, not deleted, and
-    // counting it here would draw a control that reveals nothing.
+    // Distinct entities, not events, and scoped to `loadedKinds` like the filter: a kind nothing can
+    // answer for is unnamed, not deleted, and counting it would draw a control that reveals
+    // nothing.
     const seen = new Set()
     for (const e of allEvents) {
       if (loadedKinds.has(entityKind(e.entity_type)) && !entityNames.has(e.entity_id)) {
@@ -967,8 +951,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
 
   /**
    * What the page renders. Deleted entities are hidden by default. `audit_trail_page()` applies
-   * the same rule as a predicate before the row limit; this client-side filter is kept for a server
-   * without the RPC.
+   * the same rule as a predicate before the row limit; this client-side filter covers a response
+   * that was not filtered.
    */
   const events = useMemo(() => {
     if (showPurged || !lookupsLoaded) return allEvents
@@ -986,20 +970,14 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   const hasMoreToLoad = isPartial(events.length, totalMatching)
 
   /**
-   * The search, sent as the typed text (0115).
-   *
-   * IT USED TO BE RESOLVED HERE, against `entityNames` -- the LIVE tables -- and sent as a list of
-   * ids. So a search naming something that had been deleted matched no live row, sent an EMPTY id
-   * list, and rendered as an empty trail: the one question this page exists to answer, answered
-   * "nothing happened". The lane label never had that problem, because it falls back to the audit
-   * snapshot; `p_search` reads the same fields, so the search now finds what the timeline draws.
-   *
-   * Still a database predicate rather than a filter over the page, which is what makes the row
-   * limit apply to rows that will be shown, as the action filter and the time range do.
+   * The search, sent as the typed text. `p_search` reads the same fields the lane label falls back
+   * to, so a deleted entity is found by its name. It is a database predicate rather than a filter
+   * over the page, so the row limit applies to rows that will be shown, as with the action filter
+   * and the time range.
    */
   const search = nameFilter.trim()
 
-  /** Where the next page starts; null at the end. Null is the only end-of-data signal (0077). */
+  /** Where the next page starts; null at the end, which is the only end-of-data signal. */
   const [nextCursor, setNextCursor] = useState(null)
   const [loadingMore, setLoadingMore] = useState(false)
 
@@ -1021,8 +999,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
     if (since) url += `&since=${encodeURIComponent(since)}`
     if (until) url += `&until=${encodeURIComponent(until)}`
     if (showPurged) url += '&include_purged=true'
-    // BOTH HALVES OR NEITHER (0077). `recorded_at` is not unique -- one transaction's rows all
-    // carry one `now()` -- so the id is what makes the position exact rather than approximate.
+    // Both halves or neither: `recorded_at` is not unique (one transaction's rows share a
+    // `now()`), so the id is what makes the position exact.
     if (cursor && cursor.recorded_at && cursor.id != null) {
       url += `&before_recorded_at=${encodeURIComponent(cursor.recorded_at)}`
       url += `&before_id=${encodeURIComponent(cursor.id)}`
@@ -1102,14 +1080,13 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
     (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
 
   /**
-   * Load every row one transaction wrote, by searching its id (0121).
+   * Load every row one transaction wrote, by searching its id.
    *
-   * The entity and action filters are cleared because one act crosses both by definition -- an
-   * approval that rebinds a schema writes an UPDATE on `devices` and a PROPOSAL_APPLIED row, and
-   * either filter would hide half of it and leave the count looking complete. Deleted entities
-   * are shown for the same reason: a delete's own row is about an entity no live table holds, and
-   * `transaction_rows` counts it (0006). The time range is kept: the rows share one
-   * `recorded_at`, so a range holding this event holds its siblings.
+   * The entity and action filters are cleared because one act crosses both: an approval writes an
+   * UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and either filter would hide half
+   * of it. Deleted entities are shown for the same reason: a delete's own row is about an entity
+   * no live table holds, and `transaction_rows` counts it. The time range is kept: the rows share
+   * one `recorded_at`, so a range holding this event holds its siblings.
    */
   const showWholeTransaction = (causationId) => {
     setNameFilter(String(causationId))
@@ -1181,8 +1158,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   }, [events, entityIdentities, loadedKinds])
 
   /**
-   * Every lane, grouped into sections. Nothing may be dropped here: known kinds keep their order
-   * and icons, and every remaining kind gets a section of its own with the fallback icon. Empty
+   * Every lane, grouped into sections. A known kind keeps its order and icon when this role may ask
+   * for it; a lane of a known kind outside `allowedKinds` is dropped, because the role could not
+   * have read its rows. Every other kind gets a section of its own with the fallback icon. Empty
    * sections are omitted.
    */
   const sections = useMemo(() => {
@@ -1369,7 +1347,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
       // the drawer calls them Mutation ID and Transaction ID. One name per thing, across all three.
       mutation_id:    e.event_id,
       transaction_id: e.causation_id ?? '',
-      // How many rows the transaction wrote in all (0006), so a reader of the export can tell a
+      // How many rows the transaction wrote in all, so a reader of the export can tell a
       // single-row act from a group the filters cut. Empty where the row has no transaction.
       transaction_rows: e.transaction_rows ?? '',
       action:         e.event_type,
@@ -1401,9 +1379,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                 text="Every attributed change to an area, cell, gateway, device, nameplate, schema, metric or proposal, in order and with its cause. Rows cannot be edited; an owner retires whole months. Administrators and Auditors also see roles, machine identities, settings and backups."
               />
             </h3>
-            {/* WHAT IS LOADED, not what matches. Export writes the events the page is holding,
-                and the tooltip says so rather than promising the filtered set: at 200 of 467 the
-                difference is two thirds of the answer. */}
+            {/* Export writes the events the page is holding, not everything that matches, and the
+                tooltip says so. */}
             <button
               className="btn btn-ghost btn-sm"
               style={{ marginLeft: 'auto' }}
@@ -1491,12 +1468,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             </>
           )}
 
-          {/* Shown only when something is deleted, like Clear filters and the custom inputs. Same
-              shape as the Gateways and Cells toggles. The tooltip says no longer in the database,
-              because absence from the lookups is all the test sees.
-
-              ENTITIES, NOT ASSETS: the count covers schemas as well as areas, cells, gateways and
-              devices (0117), and a schema is a definition rather than shopfloor equipment. */}
+          {/* Shown only when something is deleted. The tooltip says no longer in the database,
+              because absence from the lookups is all the test sees. */}
           {purgedEntityCount > 0 && (
             <button
               className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
@@ -1614,8 +1587,6 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                   <div className="trail-body">
                     {sections.map(section => (
                       <React.Fragment key={section.kind}>
-                        {/* The count is what is drawn, not what exists: the lane cap may fold some,
-                            and the toggle below names the remainder. */}
                         <div className="trail-section" role="separator" aria-label={`${section.label} lanes`}>
                           {/* A row of the grid: the heading in the label column and an empty track
                               beside it, so it takes the row's rule and the row's rhythm. */}
@@ -1646,17 +1617,14 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                                 /* Neither the join nor a snapshot could name it: the shortened id,
                                    monospaced. */
                                 : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
-                              {/* THE PART THAT MUST SURVIVE TRUNCATION. A schema lineage shares its
-                                  name and differs only here, so ellipsising this away leaves a
-                                  column of identical labels. */}
+                              {/* Must survive truncation: a schema lineage shares its name and differs only
+                                  here. */}
                               {lane.qualifier && (
                                 <span className="trail-lane-qualifier">{lane.qualifier}</span>
                               )}
-                              {/* A name recovered from the audit payload means the entity is gone;
-                                  say so. */}
-                              {/* `gone`, not `fromSnapshot`: the name coming from a snapshot says
-                                  where the label came from, and a settings or backup lane is named
-                                  that way while existing perfectly well. */}
+                              {/* `gone`, not `fromSnapshot`: a name from a snapshot says where the
+                                  label came from, and a settings or backup lane is named that way
+                                  while existing perfectly well. */}
                               {lane.gone && (
                                 <span
                                   className="trail-lane-gone"
@@ -1851,7 +1819,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             title: 'The entity this change was made to',
             help: ENTITY_ID_HELP
           },
-          // The audit row's own id. It identifies THIS mutation rather than the asset it touched,
+          // The audit row's own id. It identifies THIS mutation rather than the entity it touched,
           // which is what you need to quote when two edits a second apart are being told apart.
           {
             label: 'Mutation ID',

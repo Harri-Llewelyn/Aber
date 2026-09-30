@@ -435,14 +435,20 @@ describe('Audit Trail swimlanes', () => {
   })
 
   it('omits a section with nothing in it rather than drawing an empty heading', async () => {
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/audit-trail')) {
+        return Promise.resolve(EVENTS.filter(e => e.entity_type === 'devices'))
+      }
+      if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+      if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+      if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+      return Promise.resolve([])
+    })
     await show()
-    fireEvent.change(screen.getByTitle(/Show only events against one kind of entity/), { target: { value: 'DEVICE' } })
 
-    // The fixture is unfiltered by the mock, so this asserts the grouping, not the query: with
-    // only device lanes present, Cells and Gateways must not appear as empty headings.
-    await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=DEVICE'))
+    // Only device lanes are present, so Cells and Gateways must not appear as empty headings.
     const headings = [...document.querySelectorAll('.trail-section .trail-section-name')].map(h => h.textContent)
-    expect(headings).not.toContain('Cells (0)')
+    expect(headings).toEqual(['Devices'])
   })
 
   it('positions a marker along the track rather than stacking events vertically', async () => {
@@ -497,7 +503,7 @@ describe('Audit Trail time axis', () => {
   }
   const allDistinct = (spanMs) => new Set(labels(spanMs)).size === 5
 
-  it('shows seconds under ten minutes, where the minute alone repeats', () => {
+  it('shows seconds under an hour, where the minute alone repeats', () => {
     expect(labels(5 * MIN)[0]).toMatch(/\d{1,2}:\d{2}:\d{2}/)
     expect(allDistinct(5 * MIN)).toBe(true)
   })
@@ -576,7 +582,7 @@ describe('Audit Trail event classification', () => {
     expect(critical.length).toBe(2)
   })
 
-  it('paints a metric deprecation as critical and its restore as operational (#468)', () => {
+  it('paints a metric deprecation as critical and its restore as operational', () => {
     // Both are UPDATEs on metric_catalog; `deprecated` rising is a retirement, as `is_archived` is.
     const deprecate = {
       event_type: 'UPDATE',
@@ -886,7 +892,7 @@ describe('Audit Trail attribution', () => {
   it('flags a row with no actor_source at all, so a real gap is visible', async () => {
     await showAll()
     await selectEvent(/DELETE on Decommissioned Line/)
-    // Rows written before 0005. After it, this should never appear -- which is the point of
+    // Rows written before archived migration 0005_digital_thread_signal_and_attribution.sql. After it, this should never appear -- which is the point of
     // making it loud rather than blank.
     expect(screen.getByText(/Unattributed/)).toBeInTheDocument()
   })
@@ -1108,7 +1114,7 @@ describe('Audit Trail — removed tag filter', () => {
     })
   })
 
-  /* 0117: the rule reaches every kind the page can tell a deletion of, which is every kind whose
+  /* The rule reaches every kind the page can tell a deletion of, which is every kind whose
      lookup it fetches AND whose table `audit_trail_page()` can probe. Schemas qualify and were
      missing, so a deleted one wore the "deleted" flag, could not be hidden, and -- the count being
      what draws the reveal control -- was offered no way to be. */
@@ -1178,7 +1184,7 @@ describe('Audit Trail — removed tag filter', () => {
     })
 
     it('never calls a role assignment deleted, because nothing here can probe auth.users', async () => {
-      /* The complement of the rule. `list_user_accounts()` names that lane (0116), but its subject
+      /* The complement of the rule. `list_user_accounts()` names that lane, but its subject
          is an auth.users row the RPC cannot read, so the server can never hide one -- and a flag the
          control cannot act on is the defect this describe exists for, in the other direction. */
       api.get.mockImplementation((path) => {
@@ -1202,7 +1208,7 @@ describe('Audit Trail — removed tag filter', () => {
     })
   })
 
-  /* 0118: the last two lanes that drew a bare uuid. A backup job has no name column and a service
+  /* The last two lanes that drew a bare uuid. A backup job has no name column and a service
      principal has no table at all, so each needed a different answer -- a category from the payload
      for one, the dashboard's own registry of pinned ids for the other. */
   describe('lanes that have no name to be named by', () => {
@@ -1268,7 +1274,7 @@ describe('Audit Trail — removed tag filter', () => {
     })
 
     it('does not call a backup job deleted, having no table it could probe', async () => {
-      /* `backup_jobs` is outside DELETABLE_KINDS (0117), so naming it must not start flagging it. */
+      /* `backup_jobs` is outside DELETABLE_KINDS, so naming it must not start flagging it. */
       respondWith(JOB_EVENTS)
       render(<AuditTrailTab />)
 
