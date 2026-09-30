@@ -307,7 +307,7 @@ export function AccessControlTab({ showToast }) {
               >
                 <option value="active">Active ({filterCounts.active})</option>
                 <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
-                <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Bundle outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
+                <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Setup outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
                 <option value={CREDENTIAL_STATES.REVOKED}>Revoked ({filterCounts[CREDENTIAL_STATES.REVOKED]})</option>
                 <option value={CREDENTIAL_STATES.UNRECORDED}>No platform record ({filterCounts[CREDENTIAL_STATES.UNRECORDED]})</option>
                 <option value="archived">Archived ({filterCounts.archived})</option>

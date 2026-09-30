@@ -15,7 +15,7 @@ vi.mock('../api', async () => {
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
-const AREA = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
+const AREA = { area_id: 'area-1', area_name: 'North Shop', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
 
 const CELL = {
   cell_id: 'cell-1', cell_name: 'Assembly Line 1', is_archived: false, area_id: 'area-1',
@@ -84,7 +84,7 @@ describe('shopfloor legend categories', () => {
   it('names four categories, the fourth being the alert state', async () => {
     renderMap()
 
-    await waitFor(() => expect(screen.getAllByText('Building A').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('North Shop').length).toBeGreaterThan(0))
     const legend = document.querySelector('.shopfloor-legend')
 
     for (const label of ['Online', 'Needs attention', 'Nothing live', 'Alert firing']) {
@@ -97,7 +97,7 @@ describe('shopfloor legend categories', () => {
   it('draws the alert entry as a chip swatch, leaving the dots at three', async () => {
     renderMap()
 
-    await waitFor(() => expect(screen.getAllByText('Building A').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('North Shop').length).toBeGreaterThan(0))
     const legend = document.querySelector('.shopfloor-legend')
 
     expect(legend.querySelector('.legend-chip-danger')).toBeInTheDocument()
@@ -109,7 +109,7 @@ describe('shopfloor legend categories', () => {
      against a device in the area is the one thing the map must not hide. */
   it('turns the area card red while an alert fires against a device in it', async () => {
     renderMap({ devices: [device()], activeAlerts: [alert()] })
-    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-card')
+    const card = (await screen.findByRole('button', { name: 'North Shop' })).closest('.area-card')
     expect(card).toHaveClass('area-card-alerting')
     expect(card.querySelector('.area-card-header .tile-dot')).toHaveClass('tile-dot-alert')
     expect(card.querySelector('.area-card-header .tile-dot')).toHaveAttribute('title', expect.stringMatching(/Alert firing/))
@@ -117,7 +117,7 @@ describe('shopfloor legend categories', () => {
 
   it('keeps the area card in the rollup colour while nothing is firing', async () => {
     renderMap({ devices: [device()] })
-    const card = (await screen.findByRole('button', { name: 'Building A' })).closest('.area-card')
+    const card = (await screen.findByRole('button', { name: 'North Shop' })).closest('.area-card')
     expect(card).not.toHaveClass('area-card-alerting')
     expect(card.querySelector('.area-card-header .tile-dot')).toHaveClass('tile-dot-normal')
   })
@@ -125,7 +125,7 @@ describe('shopfloor legend categories', () => {
   it('says who raised the alert, since that is what permits red here at all', async () => {
     renderMap()
 
-    await waitFor(() => expect(screen.getAllByText('Building A').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('North Shop').length).toBeGreaterThan(0))
     const entry = screen.getByTitle(/Alert firing/)
 
     // The colour relays Grafana's verdict; the map evaluates no threshold of its own.
@@ -202,7 +202,7 @@ describe('drawer badges', () => {
 
   it('shows one alert tone in the area and cell drawers: warning, or danger when critical', async () => {
     renderMap({ devices: [device()], activeAlerts: [alert()] })
-    fireEvent.click(await screen.findByRole('button', { name: 'Building A' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'North Shop' }))
     expect(badge('Alert firing')).toHaveClass('badge-warning')
     fireEvent.click(await pin())
     expect(badge('Alert firing')).toHaveClass('badge-warning')
@@ -210,7 +210,7 @@ describe('drawer badges', () => {
 
   it('shows danger in both drawers for a critical alert', async () => {
     renderMap({ devices: [device()], activeAlerts: [alert({ severity: 'critical' })] })
-    fireEvent.click(await screen.findByRole('button', { name: 'Building A' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'North Shop' }))
     expect(badge('Alert firing')).toHaveClass('badge-danger')
     fireEvent.click(await pin())
     expect(badge('Alert firing')).toHaveClass('badge-danger')

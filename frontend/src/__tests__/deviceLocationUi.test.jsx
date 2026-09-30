@@ -280,7 +280,7 @@ describe('the edit form', () => {
     expect(within(cellPicker()).queryByRole('option', { name: /Site-Wide/i })).toBeNull()
 
     fireEvent.click(screen.getByRole('radio', { name: /Site-Wide/i }))
-    expect(document.querySelector('#device-cell-zone')).toBeNull()
+    expect(document.querySelector('#device-cell')).toBeNull()
   })
 
   it('withholds Area-Wide until an area exists, and names the only one without asking', async () => {
@@ -289,12 +289,12 @@ describe('the edit form', () => {
     expect(screen.getByRole('radio', { name: /Area-Wide/i })).toBeDisabled()
     cleanup()
 
-    await show([device()], { areas: [{ area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 }] })
+    await show([device()], { areas: [{ area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 }] })
     openEdit()
     fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
     // One area: no dropdown, its name is stated and the save carries it.
     expect(document.querySelector('#device-area')).toBeNull()
-    expect(screen.getByText('Building 1')).toBeInTheDocument()
+    expect(screen.getByText('Area 1')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: 'area-1', location_scope: 'area_wide' })
@@ -303,8 +303,8 @@ describe('the edit form', () => {
   it('asks which area when there are several, and holds the save until one is chosen', async () => {
     await show([device()], {
       areas: [
-        { area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 },
-        { area_id: 'area-2', area_name: 'Building 2', cells: [], cell_count: 0 }
+        { area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 },
+        { area_id: 'area-2', area_name: 'Area 2', cells: [], cell_count: 0 }
       ]
     })
     openEdit()
@@ -326,7 +326,7 @@ describe('the edit form', () => {
     // withheld.
     await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
     openEdit()
-    expect(document.querySelector('#device-cell-zone').disabled).toBe(true)
+    expect(document.querySelector('#device-cell').disabled).toBe(true)
     expect(screen.getByText(/belong to the Simulated lane/i)).toBeInTheDocument()
   })
 
@@ -484,8 +484,8 @@ describe('approving a quarantined device', () => {
     api.get.mockImplementation(routeGet([], {
       quarantine: [quarantined],
       areas: [
-        { area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 },
-        { area_id: 'area-2', area_name: 'Building 2', cells: [], cell_count: 0 }
+        { area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 },
+        { area_id: 'area-2', area_name: 'Area 2', cells: [], cell_count: 0 }
       ]
     }))
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)

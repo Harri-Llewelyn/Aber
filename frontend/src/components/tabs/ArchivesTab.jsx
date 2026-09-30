@@ -303,7 +303,9 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
             'one it had.' +
             (confirmRestore.entity_type === 'gateway' && confirmRestore.credential_revoked_at
               ? ' Its broker credential was revoked when it was archived and is not restored with it:' +
-                ' mint a new one on the Access Control page before it can publish again.'
+                ' issue it again from its drawer on the Gateways page (Generate Broker Credential) for a Host or' +
+                ' Simulated gateway, or set a Remote gateway up again from its drawer (Set Up Gateway)' +
+                ' with a fresh command or bundle, before it can publish again.'
               : '') +
             (confirmRestore.entity_type === 'gateway' && confirmRestore.forge_archived_at
               ? ' Its repository comes back out of the forge’s archive within a few seconds. The' +

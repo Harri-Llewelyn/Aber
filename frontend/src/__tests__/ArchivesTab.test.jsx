@@ -347,7 +347,8 @@ describe('ArchivesTab restore asks first', () => {
 
     const prompt = await screen.findByText(/Restore the gateway/i)
     expect(prompt.textContent).toMatch(/broker credential was revoked/i)
-    expect(prompt.textContent).toMatch(/Access Control/i)
+    expect(prompt.textContent).toMatch(/Generate Broker Credential/)
+    expect(prompt.textContent).toMatch(/Set Up Gateway/)
   })
 
   it('says the repository comes back out of the forge and the deploy key does not', async () => {
@@ -373,7 +374,7 @@ describe('ArchivesTab restore asks first', () => {
 
   it('does not raise the credential warning for a gateway that never held one', async () => {
     // `credential_revoked_at` is the fact, not the entity type: a gateway archived before it was
-    // given an account has nothing to re-mint.
+    // given an account has no credential to issue again.
     await showArchives(() => true, [{ ...ARCHIVED_GATEWAY, credential_revoked_at: null }])
     fireEvent.click(restoreButton())
 

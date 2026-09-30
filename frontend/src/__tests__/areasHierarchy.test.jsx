@@ -24,8 +24,8 @@ vi.mock('../api', async () => {
 
 const NOW = Date.parse('2026-09-11T12:00:00Z')
 
-const areaA = { area_id: 'area-a', area_name: 'Building A', description: null, icon: 'Factory', cells: [], cell_count: 0, plan_path: 'area-a/plan-1.svg', plan_aspect: 1.5 }
-const areaB = { area_id: 'area-b', area_name: 'Building B', description: 'The annexe', icon: 'Warehouse', cells: [], cell_count: 0, plan_path: null, plan_aspect: null }
+const areaA = { area_id: 'area-a', area_name: 'North Shop', description: null, icon: 'Factory', cells: [], cell_count: 0, plan_path: 'area-a/plan-1.svg', plan_aspect: 1.5 }
+const areaB = { area_id: 'area-b', area_name: 'Press Hall', description: 'The annexe', icon: 'Warehouse', cells: [], cell_count: 0, plan_path: null, plan_aspect: null }
 
 const gateway = {
   gateway_id: 'gw-1', gateway_name: 'Line_Gateway', cell_id: 'cell-1', location_scope: 'cell', sparkplug_group: 'Aber',
@@ -130,12 +130,12 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
   it('shows every area at once, with every placed cell pinned and the counts above it', async () => {
     await renderSiteMap()
-    expect(areaCards().map(t => within(t).getByText(/Building/).textContent)).toEqual(['Building A', 'Building B'])
-    // Cells, gateways and devices in the header; Area-Wide assets count, so Building A's BMS does,
+    expect(areaCards().map(t => within(t).getByText(/North Shop|Press Hall/).textContent)).toEqual(['North Shop', 'Press Hall'])
+    // Cells, gateways and devices in the header; Area-Wide assets count, so North Shop's BMS does,
     // and it is broken out in the same line.
     expect(areaCards()[0].querySelector('.area-card-counts').textContent.trim()).toBe('2 Cells · 1 Gateway · 2 Devices · 1 Area-Wide')
     expect(areaCards()[1].querySelector('.area-card-counts').textContent.trim()).toBe('1 Cell · 0 Gateways · 0 Devices')
-    // Both of Building A's cells are pinned, and the header's count agrees with what is drawn.
+    // Both of North Shop's cells are pinned, and the header's count agrees with what is drawn.
     expect(pinNames()).toEqual(['Bay 1', 'Bay 2'])
     expect(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' }).querySelector('.area-plan-pin-label')).toHaveTextContent('Bay 1')
     // Nothing to enter and nothing to come back from.
@@ -149,7 +149,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await renderSiteMap()
 
     const withOne = areaCards()[1]
-    const tip = within(withOne).getByRole('button', { name: 'About Building B' })
+    const tip = within(withOne).getByRole('button', { name: 'About Press Hall' })
     expect(tip).toHaveClass('help-tip')
 
     // The bubble is portalled and shows on hover, so it is absent until the pointer arrives.
@@ -157,8 +157,8 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     fireEvent.mouseEnter(tip)
     expect(screen.getByRole('tooltip')).toHaveTextContent('The annexe')
 
-    // Building A has no description, so it gets no tip.
-    expect(within(areaCards()[0]).queryByRole('button', { name: /^About Building A$/ })).toBeNull()
+    // North Shop has no description, so it gets no tip.
+    expect(within(areaCards()[0]).queryByRole('button', { name: /^About North Shop$/ })).toBeNull()
   })
 
   /* The grid widens as the plant shrinks, and the pin grows with the tile: at the narrowest a pin
@@ -310,7 +310,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))
     expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Building A/ }))
+    fireEvent.click(screen.getByRole('button', { name: /North Shop/ }))
     expect(within(panel()).queryByText('Five-axis machining, two shifts')).toBeNull()
     expect(within(panel()).getByText(/An SVG plan is uploaded/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Bay 1' })).toHaveAttribute('aria-pressed', 'false')
@@ -318,12 +318,12 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     fireEvent.click(screen.getByRole('button', { name: /Simulated/ }))
     expect(within(panel()).queryByText(/An SVG plan is uploaded/)).toBeNull()
     expect(within(panel()).getByText('Simulated')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Building A/ })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: /North Shop/ })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('opens an area from its name, listing what its plan cannot show', async () => {
     await renderSiteMap()
-    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'Building A' }))
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'North Shop' }))
     expect(within(panel()).getByText('2 Cells · 2 Devices')).toBeInTheDocument()
     // Area-Wide has no place on any plan, so the panel is where it lives.
     expect(within(panel()).getByText('BMS_A')).toBeInTheDocument()
@@ -331,7 +331,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).queryByText(/Not placed \(/)).toBeNull()
 
     // B's cell has no place, so it is named rather than lost.
-    fireEvent.click(within(areaCards()[1]).getByRole('button', { name: 'Building B' }))
+    fireEvent.click(within(areaCards()[1]).getByRole('button', { name: 'Press Hall' }))
     expect(within(panel()).getByText('Not placed (1)')).toBeInTheDocument()
     expect(within(panel()).getByText('Paint Shop')).toBeInTheDocument()
     expect(within(panel()).getByText(/No plan uploaded/)).toBeInTheDocument()
@@ -351,7 +351,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
 
     // And the name still closes what it opened, rather than the card reopening it behind.
-    const name = within(areaCards()[0]).getByRole('button', { name: 'Building A' })
+    const name = within(areaCards()[0]).getByRole('button', { name: 'North Shop' })
     fireEvent.click(name)
     expect(name).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(name)
@@ -378,14 +378,14 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     // The dot gives way to the archive glyph, as an archived cell's pin does.
     api.get.mockImplementation(routeGet({ areas: [{ ...areaA, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }, areaB] }))
     await renderSiteMap()
-    const card = screen.getByRole('button', { name: 'Building A' }).closest('.area-card')
+    const card = screen.getByRole('button', { name: 'North Shop' }).closest('.area-card')
     expect(card).toHaveClass('area-card-archived')
     expect(within(card).getByText('ARCHIVED')).toBeInTheDocument()
     expect(card.querySelector('.area-card-header .tile-dot')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Building A' })).toHaveAttribute('title', expect.stringMatching(/archived/))
+    expect(screen.getByRole('button', { name: 'North Shop' })).toHaveAttribute('title', expect.stringMatching(/archived/))
     expect(pinNames()).toEqual(expect.arrayContaining(['Bay 1', 'Bay 2']))
     // The one beside it is untouched.
-    expect(screen.getByRole('button', { name: 'Building B' }).closest('.area-card')).not.toHaveClass('area-card-archived')
+    expect(screen.getByRole('button', { name: 'Press Hall' }).closest('.area-card')).not.toHaveClass('area-card-archived')
   })
 
   it('draws the uploaded plan where there is one, and the default outline where there is not', async () => {
@@ -399,7 +399,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))
     const panel = document.querySelector('.context-panel')
     expect(within(panel).getByText('Bay 1')).toBeInTheDocument()
-    expect(within(panel).getByText('Building A')).toBeInTheDocument()
+    expect(within(panel).getByText('North Shop')).toBeInTheDocument()
     expect(within(panel).getByText('30% across, 40% down')).toBeInTheDocument()
     expect(within(panel).getByText('Line_Gateway')).toBeInTheDocument()
     expect(within(panel).getByText('CNC_01')).toBeInTheDocument()
@@ -422,7 +422,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 describe('AreasTab files cells into areas', () => {
   const renderAreas = async (props = {}) => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} {...props} />)
-    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
   }
 
   const rowFor = (name) => screen.getByText(name).closest('tr')
@@ -434,22 +434,22 @@ describe('AreasTab files cells into areas', () => {
     expect(banner.closest('.card')).toBeNull()
     expect(follows(banner, document.querySelector('.card'))).toBe(true)
     expect(screen.getByText('Loose End')).toBeInTheDocument()
-    const rowA = rowFor('Building A')
+    const rowA = rowFor('North Shop')
     expect(within(rowA).getByText('Bay 1')).toBeInTheDocument()
     expect(within(rowA).getByText('Bay 2')).toBeInTheDocument()
-    expect(within(rowFor('Building B')).getByText('Paint Shop')).toBeInTheDocument()
+    expect(within(rowFor('Press Hall')).getByText('Paint Shop')).toBeInTheDocument()
   })
 
   it('attaches links to an area, the way every other asset carries them', async () => {
     // The same modal Cells, Gateways and Devices open.
     await renderAreas()
-    fireEvent.click(screen.getByText('Building A'))
+    fireEvent.click(screen.getByText('North Shop'))
 
     fireEvent.click(screen.getByRole('button', { name: /Attached Links/ }))
 
     const modal = document.querySelector('.modal')
     expect(within(modal).getByText(/^Attached Links —/)).toBeInTheDocument()
-    expect(within(modal).getByText('Building A')).toBeInTheDocument()
+    expect(within(modal).getByText('North Shop')).toBeInTheDocument()
 
     // The singular noun, and the area's own id: what the modal reads back with.
     expect(api.get).toHaveBeenCalledWith(
@@ -462,11 +462,11 @@ describe('AreasTab files cells into areas', () => {
   it('archives an area through the shared dialog rather than deleting it from here', async () => {
     api.post.mockResolvedValue({})
     await renderAreas()
-    fireEvent.click(screen.getByText('Building B'))
+    fireEvent.click(screen.getByText('Press Hall'))
     expect(screen.queryByRole('button', { name: /Delete Area/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Archive Area/ }))
     const dialog = document.querySelector('.modal')
-    expect(within(dialog).getByText('Building B')).toBeInTheDocument()
+    expect(within(dialog).getByText('Press Hall')).toBeInTheDocument()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Archive' })) })
     expect(api.post).toHaveBeenCalledWith('/api/v1/areas/area-b/archive', { auto_delete_days: 30 })
     expect(api.delete).not.toHaveBeenCalled()
@@ -477,21 +477,21 @@ describe('AreasTab files cells into areas', () => {
     api.get.mockImplementation(routeGet({ areas: [areaA, { ...areaB, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }] }))
     await renderAreas()
     // Every list opens on Active.
-    expect(screen.queryByText('Building B')).toBeNull()
+    expect(screen.queryByText('Press Hall')).toBeNull()
     fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'archived' } })
-    const row = rowFor('Building B')
+    const row = rowFor('Press Hall')
     expect(within(row).getByText('ARCHIVED')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Building B'))
+    fireEvent.click(screen.getByText('Press Hall'))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Restore Area/ })) })
     expect(api.post).toHaveBeenCalledWith('/api/v1/areas/area-b/restore', {})
   })
 
   it('says whether an area carries a plan, and how many of its cells sit on it', async () => {
     await renderAreas()
-    const rowA = rowFor('Building A')
+    const rowA = rowFor('North Shop')
     expect(within(rowA).getByText('Plan')).toBeInTheDocument()
     expect(within(rowA).getByText('2 cells placed')).toBeInTheDocument()
-    const rowB = rowFor('Building B')
+    const rowB = rowFor('Press Hall')
     expect(within(rowB).getByText('Default outline')).toBeInTheDocument()
     expect(within(rowB).getByText('No cells placed')).toBeInTheDocument()
   })
@@ -516,7 +516,7 @@ describe('AreasTab files cells into areas', () => {
 
   it('counts the devices resolving to an area and its area-wide assets separately', async () => {
     await renderAreas()
-    const rowA = rowFor('Building A')
+    const rowA = rowFor('North Shop')
     expect(within(rowA).getByText('1')).toBeInTheDocument()
     expect(within(rowA).getByText('+1 Area-Wide')).toBeInTheDocument()
   })
@@ -525,14 +525,14 @@ describe('AreasTab files cells into areas', () => {
     const showToast = vi.fn()
     await renderAreas({ showToast })
     const dataTransfer = { getData: () => JSON.stringify({ cell_id: 'cell-4' }), setData: vi.fn() }
-    const rowB = rowFor('Building B')
+    const rowB = rowFor('Press Hall')
     fireEvent.dragOver(rowB, { dataTransfer })
     await act(async () => { fireEvent.drop(rowB, { dataTransfer }) })
 
     expect(api.put).toHaveBeenCalledTimes(1)
     expect(api.put.mock.calls[0][0]).toBe('/api/v1/cells/cell-4')
     expect(api.put.mock.calls[0][1]).toMatchObject({ area_id: 'area-b' })
-    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Loose End.*Building B/), 'success')
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Loose End.*Press Hall/), 'success')
   })
 
   it('un-files a cell dropped back onto the queue', async () => {
@@ -547,7 +547,7 @@ describe('AreasTab files cells into areas', () => {
   it('does not write for a drop that changes nothing', async () => {
     await renderAreas()
     const dataTransfer = { getData: () => JSON.stringify({ cell_id: 'cell-1' }), setData: vi.fn() }
-    const rowA = rowFor('Building A')
+    const rowA = rowFor('North Shop')
     fireEvent.dragOver(rowA, { dataTransfer })
     await act(async () => { fireEvent.drop(rowA, { dataTransfer }) })
     expect(api.put).not.toHaveBeenCalled()
@@ -566,7 +566,7 @@ describe('AreasTab files cells into areas', () => {
     await renderAreas({ hasPermission: () => false })
     expect(screen.getByRole('button', { name: /New Area/ })).toBeDisabled()
     const dataTransfer = { getData: () => JSON.stringify({ cell_id: 'cell-4' }), setData: vi.fn() }
-    const rowB = rowFor('Building B')
+    const rowB = rowFor('Press Hall')
     fireEvent.dragOver(rowB, { dataTransfer })
     await act(async () => { fireEvent.drop(rowB, { dataTransfer }) })
     expect(api.put).not.toHaveBeenCalled()
@@ -597,7 +597,7 @@ describe('AreasTab is the house list card', () => {
 
   it('reads shown / total while a search narrows the list', async () => {
     await renderAreas()
-    fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'Building A' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'North Shop' } })
     expect(document.querySelector('.card-header .section-count')).toHaveTextContent('1 / 2')
   })
 
@@ -636,7 +636,7 @@ describe('AreasTab is the house list card', () => {
 })
 
 describe('AreasTab manages an area\'s plan from its panel', () => {
-  const openArea = async (name = 'Building A') => {
+  const openArea = async (name = 'North Shop') => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument())
     fireEvent.click(screen.getByText(name))
@@ -654,22 +654,22 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   })
 
   it('offers a drop zone on an area with no plan, and Replace and Remove on one with', async () => {
-    await openArea('Building B')
+    await openArea('Press Hall')
     expect(planRow().getAttribute('data-plan')).toBe('outline')
-    expect(screen.getByRole('button', { name: 'Upload plan for Building B' })).toBe(planRow())
+    expect(screen.getByRole('button', { name: 'Upload plan for Press Hall' })).toBe(planRow())
     expect(within(planRow()).getByText(/Drop an SVG plan here/)).toBeInTheDocument()
     expect(within(planRow()).getByText(/Default outline · 0 cells placed on it/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Remove plan/ })).toBeNull()
 
     document.body.innerHTML = ''
-    await openArea('Building A')
+    await openArea('North Shop')
     expect(within(planRow()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
     expect(within(planRow()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
   })
 
   it('takes a plan dropped onto the zone, not only one browsed for', async () => {
     api.uploadAreaPlan.mockResolvedValue({})
-    await openArea('Building B')
+    await openArea('Press Hall')
     const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
     await act(async () => { fireEvent.drop(planRow(), { dataTransfer: { files: [file] } }) })
     expect(api.uploadAreaPlan).toHaveBeenCalledTimes(1)
@@ -678,9 +678,9 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
 
   it('uploads a plan against the area itself', async () => {
     api.uploadAreaPlan.mockResolvedValue({})
-    await openArea('Building B')
+    await openArea('Press Hall')
     const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
-    const input = within(planRow()).getByLabelText('Plan file for Building B')
+    const input = within(planRow()).getByLabelText('Plan file for Press Hall')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(api.uploadAreaPlan).toHaveBeenCalledTimes(1)
     expect(api.uploadAreaPlan.mock.calls[0][0]).toMatchObject({ area_id: 'area-b' })
@@ -692,7 +692,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     await openArea()
     fireEvent.click(within(planRow()).getByRole('button', { name: /Remove plan/ }))
     const dialog = document.querySelector('.modal')
-    expect(within(dialog).getByText(/Remove the plan from Building A\?/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Remove the plan from North Shop\?/)).toBeInTheDocument()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Remove plan' })) })
     expect(api.removeAreaPlan).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'area-a' }))
   })
@@ -700,10 +700,10 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   it('refuses a file that is not an SVG before anything is uploaded', async () => {
     const showToast = vi.fn()
     render(<AreasTab showToast={showToast} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
-    fireEvent.click(screen.getByText('Building A'))
+    await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('North Shop'))
     const file = new File(['png'], 'plan.png', { type: 'image/png' })
-    const input = within(planRow()).getByLabelText('Plan file for Building A')
+    const input = within(planRow()).getByLabelText('Plan file for North Shop')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(api.uploadAreaPlan).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/not an SVG/), 'error')
@@ -711,8 +711,8 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
 
   it('shows the plan read-only to somebody who may not manage cells', async () => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => false} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
-    fireEvent.click(screen.getByText('Building A'))
+    await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('North Shop'))
     expect(within(planRow()).getByText('Plan attached')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Upload plan|Replace plan|Remove plan/ })).toBeNull()
   })
@@ -720,13 +720,13 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   it('clears its filter with the control the other asset pages carry', async () => {
     // Wording and count together: the same control the other asset pages carry.
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
     const searchBox = screen.getByPlaceholderText(/Search by area ID or name/)
 
     // Nothing to clear on arrival, so nothing is offered.
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
 
-    fireEvent.change(searchBox, { target: { value: 'Building A' } })
+    fireEvent.change(searchBox, { target: { value: 'North Shop' } })
     expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (1)')
 
     fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
@@ -736,7 +736,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
 
   it('counts the lifecycle select and resets it to Active', async () => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
     const lifecycle = screen.getByTitle('Filter by lifecycle state')
     expect(lifecycle).toHaveValue('active')
 

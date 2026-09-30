@@ -306,7 +306,7 @@ supplies no release version, is not evidence of drift.
 | `DevicesTab` | Quarantined devices render **in the Quarantine queue card only** (the first card, always shown) — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. Two visible actions, not seven |
 | `SchemasTab` | Metric catalog, the standard-vocabulary reference card, and the schema registry. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `TelemetryTab` | Time-series viewer over the FDW view. A time window is required whenever a tag filter is active |
-| `AuditTrailTab` | Audit trail. Filtering by tag matches devices carrying it **now**; the log records what was true then, and the UI says so |
+| `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `DirectoryTab` | Directory service configuration and the GitOps flow push |
 | `ArchivesTab` | Two cards of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 

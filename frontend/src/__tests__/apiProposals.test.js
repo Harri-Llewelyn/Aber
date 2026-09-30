@@ -40,7 +40,7 @@ vi.mock('../lib/supabaseClient', () => ({
 }));
 
 const { api } = await import('../api');
-const { LANES } = await import('../components/tabs/ApprovalsTab');
+const { KINDS } = await import('../components/tabs/ApprovalsTab');
 
 const CELL_ID = 'c0000000-0000-4000-8000-000000000001';
 const GATEWAY_ID = 'a0000000-0000-4000-8000-000000000002';
@@ -184,7 +184,7 @@ describe('every lane the database admits', () => {
   };
 
   it('is offered as a kind in the queue filter', () => {
-    expect(LANES.map(l => l.id).sort()).toEqual(Object.keys(proposableLanes()).sort());
+    expect(KINDS.map(l => l.id).sort()).toEqual(Object.keys(proposableLanes()).sort());
   });
 
   it('asks its table for every column it can propose', async () => {

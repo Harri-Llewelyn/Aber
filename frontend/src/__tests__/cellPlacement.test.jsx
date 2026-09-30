@@ -14,7 +14,7 @@ vi.mock('../api', async () => {
   return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
-const area = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
+const area = { area_id: 'area-1', area_name: 'North Shop', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
 const otherArea = { area_id: 'area-2', area_name: 'Annexe', icon: 'Warehouse', plan_path: null, plan_aspect: null, cells: [] }
 
 const cells = [
@@ -52,7 +52,7 @@ describe('CellsTab places a cell on its area plan', () => {
   it('names the area and whether the cell is placed, on the row and in the panel', async () => {
     await renderCells()
     const row1 = screen.getByText('Bay 1').closest('tr')
-    expect(within(row1).getByText('Building A')).toBeInTheDocument()
+    expect(within(row1).getByText('North Shop')).toBeInTheDocument()
     expect(within(row1).getByText('placed')).toBeInTheDocument()
     const row2 = screen.getByText('Bay 2').closest('tr')
     expect(within(row2).getByText('not placed')).toBeInTheDocument()

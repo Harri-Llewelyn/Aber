@@ -16,12 +16,12 @@
 import { api } from '../api'
 
 /**
- * One entry per form: the kind of change it files (`lane`, the table name), and how the form's fields map onto its columns. A
+ * One entry per form: the kind of change it files (`kind`, the table name), and how the form's fields map onto its columns. A
  * form key absent from `fields` is not proposable.
  */
 export const PROPOSAL_FORMS = {
   device: {
-    lane: 'devices',
+    kind: 'devices',
     idField: 'asset_id',
     fields: {
       asset_name: 'name',
@@ -42,7 +42,7 @@ export const PROPOSAL_FORMS = {
      FIELDS table keyed by `device_nameplate`'s columns. Written out rather than generated, so every
      field is proposable is re-read when a column is added. */
   device_nameplate: {
-    lane: 'device_nameplate',
+    kind: 'device_nameplate',
     idField: 'asset_id',
     fields: {
       uri_of_the_product: 'uri_of_the_product',
@@ -62,7 +62,7 @@ export const PROPOSAL_FORMS = {
   /* Every column of an area a person chooses; `id` and `created_at` are the platform's. `area_name`
      is the form's name for `name`, which is what api.js writes on the direct path too. */
   area: {
-    lane: 'areas',
+    kind: 'areas',
     idField: 'area_id',
     fields: {
       area_name: 'name',
@@ -72,7 +72,7 @@ export const PROPOSAL_FORMS = {
     withheld: {}
   },
   cell: {
-    lane: 'cells',
+    kind: 'cells',
     idField: 'cell_id',
     // `access_url` is the form's name for `cells.grafana_url`, which is what api.js writes too.
     fields: {
@@ -87,7 +87,7 @@ export const PROPOSAL_FORMS = {
     withheld: {}
   },
   gateway: {
-    lane: 'gateways',
+    kind: 'gateways',
     idField: 'gateway_id',
     fields: {
       gateway_name: 'name',
@@ -170,7 +170,7 @@ export async function submitProposal({ kind, entityId, patch, rationale, proposa
     throw new Error('Change something first — a proposal with no changes has nothing to decide.')
   }
 
-  const body = { entity_type: def.lane, entity_id: entityId, patch, rationale: rationale || null }
+  const body = { entity_type: def.kind, entity_id: entityId, patch, rationale: rationale || null }
   if (proposalId) return api.put(`/api/v1/proposals/${proposalId}`, body)
   return api.post('/api/v1/proposals', body)
 }

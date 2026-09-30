@@ -7,7 +7,7 @@ import {
   canDecide,
   diffRows,
   keyLabel,
-  LANES,
+  KINDS,
   filterProposals,
   locationNameMap
 } from '../components/tabs/ApprovalsTab'
@@ -116,7 +116,7 @@ describe('who may decide which lane', () => {
   })
 
   it('lets an administrator decide every live lane', () => {
-    for (const lane of LANES.map(l => l.id)) {
+    for (const lane of KINDS.map(l => l.id)) {
       expect(canDecide(lane, 'Administrator'), lane).toBe(true)
     }
   })
@@ -124,13 +124,13 @@ describe('who may decide which lane', () => {
   it('lets a manager decide every live lane too', () => {
     // Cells and gateways resolve cell:manage and gateway:manage, held by exactly these two roles,
     // so the answer is the same for both today.
-    for (const lane of LANES.map(l => l.id)) {
+    for (const lane of KINDS.map(l => l.id)) {
       expect(canDecide(lane, 'Shopfloor_Manager'), lane).toBe(true)
     }
   })
 
   it('lets an operator decide nothing', () => {
-    for (const lane of [...LANES.map(l => l.id), 'schemas']) {
+    for (const lane of [...KINDS.map(l => l.id), 'schemas']) {
       expect(canDecide(lane, 'Operator')).toBe(false)
     }
   })
@@ -434,7 +434,7 @@ describe('following an approval into the Audit Trail', () => {
   })
 
   it('maps every lane to the kind whose filter asks for that lane', () => {
-    for (const { id } of LANES) {
+    for (const { id } of KINDS) {
       expect(ENTITY_TABLE_BY_KIND[ENTITY_KIND_BY_TABLE[id]], id).toBe(id)
     }
   })
@@ -707,9 +707,7 @@ describe('the queue that is waiting can be filtered too', () => {
   })
 
   it('counts what it would clear, like every other filter bar', async () => {
-    /* This bar said "Clear filters" with no icon and no count while the asset pages said
-       "Clear filters (n)" with both. Two filters here, so unlike the Areas page the number
-       actually moves. */
+    /* The button reads "Clear filters (n)", and n moves because two filters can be set. */
     mockLoad([
       deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
       deviceProposal({ id: 'o2', entity_type: 'device_nameplate', target_label: 'Press_02' })
@@ -765,11 +763,9 @@ describe('filterProposals', () => {
 
 describe('the page finishes loading what it asks for', () => {
   /**
-   * THE REGRESSION IS SILENT BY CONSTRUCTION. `loadAll` sets several pieces of state in sequence
-   * and `usePolling` swallows what it throws, so a ReferenceError partway down left the queue
-   * rendered, every later `setState` skipped, and the poll backing off to its 30s ceiling --
-   * which is exactly what a dead `setDrafts()` call did here from 2026-09-08. Asserting the LAST
-   * thing the load does is what makes the middle of it observable.
+   * `loadAll` sets several pieces of state in sequence and `usePolling` swallows what it throws,
+   * so an error partway down leaves the queue rendered and the rest of the load skipped. Asserting
+   * the last thing the load does makes the middle of it observable.
    */
   it('asks for nothing it no longer reads, and reaches the end of the load', async () => {
     api.get.mockImplementation((path) => {

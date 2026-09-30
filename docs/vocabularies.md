@@ -236,7 +236,7 @@ Values resolve **device-first**, joined on `semantic_id` rather than metric name
 publishes OPC 40001 Machinery `Manufacturer` / `SerialNumber` / `YearOfConstruction`, that is what
 the shell reports, and the table fills the gaps.
 
-**The editor is a modal on the Devices tab**, in the same per-device `ActionMenu` as Asset Config,
+**The editor is a modal opened from a device's drawer**, an action beside Asset Config,
 Documents and the two AAS exports — placed directly above the exports because it is the only entry
 there that changes what they contain. It is deliberately *not* on the Schemas page: that page is
 entirely type-level (what a metric may be named, what a standard defines), and a nameplate is a
@@ -247,7 +247,7 @@ That is not a limitation but the point: the exporter prefers a published value, 
 field would accept a serial number, save it, and never show it in the shell with nothing on screen
 explaining why.
 
-**The Standard Vocabulary Reference has a page of its own** (`/vocabulary`), split out of Schemas.
+**The Vocabulary page holds the standard reference** (`/vocabulary`), split out of Schemas.
 The seam is between things you *do* — the schema registry and the metric catalog, which are this
 deployment's state — and things you *look up*, which is the half that grows whenever a standard is
 adopted rather than when anyone here decides it should.
