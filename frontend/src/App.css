@@ -3580,10 +3580,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .help-missing { color: var(--text-muted); font-style: italic; }
 
-/* Below this the drawer would leave the table too little room to be worth reading. It becomes an
-   overlay instead -- still not modal, still dismissible, but no longer stealing half the list. */
-/* Below 800px there is no room for the drawer beside the list, so it slides over the page. Above
-   that it keeps its column: at half a 1080p screen the list still gets about 540px beside it. */
+/* Below 800px there is no room for the drawer beside the list, so it slides over the page, still
+   not modal and still dismissible. Above that it keeps its column: at half a 1080p screen the list
+   still gets about 540px beside it. */
 @media (max-width: 800px) {
   .context-panel-open {
     position: fixed;
