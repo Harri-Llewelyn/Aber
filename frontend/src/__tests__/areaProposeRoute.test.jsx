@@ -6,10 +6,8 @@ import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
 /**
- * Areas gained a page in 0097 and a proposal lane only in 0123. Until then an Operator holding
- * `proposal:create` -- who could ask for a change to a device, a nameplate, a cell or a gateway --
- * was shown a greyed-out Edit Details on the one rung between the site and its cells, with nothing
- * to do about it. The mirror of deviceProposeRoute, for the lane that was missing.
+ * An Operator holding `proposal:create` who may not edit an area is offered Propose a Change on it,
+ * as on a device, a cell or a gateway. The mirror of deviceProposeRoute.
  */
 
 vi.mock('../api', async () => {

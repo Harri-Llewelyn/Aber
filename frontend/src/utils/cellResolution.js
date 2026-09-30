@@ -81,7 +81,7 @@ export function gatewayAcceptsCell(gateway) {
 export function noCellReason(gateway) {
   if (gatewayAcceptsCell(gateway)) return null
   return gateway?.is_shadow
-    ? 'Its gateway republishes recorded captures, so its assets belong to the Shadow lane rather than to a cell.'
+    ? 'Its gateway is the playback gateway, so its devices are replay lanes rather than in a cell.'
     : 'Its gateway is simulated, so its assets belong to the Simulated lane rather than to a cell.'
 }
 

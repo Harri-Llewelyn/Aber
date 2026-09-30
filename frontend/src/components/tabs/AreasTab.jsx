@@ -168,7 +168,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       await api.post(`/api/v1/areas/${archiveTarget.area_id}/archive`, { auto_delete_days: days })
       // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
       setArchiveTarget(null); setSelectedId(null); loadAll()
-      showToast(`Area '${archiveTarget.area_name}' archived (Out of Commission)`, 'success')
+      showToast(`Area '${archiveTarget.area_name}' archived`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -363,7 +363,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                       <td>
                         <strong>{a.area_name}</strong>
                         {a.is_archived && (
-                          <ArchivedBadge size="sm" className="badge-follow" title="Archived: out of commission, its cells still filed here, its topics unchanged" />
+                          <ArchivedBadge size="sm" className="badge-follow" title="Archived: its cells are still filed here and its topics are unchanged" />
                         )}
                         {a.description && <div className="cell-meta">{a.description}</div>}
                       </td>
@@ -584,7 +584,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               danger: true,
               title: !canArchive
                 ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-                : 'Take this area out of commission. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
+                : 'Archive this area. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
             }
         ].filter(Boolean) : []}
       >

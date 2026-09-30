@@ -175,7 +175,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     try {
       await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
       // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
-      setArchiveTarget(null); loadAll(); showToast(`Cell '${archiveTarget.cell_name}' archived (Out of Commission)`, 'success')
+      setArchiveTarget(null); loadAll(); showToast(`Cell '${archiveTarget.cell_name}' archived`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -229,8 +229,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     liveGateways(c).some(g => gatewayNeedsAttention(g)) ||
     liveDevices(c).some(a => a.is_quarantined)
 
-  // Either no gateways at all, or gateways serving nothing -- usually a provisioning mistake or a
-  // decommissioned area nobody cleaned up.
+  // Either no gateways at all, or gateways serving nothing: usually a provisioning mistake.
   const cellIsEmpty = (c) => liveGateways(c).length === 0 || liveDevices(c).length === 0
 
   const filteredCells = cells.filter(c => {
@@ -403,7 +402,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                         <strong>{c.cell_name}</strong>
                         {c.description && <div className="cell-meta">{c.description}</div>}
                         {c.is_archived && (
-                          <ArchivedBadge size="sm" className="badge-follow" title="Cell archived: out of commission" />
+                          <ArchivedBadge size="sm" className="badge-follow" title="Archived: its topics are unchanged" />
                         )}
                         {/* A cell with neither a gateway nor a device is usually half-provisioned,
                             and saying so stops it reading as a failed load. */}
@@ -697,7 +696,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               ? `Auto-purges on ${new Date(selectedCell.auto_delete_at).toLocaleDateString()}`
               : 'Permanent — no auto-purge scheduled',
             full: true,
-            title: 'What happens to this decommissioned cell and when'
+            title: 'What happens to this archived cell and when'
           },
         ].filter(Boolean) : []}
         actions={selectedCell ? [

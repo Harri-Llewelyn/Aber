@@ -45,7 +45,7 @@ export function LocationPicker({
   const choose = (next) => { if (!disabled) onChange(locationFieldsFor(next, form, areas)) }
 
   const choices = [
-    { scope: SCOPE_CELL, label: 'In a cell', title: 'The device sits in one work center' },
+    { scope: SCOPE_CELL, label: 'In a cell', title: 'Sits in one cell.' },
     {
       scope: SCOPE_AREA_WIDE, label: 'Area-Wide', off: areas.length === 0,
       title: areas.length === 0

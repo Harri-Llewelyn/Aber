@@ -230,8 +230,8 @@ describe('AlertPill', () => {
   })
 
   /**
-   * Where a row goes is decided by the alert's declared scope, not the id's prefix: of the rules
-   * shipped, four are gateway-scoped and five platform-scoped, and a stale gateway must not send an
+   * Where a row goes is decided by the alert's declared scope, not the id's prefix: of the 33 rules
+   * shipped, 5 are gateway-scoped and 28 platform-scoped, and a stale gateway must not send an
    * operator to a Devices search.
    */
   describe('routing by the subject the alert is about', () => {
@@ -339,7 +339,7 @@ describe('AlertPill', () => {
       render(<AlertPill alerts={[platformAlert()]} />)
       fireEvent.click(pill())
       // An empty mono line reads as a lookup that failed. This one has no asset BY CONSTRUCTION --
-      // `platform_alerts_asset_has_wire_id` (0023) requires sparkplug_id to be null here.
+      // `platform_alerts_asset_has_wire_id` (0001_baseline_schema.sql) requires sparkplug_id to be null here.
       expect(screen.getByText('Platform-wide')).toBeInTheDocument()
     })
   })

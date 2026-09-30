@@ -172,7 +172,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         className={`chip ${deviceChipClass(a, alert)}`}
         onClick={() => onSelectDevice?.(a.asset_id)}
         style={{ cursor: 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
-        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
+        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
         {isArch ? <IconArchive size={11} /> : <IconCpu size={11} />}
         <span className="chip-name">{a.asset_name}</span>
@@ -364,7 +364,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           >
             {ar.area_name}
           </button>
-          {archived && <ArchivedBadge size="sm" title="Archived: out of commission, its cells still filed here, its topics unchanged" />}
+          {archived && <ArchivedBadge size="sm" title="Archived: its cells are still filed here and its topics are unchanged" />}
           {/* The area's description, only when it has one. */}
           {ar.description && (
             <HelpTip
