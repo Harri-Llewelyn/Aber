@@ -96,6 +96,7 @@ export const AUDIT_TRAIL_ACTIONS = {
  * drawable, filterable and resolvable at once, and `auditTrailEntityTypes.test.js` fails if
  * any consumer is left behind.
  */
+// `domain: 'asset'` is the database's audit-domain value; the UI calls these rows entities.
 export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset' },
   { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },

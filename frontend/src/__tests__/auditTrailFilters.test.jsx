@@ -382,12 +382,8 @@ describe('Audit Trail swimlanes', () => {
     // Neither joinable nor recoverable from a snapshot: event 6 carries no payload at all.
     expect(screen.getByText('99999999…5555')).toBeInTheDocument()
 
-    /* AND IT IS STILL FLAGGED DELETED. This used to assert the opposite, on the reasoning that
-       nothing said it was gone -- but the evidence is the same evidence that flags the lane above:
-       it is a device, the devices lookup has landed, and its id is not in it. The snapshot is only
-       where a LABEL comes from. The reader is also seeing this row because they turned Show
-       deleted entities on, so the page saying "deleted" is the page agreeing with the control that
-       revealed it. */
+    /* It is still flagged deleted: it is a device, the devices lookup has landed and its id is not
+       in it. The snapshot is only where a label comes from. */
     const lane = screen.getByText('99999999…5555').closest('.trail-lane')
     const flag = within(lane).getByText('deleted')
     expect(flag).toBeInTheDocument()
@@ -460,12 +456,8 @@ describe('Audit Trail swimlanes', () => {
   })
 
   it('draws every lane, with no cap to fold the rest behind', async () => {
-    /* Forty lanes, more than the thirty the old cap drew. The cap folded the long tail behind a
-       "Show all lanes" button at the foot, and since lanes are ordered busiest-first across the
-       whole page the hidden ones belonged to every section: pressing a button at the bottom
-       expanded rows at the top. The timeline scrolls inside the card now and a page holds at
-       most 200 events, so there is nothing for a cap to guard. The bulk assets are also returned
-       by the devices lookup, so none reads as purged and hidden by default. */
+    /* Forty lanes, and no "Show all lanes" button. The bulk assets are returned by the devices
+       lookup, so none reads as purged and hidden by default. */
     const many = Array.from({ length: 40 }, (_, i) => ({
       event_id: 100 + i, entity_type: 'devices', entity_id: `bulk-${i}`, event_type: 'UPDATE',
       timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: 'service-principal-1', actor_source: 'service'
