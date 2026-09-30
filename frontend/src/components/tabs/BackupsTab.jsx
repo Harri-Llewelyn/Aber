@@ -287,6 +287,8 @@ export function BackupsTab({ showToast }) {
 
       {releaseFor && (
         <ConfirmModal
+          title="Release backup"
+          icon={<IconHardDrive size={18} />}
           message={`Release the backup from ${formatWhen(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window and not one of the newest ${floorWord}.`}
           confirmLabel="Release"
           pendingLabel="Releasing…"

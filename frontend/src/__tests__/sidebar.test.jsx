@@ -102,7 +102,7 @@ describe('the shortcuts dialog', () => {
     const onClose = vi.fn()
     render(<ShortcutsModal onClose={onClose} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /close keyboard shortcuts/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }))
     expect(onClose).toHaveBeenCalled()
 
     onClose.mockClear()

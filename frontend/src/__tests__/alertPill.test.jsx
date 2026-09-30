@@ -128,7 +128,7 @@ describe('AlertPill', () => {
   describe('the list behind it', () => {
     it('is collapsed until asked, then lists each alert with its summary and id', () => {
       render(<AlertPill alerts={[alert()]} />)
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
 
       fireEvent.click(pill())
 
@@ -163,13 +163,13 @@ describe('AlertPill', () => {
       render(<AlertPill alerts={[alert()]} />)
 
       fireEvent.click(pill())
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
       fireEvent.click(pill())
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
 
       fireEvent.click(pill())
       fireEvent.click(screen.getByLabelText('Close alert list'))
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('renders an alert with no summary without inventing one', () => {
@@ -205,7 +205,7 @@ describe('AlertPill', () => {
       // The sparkplug id, not a name: platform_alerts carries no device name, and the Devices search
       // matches on the id anyway.
       expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('leaves a row inert when there is nowhere for it to go', () => {
@@ -271,7 +271,7 @@ describe('AlertPill', () => {
       fireEvent.click(link)
       expect(onSelectGateway).toHaveBeenCalledWith('gwy160000000000400080000')
       expect(onSelectDevice).not.toHaveBeenCalled()
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('still sends a device alert to the Devices page', () => {
@@ -354,10 +354,10 @@ describe('AlertPill', () => {
         </div>
       )
       fireEvent.click(pill())
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
 
       fireEvent.mouseDown(screen.getByRole('button', { name: 'Somewhere else' }))
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('stays open when the pointer goes down inside the panel', () => {
@@ -366,17 +366,17 @@ describe('AlertPill', () => {
       render(<AlertPill alerts={[alert()]} />)
       fireEvent.click(pill())
       fireEvent.mouseDown(screen.getByText('Thermal Excursion'))
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
     })
 
     it('lets the pill itself still toggle, rather than closing and reopening on one click', () => {
       // The ref is on the WRAPPER, so the button that opens the panel counts as inside it.
       render(<AlertPill alerts={[alert()]} />)
       fireEvent.click(pill())
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
       fireEvent.mouseDown(pill())
       fireEvent.click(pill())
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('binds nothing while it is closed', () => {

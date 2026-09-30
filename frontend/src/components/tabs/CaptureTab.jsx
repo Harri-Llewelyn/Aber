@@ -901,6 +901,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
       {deleteFor && (
         <ConfirmModal
+          title="Delete capture"
+          icon={<IconTrash size={18} />}
           message={`Delete the capture recorded ${formatWhen(deleteFor.recorded_at)}${deleteFor.note ? ` — ${deleteFor.note}` : ''}? The file is removed from storage and cannot be recovered.`}
           confirmLabel="Delete capture"
           pendingLabel="Deleting…"

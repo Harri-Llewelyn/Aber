@@ -14,7 +14,7 @@ import {
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
+  IconCheck, IconClipboardList, IconCpu, IconX, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -456,6 +456,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           use. */}
       {discardTarget && (
         <ConfirmModal
+          title="Discard draft"
+          icon={<IconTrash size={18} />}
           message={
             <>
               Discard draft <strong>{discardTarget.schema_name}</strong> (v{discardTarget.version})?

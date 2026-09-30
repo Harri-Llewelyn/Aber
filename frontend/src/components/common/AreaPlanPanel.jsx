@@ -82,6 +82,8 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     <div className="area-plan-panel">
       {confirm && (
         <ConfirmModal
+          title="Remove area plan"
+          icon={<IconTrash size={18} />}
           message={`Remove the plan from ${area.area_name}? Cells keep their places on the default outline.`}
           confirmLabel="Remove plan"
           pendingLabel="Removing…"

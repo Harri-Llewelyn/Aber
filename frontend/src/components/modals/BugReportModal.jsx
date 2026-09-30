@@ -1,12 +1,9 @@
 import React, { useState } from 'react'
 import { GITHUB_REPO_URL } from '../../constants'
 import { IconBug, IconExternalLink } from '../common/Icons'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { Modal } from '../common/Modal'
 
 export function BugReportModal({ onClose, showToast, persona, activeTab }) {
-  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
-  useEscapeKey(onClose)
-
   const [title, setTitle]       = useState('')
   const [category, setCategory] = useState('UI Dashboard')
   const [severity, setSeverity] = useState('Medium')
@@ -47,58 +44,57 @@ ${desc || 'No detailed steps provided.'}
   }
 
   return (
-    <div className="modal-overlay">
-      <div className="modal">
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <IconBug size={18} style={{ color: 'var(--danger)' }} /> Report Platform Bug / Create GitHub Issue
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Issue Title</label>
-          <input className="form-control" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Telemetry metric display error on devices page" title="Short descriptive title" />
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <div className="form-group">
-            <label className="form-label">Category</label>
-            <select className="form-control" value={category} onChange={e => setCategory(e.target.value)}>
-              <option value="UI Dashboard">UI Dashboard</option>
-              <option value="Ingestion Pipeline">Ingestion Pipeline</option>
-              <option value="FastAPI Backend">FastAPI Backend</option>
-              <option value="Node-RED Gateway">Node-RED Gateway</option>
-              <option value="TimescaleDB">TimescaleDB</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Severity</label>
-            <select className="form-control" value={severity} onChange={e => setSeverity(e.target.value)}>
-              <option value="Low">Low</option>
-              <option value="Medium">Medium</option>
-              <option value="High">High</option>
-              <option value="Critical">Critical</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Description & Steps to Reproduce</label>
-          <textarea className="form-control" rows={4} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Describe the unexpected behavior or steps to reproduce…" style={{ resize: 'vertical' }} />
-        </div>
-
-        <div style={{ padding: '10px 12px', background: 'var(--bg-base)', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-          <strong>Auto-Captured Environment Context:</strong><br />
-          Page Path: <code>/{activeTab}</code> | Persona: <code>{persona}</code>
-        </div>
-
-        <div className="modal-actions">
+    <Modal
+      title="Report platform bug / create GitHub issue"
+      icon={<IconBug size={18} style={{ color: 'var(--danger)' }} />}
+      onClose={onClose}
+      footer={
+        <>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={submitToGithub} style={{ gap: '6px' }}>
             <IconExternalLink size={13} /> Submit Issue on GitHub ↗
           </button>
+        </>
+      }
+    >
+      <div className="form-group">
+        <label className="form-label">Issue Title</label>
+        <input className="form-control" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Telemetry metric display error on devices page" title="Short descriptive title" />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div className="form-group">
+          <label className="form-label">Category</label>
+          <select className="form-control" value={category} onChange={e => setCategory(e.target.value)}>
+            <option value="UI Dashboard">UI Dashboard</option>
+            <option value="Ingestion Pipeline">Ingestion Pipeline</option>
+            <option value="FastAPI Backend">FastAPI Backend</option>
+            <option value="Node-RED Gateway">Node-RED Gateway</option>
+            <option value="TimescaleDB">TimescaleDB</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Severity</label>
+          <select className="form-control" value={severity} onChange={e => setSeverity(e.target.value)}>
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+            <option value="Critical">Critical</option>
+          </select>
         </div>
       </div>
-    </div>
+
+      <div className="form-group">
+        <label className="form-label">Description & Steps to Reproduce</label>
+        <textarea className="form-control" rows={4} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Describe the unexpected behavior or steps to reproduce…" style={{ resize: 'vertical' }} />
+      </div>
+
+      <div style={{ padding: '10px 12px', background: 'var(--bg-base)', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+        <strong>Auto-Captured Environment Context:</strong><br />
+        Page Path: <code>/{activeTab}</code> | Persona: <code>{persona}</code>
+      </div>
+    </Modal>
   )
 }
