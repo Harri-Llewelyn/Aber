@@ -164,17 +164,29 @@ members share a `causation_id` (one act) or merely a timestamp. Ordering inside 
 back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
 the rows of one transaction.
 
-### What the Access Control page deliberately does not claim
+### What the Access Control page claims, and how it says so
 
-`components/tabs/AccessControlTab.jsx` is not an inventory of the broker. Mosquitto's accounts live
-in a file reachable only by `gateway-credential-service`, which is add-only and cannot list
-anything back; giving it a LIST verb would hand whoever holds one bearer token the whole account
-table. So the page shows what the **platform issued and recorded**, and the difference shows up
-wherever a credential was minted outside a dashboard session: `record_gateway_credential_issued()`
-cannot be called on a script's behalf, because `has_role()` resolves through `auth.uid()`, which is
-NULL for the service-role key. Such a gateway reads *No platform record* and connects perfectly
-well. The state is named for the record and not for the credential: *No credential* would be a
-claim about the broker, which is the one thing the page cannot see.
+`components/tabs/AccessControlTab.jsx` shows two sources side by side and never merges them. The
+**Credential** column is what the platform issued and recorded; the **Broker** column is what the
+broker holds right now, read live from its Dynamic Security plugin through `broker-inventory`. The
+difference shows up wherever a credential was minted outside a dashboard session:
+`record_gateway_credential_issued()` cannot be called on a script's behalf, because `has_role()`
+resolves through `auth.uid()`, which is NULL for the service-role key. Such a gateway reads *No
+platform record* and *Active*, and connects perfectly well. The recorded state is named for the
+record and not for the credential: *No credential* would be a claim about the broker.
+
+The broker read may fail without failing the page. The Broker column then reads *Not read*, which
+is a fact about the page load and not about any account, and the reason is stated once in the
+card. The page does not show sessions: an *Active* account is one that may connect.
+
+### Why the cold-archive secret is a dialog
+
+`ArchiveCredentialModal` is a dialog rather than a field on the Cold Storage card because saving is
+the one act on that page with no undo and no read-back. `set_archive_credential()` overwrites the
+secret in the vault when one exists, nothing in the stack can show either value again, and a
+mistyped one is not discovered until the nightly export fails to authenticate. Replacing a key asks
+first; setting the first one does not, since there is nothing to lose and friction only buys
+attention while it stays rare.
 
 ---
 
