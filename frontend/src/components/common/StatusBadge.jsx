@@ -1,34 +1,31 @@
 import React from 'react'
 import { GATEWAY_STATUS_LABELS } from '../../utils/gatewayStatus'
+import { Badge } from './Badge'
 
 /**
- * The gateway status chip. Five visual classes, with `badge-warning` as the default for anything
- * unrecognised: `gateways.status` is free text (an
- * NBIRTH payload can override it), so the set is open.
+ * The gateway status chip, drawn through Badge. `warning` is the default for anything
+ * unrecognised: `gateways.status` is free text (an NBIRTH payload can override it), so the set is
+ * open.
  */
 export function StatusBadge({ status }) {
   const isOnline = status === 'ONLINE' || status === 'ACTIVE'
   const isOffline = status === 'OFFLINE'
 
-  // The enrolment states get their own informational variants: amber means look at this and grey
-  // means offline, and a gateway waiting for its bundle is neither. Two variants, not one: solid for
-  // "waiting on a person", dashed for "waiting on a machine". See the .badge-pending /
-  // .badge-provisioned block in App.css. The label says what is being waited for.
+  // The enrolment states get their own informational tones: amber means look at this and grey
+  // means offline, and a gateway waiting for its bundle is neither. Two tones, not one: solid
+  // (pending) for "waiting on a person", dashed (provisioned) for "waiting on a machine". The label
+  // says what is being waited for.
   const isPending = status === 'PENDING_ENROLLMENT' || status === 'AWAITING_BIRTH'
 
-  const cls = isOnline
-    ? 'badge-online'
+  const tone = isOnline
+    ? 'success'
     : status === 'PENDING_ENROLLMENT'
-      ? 'badge-pending'
+      ? 'pending'
       : status === 'AWAITING_BIRTH'
-        ? 'badge-provisioned'
+        ? 'provisioned'
         : isOffline
-          ? 'badge-neutral'
-          : 'badge-warning'
-
-  // The dot inherits `currentColor` from the variant, so only OFFLINE needs an override -- it is the
-  // one variant whose text colour is deliberately muted rather than signalling.
-  const dotColor = isOffline ? 'var(--text-muted)' : undefined
+          ? 'neutral'
+          : 'warning'
 
   const label = GATEWAY_STATUS_LABELS[status] || status
 
@@ -38,10 +35,5 @@ export function StatusBadge({ status }) {
       : 'The appliance enrolled and holds a broker credential. It has not published its first Sparkplug birth yet.'
     : `Operational Status: ${status}`
 
-  return (
-    <span className={`badge ${cls}`} title={title}>
-      <span className="badge-dot" style={dotColor ? { background: dotColor } : {}} />
-      {label}
-    </span>
-  )
+  return <Badge tone={tone} dot title={title}>{label}</Badge>
 }

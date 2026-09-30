@@ -223,7 +223,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               gwStatus === 'ONLINE' ? 'badge-online'
                 : gwStatus === 'PENDING_ENROLLMENT' ? 'badge-pending'
                   : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
-                    : 'badge-offline'}`} />}
+                    : 'badge-danger'}`} />}
         <span className="chip-name mono">{g.gateway_name}</span>
         {g.deployment === 'host' && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Runs on this host"><IconZap size={9} /></span>}
         {isGwArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}

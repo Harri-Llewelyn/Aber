@@ -4,6 +4,7 @@ import path from 'node:path'
 import { CREDENTIAL_STATES, credentialStateTone, BROKER_STATES, brokerStateTone } from '../utils/credentialState'
 import { COLD_STATES, coldStateTone } from '../utils/coldStorage'
 import { GATEWAY_TYPES, gatewayTypeTone } from '../utils/gatewayType'
+import { TONE_CLASS } from '../components/common/Badge'
 import { TOKEN_STATES, tokenStatusTone } from '../utils/serviceIdentities'
 
 /**
@@ -38,6 +39,19 @@ const TONES = new Set([
 ].map(tone => `badge-${tone}`))
 
 describe('badge classes', () => {
+  it.each([...new Set(Object.values(TONE_CLASS))].sort())('the Badge component class %s has a rule in App.css', (cls) => {
+    expect(DEFINED).toContain(cls)
+  })
+
+  it.each(['badge-sm', 'badge-archived', 'badge-danger', 'badge-success'])('the shared class %s has a rule in App.css', (cls) => {
+    expect(DEFINED).toContain(cls)
+  })
+
+  it('has folded badge-offline into badge-danger', () => {
+    expect(DEFINED).not.toContain('badge-offline')
+    expect(WRITTEN).not.toContain('badge-offline')
+  })
+
   it('finds the written-out classes and the helper tones it checks', () => {
     expect(WRITTEN).toContain('badge-neutral')
     expect(TONES).toContain('badge-ok')

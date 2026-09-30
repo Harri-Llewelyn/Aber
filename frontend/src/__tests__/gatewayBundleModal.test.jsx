@@ -532,7 +532,7 @@ describe('StatusBadge — the enrolment states', () => {
   })
 
   it('keeps the existing variants intact', () => {
-    expect(classOf('ONLINE')).toContain('badge-online')
+    expect(classOf('ONLINE')).toContain('badge-success')
     expect(classOf('OFFLINE')).toContain('badge-neutral')
     expect(classOf('STALE')).toContain('badge-warning')
   })
