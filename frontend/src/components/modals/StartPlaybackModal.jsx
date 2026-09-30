@@ -22,7 +22,8 @@ const SPEEDS = [
  * Publish a stored capture onto the Playback gateway. The device map is built from dropdowns off the
  * target's devices, a target that is not `is_shadow` is never offered, and whether the target
  * holds a broker credential is shown before the click. None of that is the control:
- * `start_playback_job()` re-checks all three. The captured ids come from the manifest, not the
+ * `start_playback_job()` re-checks the credential and the device map, and refuses any target that
+ * is not simulated. The captured ids come from the manifest, not the
  * file; captures recorded before the manifest carried them fall back to reading the file.
  */
 export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
@@ -208,7 +209,8 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                 ))}
               </select>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
-                Only the Playback gateway is listed, because the database refuses any other target.
+                Only the Playback gateway is listed: nothing else publishes as it, so a replay never
+                shares a live publisher's sequence numbers.
               </p>
             </>
           )}
