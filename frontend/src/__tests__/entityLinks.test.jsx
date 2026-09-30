@@ -87,7 +87,7 @@ describe('the link vocabulary', () => {
     openForm()
 
     fireEvent.change(tagSelect(), { target: { value: 'file_repository' } })
-    const hint = modal().getByText(/where files for this asset are saved/i)
+    const hint = modal().getByText(/where files are saved/i)
     expect(hint).toBeTruthy()
     expect(hint.textContent).toMatch(/stores no such files/i)
   })
@@ -122,7 +122,7 @@ describe('stored tag values', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save Link/i }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalled())
-    // Wire and UI now agree -- 0049 closed the divergence this used to pin.
+    // Wire and UI now agree -- archived migration 0049_documents_become_links closed the divergence this used to pin.
     expect(api.post).toHaveBeenCalledWith('/api/v1/links', expect.objectContaining({
       link_tag: 'asset_register',
       entity_type: 'device',

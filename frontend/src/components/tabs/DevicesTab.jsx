@@ -5,6 +5,8 @@ import { api } from '../../api'
 import { trackRequest } from '../../lib/apiActivity'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
+import { formatDateTime, formatRelative } from '../../utils/format'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { downloadBlob } from '../../utils/downloadBlob'
@@ -13,6 +15,13 @@ import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import { ActionButton } from '../common/ActionButton'
+import { Badge, ArchivedBadge } from '../common/Badge'
+import { ClearFilters } from '../common/ClearFilters'
+import { EmptyState } from '../common/EmptyState'
+import { LoadingState } from '../common/LoadingState'
+import { Modal } from '../common/Modal'
+import { SearchInput } from '../common/SearchInput'
+import { SectionCount } from '../common/SectionCount'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
 import { Model3DUploader } from '../common/Model3DUploader'
@@ -29,8 +38,7 @@ import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioni
 import {
   DEVICE_STATUS,
   deviceLifecycleStatus,
-  deviceStatusBadge,
-  deviceStatusDotColor
+  deviceStatusBadge
 } from '../../utils/deviceStatus'
 import {
   SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, NON_CELL_SOURCES,
@@ -60,18 +68,14 @@ import {
   IconClipboardList,
   IconBookOpen,
   IconCube,
-  IconShieldAlert,
   IconAlertTriangle,
   IconPlay,
   IconAlertCircle,
-  IconLock,
   IconDownload,
-  IconX,
   IconRadio,
   IconLayoutDashboard
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
@@ -98,8 +102,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [quarantine, setQuarantine] = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
-  // See GatewaysTab: an inline modal is still a modal, and Escape has to close it.
-  useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
   const [approveItem, setApproveItem] = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
@@ -109,8 +111,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // An ID, not the device object -- this page polls, so a captured object would freeze while the
   // row beside it kept updating. Resolved against `assets` every render.
   const [selectedId, setSelectedId] = useState(null)
-  // The device whose telemetry inspector is open, or null. A modal rather than a panel section:
-  // the inspector is a four-column table and the drawer is 360px wide.
+  // The device whose telemetry inspector is open, or null. A modal, because the inspector is a
+  // four-column table and the drawer is too narrow for one.
   const [telemetryFor, setTelemetryFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
   // Bumped when EntityLinksModal closes; the telemetry and catalog read below keys on it, since a
@@ -127,7 +129,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
-  const [filterMode, setFilterMode] = useState('all')
+  const [filterMode, setFilterMode] = useState('active')
 
   /**
    * Latest value per (device, metric), plus the catalog that says which values are legal. Outside
@@ -191,7 +193,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [gatewayFilter, setGatewayFilter] = useState('')
   const [cellFilter, setCellFilter] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
-  // Shadow devices (0060). Off by default -- see the filter below for why they are not a `filterMode`.
+  // Shadow devices. Off by default; not a `filterMode`, which is the archived axis.
   const [showShadows, setShowShadows] = useState(false)
 
   useEffect(() => {
@@ -237,7 +239,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     setGatewayFilter('')
     setCellFilter('')
     setAttentionOnly(false)
-    setFilterMode('all')
+    setFilterMode('active')
     clearUrlQuery()
     if (onClearFilter) onClearFilter()
     if (onClearSchemaFilter) onClearSchemaFilter()
@@ -283,8 +285,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
   // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
   usePolling(loadAll, refreshInterval())
-  // The quarantine queue is a filtered view of `devices`; `cells` is watched because each row shows
-  // its resolved cell.
+  // The Quarantine queue is a filtered view of `devices`; `cells` is watched because each row
+  // shows its resolved cell.
   useRealtimeTable(['devices', 'gateways', 'cells'], loadAll, { enabled: REALTIME_ENABLED })
 
   const save = async () => {
@@ -310,7 +312,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       /* The fork is here and nowhere else: fields and validation are shared, and only the last step
          differs by who is asking. */
       if (proposeMode) {
-        if (!editing) throw new Error('A device can only be registered by an Administrator.')
+        if (!editing) throw new Error(`${requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)} to register a device.`)
         const patch = patchFromForm('device', editFormFor(editing), form)
         await submitProposal({
           kind: 'device',
@@ -482,7 +484,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const archiveDevice = async (days) => {
     try {
       await api.post(`/api/v1/devices/${archiveTarget.asset_id}/archive`, { auto_delete_days: days })
-      setArchiveTarget(null); loadAll(); showToast(`Device '${archiveTarget.asset_name}' archived (Out of Commission)`, 'success')
+      setArchiveTarget(null); loadAll(); showToast(`Device '${archiveTarget.asset_name}' archived`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -525,8 +527,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     [schemas]
   )
 
-  // Indexes for the two lookups that run per device row; `Array.find` inside the filter was devices
-  // x gateways per render. Memoised so they survive renders that changed neither list.
+  // Indexes for the three lookups that run per device row, memoised so they survive renders that
+  // changed no list.
   const gatewayById = useMemo(
     () => new Map(gateways.map(g => [g.gateway_id, g])),
     [gateways]
@@ -540,10 +542,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     [areas]
   )
 
-  // A device an operator needs to act on: quarantined, provisioned but never seen, still resolved
-  // by name, or publishing unmodelled metrics. The quarantine arm stays so the predicate is true to
-  // its name where the banner is absent. An archived cell is still a valid foreign key, so pointing
-  // at one is derived rather than enforced.
+  // A device an operator needs to act on: quarantined, past its provisioning window with no birth
+  // (24h+), still resolved by name, publishing unmodelled metrics, or with a location finding. An
+  // archived cell is still a valid foreign key, so pointing at one is derived rather than enforced.
   const pointsAtArchivedCell = (a) =>
     !!a.effective_cell_id && !!cellById.get(a.effective_cell_id)?.is_archived
 
@@ -559,8 +560,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // component re-renders on any of thirty pieces of state. The dependency list is the contract:
   // miss a value the predicate reads and that filter stops responding.
   const filteredAssets = useMemo(() => assets.filter(a => {
-    // Quarantined devices belong to the queue card below and nowhere else. The two lists come from
-    // different sources, so this is the only place the separation is enforced.
+    // Quarantined devices belong to the Quarantine queue card and nowhere else. The two lists come
+    // from different sources, so this is the only place the separation is enforced.
     if (a.is_quarantined) return false
 
     // Replay lanes are out by default: `ensure_shadow_devices()` mints one per captured device when
@@ -610,8 +611,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     unmodelledFor, cellById,
   ])
 
-  // Counts only what the Needs attention filter can reveal below; quarantined devices are counted
-  // by the banner instead. `needsAttention` is rebuilt every render, so its inputs are the
+  // Counts only what the Needs attention filter can reveal; quarantined devices are counted by the
+  // Quarantine queue instead. `needsAttention` is rebuilt every render, so its inputs are the
   // dependencies.
   const attentionCount = useMemo(
     () => assets.filter(a => !a.is_quarantined && needsAttention(a)).length,
@@ -629,13 +630,23 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     () => availableTags(assets, schemas, latestFor, catalog),
     [assets, schemas, latestBySparkplugId, catalog]
   )
+  // The roster's own rows: everything but the queue, and the replay lanes unless they are shown.
+  // The lifecycle counts and the card's total are taken from it.
+  const roster = useMemo(
+    () => assets.filter(a => !a.is_quarantined && (showShadows || !a.shadow_of)),
+    [assets, showShadows]
+  )
+  const archivedCount = roster.filter(a => a.is_archived).length
+  const laneTotal = filterMode === 'archived' ? archivedCount
+    : filterMode === 'active' ? roster.length - archivedCount
+    : roster.length
   const activeFilterCount =
     [schemaFilter, statusFilter, tagFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
-    (attentionOnly ? 1 : 0) + (showShadows ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+    (attentionOnly ? 1 : 0) + (showShadows ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
-  // Arriving from a chip, an alert row or the shopfloor map with one device named: open it rather
-  // than leave a one-row table. Identifier equality only; see the hook.
+  // Arriving from a chip, an alert row or the Site Map with one device named: open it rather than
+  // leave a one-row table. Identifier equality only; see the hook.
   useArrivalSelection(
     searchQuery,
     assets,
@@ -643,8 +654,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     (a) => setSelectedId(a.asset_id)
   )
 
-  // Resolved fresh every render -- see the note on selectedId. A device that is archived out of
-  // the current filter, or deleted, resolves to null and the drawer closes itself.
+  // Resolved fresh every render, as the note on selectedId says. A deleted device resolves to null
+  // and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
 
   /* Both device lanes count: `devices` and `device_nameplate` are two kinds of change to one
@@ -664,69 +675,142 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const selectedLocation = selectedDevice ? resolveDeviceLocation(selectedDevice, selectedGateway) : null
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
 
-      {/* The roster: title, primary action, filters, table. The onboarding queue is a card of its
-          own below -- the devices that are in, then the ones waiting to be let in. */}
-      <div className="card">
+      {/* The Quarantine queue: always the first card, so the roster below never moves when a device
+          arrives. It wears the attention border only while it holds one. */}
+      <div className={`card queue-card${quarantine.length > 0 ? ' card-attention' : ''}`}>
+        <div className="card-header">
+          <h3 className="section-title">
+            Quarantine queue
+            <HelpTip
+              label="About the Quarantine queue"
+              text="A birth arrived from a device this platform does not know, so its readings are held, not recorded. Approve & Onboard admits it, or accept the suggested match to an existing device. Reject discards it."
+            />
+            <SectionCount total={quarantine.length} />
+          </h3>
+        </div>
+        {quarantine.length === 0 ? (
+          <EmptyState message="Nothing is waiting to be let in." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th title="Reported device name">Reported Name</th><th title="Sparkplug B id the device published under">Published ID</th><th title="Source gateway">Gateway</th><th title="When the platform first heard from it">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th className="row-actions">Actions</th></tr></thead>
+              <tbody>
+                {quarantine.map(q => {
+                  const [suggestion] = suggestMatches(q, assets, schemas)
+                  return (
+                  <tr key={q.quarantine_id}>
+                    {/* Constrained like the payload cell: a MALFORMED_IDENTITY reason is a full
+                        sentence and would push the actions off the edge. It wraps rather than
+                        truncates. */}
+                    <td style={{ maxWidth: '280px' }}>
+                      <strong>{q.asset_name}</strong>
+                      {q.quarantine_reason && (
+                        <div className="cell-flag cell-flag-danger">
+                          <IconAlertTriangle size={10} />
+                          <span>{q.quarantine_reason}</span>
+                        </div>
+                      )}
+                      {suggestion && (
+                        <div className="cell-flag cell-flag-warning" title={suggestion.evidence}>
+                          <IconAlertTriangle size={10} />
+                          <span>Possible match: {suggestion.candidateName}</span>
+                        </div>
+                      )}
+                    </td>
+                    <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
+                    <td>{q.gateway_name || '—'}</td>
+                    <td className="cell-meta" title={formatDateTime(q.discovered_at)}>{formatRelative(q.discovered_at)}</td>
+                    <QuarantinePayloadCell metrics={q.reported_metrics} fallbackJson={q.birth_payload} />
+                    <td className="row-actions">
+                      <ActionButton
+                        className="btn btn-primary btn-sm"
+                        permitted={canApprove}
+                        deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.QUARANTINE_APPROVE)}
+                        onClick={() => setApproveItem(q)}
+                        title="Name it, choose its gateway and location, and admit it"
+                      >
+                        Approve &amp; Onboard
+                      </ActionButton>
+                      {/* Keyed on the row: one boolean would spin every Reject button. */}
+                      <ActionButton
+                        className="btn btn-danger btn-sm"
+                        permitted={canReject}
+                        deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.QUARANTINE_REJECT)}
+                        pending={rowBusyId === q.asset_id}
+                        pendingLabel="Rejecting…"
+                        onClick={() => runRowAction(q.asset_id, () => rejectQuarantine(q))}
+                        title="Discard this device and its held readings"
+                      >
+                        Reject
+                      </ActionButton>
+                    </td>
+                  </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* The roster: title, primary action, filters, table. It is the card that scrolls. */}
+      <div className="card card-fill">
         <div className="card-header">
           <h3 className="section-title">
             Devices
             <HelpTip
               label="About devices"
-              text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: quarantine, unmodelled metrics, or no birth yet."
+              text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet. Devices not yet let in are in the Quarantine queue."
             />
+            <SectionCount total={laneTotal} shown={filteredAssets.length} />
           </h3>
-          <button
-            className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
-            style={{ marginLeft: 'auto' }}
-            disabled={!canManage}
-            onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
-            title={!canManage ? 'Requires Admin permissions' : 'Register new shopfloor device'}
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canManage}
+            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)}
+            onClick={() => (setEditing(null), setForm(blank), setShowForm(true))}
+            title="Register a new shopfloor device"
           >
             <IconPlus size={14} /> New Device
-          </button>
+          </ActionButton>
         </div>
 
         <div className="card-body">
-      {/* Filters live on their own row within the card: the header outgrew a single line once
-          schema, status and relationship filters arrived. */}
+      {/* Filters live on their own row within the card, under the header. */}
       <div className="filter-bar">
         {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
         <select
-          className="form-control"
-          style={{ width: '150px' }}
+          className="form-control control-sm"
           value={filterMode}
           onChange={e => setFilterMode(e.target.value)}
           title="Filter by lifecycle state"
         >
-          <option value="all">All ({assets.length})</option>
-          <option value="active">Active ({assets.filter(a => !a.is_archived).length})</option>
-          <option value="archived">Archived ({assets.filter(a => a.is_archived).length})</option>
+          <option value="all">All ({roster.length})</option>
+          <option value="active">Active ({roster.length - archivedCount})</option>
+          <option value="archived">Archived ({archivedCount})</option>
         </select>
 
-        <input
-          className="form-control"
-          style={{ width: '220px' }}
+        <SearchInput
           value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
+          onChange={setSearchQuery}
           placeholder="Search name, UUID or Sparkplug ID…"
-          title="Filter devices by friendly name, internal UUID, or Sparkplug ID"
+          ariaLabel="Search devices"
         />
 
-        <select className="form-control" style={{ width: '170px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)} title="Filter by operational state">
+        <select className="form-control control-md" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} title="Filter by operational state">
           <option value="">Any status</option>
           <option value="online">Online</option>
           <option value="offline">Offline / DDEATH</option>
-          <option value="unborn">Never sent a birth</option>
+          <option value="unborn">Awaiting first birth</option>
           <option value="overdue">Awaiting first birth (24h+)</option>
           <option value="unmodelled">Publishing unmodelled metrics</option>
         </select>
 
         <select
-          className="form-control"
-          style={{ width: '170px' }}
+          className="form-control control-sm"
           value={tagFilter}
           onChange={e => setTagFilter(e.target.value)}
           disabled={tagOptions.length === 0}
@@ -738,18 +822,18 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
 
-        <select className="form-control" style={{ width: '190px' }} value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} title="Filter by the schema a device was provisioned with">
+        <select className="form-control control-md" value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} title="Filter by the schema a device was provisioned with">
           <option value="">Any schema</option>
           {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
         </select>
 
-        <select className="form-control" style={{ width: '190px' }} value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} title="Filter by serving edge gateway">
+        <select className="form-control control-md" value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} title="Filter by serving gateway">
           <option value="">Any gateway</option>
           {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
         </select>
 
         {/* Filters on the RESOLVED cell, plus the two derived lanes. */}
-        <select className="form-control" style={{ width: '170px' }} value={cellFilter} onChange={e => setCellFilter(e.target.value)} title="Filter by the cell a device resolves to — its own if set, otherwise its gateway's">
+        <select className="form-control control-md" value={cellFilter} onChange={e => setCellFilter(e.target.value)} title="Filter by the cell a device resolves to — its own if set, otherwise its gateway's">
           <option value="">Any cell</option>
           <option value={CELL_FILTER_UNASSIGNED}>Unassigned (needs a cell)</option>
           <option value={CELL_FILTER_SITE_WIDE}>Site-Wide</option>
@@ -759,13 +843,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         <button
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
-          title="Show only devices needing attention: overdue their first birth, matched by legacy name, publishing unmodelled metrics, or needing a cell. Quarantined devices are in the onboarding queue below."
+          title="Show only devices that need action: past their first-birth window, matched by legacy name, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are in the Quarantine queue above."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
 
-        {/* Shown only when there are any, like the Archived toggle on Access Control: it appears
-            the moment a playback mints the first lane. */}
+        {/* Shown only when there are any: it appears the moment a playback mints the first lane. */}
         {shadowCount > 0 && (
           <button
             className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
@@ -776,46 +859,38 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           </button>
         )}
 
-        {activeFilterCount > 0 && (
-          <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">
-            <IconX size={13} /> Clear filters ({activeFilterCount})
-          </button>
-        )}
+        <ClearFilters count={activeFilterCount} onClear={resetFilters} />
 
       </div>
 
       {schemaName && (
-        <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
-          Showing devices provisioned with schema <strong style={{ color: 'var(--accent)' }}>{schemaName}</strong>.
+        <div className="form-hint">
+          Showing devices provisioned with schema <strong>{schemaName}</strong>.
         </div>
       )}
 
         </div>{/* .card-body */}
 
-        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading devices…</div> :
+        {loading ? <LoadingState label="devices" /> :
          filteredAssets.length === 0 ? (
-           <div className="empty-state">
-             <div className="empty-icon"><IconCpu size={36} /></div>
-             <div className="empty-text">No devices match the selected filter.</div>
-           </div>
+           <EmptyState
+             icon={<IconCpu size={36} />}
+             filtered={activeFilterCount > 0 || roster.length > 0}
+             message="No devices yet."
+             filteredMessage="No devices match these filters."
+           />
          ) : (
-          /* Capped ONLY while something is held below, which is the whole reason for capping: a
-             fleet of any size would push the queue off the screen, and the queue is the half of
-             this page with work waiting on it. The rest of the time the roster is the page and
-             runs its full length -- a permanent 420px window on the main table would spend most
-             of a screen on nothing, to protect a card that is usually not rendered at all. */
-          <div className={`table-wrap${quarantine.length > 0 ? ' table-scroll' : ''}`}>
+          <div className="table-wrap">
             <table>
-              <thead><tr><th title="Human-readable device name">Name</th><th title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
+              <thead><tr><th title="Human-readable device name">Name</th><th title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="The cell the device resolves to">Cell</th></tr></thead>
               <tbody>
                 {filteredAssets.map(a => {
                   return (
                     <React.Fragment key={a.asset_id}>
                       {/* Clicks originating on a button, link or input inside the row are ignored
-                          -- see rowSelectHandler. Without that, pressing Edit would also select. */}
+                          -- see rowSelectHandler. */}
                       <tr
-                        className={`row-selectable${selectedId === a.asset_id ? ' row-selected' : ''}`}
-                        style={{ background: a.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
+                        className={`row-selectable${selectedId === a.asset_id ? ' row-selected' : ''}${a.is_archived ? ' row-archived' : ''}`}
                         onClick={rowSelectHandler(() => setSelectedId(id => id === a.asset_id ? null : a.asset_id))}
                         title="Click to inspect this device in the details panel"
                       >
@@ -825,66 +900,58 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                               and filters are forgotten. The badge answers whether a reading
                               happened, wherever the row is seen. */}
                           {a.shadow_of && (
-                            <span className="badge badge-neutral" style={{ fontSize: '11px', marginLeft: '8px' }}
-                                  title="A shadow device, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
-                              <IconPlay size={11} /> SHADOW
-                            </span>
+                            <Badge size="sm" className="cell-tag" icon={<IconPlay size={11} />}
+                                   title="A shadow device, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
+                              SHADOW
+                            </Badge>
                           )}
                           {a.is_archived && (
-                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
-                              <IconArchive size={11} /> ARCHIVED
-                            </span>
+                            <ArchivedBadge size="sm" className="cell-tag" title="Archived: out of commission" />
                           )}
                         </td>
                         <td>
                           <CopyableId value={a.asset_id} label="Device UUID" onNotify={showToast} />
                           {a.identity_source === 'legacy_name' && (
-                            <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
+                            <div className="cell-flag cell-flag-warning" title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
                               <IconAlertTriangle size={10} /> Legacy name matching
                             </div>
                           )}
                         </td>
                         <td>
                           {a.is_archived ? (
-                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
-                              <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
-                            </span>
+                            <ArchivedBadge size="sm" title="Archived: out of commission" />
                           ) : (
-                            // Resolved by utils/deviceStatus.js so this cell, the drawer and the
-                            // shopfloor chip agree: ONLINE, OFFLINE, QUARANTINED, and AWAITING
-                            // FIRST BIRTH for a device never heard from. The sentence-casing below
-                            // renders that last label as "Awaiting first birth" unaided.
+                            // Resolved by utils/deviceStatus.js, so this cell, the drawer and the
+                            // Site Map chip agree.
                             (() => {
                               const badge = deviceStatusBadge(a)
                               const alert = alertFor(a)
                               return (
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-                                  <span
-                                    className={`badge ${badge.badgeClass}`}
-                                    style={badge.overdue ? { background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' } : undefined}
+                                <div className="badge-col">
+                                  {/* The triangle replaces the dot only once the wait is overdue:
+                                      a device registered a minute ago is not a fault. */}
+                                  <Badge
+                                    tone={badge.tone}
+                                    size="sm"
+                                    dot={!badge.overdue}
+                                    icon={badge.overdue ? <IconAlertTriangle size={11} /> : undefined}
                                     title={badge.title}
                                   >
-                                    {/* The triangle replaces the dot only once the wait is overdue:
-                                        a device registered a minute ago is not a fault. */}
-                                    {badge.overdue
-                                      ? <IconAlertTriangle size={11} />
-                                      : <span className="badge-dot" style={{ background: deviceStatusDotColor(badge.status) }} />}
-                                    {badge.label.charAt(0) + badge.label.slice(1).toLowerCase()}
-                                  </span>
+                                    {badge.label}
+                                  </Badge>
                                   {/* The alert sits beside the lifecycle state, not instead of it:
                                       an overheating machine is still ONLINE. */}
-                                  {/* A stroked SVG rather than an emoji: it takes `currentColor`
-                                      from the badge and matches the other badges in the column. */}
                                   {alert && (
-                                    <span
-                                      className={`badge ${alert.severity === 'critical' ? 'badge-danger' : 'badge-warning'}`}
-                                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                    <Badge
+                                      tone={alert.severity === 'critical' ? 'danger' : 'warning'}
+                                      size="sm"
+                                      icon={alert.severity === 'critical'
+                                        ? <IconAlertCircle size={11} />
+                                        : <IconAlertTriangle size={11} />}
                                       title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
                                     >
-                                      {alert.severity === 'critical'
-                                        ? <><IconAlertCircle size={11} /> ALARM</>
-                                        : <><IconAlertTriangle size={11} /> WARNING</>}
-                                    </span>
+                                      {alert.severity === 'critical' ? 'ALARM' : 'WARNING'}
+                                    </Badge>
                                   )}
                                 </div>
                               )
@@ -898,20 +965,18 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             const extra = unmodelledMetrics(a, schema)
                             if (tags.length === 0 && !a.asset_type) return '—'
 
-                            // Collapsed past two: a tri-standard schema yields six or more tags.
+                            // Collapsed past four: a tri-standard schema yields six or more tags.
                             // `priority` keeps Unmodelled visible, since deviceTagList() appends it
                             // last.
                             const entries = tags.map(tag => tag === UNMODELLED_TAG ? {
                               key: tag,
                               priority: true,
-                              className: 'badge badge-warning',
-                              style: { background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '11px' },
+                              className: 'badge badge-sm badge-warning',
                               title: `Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`,
                               content: <><IconAlertTriangle size={10} /> {tag} ({extra.length})</>
                             } : {
                               key: tag,
-                              className: 'badge badge-neutral',
-                              style: { fontSize: '11px' },
+                              className: 'badge badge-sm badge-neutral',
                               title: `This device's schema models ${tag}.* metrics`,
                               content: tag
                             })
@@ -921,7 +986,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             if (a.asset_type) {
                               entries.push({
                                 key: a.asset_type,
-                                style: { fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' },
+                                className: 'cell-meta cell-legacy',
                                 title: 'Legacy free-text classification. Assign a schema to derive this instead.',
                                 content: a.asset_type
                               })
@@ -937,42 +1002,40 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             const gw = gatewayById.get(a.active_gateway_id) || null
                             const cellName = cellById.get(a.effective_cell_id)?.cell_name
 
-                            // Every lane that resolves to no cell, not just Site-Wide.
-                            // NON_CELL_SOURCES is kept by cellResolution.js for this; a
-                            // hand-written list here once reported simulated devices as Unassigned,
-                            // a queue that could never drain.
+                            // Every lane that resolves to no cell, not just Site-Wide: use
+                            // NON_CELL_SOURCES, or a simulated device reads as Unassigned.
                             if (NON_CELL_SOURCES.has(a.location_source)) {
                               return (
-                                <span className="badge badge-neutral" style={{ fontSize: '11px' }}
-                                      title={a.location_source === SOURCE_SITE_WIDE
-                                        ? 'Asserted to have no single cell — campus-wide or mobile'
-                                        : a.location_source === SOURCE_AREA_WIDE
-                                          ? `Asserted to have no single cell — serves the whole of ${areaById.get(a.effective_area_id)?.area_name || 'its area'}`
-                                          : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
+                                <Badge size="sm"
+                                       title={a.location_source === SOURCE_SITE_WIDE
+                                         ? 'Asserted to have no single cell — campus-wide or mobile'
+                                         : a.location_source === SOURCE_AREA_WIDE
+                                           ? `Asserted to have no single cell — serves the whole of ${areaById.get(a.effective_area_id)?.area_name || 'its area'}`
+                                           : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
                                   {locationSourceLabel(a.location_source)}
-                                </span>
+                                </Badge>
                               )
                             }
                             if (!cellName) {
                               return (
-                                <span className="badge badge-warning"
-                                      style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '11px' }}
-                                      title={unassignedHint(a, gw) || 'No cell resolved'}>
-                                  <IconAlertTriangle size={10} /> Unassigned
-                                </span>
+                                <Badge tone="warning" size="sm"
+                                       icon={<IconAlertTriangle size={10} />}
+                                       title={unassignedHint(a, gw) || 'No cell resolved'}>
+                                  Unassigned
+                                </Badge>
                               )
                             }
                             return (
                               <>
                                 <div>{cellName}</div>
                                 {a.location_source === SOURCE_EXPLICIT && (
-                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}
+                                  <div className="cell-meta"
                                        title="Set on the device itself — it will not move if the gateway is reassigned">
                                     Set on device
                                   </div>
                                 )}
                                 {a.cell_mismatch && (
-                                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                                  <div className="cell-flag cell-flag-warning"
                                        title={`Its gateway serves ${cellById.get(a.gateway_cell_id)?.cell_name || 'another cell'}`}>
                                     <IconAlertTriangle size={10} /> Gateway elsewhere
                                   </div>
@@ -991,106 +1054,39 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         )}
       </div>
 
-      {/* Its own card, under the roster rather than wedged between the roster's filters and the
-          roster itself: a queue that appears and disappears was moving the table down the page by
-          a variable amount every time a device arrived. Below, not above, because "what is on this
-          floor" is the page's job and the queue is usually empty -- and the rail already carries
-          the flag that brings anyone here (useNavSignals). */}
-      {quarantine.length > 0 && (
-        <div className="card card-attention" style={{ marginTop: 'var(--stack)' }}>
-          <div className="card-header">
-            <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <IconShieldAlert size={18} />
-              Zero-Touch Onboarding Quarantine Queue
-              <HelpTip
-                label="About the quarantine queue"
-                text="A birth arrived for a device this platform does not know, so its readings are held, not recorded. Approve & Assign admits it, or accept the suggested match to an existing device. Reject discards it."
-              />
-              <span
-                className="section-count"
-                title={`${quarantine.length} device${quarantine.length === 1 ? '' : 's'} held for a decision`}
-              >
-                {quarantine.length}
-              </span>
-            </h3>
-            {!canApprove && (
-              <span style={{ fontSize: '11px', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                <IconLock size={11} /> Requires Admin permissions
-              </span>
-            )}
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th title="Reported device name">Reported Name</th><th title="Sparkplug B id the device published under">Published ID</th><th title="Source gateway">Gateway</th><th title="Discovery timestamp">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-              <tbody>
-                {quarantine.map(q => {
-                  const [suggestion] = suggestMatches(q, assets, schemas)
-                  return (
-                  <tr key={q.quarantine_id}>
-                    {/* Constrained like the payload cell: a MALFORMED_IDENTITY reason is a full
-                        sentence and would push the actions off the edge. It wraps rather than
-                        truncates. */}
-                    <td style={{ maxWidth: '280px' }}>
-                      <strong>{q.asset_name}</strong>
-                      {q.quarantine_reason && (
-                        <div style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '3px', display: 'flex', alignItems: 'flex-start', gap: '3px' }}>
-                          <IconAlertTriangle size={10} style={{ flexShrink: 0, marginTop: '1px' }} />
-                          <span style={{ minWidth: 0 }}>{q.quarantine_reason}</span>
-                        </div>
-                      )}
-                      {suggestion && (
-                        <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
-                          <IconAlertTriangle size={10} /> Possible match: {suggestion.candidateName}
-                        </div>
-                      )}
-                    </td>
-                    <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
-                    <td>{q.gateway_name || <span className="mono">—</span>}</td>
-                    <td style={{ fontSize: '11px' }}>{new Date(q.discovered_at).toLocaleString()}</td>
-                    <QuarantinePayloadCell metrics={q.reported_metrics} fallbackJson={q.birth_payload} />
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                        <button
-                          className={`btn btn-primary btn-sm ${!canApprove ? 'btn-disabled' : ''}`}
-                          disabled={!canApprove}
-                          onClick={() => canApprove && setApproveItem(q)}
-                          title={!canApprove ? 'Requires Admin permissions' : 'Approve and assign to cell zone'}
-                        >
-                          Approve & Assign
-                        </button>
-                        {/* Keyed on the row: one boolean would spin every Reject button. */}
-                        <ActionButton
-                          className={`btn btn-danger btn-sm ${!canReject ? 'btn-disabled' : ''}`}
-                          disabled={!canReject}
-                          pending={rowBusyId === q.asset_id}
-                          pendingLabel="Rejecting…"
-                          onClick={() => canReject && runRowAction(q.asset_id, () => rejectQuarantine(q))}
-                          title={!canReject ? 'Requires Admin permissions' : 'Reject quarantine payload'}
-                        >
-                          Reject
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-title">{editing ? 'Edit Device Configuration' : 'Register New Device'}</div>
-            
+        <Modal
+          title={editing ? 'Edit Device Configuration' : 'Register New Device'}
+          size="md"
+          onClose={() => { setShowForm(false); setEditingProposal(null) }}
+          footer={
+            <>
+              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel edits">Cancel</button>
+              <ActionButton
+                pending={saving}
+                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
+                onClick={() => runSave(save)}
+                // Area-Wide with no area named would be refused by the database; held here.
+                disabled={locationIncomplete(form)}
+                title={locationIncomplete(form)
+                  ? 'Choose which area the device serves'
+                  : proposeMode
+                    ? 'Ask for these changes — an approver applies them, or says why not'
+                    : 'Save device configuration and gateway assignment'}
+              >
+                {proposeMode
+                  ? (editingProposal ? 'Update your proposal' : 'Propose a change')
+                  : 'Save Configuration'}
+              </ActionButton>
+            </>
+          }
+        >
             {/* Every field here is editable. The identifiers and the topic helper are facts, and
                 live on the drawer where they are copyable. */}
             <div className="form-group">
               <label className="form-label">Device Name</label>
-              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Friendly label for this device" placeholder="e.g. Sim_CNC_Mill_01" />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Friendly label for this device" placeholder="e.g. CNC Mill 01" />
+              <div className="form-hint">
                 A display label only — rename it freely. Identity on the wire is the Sparkplug ID, which is generated from the database key and never moves, so renaming never breaks ingestion or detaches telemetry history.
               </div>
             </div>
@@ -1105,7 +1101,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 title="Optional free-text note about this device"
                 placeholder="e.g. Spindle rebuilt 2026-03; runs warmer than its twin"
               />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              <div className="form-hint">
                 {/* Says what it is NOT for, because the tempting misuse is to encode something here
                     that belongs in a typed field -- and then to start parsing it. */}
                 Optional, and read by nothing. For identification a consumer should trust — manufacturer, serial number, firmware — use the Digital Nameplate, whose fields carry published IDTA identifiers.
@@ -1113,9 +1109,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assigned Edge Gateway</label>
+              <label className="form-label">Serving Gateway</label>
               <Withheld field="active_gateway_id" />
-              <select className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title={proposeMode ? withheldFields.active_gateway_id : "Select edge gateway serving this device"}>
+              <select className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title={proposeMode ? withheldFields.active_gateway_id : "Select the gateway serving this device"}>
                 <option value="">— Unassigned Gateway —</option>
                 {/* A replay lane is listed but disabled rather than filtered out, so a device that
                     is a lane still opens with its own gateway shown. The database refuses the write
@@ -1129,7 +1125,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </select>
               {/* Shown always: the question is why Playback cannot be picked, asked while something
                   else is selected. */}
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              <div className="form-hint">
                 {noDeviceAssignmentReason({ is_shadow: true })}
               </div>
             </div>
@@ -1173,7 +1169,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     cellTitle="Where this device physically sits. Leave on Inherit to follow its gateway."
                   />
 
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  <div className="form-hint">
                     {!acceptsCell
                       /* Deliberately does not clear `cell_id`: nothing here is refused on save, so
                          a stored cell is kept and applies again if the gateway stops being
@@ -1187,17 +1183,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                           ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
                           : inheritedName
                             ? `Follows the gateway above. Reassigning the gateway moves this device with it.`
-                            : 'Neither this device nor its gateway has a cell, so it will appear in the Unassigned queue. Pick a cell here, set one on the gateway, or mark it Site-Wide.'}
+                            : 'Neither this device nor its gateway has a cell, so it will show under Unassigned in the Cell filter. Pick a cell here, set one on the gateway, or mark it Site-Wide.'}
                   </div>
 
                   {location.cell_mismatch && (
-                    <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px', display: 'flex', alignItems: 'flex-start', gap: '5px' }}>
-                      <IconAlertTriangle size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
-                      <span>
-                        This device is filed in <strong>{nameOf(location.effective_cell_id)}</strong> but its
-                        gateway serves <strong>{inheritedName}</strong>. That is allowed — a shared or host-run
-                        connector often reaches across cells — but check it is what you meant.
-                      </span>
+                    <div className="form-hint hint-warning">
+                      <IconAlertTriangle size={12} /> This device is filed in <strong>{nameOf(location.effective_cell_id)}</strong> but its
+                      gateway serves <strong>{inheritedName}</strong>. That is allowed — a shared or host-run
+                      connector often reaches across cells — but check it is what you meant.
                     </div>
                   )}
                 </div>
@@ -1205,17 +1198,17 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             })()}
 
             <div className="form-group">
-              <label className="form-label">Device Type / Classification <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '11px' }}>(derived)</span></label>
+              <label className="form-label">Device Type / Classification <span className="form-hint-inline">(derived)</span></label>
               {/* flexWrap is load-bearing: a tri-standard schema derives six tags, and the count
                   grows with the schema. */}
-              <div className="form-control" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', background: 'var(--bg-glass)' }} title="Derived from the metric groups the assigned schema models — not typed in by hand">
+              <div className="form-control derived-tags" title="Derived from the metric groups the assigned schema models — not typed in by hand">
                 {(() => {
                   const preview = deviceTagList(editing, schemas.find(s => s.schema_uuid === form.schema_id) || null)
                   if (preview.length === 0) {
-                    return <span style={{ fontSize: '12px' }}>Assign a schema below to classify this device</span>
+                    return <span className="cell-meta">Assign a schema below to classify this device</span>
                   }
                   return preview.map(t => (
-                    <span key={t} className="badge badge-neutral" style={{ fontSize: '11px' }}>{t}</span>
+                    <Badge key={t} size="sm">{t}</Badge>
                   ))
                 })()}
               </div>
@@ -1234,21 +1227,20 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   </option>
                 ))}
               </select>
-              {/* What the field is for, in the order it matters: the contract every DDATA value is
-                  judged against, and under Enforce that judgement drops readings. The quarantine
-                  hint is second because suggestMatches() weights a required-metric overlap above
-                  name similarity. */}
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                The contract this device's metrics are judged against — see Schema Conformance below,
-                which decides whether a violation is recorded or the reading is dropped. Optional:
-                with none attached nothing is judged. It also helps identify this device if it turns
-                up in quarantine under another name, by matching the metrics it reports against the
-                schema's required fields.
+              {/* The contract every DDATA value is judged against comes first; the quarantine hint
+                  second, since suggestMatches() weights a required-metric overlap above name
+                  similarity. */}
+              <div className="form-hint">
+                The contract this device's metrics are judged against. Once the device exists, its
+                Schema Conformance setting decides whether a violation is recorded or the reading is
+                dropped. Optional: with none attached nothing is judged. It also helps identify this
+                device if it turns up in the Quarantine queue under another name, by matching the
+                metrics it reports against the schema's required fields.
               </div>
               {/* Said only when it applies: the device is on a version its lineage has moved past,
                   which is a migration to finish. */}
               {form.schema_id && !isAssignableSchema(schemas.find(s => s.schema_uuid === form.schema_id)) && (
-                <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                <div className="form-hint hint-warning">
                   This device is still on an archived version. It is kept selectable so saving does not
                   silently detach it — move it forward by publishing from the Schemas page, not from here.
                 </div>
@@ -1259,7 +1251,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 const attached = schemasForDevice(editing, schemas)
                 if (attached.length < 2) return null
                 return (
-                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                  <div className="form-hint hint-warning">
                     This device has {attached.length} schemas attached
                     ({attached.map(s => s.schema_name).join(', ')}). This picker sets only the primary
                     one; the rest are managed as AAS submodels and are unaffected by saving here.
@@ -1283,7 +1275,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   <option value="audit">Audit — record the violation, keep the reading</option>
                   <option value="enforce">Enforce — record it and DROP the reading</option>
                 </select>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                <div className="form-hint">
                   Applies to DDATA values judged against the schemas bound to this device. Only the
                   offending metric is affected; the rest of the message is written either way.
                 </div>
@@ -1292,7 +1284,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     'enforce' is inert. */}
                 {form.conformance_policy === 'enforce'
                   && schemasForDevice(editing, schemas).length === 0 && (
-                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                  <div className="form-hint hint-warning">
                     This device has no schema attached, so enforcing does nothing — there is
                     nothing to judge a value against. Attach a schema above first.
                   </div>
@@ -1303,7 +1295,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 {form.conformance_policy === 'enforce'
                   && editing.conformance_policy !== 'enforce'
                   && schemasForDevice(editing, schemas).length > 0 && (
-                  <div style={{ fontSize: '11px', color: 'var(--danger-text)', marginTop: '6px' }}>
+                  <div className="form-hint hint-danger">
                     From the next message, a value contradicting this device's schema will not be
                     written to the historian and cannot be recovered. The violation is still
                     recorded in the Audit Trail. Schema changes take up to five minutes to take
@@ -1331,28 +1323,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 />
               </div>
             )}
-
-            <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel edits">Cancel</button>
-              <ActionButton
-                pending={saving}
-                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
-                onClick={() => runSave(save)}
-                // Area-Wide with no area named would be refused by the database; held here.
-                disabled={locationIncomplete(form)}
-                title={locationIncomplete(form)
-                  ? 'Choose which area the device serves'
-                  : proposeMode
-                    ? 'Ask for these changes — an approver applies them, or says why not'
-                    : 'Save device configuration and gateway assignment'}
-              >
-                {proposeMode
-                  ? (editingProposal ? 'Update your proposal' : 'Propose a change')
-                  : 'Save Configuration'}
-              </ActionButton>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {approveItem && (
@@ -1372,8 +1343,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         <AssetConfigModal
           asset={configAsset}
           schemas={schemas}
-          // Read-only now that the 3D uploader has moved to the row's document accordion, so no
-          // reload is needed on close -- the uploader reloads for itself when it writes.
           onClose={() => setConfigAsset(null)}
         />
       )}
@@ -1383,8 +1352,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           canManage={canManage}
           showToast={showToast}
           onClose={() => setNameplateFor(null)}
-          /* THE DIALOG FILES ITS OWN PROPOSAL NOW, rather than routing to a composer that listed
-             these same eleven columns a second time. It needs the permission, not a destination. */
+          /* The dialog files its own proposal, so it needs the permission, not a destination. */
           canPropose={canPropose}
         />
       )}
@@ -1422,17 +1390,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 axis. */}
             {(() => {
               const badge = deviceStatusBadge(selectedDevice)
-              return (
-                <span
-                  className={`badge ${badge.badgeClass}`}
-                  style={{ fontSize: '11px' }}
-                  title={badge.title}
-                >
-                  {badge.label}
-                </span>
-              )
+              return <Badge tone={badge.tone} size="sm" title={badge.title}>{badge.label}</Badge>
             })()}
-            {selectedDevice.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
+            {selectedDevice.is_archived && <ArchivedBadge size="sm" title="Archived: out of commission" />}
           </>
         )}
         fields={selectedDevice ? [
@@ -1454,8 +1414,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 : "The DDATA topic this device publishes on. No Sparkplug group is recorded on its gateway, so that segment is a wildcard."
           },
           {
-            // A link, not a picker: rebinding lives in Edit Details behind an explicit save. What
-            // the field is asked is which gateway, and take me to it.
+            // A link, not a picker: rebinding lives in Edit Details behind an explicit save.
             label: 'Serving Gateway',
             full: true,
             value: selectedDevice.active_gateway_id ? (
@@ -1567,7 +1526,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
         ] : []}
         actions={selectedDevice ? [
-          // The old actions column, which applies to one device you have already picked.
           selectedDevice.is_archived ? {
             label: 'Restore Device', icon: <IconRefreshCw size={13} />,
             onClick: () => runRowAction(selectedDevice.asset_id, () => restoreDevice(selectedDevice.asset_id, selectedDevice.asset_name)),
@@ -1575,7 +1533,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             pendingLabel: 'Restoring…',
             disabled: !canArchive,
             primary: true,
-            title: !canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'
+            title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore device back to active service'
           } : {
             icon: <IconPencil size={13} />,
             // Seeded with the resolved schema, not the raw row, whose `schema_id` is null for a
@@ -1600,7 +1558,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               : proposeMode
                 ? 'Ask for a change to this device — an approver applies it, or says why not'
                 : !canManage && !canPropose
-                  ? 'Requires Admin permissions'
+                  ? requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)
                   : 'Edit device parameters'
           },
           /* No separate Propose a Change action: the dialog above is the only form, and for
@@ -1616,11 +1574,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: 'Open the approvals queue, filtered to this device'
           },
           {
-            // Opens the modal rather than a section of this panel. The inspector is a four-column
-            // table and 360px is not a table -- see TelemetryModal for the full history.
-            label: 'View Realtime Telemetry', icon: <IconActivity size={13} />,
+            // A modal, not a section of this panel: the inspector is a four-column table.
+            label: 'View Telemetry', icon: <IconActivity size={13} />,
             onClick: () => setTelemetryFor(selectedDevice),
-            title: "Open this device's metric inspector"
+            title: "Open this device's metrics with their latest values"
           },
           {
             // A read of what the device declared at birth: not gated on device:manage and not
@@ -1632,13 +1589,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           /* Withheld from a replay lane: a nameplate carries a serial number that identifies one
              physical object, and a shadow is a recording of an asset, not a second asset. */
           !selectedDevice.shadow_of && {
-            // Directly above the two exports on purpose: it is the only thing here that changes
-            // what they contain.
+            // Directly above the exports on purpose: it is the only thing here that changes what
+            // they contain.
             label: 'Digital Nameplate…', icon: <IconTag size={13} />,
             onClick: () => setNameplateFor(selectedDevice),
             title: canManage
               ? "Manufacturer, serial number and versions — exported in this device's AAS"
-              : "View this device's nameplate (editing requires Admin permissions)"
+              : `View this device's nameplate. ${requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)} to edit it`
           },
           {
             label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export AAS JSON (V3)',
@@ -1668,8 +1625,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           /* Also withheld from a replay lane: links are resolved through `shadow_of` at read time,
              and a copy here would go stale. */
           !selectedDevice.shadow_of && {
-            // The accordion below lists the links; this is how a new one gets attached. Both are
-            // needed now that the accordion no longer carries its own Manage button.
             label: 'Attached Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForDevice(selectedDevice),
             title: 'Attach or edit links for this device — documents, an asset register, a file repository, any URL'
@@ -1679,7 +1634,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           canReadTrail && {
             label: 'View Audit Trail', icon: <IconHistory size={13} />,
             onClick: () => onViewTrail?.(selectedDevice),
-            title: 'Open the immutable audit trace for this device'
+            title: 'Open the Audit Trail filtered to this device'
           },
           // Archive only, never beside Restore: the two are mutually exclusive states of the
           // same row, and offering both would make one of them a no-op.
@@ -1688,18 +1643,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             onClick: () => setArchiveTarget(selectedDevice),
             disabled: !canArchive,
             danger: true,
-            title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Device'
+            title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Archive this device: take it out of commission'
           },
         ].filter(Boolean) : []}
       >
-        {/* The two accordions belong to one device rather than being mounted once per row. */}
         {selectedDevice && (
           <>
-            {/* The 3D model stays: it is an attachment, and one upload control fits a narrow
-                column. onChange reloads so model_3d_path cannot go stale. */}
+            {/* onChange reloads so model_3d_path cannot go stale. */}
             <div>
-              {/* The icon is what the uploader gave up when its own two-row heading came off --
-                  it identified the section at a glance, and a bare text label does not. */}
               <div className="context-panel-section-label context-panel-section-label-icon">
                 <IconCube size={13} /> 3D Model
               </div>
