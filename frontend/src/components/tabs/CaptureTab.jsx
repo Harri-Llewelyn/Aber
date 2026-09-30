@@ -374,7 +374,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     <div className="page-layout page-fill">
       <div className="page-main">
 
-        <PageHeading icon={<IconRecord size={15} />} title="Capture and playback">
+        <PageHeading icon={<IconRecord size={15} />} title="Capture">
           What the plant actually published, kept verbatim and played back on demand. A capture is one
           recording per subject, so a new one replaces it; a playback publishes a stored capture
           through the real broker and the real ingestion path, as the Playback gateway.
