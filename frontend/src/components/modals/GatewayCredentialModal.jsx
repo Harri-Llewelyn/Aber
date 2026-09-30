@@ -239,7 +239,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               <div className="form-group">
                 <label className="form-label">For .env</label>
                 <pre className="mono" style={{
-                  background: 'var(--bg-subtle)', padding: '10px', borderRadius: '4px',
+                  background: 'var(--bg-glass)', padding: '10px', borderRadius: '4px',
                   fontSize: '12px', overflowX: 'auto', margin: 0
                 }}>{envBlock}</pre>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>

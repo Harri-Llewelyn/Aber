@@ -319,7 +319,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
             {unmapped.length > 0 && (
               <div style={{ marginBottom: '10px' }}>
                 <ActionButton
-                  className="btn btn-secondary btn-sm"
+                  className="btn btn-ghost btn-sm"
                   pending={preparing}
                   pendingLabel="Preparing…"
                   disabled={pending}

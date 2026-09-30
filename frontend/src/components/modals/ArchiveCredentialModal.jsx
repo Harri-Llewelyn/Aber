@@ -51,7 +51,7 @@ export function ArchiveCredentialModal({ credentialSet, onSave, onClose }) {
                 recovered from this stack.
               </span>
             </div>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '0 0 20px' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 20px' }}>
               The access key ID, endpoint, region and bucket are ordinary settings and are not
               touched by this.
             </p>

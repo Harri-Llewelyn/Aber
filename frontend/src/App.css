@@ -815,7 +815,7 @@ html, body, #root {
 }
 
 .page-heading .page-heading-note {
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 /* ===== Cards & Containers ===== */
@@ -1207,8 +1207,8 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* Copyable: deliberately quieter. It is useful, but it is not a destination, and colouring it
    like one would put the two back on equal footing. */
-.endpoint-copy { color: var(--text-secondary); font-family: inherit; }
-.endpoint-copy:hover { border-color: var(--text-secondary); background: var(--bg-surface); }
+.endpoint-copy { color: var(--text-muted); font-family: inherit; }
+.endpoint-copy:hover { border-color: var(--text-muted); background: var(--bg-surface); }
 
 /* Keyboard reachability is not optional here: the copy variant is the ONLY way to obtain a
    broker or database address from this page. */
@@ -1362,6 +1362,21 @@ tbody tr:hover { background: var(--bg-glass); }
   border: 1px solid var(--border);
 }
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--accent); }
+
+/* A square icon-only button, such as a dialog's close ×. Follows .btn-ghost so it overrides its
+   border and fill. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+.btn-icon:hover { color: var(--accent); background: transparent; }
 
 /* The count pill inside a selected filter button. `.section-count` paints --accent on --accent-dim,
    which is invisible on a `.btn-primary` fill, so the pill takes the button's ink as its fill and
@@ -2145,7 +2160,7 @@ tbody tr:hover { background: var(--bg-glass); }
 .area-thumb-counts { flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
 
 /* The area's own assets, in the same line as the rest. Marked so the breakdown reads as one. */
-.area-thumb-wide { color: var(--text); }
+.area-thumb-wide { color: var(--text-primary); }
 
 .area-thumb-name {
   flex: 1 1 auto;
@@ -2181,7 +2196,7 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
 }
 
-.area-thumb-aside:hover { color: var(--text); }
+.area-thumb-aside:hover { color: var(--text-primary); }
 .area-thumb-aside-warn { color: var(--warning-text); }
 
 /* The grid is the map, so it follows the number of areas rather than a fixed minimum width: one
@@ -4671,7 +4686,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--text);
+  color: var(--text-primary);
   cursor: pointer;
 }
 

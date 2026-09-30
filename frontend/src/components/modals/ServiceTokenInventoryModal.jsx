@@ -86,7 +86,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
           </div>
         ) : (
           <div className="table-wrapper">
-            <table className="data-table">
+            <table>
               <thead>
                 <tr>
                   <th>Token ID (jti)</th>

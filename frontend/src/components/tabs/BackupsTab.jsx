@@ -223,7 +223,7 @@ export function BackupsTab({ showToast }) {
                   </div>
                 ) : (
                   <div className="table-wrap">
-                    <table className="data-table">
+                    <table>
                       <thead>
                         <tr>
                           <th>When</th>

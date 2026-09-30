@@ -48,7 +48,7 @@ export function ConfirmModal({
     <div className="modal-overlay" style={{ zIndex: 1100 }}>
       <div className="modal modal-sm">
         <div className="modal-title">Confirm Action</div>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '12px 0 20px' }}>{message}</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '12px 0 20px' }}>{message}</p>
 
         {gated && (
           <div className="form-group" style={{ marginBottom: '20px' }}>

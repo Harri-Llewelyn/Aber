@@ -145,7 +145,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
                   /* Tight padding: with ~14 sections per standard the headings are scanned as a
                      list. */
                   padding: '6px 2px', background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--text)', textAlign: 'left', font: 'inherit'
+                  color: 'var(--text-primary)', textAlign: 'left', font: 'inherit'
                 }}
                 title={open ? 'Collapse this section' : 'Expand this section'}
               >

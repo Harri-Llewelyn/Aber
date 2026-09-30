@@ -241,7 +241,7 @@ function DiffTable({ proposal, names }) {
         {rows.map(r => (
           <tr key={r.key}>
             <td>{keyLabel(r.key)}</td>
-            <td className="text-muted"><ValueCell value={r.from} names={names} /></td>
+            <td className="cell-meta"><ValueCell value={r.from} names={names} /></td>
             <td>
               <strong><ValueCell value={r.to} names={names} /></strong>
               {r.unchanged && <span className="badge badge-neutral"> unchanged</span>}
@@ -358,9 +358,9 @@ function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
                   )}
                 </td>
                 <td><span className="badge badge-neutral">{lane?.label || p.entity_type}</span></td>
-                <td className="text-muted">{summary}</td>
+                <td className="cell-meta">{summary}</td>
                 <td><StatusBadge status={p.status} /></td>
-                <td className="text-muted" title={absoluteTime(p.decided_at || p.proposed_at)}>
+                <td className="cell-meta" title={absoluteTime(p.decided_at || p.proposed_at)}>
                   {ageLabel(p.decided_at || p.proposed_at)}
                 </td>
               </tr>
