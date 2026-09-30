@@ -868,6 +868,9 @@ html, body, #root {
   border: none;
 }
 
+/* The bar's bottom gap when something follows it in the card body. A bar that ends the body has none. */
+.card-body > .filter-bar:not(:last-child) { margin-bottom: 12px; }
+
 /* The seam between a card's body and the table it introduces: the same 1px the card header uses on
    its underside, so the card reads as header / body / table. */
 .card-body + .table-wrap,
@@ -907,6 +910,56 @@ html, body, #root {
   align-items: center;
   gap: 10px;
 }
+
+/* The three widths of a filter control, selects and search alike. The doubled selector beats
+   `.form-control { width: 100% }`, which comes later in the file. */
+.control-sm, .form-control.control-sm { width: 150px; max-width: 100%; }
+.control-md, .form-control.control-md { width: 190px; max-width: 100%; }
+.control-lg, .form-control.control-lg { width: 220px; max-width: 100%; }
+
+/* The "Clear filters (N)" button: always the right-hand end of the bar, wrapped or not. */
+.filter-bar-clear { margin-left: auto; }
+
+/* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
+   native search cancel is hidden, since the clear button replaces it. */
+.search-input { position: relative; display: inline-flex; align-items: center; }
+.search-input-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.search-input .search-input-field { padding-left: 30px; padding-right: 28px; }
+.search-input .search-input-field::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.search-input-clear {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.search-input-clear:hover { color: var(--text-primary); background: var(--bg-glass); }
+.search-input-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The foot of a list that loads in steps (ListFoot): a rule above, the button or the end line
+   inside. It sits after the scroller, not in it. */
+.list-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px var(--inset);
+  border-top: 1px solid var(--border);
+}
+.list-foot-end { font-size: 12px; color: var(--text-muted); }
 
 /* A cell rendered as an action -- used for counts that navigate elsewhere (e.g. a schema's
    device count opening the Devices page filtered to it). Reads as a link, not a button. */
@@ -1811,7 +1864,7 @@ tbody tr:hover { background: var(--bg-glass); }
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 60px;
+  padding: 36px var(--inset);
   gap: 12px;
   color: var(--text-muted);
 }

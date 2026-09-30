@@ -210,7 +210,7 @@ describe('byte formatting', () => {
     // A page saying "1.1 GB" beside a bucket configured for 1073741824 invites the reader to work
     // out which of the two numbers is wrong.
     expect(formatBytes(1073741824)).toBe('1.0 GiB')
-    expect(formatBytes(104857600)).toBe('100 MiB')
+    expect(formatBytes(104857600)).toBe('100.0 MiB')
     expect(formatBytes(4938)).toBe('4.8 KiB')
     expect(formatBytes(512)).toBe('512 B')
   })

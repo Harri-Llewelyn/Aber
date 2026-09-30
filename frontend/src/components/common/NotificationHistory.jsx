@@ -4,6 +4,7 @@ import { TOAST_ICONS, TOAST_SPOKEN_PREFIX } from './Toast'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { HISTORY_LIMIT } from '../../hooks/useToast'
+import { formatRelative } from '../../utils/format'
 
 /** Most severe first. The badge takes the tone of the worst unread entry. */
 const SEVERITY = ['error', 'warning', 'info', 'success']
@@ -12,14 +13,9 @@ export function worstType(entries) {
   return SEVERITY.find(type => entries.some(e => e.type === type)) ?? null
 }
 
-/** "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago". */
+/** The compact relative style the whole app uses: "12s ago", "5m ago", "3h ago", "4d ago". */
 export function relativeTime(at, now = Date.now()) {
-  const seconds = Math.max(0, Math.round((now - at) / 1000))
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`
-  const days = Math.floor(seconds / 86400)
-  return days === 1 ? 'yesterday' : `${days} days ago`
+  return formatRelative(at, now)
 }
 
 const TONE_WORD = { error: 'an error', warning: 'a warning' }

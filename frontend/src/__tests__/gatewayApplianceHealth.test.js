@@ -79,8 +79,8 @@ describe('byte formatting', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(1024)).toBe('1.0 KiB');
     expect(formatBytes(6_423_183_360)).toBe('6.0 GiB');
-    // 48.83 GiB. Above 10 the fraction is dropped, so this rounds rather than truncating.
-    expect(formatBytes(52_428_288_000)).toBe('49 GiB');
+    // 48.83 GiB. One decimal at every unit from KiB up.
+    expect(formatBytes(52_428_288_000)).toBe('48.8 GiB');
   });
 
   it('keeps zero distinguishable from unreported', () => {

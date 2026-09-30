@@ -5,6 +5,8 @@
  * threshold and the PENDING states agree with ensure_gateway_status_view().
  */
 
+import { formatBytes as formatBytesBase, formatDuration, NO_VALUE } from './format';
+
 // The gateway appliance's flow beats every 30s; allow three missed beats before calling it stale.
 export const HEARTBEAT_STALE_MS = 90_000;
 
@@ -84,12 +86,8 @@ export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
 
 /** A length of time in seconds, e.g. "45s", "12m", "3h 5m" or "2d 4h"; null when it is not a number. */
 export function formatUptime(seconds) {
-  const s = Number(seconds);
-  if (seconds === null || seconds === undefined || !Number.isFinite(s) || s < 0) return null;
-  if (s < 60) return `${Math.floor(s)}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
+  const text = formatDuration(seconds);
+  return text === NO_VALUE ? null : text;
 }
 
 /**
@@ -159,16 +157,8 @@ export function holdsOlderRoot(certExpiresAt, platformNotAfter) {
  */
 export function formatBytes(bytes) {
   if (bytes === null || bytes === undefined || Number.isNaN(Number(bytes))) return null;
-  const n = Number(bytes);
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  let i = 0;
-  let value = Math.abs(n);
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i += 1;
-  }
-  const rendered = i === 0 ? value : value.toFixed(value < 10 ? 1 : 0);
-  return `${n < 0 ? '-' : ''}${rendered} ${units[i]}`;
+  const text = formatBytesBase(bytes);
+  return text === NO_VALUE ? null : text;
 }
 
 /**

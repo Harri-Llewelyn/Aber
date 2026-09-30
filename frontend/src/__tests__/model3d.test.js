@@ -109,9 +109,9 @@ describe('formatFileSize', () => {
   it('formats across units', () => {
     expect(formatFileSize(0)).toBe('0 B')
     expect(formatFileSize(512)).toBe('512 B')
-    expect(formatFileSize(1024)).toBe('1.0 KB')
-    expect(formatFileSize(13_002_342)).toBe('12.4 MB')
-    expect(formatFileSize(1024 ** 3)).toBe('1.0 GB')
+    expect(formatFileSize(1024)).toBe('1.0 KiB')
+    expect(formatFileSize(13_002_342)).toBe('12.4 MiB')
+    expect(formatFileSize(1024 ** 3)).toBe('1.0 GiB')
   })
 
   it('reports an unusable value as unknown rather than as NaN', () => {

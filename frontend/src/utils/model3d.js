@@ -7,6 +7,8 @@
  * `test_aas_export.py` fails on drift.
  */
 
+import { formatBytes } from './format';
+
 /** Extensions the uploader accepts, in the order the file picker offers them. */
 export const MODEL_3D_EXTENSIONS = ['.glb', '.gltf', '.obj', '.stl'];
 
@@ -72,16 +74,5 @@ export function modelStoragePath(deviceId, filename) {
 
 /** Human-readable file size. Binary units, because that is what a file manager reports. */
 export function formatFileSize(bytes) {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  // One decimal at every unit above bytes: "12.4 MB" is the precision an operator judges an upload
-  // by, and rounding it to "12 MB" loses exactly the digit that distinguishes two revisions.
-  return `${value.toFixed(1)} ${units[unit]}`;
+  return formatBytes(bytes);
 }
