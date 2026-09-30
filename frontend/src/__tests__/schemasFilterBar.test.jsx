@@ -102,13 +102,15 @@ describe('schema registry default view', () => {
     expect(within(statusSelect()).getByText('All versions (3)')).toBeInTheDocument()
   })
 
-  it('caps the registry height and pins its header', async () => {
+  it('scrolls inside its card, which fills the page', async () => {
     renderTab()
     await ready()
 
-    // The cap is the half of issue #60 that a filter cannot do: a registry narrowed to forty rows
-    // is still forty rows, and the catalog below has to stay reachable.
-    expect(registryCard().querySelector('.table-wrap')).toHaveClass('table-scroll')
+    // The table is the card's own scroller and the page does not scroll.
+    expect(registryCard()).toHaveClass('card-fill')
+    expect(registryCard().querySelector(':scope > .table-wrap')).toBeTruthy()
+    expect(registryCard().querySelector('.table-scroll')).toBeNull()
+    expect(registryCard().closest('.page-layout')).toHaveClass('page-fill')
   })
 })
 
@@ -124,9 +126,9 @@ describe('schema registry search', () => {
     expect(registryNames()).toEqual(['Robot_Arm_Profile'])
   })
 
-  /* UUID and change description are matched too, unlike the metric catalog's name-only search
-     below: every field matched here is a column of this table, so a hit can always be seen, and a
-     schema arrives from a log line as a UUID more often than as a name. */
+  /* UUID and change description are matched too, unlike the metric catalog's name-only search:
+     every field matched here is a column of this table, so a hit can always be seen, and a schema
+     arrives from a log line as a UUID more often than as a name. */
   it('narrows by UUID', async () => {
     renderTab()
     await ready()
@@ -200,30 +202,33 @@ describe('clearing schema filters', () => {
 
     // `current` is the resting state, not a filter, so it must not count towards the badge --
     // a Clear button offered on arrival has nothing to clear.
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
 
     fireEvent.change(searchBox(), { target: { value: 'profile' } })
     fireEvent.change(statusSelect(), { target: { value: 'all' } })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (2)')
+    expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (2)')
 
-    fireEvent.click(screen.getByTitle('Clear every filter'))
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
 
     expect(searchBox()).toHaveValue('')
     expect(statusSelect()).toHaveValue('current')
     expect(registryNames()).not.toContain('CNC_Mill_Profile_v1')
   })
 
-  /* Filtered of total, and only then: a narrowed registry showing a bare count reads as a short
-     registry. Unfiltered, the title carries no badge. */
-  it('shows a filtered-of-total badge only while narrowed', async () => {
+  /* The total is the rows in the chosen status view, so the page reads a bare count at rest and
+     "shown / total" only while the search narrows it. */
+  it('reads a bare count at rest and shown / total while searching', async () => {
     renderTab()
     await ready()
 
+    const count = () => registryCard().querySelector('.card-header .section-count')
+    expect(count()).toHaveTextContent(/^2$/)
+
     fireEvent.change(statusSelect(), { target: { value: 'all' } })
-    expect(registryCard().querySelector('.card-header .section-count')).toBeNull()
+    expect(count()).toHaveTextContent(/^3$/)
 
     fireEvent.change(searchBox(), { target: { value: 'robot' } })
-    expect(registryCard().querySelector('.card-header .section-count')).toHaveTextContent('1/3')
+    expect(count()).toHaveTextContent('1 / 3')
   })
 })
 

@@ -159,7 +159,6 @@ describe('pages do not space a block sideways with a literal margin', () => {
     'ApprovalsTab.jsx: marginLeft 8px': 1,
     'CaptureTab.jsx: marginLeft 6px': 5,
     'CaptureTab.jsx: marginRight 6px': 3,
-    'SchemasTab.jsx: marginLeft 6px': 1
   }
 
   const files = jsxFiles(path.join(SRC, 'components', 'tabs'))

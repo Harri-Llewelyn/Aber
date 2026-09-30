@@ -4882,3 +4882,19 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
   gap: 24px;
   flex-wrap: wrap;
 }
+
+.schema-change-cell { max-width: 280px; }
+
+.validate-payload-input {
+  height: 150px;
+  font-size: 12px;
+}
+
+.callout-success {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+/* The schema detail dialog's five footer buttons do not fit one row at its width. */
+.modal-lg .modal-actions { flex-wrap: wrap; }

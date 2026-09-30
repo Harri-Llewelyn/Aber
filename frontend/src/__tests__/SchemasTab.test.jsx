@@ -88,10 +88,9 @@ describe('what the page no longer loads', () => {
 })
 
 /**
- * The builder builds a schema. It used to register a device and download a spec sheet as well,
- * which put a second, worse device form on a page that is not about devices: no cell, no area, no
- * conformance policy, and a status the Devices page would have set correctly. A device is given its
- * schema on the Devices page; the definition is downloaded from this page's context panel.
+ * The builder builds a schema and nothing else. A device is given its schema on the Devices page,
+ * where its cell, area and conformance policy are decided too; the definition is downloaded from
+ * this page's context panel.
  */
 describe('the schema builder builds a schema', () => {
   const openBuilder = async () => {
