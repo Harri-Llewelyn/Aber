@@ -27,7 +27,7 @@ import React from 'react'
  *   <CardHeading
  *     icon={<IconFactory size={15} />}
  *     title="Areas"
- *     description="The parts of the campus your cells are filed into, each with its floor plan."
+ *     description="The parts of the site your cells are filed into, each with its own plan."
  *     count={<SectionCount total={areas.length} />}
  *     actions={<button className="btn btn-primary btn-sm">New Area</button>}
  *   />
