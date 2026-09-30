@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -56,6 +57,14 @@ const openPanel = (name = 'Host_Gateway_NodeRED') => {
 const inRow = () => within(document.querySelector('.page-main'))
 
 beforeEach(() => vi.clearAllMocks())
+
+describe('the gateways card header', () => {
+  it('names the page with its icon, title and description, and no title tip', async () => {
+    await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
+    const header = expectCardHeading('Gateways', /edge nodes/)
+    expect(header).toHaveTextContent('New Gateway')
+  })
+})
 
 describe('gateway row actions', () => {
   it('leaves no action controls in the row at all', async () => {

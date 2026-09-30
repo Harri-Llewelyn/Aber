@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 /**
  * The schema registry. The metric catalog left this page for its own (MetricsTab.test.jsx), so
@@ -41,6 +42,15 @@ beforeEach(() => {
   api.get.mockImplementation((path) => {
     const key = Object.keys(routes).find(r => path.startsWith(r))
     return Promise.resolve(key ? routes[key] : [])
+  })
+})
+
+describe('the schemas card header', () => {
+  it('names the page with its icon, title and description, and no title tip', async () => {
+    renderTab()
+    await waitForRegistry()
+    const header = expectCardHeading('Schemas', /modelled to publish/)
+    expect(header).toHaveTextContent('Build Schema from Catalog')
   })
 })
 

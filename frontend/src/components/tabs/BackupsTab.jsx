@@ -13,7 +13,7 @@ import { SectionCount } from '../common/SectionCount'
 import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import CopyableId from '../common/CopyableId'
-import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { IconAlertTriangle, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
 import { formatBytes, formatDateTime, NO_VALUE } from '../../utils/format'
 import { readSetting } from '../../config'
@@ -170,28 +170,25 @@ export function BackupsTab({ showToast }) {
     <div className="page-layout page-fill">
       <div className="page-main">
         <div className="card card-fill">
-          <div className="card-header">
-            <h3 className="section-title">
-              Backups
-              <HelpTip
-                label="About backups"
-                text="Every backup run, newest first, and why any failed. A requested backup is kept until released. Scheduled ones follow the retention window, but the newest three backups are always kept."
-              />
-              <SectionCount total={total} shown={runs.length} />
-            </h3>
-            {/* The primary action in the header, where every card keeps its. Disabled rather than
-                hidden while one is in flight: the gate refuses a second anyway, and the callout
-                below says why. */}
-            <button
-              className="btn btn-primary btn-sm"
-              style={{ marginLeft: 'auto' }}
-              disabled={!!activeJob}
-              onClick={() => setAsking(true)}
-              title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
-            >
-              <IconHardDrive size={14} /> Take a backup
-            </button>
-          </div>
+          <CardHeading
+            icon={<IconHardDrive size={15} />}
+            title="Backups"
+            description="Every backup run, newest first, and why any failed. Scheduled backups follow the retention window; requested ones are kept until released."
+            count={<SectionCount total={total} shown={runs.length} />}
+            actions={(
+              /* The primary action in the header, where every card keeps its. Disabled rather
+                 than hidden while one is in flight: the gate refuses a second anyway, and the
+                 callout below says why. */
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={!!activeJob}
+                onClick={() => setAsking(true)}
+                title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
+              >
+                <IconHardDrive size={14} /> Take a backup
+              </button>
+            )}
+          />
 
           <div className="card-body stack">
             {error && (

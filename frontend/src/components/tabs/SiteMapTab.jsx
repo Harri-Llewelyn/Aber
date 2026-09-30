@@ -9,6 +9,7 @@ import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewayFleetCounts } from '../../utils/fleetCounts'
 import { useSetting } from '../../hooks/useSettings'
 import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -605,24 +606,24 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         {/* One card: the ladder, the lanes, then the plans. The page scrolls, not the card: it is a
             map, not a list. */}
         <div className="card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Site Map
-              <HelpTip
-                label="About the site map"
-                text="Every area drawn as its plan, its cells pinned and coloured by device state. The lanes below hold what belongs to no area. Upload plans on the Areas page; place cells from the Cells page."
-              />
-            </h3>
-            {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
-            <div className="shopfloor-legend">
-              <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
-              <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
-              <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
-              {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
-                  for it while the dots roll up a whole tile. */}
-              <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
-            </div>
-          </div>
+          <CardHeading
+            icon={<IconMap size={15} />}
+            title="Site Map"
+            description="Every area drawn as its plan, with its cells pinned and coloured by device state; the lanes hold whatever belongs to no area."
+            actions={(
+              <>
+                {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
+                <div className="shopfloor-legend">
+                  <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
+                  <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
+                  <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
+                  {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
+                      for it while the dots roll up a whole tile. */}
+                  <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
+                </div>
+              </>
+            )}
+          />
 
           <div className="card-body">
             {loading ? <LoadingState label="site map" /> : (

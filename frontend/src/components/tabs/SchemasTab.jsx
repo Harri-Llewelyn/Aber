@@ -23,7 +23,7 @@ import { LoadingState } from '../common/LoadingState'
 import {
   IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash
 } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 /**
@@ -258,28 +258,28 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       <div className="page-main">
 
       <div className="card card-fill">
-        <div className="card-header">
-          <h3 className="section-title">
-            Schemas
-            <HelpTip
-              label="About schemas"
-              text="What a device is modelled to publish, built from the Metrics page. A published schema is read-only: create the next version to get an editable draft. Publishing it moves every device across at once."
-            />
-            <SectionCount total={inStatusView.length} shown={visibleSchemas.length} />
-          </h3>
-          {/* The only way to create a schema. Building from the catalog is what guarantees every
-              metric has a standard and a semantic id, which device tags, unmodelled detection and
-              the tag filters all read. */}
-          <ActionButton
-            className="btn btn-primary btn-sm"
-            permitted={canManageSchema}
-            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
-            title="Compose a schema from catalog metrics. Attach it to a device on the Devices page"
-            onClick={() => setShowBuilderModal(true)}
-          >
-            <IconClipboardList size={14} /> Build Schema from Catalog
-          </ActionButton>
-        </div>
+        <CardHeading
+          icon={<IconClipboardList size={15} />}
+          title="Schemas"
+          description="What each device is modelled to publish, built from the Metrics page. A published schema is read-only; version it to edit."
+          count={<SectionCount total={inStatusView.length} shown={visibleSchemas.length} />}
+          actions={(
+            <>
+              {/* The only way to create a schema. Building from the catalog is what guarantees every
+                  metric has a standard and a semantic id, which device tags, unmodelled detection and
+                  the tag filters all read. */}
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManageSchema}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                title="Compose a schema from catalog metrics. Attach it to a device on the Devices page"
+                onClick={() => setShowBuilderModal(true)}
+              >
+                <IconClipboardList size={14} /> Build Schema from Catalog
+              </ActionButton>
+            </>
+          )}
+        />
 
         <div className="card-body">
           <div className="filter-bar">

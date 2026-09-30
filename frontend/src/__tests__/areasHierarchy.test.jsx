@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AreasTab } from '../components/tabs/AreasTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -100,7 +101,9 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     const cards = [...document.querySelectorAll('.card')]
     expect(cards).toHaveLength(1)
     expect(within(cards[0]).getByRole('heading', { name: /^Site Map/ })).toHaveClass('section-title')
-    expect(cards[0].querySelector(':scope > .card-header')).toContainElement(screen.getByRole('button', { name: 'About the site map' }))
+    const header = expectCardHeading('Site Map', /plan/)
+    expect(cards[0].querySelector(':scope > .card-header')).toBe(header)
+    expect(header.querySelector('.shopfloor-legend')).toHaveTextContent('Alert firing')
     expect(cards[0].querySelector(':scope > .card-body')).toContainElement(hierarchy)
   })
 
@@ -584,6 +587,12 @@ describe('AreasTab is the house list card', () => {
     expect(document.querySelector('.card')).toHaveClass('card-fill')
     expect(document.querySelector('.card-header .section-count')).toHaveTextContent('2')
     expect(document.querySelector('.card-fill > .table-wrap')).toBeInTheDocument()
+  })
+
+  it('names the page in its card header, with no title tip', async () => {
+    await renderAreas()
+    expectCardHeading('Areas', /ISA-95/)
+    expect(within(document.querySelector('.card-header')).getByRole('button', { name: /New Area/ })).toBeInTheDocument()
   })
 
   it('reads shown / total while a search narrows the list', async () => {

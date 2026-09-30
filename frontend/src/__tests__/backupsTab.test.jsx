@@ -36,6 +36,7 @@ vi.mock('../api', async () => {
 vi.mock('../hooks/usePolling', () => ({ usePolling: vi.fn() }))
 
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
 
@@ -112,6 +113,14 @@ beforeEach(() => {
 })
 
 describe('the list of runs', () => {
+  it('names the page in its card header, with the count and the action', async () => {
+    renderTab()
+    await screen.findByText(/before the areas migration/)
+    const header = expectCardHeading('Backups', /newest first/)
+    expect(header.querySelector('.section-count')).toBeInTheDocument()
+    expect(header).toHaveTextContent('Take a backup')
+  })
+
   it('lists a completed run with its backup: note, size, contents and retention', async () => {
     renderTab()
     const pinned = await screen.findByTestId('run-j-1')
