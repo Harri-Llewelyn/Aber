@@ -22,7 +22,7 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
         deprecating and adding a new catalog entry is the only way to change either. A wrong
         semantic id is corrected with Edit instead.
       </>}
-      confirmLabel="Deprecate metric"
+      confirmLabel="Deprecate Metric"
       pendingLabel="Deprecating…"
       onConfirm={() => onConfirm(supersededBy || null)}
       onCancel={onCancel}

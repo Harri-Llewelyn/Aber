@@ -13,7 +13,7 @@ export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
       message={<>
         Decommissioning <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> will mark it as archived. Historical telemetry and Audit Trail data remain 100% retained.
       </>}
-      confirmLabel="Archive & set timer"
+      confirmLabel="Archive & Set Timer"
       pendingLabel="Archiving…"
       onConfirm={() => onArchive(retentionDays)}
       onCancel={onCancel}

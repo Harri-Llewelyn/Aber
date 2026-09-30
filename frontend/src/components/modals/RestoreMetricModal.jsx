@@ -27,7 +27,7 @@ export function RestoreMetricModal({ metric, replacement, onConfirm, onCancel })
           <>It names no replacement, so there is no pointer to clear.</>
         )}
       </>}
-      confirmLabel="Restore metric"
+      confirmLabel="Restore Metric"
       pendingLabel="Restoring…"
       confirmClassName="btn btn-primary"
       onConfirm={onConfirm}

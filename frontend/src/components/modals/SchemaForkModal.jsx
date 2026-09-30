@@ -15,7 +15,7 @@ export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }
 
   return (
     <ConfirmModal
-      title={`Create version v${next}`}
+      title={`Create Version v${next}`}
       size="md"
       icon={<IconGitBranch size={18} />}
       message={<>

@@ -1542,6 +1542,13 @@ tbody tr:hover { background: var(--bg-glass); }
   line-height: 1.5;
 }
 
+/* One paragraph under the header saying what the dialog will do. */
+.modal-lead {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 .modal-error-icon { flex-shrink: 0; margin-top: 2px; color: var(--danger); }
 
 .form-group {
