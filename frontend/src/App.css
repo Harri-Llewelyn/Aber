@@ -940,6 +940,9 @@ html, body, #root {
 /* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
    native search cancel is hidden, since the clear button replaces it. */
 .search-input { position: relative; display: inline-flex; align-items: center; }
+/* The icon and the clear button take 58px of the field, so the wide search is wider than a wide
+   select: at 220px "Search name, UUID or Sparkplug ID…" was cut short. */
+.search-input.control-lg { width: 280px; }
 .search-input-icon {
   position: absolute;
   left: 10px;
