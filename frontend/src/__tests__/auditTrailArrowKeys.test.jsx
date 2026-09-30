@@ -97,7 +97,7 @@ describe('the arrow keys step the drawer', () => {
     await show()
     await selectOldest()
 
-    const search = screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/)
+    const search = screen.getByPlaceholderText('Search a name or any ID…')
     search.focus()
     press('ArrowRight', search)
     await new Promise(r => setTimeout(r, 20))
@@ -109,7 +109,7 @@ describe('the arrow keys step the drawer', () => {
     await show()
     await selectOldest()
 
-    const kind = screen.getByTitle(/Show only events against one kind of asset/)
+    const kind = screen.getByTitle(/Show only events against one kind of entity/)
     kind.focus()
     press('ArrowRight', kind)
     await new Promise(r => setTimeout(r, 20))

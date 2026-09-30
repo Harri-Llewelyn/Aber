@@ -336,7 +336,7 @@ describe('the component draws the badges', () => {
 
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
     // Oldest first, so a click lands at the START of the burst and Next means "and then what".
-    expect(screen.getByTitle(/Position in this asset's history/)).toHaveTextContent('Event 1 of 3')
+    expect(screen.getByTitle(/Position in this entity's history/)).toHaveTextContent('Event 1 of 3')
   })
 
   it('keeps the badge ringed while Previous/Next steps through the events inside it', async () => {
@@ -351,7 +351,7 @@ describe('the component draws the badges', () => {
     const next = () => screen.getByRole('button', { name: /Next/ })
     fireEvent.click(next())
     await waitFor(() =>
-      expect(screen.getByTitle(/Position in this asset's history/)).toHaveTextContent('Event 2 of 3'))
+      expect(screen.getByTitle(/Position in this entity's history/)).toHaveTextContent('Event 2 of 3'))
     expect(badges()[0].className).toContain('trail-node-selected')
 
     fireEvent.click(next())

@@ -51,7 +51,7 @@ const openDrawer = async () => {
 }
 
 const searchBox = () =>
-  screen.getByPlaceholderText(/Search by name, entity, mutation or transaction ID/)
+  screen.getByPlaceholderText('Search a name or any ID…')
 
 
 describe('each id in the drawer says what it is for', () => {
@@ -92,8 +92,7 @@ describe('each id in the drawer says what it is for', () => {
 describe('one name per id, across the drawer and the export', () => {
 
   it('calls it Transaction ID in the drawer, not Transaction', async () => {
-    // Reported as four ids in a drawer that shows three: the label said Transaction and the CSV
-    // column said causation_id, so one thing read as two.
+    // The label said Transaction and the CSV column said causation_id, so one thing read as two.
     await show()
     await openDrawer()
 
@@ -116,7 +115,7 @@ describe('one name per id, across the drawer and the export', () => {
   })
 
   it('exports how many rows the transaction wrote, beside its id', async () => {
-    // The count the drawer acts on (0006), so a reader of the export can tell a single-row act
+    // The count the drawer acts on, so a reader of the export can tell a single-row act
     // from a group the filters cut without re-deriving it from the transaction id column.
     await show()
     fireEvent.click(screen.getByTitle(/Download the events matching the current filters as CSV/))
@@ -144,6 +143,6 @@ describe('the search box takes a numeric id', () => {
 
   it('says so on the control, because a box that takes three things must name them', async () => {
     await show()
-    expect(searchBox().title).toMatch(/only digits also matches a mutation id and a transaction id/i)
+    expect(searchBox().getAttribute('aria-label')).toMatch(/entity id.*mutation id.*transaction id/i)
   })
 })
