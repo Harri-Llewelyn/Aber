@@ -17766,8 +17766,10 @@ END $$;
 DO $$
 DECLARE
   -- Every table this platform intends to publish, in one place. Order is not significant.
-  -- `areas` is the Site Map's shape; 0098 publishes it where the plan is declared.
-  intended CONSTANT text[] := ARRAY['cells', 'gateways', 'devices', 'platform_alerts', 'areas'];
+  -- `areas` is the Site Map's shape; the two job tables are what the Capture page subscribes to.
+  intended CONSTANT text[] := ARRAY[
+    'cells', 'gateways', 'devices', 'platform_alerts', 'areas', 'capture_jobs', 'playback_jobs'
+  ];
   members  text;
 BEGIN
   SELECT string_agg(format('public.%I', t), ', ' ORDER BY t)
