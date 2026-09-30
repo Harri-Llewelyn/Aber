@@ -7,7 +7,7 @@ import { api } from '../api'
 /**
  * The Gateways page asks whether this deployment can enrol an appliance before it offers a remote
  * gateway. What is asserted: the answer is said above the table and in the form, Save is withheld
- * for a Remote gateway and nothing else, the drawer's bundle action is withheld too, and an
+ * for a Remote gateway and nothing else, the drawer's setup action is withheld too, and an
  * unanswered probe blocks nothing.
  */
 
@@ -64,26 +64,29 @@ const show = async (readiness, rows = [gateway()], hasPermission = () => true) =
 const openNew = () => fireEvent.click(screen.getByRole('button', { name: /New Gateway/ }))
 const typeSelect = () => document.querySelector('#gateway-type')
 const save = () => screen.getByRole('button', { name: 'Save' })
+// The page banner, found by its heading text; it is one of the page's three shared banners.
+const BANNER = /Remote gateways cannot be enrolled on this deployment/
+const banner = async () => (await screen.findByText(BANNER)).closest('.callout-page')
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('remote enrolment readiness', () => {
   it('says above the table which address is missing, and that other gateways are unaffected', async () => {
     await show(NOT_READY)
-    const notice = await screen.findByRole('status')
+    const notice = await banner()
     expect(notice.textContent).toContain('Remote gateways cannot be enrolled on this deployment')
     expect(notice.textContent).toContain('SUPABASE_PUBLIC_URL is unset')
     expect(notice.textContent).toContain("MQTT_PUBLIC_HOST is 'mosquitto' resolves only inside the stack")
-    expect(notice.textContent).toContain('Host-run and simulated gateways are unaffected')
+    expect(notice.textContent).toContain('Host and Simulated gateways are unaffected')
   })
 
   it('withholds Save for a new Remote gateway and says why in the form', async () => {
     await show(NOT_READY)
-    await screen.findByRole('status')
+    await banner()
     openNew()
     // Remote is the default type, so the withholding is the first thing the form says.
     expect(typeSelect().value).toBe('remote')
-    expect(screen.getByText(/This deployment cannot issue a bundle yet/)).toBeTruthy()
+    expect(screen.getByText(/This deployment cannot issue an install command or bundle yet/)).toBeTruthy()
     expect(save().disabled).toBe(true)
     expect(save().title).toMatch(/cannot be enrolled/)
   })
@@ -91,22 +94,22 @@ describe('remote enrolment readiness', () => {
   it('leaves Host and Simulated gateways unaffected', async () => {
     api.post.mockResolvedValue({ id: 'new', name: 'Bench', sparkplug_id: 'gwy1' })
     await show(NOT_READY)
-    await screen.findByRole('status')
+    await banner()
     openNew()
     fireEvent.change(screen.getByTitle('Friendly label for this gateway'), { target: { value: 'Bench' } })
     fireEvent.change(typeSelect(), { target: { value: 'host' } })
-    expect(screen.queryByText(/cannot issue a bundle yet/)).toBeNull()
+    expect(screen.queryByText(/cannot issue an install command or bundle yet/)).toBeNull()
     expect(save().disabled).toBe(false)
     fireEvent.click(save())
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post.mock.calls[0][1].deployment).toBe('host')
   })
 
-  it('withholds the drawer bundle action while the deployment cannot issue one', async () => {
+  it('withholds the drawer setup action while the deployment cannot issue one', async () => {
     await show(NOT_READY)
-    await screen.findByRole('status')
+    await banner()
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Press_Line'))
-    const action = within(document.querySelector('.context-panel')).getByRole('button', { name: /Download Setup Bundle/ })
+    const action = within(document.querySelector('.context-panel')).getByRole('button', { name: /Set Up Gateway/ })
     expect(action.disabled).toBe(true)
     expect(action.title).toMatch(/cannot be enrolled/)
   })
@@ -114,16 +117,16 @@ describe('remote enrolment readiness', () => {
   it('offers everything when the deployment is ready', async () => {
     await show(READY)
     await waitFor(() => expect(api.enrolmentReadiness).toHaveBeenCalled())
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByText(BANNER)).toBeNull()
     openNew()
-    expect(screen.getByText(/On save you will be given a bundle/)).toBeTruthy()
+    expect(screen.getByText(/On save you will be given an install command, or a bundle/)).toBeTruthy()
     expect(save().disabled).toBe(false)
   })
 
   it('blocks nothing when the probe fails, since the function still refuses for itself', async () => {
     await show(new Error('network'))
     await waitFor(() => expect(api.enrolmentReadiness).toHaveBeenCalled())
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByText(BANNER)).toBeNull()
     openNew()
     expect(save().disabled).toBe(false)
   })
@@ -131,6 +134,6 @@ describe('remote enrolment readiness', () => {
   it('does not ask on behalf of someone who cannot create a gateway', async () => {
     await show(NOT_READY, [gateway()], () => false)
     expect(api.enrolmentReadiness).not.toHaveBeenCalled()
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByText(BANNER)).toBeNull()
   })
 })

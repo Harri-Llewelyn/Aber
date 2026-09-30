@@ -4820,3 +4820,9 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
   margin-bottom: 4px;
   color: var(--warning-text);
 }
+
+/* GATEWAYS: the list page. */
+.gateway-name-badge { margin-left: 8px; }
+.gateway-cell-warning { color: var(--warning-text); }
+.gateway-cell-italic { font-style: italic; }
+.gateway-withheld { color: var(--warning-text); }
