@@ -4,7 +4,8 @@ import {
   isHeartbeatStale,
   gatewayLiveStatus,
   isGatewayOnline,
-  formatHeartbeat
+  formatHeartbeat,
+  formatUptime
 } from '../utils/gatewayStatus';
 
 const NOW = Date.parse('2026-01-01T12:00:00Z');
@@ -43,5 +44,22 @@ describe('gateway heartbeat freshness', () => {
   it('is defensive about unparseable timestamps', () => {
     expect(formatHeartbeat('not-a-date', NOW)).toBe('Never');
     expect(isHeartbeatStale('not-a-date', NOW)).toBe(false);
+  });
+});
+
+describe('formatUptime', () => {
+  it('formats a duration at every scale, never a date', () => {
+    expect(formatUptime(45)).toBe('45s');
+    expect(formatUptime(720)).toBe('12m');
+    expect(formatUptime(3 * 3600 + 300)).toBe('3h 5m');
+    expect(formatUptime(2 * 86400 + 4 * 3600)).toBe('2d 4h');
+    expect(formatUptime(40 * 86400)).toBe('40d 0h');
+  });
+
+  it('is null for a missing or invalid value', () => {
+    expect(formatUptime(null)).toBeNull();
+    expect(formatUptime(undefined)).toBeNull();
+    expect(formatUptime(-1)).toBeNull();
+    expect(formatUptime('abc')).toBeNull();
   });
 });

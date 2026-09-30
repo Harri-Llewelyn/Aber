@@ -82,6 +82,16 @@ export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
   return new Date(ts).toLocaleString();
 }
 
+/** A length of time in seconds, e.g. "45s", "12m", "3h 5m" or "2d 4h"; null when it is not a number. */
+export function formatUptime(seconds) {
+  const s = Number(seconds);
+  if (seconds === null || seconds === undefined || !Number.isFinite(s) || s < 0) return null;
+  if (s < 60) return `${Math.floor(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
+}
+
 /**
  * Appliance health, reported by the gateway itself on the heartbeat. The columns are NULL on every
  * gateway that does not report them, so each helper returns null rather than a zero or a dash: a
