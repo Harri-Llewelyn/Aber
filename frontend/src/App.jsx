@@ -628,7 +628,7 @@ function Dashboard({ session, onSignOut }) {
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from
                 auth.uid(). */}
-            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} hasPermission={hasPermission} userRole={userRole} currentUserId={session?.user?.id}
+            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id}
               initialSubject={proposalFocus?.subject || ''}
               onClearFocus={() => setProposalFocus(null)}
               onOpenSubject={openProposalSubject}

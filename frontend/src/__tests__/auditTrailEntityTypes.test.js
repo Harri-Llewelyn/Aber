@@ -44,7 +44,7 @@ describe('Audit Trail entity types', () => {
   })
 
   it('gives every entry a label a person can read', () => {
-    // The bar from 0031: "a half-legible audit entry is worse than an absent one, because it looks
+    // The bar the trail holds itself to: "a half-legible audit entry is worse than an absent one, because it looks
     // like the feature works." A label that is just the raw table name clears nothing.
     for (const { kind, table, label } of AUDIT_TRAIL_ENTITY_TYPES) {
       expect(label).toBeTruthy()
@@ -53,16 +53,16 @@ describe('Audit Trail entity types', () => {
     }
   })
 
-  it('records the metric catalog in the asset lane, as 0010 classifies it (#468)', () => {
+  it('records the metric catalog in the asset domain, as the audit trigger classifies it', () => {
     // Who deprecated a metric, and who restored it, is readable by a Shopfloor_Manager: the
     // catalog itself is readable by every authenticated user.
     const metric = AUDIT_TRAIL_ENTITY_TYPES.find(e => e.table === 'metric_catalog')
     expect(metric).toMatchObject({ kind: 'METRIC', domain: 'asset' })
   })
 
-  it('covers the audit domains 0070 added, which is what drifted', () => {
-    // Named rather than counted. These three reached the audit trigger in 0070 and none of the
-    // three lists was extended, which is the whole of #141; a count would pass against any seven.
+  it('covers the security audit domains, which is what drifted', () => {
+    // Named rather than counted. These three reached the audit trigger in archived migration 0070_audit_domain_and_the_acts_nothing_recorded.sql and none of the
+    // three lists was extended, which is what drifted; a count would pass against any seven.
     const tables = AUDIT_TRAIL_ENTITY_TYPES.map(e => e.table)
     expect(tables).toEqual(expect.arrayContaining([
       'user_roles', 'schemas', 'system_settings', 'service_principals',

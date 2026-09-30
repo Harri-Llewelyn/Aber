@@ -156,7 +156,6 @@ describe('pages do not space a block sideways with a literal margin', () => {
   const BASELINE = {
     'AccessControlTab.jsx: margin 12px 20px 0': 4,
     'AccessControlTab.jsx: marginLeft 4px': 1,
-    'ApprovalsTab.jsx: marginLeft 8px': 1,
     'MetricsTab.jsx: marginLeft 6px': 1,
     'MetricsTab.jsx: marginRight 6px': 1,
     'SchemasTab.jsx: marginLeft 6px': 1

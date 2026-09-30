@@ -6,8 +6,6 @@ import {
   ActorLabel,
   canDecide,
   diffRows,
-  ageLabel,
-  absoluteTime,
   keyLabel,
   LANES,
   filterProposals,
@@ -15,6 +13,7 @@ import {
 } from '../components/tabs/ApprovalsTab'
 import { api } from '../api'
 import { ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND } from '../constants'
+import { formatDateTime } from '../utils/format'
 
 vi.mock('../api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }
@@ -206,7 +205,7 @@ describe('what a proposal says it would change', () => {
     mockLoad([schemaProposal()])
     renderTab({ userRole: 'Administrator' })
     await selectRow()
-    expect(screen.getByText(/archives its predecessor/i)).toBeInTheDocument()
+    expect(screen.getByText(/request to publish a schema draft/i)).toBeInTheDocument()
   })
 
   it('falls back to the raw key for one it has no label for', () => {
@@ -355,7 +354,7 @@ describe('finding a decision again', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    const box = screen.getByTitle(/filter decided proposals/i)
+    const box = screen.getByLabelText(/filter decided proposals by what/i)
     fireEvent.change(box, { target: { value: 'retired' } })
     let rows = screen.getAllByTestId('proposal-row')
     expect(rows).toHaveLength(1)
@@ -372,10 +371,10 @@ describe('finding a decision again', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    fireEvent.change(screen.getByTitle(/filter decided proposals/i), {
+    fireEvent.change(screen.getByLabelText(/filter decided proposals by what/i), {
       target: { value: 'nothing matches this' }
     })
-    expect(screen.getByText(/no decided proposal matches the selected filter/i)).toBeInTheDocument()
+    expect(screen.getByText(/no decided proposal matches these filters/i)).toBeInTheDocument()
   })
 
   it('does not filter the queue that is still waiting', async () => {
@@ -535,7 +534,7 @@ describe('the columns say one thing each', () => {
     renderTab()
     await selectRow()
     expect(screen.getByText('Proposed at')).toBeInTheDocument()
-    const shown = absoluteTime('2026-09-06T09:15:00Z')
+    const shown = formatDateTime('2026-09-06T09:15:00Z')
     expect(screen.getByText(new RegExp(shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument()
   })
 
@@ -554,7 +553,7 @@ describe('the columns say one thing each', () => {
     })])
     renderTab()
     await screen.findAllByTestId('proposal-row')
-    fireEvent.change(screen.getByTitle(/filter decided proposals/i), {
+    fireEvent.change(screen.getByLabelText(/filter decided proposals by what/i), {
       target: { value: 'ops.person' }
     })
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
@@ -612,7 +611,7 @@ describe('a machine proposer is named, and marked as a machine', () => {
     ])
     renderTab()
     await screen.findAllByTestId('proposal-row')
-    fireEvent.change(screen.getByTitle(/filter open proposals/i), {
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), {
       target: { value: 'scheduler' }
     })
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
@@ -642,9 +641,9 @@ describe('arriving from another page', () => {
     await waitFor(() => expect(onClearFocus).toHaveBeenCalled())
   })
 
-  it('hands back to the asset rather than opening a form of its own', async () => {
-    // THE COMPOSER IS GONE. Extending your own open proposal happens in the asset's Edit Details
-    // dialog -- one form per asset -- so this drawer action is a route there, not a dialog here.
+  it('hands back to the entity rather than opening a form of its own', async () => {
+    // Extending your own open proposal happens in the entity's own dialog (Edit Details, or
+    // Digital Nameplate), so this drawer action is a route there, not a dialog here.
     const onOpenSubject = vi.fn()
     mockLoad([deviceProposal({ proposed_by: OPERATOR_ID })])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID, onOpenSubject })
@@ -687,10 +686,10 @@ describe('the queue that is waiting can be filtered too', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    fireEvent.change(screen.getByTitle(/filter open proposals/i), {
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), {
       target: { value: 'nothing matches this' }
     })
-    expect(screen.getByText(/nothing open matches that filter/i)).toBeInTheDocument()
+    expect(screen.getByText(/nothing open matches these filters/i)).toBeInTheDocument()
     expect(screen.queryByText(/nothing is waiting/i)).toBeNull()
   })
 
@@ -718,18 +717,18 @@ describe('the queue that is waiting can be filtered too', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /clear filters/i })).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), {
       target: { value: 'device_nameplate' }
     })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+    expect(screen.getByRole('button', { name: /clear filters/i })).toHaveTextContent('Clear filters (1)')
 
-    fireEvent.change(screen.getByTitle(/filter open proposals/i), { target: { value: 'Press' } })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (2)')
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), { target: { value: 'Press' } })
+    expect(screen.getByRole('button', { name: /clear filters/i })).toHaveTextContent('Clear filters (2)')
 
-    fireEvent.click(screen.getByTitle('Clear every filter'))
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /clear filters/i }))
+    expect(screen.queryByRole('button', { name: /clear filters/i })).toBeNull()
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(2)
   })
 })
@@ -761,16 +760,6 @@ describe('filterProposals', () => {
   it('leaves the rows alone when nothing is asked of it', () => {
     expect(filterProposals(rows, 'all', '')).toHaveLength(2)
     expect(filterProposals(rows, 'all', '   ')).toHaveLength(2)
-  })
-})
-
-describe('ageLabel', () => {
-  const base = new Date('2026-09-07T12:00:00Z').getTime()
-  it('reads in the coarsest unit that is still true', () => {
-    expect(ageLabel('2026-09-07T11:59:30Z', base)).toBe('just now')
-    expect(ageLabel('2026-09-07T11:30:00Z', base)).toBe('30m ago')
-    expect(ageLabel('2026-09-07T09:00:00Z', base)).toBe('3h ago')
-    expect(ageLabel('2026-09-04T12:00:00Z', base)).toBe('3d ago')
   })
 })
 
@@ -956,9 +945,66 @@ describe('a cell, a gateway or an area proposal names its subject', () => {
     mockSubjects([cellMove(), gatewayUrl(), areaIcon()])
     renderTab()
     await screen.findAllByTestId('proposal-row')
-    fireEvent.change(screen.getByTitle(/filter open proposals/i), { target: { value: 'line 3' } })
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), { target: { value: 'line 3' } })
     const rows = screen.getAllByTestId('proposal-row')
     expect(rows).toHaveLength(1)
     expect(within(rows[0]).getByText('Line 3 edge')).toBeInTheDocument()
+  })
+})
+
+describe('the cards count, load in place and light up only when work waits', () => {
+  const decidedOne = (id, at) => deviceProposal({
+    id, target_label: id, status: 'applied', decided_by: MANAGER_ID, decided_at: at
+  })
+
+  it('shows a count on both cards, 0 included, and no attention tint while nothing waits', async () => {
+    mockLoad([])
+    renderTab()
+    await screen.findByText('Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.')
+    const cards = document.querySelectorAll('.approvals-card')
+    expect(cards).toHaveLength(2)
+    for (const card of cards) {
+      expect(card.querySelector('.section-count')).toHaveTextContent('0')
+    }
+    expect(cards[0].className).not.toContain('card-attention')
+  })
+
+  it('tints the awaiting card while it holds something, and counts the narrowed rows', async () => {
+    mockLoad([
+      deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
+      deviceProposal({ id: 'o2', target_label: 'Press_02', entity_type: 'cells' })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    const [awaiting] = document.querySelectorAll('.approvals-card')
+    expect(awaiting.className).toContain('card-attention')
+    expect(awaiting.querySelector('.section-count')).toHaveTextContent('2')
+
+    fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), { target: { value: 'cells' } })
+    expect(awaiting.querySelector('.section-count')).toHaveTextContent('1 / 2')
+  })
+
+  it('keeps the heading and both cards on screen while the first load runs', () => {
+    api.get.mockImplementation(() => new Promise(() => {}))
+    renderTab()
+    expect(screen.getByRole('heading', { name: 'Approvals' })).toBeInTheDocument()
+    expect(screen.getAllByText('Loading proposals…')).toHaveLength(2)
+  })
+
+  it('lists the decided proposals by decision time, newest first', async () => {
+    mockLoad([
+      decidedOne('Decided-early', '2026-09-01T00:00:00Z'),
+      decidedOne('Decided-late', '2026-09-09T00:00:00Z')
+    ])
+    renderTab()
+    const rows = await screen.findAllByTestId('proposal-row')
+    expect(within(rows[0]).getByText('Decided-late')).toBeInTheDocument()
+  })
+
+  it('draws a status through the shared badge, dot included', async () => {
+    mockLoad([deviceProposal()])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    expect(row.querySelector('.badge-pending .badge-dot')).not.toBeNull()
   })
 })

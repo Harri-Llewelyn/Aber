@@ -4003,26 +4003,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 0 5px;
 }
 
-/* The foot of the timeline, present only when the trail continues past what is loaded or ended
-   at a page boundary. Separated by a rule, because it makes a claim about the data above it. */
-.trail-pagination {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-/* Muted and italic: it is a statement of completeness, not a warning. The truncated case gets the
-   button instead, and a button is louder than any colour would be here. */
-.trail-pagination-end {
-  font-size: 11px;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
 /* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
    above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
    borders and fills, not for text. */

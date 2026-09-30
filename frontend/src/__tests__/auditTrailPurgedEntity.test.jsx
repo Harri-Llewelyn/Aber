@@ -3,7 +3,7 @@
  * `audit_trail` holds only `entity_id`, so the page joins client-side against the live lists,
  * and that join cannot resolve a hard-purged entity -- nor one of a kind nothing fetches at all.
  * The fallback reads an ordered list of identity fields out of the audit payload, SHARED WITH
- * `audit_trail_page()`'s `p_search` (0115): a field in one and not the other is a lane you can
+ * `audit_trail_page()`'s `p_search`: a field in one and not the other is a lane you can
  * see and cannot search for, or a row you can find and cannot identify. The CSV export is tested
  * separately from the lane label because they are separate code.
  */
@@ -80,7 +80,7 @@ describe('snapshotIdentity', () => {
     /* `user_roles` rows carry a role and the lane is a PERSON, keyed by user_id. Two
        Administrators would draw two lanes with one name, and the label would change under a reader
        as pages arrive, since resolveLaneName() takes whichever event it meets first.
-       list_user_accounts() (0116) is what names that lane. */
+       list_user_accounts() is what names that lane. */
     const event = { new_data: { role: 'Administrator', role_id: 1 }, old_data: null }
     expect(snapshotIdentity(event)).toBeNull()
   })

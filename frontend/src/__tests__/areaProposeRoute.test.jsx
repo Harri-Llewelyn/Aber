@@ -23,7 +23,7 @@ const AREA_ID = 'bbbbbbbb-0000-4000-8000-000000000001'
 
 const area = (overrides = {}) => ({
   area_id: AREA_ID,
-  area_name: 'Building A',
+  area_name: 'North Shop',
   description: 'The old wing',
   icon: 'Factory',
   cells: [],
@@ -38,7 +38,7 @@ const proposal = (overrides = {}) => ({
   entity_type: 'areas',
   entity_id: AREA_ID,
   status: 'open',
-  patch: { name: 'Building One' },
+  patch: { name: 'Press Hall' },
   proposed_at: new Date().toISOString(),
   ...overrides
 })
@@ -64,10 +64,10 @@ const show = async (hasPermission, rows = [area()], proposals = []) => {
       onSelectGateway={vi.fn()}
     />
   )
-  await waitFor(() => expect(screen.getByText('Building A')).toBeTruthy())
+  await waitFor(() => expect(screen.getByText('North Shop')).toBeTruthy())
 }
 
-const openPanel = (name = 'Building A') => {
+const openPanel = (name = 'North Shop') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
   return within(document.querySelector('.context-panel'))
 }
@@ -121,7 +121,7 @@ describe('proposing a change to an area', () => {
     openPanel()
     clickAction('Propose a Change')
 
-    fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Building One' } })
+    fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Press Hall' } })
     fireEvent.change(screen.getByLabelText('Why (optional)'), { target: { value: 'renamed on site' } })
     fireEvent.click(footer().getByRole('button', { name: /Propose a change/i }))
 
@@ -132,7 +132,7 @@ describe('proposing a change to an area', () => {
       entity_type: 'areas',
       entity_id: AREA_ID,
       // Only what moved, and under the COLUMN name rather than the form's.
-      patch: { name: 'Building One' },
+      patch: { name: 'Press Hall' },
       rationale: 'renamed on site'
     })
   })
@@ -145,7 +145,7 @@ describe('proposing a change to an area', () => {
     clickAction('Propose a Change')
 
     // The earlier request is back in the box.
-    expect(screen.getByLabelText('Area Name')).toHaveValue('Building One')
+    expect(screen.getByLabelText('Area Name')).toHaveValue('Press Hall')
     expect(footer().getByRole('button', { name: /Update your proposal/i })).toBeTruthy()
 
     fireEvent.change(screen.getByLabelText('Description (Optional)'), { target: { value: 'The new wing' } })
