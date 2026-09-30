@@ -19,8 +19,8 @@ const SPEEDS = [
 ]
 
 /**
- * Publish a stored capture onto a simulated gateway. The device map is built from dropdowns off the
- * target's devices, a target that is not `is_simulated` is never offered, and whether the target
+ * Publish a stored capture onto the Playback gateway. The device map is built from dropdowns off the
+ * target's devices, a target that is not `is_shadow` is never offered, and whether the target
  * holds a broker credential is shown before the click. None of that is the control:
  * `start_playback_job()` re-checks all three. The captured ids come from the manifest, not the
  * file; captures recorded before the manifest carried them fall back to reading the file.
@@ -182,10 +182,8 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
             <div className="callout" style={{ borderColor: 'var(--warning)' }}>
               <IconShieldAlert size={14} className="callout-icon" />
               <div style={{ fontSize: '12px' }}>
-                No gateway is marked <strong>simulated</strong>. A capture can only be published onto
-                one that is: the historian records a replayed reading identically to an observed one,
-                and that flag is the only thing downstream that says otherwise. Mark a gateway
-                simulated on the Gateways page, or create one for playback.
+                The <strong>Playback gateway</strong> is the only target a capture can be published
+                onto, and it is missing or archived here. Restore it from Archived Entities.
               </div>
             </div>
           )}
@@ -198,7 +196,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                 onChange={e => setTargetId(e.target.value)}
                 disabled={pending}
               >
-                <option value="">Choose a simulated gateway…</option>
+                <option value="">Choose the Playback gateway…</option>
                 {targets.map(t => (
                   <option key={t.id} value={t.id}>
                     {t.name} ({t.sparkplug_id})
@@ -210,7 +208,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                 ))}
               </select>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
-                Only simulated gateways are listed, because the database refuses any other target.
+                Only the Playback gateway is listed, because the database refuses any other target.
               </p>
             </>
           )}
@@ -285,8 +283,8 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               publisher on the same edge node, so the two sets of Sparkplug sequence numbers
               interleave and the daemon reports both as losing messages.
               <br />
-              A playback target is best as a gateway <em>nothing else</em> publishes as — a Simulated
-              one created for the purpose, rather than one a simulator or an appliance is already driving.
+              The Playback gateway is meant to have no other publisher. Stop whatever is publishing
+              as it before starting a playback.
             </div>
           </div>
         )}

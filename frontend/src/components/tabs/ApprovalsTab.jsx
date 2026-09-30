@@ -182,7 +182,7 @@ function StatusBadge({ status }) {
   const cls = {
     open: 'badge-pending',
     applied: 'badge-online',
-    rejected: 'badge-offline',
+    rejected: 'badge-danger',
     withdrawn: 'badge-neutral',
     expired: 'badge-warning'
   }[status] || 'badge-neutral'
@@ -344,7 +344,7 @@ function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
               <tr
                 key={p.id}
                 data-testid="proposal-row"
-                className={selectedId === p.id ? 'row-selected' : ''}
+                className={`row-selectable${selectedId === p.id ? ' row-selected' : ''}`}
                 onClick={rowSelectHandler(() => onSelect(p.id))}
                 title="Click to inspect this proposal in the details panel"
               >

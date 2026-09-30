@@ -877,7 +877,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                                       from the badge and matches the other badges in the column. */}
                                   {alert && (
                                     <span
-                                      className={`badge ${alert.severity === 'critical' ? 'badge-offline' : 'badge-warning'}`}
+                                      className={`badge ${alert.severity === 'critical' ? 'badge-danger' : 'badge-warning'}`}
                                       style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                                       title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
                                     >

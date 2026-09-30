@@ -683,13 +683,15 @@ describe('publishing a capture back', () => {
 
   // NOT VIA open(), which waits for the select: with no targets there is deliberately no select to
   // wait for, only the explanation of why.
-  it('says so when nothing is marked simulated', async () => {
+  it('says the Playback gateway is missing when there is no target', async () => {
     api.playbackTargets.mockResolvedValue([])
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/No gateway is marked/)).toBeInTheDocument()
+    expect(await screen.findByText(/only target a capture can be published/)).toBeInTheDocument()
+    expect(screen.getByText(/Archived Entities/)).toBeInTheDocument()
+    expect(screen.getByText(/only target a capture can be published/).textContent).not.toMatch(/simulated/i)
     expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
   })
 
