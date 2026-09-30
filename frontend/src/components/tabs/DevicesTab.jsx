@@ -1367,7 +1367,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           onCancel={() => setApproveItem(null)}
         />
       )}
-      {archiveTarget && <ArchiveModal entityType="devices" entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
+      {archiveTarget && <ArchiveModal entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
       {configAsset && (
         <AssetConfigModal
           asset={configAsset}

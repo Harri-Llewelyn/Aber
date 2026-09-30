@@ -99,7 +99,7 @@ function readTheme(isLight) {
         lightness: 26,
         // Visible weight is alpha divided by fade: each stroke deposits `alpha`, and every frame
         // the buffer keeps `fade` of it. Dark composites the trail twice (blurred and sharp) and
-        // light once, so light's ratio sits near double dark's.
+        // light once, so light deposits more per stroke to compensate.
         alpha: 0.18,
         fade: 0.012,
         blur: 0,

@@ -31,7 +31,7 @@ export function areaIconComponent(key) {
 }
 
 /** Render an area's icon. Takes the area so every render site shares the fallback. */
-export function AreaIcon({ area, size = 16, className = '' }) {
+export function AreaIcon({ area, size = 16 }) {
   const Icon = areaIconComponent(area?.icon)
-  return <Icon size={size} className={className} />
+  return <Icon size={size} />
 }

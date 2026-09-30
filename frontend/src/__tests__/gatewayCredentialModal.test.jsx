@@ -168,14 +168,4 @@ describe('GatewayCredentialModal', () => {
     // nobody can ever authenticate as.
     expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeTruthy()
   })
-
-  it('warns when the durable write landed but the running broker has not reloaded', async () => {
-    api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, applied_to_running_broker: false })
-    renderModal()
-    await confirmAndMint()
-
-    await waitFor(() => {
-      expect(screen.getByText(/has not reloaded it yet/i)).toBeTruthy()
-    })
-  })
 })

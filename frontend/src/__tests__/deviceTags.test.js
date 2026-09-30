@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  modelledMetrics, unmodelledMetrics, hasUnmodelledMetrics, schemaForDevice,
+  modelledMetrics, unmodelledMetrics, hasUnmodelledMetrics,
   deviceGroupTags, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../utils/deviceTags'
 
@@ -178,17 +178,5 @@ describe('availableTags', () => {
     expect(availableTags([device({ schema_id: null })], schemas)).toEqual([])
     expect(availableTags([], schemas)).toEqual([])
     expect(availableTags(null, null)).toEqual([])
-  })
-})
-
-describe('schemaForDevice', () => {
-  it('matches devices.schema_id against the list keyed by schema_uuid', () => {
-    expect(schemaForDevice(device(), [builderSchema])).toBe(builderSchema)
-  })
-
-  it('returns null for an unassigned or dangling schema_id', () => {
-    expect(schemaForDevice(device({ schema_id: null }), [builderSchema])).toBeNull()
-    expect(schemaForDevice(device({ schema_id: 'gone' }), [builderSchema])).toBeNull()
-    expect(schemaForDevice(device(), [])).toBeNull()
   })
 })

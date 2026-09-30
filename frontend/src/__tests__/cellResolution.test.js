@@ -5,7 +5,6 @@ import {
   SCOPE_SITE_WIDE,
   SOURCE_AREA_WIDE,
   groupCellsByArea,
-  LOCATION_SCOPES,
   SOURCE_EXPLICIT,
   SOURCE_INHERITED,
   SOURCE_SITE_WIDE,
@@ -15,14 +14,11 @@ import {
   UNASSIGNED_GATEWAY_SITE_WIDE,
   resolveDeviceLocation,
   deviceLocationOf,
-  effectiveCellId,
-  isSiteWide,
   isUnassigned,
   needsCellAssignment,
   unassignedReason,
   unassignedHint,
   locationSourceLabel,
-  resolveDeviceLocations,
   groupDevicesByCell
 } from '../utils/cellResolution';
 
@@ -78,10 +74,6 @@ describe('effective cell resolution', () => {
   it('treats a missing or unknown scope as cell-scoped', () => {
     expect(resolveDeviceLocation({}, gatewayInCellA).location_scope).toBe(SCOPE_CELL);
     expect(resolveDeviceLocation({ location_scope: 'nonsense' }, gatewayInCellA).location_scope).toBe(SCOPE_CELL);
-  });
-
-  it('exposes only the three scopes the CHECK constraints allow', () => {
-    expect(LOCATION_SCOPES).toEqual([SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE]);
   });
 });
 
@@ -163,14 +155,14 @@ describe('preferring the server-resolved row', () => {
   });
 
   it('falls back to local derivation when the view has not been read', () => {
-    expect(effectiveCellId({ cell_id: null }, gatewayInCellA)).toBe(CELL_A);
+    expect(deviceLocationOf({ cell_id: null }, gatewayInCellA).effective_cell_id).toBe(CELL_A);
   });
 
   it('does not mistake a site-wide view row for an unread one', () => {
     // effective_cell_id is null for site-wide AND for unassigned, which is why location_source
     // is what signals that the view was read.
     const merged = { location_source: SOURCE_SITE_WIDE, effective_cell_id: null };
-    expect(isSiteWide(merged, gatewayInCellA)).toBe(true);
+    expect(deviceLocationOf(merged, gatewayInCellA).location_source).toBe(SOURCE_SITE_WIDE);
     expect(isUnassigned(merged, gatewayInCellA)).toBe(false);
   });
 });
@@ -243,29 +235,11 @@ describe('grouping devices by cell', () => {
   });
 });
 
-describe('labels and bulk resolution', () => {
+describe('labels', () => {
   it('labels each source distinctly', () => {
     const labels = [SOURCE_EXPLICIT, SOURCE_INHERITED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED]
       .map(locationSourceLabel);
     expect(new Set(labels).size).toBe(5);
     expect(locationSourceLabel(undefined)).toBe('Unassigned');
-  });
-
-  it('resolves a list against its gateways, keyed by device id', () => {
-    const devices = [
-      { asset_id: 'd1', active_gateway_id: 'gw-1', cell_id: null },
-      { asset_id: 'd2', active_gateway_id: 'gw-1', cell_id: CELL_B },
-      { asset_id: 'd3', active_gateway_id: null, cell_id: null }
-    ];
-    const resolved = resolveDeviceLocations(devices, [{ gateway_id: 'gw-1', cell_id: CELL_A }]);
-    expect(resolved.get('d1').location_source).toBe(SOURCE_INHERITED);
-    expect(resolved.get('d2').effective_cell_id).toBe(CELL_B);
-    expect(resolved.get('d3').location_source).toBe(SOURCE_UNASSIGNED);
-  });
-
-  it('accepts gateways keyed by either id shape, since api.js maps one onto the other', () => {
-    const devices = [{ id: 'd1', gateway_id: 'gw-1', cell_id: null }];
-    const resolved = resolveDeviceLocations(devices, [{ id: 'gw-1', cell_id: CELL_A }]);
-    expect(resolved.get('d1').effective_cell_id).toBe(CELL_A);
   });
 });

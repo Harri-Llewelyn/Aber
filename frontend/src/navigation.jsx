@@ -23,12 +23,12 @@ import {
 /*
  * The navigation model, read by the sidebar, the search palette and App.jsx. It lives here
  * rather than in App.jsx because a component App renders cannot import App without a cycle.
- * `TABS` and `tabIsVisible` are re-exported from App.jsx for the tests that import them there.
  */
 
 /*
  * The groups. Each answers one question and the questions do not overlap:
  *
+ *   Work           -- what is waiting for me? Approvals.
  *   Assets         -- what is out there? The physical estate.
  *   Modelling      -- what does it mean? Read down: the contract, the catalogue it is built from,
  *                     the standards the catalogue draws on. Most-worked to most-reference.
@@ -37,7 +37,7 @@ import {
  *                     timer over something and offers a way to restore from it.
  *   Administration -- who may do what, where does everything live, how is it configured?
  *
- * The Site Map is in no group: it is the landing page. Audit Trail leads History rather than
+ * The Site Map is the landing page, alone in `home`. Audit Trail leads History rather than
  * sitting beside Devices because it is the audit trace of every entity.
  *
  * The groups are not captioned in the rail: the separator is the whole of the grouping, and a
@@ -46,7 +46,7 @@ import {
 export const NAV_GROUPS = [
   { id: 'home' },
   // A work queue: it answers "what is waiting for me", which none of the subject groups asks, and
-  // its rows are devices, nameplates and gateways at once. Not in `admin`, because Approvals is the
+  // its rows are proposals against every kind of entity. Not in `admin`, because Approvals is the
   // one page an Operator has something to do on.
   { id: 'work' },
   { id: 'assets' },
@@ -71,11 +71,6 @@ export const TABS = [
   { id: 'devices',        label: 'Devices',        group: 'assets',  icon: <IconCpu size={16} /> },
 
   { id: 'schemas',        label: 'Schemas',        group: 'model',   icon: <IconClipboardList size={16} /> },
-  /* Split out of Schemas, which held the registry and the catalogue in one page. They grow on
-     different clocks -- the registry a row per publish, the catalogue a row per metric anyone
-     models, for as long as standards keep being adopted -- so each was capping its own height to
-     leave the other room and neither had a viewport. Vocabulary left the same page earlier for
-     the same reason. */
   // IconTag, not IconGauge (which already means a metrology cell) and not IconActivity (which
   // means live telemetry): this page is the definitions, never the readings.
   { id: 'metrics',        label: 'Metrics',        group: 'model',   icon: <IconTag size={16} /> },
@@ -98,14 +93,10 @@ export const TABS = [
   // Administrator alone, as request_backup() and the two tables' SELECT policies are: a backup
   // is an act on the whole database, and reading what exists sizes the security lane.
   { id: 'backups',        label: 'Backups',        group: 'retention', icon: <IconHardDrive size={16} />, role: 'Administrator' },
-  /* "Archived Entities", not "Archives", because it sits next to Cold Storage now and the two
-     were only ever told apart by the distance between them: this is cells, gateways and devices
-     taken out of commission, that is telemetry tiered to Parquet. The label carries the
-     distinction so the rail does not have to.
-
-     Filed here rather than with the assets it archives: the three pages in this group each run a
-     retention timer over something and each offer a way back from it, which is one subject rather
-     than one permission level -- an Administrator-only group would only ever mean "restricted". */
+  /* "Archived Entities", not "Archives": it sits next to Cold Storage, and the label tells them
+     apart. This page lists areas, cells, gateways and devices taken out of commission; that one is
+     telemetry tiered to Parquet. Filed here rather than with the assets because each page in this
+     group runs a retention timer over something and offers a way back from it. */
   { id: 'archives',       label: 'Archived Entities', group: 'retention', icon: <IconArchive size={16} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
 
   // Where everything lives, who may touch it, and how it is tuned. Directory is ungated while the

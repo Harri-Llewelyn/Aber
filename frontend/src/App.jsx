@@ -80,11 +80,6 @@ const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab')
 const BackupsTab       = lazy(() => import('./components/tabs/BackupsTab').then(m => ({ default: m.BackupsTab })))
 const ApprovalsTab     = lazy(() => import('./components/tabs/ApprovalsTab').then(m => ({ default: m.ApprovalsTab })))
 
-/* The page list lives in navigation.jsx and is re-exported here unchanged: the sidebar and the
-   search palette read it and cannot import from this file without a cycle, and the tests import
-   TABS and tabIsVisible from here. */
-export { TABS, tabIsVisible, NAV_GROUPS, groupedNav } from './navigation'
-
 function AuthScreen({ onLoginSuccess, notice }) {
   // Its own theme handle: this renders instead of Dashboard, never beside it.
   const { theme, toggleTheme } = useTheme()
@@ -375,7 +370,7 @@ function Dashboard({ session, onSignOut }) {
   // Separate from the device filter above: set by a device drawer's Schema chip and consumed by
   // SchemasTab, which opens that schema's drawer.
   const [selectedSchemaId, setSelectedSchemaId] = useState('')
-  // Set when a cell is opened from the Site Map; consumed by CellsTab.
+  // Set when a cell is opened from another page; consumed by CellsTab.
   const [selectedCellFilter, setSelectedCellFilter] = useState('')
   // Set by a cell drawer's Area chip; consumed by AreasTab, which opens that area's drawer.
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
@@ -493,7 +488,7 @@ function Dashboard({ session, onSignOut }) {
   const apiBusy = useApiActivity()
 
   // Data refresh is owned by the tabs through useRealtimeTable, which subscribes only to the tables
-  // the visible tab renders. Quarantine arrivals are handled by useQuarantineAlerts below.
+  // the visible tab renders. Quarantine arrivals are handled by useQuarantineAlerts above.
 
   const persona = session?.user?.email || 'Administrator'
 
@@ -611,11 +606,11 @@ function Dashboard({ session, onSignOut }) {
 
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
-            {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
+            {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
@@ -782,10 +777,10 @@ export default function App() {
     return <AuthScreen notice={authNotice} onLoginSuccess={(sess) => { setAuthNotice(null); setSession(sess) }} />
   }
 
-  // Two sessions end here: Studio sits behind a session the gateway owns, so the beacon clears its
-  // cookie alongside signOut(). Both start in the same tick so a slow console cannot delay the
-  // local sign-out, and signOut() is called synchronously on click, which navigationShell.test.jsx
-  // asserts.
+  // Three sessions end here: Studio and the forge sit behind sessions the gateway owns, so a beacon
+  // clears each cookie alongside signOut(). All start in the same tick so a slow console cannot
+  // delay the local sign-out, and signOut() is called synchronously on click, which
+  // navigationShell.test.jsx asserts.
   return <Dashboard
     session={session}
     onSignOut={() => Promise.all([signOutOfStudio(), signOutOfForge(), supabase.auth.signOut()])}

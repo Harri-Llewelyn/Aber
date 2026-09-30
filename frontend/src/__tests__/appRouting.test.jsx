@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { TABS, tabIsVisible } from '../App'
+import { TABS, tabIsVisible } from '../navigation'
 import { VALID_TABS, RENAMED_TABS } from '../constants'
 import { useAppRouting } from '../hooks/useAppRouting'
 

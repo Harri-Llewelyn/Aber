@@ -4,7 +4,7 @@
  * positions and the time axis keeps telling the truth; the causation signal survives, stated as
  * "One transaction" when every member shares a causation_id; and the threshold is in pixels, so
  * narrowing the range control zooms a badge apart into its members. Why a badge rather than a fan:
- * ../README.md, Migrated design notes.
+ * frontend/README.md, Migrated design notes.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'

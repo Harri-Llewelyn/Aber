@@ -124,9 +124,7 @@ export function usePermissions(session) {
 
   return {
     userRole,
-    userPerms,
     loadingPerms,
-    errorPerms: null,
     hasPermission
   };
 }

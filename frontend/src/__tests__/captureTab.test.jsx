@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CaptureTab } from '../components/tabs/CaptureTab'
 import { captureManifest, capturePath } from '../api'
-import { tabIsVisible, TABS, groupedNav } from '../App'
+import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
 /**
  * The Capture page. Two decisions here are destructive or unrecoverable: the replace confirmation

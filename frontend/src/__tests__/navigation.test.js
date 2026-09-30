@@ -45,8 +45,8 @@ describe('the groups', () => {
   })
 
   /**
-   * The placements pinned so they are not re-litigated by accident. Audit Trail traces cells,
-   * gateways and devices equally, so it is filed by tense with Capture rather than beside Devices.
+   * The placements pinned so they are not re-litigated by accident. Audit Trail traces every kind of
+   * entity equally, so it is filed by tense with Capture rather than beside Devices.
    */
   it('files Audit Trail by tense rather than by subject', () => {
     expect(TABS.find(t => t.id === 'audit-trail').group).toBe('history')

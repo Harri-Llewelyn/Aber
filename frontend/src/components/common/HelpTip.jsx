@@ -13,7 +13,7 @@ const GAP = 6
  * `.card`, whose overflow is hidden, and scrolling or resizing closes it rather than tracking the
  * trigger. `role="tooltip"` and `aria-describedby` tie the text to the button for screen readers.
  */
-export function HelpTip({ text, label = 'More information', size = 13, className = '' }) {
+export function HelpTip({ text, label = 'More information', size = 13 }) {
   const id = useId()
   const ref = useRef(null)
   const [hovered, setHovered] = useState(false)
@@ -44,7 +44,7 @@ export function HelpTip({ text, label = 'More information', size = 13, className
       <button
         ref={ref}
         type="button"
-        className={`help-tip${pinned ? ' help-tip-pinned' : ''} ${className}`.trim()}
+        className={`help-tip${pinned ? ' help-tip-pinned' : ''}`}
         aria-label={label}
         aria-describedby={visible ? id : undefined}
         aria-expanded={pinned}

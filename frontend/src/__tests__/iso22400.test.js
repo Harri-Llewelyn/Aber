@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  kpis, kpiNames, kpiByName, iso22400Sections, iso22400Prefill, kpiTooltip, KPI_CATEGORY
+  kpis, kpiByName, iso22400Sections, iso22400Prefill, kpiTooltip, KPI_CATEGORY
 } from '../utils/iso22400'
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName } from '../utils/metricGroup'
@@ -18,7 +18,7 @@ const vocabulary = [
 
 describe('kpis', () => {
   it('orders by name regardless of the order the API returned them in', () => {
-    expect(kpiNames(vocabulary)).toEqual(['AVAILABILITY', 'EFFECTIVENESS', 'MTBF', 'QUALITY', 'SCRAP_RATIO'])
+    expect(kpis(vocabulary).map(k => k.name)).toEqual(['AVAILABILITY', 'EFFECTIVENESS', 'MTBF', 'QUALITY', 'SCRAP_RATIO'])
   })
 
   it('survives an empty or missing vocabulary', () => {
@@ -46,8 +46,8 @@ describe('iso22400Sections', () => {
   it('uses ISO 22400-2 terminology — EFFECTIVENESS, not PERFORMANCE', () => {
     // Archived migration 0032 aligned the vocabulary with the standard's own wording and superseded the
     // catalog's OEE/PERFORMANCE metric. The old token must not reappear as a KPI definition.
-    expect(kpiNames(vocabulary)).toContain('EFFECTIVENESS')
-    expect(kpiNames(vocabulary)).not.toContain('PERFORMANCE')
+    expect(kpis(vocabulary).map(k => k.name)).toContain('EFFECTIVENESS')
+    expect(kpis(vocabulary).map(k => k.name)).not.toContain('PERFORMANCE')
     expect(kpiByName(vocabulary, 'EFFECTIVENESS').kpi_id).toBe('E')
   })
 })

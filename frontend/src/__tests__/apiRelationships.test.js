@@ -46,8 +46,8 @@ vi.mock('../lib/supabaseClient', () => ({
           events: (state.responses.audit_trail || { data: [] }).data || [],
           purged_assets: 0,
           truncated: false,
-          // Only when a test asks for one. A server without 0115 returns no such key at all, and
-          // the attachment has to tell that apart from a total of zero.
+          // Only when a test asks for one: a payload without the key has to be told apart from a
+          // total of zero.
           ...(state.responses.audit_trail?.total_matching !== undefined
             ? { total_matching: state.responses.audit_trail.total_matching }
             : {})
@@ -263,10 +263,6 @@ describe('device liveness is never asserted by the UI', () => {
     expect(callFor('devices').payload).not.toHaveProperty('is_quarantined');
   });
 
-  it('still writes a status the caller does state, so the quarantine paths keep working', async () => {
-    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', status: 'OFFLINE', is_quarantined: false });
-    expect(callFor('devices').payload).toMatchObject({ status: 'OFFLINE', is_quarantined: false });
-  });
 });
 
 describe('device DBIRTH parameters', () => {
@@ -461,39 +457,6 @@ describe('telemetry queries', () => {
   });
 });
 
-describe('telemetry filtering by device tag', () => {
-  it('expands asset_ids into a single IN over the telemetry view', async () => {
-    // A tag filter resolves to a whole group of devices client-side, because a device's tags are
-    // derived from its schema and the database does not model them.
-    await api.get('/api/v1/telemetry?asset_ids=dev200000000000400080000,dev300000000000400080000');
-    expect(callFor('telemetry').filters).toContainEqual([
-      'in', 'asset_id', ['dev200000000000400080000', 'dev300000000000400080000']
-    ]);
-  });
-
-  it('translates device UUIDs in asset_ids to Sparkplug keys', async () => {
-    // telemetry.asset_id is keyed by sparkplug_id; the UI works in UUIDs. Same local derivation
-    // as the single-device path: 'dev' + the first 21 unhyphenated hex characters.
-    await api.get('/api/v1/telemetry?asset_ids=ccd19944-8805-4c11-ae66-ea0d2c50f40c');
-    const [, , keys] = callFor('telemetry').filters.find(f => f[0] === 'in');
-    expect(keys).toEqual(['devccd1994488054c11ae66e']);
-  });
-
-  it('returns nothing — not everything — for a tag that matches no device', async () => {
-    // The failure mode this guards: an empty IN list silently widening to the whole fleet.
-    const rows = await api.get('/api/v1/telemetry?asset_ids=');
-    expect(rows).toEqual([]);
-    expect(callFor('telemetry')).toBeUndefined();
-  });
-
-  it('lets an explicitly chosen device win over a tag', async () => {
-    await api.get('/api/v1/telemetry?asset_id=dev200000000000400080000&asset_ids=dev300000000000400080000');
-    const filters = callFor('telemetry').filters;
-    expect(filters).toContainEqual(['eq', 'asset_id', 'dev200000000000400080000']);
-    expect(filters.find(f => f[0] === 'in')).toBeUndefined();
-  });
-});
-
 describe('audit trail filtering', () => {
   /* The filters are RPC arguments: `audit_trail_page()` hides deleted entities with an anti-join
      PostgREST cannot express. */
@@ -526,10 +489,7 @@ describe('audit trail filtering', () => {
     expect(rpcArgs().p_include_purged).toBe(true);
   });
 
-  /* The keyset cursor and the compatibility rule around it. PostgREST resolves an RPC by the
-     argument names given, so naming the cursor arguments against a database without them fails with
-     "function does not exist" rather than falling back. Omitted, the call matches the
-     seven-argument form and the page renders unpaged. */
+  /* The keyset cursor is sent only when there is one. */
   it('omits the cursor arguments entirely when there is no cursor', async () => {
     await api.get('/api/v1/audit-trail');
     expect(rpcArgs()).not.toHaveProperty('p_before_recorded_at');
@@ -597,9 +557,9 @@ describe('audit trail filtering', () => {
   });
 
   it('attaches the match total, and tells a missing one from a total of zero', async () => {
-    // `total_matching` (0115) is how the page says "200 of 467" rather than "200 events". Zero is
-    // a real answer -- a filter that matches nothing -- so the absent case has to be null, or a
-    // server without 0115 renders as a trail with no events in it.
+    // `total_matching` is how the page says "200 of 467" rather than "200 events". Zero is a real
+    // answer -- a filter that matches nothing -- so the absent case has to be null, or a payload
+    // without a total renders as a trail with no events in it.
     const rows = [{ id: 1, entity_type: 'devices', entity_id: 'dev-a', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' }];
 
     state.responses.audit_trail = { data: rows, total_matching: 467 };

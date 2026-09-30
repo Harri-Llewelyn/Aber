@@ -60,10 +60,8 @@ describe('API Path Coverage Test', () => {
     '/api/v1/cells',
     '/api/v1/gateways',
     '/api/v1/devices',
-    '/api/v1/assets',
     '/api/v1/quarantine',
     '/api/v1/audit-trail',
-    '/api/v1/cells/some-id/audit-trail',
     '/api/v1/links?entity_type=cell&entity_id=123',
     '/api/v1/devices/dev-123/config',
     '/api/v1/schemas',
@@ -76,7 +74,6 @@ describe('API Path Coverage Test', () => {
     '/api/v1/opcua-vocabulary',
     '/api/v1/idta-submodel-templates',
     '/api/v1/directory',
-    '/api/v1/stats',
     '/api/v1/telemetry?limit=500',
     '/api/v1/telemetry/latest?minutes=60'
   ];
@@ -101,8 +98,6 @@ describe('API Path Coverage Test', () => {
     '/api/v1/cells/cell-123',
     '/api/v1/gateways/gw-123',
     '/api/v1/devices/dev-123',
-    '/api/v1/cells/cell-123/archive',
-    '/api/v1/cells/cell-123/restore',
     '/api/v1/links/doc-123'
   ];
 

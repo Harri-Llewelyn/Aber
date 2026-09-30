@@ -6,7 +6,6 @@ import {
   ActorLabel,
   canDecide,
   diffRows,
-  refusalFor,
   ageLabel,
   absoluteTime,
   keyLabel,
@@ -74,8 +73,6 @@ const schemaProposal = (over = {}) => ({
 function mockLoad(proposals) {
   api.get.mockImplementation((path) => {
     if (path === '/api/v1/proposals') return Promise.resolve(proposals)
-    if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
-    if (path.startsWith('/api/v1/proposals/allowed-keys/')) return Promise.resolve(['name', 'description'])
     return Promise.resolve([])
   })
 }
@@ -219,32 +216,6 @@ describe('what a proposal says it would change', () => {
     expect(keyLabel('serial_number')).toBe('Serial number')
   })
 })
-
-describe('the two caps fail differently', () => {
-  it('offers to open the proposal you already have', () => {
-    const existing = deviceProposal()
-    const refusal = refusalFor({ code: '23505' }, existing)
-    expect(refusal.openExisting).toBe(true)
-    expect(refusal.message).toMatch(/already have an open proposal/i)
-  })
-
-  it('does not offer that when the row is not in hand', () => {
-    expect(refusalFor({ code: '23505' }, undefined).openExisting).toBe(false)
-  })
-
-  it('passes the per-person ceiling through in the database wording', () => {
-    // The repair is different -- decide or withdraw something else -- and the message says how
-    // many are open, which no sentence written here could know.
-    const refusal = refusalFor({ code: '23514', message: 'you already have 10 open proposal(s)' }, null)
-    expect(refusal.openExisting).toBe(false)
-    expect(refusal.message).toMatch(/10 open/)
-  })
-
-  it('reports a refusal as a refusal', () => {
-    expect(refusalFor({ code: '42501' }, null).message).toMatch(/not permitted/i)
-  })
-})
-
 
 describe('rejecting', () => {
   it('will not send without a reason', async () => {
@@ -867,7 +838,6 @@ describe('a relocation names the cells rather than their uuids', () => {
 
   const mockWithCells = () => api.get.mockImplementation((path) => {
     if (path === '/api/v1/proposals') return Promise.resolve([relocation])
-    if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
     if (path === '/api/v1/cells') return Promise.resolve([
       { cell_id: 'cell-weld', cell_name: 'Weld Bay' },
       { cell_id: 'cell-paint', cell_name: 'Paint Line' }

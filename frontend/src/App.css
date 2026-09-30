@@ -348,7 +348,7 @@ html, body, #root {
 }
 
 /* The icon takes the accent on hover rather than the border alone: a 1px ring on a 28px circle is a
-   very small change to notice, and this is the only way into four actions. */
+   very small change to notice, and this is the only way into three actions. */
 .user-avatar:hover { border-color: var(--accent); color: var(--accent); }
 .user-avatar-open { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
 .user-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -469,8 +469,7 @@ html, body, #root {
 /* Sidebar: the primary navigation, a rail of icons with a labelled panel. Two elements, and the
    split is the mechanism: `.sidebar` is a 52px gutter that does not change width in hover mode, and
    `.sidebar-panel` is absolutely positioned inside it and grows to 232px, painting over the page
-   without reflowing it. Expanded mode widens the gutter instead; see the modes block at the end of
-   the file. */
+   without reflowing it. Expanded mode widens the gutter instead; see `.sidebar-mode-expanded`. */
 .sidebar {
   position: relative;
   flex: 0 0 52px;
@@ -733,17 +732,11 @@ html, body, #root {
   color: var(--text-dim);
 }
 
-/* Top bar responsive collapse. Below 1400px the strapline goes and button labels go; below
-   1100px the brand text goes entirely. `.brand-text` is a stacked block as wide as its wider
-   line, and the strapline is far wider than the wordmark, so hiding it reclaims the space. */
+/* Top bar responsive collapse. Below 1400px the strapline goes; below 1100px the brand text goes
+   entirely. `.brand-text` is a stacked block as wide as its wider line, and the strapline is far
+   wider than the wordmark, so hiding it reclaims the space. */
 @media (max-width: 1399px) {
   .brand-sub { display: none; }
-  /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
-     leaves a shape and a figure -- whereas dropping the pill would hide the only changing thing in
-     the bar at exactly the widths a kiosk display uses. */
-  /* Nothing left to shed. The pill lost its word entirely when it became a glyph, so the band
-     that used to drop it has nothing to do -- and the count it keeps is a single digit that was
-     never the thing costing width. */
 }
 
 @media (max-width: 1099px) {
@@ -955,8 +948,6 @@ html, body, #root {
 .table-scroll thead tr {
   position: sticky;
   top: 0;
-  /* Above the rows it covers, and nothing else -- `.action-menu` portals to <body> precisely so
-     it is not competing at this level. */
   z-index: 2;
 }
 
@@ -1005,48 +996,6 @@ tbody tr {
 }
 
 tbody tr:hover { background: var(--bg-glass); }
-
-/* Table summary footer: a counts bar under a table, for totals that describe the whole list.
-   `--bg-glass` matches `thead tr`, so the table is bracketed by the same tint at both ends. */
-.table-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 16px;
-  background: var(--bg-glass);
-  border-top: 1px solid var(--border);
-}
-
-/* A count and its label as one pill, so the pair cannot be split across a wrap -- which is what
-   made the loose-text version hard to scan at width: "0 issued 0 bundle outstanding 0 revoked"
-   reads as six tokens rather than three facts. */
-.table-summary-pill {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 11px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.table-summary-pill strong {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  /* Tabular figures so a column of counts does not jitter as it updates, the same reason
-     `.alert-pill-count` carries it. */
-  font-variant-numeric: tabular-nums;
-}
-
-/* ZERO IS DIMMED RATHER THAN HIDDEN. "0 revoked" is a fact worth reading -- it is the difference
-   between "nothing has been revoked" and "revocation is not shown here" -- but it should not
-   compete with a count that is not zero. */
-.table-summary-pill-zero strong { color: var(--text-dim); font-weight: 500; }
 
 /* Callout: a bordered, tinted banner for a caveat the reader must not miss, inside the card it
    qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue. */
@@ -1173,7 +1122,7 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* An endpoint is one unbroken token (`http://127.0.0.1:54321/functions/v1`), which a fixed
-   column cannot break at a space. Without this it overruns its cell into STATUS. */
+   column cannot break at a space. Without this it overruns its cell into Reach. */
 .table-directory .cell-endpoint { overflow-wrap: anywhere; }
 
 /* A tag is one token too, and some are long (`2026.07.07-sha-a6a04f2`). */
@@ -1446,68 +1395,6 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .btn-group { display: flex; gap: 8px; }
 
-/* Overflow action menu, portalled to <body> because .table-wrap is overflow-x:auto and would clip
-   it. The z-index clears the page but stays under .modal-overlay (1000). */
-.action-menu {
-  z-index: 900;
-  min-width: 200px;
-  padding: 4px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-hover);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: fadeIn 0.12s ease;
-}
-
-.action-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.action-menu-item:hover:not(:disabled),
-.action-menu-item:focus-visible {
-  background: var(--bg-glass);
-  outline: none;
-}
-
-.action-menu-item:disabled {
-  color: var(--text-dim);
-  cursor: not-allowed;
-}
-
-.action-menu-item-danger:hover:not(:disabled) {
-  background: rgba(255, 82, 82, 0.12);
-  color: var(--danger);
-}
-
-.action-menu-icon {
-  display: inline-flex;
-  width: 14px;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.action-menu-separator {
-  height: 1px;
-  margin: 4px 2px;
-  background: var(--border);
-}
-
 /* A document provider's badge: the provider's colour tints the fill and draws the border, while the
    label takes --text-primary, because the brand colours are not legible as text. `color-mix` keeps
    the tint derived from the one place the colour is written. */
@@ -1563,7 +1450,7 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-primary);
 
   /* Caps the height of every modal so a long dialog scrolls inside itself rather than growing past
-     both edges of the viewport. ActionMenu portals to <body>, so this cannot clip it. */
+     both edges of the viewport. */
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
@@ -1594,7 +1481,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* For a modal holding a TABLE rather than a form. `.modal`'s 480px is sized for stacked fields;
    the telemetry inspector is four columns and was unreadable at that width -- which is the whole
-   reason it left the 360px context panel. */
+   reason it left the context panel. */
 .modal-wide {
   max-width: 900px;
   padding: 20px 22px;
@@ -1708,9 +1595,8 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
 }
 
-.semantic-id-picker-option:hover,
-.semantic-id-picker-option:focus-visible { background: var(--bg-glass); }
-.semantic-id-picker-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.semantic-id-picker-option:hover { background: var(--bg-glass); }
+.semantic-id-picker-option:focus-visible { background: var(--bg-glass); outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .semantic-id-picker-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
@@ -1758,11 +1644,8 @@ tbody tr:hover { background: var(--bg-glass); }
 .empty-state .btn { display: inline-flex; margin-top: 12px; }
 
 /* ===== Stat strip ===== */
-/* A row of figures above a table, centred on the card and ruled between. Left-aligned and spaced
-   only by a gap, a run of six read as one ragged block with no boundary between "object storage
-   used" and the figure after it -- the eye had to use the label casing to find where each one
-   started. The rule does that instead, and centring stops a short run sitting off to one side of a
-   wide card. */
+/* A row of figures above a table, centred on the card and ruled between, so each figure has a
+   visible boundary and a short run does not sit off to one side of a wide card. */
 .stat-strip {
   display: flex;
   justify-content: center;
@@ -1933,7 +1816,7 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* ===== Shopfloor Blueprint Map Styles ===== */
+/* ===== Site Map: area plans and lanes ===== */
 .shopfloor-map-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -1974,18 +1857,6 @@ tbody tr:hover { background: var(--bg-glass); }
   gap: 12px;
   font-size: 11px;
   color: var(--text-muted);
-}
-
-/* The area thumbnails: three to a row at most, so each plan is legible. The track minimum is a
-   third of the width less its share of the gaps, or 320px, whichever is larger; the 320px floor
-   keeps them readable on a narrow window, where the row holds fewer. `min(…, 100%)` so a track
-   never overflows a container narrower than 320px. `auto-fill`, not `auto-fit`: the tracks stay
-   put when there are fewer areas than columns, so the grid keeps its shape as areas are added. */
-.shopfloor-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(max(320px, calc(33.333% - 8px)), 100%), 1fr));
-  gap: 12px;
-  align-items: start;
 }
 
 /* The rungs above the map: enterprise, then site. Small caps for the level, the name beside it. */
@@ -2085,10 +1956,9 @@ tbody tr:hover { background: var(--bg-glass); }
 .site-lane-queue:hover,
 .site-lane-queue.is-open { box-shadow: 0 0 14px rgba(255, 179, 0, 0.2); }
 
-/* A lane wears its hue only while it holds something. An empty Unassigned queue is the good state
-   and an amber tile over 0 · 0 was a standing false alarm, so an empty lane keeps its outline and
-   drops the fill. The 4px cap stays 4px, in grey: dropping it would make the empty lanes shorter
-   than the full ones and the strip ragged. Compounded, so it outranks each lane's own hue. */
+/* A lane wears its hue only while it holds something: an empty lane keeps its outline and drops
+   the fill. The 4px cap stays, in grey, so empty lanes are as tall as full ones. Compounded, so it
+   outranks each lane's own hue. */
 .site-lane.is-empty {
   border-color: var(--border);
   background: transparent;
@@ -2102,7 +1972,7 @@ tbody tr:hover { background: var(--bg-glass); }
 .site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ===== The Site Map card: area plans and pins ===== */
-/* Area thumbnails share the cell grid's tracks. */
+/* Area thumbnails sit in the tracks of `.shopfloor-grid`. */
 .area-thumb {
   display: flex;
   flex-direction: column;
@@ -2115,6 +1985,7 @@ tbody tr:hover { background: var(--bg-glass); }
   text-align: left;
   cursor: pointer;
   transition: var(--transition);
+  --thumb-max-height: 260px;
 }
 
 .area-thumb:hover {
@@ -2203,20 +2074,19 @@ tbody tr:hover { background: var(--bg-glass); }
    area takes the row, two split it, three or more settle on thirds. Below the breakpoint every
    area takes the row, whatever the count. */
 .shopfloor-grid {
+  display: grid;
   grid-template-columns: repeat(var(--map-columns, 3), minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
 }
 
 @media (max-width: 900px) {
   .shopfloor-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* A plan is at most --thumb-max-height tall: a tall plan is a narrow column in its card rather
-   than a card the height of the page. It grows as the grid narrows, because the pins on it have
-   to stay apart at the spacing the database enforces. */
-.area-thumb {
-  --thumb-max-height: 260px;
-}
-
+/* A plan is at most --thumb-max-height tall (260px on .area-thumb): a tall plan is a narrow column
+   in its card rather than a card the height of the page. It grows as the grid narrows, because the
+   pins on it have to stay apart at the spacing the database enforces. */
 .shopfloor-grid[style*="--map-columns: 2"] .area-thumb { --thumb-max-height: 340px; }
 .shopfloor-grid[style*="--map-columns: 1"] .area-thumb { --thumb-max-height: 440px; }
 
@@ -2494,16 +2364,7 @@ tbody tr:hover { background: var(--bg-glass); }
    the chip it describes is a legend that lies. */
 .legend-chip-danger { border-color: var(--danger); background: rgba(255, 77, 109, 0.15); }
 
-/* --text-muted, not --text-dim: --text-dim measures exactly 4.50:1 on a bare card; --text-muted
-   stays clear over the lane fills too. See themeContrast.test.js. */
-.zone-empty {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-style: italic;
-  line-height: 1.35;
-}
-
-/* A chip that navigates, used in the context drawers for Serving Gateway, Cell Zone and Schema. A
+/* A chip that navigates, used in the context drawers for Serving Gateway, Cell and Schema. A
    <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs.
    Inherits `.chip` and adds only the affordance. `text-align: left` because a button centres its
    text by default. */
@@ -2569,7 +2430,7 @@ tbody tr:hover { background: var(--bg-glass); }
   margin-top: 5px;
 }
 
-/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is 360px
+/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
    and "Raised by Grafana · since 14:22:07" plus the link is close enough to that to wrap on a narrow
    band, and a clipped link is worse than a two-line footer. */
 .context-alert-foot {
@@ -2749,6 +2610,7 @@ tbody tr:hover { background: var(--bg-glass); }
   color: inherit;
   font-family: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition: var(--transition);
 }
@@ -2756,11 +2618,8 @@ tbody tr:hover { background: var(--bg-glass); }
 .alert-pill-item-link:hover { background: var(--bg-glass); }
 .alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* No underline; the colour carries the affordance. Two variants render this class, a <button> for
-   an asset alert and an <a> for a platform alert that opens Grafana, and only the anchor picked up
-   the browser underline. The title takes the accent, as .endpoint-open does; the summary and meta
-   keep their muted colours. */
-.alert-pill-item-link { text-decoration: none; }
+/* An <a> for a platform alert that opens Grafana: the title takes the accent, as .endpoint-open
+   does; the summary and meta keep their muted colours. */
 a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
@@ -3018,9 +2877,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   color: var(--text-muted);
 }
 
-/* The cell icon picker: a grid of labelled buttons rather than a <select>, because the operator is
-   choosing what the card will look like on the map. `auto-fit` so the grid reflows at any modal
-   width; each option carries its label. */
+/* The cell and area icon picker: a grid of labelled buttons rather than a <select>, because the
+   operator is choosing what the pin will look like on the plan. `auto-fit` so the grid reflows at
+   any modal width; each option carries its label. */
 .icon-picker {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
@@ -3101,8 +2960,8 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   flex-shrink: 0;
 }
 
-/* A gateway name is `.mono`, which carries its own 12px. Inside a chip that is a point larger than
-   everything beside it and it grew the row it sits in. The colour is deliberately NOT reset --
+/* A gateway name is `.mono`, which carries its own 13px. Inside a chip that is larger than
+   everything beside it and it would grow the row it sits in. The colour is deliberately NOT reset --
    accent is what distinguishes a gateway chip from a device chip at a glance. */
 .chip .mono { font-size: inherit; }
 
@@ -3117,9 +2976,8 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
    `min-width: auto` and refuses to shrink below its content. `align-items: flex-start` so the panel
    does not stretch to the height of a long table. */
 /* No `gap`: a gap applies between the flex items whether or not the drawer has any width, so every
-   page that renders a ContextPanel gave up 16px on its right edge permanently and ended short of
-   the pages that render no drawer at all (Archives, Directory, Vocabulary). The space belongs to
-   the open drawer, so the open drawer carries it. */
+   page with a ContextPanel would give up 16px on its right edge and end short of the pages with no
+   drawer. The open drawer carries the space. */
 .page-layout {
   display: flex;
   align-items: flex-start;
@@ -3239,8 +3097,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
 .context-panel-fields { display: flex; flex-direction: column; gap: 9px; }
 
-/* Label above value, not beside it. A side-by-side pair inside 360px gives the value ~180px, which
-   is not enough for a UUID or a Sparkplug topic path -- the two things most often read here. */
+/* Label above value, not beside it. A side-by-side pair inside the drawer gives the value about
+   half its width, which is not enough for a UUID or a Sparkplug topic path -- the two things most
+   often read here. */
 .context-field { min-width: 0; }
 
 .context-field-label {
@@ -3613,13 +3472,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   font-variant-numeric: tabular-nums;
 }
 
-/* Both scrolls live HERE rather than on the page. Horizontal, because the drawer is a flex sibling
-   of the list: opening it takes 360px off this element's width, and a page that scrolled as a
-   whole would push the lane labels off-screen the moment an event was selected. Vertical, because
-   this is the box the axis row pins to: a sticky element resolves against its nearest scroll
-   container, and this was already one for the horizontal axis, so while the page did the vertical
-   scrolling the axis pinned to a box that never moved. The .dt-page chain is what gives this
-   element a height to overflow. */
+/* Both scrolls live here rather than on the page: the drawer is a flex sibling of the list and takes
+   width off this box, and the axis row pins to its nearest scroll container, so that must be this
+   one. The .dt-page chain gives it a height to overflow. */
 .dt-scroll {
   overflow-x: auto;
   overflow-y: auto;
@@ -3752,11 +3607,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
    them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
    here would let a dozen dots slide through the text. */
-/* 260px, not 210px. A schema lane is `<name> v<version>`, and a lineage shares the name and differs
-   only in the version -- so at 210px, with the deleted flag beside it, every version of one schema
-   ellipsised to the same string and the lanes became indistinguishable. The track is `flex: 1` and
-   every marker is positioned as a fraction of it, so the width comes off the track harmlessly. The
-   full name is on the label's `title` either way. */
+/* 260px: a schema lane is `<name> v<version>` and a lineage shares the name, so a narrower label
+   ellipsises every version to the same string. The track is `flex: 1` and every marker is a
+   fraction of it, so the width comes off the track. The full name is on the label's `title`. */
 .dt-lane-label {
   position: sticky;
   left: 0;
@@ -3795,7 +3648,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--text-muted);
 }
 
-/* The entity is gone and the name came out of its final snapshot. */
 /* The part of a label that identifies one row within a lineage -- a schema's version. It sits
    OUTSIDE `.dt-lane-name` so the ellipsis cannot reach it: appended to the name it was the end of
    the string, and sixteen versions of one schema drew sixteen lanes reading the same truncation. */
@@ -3807,13 +3659,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* A flag, not a heading. It was 11px uppercase with half a pixel of tracking, which cost about
-   62px of a 184px label -- two thirds of the room the NAME had, on exactly the lanes whose name is
-   the only thing distinguishing them from their neighbours. */
+/* A flag, not a heading: it costs the lane's name as little room as possible. */
 .dt-lane-gone {
   flex-shrink: 0;
-  /* 11px is the type-scale floor themeContrast.test.js holds; the width came back from dropping
-     the uppercasing and the tracking, not from shrinking it below what is readable. */
+  /* 11px is the type-scale floor themeContrast.test.js holds. */
   font-size: 11px;
   font-weight: 600;
   color: var(--danger-text);
@@ -4066,8 +3915,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   background: var(--accent-dim);
 }
 
-/* Fixed width so the three columns line up down the list rather than stepping in and out with
-   whichever entity kind each row happens to be. DEVICE is the longest of the three. */
+/* Fixed width so the name column lines up down the list rather than stepping in and out with
+   whichever entity kind each row happens to be. */
 .dt-causation-kind {
   flex: 0 0 auto;
   min-width: 58px;
@@ -4146,9 +3995,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-diff-table th:last-child,
 .dt-diff-table td:last-child { padding-right: 0; }
 
-/* Equal thirds. The property column was the widest at 38%, which is the right call when names
-   cannot wrap -- now that they can, the values are what need the room, and three even columns
-   keep the header row and the divider lines reading as one grid. */
+/* Equal thirds: the values need the room, and three even columns keep the header row and the
+   divider lines reading as one grid. */
 .dt-diff-table th:nth-child(1),
 .dt-diff-table td:nth-child(1) { width: 33.34%; }
 .dt-diff-table th:nth-child(2),
@@ -4180,9 +4028,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--text-muted);
 }
 
-/* The property name is a LABEL, not a value -- muted, so the two things being compared beside it
-   are what the eye lands on. It was --text-primary, which gave the column name the same weight as
-   the data and made every row read as three equal facts. */
+/* The property name is a label, not a value: muted, so the two values beside it are what the eye
+   lands on. */
 .dt-diff-table tbody th {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
@@ -4449,8 +4296,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   line-height: 1.45;
 }
 
-/* Approvals: a card's own prose, and the hint under a control that explains itself. Both
-   `--text-muted` at 13px, like every other card description. */
 /* Between the approvals cards. Deliberately not `.card + .card`, for the reason the directory
    groups give: several pages stack cards that are meant to sit tight against each other. */
 .approvals-card + .approvals-card { margin-top: var(--stack); }
@@ -4505,9 +4350,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 .help-tip:hover,
-.help-tip:focus-visible,
 .help-tip-pinned { color: var(--accent); }
-.help-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.help-tip:focus-visible { color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .help-tip-bubble {
   position: fixed;
@@ -4525,10 +4369,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   line-height: 1.5;
   letter-spacing: normal;
   text-transform: none;
-  /* `pre-line`, not `normal`: a tooltip long enough to need a second paragraph -- Cold telemetry's,
-     which carries the only-copy warning -- had its blank line collapsed into one wall of text.
-     Spaces and wrapping still collapse as before, and no other tip's text contains a newline, so
-     this only enables the break rather than changing any existing bubble. */
+  /* `pre-line` so a tip can carry a second paragraph (Cold telemetry's only-copy warning); spaces
+     and wrapping still collapse. */
   white-space: pre-line;
   pointer-events: none;
 }

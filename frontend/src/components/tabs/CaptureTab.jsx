@@ -1292,7 +1292,7 @@ function formatSize(bytes) {
 }
 
 /** A timestamp an operator can compare with their own memory of the shift. */
-export function formatWhen(iso) {
+function formatWhen(iso) {
   if (!iso) return 'at an unknown time'
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return 'at an unknown time'

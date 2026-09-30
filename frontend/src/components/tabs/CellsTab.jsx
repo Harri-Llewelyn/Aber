@@ -588,7 +588,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
 
       {archiveTarget && (
         <ArchiveModal
-          entityType="cells" entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
+          entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
           onArchive={archiveCell} onCancel={() => setArchiveTarget(null)}
         />
       )}

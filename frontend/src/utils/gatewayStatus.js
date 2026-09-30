@@ -143,7 +143,7 @@ export function isCertExpiring(certExpiresAt, now = Date.now()) {
  * A DAY'S TOLERANCE, because the two dates come from different clocks and a re-issue that moves
  * `notAfter` by hours is not a rotation anybody has to wait for.
  */
-export const ROOT_LAG_TOLERANCE_DAYS = 1;
+const ROOT_LAG_TOLERANCE_DAYS = 1;
 
 export function holdsOlderRoot(certExpiresAt, platformNotAfter) {
   if (!certExpiresAt || !platformNotAfter) return false;

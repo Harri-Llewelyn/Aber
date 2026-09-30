@@ -14,7 +14,7 @@ import { conceptByName, metricConcepts } from './ashrae223'
 
 /**
  * An MTConnect data item type's suggestion: its concept id, shared by every metric of that type.
- * Derived rather than read, so it is the id check-mirror-drift check 8 holds to the seed. `null`
+ * Derived rather than read, so it is the id check-mirror-drift check 7 holds to the seed. `null`
  * without a type.
  */
 export function mtconnectSuggestion(dataItemType) {

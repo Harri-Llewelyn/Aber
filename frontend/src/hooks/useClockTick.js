@@ -7,18 +7,16 @@ import { useEffect, useState } from 'react'
  *
  * @param {number} intervalMs
  *
- * @param {boolean} [enabled=true]
- *
  * @returns {number} An incrementing counter; read it (or ignore it) to depend on the tick.
  */
-export function useClockTick(intervalMs, enabled = true) {
+export function useClockTick(intervalMs) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
-    if (!enabled || !intervalMs) return
+    if (!intervalMs) return
     const id = setInterval(() => setTick(t => t + 1), intervalMs)
     return () => clearInterval(id)
-  }, [intervalMs, enabled])
+  }, [intervalMs])
 
   return tick
 }

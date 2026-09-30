@@ -39,7 +39,7 @@ export function shortcutGroups({ mac = false } = {}) {
       title: 'Anywhere',
       items: [
         { keys: ['?'], description: 'Open this list' },
-        // One hook, twenty-five dialogs. Worth one row rather than one row per dialog.
+        // One hook serves every dialog. Worth one row rather than one row per dialog.
         { keys: ['Esc'], description: 'Close the open dialog, drawer or menu' }
       ]
     },

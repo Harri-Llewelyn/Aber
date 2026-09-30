@@ -1,8 +1,8 @@
 /**
  * The standards a catalog metric can be built from. `metric_catalog.standard` is provenance; NULL
- * means a local extension, which every adopted standard permits. The three are complementary:
+ * means a local extension, which every adopted standard permits. The four are complementary:
  * MTConnect for machine tools, ISO 22400 for computed KPIs, OPC UA for robotics and machinery
- * companion specs.
+ * companion specs, ASHRAE 223P for building systems.
  */
 
 export const STANDARDS = {
@@ -69,7 +69,7 @@ export const LOCAL_SEMANTIC_NAMESPACE = 'https://aber.local/semantics'
  */
 export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconnect/v2.0`
 
-/** ISO 22400 KPI namespace. The ids seeded by archived migration 0030 are built on this. */
+/** ISO 22400 KPI namespace. The ids seeded by archived migration 20260101000030_iso22400_vocabulary.sql are built on this. */
 export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400`
 
 /**
@@ -154,7 +154,3 @@ export function followSemanticIdType(previousId, previousType, nextId) {
 
 /** Display label for a `standard` value as stored (NULL/'' meaning a local extension). */
 export const LOCAL_EXTENSION_LABEL = 'Local extension'
-
-export function standardLabel(standard) {
-  return standard || LOCAL_EXTENSION_LABEL
-}

@@ -88,8 +88,7 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
           </div>
 
           {healthy ? (
-            /* The empty state says what is true: it names the evaluator, so nothing wrong and
-               nothing arriving are told apart. */
+            /* The healthy state: nothing firing. */
             <div className="alert-pill-empty">
               <IconShieldCheck size={20} />
               <div className="alert-pill-empty-title">No active alerts</div>

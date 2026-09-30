@@ -152,38 +152,26 @@ const planCoordFrom = (v) => {
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
-// postgres_fdw pushes WHERE clauses to TimescaleDB but not LIMIT, so an unbounded
-// query materialises the whole matching range in Supabase before trimming. Cap it.
+// postgres_fdw ships a LIMIT to TimescaleDB only below about 6,300 rows; past that every matching
+// row crosses the wrapper before it is trimmed. Stay under it.
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
  * Ceiling on a single CSV export, across all selected metrics. Higher than TELEMETRY_MAX_ROWS
- * because an export is a deliberate act with a progress bar, but still bounded: postgres_fdw
- * pushes WHERE down and not LIMIT. On reaching it the export downloads the most recent rows and
- * says it was truncated.
+ * because an export is a deliberate act with a progress bar, but still bounded. On reaching it the
+ * export downloads the most recent rows and says it was truncated.
  */
 export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
 
-/**
- * The lower time bound applied when a caller supplies none.
- *
- * `public.telemetry` is a postgres_fdw projection and the FDW pushes WHERE down but not LIMIT,
- * so a query with no time predicate makes TimescaleDB materialise an asset's entire history
- * before `.range()` applies. Every live caller already passes a window; this exists so the next
- * caller cannot reintroduce the unbounded scan by omitting an argument.
- */
 /**
  * Rollup resolutions a caller may ask for, and the relation each maps to.
  *
  * Continuous aggregates in TimescaleDB (timescaledb/aggregates.sql), exposed over the FDW. A
  * trend over a month is made cheap by there being fewer rows, not by asking for fewer.
  *
- * THE CSV EXPORT DEFAULTS TO RAW AND MAY BE ASKED FOR THESE. A bucket average is not a reading any
- * instrument produced, so raw stays the default and a rollup is never substituted for it silently
- * -- but past the raw retention window a rollup is the only thing that still answers, and refusing
- * to export one meant reporting "no telemetry in that range" for data the stack was holding
- * (issue #160). `relation` is also exported as TELEMETRY_RESOLUTION_RELATIONS so the export dialog
- * can match a resolution to its row in `telemetry_horizons`.
+ * The CSV export defaults to raw and may ask for these. A bucket average is not a reading any
+ * instrument produced, so a rollup is never substituted for raw silently; past the raw retention
+ * window it is the only thing that still answers.
  */
 const TELEMETRY_RESOLUTIONS = {
   '1m': { relation: 'telemetry_1m', bucketMinutes: 1 },
@@ -192,17 +180,22 @@ const TELEMETRY_RESOLUTIONS = {
 };
 
 /**
- * The relation each resolution reads, keyed as `telemetry_horizons` names them; `null` is raw.
- *
- * Derived from TELEMETRY_RESOLUTIONS rather than restated, so a resolution added there cannot be
- * missing here -- the failure that would produce is a picker offering a choice whose horizon is
- * silently unknown.
+ * The relation each resolution reads, keyed as `telemetry_horizons` names them. Exported for the
+ * test that checks the export dialog's resolution list against it; the app does not read it.
  */
 export const TELEMETRY_RESOLUTION_RELATIONS = Object.freeze({
   raw: 'telemetry',
   ...Object.fromEntries(Object.entries(TELEMETRY_RESOLUTIONS).map(([k, v]) => [k, v.relation]))
 });
 
+/**
+ * The lower time bound applied when a caller supplies none.
+ *
+ * `public.telemetry` is a postgres_fdw projection and a LIMIT ships only below about 6,300 rows, so
+ * a query with no time predicate can drag an asset's entire history across the wrapper before
+ * `.range()` applies. Every live caller already passes a window; this exists so the next caller
+ * cannot reintroduce the unbounded scan by omitting an argument.
+ */
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
 
 /**
@@ -236,16 +229,15 @@ function toTelemetryKey(assetId) {
 
 /**
  * Query the `telemetry` view, a postgres_fdw projection of the TimescaleDB hypertable exposed
- * through PostgREST (0001_baseline_schema.sql).
- */
-/**
+ * through PostgREST.
+ *
  * @param minutes  Relative window, "the last N minutes"; the primary form.
  * @param from,to  Absolute ISO bounds, for the export dialog. An explicit bound wins over
  *                 `minutes`.
  *
  * Every query leaves here with a lower time bound; see TELEMETRY_DEFAULT_WINDOW_MINUTES.
  */
-async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fromTime, to: toTime, limit, offset, resolution } = {}) {
+async function queryTelemetry({ assetId, metricName, minutes, from: fromTime, to: toTime, limit, offset, resolution } = {}) {
   const pageSize = Math.min(
     Number.isFinite(limit) && limit > 0 ? limit : TELEMETRY_PAGE_SIZE,
     TELEMETRY_MAX_ROWS
@@ -265,18 +257,9 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
   const timeColumn = rollup ? 'bucket' : 'time';
 
   const telemetryKey = toTelemetryKey(assetId);
-  // Set by a tag filter, which resolves to a whole group of devices. The Telemetry tab requires a
-  // time window on this path; the floor bounds the damage, it does not make a fleet query cheap.
-  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
-
-  // An empty set means "a tag that matches no device", which must return nothing rather than
-  // silently widening to the whole fleet. Checked before the query is built so no request is
-  // issued at all.
-  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
 
   let query = supabase.from(relation).select('*');
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  else if (assetIds) query = query.in('asset_id', telemetryKeys);
   if (metricName) query = query.eq('metric_name', metricName);
 
   // Absolute bounds win over the relative window -- see the parameter note above. `to` is
@@ -301,18 +284,11 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
  * the cost is bounded by how many series exist. `minutes` is honoured as a staleness bound, so a
  * machine that last reported in March does not reappear with a March reading as current state.
  */
-async function queryLatestTelemetry({ assetId, assetIds, metricName, minutes } = {}) {
+async function queryLatestTelemetry({ assetId, minutes } = {}) {
   const telemetryKey = toTelemetryKey(assetId);
-  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
-
-  // An empty set means "a tag that matches no device" -- return nothing rather than widening to
-  // the whole fleet. Checked before the query is built, as in queryTelemetry.
-  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
 
   let query = supabase.from('telemetry_latest').select('*');
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  else if (assetIds) query = query.in('asset_id', telemetryKeys);
-  if (metricName) query = query.eq('metric_name', metricName);
 
   const window = Number.isFinite(minutes) && minutes > 0 ? minutes : TELEMETRY_DEFAULT_WINDOW_MINUTES;
   query = query.gte('time', new Date(Date.now() - window * 60000).toISOString());
@@ -505,7 +481,7 @@ function withApiKey(signedUrl) {
   return signedUrl + (signedUrl.includes('?') ? '&' : '?') + `apikey=${SUPABASE_GATEWAY_KEY}`;
 }
 
-/** The public URL for a stored model path. Composed, never stored -- see archived migration 0035. */
+/** The public URL for a stored model path. Composed, never stored -- see archived migration 20260101000035_asset_3d_models.sql. */
 export function model3dPublicUrl(path) {
   if (!path) return null;
   return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path).data.publicUrl;
@@ -645,12 +621,6 @@ const apiMethods = {
   },
 
   /**
-   * Whether this deployment can enrol an appliance: `{ ready, addresses }`, where each address is
-   * `{ variable, value, problem }`. gateway-bundle's GET; it mints nothing and any signed-in user
-   * may ask. The Gateways page asks before offering a remote gateway, so the answer arrives
-   * before a row exists rather than as a refusal after.
-   */
-  /**
    * The one-liner: mints the enrolment token the way downloadGatewayBundle does and answers
    * JSON naming the command to paste, its expiry, the pin and the installer's address. A 503
    * names why this deployment cannot serve it (plain HTTP, no root mounted), and the caller
@@ -685,6 +655,12 @@ const apiMethods = {
     };
   },
 
+  /**
+   * Whether this deployment can enrol an appliance: `{ ready, addresses }`, where each address is
+   * `{ variable, value, problem }`. gateway-bundle's GET; it mints nothing and any signed-in user
+   * may ask. The Gateways page asks before offering a remote gateway, so the answer arrives
+   * before a row exists rather than as a refusal after.
+   */
   enrolmentReadiness: async () => {
     const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {
@@ -907,9 +883,9 @@ const apiMethods = {
    *
    * Through `create_machine_principal()` (0125, 0013), which is SECURITY DEFINER and checks
    * has_role() itself. It takes permissions from an allow-list, not a role, so widening `Operator`
-   * does not widen the identity. Machines propose, people decide: four reads (`telemetry:read`,
-   * `quarantine:view`, `audit_trail:read`, `archive:manage`) and two writes
-   * (`proposal:create`, `schema:manage`). Anything else is refused, and the message thrown gives
+   * does not widen the identity. Machines propose, people decide: three reads (`telemetry:read`,
+   * `quarantine:view`, `audit_trail:read`) and three writes (`archive:manage`,
+   * `proposal:create`, `schema:manage`). Anything else is refused, and the message thrown gives
    * the reason. No token is issued here: the identity reaches nothing until `mintServiceToken()`
    * signs one, which the page offers next.
    *
@@ -1585,34 +1561,6 @@ const apiMethods = {
   },
 
   get: async (path, _options = {}) => {
-    const entityAuditTrailMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/audit-trail/);
-    if (entityAuditTrailMatch) {
-      const rawEntityType = entityAuditTrailMatch[1];
-      const entityId = entityAuditTrailMatch[2];
-      const SINGULAR_MAP = { cells: 'cell', gateways: 'gateway', devices: 'device', assets: 'device' };
-      const singularType = SINGULAR_MAP[rawEntityType] || rawEntityType.replace(/s$/, '');
-
-      /**
-       * The entity types that belong to this entity's history as well as their own.
-       * `device_nameplate` rows are keyed by the device id, so a device's timeline includes them.
-       */
-      const ALSO_ABOUT = { device: ['device_nameplate'], devices: ['device_nameplate'] };
-      const alsoAbout = new Set(ALSO_ABOUT[singularType] || []);
-
-      let query = supabase.from('audit_trail').select('*').eq('entity_id', entityId);
-      const { data, error } = await query.order('recorded_at', { ascending: false });
-      if (error) throw error;
-
-      const filtered = (data || []).filter(t => {
-        if (!t.entity_type) return true;
-        const et = t.entity_type.toLowerCase();
-        return et === singularType || et === rawEntityType || et === `${singularType}s`
-          || alsoAbout.has(et);
-      });
-
-      return filtered.map(mapAuditTrailRow);
-    }
-
     /**
      * The tombstones: rows that were archived and then deleted, one per entity, written by the
      * database on the DELETE and readable by whoever may read the page or the trail's asset
@@ -1717,7 +1665,8 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/areas')) {
       // Cells embedded so the Areas page has membership in one round trip. Devices are not: a
-      // device's area is derived through its resolved cell, which is device_locations' answer.
+      // device's area is its resolved cell's, which is device_locations' answer, except an
+      // Area-Wide device, which carries its own `area_id`.
       const { data, error } = await supabase
         .from('areas')
         .select('*, cells(id, name, plan_x, plan_y, icon, is_archived)')
@@ -1844,7 +1793,7 @@ const apiMethods = {
       return data || [];
     }
 
-    if (path.startsWith('/api/v1/devices') || path.startsWith('/api/v1/assets')) {
+    if (path.startsWith('/api/v1/devices')) {
       // Embed the serving gateway so each device carries its resolved gateway name, and read
       // device_locations for the effective cell. The gateway's own cell is what the local fallback
       // resolves from.
@@ -1878,15 +1827,10 @@ const apiMethods = {
     }
 
     if (path.includes('/audit-trail')) {
-      // Every one of these parameters was previously parsed by the caller, appended to the path,
-      // and then dropped on the floor here -- the Audit Trail tab's entity dropdown, search box
-      // and row limit all had no effect at all. They are honoured now.
       const url = new URL(path, window.location.origin);
       const entityType = url.searchParams.get('entity_type');
-      // Pushed down as a SQL predicate (0115), matching the entity id and the audit-snapshot fields
-      // the timeline labels a lane from. It used to be resolved in the tab against the LIVE tables
-      // and sent as `entity_ids`, so searching for something deleted sent an empty list and drew an
-      // empty trail.
+      // Pushed down as a SQL predicate, matching the entity id and the audit-snapshot fields the
+      // timeline labels a lane from, so a deleted entity is still searchable by name.
       const search = (url.searchParams.get('search') || '').trim();
       const entityIds = url.searchParams.has('entity_ids')
         ? url.searchParams.get('entity_ids').split(',').filter(Boolean)
@@ -1908,14 +1852,12 @@ const apiMethods = {
       const hasCursor = beforeRecordedAt !== '' && beforeId !== '';
 
       // An EMPTY list must return nothing rather than everything -- "these ids, of which there are
-      // none" is not "no filter". The Audit Trail page no longer sends this: it asks the
-      // database to match the name (`search` above) rather than resolving one to ids here, which is
-      // what stopped a deleted entity being unsearchable. The parameter is kept because it is the
-      // right primitive for "this entity's history" and `p_search` cannot express an exact set.
+      // none" is not "no filter". The Audit Trail page searches by name (`search` above); this
+      // stays as the primitive for "this entity's history", which `p_search` cannot express.
       if (entityIds && entityIds.length === 0) return [];
 
       // The deleted-asset filter is a predicate, not a post-filter, which is why this is an RPC:
-      // "still exists" is an anti-join against three tables, and a filter applied after the limit
+      // "still exists" is an anti-join against five tables, and a filter applied after the limit
       // pages through mixed rows and shows whichever fraction survived. `audit_trail_page()` also
       // returns the purged count, which drives the control that reveals them.
       const includePurged = url.searchParams.get('include_purged') === 'true';
@@ -1941,9 +1883,7 @@ const apiMethods = {
         p_search: search || null,
         p_since: since || null,
         p_until: until || null,
-        // Omitted entirely when there is no cursor, rather than sent as null: PostgREST resolves an RPC
-        // by the names it is given, so naming these against a database that has not applied the keyset
-        // migration would fail outright. Omitted, the call matches the seven-argument form.
+        // Sent only with a cursor, both halves or neither.
         ...(hasCursor
           ? { p_before_recorded_at: beforeRecordedAt, p_before_id: Number(beforeId) }
           : {}),
@@ -1951,20 +1891,17 @@ const apiMethods = {
       if (error) throw error;
 
       const payload = data || {};
-      // NOTHING IS FILTERED AFTER THIS POINT. There used to be a substring match here over the
-      // rendered `description`, which is synthesised below from the entity type and id -- so it
-      // searched the id by a longer route, and no caller ever sent the parameter that reached it.
-      // A filter applied after the page also makes `rows.length` say nothing about whether the
-      // database had more, which is why `next_cursor` is the only end-of-data signal.
+      // Nothing is filtered after this point: a filter applied after the page would make
+      // `rows.length` say nothing about whether the database had more, which is why `next_cursor`
+      // is the only end-of-data signal.
       const rows = (payload.events || []).map(mapAuditTrailRow);
 
       // The array is still the return value, with the page-level facts attached to it, so
       // `.length`, `.map`, destructuring and bare-array mocks keep working.
       rows.purgedAssets = Number(payload.purged_assets || 0);
       rows.truncated = Boolean(payload.truncated);
-      // How many rows the filters select in total (0115). NULL rather than 0 when the server did
-      // not say: a database without 0115 must render as "no total", not as "no events" -- and 0 is
-      // a real answer that an empty filter result gives.
+      // How many rows the filters select in total. NULL rather than 0 when the payload carries none,
+      // so "no total" is not read as "no events"; 0 is a real answer an empty filter result gives.
       rows.totalMatching = typeof payload.total_matching === 'number'
         ? payload.total_matching
         : null;
@@ -2042,8 +1979,9 @@ const apiMethods = {
         .select('*')
         .order('name', { ascending: true });
       if (error) throw error;
-      // semantic_id is the concept-level local IRI added by archived migration 0032 -- distinct from the
-      // observation-level id a catalog metric carries, which is built from the whole metric name.
+      // semantic_id is the concept-level local IRI added by archived migration
+      // 20260101000032_effectiveness_and_mtconnect_semantics.sql -- distinct from the observation-level
+      // id a catalog metric carries, which is built from the whole metric name.
       return (data || []).map(v => ({
         kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null
       }));
@@ -2069,7 +2007,7 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/ashrae223-vocabulary')) {
-      // Reference data (archived migration 0013), generated from the open223 ontology. Ordered by the
+      // Reference data (archived migration 0013_ashrae223_vocabulary.sql), generated from the open223 ontology. Ordered by the
       // hierarchy the panel sections on, then by label -- the panel re-sorts, but arriving grouped
       // keeps a 640-row payload cheap to render on first paint.
       const { data, error } = await supabase
@@ -2209,27 +2147,16 @@ const apiMethods = {
       }));
     }
 
-    if (path.startsWith('/api/v1/stats')) {
-      const [qRes, docRes] = await Promise.all([
-        supabase.from('devices').select('id', { count: 'exact', head: true }).eq('is_quarantined', true),
-        supabase.from('links').select('id', { count: 'exact', head: true })
-      ]);
-      return {
-        quarantine_pending: qRes.count || 0,
-        links_attached: docRes.count || 0
-      };
-    }
-
-    // Latest value per (device, metric) inside a bounded recent window. Used by the
-    // Site Map, which only needs current state -- not the full history the
-    // export dialog pages through.
-    // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side
-    // (archived migration 0111) -- the retention SETTINGS cannot answer this, because a young stack holds
-    // less than its policy allows and a widened policy does not restore dropped chunks.
+    // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side (archived
+    // migration 0111_how_far_back_each_telemetry_resolution_reaches.sql) -- the retention SETTINGS
+    // cannot answer this, because a young stack holds less than its policy allows and a widened
+    // policy does not restore dropped chunks.
     if (path.startsWith('/api/v1/telemetry/horizons')) {
       return queryTelemetryHorizons();
     }
 
+    // Latest value per (device, metric) inside a bounded recent window, for the Devices page, which
+    // needs current state rather than the history the export dialog pages through.
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
@@ -2238,14 +2165,8 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/telemetry')) {
       const url = new URL(path, window.location.origin);
-      // asset_ids (plural) is how a tag filter asks for a whole group of devices at once. Absent
-      // means "no device restriction"; present but empty means "a tag nobody matches".
-      const assetIds = url.searchParams.has('asset_ids')
-        ? url.searchParams.get('asset_ids').split(',').filter(Boolean)
-        : undefined;
       return queryTelemetry({
         assetId: url.searchParams.get('asset_id'),
-        assetIds,
         metricName: url.searchParams.get('metric_name'),
         minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
         // Absolute bounds, used by the CSV export's custom range. Null when absent, so the
@@ -2343,18 +2264,6 @@ const apiMethods = {
       });
     }
 
-    /**
-     * Which keys a lane admits, asked of the database. `proposable_columns()` is the only place
-     * that answer exists (the validation trigger and the apply path both read it) and is granted to
-     * `authenticated` so the form can ask.
-     */
-    if (/^\/api\/v1\/proposals\/allowed-keys\/[^/]+$/.test(path)) {
-      const entityType = decodeURIComponent(path.split('/')[5]);
-      const { data, error } = await supabase.rpc('proposable_columns', { p_entity_type: entityType });
-      if (error) throw error;
-      return data || [];
-    }
-
     throw new Error('Unhandled API path: ' + path);
   },
 
@@ -2422,13 +2331,12 @@ const apiMethods = {
       const parts = path.split('/');
       const entityType = parts[3];
       const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
       const now = new Date().toISOString();
       const days = body?.auto_delete_days;
       const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
 
       let query = supabase
-        .from(table)
+        .from(entityType)
         .update({ is_archived: true, archived_at: now, auto_delete_at });
       query = query.eq('id', id);
 
@@ -2441,10 +2349,9 @@ const apiMethods = {
       const parts = path.split('/');
       const entityType = parts[3];
       const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
 
       let query = supabase
-        .from(table)
+        .from(entityType)
         .update({ is_archived: false, archived_at: null, auto_delete_at: null });
       query = query.eq('id', id);
 
@@ -2762,41 +2669,6 @@ const apiMethods = {
       return data;
     }
 
-    if (path.includes('/archive')) {
-      const parts = path.split('/');
-      const entityType = parts[3];
-      const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
-      const now = new Date().toISOString();
-      const days = body?.auto_delete_days;
-      const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-
-      let query = supabase
-        .from(table)
-        .update({ is_archived: true, archived_at: now, auto_delete_at });
-      query = query.eq('id', id);
-
-      const { data, error } = await query.select();
-      if (error) throw error;
-      return data[0] || {};
-    }
-
-    if (path.includes('/restore')) {
-      const parts = path.split('/');
-      const entityType = parts[3];
-      const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
-
-      let query = supabase
-        .from(table)
-        .update({ is_archived: false, archived_at: null, auto_delete_at: null });
-      query = query.eq('id', id);
-
-      const { data, error } = await query.select();
-      if (error) throw error;
-      return data[0] || {};
-    }
-
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
       const { data, error } = await supabase.from('links').update({
@@ -2940,11 +2812,6 @@ const apiMethods = {
       const patch = {
         name: body.asset_name
       };
-      // Guarded like the optional fields below, not assigned unconditionally: both are what the
-      // platform observed rather than what an operator asked for, and no edit form sends either.
-      if ('status' in body) patch.status = body.status;
-      if ('is_quarantined' in body) patch.is_quarantined = body.is_quarantined;
-      if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
       // emptyToNull, so clearing the field in the form stores NULL rather than ''. Absent and empty
       // are the same thing to every reader of a description, and two representations of one state is
       // how a `WHERE description IS NULL` starts missing rows.
@@ -2969,14 +2836,6 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  /*
-   * Change one setting's value.
-   *
-   * PATCH semantics through `.update()`, not PUT: `value` is the only column `authenticated`
-   * holds a grant on. `.select()` is not optional: RLS makes a non-Administrator's update affect
-   * zero rows without erroring, and returning the row lets the page tell "saved" from "silently
-   * not saved".
-   */
   /**
    * Attach a plan to an area. The file is read first so an SVG with no stated size is
    * refused before anything is uploaded; the object goes up, then the row records its path and
@@ -3040,6 +2899,14 @@ const apiMethods = {
     return { ...data[0], area_id: data[0].id };
   },
 
+  /**
+   * Change one setting's value.
+   *
+   * PATCH semantics through `.update()`, not PUT: `value` is the only column `authenticated`
+   * holds a grant on. `.select()` is not optional: RLS makes a non-Administrator's update affect
+   * zero rows without erroring, and returning the row lets the page tell "saved" from "silently
+   * not saved".
+   */
   patchSetting: async (key, value) => {
     const { data, error } = await supabase
       .from('system_settings')
@@ -3114,7 +2981,7 @@ const apiMethods = {
     ]);
 
     // AN EXACT MATCH FIRST, then alphabetical. Somebody who typed a full name wants that row, and
-    // it would otherwise sit wherever its table happened to fall among the four.
+    // it would otherwise sit wherever its table happened to fall among the five.
     const lowered = needle.toLowerCase();
     return found.flat().sort((a, b) => {
       const aExact = String(a.name || '').toLowerCase() === lowered;

@@ -22,6 +22,8 @@ export const PERMISSION_UUIDS = {
   LINK_MANAGE:        'a012b345-6789-4c1d-8706-933e08544e38',
   AUTHZ_MANAGE:       'e012c345-6789-4c1d-8706-933e08544e39',
   SCHEMA_MANAGE:      'f123d456-7890-4c1d-8706-933e08544e40',
+  // Retired: GitOps edge sync is gone and no check consults `gitops:manage`; the row remains in the
+  // database.
   GITOPS_MANAGE:      'c234e567-8901-4c1d-8706-933e08544e41',
   AUDIT_TRAIL_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
   // Added by 0086. The first WRITE grant Operator has ever held, and it is a write to a queue
@@ -108,8 +110,6 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
-  // `device_nameplate` is keyed by the device id, so a nameplate approval also belongs to that
-  // device's own history (the entity trail in api.js unions the two).
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
   // The backup lane (0101): the act and the artefact, both filed under security by
@@ -145,7 +145,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
 );
 
 /**
- * Every tab id the router will accept. This list and `TABS` in App.jsx must agree:
+ * Every tab id the router will accept. This list and `TABS` in navigation.jsx must agree:
  * `handleNavClick` returns early on an id that is not here, so a tab declared there and forgotten
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */

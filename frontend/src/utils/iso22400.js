@@ -29,9 +29,6 @@ export function kpiByName(vocabulary, name) {
   return (vocabulary || []).find(k => k?.name === name) || null
 }
 
-/** The KPI names, for a picker. */
-export const kpiNames = (vocabulary) => kpis(vocabulary).map(k => k.name)
-
 /** The vocabulary arranged into browsable sections, one per KPI family. */
 export function iso22400Sections(vocabulary) {
   const buckets = new Map()

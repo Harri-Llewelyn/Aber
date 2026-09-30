@@ -223,7 +223,6 @@ describe('usePermissions hook', () => {
       expect(result.current.userRole).toBeNull()
     })
 
-    expect(result.current.userPerms.length).toBe(0)
     expect(result.current.hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.QUARANTINE_APPROVE)).toBe(false)
   })

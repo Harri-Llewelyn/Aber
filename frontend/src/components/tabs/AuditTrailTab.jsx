@@ -69,7 +69,7 @@ const ENTITY_KIND = ENTITY_KIND_BY_TABLE
  * `auth.users` row the RPC cannot probe, so the server can never hide one and the page must not
  * claim a deletion it cannot act on. An unnameable person falls back to a shortened id, unflagged.
  */
-export const DELETABLE_KINDS = new Set(
+const DELETABLE_KINDS = new Set(
   ['AREA', 'CELL', 'GATEWAY', 'DEVICE', 'SCHEMA', 'NAMEPLATE']
 )
 

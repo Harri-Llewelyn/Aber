@@ -155,9 +155,8 @@ export function brokerStateExplanation(state) {
 }
 
 /**
- * Which action, if any, this gateway offers, mirroring GatewaysTab's own conditions: a remote
- * gateway gets a bundle, a host-run one gets a mint, an archived one neither. `deployment` is the
- * axis.
+ * Which credential action, if any, the Access Control page offers this gateway: a remote gateway
+ * gets a bundle, a host-run one gets a mint, an archived one neither. `deployment` is the axis.
  */
 export function credentialAction(gateway) {
   if (!gateway || gateway.is_archived) return null;
