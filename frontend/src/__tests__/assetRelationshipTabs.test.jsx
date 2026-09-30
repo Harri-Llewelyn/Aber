@@ -20,7 +20,7 @@ const gateway = {
   gateway_id: 'gw-1',
   gateway_name: 'Host_Gateway_NodeRED',
   cell_id: 'cell-1',
-  // NOT NULL DEFAULT 'cell' (archived migration 0036), so every real payload carries it. Host and
+  // NOT NULL DEFAULT 'cell' (archived migration 20260101000036_device_location), so every real payload carries it. Host and
   // site-wide are independent: this fixture is a host-run gateway that has been given a cell.
   location_scope: 'cell',
   status: 'ONLINE',
@@ -219,8 +219,8 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
   })
 })
 
-// Paging a fleet-wide stream has no equivalent in the per-device drawer, which shows the latest
-// value per metric and defers history to the CSV export. See deviceTelemetryAccordion.test.jsx.
+// Paging a fleet-wide stream has no equivalent in the per-device telemetry modal, which shows the
+// latest value per metric and defers history to the CSV export. See telemetryModal.test.jsx.
 
 // Site Map -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
 // the cell id, and Cells consumes it the way Gateways and Devices consume theirs.

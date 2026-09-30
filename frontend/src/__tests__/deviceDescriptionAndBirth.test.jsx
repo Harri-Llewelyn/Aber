@@ -71,7 +71,7 @@ describe('a device description', () => {
   it('is sent by the create form', async () => {
     await show([device()])
     fireEvent.click(screen.getByRole('button', { name: /New Device/i }))
-    fireEvent.change(screen.getByPlaceholderText(/Sim_CNC_Mill_01/), { target: { value: 'Lathe_02' } })
+    fireEvent.change(screen.getByPlaceholderText(/CNC Mill 01/), { target: { value: 'Lathe_02' } })
     fireEvent.change(screen.getByPlaceholderText(/Spindle rebuilt 2026-03/), { target: { value: 'Second lathe' } })
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
 

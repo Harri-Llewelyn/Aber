@@ -84,7 +84,7 @@ describe('the Schema Conformance control', () => {
   })
 
   it('defaults to audit for a device that has never been set', async () => {
-    // A row cached or created before 0050 has no such key. Absent must read as audit, which is
+    // A row cached or created before archived migration 0050_device_conformance_policy has no such key. Absent must read as audit, which is
     // what the column defaults to, rather than rendering blank and saving something else.
     const d = device({ schema_id: SCHEMA_UUID })
     delete d.conformance_policy
@@ -97,7 +97,7 @@ describe('the Schema Conformance control', () => {
     // A device being created has no schema attached, so the choice could not do anything, and the
     // column defaults server-side. Offering it would be a control that decides nothing.
     await show([device()])
-    fireEvent.click(screen.getByText(/Register Device|Add Device|New Device/i))
+    fireEvent.click(screen.getByText(/New Device/))
     expect(policySelect()).toBeUndefined()
   })
 

@@ -58,19 +58,21 @@ const asManager = () => true
 
 const show = async (hasPermission, rows = [device()], proposals = []) => {
   api.get.mockImplementation(routeGet(rows, proposals))
-  const onPropose = vi.fn()
   const onViewApprovals = vi.fn()
   render(
     <DevicesTab
       showToast={vi.fn()}
       onSelectDevice={vi.fn()}
       hasPermission={hasPermission}
-      onPropose={onPropose}
       onViewApprovals={onViewApprovals}
     />
   )
+  // The roster opens on Active, so a fixture holding an archived row asks for All first.
+  if (rows.some(r => r.is_archived)) {
+    fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+  }
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-  return { onPropose, onViewApprovals }
+  return { onViewApprovals }
 }
 
 const openPanel = (name = 'CNC_01') => {
@@ -119,8 +121,8 @@ describe('proposing a change from a device', () => {
   })
 
   it('does not offer it on an archived device, which cannot be proposed against', async () => {
-    // 0086 refuses a proposal against an archived device outright, so the button would lead to a
-    // form that fails on submit.
+    // Archived migration 0086_a_change_can_be_proposed_before_it_is_made refuses a proposal against
+    // an archived device outright, so the button would lead to a form that fails on submit.
     await show(asOperator, [device({ is_archived: true })])
     expect(panelLabels()).not.toContain('Propose a Change')
   })
@@ -205,8 +207,9 @@ describe('proposing a change from a device', () => {
   })
 
   it('adds to the proposal already open rather than opening a second one', async () => {
-    // 0086 allows one open proposal per asset per person, so a second field has to extend the
-    // request that exists. Seeded with the earlier patch, or the new proposal would drop it.
+    // Archived migration 0086_a_change_can_be_proposed_before_it_is_made allows one open proposal
+    // per asset per person, so a second field has to extend the request that exists. Seeded with
+    // the earlier patch, or the new proposal would drop it.
     await show(asOperator, [device()], [proposal({ patch: { name: 'CNC_01_renamed' } })])
     openPanel()
     clickAction('Propose a Change')
