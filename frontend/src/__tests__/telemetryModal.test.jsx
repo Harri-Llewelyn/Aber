@@ -168,7 +168,7 @@ describe('telemetry CSV export dialog', () => {
   const DAY = 24 * 60 * 60 * 1000
 
   /**
-   * A stack on the default policies, as `telemetry_horizons` reports them: Dates, because that is
+   * A stack with a 90-day raw window, as `telemetry_horizons` reports it: Dates, because that is
    * what queryTelemetryHorizons parses the rows into before the dialog sees them.
    */
   const HORIZONS = {
