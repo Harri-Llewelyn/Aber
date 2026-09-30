@@ -6,6 +6,7 @@ import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { PageHeading } from '../common/PageHeading'
 import { SectionCount } from '../common/SectionCount'
+import { TabStrip } from '../common/TabStrip'
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -284,25 +285,18 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
         ) : (<>
           {/* One category at a time. The categories were stacked as titled cards, which made a page
               of thirty settings a scroll to find the one being changed. */}
-          <div
-            role="tablist"
-            aria-label="Settings category"
-            style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: 'var(--stack)' }}
-          >
-            {groups.map(group => (
-              <button
-                key={group.category}
-                role="tab"
-                aria-selected={group.category === activeCategory}
-                className={`btn btn-sm ${group.category === activeCategory ? 'btn-primary' : 'btn-ghost'}`}
-                // Choosing a category by hand ends the search's highlight: it has been seen.
-                onClick={() => { setCategory(group.category); setFoundKey('') }}
-                title={`${group.settings.length} setting${group.settings.length === 1 ? '' : 's'}`}
-              >
-                {group.category} <span className="section-count">{group.settings.length}</span>
-              </button>
-            ))}
-          </div>
+          <TabStrip
+            ariaLabel="Settings category"
+            value={activeCategory}
+            // Choosing a category by hand ends the search's highlight: it has been seen.
+            onChange={category => { setCategory(category); setFoundKey('') }}
+            tabs={groups.map(group => ({
+              id: group.category,
+              label: group.category,
+              count: group.settings.length,
+              title: `${group.settings.length} setting${group.settings.length === 1 ? '' : 's'}`,
+            }))}
+          />
 
           {activeGroup && (
             <div className="card settings-group" key={activeGroup.category}>

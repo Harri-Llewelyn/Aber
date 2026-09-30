@@ -48,8 +48,7 @@
   --cluster:      #a855f7;
   --cluster-bg:   rgba(168, 85, 247, 0.18);
   --cluster-text: #d8b4fe;
-  /* The monospace stack as a token, so `var(--font-mono, monospace)` resolves to JetBrains Mono
-     rather than the bare generic. Structural, so the light theme does not restate it. */
+  /* The monospace face, written once. Structural, so the light theme does not restate it. */
   --font-mono:    'JetBrains Mono', monospace;
   /* The interface face, written once. Structural, like --font-mono. */
   --font-display: 'Outfit', sans-serif;
@@ -450,7 +449,7 @@ html, body, #root {
   border: none;
   background: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 500;
   text-align: left;
@@ -544,7 +543,7 @@ html, body, #root {
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-muted);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   /* The scale's nav step, which is what the tab strip used. A rail has more room for a label than
      a bar did, so there is no reason for this to be the one navigation control that shrank. */
   font-size: 14px;
@@ -626,7 +625,7 @@ html, body, #root {
   background: none;
   outline: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
 }
 
@@ -688,7 +687,7 @@ html, body, #root {
   border: none;
   background: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 500;
   text-align: left;
@@ -783,6 +782,15 @@ html, body, #root {
   font-weight: 600;
   color: var(--text-primary);
 }
+
+/* A row of tab pills; see TabStrip. Wraps on a narrow window. */
+.tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tab-strip-page { margin-bottom: var(--stack); }
+.tab-strip-card { margin-left: auto; }
 
 .section-count {
   display: inline-flex;
@@ -1491,7 +1499,7 @@ td.row-actions, th.row-actions {
   padding: 9px 18px;
   border: none;
   border-radius: var(--radius-sm);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -1780,7 +1788,7 @@ td.row-actions, th.row-actions {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   transition: var(--transition);
   outline: none;
@@ -1921,7 +1929,7 @@ td.row-actions, th.row-actions {
 
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
 }
 
@@ -2708,7 +2716,7 @@ td.row-actions, th.row-actions {
   cursor: pointer;
   border: 1px solid transparent;
   background: none;
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   /* A fixed floor, so the bar does not resize as the count arrives, clears or crosses 9, and the
      account button beside it does not step sideways. */
   min-width: 34px;
@@ -3361,7 +3369,7 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 }
 
 .context-field-value.mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   /* Overrides `.mono`'s accent colour: in this panel a monospace value is a plain fact, not a
      link, and colouring every id would make the whole list read as actionable. */
@@ -3806,7 +3814,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The count, dim and monospaced beside the name; the label's own gap separates them. */
 .trail-section-count {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-dim);
 }
@@ -3863,7 +3871,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   font-size: 11px;
   font-weight: 600;
   color: var(--text-dim);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 /* A flag, not a heading: it costs the lane's name as little room as possible. */
@@ -3898,7 +3906,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   position: absolute;
   top: 6px;
   transform: translateX(-50%);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -3965,7 +3973,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   background: var(--cluster-bg);
   border: 1px solid var(--cluster);
   color: var(--cluster-text);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;
@@ -4218,14 +4226,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The property name is a label, not a value: muted, so the two values beside it are what the eye
    lands on. */
 .trail-diff-table tbody th {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
 }
 
 .trail-diff-table td {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   color: var(--text-primary);
 }
 
@@ -4261,14 +4269,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .trail-raw-body { margin-top: 8px; }
 
 .trail-raw-label {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
   margin-bottom: 3px;
 }
 
 .trail-raw-json {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   background: var(--bg-base);
@@ -4348,7 +4356,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 .setting-json {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   resize: vertical;
 }
@@ -4543,7 +4551,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 400;
   line-height: 1.5;
@@ -4633,7 +4641,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-muted);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 500;
   text-align: left;
@@ -4673,7 +4681,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   text-align: left;
   cursor: pointer;

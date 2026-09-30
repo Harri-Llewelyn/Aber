@@ -18,6 +18,7 @@ import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { PageHeading } from '../common/PageHeading'
 import { SectionCount } from '../common/SectionCount'
+import { TabStrip } from '../common/TabStrip'
 import { ContextPanel } from '../common/ContextPanel'
 import { formatDateTime } from '../../utils/format'
 import {
@@ -273,30 +274,15 @@ export function AccessControlTab({ showToast }) {
         {/* Two sections, one page: a gateway's credential and a machine identity are different
             questions with different actions, and interleaving their cards read as one long list.
             The heading above does not change with the tab, because the subject does not. */}
-        <div
-          role="tablist"
-          aria-label="Access Control section"
-          style={{ display: 'flex', gap: '8px', marginBottom: 'var(--stack)' }}
-        >
-          <button
-            role="tab"
-            aria-selected={section === 'gateways'}
-            className={`btn btn-sm ${section === 'gateways' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => { setSection('gateways'); setOpenRole(null) }}
-            title="Every gateway's broker credential, and any broker account no gateway claims"
-          >
-            Gateways
-          </button>
-          <button
-            role="tab"
-            aria-selected={section === 'services'}
-            className={`btn btn-sm ${section === 'services' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setSection('services')}
-            title="The stack's own identities: machine identities, broker accounts and broker roles"
-          >
-            Services
-          </button>
-        </div>
+        <TabStrip
+          ariaLabel="Access Control section"
+          value={section}
+          onChange={id => { setSection(id); if (id === 'gateways') setOpenRole(null) }}
+          tabs={[
+            { id: 'gateways', label: 'Gateways', title: "Every gateway's broker credential, and any broker account no gateway claims" },
+            { id: 'services', label: 'Services', title: "The stack's own identities: machine identities, broker accounts and broker roles" },
+          ]}
+        />
 
         {section === 'gateways' && (
         <div className="stack">

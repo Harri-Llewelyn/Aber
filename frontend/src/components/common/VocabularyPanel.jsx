@@ -3,6 +3,7 @@ import { IconChevronDown, IconChevronUp, IconCheck, IconBookOpen, IconFileCode }
 import { HelpTip } from './HelpTip'
 import { PageHeading } from './PageHeading'
 import { SectionCount } from './SectionCount'
+import { TabStrip } from './TabStrip'
 import { SearchInput } from './SearchInput'
 import { EmptyState } from './EmptyState'
 
@@ -74,30 +75,17 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
     {/* A segmented control rather than a dropdown so all four counts are visible at once. Above the
         card, not inside it: the heading names the page and this names which vocabulary is in it.
         The search text survives a switch, so one query asks every standard. */}
-    <div
-      role="tablist"
-      aria-label="Standard"
-      style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: 'var(--stack)' }}
-    >
-      {available.map(tab => {
-        const selected = tab.id === active.id
-        return (
-          <button
-            key={tab.id}
-            role="tab"
-            aria-selected={selected}
-            onClick={() => setActiveId(tab.id)}
-            className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-ghost'}`}
-            title={tab.hint || `Browse the ${tab.label} vocabulary`}
-          >
-            {tab.label}
-            <span className="section-count" style={{ marginLeft: '6px' }}>
-              {(tab.sections || []).reduce((n, s) => n + s.items.length, 0)}
-            </span>
-          </button>
-        )
-      })}
-    </div>
+    <TabStrip
+      ariaLabel="Standard"
+      value={active.id}
+      onChange={setActiveId}
+      tabs={available.map(tab => ({
+        id: tab.id,
+        label: tab.label,
+        count: (tab.sections || []).reduce((n, s) => n + s.items.length, 0),
+        title: tab.hint || `Browse the ${tab.label} vocabulary`,
+      }))}
+    />
 
     <div className="card">
       {/* The card names the standard on show; the page heading above it says what the page is. */}
