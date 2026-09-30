@@ -31,7 +31,7 @@ import { formatDateTime, formatRelative } from '../../utils/format'
  * renders through the `entity_type` fallback. The form for each kind is the entity's own Edit
  * Details dialog.
  */
-export const LANES = [
+export const KINDS = [
   { id: 'devices', label: 'Device details' },
   { id: 'device_nameplate', label: 'Device nameplate' },
   { id: 'areas', label: 'Area details' },
@@ -39,7 +39,7 @@ export const LANES = [
   { id: 'gateways', label: 'Gateway details' },
 ]
 
-const LANE_BY_ID = new Map(LANES.map(l => [l.id, l]))
+const KIND_BY_ID = new Map(KINDS.map(l => [l.id, l]))
 
 /**
  * A readable label for a proposable key. Presentation only, and it falls back rather than filters:
@@ -287,7 +287,7 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
         </thead>
         <tbody>
           {rows.map(p => {
-            const kind = LANE_BY_ID.get(p.entity_type)
+            const kind = KIND_BY_ID.get(p.entity_type)
             const diff = diffRows(p)
             const summary = p.entity_type === 'schemas'
               ? 'Publish this draft'
@@ -356,7 +356,7 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
         aria-label={`Filter ${label} by kind`}
       >
         <option value="all">All kinds ({rows.length})</option>
-        {LANES.map(l => (
+        {KINDS.map(l => (
           <option key={l.id} value={l.id}>
             {l.label} ({rows.filter(p => p.entity_type === l.id).length})
           </option>
@@ -624,7 +624,7 @@ export function ApprovalsTab({
         subtitle={selected && (
           <>
             <Badge size="sm">
-              {LANE_BY_ID.get(selected.entity_type)?.label || selected.entity_type}
+              {KIND_BY_ID.get(selected.entity_type)?.label || selected.entity_type}
             </Badge>
             <ProposalStatus status={selected.status} />
           </>

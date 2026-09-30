@@ -207,7 +207,7 @@ describe('the row and its drawer', () => {
 
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
-    expect(within(panel()).getByText(/Auto-purges on/)).toBeTruthy()
+    expect(within(panel()).getByText(/Auto-Purge: /)).toBeTruthy()
   })
 
   it('says permanent retention rather than falling silent when no timer is set', async () => {
@@ -216,7 +216,7 @@ describe('the row and its drawer', () => {
 
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
-    expect(within(panel()).getByText(/Permanent/)).toBeTruthy()
+    expect(within(panel()).getByText(/Never auto-purged/)).toBeTruthy()
   })
 
   it('shows no Retention field on a cell still in service', async () => {

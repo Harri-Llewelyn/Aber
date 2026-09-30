@@ -69,7 +69,7 @@ describe('what a form would change', () => {
        but a form that offered a box for one would be refused at the INSERT rather than here. */
     expect(Object.values(PROPOSAL_FORMS.area.fields).sort())
       .toEqual(['description', 'icon', 'name'])
-    expect(PROPOSAL_FORMS.area.lane).toBe('areas')
+    expect(PROPOSAL_FORMS.area.kind).toBe('areas')
     expect(PROPOSAL_FORMS.area.idField).toBe('area_id')
   })
 

@@ -229,7 +229,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 // Site Map -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
 // the cell id, and Cells consumes it the way Gateways and Devices consume theirs.
 describe('The Site Map hands a cell over to the Cells page', () => {
-  const area = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
+  const area = { area_id: 'area-1', area_name: 'North Shop', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
   const placedCell = { ...cell, area_id: 'area-1', plan_x: 0.4, plan_y: 0.6 }
   const routes = (path) => {
     if (path.startsWith('/api/v1/areas')) return Promise.resolve([area])
@@ -244,7 +244,7 @@ describe('The Site Map hands a cell over to the Cells page', () => {
   )
 
   const openPanel = async () => {
-    fireEvent.click(await screen.findByRole('button', { name: 'Building A' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'North Shop' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Assembly Line 1' }))
     return screen.findByRole('button', { name: /Open on Cells page/ })
   }

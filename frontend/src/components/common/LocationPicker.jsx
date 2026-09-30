@@ -75,7 +75,7 @@ export function LocationPicker({
 
       {scope === SCOPE_CELL && (
         <select
-          id={`${idPrefix}-cell-zone`}
+          id={`${idPrefix}-cell`}
           className="form-control"
           value={disabled ? '' : (form.cell_id || '')}
           disabled={disabled}

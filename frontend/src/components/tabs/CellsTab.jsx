@@ -693,8 +693,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           selectedCell.is_archived && {
             label: 'Retention',
             value: selectedCell.auto_delete_at
-              ? `Auto-purges on ${new Date(selectedCell.auto_delete_at).toLocaleDateString()}`
-              : 'Permanent — no auto-purge scheduled',
+              ? `Auto-Purge: ${new Date(selectedCell.auto_delete_at).toLocaleDateString()}`
+              : 'Never auto-purged',
             full: true,
             title: 'What happens to this archived cell and when'
           },

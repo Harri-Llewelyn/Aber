@@ -18,7 +18,7 @@ export const CREDENTIAL_STATES = {
 const LABELS = {
   [CREDENTIAL_STATES.REVOKED]: 'Revoked',
   [CREDENTIAL_STATES.ISSUED]: 'Issued',
-  [CREDENTIAL_STATES.AWAITING_ENROLMENT]: 'Bundle outstanding',
+  [CREDENTIAL_STATES.AWAITING_ENROLMENT]: 'Setup outstanding',
   [CREDENTIAL_STATES.UNRECORDED]: 'No platform record',
 };
 

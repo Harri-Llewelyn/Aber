@@ -21,7 +21,7 @@ Who and what may reach this platform, and with which credential, for the machine
 - **WITHDRAWN** -- the machine identity was taken out of use. The API refuses every token that names it, including tokens issued afterwards.
 - **REVOKED** -- a token, or a gateway's broker credential, was revoked. A revoked broker credential is disabled at the broker, and its next connection is refused.
 - **No platform record** -- the broker may hold an account that the platform never recorded issuing, usually one made on the host by a script. It is worth looking at, because it means a change was made somewhere the platform did not see.
-- **Bundle outstanding** -- a bundle was generated for a Remote gateway and the appliance has not used it yet.
+- **Setup outstanding** -- setup was started for a Remote gateway (an install command or a bundle) and the appliance has not used it yet.
 - **Active**, **Disabled**, **No account** and **Not read** are what the **Broker** column says about the account itself. **Not read** means the broker could not be reached, which is a fact about this page load and not about the account.
 - **ARCHIVED** -- decommissioned deliberately, and retained so that history still resolves.
 

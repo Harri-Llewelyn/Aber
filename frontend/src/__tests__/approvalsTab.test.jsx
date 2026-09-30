@@ -7,7 +7,7 @@ import {
   canDecide,
   diffRows,
   keyLabel,
-  LANES,
+  KINDS,
   filterProposals,
   locationNameMap
 } from '../components/tabs/ApprovalsTab'
@@ -116,7 +116,7 @@ describe('who may decide which lane', () => {
   })
 
   it('lets an administrator decide every live lane', () => {
-    for (const lane of LANES.map(l => l.id)) {
+    for (const lane of KINDS.map(l => l.id)) {
       expect(canDecide(lane, 'Administrator'), lane).toBe(true)
     }
   })
@@ -124,13 +124,13 @@ describe('who may decide which lane', () => {
   it('lets a manager decide every live lane too', () => {
     // Cells and gateways resolve cell:manage and gateway:manage, held by exactly these two roles,
     // so the answer is the same for both today.
-    for (const lane of LANES.map(l => l.id)) {
+    for (const lane of KINDS.map(l => l.id)) {
       expect(canDecide(lane, 'Shopfloor_Manager'), lane).toBe(true)
     }
   })
 
   it('lets an operator decide nothing', () => {
-    for (const lane of [...LANES.map(l => l.id), 'schemas']) {
+    for (const lane of [...KINDS.map(l => l.id), 'schemas']) {
       expect(canDecide(lane, 'Operator')).toBe(false)
     }
   })
@@ -434,7 +434,7 @@ describe('following an approval into the Audit Trail', () => {
   })
 
   it('maps every lane to the kind whose filter asks for that lane', () => {
-    for (const { id } of LANES) {
+    for (const { id } of KINDS) {
       expect(ENTITY_TABLE_BY_KIND[ENTITY_KIND_BY_TABLE[id]], id).toBe(id)
     }
   })

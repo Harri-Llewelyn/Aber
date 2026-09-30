@@ -259,7 +259,7 @@ describe('AccessControlTab', () => {
     expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
     const filter = screen.getByLabelText('Filter gateways by credential state')
     expect(within(filter).getByText('Active (2)')).toBeTruthy()
-    expect(within(filter).getByText('Bundle outstanding (1)')).toBeTruthy()
+    expect(within(filter).getByText('Setup outstanding (1)')).toBeTruthy()
     expect(within(filter).getByText('No platform record (1)')).toBeTruthy()
 
     fireEvent.change(filter, { target: { value: 'awaiting-enrolment' } })

@@ -195,7 +195,7 @@ describe('the Type control', () => {
  */
 describe('the Location control', () => {
 
-  const cellSelect = () => document.querySelector('#gateway-cell-zone')
+  const cellSelect = () => document.querySelector('#gateway-cell')
 
   it('reports no cell for a simulated gateway, whatever scope is stored', async () => {
     // Simulated gateways must agree with each other about their location, since the Simulated lane
