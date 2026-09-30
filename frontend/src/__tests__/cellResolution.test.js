@@ -23,8 +23,8 @@ import {
 } from '../utils/cellResolution';
 
 /**
- * These mirror the DO probe at the end of supabase/migrations/0001_baseline_schema.sql case for
- * case, so a drift between public.device_locations and this module fails somewhere.
+ * These mirror how public.device_locations (supabase/migrations/0001_baseline_schema.sql) resolves a
+ * device, case for case, so a drift between the view and this module fails somewhere.
  */
 
 const CELL_A = 'aaaaaaaa-0000-4000-8000-000000000000';

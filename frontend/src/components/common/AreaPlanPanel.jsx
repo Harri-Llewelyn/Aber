@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react'
 import { api } from '../../api'
 import { AREA_PLAN_MAX_BYTES, isSvgFile } from '../../utils/areaPlans'
 import { HelpTip } from './HelpTip'
+import { plural } from '../../utils/format'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { IconUpload, IconImage, IconTrash } from './Icons'
 
@@ -18,7 +19,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
   const fileInput = useRef(null)
 
   const placed = (cells || []).filter(c => c.plan_x !== null && c.plan_x !== undefined && !c.is_archived).length
-  const placedLine = `${placed} cell${placed === 1 ? '' : 's'} placed on it`
+  const placedLine = `${plural(placed, 'cell')} placed on it`
   const limitMiB = Math.round(AREA_PLAN_MAX_BYTES / 1048576)
 
   const upload = async (file) => {

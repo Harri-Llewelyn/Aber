@@ -5,7 +5,7 @@ import {
 } from '../components/common/Icons'
 
 /**
- * The area icon registry. Mirrors the `areas_icon_valid` CHECK constraint (0097) the way
+ * The area icon registry. Mirrors the `areas_icon_valid` CHECK constraint (0001_baseline_schema.sql) the way
  * utils/cellIcon.jsx mirrors `cells_icon_valid`: the database stores a key, only a bundled component
  * can render it, and adding one is two edits. `label` names what the area is for.
  */

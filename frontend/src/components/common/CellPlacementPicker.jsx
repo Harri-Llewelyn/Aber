@@ -57,7 +57,7 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
       </AreaPlan>
       <div className="area-plan-placement-footer">
         <span style={{ fontSize: '11px', color: refusal ? 'var(--danger)' : 'var(--text-muted)' }} role={refusal ? 'alert' : undefined}>
-          {refusal || (value ? `Placed ${formatPlace({ plan_x: value.x, plan_y: value.y })}.` : 'Not placed — the cell is listed beside the plan until it is.')}
+          {refusal || (value ? `Placed ${formatPlace({ plan_x: value.x, plan_y: value.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.')}
         </span>
         {value && !disabled && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRefusal(null); onChange?.(null) }} title="Take the cell off the plan; it stays in the area">

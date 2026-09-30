@@ -152,16 +152,13 @@ describe('Model3DUploader', () => {
     expect(screen.getByText(/anyone with the link can read it/i)).toBeInTheDocument()
   })
 
-  /* Getting the file out: a Download button beside Replace and Remove, not a small link beside the
-     file size. */
+  // Download is a button beside Replace and Remove.
   describe('downloading the attached model', () => {
     it('offers Download as a button rather than a label beside the size', async () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
       expect(screen.getByTitle(/Download this model file/i)).toBeInTheDocument()
-      // The old affordance is gone, not merely demoted -- two ways to fetch the same file, one of
-      // them 11px, is the state being fixed.
       expect(screen.queryByText(/^Open$/)).not.toBeInTheDocument()
     })
 
@@ -177,7 +174,7 @@ describe('Model3DUploader', () => {
     })
 
     it('is the first of the three controls', async () => {
-      // The issue asks for it first and visually strongest, because it is the one most used.
+      // First and strongest: it is the control most used.
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 

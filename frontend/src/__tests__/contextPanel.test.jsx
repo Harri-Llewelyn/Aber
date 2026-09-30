@@ -150,7 +150,7 @@ describe('ContextPanel component', () => {
         {...baseProps}
         open
         onClose={vi.fn()}
-        fields={[{ label: 'Cell Zone', value: null }]}
+        fields={[{ label: 'Cell', value: null }]}
       />
     )
     expect(screen.getByText('Not set')).toBeTruthy()
@@ -585,7 +585,7 @@ describe('Links accordion no longer duplicates the panel action', () => {
 
     // The label carries the online/total figure because the value beneath it is a list of chips.
     // Still one count, so the match is anchored rather than exact.
-    expect(within(panel()).getByText(/^Located Devices\b/)).toBeTruthy()
+    expect(within(panel()).getByText(/^Devices\b/)).toBeTruthy()
     expect(within(panel()).queryByText(/Directly Assigned Devices/i)).toBeNull()
     expect(within(panel()).queryByText(/Explicitly Filed Here/i)).toBeNull()
   })
@@ -675,7 +675,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
     const headers = [...cellsTable().querySelectorAll('thead th')].map(h => h.textContent.trim())
     // The icon column's header is a screen-reader label, so it reads as a word here and as an
     // empty cell on screen.
-    expect(headers).toEqual(['Icon', 'Cell Name', 'Area', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
+    expect(headers).toEqual(['Icon', 'Cell Name', 'Area', 'Cell UUID', 'Assigned Gateways', 'Devices'])
     expect(headers).not.toContain('Actions')
     expect(within(cellsTable()).queryByRole('button', { name: /Telemetry/i })).toBeNull()
   })
@@ -699,15 +699,15 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
     await waitFor(() => expect(screen.getByText('TEST2')).toBeInTheDocument())
 
     const emptyRow = within(cellsTable()).getByText('TEST2').closest('tr')
-    expect(within(emptyRow).getByText('empty')).toBeTruthy()
+    expect(within(emptyRow).getByText('Empty')).toBeTruthy()
     expect(within(emptyRow).getByText('No gateways assigned')).toBeTruthy()
-    expect(within(emptyRow).getByText('No devices located here')).toBeTruthy()
+    expect(within(emptyRow).getByText('No devices here')).toBeTruthy()
     // Still selectable, and still opens the drawer.
     expect(emptyRow.className).toMatch(/row-selectable/)
 
     // The populated row is untouched.
     const fullRow = within(cellsTable()).getByText('Assembly Line 1').closest('tr')
-    expect(within(fullRow).queryByText('empty')).toBeNull()
+    expect(within(fullRow).queryByText('Empty')).toBeNull()
   })
 
   it('drops the per-cell card layout from the stylesheet with the cards', async () => {

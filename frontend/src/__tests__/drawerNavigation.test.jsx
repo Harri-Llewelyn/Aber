@@ -127,9 +127,9 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
       onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await openRow('Assembly Line 1')
 
-    // "how big is this zone and is it healthy" is answered at a glance by a figure and slowly by
+    // "how big is this cell and is it healthy" is answered at a glance by a figure and slowly by
     // counting chips, so the label keeps it.
-    expect(within(panel()).getByText(/Located Devices \(1\/1 online\)/)).toBeTruthy()
+    expect(within(panel()).getByText(/Devices \(1\/1 online\)/)).toBeTruthy()
   })
 
   it('gateway drawer -> device chip hands over the device id', async () => {

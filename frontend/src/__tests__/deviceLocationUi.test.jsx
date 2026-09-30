@@ -46,7 +46,7 @@ const device = (overrides = {}) => ({
 const GATEWAYS = [
   { gateway_id: 'gw-1', gateway_name: 'Line_A_Gateway', sparkplug_id: 'gwy-1-sparkplug', cell_id: CELL_1, location_scope: 'cell', status: 'ONLINE', is_archived: false, devices: [] },
   { gateway_id: 'gw-host', gateway_name: 'Host_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] },
-  // `gateways_synthetic_has_no_cell` (archived migration 0059_simulated_and_shadow_lanes) forbids a cell here, so cell_id is null by constraint
+  // `gateways_synthetic_has_no_cell` (0001_baseline_schema.sql) forbids a cell here, so cell_id is null by constraint
   // rather than by omission -- the fixture cannot be written any other way.
   { gateway_id: 'gw-sim', gateway_name: 'Sim_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', is_simulated: true, status: 'ONLINE', is_archived: false, devices: [] }
 ]
@@ -392,8 +392,6 @@ describe('the Sparkplug topic in the context panel', () => {
   })
 
   it('no longer duplicates the identifiers inside the edit dialog', async () => {
-    // The removal itself, asserted -- otherwise the three blocks could drift back in and only the
-    // absence of a test would notice.
     await show([device()])
     openEdit()
     const modal = document.querySelector('.modal')
@@ -610,9 +608,8 @@ describe('the actions a shadow device does not offer', () => {
     expect(panel.queryByText('Attached Links')).toBeNull()
   })
 
-  it('still offers the AAS exports, which archived migration 0060_playback_gateway_and_shadow_devices designed for', async () => {
-    /* Deliberately kept: a shadow exports without a Nameplate submodel, which produces a shell with
-       no asset identity to collide with. */
+  it('still offers the AAS exports on a replay lane', async () => {
+    // A replay lane exports without a Nameplate submodel: a shell with no asset identity.
     const panel = await openShadowPanel()
     expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
   })

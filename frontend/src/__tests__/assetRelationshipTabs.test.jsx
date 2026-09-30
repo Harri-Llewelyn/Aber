@@ -111,7 +111,7 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    expect(screen.queryByText(/not linked to any cell zone/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not linked to any cell/i)).not.toBeInTheDocument()
   })
 
   it('flags devices that belong to no cell instead of hiding them', async () => {
@@ -122,8 +122,12 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
 
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
-    await waitFor(() => expect(screen.getByText(/1 device not linked to any cell zone/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/1 device not linked to any cell/i)).toBeInTheDocument())
     expect(screen.getByText(/Orphan_CNC/)).toBeInTheDocument()
+    // The banner offers both ways out of a wide scope.
+    const banner = screen.getByText(/1 device not linked to any cell/i).closest('.callout-page')
+    expect(banner).toHaveClass('callout', 'callout-warning')
+    expect(banner).toHaveTextContent(/Site-Wide or Area-Wide/)
   })
 })
 
@@ -303,7 +307,7 @@ describe('CellsTab consumes a handed-over cell filter', () => {
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.change(screen.getByPlaceholderText(/Search by Cell ID or name/), { target: { value: 'Weld' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search by Cell UUID or name/), { target: { value: 'Weld' } })
 
     expect(screen.getByText('Weld Bay 2')).toBeInTheDocument()
     expect(screen.queryByText('Assembly Line 1')).not.toBeInTheDocument()

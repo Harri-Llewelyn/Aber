@@ -49,10 +49,11 @@ export const PAGE_KEYWORDS = {
 export const CARDS = [
   { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
   { id: 'site-wide-lane',       label: 'Site-Wide',            tab: 'site-map',       keywords: ['no cell', 'bms', 'agv', 'unassigned lane'] },
+  { id: 'simulated-lane',       label: 'Simulated',            tab: 'site-map',       keywords: ['no cell', 'simulator', 'synthetic', 'generated'] },
   { id: 'unassigned-lane',      label: 'Unassigned',           tab: 'site-map',       keywords: ['no cell', 'orphan', 'unplaced'] },
 
   { id: 'area-list',            label: 'Areas',                tab: 'areas',          keywords: ['buildings', 'unfiled cells', 'area list'] },
-  { id: 'shopfloor-cells',      label: 'Shopfloor Cells',      tab: 'cells',          keywords: ['cell list', 'zones'] },
+  { id: 'shopfloor-cells',      label: 'Cells',                tab: 'cells',          keywords: ['cell list', 'zones'] },
   { id: 'edge-gateways',        label: 'Gateways',             tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
   /* No 'Archived Entities' card: it would add no keyword the page entry does not have. */
