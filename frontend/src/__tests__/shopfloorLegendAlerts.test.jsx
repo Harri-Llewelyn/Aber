@@ -66,11 +66,8 @@ const renderMap = ({ devices = [], activeAlerts = [] } = {}) => {
   )
 }
 
-/** The one cell's pin, once the map has loaded and the area is open. */
-const pin = async () => {
-  fireEvent.click(await screen.findByRole('button', { name: 'Building A' }))
-  return screen.findByRole('button', { name: 'Assembly Line 1' })
-}
+/** The one cell's pin, once the map has loaded. */
+const pin = () => screen.findByRole('button', { name: 'Assembly Line 1' })
 
 /** The chip for the one device in the fixture, in the panel the pin opens. */
 const chip = async () => {
@@ -131,7 +128,7 @@ describe('shopfloor legend categories', () => {
     await waitFor(() => expect(screen.getAllByText('Building A').length).toBeGreaterThan(0))
     const entry = screen.getByTitle(/Alert firing/)
 
-    // The dashboard withdrew its own threshold evaluation; this red RELAYS Grafana's verdict.
+    // The colour relays Grafana's verdict; the map evaluates no threshold of its own.
     expect(entry.getAttribute('title')).toMatch(/Grafana/)
   })
 })
@@ -172,7 +169,7 @@ describe('alerting device chip', () => {
 
     const el = await chip()
     // Both halves: the colour the legend promises, and a mark that survives without it.
-    expect(el).toHaveTextContent('WARN')
+    expect(el).toHaveTextContent('WARNING')
     expect(screen.getByText(/Alerts firing \(1\)/)).toBeInTheDocument()
     expect(screen.getByText('Thermal Excursion')).toBeInTheDocument()
   })
@@ -195,5 +192,42 @@ describe('alerting device chip', () => {
     const el = await chip()
     expect(el).not.toHaveTextContent(/ALARM|WARN/)
     expect(screen.queryByText(/Alerts firing/)).toBeNull()
+  })
+})
+
+// The drawers' badges
+
+describe('drawer badges', () => {
+  const badge = (text) => screen.getByText(text, { selector: '.badge' })
+
+  it('shows one alert tone in the area and cell drawers: warning, or danger when critical', async () => {
+    renderMap({ devices: [device()], activeAlerts: [alert()] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Building A' }))
+    expect(badge('Alert firing')).toHaveClass('badge-warning')
+    fireEvent.click(await pin())
+    expect(badge('Alert firing')).toHaveClass('badge-warning')
+  })
+
+  it('shows danger in both drawers for a critical alert', async () => {
+    renderMap({ devices: [device()], activeAlerts: [alert({ severity: 'critical' })] })
+    fireEvent.click(await screen.findByRole('button', { name: 'Building A' }))
+    expect(badge('Alert firing')).toHaveClass('badge-danger')
+    fireEvent.click(await pin())
+    expect(badge('Alert firing')).toHaveClass('badge-danger')
+  })
+
+  it('spells the counts out', async () => {
+    renderMap({ devices: [device()] })
+    fireEvent.click(await pin())
+    expect(badge('0 Gateways · 1 Device')).toBeInTheDocument()
+  })
+})
+
+describe('loading', () => {
+  it('shows the card and its header while the lists load', () => {
+    api.get.mockImplementation(() => new Promise(() => {}))
+    render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} />)
+    expect(screen.getByRole('heading', { name: /Site Map/ })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading site map…')
   })
 })

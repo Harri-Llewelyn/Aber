@@ -2068,39 +2068,7 @@ td.row-actions, th.row-actions {
 }
 
 /* ===== Site Map: area plans and lanes ===== */
-.shopfloor-map-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  box-shadow: var(--shadow);
-  margin-bottom: var(--stack);
-}
-
-.shopfloor-map-bg {
-  padding: 14px 16px 16px;
-}
-
-.shopfloor-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.shopfloor-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
+/* The map sits in a plain .card; only its legend, hierarchy, lanes and area cards are its own. */
 .shopfloor-legend {
   display: flex;
   align-items: center;
@@ -2109,6 +2077,8 @@ td.row-actions, th.row-actions {
   font-size: 11px;
   color: var(--text-muted);
 }
+
+.shopfloor-legend > span { display: flex; align-items: center; gap: 5px; }
 
 /* The rungs above the map: enterprise, then site. Small caps for the level, the name beside it. */
 .site-hierarchy {

@@ -9,6 +9,10 @@ import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewayFleetCounts } from '../../utils/fleetCounts'
 import { useSetting } from '../../hooks/useSettings'
 import { HelpTip } from '../common/HelpTip'
+import { Badge, ArchivedBadge } from '../common/Badge'
+import { LoadingState } from '../common/LoadingState'
+import { EmptyState } from '../common/EmptyState'
+import { plural } from '../../utils/format'
 import { ContextPanel } from '../common/ContextPanel'
 import { AreaPlan, AreaPlanPin } from '../common/AreaPlan'
 import {
@@ -40,14 +44,6 @@ import {
   IconRadio,
   IconCpu
 } from '../common/Icons'
-
-/**
- * `0 Cells`, `1 Gateway`, `2 Devices`. The lane and area counts read as words in the order a
- * person says them, rather than as an abbreviation before a bare number: `GW 1` invites reading
- * the 1 as an identifier, and mixing `cells` with `GW`/`Dev` made one line say the same kind of
- * thing three different ways. The title attributes beside each already spelled the nouns out.
- */
-const counted = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
 /**
  * How wide the grid runs and how big a pin is drawn on it: one area takes the width, two split it,
@@ -134,8 +130,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const alerts = useMemo(() => alertIndex(activeAlerts), [activeAlerts])
 
   // The derived lanes that belong to no area. None is a row in `cells`: Unassigned is the absence
-  // of a decision, Site-Wide an assertion, Simulated a fact about the gateway. Shadow is not here:
-  // a replay is not now.
+  // of a decision, Site-Wide an assertion, Simulated a fact about the gateway. Replay lanes are not
+  // here: a replay is not now.
   const laneDevices = useMemo(() => ({
     [SOURCE_UNASSIGNED]: assets.filter(a => a.location_source === SOURCE_UNASSIGNED),
     [SOURCE_SITE_WIDE]: assets.filter(a => a.location_source === SOURCE_SITE_WIDE),
@@ -192,12 +188,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         {!isArch && alert && (
           <span
             className="chip-flag"
-            style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+            style={{ color: 'var(--danger-text)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
             title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
           >
             {alert.severity === 'critical'
               ? <><IconAlertCircle size={10} /> ALARM</>
-              : <><IconAlertTriangle size={10} /> WARN</>}
+              : <><IconAlertTriangle size={10} /> WARNING</>}
           </span>
         )}
       </span>
@@ -225,7 +221,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                   : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
                     : 'badge-danger'}`} />}
         <span className="chip-name mono">{g.gateway_name}</span>
-        {g.deployment === 'host' && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Runs on this host"><IconZap size={9} /></span>}
+        {g.deployment === 'host' && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} title="Runs on this host"><IconZap size={9} /></span>}
         {isGwArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
       </span>
     )
@@ -260,7 +256,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       icon: IconMap,
       className: 'site-lane-site',
       matchGateway: (g) => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_SITE_WIDE,
-      empty: 'No site-wide assets.',
+      empty: 'No Site-Wide assets.',
       hint: 'A permanent home, not a queue. Campus-wide and mobile assets live here rather than being filed in an arbitrary bay. Set on the Devices and Gateways pages.'
     },
     {
@@ -269,7 +265,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       icon: IconBot,
       className: 'site-lane-simulated',
       matchGateway: (g) => !g.is_shadow && g.is_simulated,
-      empty: 'No Simulated Assets.',
+      empty: 'No simulated assets.',
       hint: 'Telemetry generated rather than observed — a simulator, or a broker playback target. Set on the gateway; its devices inherit it and cannot be filed into a cell.'
     },
     {
@@ -277,14 +273,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       title: 'Unassigned',
       icon: IconShieldAlert,
       className: 'site-lane-queue',
-      // Synthetic gateways are excluded: `gateways_synthetic_has_no_cell` refuses every fix.
-      // A WIDE SCOPE IS AN ANSWER, NOT AN ABSENCE. Area-Wide and Site-Wide both store no cell --
-      // `gateways_area_wide_has_no_cell` and `gateways_site_wide_has_no_cell` require it -- so a
-      // bare `!g.cell_id` reads a filed gateway as an unfiled one. An Area-Wide gateway is already
-      // listed under its own area by `areaWideOf()`, and this lane's own hint offers Area-Wide as a
-      // way OUT of the queue, so counting it here put it in two places and made the queue unclearable.
+      // Synthetic gateways are excluded: they cannot be given a cell. A wide scope is an answer, not
+      // an absence: Area-Wide and Site-Wide gateways store no cell, so a bare `!g.cell_id` would
+      // count a filed gateway here as well as under its area.
       matchGateway: (g) => !g.is_simulated && !g.is_shadow && !WIDE_SCOPES.has(g.location_scope) && !g.cell_id,
-      empty: 'No Unassigned Assets',
+      empty: 'No unassigned assets.',
       hint: 'A work queue, not a location: nobody has said where these are. File each on the Devices or Gateways page, or mark it Site-Wide or Area-Wide.',
       queue: true
     }
@@ -296,10 +289,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   }))
   const openLaneView = laneViews.find(v => v.lane.key === openLane) || null
 
-  if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading site map…</div>
-
   const gw = gatewayFleetCounts(gwList)
-  // The ISA-95 enterprise is the site's Sparkplug group, named at install. The gateways' own
+  // The ISA-95 enterprise is the `sparkplug.group_id` setting named at install. The gateways' own
   // groups answer only when the setting cannot be read; several are all named, and the playback
   // gateway is not a member of the plant.
   const enterprise = sparkplugGroup
@@ -346,9 +337,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const state = stateOf(devices)
     const AreaGlyph = areaIconComponent(ar.icon)
     const wideCount = wide.gateways.length + wide.devices.length
-    // Archived: drawn muted with its plan and its pins kept, as an archived cell's pin is. The
-    // cells are still filed here and the topics beneath it still carry its name, so taking the
-    // card away would misplace what is under it.
+    // Archived: drawn muted with its plan and its pins kept, as an archived cell's pin is.
     const archived = !!ar.is_archived
     return (
       <div
@@ -375,10 +364,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           >
             {ar.area_name}
           </button>
-          {archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
-          {/* What the area IS, for the areas that say. Only when there is one: a bare "?" on every
-              area without a description would be a question mark that answers nothing. The name's
-              own title carries the status, which is a different fact and changes on its own. */}
+          {archived && <ArchivedBadge size="sm" title="Archived: out of commission, its cells still filed here, its topics unchanged" />}
+          {/* The area's description, only when it has one. */}
           {ar.description && (
             <HelpTip
               label={`About ${ar.area_name}`}
@@ -386,24 +373,21 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               size={12}
             />
           )}
-          {/* The Area-Wide tally rides with the others rather than taking a line of its own under
-              the plan: it is a count, and the counts live here. It is a breakdown, not an addition
-              -- the gateway and device figures beside it already include these. */}
+          {/* The Area-Wide tally is a breakdown, not an addition: the gateway and device figures
+              beside it already include these. */}
           <span
             className="area-card-counts mono"
             title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s)`
               + (wideCount > 0 ? `, of which ${wideCount} belong(s) to the area rather than to a cell in it` : '')}
           >
-            {counted(areaCells.length, 'Cell')} · {counted(gateways.length, 'Gateway')} · {counted(devices.length, 'Device')}
+            {plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}
             {wideCount > 0 && <> · <span className="area-card-wide">{wideCount} Area-Wide</span></>}
           </span>
         </div>
         <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
           {areaCells.map(cellPin)}
         </AreaPlan>
-        {/* The one thing the counts cannot say: a cell filed here that the plan does not draw.
-            That is a job, not a tally, so it keeps its line -- and a card with everything placed
-            spends no space on it. */}
+        {/* A cell filed here that the plan does not draw: a job, not a tally, so it keeps its line. */}
         {unplaced.length > 0 && (
           <button
             type="button"
@@ -411,7 +395,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
             title={`Open ${ar.area_name} to see which cells have no place on the plan`}
           >
-            <span className="area-card-aside-warn">{counted(unplaced.length, 'cell')} not placed</span>
+            <span className="area-card-aside-warn">{plural(unplaced.length, 'cell')} not placed</span>
           </button>
         )}
       </div>
@@ -424,21 +408,23 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     ? cellDevicesOf(selectedCell).map(d => ({ device: d, alert: alertForDevice(alerts, d) })).filter(x => x.alert && !x.device.is_archived)
     : []
 
+  /** The status badge of a drawer's subtitle: an alert firing outranks the connectivity rollup. */
+  const stateBadge = (state, devices) => {
+    const critical = state.alert && devices.some(d => !d.is_archived && alertForDevice(alerts, d)?.severity === 'critical')
+    const tone = state.pin === 'alert' ? (critical ? 'danger' : 'warning') : state.status === 'normal' ? 'success' : 'neutral'
+    return <Badge tone={tone} size="sm" title={STATUS_LABEL[state.pin]}>{STATUS_WORD[state.pin]}</Badge>
+  }
+
   /** The panel's contents for the open lane: what it is, and its assets as chips. */
   const lanePanel = openLaneView ? (() => {
     const { lane, devices: laneAssets, gateways: laneGateways } = openLaneView
-    const status = stateOf(laneAssets).status
     return {
       type: 'LANE',
       title: lane.title,
       subtitle: (
         <>
-          <span className={`badge ${status === 'normal' ? 'badge-online' : 'badge-neutral'}`} style={{ fontSize: '11px' }} title={STATUS_LABEL[status]}>
-            {STATUS_WORD[status]}
-          </span>
-          <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-            GW: {laneGateways.length} · Dev: {laneAssets.length}
-          </span>
+          {stateBadge(stateOf(laneAssets), laneAssets)}
+          <Badge size="sm">{plural(laneGateways.length, 'Gateway')} · {plural(laneAssets.length, 'Device')}</Badge>
         </>
       ),
       fields: [
@@ -457,10 +443,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           title: 'Click one to open it on the Devices page'
         }
       ].filter(Boolean),
-      // Each action is offered only while the lane holds something to act on, as the cell panel
-      // offers Open Dashboard only to a cell that has one. An empty lane is a state to read, not a
-      // job: sending somebody to the Devices page to file nothing is a dead end wearing the
-      // clothes of a next step.
+      // Each action is offered only while the lane holds something to act on.
       actions: onNavigateTab ? [
         laneAssets.length > 0 && { label: 'Open Devices page', icon: <IconCpu size={13} />, onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
         laneGateways.length > 0 && { label: 'Open Gateways page', icon: <IconRadio size={13} />, onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
@@ -480,12 +463,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       title: selectedArea.area_name,
       subtitle: (
         <>
-          <span className={`badge ${state.pin === 'alert' ? 'badge-warning' : state.status === 'normal' ? 'badge-online' : 'badge-neutral'}`} style={{ fontSize: '11px' }} title={STATUS_LABEL[state.pin]}>
-            {STATUS_WORD[state.pin]}
-          </span>
-          <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-            {counted(areaCells.length, 'Cell')} · {counted(devices.length, 'Device')}
-          </span>
+          {stateBadge(state, devices)}
+          <Badge size="sm">{plural(areaCells.length, 'Cell')} · {plural(devices.length, 'Device')}</Badge>
         </>
       ),
       fields: [
@@ -528,17 +507,9 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     title: selectedCell?.cell_name || '',
     subtitle: selectedCell && (
       <>
-        <span
-          className={`badge ${selectedState.pin === 'alert' ? 'badge-warning' : selectedState.status === 'normal' ? 'badge-online' : 'badge-neutral'}`}
-          style={selectedState.pin === 'alert' ? { color: 'var(--danger)', borderColor: 'var(--danger)', background: 'rgba(255, 77, 109, 0.15)' } : { fontSize: '11px' }}
-          title={STATUS_LABEL[selectedState.pin]}
-        >
-          {STATUS_WORD[selectedState.pin]}
-        </span>
-        <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-          GW: {cellGatewaysOf(selectedCell).length} · Dev: {cellDevicesOf(selectedCell).length}
-        </span>
-        {selectedCell.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
+        {stateBadge(selectedState, cellDevicesOf(selectedCell))}
+        <Badge size="sm">{plural(cellGatewaysOf(selectedCell).length, 'Gateway')} · {plural(cellDevicesOf(selectedCell).length, 'Device')}</Badge>
+        {selectedCell.is_archived && <ArchivedBadge size="sm" />}
       </>
     ),
     fields: selectedCell ? [
@@ -560,7 +531,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {selectedAlerts.map(({ device, alert }) => (
               <div key={device.asset_id} style={{ fontSize: '12px' }}>
-                <strong style={{ color: 'var(--danger)' }}>{alert.alert_name}</strong> — {device.asset_name}{alert.summary ? `: ${alert.summary}` : ''}
+                <strong style={{ color: 'var(--danger-text)' }}>{alert.alert_name}</strong> — {device.asset_name}{alert.summary ? `: ${alert.summary}` : ''}
               </div>
             ))}
           </div>
@@ -600,7 +571,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                     <IconCpu size={11} />
                     <span className="chip-name">{d.asset_name}</span>
                     {!d.is_archived && alert && (
-                      <span className="chip-flag" style={{ color: 'var(--danger)' }}>{alert.severity === 'critical' ? 'ALARM' : 'WARN'}</span>
+                      <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>{alert.severity === 'critical' ? 'ALARM' : 'WARNING'}</span>
                     )}
                   </button>
                 )
@@ -631,107 +602,107 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   return (
     <div className="page-layout">
       <div className="page-main">
-        {/* ---- One card: the ladder, the lanes, then the plans ---- */}
-        <div className="shopfloor-map-card">
-          <div className="shopfloor-map-bg">
-            <div className="shopfloor-header">
-              <div className="shopfloor-title">
-                <IconMap size={18} />
-                <span>Site Map</span>
-                <HelpTip
-                  label="About the site map"
-                  text="Every area drawn as its plan, its cells pinned and coloured by device state. The lanes above hold what belongs to no area. Upload plans on the Areas page; place cells from the Cells page."
-                />
-              </div>
-              {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
-              <div className="shopfloor-legend">
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
-                {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
-                    for it while the dots roll up a whole tile. */}
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
-              </div>
+        {/* One card: the ladder, the lanes, then the plans. The page scrolls, not the card: it is a
+            map, not a list. */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="section-title">
+              Site Map
+              <HelpTip
+                label="About the site map"
+                text="Every area drawn as its plan, its cells pinned and coloured by device state. The lanes below hold what belongs to no area. Upload plans on the Areas page; place cells from the Cells page."
+              />
+            </h3>
+            {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
+            <div className="shopfloor-legend">
+              <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
+              <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
+              <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
+              {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
+                  for it while the dots roll up a whole tile. */}
+              <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
             </div>
+          </div>
 
-            {/* The rungs: enterprise, then site. */}
-            <div className="site-hierarchy" role="group" aria-label="Hierarchy">
-              <div className="site-hierarchy-level" title="The ISA-95 enterprise: the Sparkplug group the gateways publish under">
-                <span className="site-hierarchy-label">Enterprise</span>
-                {enterprise
-                  ? <span className="site-hierarchy-value">{enterprise}</span>
-                  : <span className="site-hierarchy-unset">Not known yet — it is the Sparkplug group of the first enrolled gateway. The Playback lane does not count</span>}
-              </div>
-              <IconChevronRight size={12} className="site-hierarchy-sep" aria-hidden="true" />
-              <div className="site-hierarchy-level" title="The ISA-95 site: this campus, named on the Settings page under Site">
-                <span className="site-hierarchy-label">Site</span>
-                {siteName
-                  ? <span className="site-hierarchy-value">{siteName}</span>
-                  : <span className="site-hierarchy-unset">Not set — name it on the Settings page under Site</span>}
-              </div>
-            </div>
-
-            {/* The lanes, three across, sharing the width; each opens into the panel. */}
-            <div className="site-lanes" role="group" aria-label="Campus lanes">
-              {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways }) => {
-                const open = openLane === lane.key
-                const status = stateOf(laneAssets).status
-                const LaneIcon = lane.icon
-                const holds = laneAssets.length + laneGateways.length > 0
-                return (
-                  <button
-                    key={lane.key}
-                    type="button"
-                    /* A lane wears its hue only while it holds something. An empty Unassigned
-                       queue is the good state, and an amber tile over 0 · 0 was a standing false
-                       alarm; an empty lane keeps its outline and drops the fill. */
-                    className={`site-lane ${lane.className}${holds ? '' : ' is-empty'}${open ? ' is-open' : ''}`}
-                    onClick={() => toggleLane(lane.key)}
-                    aria-pressed={open}
-                    title={`${lane.hint} ${open ? 'Click to close.' : 'Click to list its assets.'}`}
-                  >
-                    {/* No dot on an empty lane: grey next to zero says nothing, and its absence
-                        lets a lane that holds something stand out. */}
-                    {holds && <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />}
-                    <LaneIcon size={13} style={{ flexShrink: 0 }} />
-                    <span className="site-lane-name">{lane.title}</span>
-                    <span className="site-lane-counts mono" title={`${laneGateways.length} gateway(s), ${laneAssets.length} device(s)`}>
-                      {counted(laneGateways.length, 'Gateway')} · {counted(laneAssets.length, 'Device')}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {areas.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon"><IconMap size={36} /></div>
-                <div className="empty-text">
-                  {cells.length > 0
-                    ? 'No areas yet. Add one on the Areas page and file the cells into it; each area is drawn as its own plan here.'
-                    : laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
-                      ? 'No areas or cells configured — every asset resolves to one of the lanes above.'
-                      : gw.shadow > 0
-                        ? 'Nothing on the floor yet. The only gateway on this stack is the replay lane, which is not part of the fleet and is driven from the Capture page.'
-                        : 'No areas or cells configured. Add an area on the Areas page to start the map.'}
-                </div>
-              </div>
-            ) : (
+          <div className="card-body">
+            {loading ? <LoadingState label="site map" /> : (
               <>
-                <div className="shopfloor-grid" style={{ '--map-columns': columns, '--pin-size': `${PIN_SIZE[columns]}px` }}>
-                  {areas.map(areaCard)}
-                </div>
-                {unfiledCells.length > 0 && (
-                  <div className="site-map-tray">
-                    <div className="site-map-tray-group" data-tray="unfiled">
-                      <span className="site-map-tray-title" title="Cells in no area yet; file them on the Areas page">
-                        <IconShieldAlert size={12} /> Unfiled — in no area yet
-                      </span>
-                      <div className="context-device-list">
-                        {unfiledCells.map(c => cellChip(c, 'in no area; file it on the Areas page'))}
-                      </div>
-                    </div>
+                {/* The rungs: enterprise, then site. */}
+                <div className="site-hierarchy" role="group" aria-label="Hierarchy">
+                  <div className="site-hierarchy-level" title="The ISA-95 enterprise: the Sparkplug group the gateways publish under">
+                    <span className="site-hierarchy-label">Enterprise</span>
+                    {enterprise
+                      ? <span className="site-hierarchy-value">{enterprise}</span>
+                      : <span className="site-hierarchy-unset">Not set — it is the Sparkplug group named at install (the sparkplug.group_id setting)</span>}
                   </div>
+                  <IconChevronRight size={12} className="site-hierarchy-sep" aria-hidden="true" />
+                  <div className="site-hierarchy-level" title="The ISA-95 site: this campus, named on the Settings page under Site">
+                    <span className="site-hierarchy-label">Site</span>
+                    {siteName
+                      ? <span className="site-hierarchy-value">{siteName}</span>
+                      : <span className="site-hierarchy-unset">Not set — name it on the Settings page under Site</span>}
+                  </div>
+                </div>
+
+                {/* The lanes, three across, sharing the width; each opens into the panel. */}
+                <div className="site-lanes" role="group" aria-label="Campus lanes">
+                  {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways }) => {
+                    const open = openLane === lane.key
+                    const status = stateOf(laneAssets).status
+                    const LaneIcon = lane.icon
+                    const holds = laneAssets.length + laneGateways.length > 0
+                    return (
+                      <button
+                        key={lane.key}
+                        type="button"
+                        /* A lane wears its hue only while it holds something: an empty Unassigned
+                           queue is the good state, so it keeps its outline and drops the fill. */
+                        className={`site-lane ${lane.className}${holds ? '' : ' is-empty'}${open ? ' is-open' : ''}`}
+                        onClick={() => toggleLane(lane.key)}
+                        aria-pressed={open}
+                        title={`${lane.hint} ${open ? 'Click to close.' : 'Click to list its assets.'}`}
+                      >
+                        {/* No dot on an empty lane: grey next to zero says nothing. */}
+                        {holds && <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />}
+                        <LaneIcon size={13} style={{ flexShrink: 0 }} />
+                        <span className="site-lane-name">{lane.title}</span>
+                        <span className="site-lane-counts mono" title={`${plural(laneGateways.length, 'gateway')}, ${plural(laneAssets.length, 'device')}`}>
+                          {plural(laneGateways.length, 'Gateway')} · {plural(laneAssets.length, 'Device')}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {areas.length === 0 ? (
+                  <EmptyState
+                    icon={<IconMap size={36} />}
+                    message={cells.length > 0
+                      ? 'No areas yet. Add one on the Areas page and file the cells into it; each area is drawn as its own plan here.'
+                      : laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
+                        ? 'No areas or cells configured — every asset resolves to one of the lanes above.'
+                        : gw.shadow > 0
+                          ? 'Nothing on the map yet. The only gateway on this stack is the playback gateway, which is not part of the fleet and is driven from the Capture page.'
+                          : 'No areas or cells configured. Add an area on the Areas page to start the map.'}
+                  />
+                ) : (
+                  <>
+                    <div className="shopfloor-grid" style={{ '--map-columns': columns, '--pin-size': `${PIN_SIZE[columns]}px` }}>
+                      {areas.map(areaCard)}
+                    </div>
+                    {unfiledCells.length > 0 && (
+                      <div className="site-map-tray">
+                        <div className="site-map-tray-group" data-tray="unfiled">
+                          <span className="site-map-tray-title" title="Cells in no area yet; file them on the Areas page">
+                            <IconShieldAlert size={12} /> Unfiled — in no area yet
+                          </span>
+                          <div className="context-device-list">
+                            {unfiledCells.map(c => cellChip(c, 'in no area; file it on the Areas page'))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
