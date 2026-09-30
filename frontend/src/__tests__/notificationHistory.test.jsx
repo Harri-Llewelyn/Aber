@@ -42,7 +42,7 @@ const badge = () => document.querySelector('.notif-badge')
 
 describe('relativeTime', () => {
   it.each([
-    [0, '0s ago'],
+    [0, 'just now'],
     [59, '59s ago'],
     [60, '1m ago'],
     [125, '2m ago'],
@@ -54,8 +54,8 @@ describe('relativeTime', () => {
     expect(relativeTime(NOW - seconds * 1000, NOW)).toBe(expected)
   })
 
-  it('reads an entry stamped after the clock as 0s ago', () => {
-    expect(relativeTime(NOW + 5000, NOW)).toBe('0s ago')
+  it('reads an entry stamped after the clock as just now', () => {
+    expect(relativeTime(NOW + 5000, NOW)).toBe('just now')
   })
 })
 

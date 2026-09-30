@@ -33,13 +33,14 @@ export function formatDate(ts) {
 }
 
 /**
- * How long ago, compactly: "12s ago", "5m ago", "3h ago", "4d ago", then `formatDate` from 30 days.
- * A timestamp after `now` reads as "0s ago". Fallback "—".
+ * How long ago, compactly: "just now" under 10 seconds, then "12s ago", "5m ago", "3h ago", "4d ago",
+ * then `formatDate` from 30 days. A timestamp after `now` reads as "just now". Fallback "—".
  */
 export function formatRelative(ts, now = Date.now()) {
   const d = toDate(ts)
   if (!d) return NO_VALUE
   const seconds = Math.max(0, Math.round((now - d.getTime()) / 1000))
+  if (seconds < 10) return 'just now'
   if (seconds < 60) return `${seconds}s ago`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`

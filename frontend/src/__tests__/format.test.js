@@ -27,7 +27,8 @@ describe('formatDateTime and formatDate', () => {
 
 describe('formatRelative', () => {
   it.each([
-    [0, '0s ago'],
+    [0, 'just now'],
+    [9, 'just now'],
     [12, '12s ago'],
     [60, '1m ago'],
     [5 * 60, '5m ago'],
@@ -43,8 +44,8 @@ describe('formatRelative', () => {
     expect(formatRelative(ts, NOW)).toBe(formatDate(ts))
   })
 
-  it('reads a future timestamp as 0s ago and a bad one as a dash', () => {
-    expect(formatRelative(NOW + 5000, NOW)).toBe('0s ago')
+  it('reads a future timestamp as just now and a bad one as a dash', () => {
+    expect(formatRelative(NOW + 5000, NOW)).toBe('just now')
     expect(formatRelative(null, NOW)).toBe(NO_VALUE)
     expect(formatRelative('nope', NOW)).toBe(NO_VALUE)
   })
