@@ -1381,13 +1381,13 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   })
 
   return (
-    /* `trail-page`: the page fills the viewport and the timeline scrolls inside the card, so the axis
-       row has a scroller to pin to. See .trail-page in App.css. */
-    <div className="page-layout trail-page">
+    /* `page-fill` and `card-fill`: the page fills the viewport and the timeline scrolls inside the
+       card, so the axis row has a scroller to pin to. See .page-fill in App.css. */
+    <div className="page-layout page-fill">
       <div className="page-main">
         {/* The description is a tip on the title; Export sits in the header with the other actions
             and states the filtered count it will write. */}
-        <div className="card">
+        <div className="card card-fill">
           <div className="card-header">
             <h3 className="section-title">
               Audit Trail
@@ -1523,8 +1523,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
           </div>{/* .card-body */}
 
         {/* A second `.card-body`, so the controls and the trace get a divider from one rule.
-            `trail-timeline` is the one part of the card that gives way when the viewport is short. */}
-        <div className="card-body trail-timeline">
+            `trail-timeline` is the one part of the card that gives way when the viewport is short; its own
+            scroller is `trail-scroll`. */}
+        <div className="card-body card-fill-scroll trail-timeline">
           {loading ? (
             <div className="loading-wrap"><div className="spinner" /> Loading audit trail trace sequence…</div>
           ) : events.length === 0 ? (

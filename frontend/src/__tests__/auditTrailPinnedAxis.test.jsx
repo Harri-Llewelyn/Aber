@@ -52,11 +52,11 @@ describe('the timeline scrolls inside the card', () => {
     /* A chain of flex columns from the page down to the scroller, every link able to shrink and
        everything beside the scroller refusing to. A maximum, not a height: a short trail gets a
        short card. */
-    expect(ruleFor('.trail-page')).toMatch(/height:\s*100%/)
-    expect(ruleFor('.trail-page > .page-main')).toMatch(/max-height:\s*100%/)
-    expect(ruleFor('.trail-page > .page-main > .card')).toMatch(/min-height:\s*0/)
-    expect(ruleFor('.trail-page > .page-main > .card > :not(.trail-timeline)')).toMatch(/flex-shrink:\s*0/)
-    expect(ruleFor('.trail-timeline')).toMatch(/min-height:\s*0/)
+    expect(ruleFor('.page-fill')).toMatch(/height:\s*100%/)
+    expect(ruleFor('.page-fill > .page-main')).toMatch(/max-height:\s*100%/)
+    expect(ruleFor('.page-fill > .page-main > .card-fill')).toMatch(/min-height:\s*0/)
+    expect(ruleFor('.card-fill > *')).toMatch(/flex-shrink:\s*0/)
+    expect(ruleFor('.card-fill > .trail-timeline')).toMatch(/flex-direction:\s*column/)
     expect(ruleFor('.trail-timeline > :not(.trail-scroll)')).toMatch(/flex-shrink:\s*0/)
     expect(ruleFor('.trail-timeline > .trail-scroll')).toMatch(/min-height:\s*0/)
   })
@@ -71,9 +71,9 @@ describe('the timeline scrolls inside the card', () => {
   it('marks the page and the timeline body so the chain has something to hang from', async () => {
     render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText('Press_01')).toBeInTheDocument())
-    expect(document.querySelector('.page-layout')).toHaveClass('trail-page')
+    expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
     const body = document.querySelector('.trail-timeline')
-    expect(body).toHaveClass('card-body')
+    expect(body).toHaveClass('card-body', 'card-fill-scroll')
     expect(body.querySelector('.trail-scroll')).toBeTruthy()
   })
 })

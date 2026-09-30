@@ -961,6 +961,55 @@ html, body, #root {
   box-shadow: inset 0 -1px 0 var(--border);
 }
 
+/* IN-CARD SCROLL. A page opts in with `.page-fill` on its `.page-layout`, and puts `.card-fill` on
+   the ONE card that gives way; the other children of `.page-main` keep their height. Inside that card
+   either a `.table-wrap` directly under it is the scroller, or a child marked `.card-fill-scroll`
+   is. Anything after the scroller (a list foot, a note) stays on screen. If the parts that cannot
+   shrink are taller than the window, the page scrolls as before. */
+.page-fill { height: 100%; }
+
+.page-fill > .page-main {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.page-fill > .page-main > * { flex-shrink: 0; }
+
+.page-fill > .page-main > .card-fill {
+  flex-shrink: 1;
+  min-height: 0;
+}
+
+.card-fill {
+  display: flex;
+  flex-direction: column;
+}
+
+.card-fill > * { flex-shrink: 0; }
+
+.card-fill > .card-fill-scroll,
+.card-fill > .table-wrap {
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The table scroller pins its header like .table-scroll, without that class's cap. */
+.card-fill > .table-wrap.table-scroll { max-height: none; }
+
+.card-fill > .table-wrap thead tr {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.card-fill > .table-wrap thead th {
+  background: var(--bg-card);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -3393,33 +3442,13 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Audit Trail swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
-/* The page fills the viewport instead of growing past it, so the timeline can scroll inside the
-   card and the axis row can pin to the top of that scroll. A chain of flex columns from here down
-   to .trail-scroll: every link may shrink, and everything beside the scroller -- the card header, the
-   filter bar, the header row, the lane toggle, the foot -- is told not to. A maximum rather than a
-   height, so a short trail gets a short card. */
-.trail-page { height: 100%; }
-
-.trail-page > .page-main {
+/* The card body holding the timeline: the one link in the card that gives way (.card-fill-scroll),
+   and inside it .trail-scroll is the one thing that scrolls. It keeps overflow visible so the two
+   are not nested scrollers; the parts beside the scroller do not shrink. */
+.card-fill > .trail-timeline {
   display: flex;
   flex-direction: column;
-  max-height: 100%;
-}
-
-.trail-page > .page-main > .card {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.trail-page > .page-main > .card > :not(.trail-timeline) { flex-shrink: 0; }
-
-/* The card body holding the timeline: the one link in the card that gives way, and inside it the
-   scroller is the one thing that does. */
-.trail-timeline {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  overflow: visible;
 }
 
 .trail-timeline > :not(.trail-scroll) { flex-shrink: 0; }
@@ -3474,7 +3503,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* Both scrolls live here rather than on the page: the drawer is a flex sibling of the list and takes
    width off this box, and the axis row pins to its nearest scroll container, so that must be this
-   one. The .trail-page chain gives it a height to overflow. */
+   one. The .page-fill chain gives it a height to overflow. */
 .trail-scroll {
   overflow-x: auto;
   overflow-y: auto;
