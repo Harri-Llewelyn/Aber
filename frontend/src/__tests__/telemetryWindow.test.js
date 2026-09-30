@@ -105,6 +105,7 @@ describe('queryTelemetry always bounds time', () => {
   it('bounds the device-scoped latest query', async () => {
     await api.get(`/api/v1/devices/${key}/telemetry/latest`);
     expect(timeBounds()).toHaveLength(1);
+    expect(calls.eq).toContainEqual(['asset_id', key]);
   });
 
   it('bounds a query carrying only an upper bound', async () => {

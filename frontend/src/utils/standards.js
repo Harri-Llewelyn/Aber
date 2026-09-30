@@ -69,7 +69,7 @@ export const LOCAL_SEMANTIC_NAMESPACE = 'https://aber.local/semantics'
  */
 export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconnect/v2.0`
 
-/** ISO 22400 KPI namespace. The ids seeded by archived migration 0030 are built on this. */
+/** ISO 22400 KPI namespace. The ids seeded by archived migration 20260101000030_iso22400_vocabulary.sql are built on this. */
 export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400`
 
 /**

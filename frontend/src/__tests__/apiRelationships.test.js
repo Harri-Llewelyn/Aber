@@ -46,8 +46,8 @@ vi.mock('../lib/supabaseClient', () => ({
           events: (state.responses.audit_trail || { data: [] }).data || [],
           purged_assets: 0,
           truncated: false,
-          // Only when a test asks for one. A server without 0115 returns no such key at all, and
-          // the attachment has to tell that apart from a total of zero.
+          // Only when a test asks for one: a payload without the key has to be told apart from a
+          // total of zero.
           ...(state.responses.audit_trail?.total_matching !== undefined
             ? { total_matching: state.responses.audit_trail.total_matching }
             : {})
@@ -489,10 +489,7 @@ describe('audit trail filtering', () => {
     expect(rpcArgs().p_include_purged).toBe(true);
   });
 
-  /* The keyset cursor and the compatibility rule around it. PostgREST resolves an RPC by the
-     argument names given, so naming the cursor arguments against a database without them fails with
-     "function does not exist" rather than falling back. Omitted, the call matches the
-     seven-argument form and the page renders unpaged. */
+  /* The keyset cursor is sent only when there is one. */
   it('omits the cursor arguments entirely when there is no cursor', async () => {
     await api.get('/api/v1/audit-trail');
     expect(rpcArgs()).not.toHaveProperty('p_before_recorded_at');
@@ -560,9 +557,9 @@ describe('audit trail filtering', () => {
   });
 
   it('attaches the match total, and tells a missing one from a total of zero', async () => {
-    // `total_matching` (0115) is how the page says "200 of 467" rather than "200 events". Zero is
-    // a real answer -- a filter that matches nothing -- so the absent case has to be null, or a
-    // server without 0115 renders as a trail with no events in it.
+    // `total_matching` is how the page says "200 of 467" rather than "200 events". Zero is a real
+    // answer -- a filter that matches nothing -- so the absent case has to be null, or a payload
+    // without a total renders as a trail with no events in it.
     const rows = [{ id: 1, entity_type: 'devices', entity_id: 'dev-a', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' }];
 
     state.responses.audit_trail = { data: rows, total_matching: 467 };

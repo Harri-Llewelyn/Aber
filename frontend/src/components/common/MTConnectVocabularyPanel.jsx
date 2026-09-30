@@ -18,7 +18,7 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
   const adopted = adoptedVocabulary(catalog)
 
   // Concept-level semantic ids, keyed by name. Looked up rather than re-derived so the panel shows
-  // exactly what archived migration 0032 stored, and shows nothing if the backfill has not run.
+  // exactly what archived migration 20260101000032_effectiveness_and_mtconnect_semantics.sql stored, and shows nothing if the backfill has not run.
   const semanticIds = new Map()
   for (const entry of vocabulary || []) {
     if (entry?.semantic_id) semanticIds.set(entry.name, entry.semantic_id)

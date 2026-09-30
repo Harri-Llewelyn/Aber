@@ -28,7 +28,7 @@ const STATUS_BADGES = {
   [SCHEMA_STATUS.ARCHIVED]: 'badge-neutral'
 }
 
-/** A schema that predates archived migration 0037 reads as v1/active -- the same default the column took. */
+/** A schema that predates archived migration 20260101000037_schema_versioning.sql reads as v1/active -- the same default the column took. */
 export const schemaVersion = (schema) => Number(schema?.version) || 1
 export const schemaStatus = (schema) => schema?.status || SCHEMA_STATUS.ACTIVE
 
