@@ -1399,7 +1399,8 @@ const apiMethods = {
   /**
    * Gateways a capture may be published onto, with their devices and their credential state.
    *
-   * Playback gateways only (`is_shadow`); the database refuses any other target.
+   * The Playback gateway only (`is_shadow`; the filter below says why). `start_playback_job()`
+   * itself refuses any gateway that is not simulated.
    * `gateway_has_broker_credential` is a computed field: PostgREST exposes a function taking the
    * row type as a selectable column, so the gate's own predicate is what the dialog displays.
    */
