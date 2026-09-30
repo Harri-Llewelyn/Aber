@@ -287,3 +287,76 @@ describe('the playback gateway is filtered out by default', () => {
     expect(screen.queryByText('Playback')).toBeNull()
   })
 })
+
+describe('the Gateways list', () => {
+  const live = () => gateway()
+  const retired = () => gateway({ gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', is_archived: true })
+
+  const open = async (rows, hasPermission = () => true) => {
+    api.get.mockImplementation(routeGet(rows))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={hasPermission} initialSearchFilter="" onClearFilter={vi.fn()} />)
+    await waitFor(() => expect(screen.queryByText(/Loading gateways/)).toBeNull())
+  }
+
+  it('opens on Active, with archived gateways one filter away', async () => {
+    await open([live(), retired()])
+
+    expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument()
+    expect(screen.queryByText('Retired_Gateway')).toBeNull()
+    expect(screen.queryByText(/Clear filters/)).toBeNull()
+
+    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'archived' } })
+    expect(screen.getByText('Retired_Gateway')).toBeInTheDocument()
+    expect(screen.getByText(/Clear filters \(1\)/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText(/Clear filters/))
+    expect(screen.queryByText('Retired_Gateway')).toBeNull()
+  })
+
+  it('counts the rows on the card title, as shown / total while the list is narrowed', async () => {
+    await open([live(), retired()])
+    expect(document.querySelector('.section-count').textContent).toBe('1 / 2')
+
+    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+    expect(document.querySelector('.section-count').textContent).toBe('2')
+  })
+
+  it('shows a count of 0 on a stack with no gateways', async () => {
+    await open([])
+    expect(document.querySelector('.section-count').textContent).toBe('0')
+  })
+
+  it('tells none yet from none match', async () => {
+    await open([])
+    expect(screen.getByText('No gateways yet.')).toBeInTheDocument()
+  })
+
+  it('says a filter emptied the list when gateways exist', async () => {
+    await open([live()])
+    fireEvent.change(screen.getByPlaceholderText(/Search name, UUID or Sparkplug ID/), { target: { value: 'zzz' } })
+    expect(screen.getByText('No gateways match these filters.')).toBeInTheDocument()
+  })
+
+  it('calls the archived state Archived, in the row and in the drawer', async () => {
+    await show([retired()])
+    expect(within(document.querySelector('table')).getByText('ARCHIVED')).toBeInTheDocument()
+    expect(document.querySelector('tr.row-archived')).not.toBeNull()
+    expect(screen.queryByText(/DECOMMISSIONED|Inaccessible|Out of Commission/i)).toBeNull()
+
+    const panel = openPanel('Retired_Gateway')
+    expect(panel.getByText('ARCHIVED')).toBeInTheDocument()
+  })
+
+  it('names the roles that may register a gateway on a denied button', async () => {
+    await open([live()], () => false)
+    const button = screen.getByRole('button', { name: /New Gateway/ })
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe('Requires Administrator or Shopfloor Manager')
+  })
+
+  it('scrolls inside its card', async () => {
+    await open([live()])
+    expect(document.querySelector('.page-layout').classList.contains('page-fill')).toBe(true)
+    expect(document.querySelector('.card.card-fill > .table-wrap')).not.toBeNull()
+  })
+})
