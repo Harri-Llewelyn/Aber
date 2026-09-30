@@ -223,7 +223,7 @@ export function BackupsTab({ showToast }) {
                   </div>
                 ) : (
                   <div className="table-wrap">
-                    <table className="data-table">
+                    <table>
                       <thead>
                         <tr>
                           <th>When</th>
@@ -388,7 +388,7 @@ function RunningCard({ job, onCancel, cancelPending }) {
 
 const STATUS_BADGES = {
   COMPLETED: { className: 'badge badge-online', label: 'Completed' },
-  FAILED: { className: 'badge badge-offline', label: 'Failed' },
+  FAILED: { className: 'badge badge-danger', label: 'Failed' },
   CANCELLED: { className: 'badge badge-neutral', label: 'Cancelled' }
 }
 
@@ -556,7 +556,7 @@ function OffsiteLine({ destination, onEdit, showToast }) {
           </span>
         )}
       </div>
-      <button className="btn btn-sm" onClick={onEdit} title="Where every backup is copied, and the key it is encrypted to">
+      <button className="btn btn-ghost btn-sm" onClick={onEdit} title="Where every backup is copied, and the key it is encrypted to">
         {base ? 'Change' : 'Set a destination'}
       </button>
     </div>

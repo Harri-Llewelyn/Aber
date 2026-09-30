@@ -402,7 +402,7 @@ function DestinationCard({ summary, missing, archiveEnabled, credentialSet, onCr
           <span style={{ fontSize: '12px', color: credentialSet ? 'var(--text-primary)' : 'var(--text-muted)' }}>
             {credentialSet ? 'Set' : 'Not set'}
           </span>
-          <button className="btn btn-sm" onClick={() => setEditing(true)}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
             {credentialSet ? 'Replace' : 'Set key'}
           </button>
         </div>

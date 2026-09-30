@@ -124,9 +124,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
 
-  // A sum over one term, written as the sum the other pages write: a second filter added here
-  // joins it rather than replacing the expression.
-  const activeFilterCount = (searchQuery ? 1 : 0)
+  // Every control that is off its default: the lifecycle select opens on Active.
+  const activeFilterCount = (searchQuery ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
 
   const save = async () => {
     try {
@@ -310,13 +309,11 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               placeholder="Search by area ID or name…"
               title="Filter areas by ID or name"
             />
-            {/* The same control the other asset pages carry, worded and counted the same way.
-                Search is this page's only filter, so the count is always one -- it says which
-                control is on rather than how many. */}
+            {/* The same control the other asset pages carry, worded and counted the same way. */}
             {activeFilterCount > 0 && (
               <button
                 className="btn btn-ghost btn-sm filter-bar-spacer"
-                onClick={clearSearch}
+                onClick={() => { clearSearch(); setFilterMode('active') }}
                 title="Clear every filter"
               >
                 <IconX size={13} /> Clear filters ({activeFilterCount})

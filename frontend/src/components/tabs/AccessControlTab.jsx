@@ -857,7 +857,7 @@ export function AccessControlTab({ showToast }) {
                         {(c.roles || []).join(', ') || '—'}
                       </td>
                       <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>
-                        {c.name && <strong style={{ color: 'var(--text)' }}>{c.name}. </strong>}
+                        {c.name && <strong style={{ color: 'var(--text-primary)' }}>{c.name}. </strong>}
                         {c.purpose || 'Holds no platform role; nothing in the repository declares it.'}
                       </td>
                       <td>

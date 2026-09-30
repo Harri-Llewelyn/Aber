@@ -61,7 +61,7 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, onR
       <div className="modal">
         <div className="modal-title">Off-site destination</div>
 
-        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '12px 0 0' }}>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '12px 0 0' }}>
           The backup service copies every backup to this S3 bucket, each file encrypted with age to
           the recipient below before it leaves the pod. The copy on the backup volume stays; this is
           the one that survives losing the disk, the node or the site.
@@ -149,7 +149,7 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, onR
 
         {removing ? (
           <div className="modal-actions">
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginRight: 'auto' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginRight: 'auto' }}>
               Stop copying, and delete the secret key? Copies already made stay in the bucket.
             </span>
             <button className="btn btn-ghost" onClick={() => setRemoving(false)} disabled={pending}>Keep it</button>

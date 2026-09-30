@@ -205,7 +205,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
         {loading && <div style={{ padding: '20px 0', color: 'var(--text-muted)' }}>Loading…</div>}
 
         {error && (
-          <div className="alert alert-error" style={{ marginBottom: '12px' }}>
+          <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)', margin: '0 0 12px' }}>
             <IconAlertTriangle size={14} /> {error}
           </div>
         )}

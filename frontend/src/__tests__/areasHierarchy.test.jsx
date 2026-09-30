@@ -684,4 +684,21 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(searchBox).toHaveValue('')
     expect(screen.queryByTitle('Clear every filter')).toBeNull()
   })
+
+  it('counts the lifecycle select and resets it to Active', async () => {
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Building A')).toBeInTheDocument())
+    const lifecycle = screen.getByTitle('Filter by lifecycle state')
+    expect(lifecycle).toHaveValue('active')
+
+    fireEvent.change(lifecycle, { target: { value: 'archived' } })
+    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+
+    fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'x' } })
+    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (2)')
+
+    fireEvent.click(screen.getByTitle('Clear every filter'))
+    expect(lifecycle).toHaveValue('active')
+    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+  })
 })

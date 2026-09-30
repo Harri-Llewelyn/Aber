@@ -296,6 +296,21 @@ describe('the queue is worked from the front', () => {
     expect(within(cards[0]).getByText('Older')).toBeInTheDocument()
   })
 
+  it('gives every selectable row the pointer cursor, and a rejected proposal a readable badge', async () => {
+    mockLoad([
+      deviceProposal({ id: 'open-1', target_label: 'Open one' }),
+      deviceProposal({ id: 'rej-1', target_label: 'Rejected one', status: 'rejected', decided_by: MANAGER_ID, decided_at: '2026-09-05T00:00:00Z' })
+    ])
+    renderTab()
+
+    await screen.findAllByTestId('proposal-row')
+    for (const row of screen.getAllByTestId('proposal-row')) {
+      expect(row.className).toContain('row-selectable')
+    }
+    expect(document.querySelector('.badge-danger')).not.toBeNull()
+    expect(document.querySelector('.badge-offline')).toBeNull()
+  })
+
   it('separates what is waiting from what was decided', async () => {
     mockLoad([
       deviceProposal({ id: 'open-one', target_label: 'Waiting' }),

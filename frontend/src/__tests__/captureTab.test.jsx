@@ -683,13 +683,15 @@ describe('publishing a capture back', () => {
 
   // NOT VIA open(), which waits for the select: with no targets there is deliberately no select to
   // wait for, only the explanation of why.
-  it('says so when nothing is marked simulated', async () => {
+  it('says the Playback gateway is missing when there is no target', async () => {
     api.playbackTargets.mockResolvedValue([])
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/No gateway is marked/)).toBeInTheDocument()
+    expect(await screen.findByText(/only target a capture can be published/)).toBeInTheDocument()
+    expect(screen.getByText(/Archived Entities/)).toBeInTheDocument()
+    expect(screen.getByText(/only target a capture can be published/).textContent).not.toMatch(/simulated/i)
     expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
   })
 
@@ -1125,6 +1127,20 @@ describe('the filter bar', () => {
     await screen.findByText('Line 1 Gateway')
     fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
     expect(screen.getByText(/No subject matches these filters/)).toBeInTheDocument()
+  })
+
+  it('spans every column of the subject view with the empty row', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    const span = () => document.querySelector('tbody td[colspan]').getAttribute('colspan')
+    const headers = () => document.querySelectorAll('thead th').length
+
+    fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
+    expect(span()).toBe(String(headers()))
+
+    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    expect(span()).toBe(String(headers()))
+    expect(headers()).toBe(5)
   })
 
   it('clears every filter at once, and only offers to when there is something to clear', async () => {

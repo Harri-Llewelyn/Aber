@@ -5,7 +5,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat,
+  gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat, formatUptime,
   formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
@@ -336,7 +336,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   useArrivalSelection(
     searchQuery,
     gateways,
-    (g, term) => g.gateway_id === term || gatewaySparkplugId(g) === term,
+    (g, term) => g.gateway_id === term || (g.sparkplug_id || gatewaySparkplugId(g.gateway_id)) === term,
     (g) => setSelectedId(g.gateway_id)
   )
 
@@ -882,10 +882,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             },
             {
               label: 'Runtime Uptime',
-              value: selected.uptime_seconds === null || selected.uptime_seconds === undefined
-                ? null
-                : formatHeartbeat(new Date(Date.now() - selected.uptime_seconds * 1000).toISOString())
-                  .replace(' ago', ''),
+              value: formatUptime(selected.uptime_seconds),
               title: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
                 + 'host uptime: a restarted container resets it while the machine stays up.'
             },
@@ -1074,7 +1071,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             onClick: () => setCredentialForGw({
               gateway_id: selected.gateway_id,
               gateway_name: selected.gateway_name,
-              sparkplug_id: selected.sparkplug_id
+              sparkplug_id: selected.sparkplug_id,
+              is_shadow: selected.is_shadow
             }),
             // Named by the condition the action is gated on, `deployment === 'host'`: no appliance,
             // so the credential is minted in the browser.
