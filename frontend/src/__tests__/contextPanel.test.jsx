@@ -606,8 +606,9 @@ describe('A card is a composition: header, description, filters, table', () => {
     const btn = within(header).getByRole('button', { name: label })
     expect(btn.className).toMatch(/btn-primary/)
 
-    // The description is behind a "?" on the title; the filters are in the body, inside the card.
-    expect(header.querySelector('.section-title .help-tip')).toBeTruthy()
+    // A single-card page says what it is in the header's own description line; a card among several
+    // keeps a "?" on its title. The filters are in the body, inside the card.
+    expect(header.querySelector('.card-heading-description') || header.querySelector('.section-title .help-tip')).toBeTruthy()
     const body = card.querySelector('.card-body')
     expect(body).toBeTruthy()
     expect(body.querySelector('p')).toBeNull()
