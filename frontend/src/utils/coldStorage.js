@@ -1,7 +1,7 @@
 /**
  * The cold telemetry catalogue, as the page needs it. The state is derived in SQL by
- * `cold_storage_rows()` (claimed, exported, verified, archived, enforced by CHECK constraints on
- * the historian) and is not recomputed here. This file holds what each state means to a reader:
+ * `cold_storage_rows()` (claimed, exported, verified, archived or failed, enforced by CHECK
+ * constraints on the historian) and is not recomputed here. This file holds what each state means to a reader:
  * label, tone, and whether the rows are still in the hypertable. `archived` is the only state where
  * the raw rows are gone.
  */
@@ -85,8 +85,8 @@ export function formatBytes(bytes) {
 }
 
 /**
- * The totals above the table. Rows and bytes count only what is archived; `pending` is counted
- * separately as the work outstanding.
+ * The totals above the table. Rows and bytes count only what is archived; `verified` (awaiting
+ * the drop) and `failed` are counted separately.
  */
 export function coldStorageSummary(rows) {
   const list = rows || []

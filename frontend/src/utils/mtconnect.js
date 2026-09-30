@@ -105,4 +105,4 @@ export function vocabularySections(vocabulary) {
 
 // Name composition lives in utils/metricGroup.js as composeMetricName(). There is no
 // MTConnect-specific composer; the part order (component, instance, type, subType) is spelled out
-// at the call site in SchemasTab's Add Metric form.
+// at the call site in the Metrics page's Add Metric form.

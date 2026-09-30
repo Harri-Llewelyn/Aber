@@ -22,7 +22,10 @@ export const GATEWAY_TYPES = {
   SHADOW: 'shadow',
 }
 
-/** What the create/edit form may choose. Shadow is seeded by 0060 and set by nothing else. */
+/**
+ * What the create/edit form may choose. Shadow is seeded by archived migration
+ * 0060_playback_gateway_and_shadow_devices.sql and set by nothing else.
+ */
 export const SELECTABLE_TYPES = [
   GATEWAY_TYPES.REMOTE,
   GATEWAY_TYPES.HOST,

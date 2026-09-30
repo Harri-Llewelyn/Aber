@@ -2,21 +2,18 @@ import React from 'react'
 import { GATEWAY_STATUS_LABELS } from '../../utils/gatewayStatus'
 
 /**
- * The one status chip, shared by cells, gateways and devices. Four visual classes, with
- * `badge-warning` as the default for anything unrecognised: `gateways.status` is free text (an
+ * The gateway status chip. Five visual classes, with `badge-warning` as the default for anything
+ * unrecognised: `gateways.status` is free text (an
  * NBIRTH payload can override it), so the set is open.
  */
 export function StatusBadge({ status }) {
   const isOnline = status === 'ONLINE' || status === 'ACTIVE'
   const isOffline = status === 'OFFLINE'
 
-  /**
-   * The enrolment states get their own informational variant: amber means look at this and grey
-   * reads as decommissioned, and a gateway waiting for its bundle is neither. The label says what
-   * is being waited for.
-   */
-  // Two variants, not one: solid for "waiting on a person", dashed for "waiting on a machine". See
-  // the .badge-pending / .badge-provisioned block in App.css.
+  // The enrolment states get their own informational variants: amber means look at this and grey
+  // means offline, and a gateway waiting for its bundle is neither. Two variants, not one: solid for
+  // "waiting on a person", dashed for "waiting on a machine". See the .badge-pending /
+  // .badge-provisioned block in App.css. The label says what is being waited for.
   const isPending = status === 'PENDING_ENROLLMENT' || status === 'AWAITING_BIRTH'
 
   const cls = isOnline

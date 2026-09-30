@@ -1,8 +1,8 @@
 /**
  * The standards a catalog metric can be built from. `metric_catalog.standard` is provenance; NULL
- * means a local extension, which every adopted standard permits. The three are complementary:
+ * means a local extension, which every adopted standard permits. The four are complementary:
  * MTConnect for machine tools, ISO 22400 for computed KPIs, OPC UA for robotics and machinery
- * companion specs.
+ * companion specs, ASHRAE 223P for building systems.
  */
 
 export const STANDARDS = {

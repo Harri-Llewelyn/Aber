@@ -169,8 +169,7 @@ export function deviceHasTag(device, schemaOrSchemas, tag, latestValues, catalog
 
 /**
  * Every tag present across a fleet, for a filter. Unmodelled is offered only when a device has it.
- */
-/**
+ *
  * `latestFor` is a function from device to its last values, not a map: telemetry is keyed on
  * `sparkplug_id`, a device row on its uuid, and a wrong key produces no finding rather than an
  * error.

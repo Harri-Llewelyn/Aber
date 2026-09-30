@@ -8,7 +8,7 @@ import {
 import { HEARTBEAT_STALE_MS } from '../utils/gatewayStatus'
 
 /**
- * The Site Map ribbon's arithmetic. A playback gateway and its shadow device must not be counted in
+ * The fleet figures the rail signals and the Site Map show. A playback gateway and its shadow device must not be counted in
  * the fleet; counted raw, the playback gateway lands in OFFLINE and reports a permanent fault.
  */
 
@@ -90,8 +90,8 @@ describe('gatewayFleetCounts', () => {
   })
 
   it('sums its four buckets to the total, with shadow deliberately outside them', () => {
-    // The property the ribbon's own comment claims. `shadow` is returned for a tooltip and must
-    // NOT participate: folding it in would restore the miscount under a different name.
+    // The property fleetCounts.js states. `shadow` is returned for a tooltip and must NOT
+    // participate: folding it in would restore the miscount under a different name.
     const gateways = [
       gateway(),
       gateway({ last_heartbeat: stale() }),
@@ -139,8 +139,7 @@ describe('deviceFleetCounts', () => {
   })
 
   it('treats a device with no status yet as online', () => {
-    // A row written before its first birth carries no status. Calling that a fault reports one on
-    // every device between provisioning and its first message.
+    // A row with no status at all is not called a fault: that would report one on every partial row.
     expect(deviceFleetCounts([device({ status: null })]).online).toBe(1)
   })
 
@@ -159,8 +158,7 @@ describe('deviceFleetCounts', () => {
   })
 
   it('agrees with the fleet this stack actually runs', () => {
-    // The provisioned demonstration shopfloor plus one replay, which is the shape that surfaced this:
-    // six Sim_ devices and one `Sim_BMS_Zone_HVAC (replay)`.
+    // Six live devices and one replay of the first: only the six count.
     const c = deviceFleetCounts([
       device({ name: 'Sim_BMS_Zone_HVAC' }),
       device({ name: 'Sim_Cell3_Aggregator' }),
