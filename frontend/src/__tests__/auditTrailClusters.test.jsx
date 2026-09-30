@@ -231,7 +231,7 @@ describe('the component draws the badges', () => {
     {
       event_id: 2, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
       timestamp: '2026-08-21T09:00:02Z', description: 'went online',
-      changed_by: null, actor_source: 'ingestion',
+      changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
       old_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' },
       new_data: { name: 'Simulated_CNC_01', status: 'ONLINE' }
     }
@@ -239,7 +239,7 @@ describe('the component draws the badges', () => {
   const LATER = {
     event_id: 3, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
     timestamp: '2026-08-21T18:00:00Z', description: 'much later',
-    changed_by: null, actor_source: 'ingestion',
+    changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
     old_data: { name: 'Simulated_CNC_01', status: 'ONLINE' },
     new_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' }
   }

@@ -23,7 +23,7 @@ const EVENTS = [{
   event_id: 1, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
   timestamp: '2026-08-21T09:00:00Z', causation_id: 10,
   description: 'Action UPDATE on devices [dev-1]',
-  changed_by: null, actor_source: 'ingestion',
+  changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
   old_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' },
   new_data: { name: 'Simulated_CNC_01', status: 'ONLINE' }
 }]

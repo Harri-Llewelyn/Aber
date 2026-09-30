@@ -14,24 +14,39 @@ import {
 import { useSetting } from '../../hooks/useSettings'
 
 /**
- * `changed_by` names the user and is NULL for every machine write; `actor_source` names the kind of
- * actor, so a blank author is not ambiguous.
+ * `actor_source` names the kind of actor; `changed_by` only says which principal it was, and is set
+ * for a machine write as well as a person's.
  */
 const ACTOR_LABELS = {
   user:      { label: 'User',              title: 'Made by a signed-in operator' },
   ingestion: { label: 'Ingestion daemon',  title: 'Written by the Sparkplug B ingestion daemon' },
   migration: { label: 'Database migration', title: 'Written by a migration or an owner connection' },
-  service:   { label: 'Service',           title: 'Written by an automated service on the service-role key' }
+  service:   { label: 'Service',           title: 'Written by a machine identity or the service-role key' }
 }
 
-/** The actor badge's text and hover title, from the pair of columns that describe one actor. */
-function actorLabel(event) {
-  if (event.actor_source === 'user' || event.changed_by) return ACTOR_LABELS.user.label
-  return ACTOR_LABELS[event.actor_source]?.label || '⚠ Unattributed'
+/** Whether an id is a machine identity: one the dashboard names, or one with a `machine_principals` row. */
+const isMachineId = (id, machinePrincipals) =>
+  !!id && (id in KNOWN_PRINCIPALS || !!machinePrincipals?.has(id))
+
+/** A machine wrote the row: by its `actor_source`, or, where that is absent, by its principal. */
+function isMachineRow(event, machinePrincipals) {
+  const src = event.actor_source
+  if (src) return src !== 'user'
+  return isMachineId(event.changed_by, machinePrincipals)
 }
-function actorTitle(event) {
-  if (event.changed_by) return `Changed by user ${event.changed_by}`
-  return ACTOR_LABELS[event.actor_source]?.title || 'No actor recorded for this change'
+
+/** The actor badge's text and hover title, decided on `actor_source` before `changed_by`. */
+function actorLabel(event, machinePrincipals) {
+  const src = event.actor_source
+  if (src && ACTOR_LABELS[src]) return ACTOR_LABELS[src].label
+  if (!src && event.changed_by && !isMachineId(event.changed_by, machinePrincipals)) return ACTOR_LABELS.user.label
+  return '⚠ Unattributed'
+}
+function actorTitle(event, machinePrincipals) {
+  const src = event.actor_source
+  if (src && ACTOR_LABELS[src]) return ACTOR_LABELS[src].title
+  if (!src && event.changed_by && !isMachineId(event.changed_by, machinePrincipals)) return `Changed by user ${event.changed_by}`
+  return 'No actor recorded for this change'
 }
 
 /**
@@ -1354,7 +1369,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
       transaction_rows: e.transaction_rows ?? '',
       action:         e.event_type,
       classification: MARKERS[a.kind].label,
-      actor:          actorLabel(e),
+      actor:          actorLabel(e, machinePrincipals),
       actor_user_id:  e.changed_by || '',
       actor_source:   e.actor_source || '',
       changed_fields: a.diff.map(d => d.field).join(' '),
@@ -1717,7 +1732,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                                     onClick={() => setSelectedEventId(e.event_id)}
                                     /* A plain `title`, as elsewhere: what, who, when. The rest is in
                                        the drawer. */
-                                    title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e)}\n${new Date(e.timestamp).toLocaleString()}`}
+                                    title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
                                     aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
                                     aria-pressed={isSelected}
                                   />
@@ -1839,12 +1854,22 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
           { label: 'Recorded', value: new Date(selected.timestamp).toLocaleString(), title: selected.timestamp },
           {
             label: 'Actor',
-            value: actorLabel(selected),
-            title: actorTitle(selected)
+            value: actorLabel(selected, machinePrincipals),
+            title: actorTitle(selected, machinePrincipals)
           },
-          // Only when there is one: `changed_by` is NULL for every machine-originated write.
+          // Only when the row names a principal: a user's id, or the machine identity's name
+          // (its id where nothing here names it).
           ...(selected.changed_by
-            ? [{ label: 'User ID', value: selected.changed_by, copyable: true, mono: true, title: 'The signed-in user who made this change' }]
+            ? [isMachineRow(selected, machinePrincipals)
+              ? {
+                label: 'Machine identity',
+                value: selected.changed_by,
+                display: entityNames.get(selected.changed_by),
+                copyable: true,
+                mono: true,
+                title: 'The machine identity that made this change'
+              }
+              : { label: 'User ID', value: selected.changed_by, copyable: true, mono: true, title: 'The signed-in user who made this change' }]
             : []),
           {
             label: 'Entity ID',
