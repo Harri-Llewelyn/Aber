@@ -8,10 +8,8 @@ listeners: the API on 8000, Studio's login on 8001 and the forge's login on 8002
 documented with [Studio's door](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
 and [the forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094)).
 
-**The Service is named `supabase-kong`.** Every in-cluster consumer carries
-`http://supabase-kong:8000`, Kubernetes has no Service aliasing, and the name is not worth an edit
-to fifteen files. The Deployment and its pod labels are `supabase-envoy`; NetworkPolicy and the
-ServiceMonitor select on those.
+The Deployment, its pod labels and its Service are all `supabase-envoy`, and every in-cluster
+consumer reaches the gateway as `http://supabase-envoy:8000`.
 
 ## The API keys
 
@@ -76,6 +74,33 @@ Envoy semantics that produce a stack that looks fine and is not are listed in th
 header: first-match route order, the key in Realtime's query string, Realtime reading its tenant
 from the Host label, per-route credential hiding, and the Directory routes keeping their path.
 
+## The client's address
+
+Traefik establishes the caller's address, and the gateway passes it on. Traefik writes
+`X-Forwarded-For` from the connection it receives and replaces any a client sent, because it
+trusts no forwarded header unless `forwardedHeaders.trustedIPs` names the sender. Envoy runs with
+`use_remote_address` unset, which leaves the header as it arrived. GoTrue keys its sign-in, token
+refresh, OTP, verify and MFA limits on the first address in it (`supabaseAuth.rateLimitHeader`).
+`/oauth/token`, where Grafana, Node-RED and the gateway's two logins exchange their codes, has no
+limit.
+
+Three things break it, each without an error:
+
+- **Traefik's Service on `externalTrafficPolicy: Cluster`, which is k3s's default.** kube-proxy
+  rewrites every outside request's source to the node's pod-network address, so every client is
+  one client and one limit serves the whole site.
+  [`deploy/k8s/traefik-config.yaml`](../deploy/k8s/traefik-config.yaml) sets `Local`; the
+  runbook's *Install* section applies it.
+- **A proxy in front of Traefik.** Every request then comes from the proxy. It needs naming in
+  `forwardedHeaders.trustedIPs`, and it must replace a client's `X-Forwarded-For` rather than
+  append to it, since GoTrue reads the first address.
+- **A caller that bypasses Traefik**, such as an in-cluster service or a port-forward to the
+  gateway (the stack-lane suites sign in this way), sends no header. GoTrue logs a warning and
+  does not limit it.
+
+[`supabase/test_auth_rate_limit.py`](../supabase/test_auth_rate_limit.py) proves, on the
+development cluster, that one client spending its limit leaves another able to sign in.
+
 ## Rendering
 
 The template carries thirteen `__UPPER_SNAKE__` placeholders. The initContainer substitutes them
@@ -92,7 +117,7 @@ cover the keys, which come from the Secret: rotating one needs
 
 ```bash
 node scripts/check-gateway-surface.mjs                      # static: placeholders, no committed key
-kubectl -n aber port-forward svc/supabase-kong 18080:8000
+kubectl -n aber port-forward svc/supabase-envoy 18080:8000
 SUPABASE_PUBLISHABLE_KEY=$(kubectl -n aber get secret aber-secrets \
   -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d) \
   node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
@@ -120,5 +145,43 @@ The gateway was Kong until September 2026. Envoy replaced it because the `sb_pub
 equivalent by running the probe above against both before promotion. The legacy anon and
 service-role JWTs were accepted alongside the new pair while every consumer moved, then refused
 and Kong deleted from the chart on 2026-09-13, before any deployment existed. The migration
-protocol and its findings are in this file's git history under its former name,
-`docs/gateway-migration.md`.
+protocol and its findings are in the git history of `docs/gateway-migration.md`, this file's former
+name.
+
+Envoy kept the Kong Service's name, `supabase-kong`, until 2026-09-28. It adopted the name at
+promotion because Kubernetes has no Service aliasing, and a decision of 2026-09-11 kept it for two
+reasons: Kong could be switched back on, and every consumer's URL kept working without an edit.
+The first ended when Kong was deleted. The second was a saving, not a reason for the name, and
+after 1.0 a Service rename breaks every values override and out-of-chart client that names it. So
+before 1.0 the Service took its workload's name, `supabase-envoy`, like every other Service here
+([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)). That superseded the decision of
+2026-09-11, and it removed the scaffolding that let the chart and CI read either name: the
+`supabaseEnvoy.serviceName` value, the NetworkPolicy's Service-to-component bridge, and CI's
+derived gateway name. What the rename asks of a site is in
+[`upgrades.md`](upgrades.md#what-10-renames-and-what-each-rename-asks-of-a-site).
+
+### What Kong taught
+
+Facts measured on Kong that the design record once carried, kept so they are not re-derived if a
+Kong-based gateway comes back:
+
+- **`key-auth` accepts an empty key.** Rendering the config in Helm with `secrets.existingSecret`
+  set registered empty keys, and the gateway came up with its authentication off. That is why
+  substitution moved to an initContainer, which Envoy inherited (design record §4.5).
+- **Kong took the upstream `Host` from the service's hostname** (`preserve_host: false`), so naming
+  the Service `realtime-dev` was enough for Realtime's tenant. Envoy preserves the downstream `Host`,
+  hence its explicit `host_rewrite_literal` (design record §3.4).
+- **There is no 3.x `-alpine` image.** Kong stopped publishing alpine variants after 3.3.1, so
+  `kong:3.9.3-alpine` was a 404 and the pin dropped the suffix for a Debian image.
+- **3.0 made the Prometheus plugin's per-entity metrics opt-in.** `status_code_metrics`,
+  `latency_metrics` and `bandwidth_metrics` default to `false`, so a bare `- name: prometheus`
+  exported node-level gauges only while the target stayed UP. The scrape needed the plugin and the
+  status listener, for 57 `kong_*` series; PostgREST 12.2.0 exposed no metrics, so its traffic was
+  measured on Kong.
+- **`KONG_PLUGINS` replaces the bundled plugin set rather than extending it.** The three plugin
+  lists had to agree or Kong refused to boot, with an error naming the config file rather than the
+  variable, and a CI guard held them equal. `rate-limiting` was bundled and unavailable for the
+  same reason; `policy: local` was the right choice, as DB-less mode cannot run `cluster`.
+- **Compose's `supabase-kong-init` rendered the template with `sed`** because Kong 2.8 could not
+  read environment variables from declarative config. 3.x can (`${{env.VAR}}`), but using it would
+  have put the service-role key in Kong's environment, where `docker inspect` prints it.

@@ -5,17 +5,24 @@ WHAT IS UNDER TEST, in order of what would be worst to get wrong: nobody but an 
 queue a backup, and no PostgREST role can call the service's gates; a backup an Administrator asks
 for is taken -- both dumps, the storage objects, the forge, the broker's document and, with TLS
 on, the internal CA, each with the digest the row records, and a manifest restore-databases.sh
-can read; the thread records who asked and that the service wrote it; a request nobody has
-claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; and
-a RUNNING job no service is running is failed, so a restored database does not refuse backups.
+can read; the trail records who asked and that the service wrote it; a request nobody has
+claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; a
+RUNNING job no service is running is failed, so a restored database does not refuse backups; a
+failed job is followed by a prune that leaves the newest three backups alone; and, with a MinIO of
+the test's own as the destination, a backup is copied off site encrypted to a key the stack never
+holds, and a pruned backup takes its copy with it.
 
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
-cancel test stops the service container for a few seconds. Skips without the keys.
+cancel test stops the service container for a few seconds. The off-site test applies
+test-harness/restore-rehearsal/minio.yaml and deletes its namespace afterwards; it skips on a stack
+that already has a destination, or NetworkPolicies. Skips without the keys.
 
     SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 """
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 import unittest
@@ -29,6 +36,28 @@ import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
 OPERATOR_EMAIL = os.getenv("ABER_OPERATOR_EMAIL", "operator@aber.local")
 NOTE = "test_backup_service.py"
+# A job with this note fails at backup_finalise(), refused by a trigger test_07 installs.
+FAILING_NOTE = "test_backup_service.py: a failing job"
+STAMP = re.compile(r"^\d{8}T\d{6}Z$")
+
+# test_08's off-site store: a MinIO in a namespace of its own, the rehearsal's manifest.
+MINIO_MANIFEST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness", "restore-rehearsal", "minio.yaml")
+OFFSITE_NS = "rehearsal-offsite"
+OFFSITE_ENDPOINT = f"http://minio.{OFFSITE_NS}.svc.cluster.local:9000"
+OFFSITE_BUCKET = "aber-offsite-test"
+OFFSITE_PREFIX = "test-backup-service"
+# The manifest's root credential, handed to the aws CLI inside the service's pod.
+OFFSITE_AWS = ("AWS_ACCESS_KEY_ID=rehearsal", "AWS_SECRET_ACCESS_KEY=rehearsal-secret-key",
+               "AWS_DEFAULT_REGION=us-east-1", "AWS_EC2_METADATA_DISABLED=true",
+               "AWS_REQUEST_CHECKSUM_CALCULATION=when_required")
+
+
+def kubectl(*args, namespace=None, input=None, check=True):
+    cmd = ["kubectl", *(["-n", namespace] if namespace else []), *args]
+    result = subprocess.run(cmd, capture_output=True, text=True, input=input)
+    if check and result.returncode != 0:
+        raise RuntimeError(f"kubectl {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout
 # A backup of a developer stack takes well under a minute; a poll of fifteen seconds precedes it.
 BACKUP_TIMEOUT_SECONDS = int(os.getenv("BACKUP_TIMEOUT_SECONDS", "300"))
 
@@ -108,6 +137,10 @@ class BackupServiceTests(unittest.TestCase):
             ("backup_reconcile_jobs", {"p_reason": "x"}),
             ("backup_prunable", {"p_retention_days": 1}),
             ("backup_schedule", {"p_cron": ""}),
+            ("backup_offsite_destination", {}),
+            ("backup_offsite_next", {}),
+            ("backup_offsite_record", {"p_backup_id": "00000000-0000-0000-0000-000000000000",
+                                       "p_location": None, "p_objects": None, "p_error": "x"}),
         ]:
             for bearer in (self.admin, SERVICE_ROLE_KEY):
                 status, _ = rpc(name, body, bearer)
@@ -119,7 +152,7 @@ class BackupServiceTests(unittest.TestCase):
 
         # Who asked, as a user.
         self.assertEqual(psql(
-            f"SELECT actor_source || ' ' || (changed_by IS NOT NULL)::text FROM public.digital_thread "
+            f"SELECT actor_source || ' ' || (changed_by IS NOT NULL)::text FROM public.audit_trail "
             f"WHERE entity_type = 'backup_jobs' AND entity_id = '{job_id}' AND action = 'BACKUP_REQUESTED'"
         ), "user true")
 
@@ -192,7 +225,7 @@ class BackupServiceTests(unittest.TestCase):
 
         # And the service witnessed it.
         self.assertEqual(psql(
-            f"SELECT actor_source || ' ' || (changed_by IS NULL)::text FROM public.digital_thread "
+            f"SELECT actor_source || ' ' || (changed_by IS NULL)::text FROM public.audit_trail "
             f"WHERE entity_type = 'backups' AND entity_id = '{backup['id']}' AND action = 'BACKUP_TAKEN'"
         ), "service true")
 
@@ -211,7 +244,7 @@ class BackupServiceTests(unittest.TestCase):
             status, again = rpc("cancel_backup_job", {"p_job_id": job_id}, self.admin)
             self.assertEqual((status, again), (200, False), "cancelling twice is a no-op, not an error")
             self.assertEqual(psql(
-                f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backup_jobs' "
+                f"SELECT count(*) FROM public.audit_trail WHERE entity_type = 'backup_jobs' "
                 f"AND entity_id = '{job_id}' AND action = 'BACKUP_CANCELLED' AND actor_source = 'user'"
             ), "1")
         finally:
@@ -232,7 +265,7 @@ class BackupServiceTests(unittest.TestCase):
         status, again = rpc("release_backup", {"p_backup_id": backup_id}, self.admin)
         self.assertEqual((status, again), (200, False))
         self.assertEqual(psql(
-            f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backups' "
+            f"SELECT count(*) FROM public.audit_trail WHERE entity_type = 'backups' "
             f"AND entity_id = '{backup_id}' AND action = 'BACKUP_RELEASED'"
         ), "1")
 
@@ -265,7 +298,7 @@ class BackupServiceTests(unittest.TestCase):
         self.assertEqual(row["status"], "FAILED", row)
         self.assertIn("no backup service was running this job", row["error"])
         self.assertEqual(psql(
-            f"SELECT count(*) FROM public.digital_thread WHERE entity_type = 'backup_jobs' "
+            f"SELECT count(*) FROM public.audit_trail WHERE entity_type = 'backup_jobs' "
             f"AND entity_id = '{job_id}' AND action = 'BACKUP_FAILED' AND actor_source = 'service'"
         ), "1")
 
@@ -275,6 +308,170 @@ class BackupServiceTests(unittest.TestCase):
         status, cancelled = rpc("cancel_backup_job", {"p_job_id": new_job}, self.admin)
         if status != 200 or not cancelled:
             self.wait_for_idle()
+
+    def test_07_a_failed_job_prunes_nothing_inside_the_floor(self):
+        # Four scheduled backups older than any window, then a job that fails at its last step.
+        # The service prunes after the failure, and backup_prunable() never hands it the newest
+        # three rows. How many of the four are among those depends on the backups the stack already
+        # has; the floor's arithmetic on old rows is test_backup_health.py's, and this is that the
+        # failure path prunes and leaves the floor alone.
+        self.wait_for_idle()
+        fakes = [f"2001010{i}T000000Z" for i in range(1, 5)]
+        for age, stamp in enumerate(fakes):
+            service("sh", "-c", f"mkdir -p /backups/{stamp} && echo floor > /backups/{stamp}/marker")
+            psql(
+                "INSERT INTO public.backups (stamp, origin, note, location, taken_at) "
+                f"VALUES ('{stamp}', 'scheduled', '{NOTE}', '/backups/{stamp}', now() - interval '{400 + age} days')"
+            )
+        floor = psql("SELECT stamp || ' ' || location FROM public.backups ORDER BY taken_at DESC, stamp DESC LIMIT 3").splitlines()
+        floor = dict(line.split(" ", 1) for line in floor)
+        doomed = [s for s in fakes if s not in floor]
+        orphans_before = self.unrecorded_directories()
+
+        # The failure: backup_finalise() refused, after the files were written and renamed.
+        psql(
+            "CREATE OR REPLACE FUNCTION public.test_backup_service_refuse() RETURNS trigger "
+            "LANGUAGE plpgsql AS $$ BEGIN IF NEW.note = '" + FAILING_NOTE + "' THEN "
+            "RAISE EXCEPTION 'test_backup_service.py refused this backup'; END IF; RETURN NEW; END $$"
+        )
+        psql(
+            "CREATE OR REPLACE TRIGGER test_backup_service_refuse BEFORE INSERT ON public.backups "
+            "FOR EACH ROW EXECUTE FUNCTION public.test_backup_service_refuse()"
+        )
+        try:
+            status, job_id = rpc("request_backup", {"p_note": FAILING_NOTE}, self.admin)
+            self.assertEqual(status, 200, job_id)
+            deadline = time.time() + BACKUP_TIMEOUT_SECONDS
+            while time.time() < deadline:
+                job = query(f"/backup_jobs?id=eq.{job_id}&select=status,error", self.admin)[0]
+                if job["status"] in ("COMPLETED", "FAILED", "CANCELLED"):
+                    break
+                time.sleep(3)
+            self.assertEqual(job["status"], "FAILED", job)
+            self.assertIn("refused this backup", job["error"])
+
+            # The prune follows the failure in the same poll.
+            deadline = time.time() + 60
+            while time.time() < deadline and doomed:
+                if psql(f"SELECT count(*) FROM public.backups WHERE stamp IN ({', '.join(repr(s) for s in doomed)})") == "0":
+                    break
+                time.sleep(3)
+        finally:
+            psql("DROP TRIGGER IF EXISTS test_backup_service_refuse ON public.backups")
+            psql("DROP FUNCTION IF EXISTS public.test_backup_service_refuse()")
+
+        for stamp, location in floor.items():
+            self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{stamp}'"), "1", f"{stamp} is in the floor and was pruned")
+            self.assertEqual(service("sh", "-c", f"test -d '{location}' && echo present || echo absent").strip(), "present", location)
+        for stamp in doomed:
+            self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{stamp}'"), "0", f"{stamp} is outside the floor and was not pruned after the failure")
+            self.assertEqual(service("sh", "-c", f"test -d /backups/{stamp} && echo present || echo absent").strip(), "absent")
+        # And the failed job's own directory went with it.
+        self.assertLessEqual(self.unrecorded_directories(), orphans_before)
+
+    def test_08_a_backup_is_copied_off_site_encrypted_and_its_copy_follows_the_prune(self):
+        # A MinIO of the test's own, the destination set the way the page's dialog sets it, and a
+        # backup: the copy lands, each object is the ciphertext of a file the backup holds, and the
+        # identity the stack never held turns it back into that file. A backup the prune after that
+        # job removes takes its copy with it.
+        if psql("SELECT count(*) FROM public.system_settings WHERE starts_with(key, 'backup_offsite.') "
+                "AND value NOT IN ('\"\"'::jsonb, 'false'::jsonb)") != "0":
+            self.skipTest("this stack has an off-site destination already, which the test will not replace")
+        if kubectl("get", "networkpolicy", "-o", "name", namespace=stack_exec.NAMESPACE).strip():
+            self.skipTest("NetworkPolicies are on, and the backup service has no egress rule for the test's MinIO")
+        self.wait_for_idle()
+
+        with open(MINIO_MANIFEST, encoding="utf-8") as handle:
+            kubectl("apply", "-f", "-", input=handle.read())
+        self.addCleanup(kubectl, "delete", "namespace", OFFSITE_NS, "--wait=false", check=False)
+        kubectl("rollout", "status", "deploy/minio", "--timeout=180s", namespace=OFFSITE_NS)
+
+        # The aws CLI in the service's own pod, path-style, as the root user of the test's MinIO.
+        service("sh", "-c", "printf '[default]\\ns3 =\\n  addressing_style = path\\n' > /tmp/offsite-test-aws")
+        self.addCleanup(service, "rm", "-f", "/tmp/offsite-test-aws", "/tmp/offsite-test.key",
+                        "/tmp/offsite-test.age", "/tmp/offsite-test.plain", check=False)
+
+        def aws(*args):
+            return service("env", *OFFSITE_AWS, "AWS_CONFIG_FILE=/tmp/offsite-test-aws",
+                           "aws", "--endpoint-url", OFFSITE_ENDPOINT, "--output", "json", *args)
+
+        aws("s3api", "create-bucket", "--bucket", OFFSITE_BUCKET)
+
+        # The identity is made and kept here; only the recipient goes to the stack.
+        identity = service("age-keygen")
+        recipient = re.search(r"^# public key: (age1[0-9a-z]+)$", identity, re.M).group(1)
+        status, body = rpc("set_backup_offsite_destination", {
+            "p_endpoint": OFFSITE_ENDPOINT, "p_region": "us-east-1", "p_bucket": OFFSITE_BUCKET,
+            "p_prefix": OFFSITE_PREFIX, "p_access_key_id": "rehearsal", "p_recipient": recipient,
+            "p_path_style": True,
+        }, self.admin)
+        self.assertIn(status, (200, 204), body)
+        self.addCleanup(rpc, "clear_backup_offsite_destination", {}, self.admin)
+        status, body = rpc("set_backup_offsite_credential", {"p_secret": "rehearsal-secret-key"}, self.admin)
+        self.assertIn(status, (200, 204), body)
+        self.assertEqual(rpc("backup_offsite_credential_is_set", {}, self.admin), (200, True))
+
+        # An old backup with a copy, older than every other: pruned after the job below, copy and
+        # all, unless fewer than three backups are newer than it, when the floor keeps both.
+        old = "20010105T000000Z"
+        old_prefix = f"{OFFSITE_PREFIX}/{old}/"
+        service("sh", "-c", f"mkdir -p /backups/{old} && echo floor > /backups/{old}/marker")
+        aws("s3api", "put-object", "--bucket", OFFSITE_BUCKET, "--key", f"{old_prefix}marker.age", "--body", f"/backups/{old}/marker")
+        psql(
+            "INSERT INTO public.backups (stamp, origin, note, location, taken_at, offsite_state, offsite_location) "
+            f"VALUES ('{old}', 'scheduled', '{NOTE}', '/backups/{old}', now() - interval '500 days', 'COPIED', "
+            f"'{OFFSITE_ENDPOINT}/{OFFSITE_BUCKET}/{old_prefix}')"
+        )
+        newer = int(psql(f"SELECT count(*) FROM public.backups WHERE stamp <> '{old}'"))
+
+        status, job_id = rpc("request_backup", {"p_note": NOTE}, self.admin)
+        self.assertEqual(status, 200, job_id)
+        deadline = time.time() + BACKUP_TIMEOUT_SECONDS
+        row = None
+        while time.time() < deadline:
+            job = query(f"/backup_jobs?id=eq.{job_id}&select=status,error,backup_id", self.admin)[0]
+            self.assertNotIn(job["status"], ("FAILED", "CANCELLED"), job)
+            if job["status"] == "COMPLETED":
+                row = query(f"/backups?id=eq.{job['backup_id']}&select=*", self.admin)[0]
+                if row["offsite_state"] == "COPIED":
+                    break
+            time.sleep(3)
+        self.assertEqual((row or {}).get("offsite_state"), "COPIED", row)
+        self.assertEqual(row["offsite_location"], f"{OFFSITE_ENDPOINT}/{OFFSITE_BUCKET}/{OFFSITE_PREFIX}/{row['stamp']}/")
+
+        # One object per file, the manifests included, each the size the row recorded.
+        listing = json.loads(aws("s3api", "list-objects-v2", "--bucket", OFFSITE_BUCKET, "--prefix", f"{OFFSITE_PREFIX}/{row['stamp']}/"))
+        stored = {o["Key"]: o["Size"] for o in listing["Contents"]}
+        files = {c["file"] for c in row["components"]} | {"manifest.json", f"manifest-{row['stamp']}.txt"}
+        self.assertEqual({o["file"] for o in row["offsite_objects"]}, files)
+        for o in row["offsite_objects"]:
+            self.assertEqual(stored.get(o["key"]), o["size_bytes"], o["key"])
+
+        # The ciphertext is not the dump, and the identity makes it the dump again, byte for byte.
+        dump = next(c for c in row["components"] if c["name"] == "supabase-db")
+        aws("s3api", "get-object", "--bucket", OFFSITE_BUCKET, "--key", f"{OFFSITE_PREFIX}/{row['stamp']}/{dump['file']}.age", "/tmp/offsite-test.age")
+        self.assertEqual(service("head", "-c", "21", "/tmp/offsite-test.age"), "age-encryption.org/v1")
+        stack_exec.run("backup-service", "sh", "-c", "umask 077; cat > /tmp/offsite-test.key", input=identity, check=True)
+        service("age", "-d", "-i", "/tmp/offsite-test.key", "-o", "/tmp/offsite-test.plain", "/tmp/offsite-test.age")
+        self.assertEqual(service("sha256sum", "/tmp/offsite-test.plain").split()[0], dump["sha256"])
+
+        # The old backup and its copy, together.
+        remaining = json.loads(aws("s3api", "list-objects-v2", "--bucket", OFFSITE_BUCKET, "--prefix", old_prefix) or "{}")
+        if newer + 1 >= 3:
+            self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{old}'"), "0")
+            self.assertEqual(remaining.get("Contents", []), [], "the prune removed the backup and left its copy")
+            self.assertIn("was deleted", psql(
+                "SELECT new_data ->> 'reason' FROM public.audit_trail WHERE action = 'BACKUP_PRUNED' "
+                f"AND old_data ->> 'stamp' = '{old}' ORDER BY recorded_at DESC LIMIT 1"))
+        else:
+            self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{old}'"), "1")
+            self.assertEqual(len(remaining.get("Contents", [])), 1, "the floor kept the backup and not its copy")
+
+    @staticmethod
+    def unrecorded_directories():
+        """Stamp-named directories on the volume that no backups row names."""
+        on_disk = {name for name in service("ls", "-1", "/backups").split() if STAMP.match(name)}
+        return on_disk - set(psql("SELECT stamp FROM public.backups").split())
 
 
 if __name__ == "__main__":

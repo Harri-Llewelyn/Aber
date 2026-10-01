@@ -1,7 +1,8 @@
 """
 Unit tests for the ingestion daemon's birth-metric observation
 (`extract_declared_metrics` / `record_declared_metrics`), its Sparkplug B alias resolution, the
-NCMD rebirth request path, and the device liveness watchdog -- all in ingestion.py.
+NCMD rebirth request path, the device liveness watchdog, and what DDATA from an OFFLINE device
+does -- all in ingestion.py.
 
 Unlike the edge-function suites, which mirror TypeScript logic in Python, these exercise the
 shipped functions directly -- there is no second copy to drift from. To do that without the
@@ -94,6 +95,8 @@ def reset_module_state():
     ingestion._alias_map.clear()
     ingestion._rebirth_requested.clear()
     ingestion._device_seen.clear()
+    ingestion._device_offline.clear()
+    ingestion._node_epoch.clear()
     ingestion._last_seq.clear()
 
 
@@ -167,7 +170,7 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
 
     def test_no_write_when_the_declared_set_is_unchanged(self):
         """
-        The point of the change check: log_digital_thread_event() fires on every UPDATE to
+        The point of the change check: log_audit_trail_event() fires on every UPDATE to
         `devices`, so an unchanged rewrite on each rebirth would append an audit row every
         time to a table that is deliberately append-only.
         """
@@ -494,7 +497,7 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
     """
     A device that stops publishing writes nothing and emits no DDEATH, so without a watchdog it
     stays ONLINE forever. The hard constraint is that this must not become an audit-row generator:
-    log_digital_thread_event() fires on every UPDATE to `devices`.
+    log_audit_trail_event() fires on every UPDATE to `devices`.
     """
 
     DEVICE = {"id": "dev-uuid-1", "name": "Robot_01", "sparkplug_id": "dev" + "1" * 21}
@@ -648,6 +651,229 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
     def test_label_falls_back_when_a_device_has_no_name(self):
         ingestion.mark_device_seen({"id": "x", "sparkplug_id": "dev" + "9" * 21})
         self.assertEqual(ingestion._device_seen["x"]["name"], "dev" + "9" * 21)
+
+
+class TestADeviceThatPublishesAgain(unittest.TestCase):
+    """
+    DDATA from a device the directory holds OFFLINE. A watchdog timeout rests on silence alone, so
+    the device's next DDATA sets it ONLINE again. Any other OFFLINE (a DDEATH, its node's birth or
+    death since, a row this process has not seen born) is a device that has not been born, and gets
+    a rebirth request instead. The data is stored either way.
+    """
+
+    WIRE = "dev" + "1" * 21
+
+    def setUp(self):
+        reset_module_state()
+        self.device = {"id": "dev-uuid-1", "name": "Robot_01", "sparkplug_id": self.WIRE,
+                       "is_quarantined": False, "status": "ONLINE"}
+        self.gate_moved = True
+        self.failing = set()
+        self.client = MagicMock()
+        self.client.rpc.side_effect = self._rpc
+        self.mqtt = MagicMock()
+        self._real = {}
+        for name, value in (
+            ("supabase_client", self.client),
+            ("resolve_device", lambda wire_id, use_cache=True, include_archived=False: self.device),
+            ("verify_gateway_binding", lambda *a, **k: None),
+            ("device_modelled_constraints", lambda device_uuid: None),
+            ("_writer", MagicMock()),
+            ("sparkplug_b_pb2", types.SimpleNamespace(Payload=FakeProtoPayload)),
+        ):
+            self._real[name] = getattr(ingestion, name)
+            setattr(ingestion, name, value)
+
+    def tearDown(self):
+        for name, value in self._real.items():
+            setattr(ingestion, name, value)
+        reset_module_state()
+
+    def _rpc(self, name, params):
+        call = MagicMock()
+        if name in self.failing:
+            call.execute.side_effect = RuntimeError("supabase down")
+        else:
+            moved = self.gate_moved if name == "ingest_mark_device_offline" else True
+            call.execute.return_value = types.SimpleNamespace(data=moved)
+        return call
+
+    def birth(self, node=NODE_A):
+        """What process_dbirth() leaves behind once its write has set the row ONLINE."""
+        self.device["status"] = "ONLINE"
+        ingestion.mark_device_seen(self.device, GROUP, node)
+
+    def sweep(self):
+        seen_at = ingestion._device_seen[self.device["id"]]["at"]
+        ingestion.sweep_stale_devices(now=seen_at + 61, timeout=60)
+        # The directory refresher's next pass.
+        self.device["status"] = "OFFLINE"
+
+    def ddeath(self):
+        ingestion.process_ddeath(self.WIRE, NODE_A)
+        self.device["status"] = "OFFLINE"
+
+    def ddata(self, node=NODE_A):
+        payload = types.SimpleNamespace(metrics=[FakeMetric("Systems/TEMPERATURE", string_value="ok")])
+        ingestion.process_ddata(self.WIRE, node, payload, group_id=GROUP, client=self.mqtt)
+
+    def online_writes(self):
+        return [c.args[1] for c in self.client.rpc.call_args_list
+                if c.args[0] == "ingest_set_device_state" and c.args[1]["p_status"] == "ONLINE"]
+
+    def rebirths(self):
+        return [c.args[0] for c in self.mqtt.publish.call_args_list]
+
+    def tracked(self):
+        return self.device["id"] in ingestion._device_seen
+
+    def test_ddata_after_a_timeout_sets_the_device_online(self):
+        self.birth()
+        self.sweep()
+        self.ddata()
+
+        self.assertEqual(self.online_writes(), [{
+            "p_device_id": self.device["id"], "p_status": "ONLINE",
+            "p_identity_source": None, "p_first_dbirth_at": None,
+        }])
+        self.assertEqual(self.device["status"], "ONLINE")
+        self.assertTrue(self.tracked())
+        self.assertEqual(self.rebirths(), [], "a timed-out device needs no rebirth to be believed")
+
+    def test_the_revival_is_written_once(self):
+        """One audit row per quiet period, as for the timeout itself."""
+        self.birth()
+        self.sweep()
+        self.ddata()
+        self.ddata()
+        self.assertEqual(len(self.online_writes()), 1)
+
+    def test_a_revived_device_times_out_again(self):
+        self.birth()
+        self.sweep()
+        self.ddata()
+        self.sweep()
+        offline = [c for c in self.client.rpc.call_args_list
+                   if c.args[0] == "ingest_mark_device_offline"]
+        self.assertEqual(len(offline), 2)
+
+    def test_a_failed_revival_is_retried_by_the_next_ddata(self):
+        self.birth()
+        self.sweep()
+        self.failing.add("ingest_set_device_state")
+        self.ddata()
+        self.assertEqual(self.device["status"], "OFFLINE")
+        self.assertFalse(self.tracked())
+
+        self.failing.clear()
+        self.ddata()
+        self.assertEqual(len(self.online_writes()), 2)
+        self.assertEqual(self.device["status"], "ONLINE")
+        self.assertEqual(self.rebirths(), [])
+
+    def test_a_stale_offline_row_after_a_revival_asks_for_nothing(self):
+        """The refresher can replace the cached row with one read before the revival wrote."""
+        self.birth()
+        self.sweep()
+        self.ddata()
+        self.device["status"] = "OFFLINE"
+        self.ddata()
+        self.assertEqual(self.rebirths(), [])
+        self.assertEqual(len(self.online_writes()), 1)
+
+    def test_ddata_after_a_ddeath_requests_a_rebirth_and_stays_offline(self):
+        self.birth()
+        self.ddeath()
+        self.ddata()
+
+        self.assertEqual(self.online_writes(), [])
+        self.assertEqual(self.rebirths(), ["spBv1.0/%s/NCMD/%s" % (GROUP, NODE_A)])
+        self.assertFalse(self.tracked(), "already OFFLINE: nothing for the watchdog to sweep")
+
+    def test_the_data_is_stored_while_the_device_waits_for_its_birth(self):
+        self.birth()
+        self.ddeath()
+        self.ddata()
+        self.assertEqual(ingestion._writer.submit.call_count, 1)
+
+    def test_the_rebirth_request_is_rate_limited(self):
+        self.birth()
+        self.ddeath()
+        for _ in range(3):
+            self.ddata()
+        self.assertEqual(len(self.rebirths()), 1)
+
+    def test_a_stale_online_row_does_not_end_the_wait(self):
+        """A row cached before the DDEATH wrote must not make the device look live."""
+        self.birth()
+        self.ddeath()
+        self.ddata()
+        self.device["status"] = "ONLINE"
+        self.ddata()
+        self.assertFalse(self.tracked())
+        self.assertEqual(self.online_writes(), [])
+
+    def test_a_birth_ends_the_wait(self):
+        self.birth()
+        self.ddeath()
+        self.ddata()
+        self.birth()
+        self.ddata()
+        self.assertTrue(self.tracked())
+        self.assertEqual(len(self.rebirths()), 1)
+
+    def test_a_node_death_before_the_timeout_requires_a_device_birth(self):
+        """The usual way a node's devices go quiet: its NDEATH, and the watchdog 300s later."""
+        self.birth()
+        ingestion.end_device_births(GROUP, NODE_A)
+        self.sweep()
+        self.ddata()
+        self.assertEqual(self.online_writes(), [])
+        self.assertEqual(len(self.rebirths()), 1)
+
+    def test_a_node_birth_after_the_timeout_requires_a_device_birth(self):
+        self.birth()
+        self.sweep()
+        ingestion.end_device_births(GROUP, NODE_A)
+        self.ddata()
+        self.assertEqual(self.online_writes(), [])
+        self.assertEqual(len(self.rebirths()), 1)
+
+    def test_another_nodes_birth_changes_nothing(self):
+        self.birth()
+        self.sweep()
+        ingestion.end_device_births(GROUP, NODE_B)
+        self.ddata()
+        self.assertEqual(len(self.online_writes()), 1)
+
+    def test_node_births_and_deaths_end_device_births_and_ndata_does_not(self):
+        ingestion.supabase_client = None  # process_node_message() returns after the bump
+        for msg_type in ("NBIRTH", "NDATA", "NDEATH"):
+            ingestion.process_node_message(NODE_A, msg_type, AliasPayload(), group_id=GROUP)
+        self.assertEqual(ingestion._node_epoch[ingestion.alias_key(GROUP, NODE_A)], 2)
+
+    def test_a_sweep_that_moved_nothing_leaves_the_device_to_its_birth(self):
+        """The gate answered False: the row was already OFFLINE, so the watchdog is not why."""
+        self.birth()
+        self.gate_moved = False
+        self.sweep()
+        self.ddata()
+        self.assertEqual(self.online_writes(), [])
+        self.assertEqual(len(self.rebirths()), 1)
+
+    def test_an_offline_row_this_process_has_not_seen_born_requests_a_rebirth(self):
+        """After a restart, or a device registered and never born."""
+        self.device["status"] = "OFFLINE"
+        self.ddata()
+        self.assertEqual(self.online_writes(), [])
+        self.assertEqual(len(self.rebirths()), 1)
+        self.assertFalse(self.tracked())
+
+    def test_an_online_row_new_to_this_process_is_tracked(self):
+        self.ddata()
+        self.assertTrue(self.tracked())
+        self.assertEqual(self.online_writes(), [])
+        self.assertEqual(self.rebirths(), [])
 
 
 if __name__ == "__main__":

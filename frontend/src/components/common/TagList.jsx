@@ -7,11 +7,11 @@ import React, { useState } from 'react'
  * style?, title?, priority?, label? }`; `label` is what the overflow tooltip reads, and differs
  * from `key` where the identity is a UUID.
  */
-export function TagList({ tags, limit = 2, emptyLabel = '—' }) {
+export function TagList({ tags, limit = 2 }) {
   const [expanded, setExpanded] = useState(false)
 
   const entries = (tags || []).filter(Boolean)
-  if (entries.length === 0) return emptyLabel
+  if (entries.length === 0) return '—'
 
   const ordered = [
     ...entries.filter(t => t.priority),

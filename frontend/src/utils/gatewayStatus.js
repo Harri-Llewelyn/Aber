@@ -1,12 +1,13 @@
 /**
  * Gateway heartbeat helpers. Ingestion stamps `gateways.last_heartbeat` on every node-level
  * message; a gateway that stops beating never gets an OFFLINE write, so freshness is derived on
- * read. Mirrors public.gateway_status, and scripts/check-mirror-drift.mjs asserts the threshold
- * matches. The PENDING states must agree with ensure_gateway_status_view() as well, which is not
- * machine-checked.
+ * read. Mirrors public.gateway_status; check 2 of scripts/check-mirror-drift.mjs asserts that the
+ * threshold and the PENDING states agree with ensure_gateway_status_view().
  */
 
-// node_red_flow.json beats every 30s; allow three missed beats before calling it stale.
+import { formatBytes as formatBytesBase, formatDuration, NO_VALUE } from './format';
+
+// The gateway appliance's flow beats every 30s; allow three missed beats before calling it stale.
 export const HEARTBEAT_STALE_MS = 90_000;
 
 /**
@@ -32,7 +33,7 @@ export function isGatewayPending(gateway) {
 export const GATEWAY_STATUS_LABELS = {
   [GATEWAY_STATUS_PENDING_ENROLMENT]: 'AWAITING SETUP',
   [GATEWAY_STATUS_AWAITING_BIRTH]: 'ENROLLED — NO DATA YET',
-  OFFLINE: 'OFFLINE / DDEATH',
+  OFFLINE: 'OFFLINE',
 };
 
 export function isHeartbeatStale(lastHeartbeat, now = Date.now()) {
@@ -83,6 +84,12 @@ export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
   return new Date(ts).toLocaleString();
 }
 
+/** A length of time in seconds, e.g. "45s", "12m", "3h 5m" or "2d 4h"; null when it is not a number. */
+export function formatUptime(seconds) {
+  const text = formatDuration(seconds);
+  return text === NO_VALUE ? null : text;
+}
+
 /**
  * Appliance health, reported by the gateway itself on the heartbeat. The columns are NULL on every
  * gateway that does not report them, so each helper returns null rather than a zero or a dash: a
@@ -123,18 +130,11 @@ export function isCertExpiring(certExpiresAt, now = Date.now()) {
 }
 
 /**
- * A gateway that has not been given the root the platform is publishing.
- *
- * THE QUESTION BETWEEN THE TWO HALVES OF A ROTATION. The root is re-issued, the sweep publishes
- * the new bundle, and each appliance installs it within the hour of its next convergence. Only
- * once every appliance has it is it safe to switch the broker's leaf to the new root; until then
- * this says who has not converged yet. An appliance that never reported an expiry is not counted:
- * unknown is not the same as behind.
- *
- * A DAY'S TOLERANCE, because the two dates come from different clocks and a re-issue that moves
- * `notAfter` by hours is not a rotation anybody has to wait for.
+ * A gateway that has not been given the root the platform is publishing. An appliance that never
+ * reported an expiry is not counted: unknown is not behind. The tolerance is a day, because the two
+ * dates come from different clocks.
  */
-export const ROOT_LAG_TOLERANCE_DAYS = 1;
+const ROOT_LAG_TOLERANCE_DAYS = 1;
 
 export function holdsOlderRoot(certExpiresAt, platformNotAfter) {
   if (!certExpiresAt || !platformNotAfter) return false;
@@ -150,16 +150,8 @@ export function holdsOlderRoot(certExpiresAt, platformNotAfter) {
  */
 export function formatBytes(bytes) {
   if (bytes === null || bytes === undefined || Number.isNaN(Number(bytes))) return null;
-  const n = Number(bytes);
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  let i = 0;
-  let value = Math.abs(n);
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i += 1;
-  }
-  const rendered = i === 0 ? value : value.toFixed(value < 10 ? 1 : 0);
-  return `${n < 0 ? '-' : ''}${rendered} ${units[i]}`;
+  const text = formatBytesBase(bytes);
+  return text === NO_VALUE ? null : text;
 }
 
 /**

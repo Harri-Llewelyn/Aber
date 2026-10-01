@@ -8,10 +8,19 @@ import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal
 import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { ServicePrincipalCreateModal } from '../modals/ServicePrincipalCreateModal'
 import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescribeModal'
-import { IconDownload, IconLock, IconPencil, IconPlus, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import {
+  IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconRefreshCw, IconShieldAlert,
+} from '../common/Icons'
+import { Badge, ArchivedBadge } from '../common/Badge'
+import { ClearFilters } from '../common/ClearFilters'
+import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
+import { LoadingState } from '../common/LoadingState'
 import { PageHeading } from '../common/PageHeading'
+import { SectionCount } from '../common/SectionCount'
+import { TabStrip } from '../common/TabStrip'
 import { ContextPanel } from '../common/ContextPanel'
+import { formatDateTime } from '../../utils/format'
 import {
   CREDENTIAL_STATES,
   brokerState,
@@ -67,28 +76,32 @@ const ROLE_ENTRIES = [
 ]
 
 /**
- * Access Control: broker credentials and service identities, as two sections of one page.
+ * Access Control: broker credentials and machine identities, as two sections of one page.
  *
  * Gateways is the per-gateway list, with two sources side by side: what the platform issued and
  * recorded (the database), and what the broker holds right now (its Dynamic Security plugin, read
  * through broker-inventory). A credential issued outside a dashboard session reads `No platform
  * record` and `Active`, which is the honest pair. Services is the non-human identities on both
  * planes. Administrator only, gated on the role as Settings is; the page is narrower than the RPCs
- * behind it, which also admit Shopfloor_Manager.
+ * behind it, which also admit Shopfloor_Manager. The page scrolls: it holds several peer cards.
  */
 export function AccessControlTab({ showToast }) {
   const [section, setSection] = useState('gateways')
   // The role whose rules the drawer shows, by name; null when closed.
   const [openRole, setOpenRole] = useState(null)
   const [rows, setRows] = useState([])
+  // One flag per read a card waits on, so a card that is still loading says so instead of reading
+  // as empty.
   const [loading, setLoading] = useState(true)
+  const [inventoryLoading, setInventoryLoading] = useState(true)
+  const [principalsLoading, setPrincipalsLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   // The broker's own account list, or null when it could not be read. Its own error, because a
   // stack whose credential service is down should still show what the platform recorded.
   const [inventory, setInventory] = useState(null)
   const [inventoryError, setInventoryError] = useState(null)
-  // One of CREDENTIAL_FILTERS' values: a credential state, every current gateway, or the archive.
-  const [credentialFilter, setCredentialFilter] = useState('current')
+  // One of the credential filter's values: a credential state, every active gateway, or the archive.
+  const [credentialFilter, setCredentialFilter] = useState('active')
   const [bundleForGw, setBundleForGw] = useState(null)
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [principals, setPrincipals] = useState([])
@@ -103,23 +116,27 @@ export function AccessControlTab({ showToast }) {
   // authority: an Auditor can see the denylist, a Shopfloor_Manager cannot, and tokenStatus()
   // degrades on an empty set rather than claiming everything is live.
   const [revokedJtis, setRevokedJtis] = useState(() => new Set())
-  // Principal id -> its `revoked_service_principals` row (0076). A MAP, not a Set: the row carries
-  // when and why, and both are shown.
+  // Principal id -> its `revoked_service_principals` row. A MAP, not a Set: the row carries when and
+  // why, and both are shown.
   const [revokedPrincipals, setRevokedPrincipals] = useState(() => new Map())
   // { principal, name, revocation, activeTokens } while the withdraw/reinstate dialog is open.
   const [revokeIdentity, setRevokeIdentity] = useState(null)
-  // True while the create dialog is open (0125). On success the token dialog opens for the new
-  // identity, so the first token is shown once the way every other is.
+  // True while the create dialog is open. On success the token dialog opens for the new identity,
+  // so the first token is shown once the way every other is.
   const [creating, setCreating] = useState(false)
-  // The principal row whose name and purpose are being edited (0126), or null.
+  // The principal row whose name and purpose are being edited, or null.
   const [describing, setDescribing] = useState(null)
-  // Its own error: gateway credentials accept Shopfloor_Manager, service principals are
+  // Its own error: gateway credentials accept Shopfloor_Manager, machine identities are
   // Administrator-only, and one error state would blame the whole page for a refusal that applies
   // to one section.
   const [principalError, setPrincipalError] = useState(null)
 
   const load = useCallback((isInitial = false) => {
-    if (isInitial) setLoading(true)
+    if (isInitial) {
+      setLoading(true)
+      setInventoryLoading(true)
+      setPrincipalsLoading(true)
+    }
     api.listGatewayCredentials()
       .then(d => { setRows(d); setLoadError(null); setLoading(false) })
       .catch(e => { setLoadError(e?.message || 'Could not read gateway credentials.'); setLoading(false) })
@@ -127,30 +144,39 @@ export function AccessControlTab({ showToast }) {
     // The broker, live. Not allowed to fail the page: the Broker column reads Not read and the
     // reason is shown once, above the table.
     api.listBrokerInventory()
-      .then(d => { setInventory(d); setInventoryError(null) })
-      .catch(e => { setInventory(null); setInventoryError(e?.message || 'Could not read the broker.') })
+      .then(d => { setInventory(d); setInventoryError(null); setInventoryLoading(false) })
+      .catch(e => {
+        setInventory(null)
+        setInventoryError(e?.message || 'Could not read the broker.')
+        setInventoryLoading(false)
+      })
 
-    // Not awaited with the other and not allowed to fail the page: everyone else still gets the
+    // Not awaited with the others and not allowed to fail the page: everyone else still gets the
     // credential inventory.
     api.listServicePrincipals()
-      .then(d => { setPrincipals(d); setPrincipalError(null) })
-      .catch(e => { setPrincipals([]); setPrincipalError(e?.message || 'Could not list service principals.') })
+      .then(d => { setPrincipals(d); setPrincipalError(null); setPrincipalsLoading(false) })
+      .catch(e => {
+        setPrincipals([])
+        setPrincipalError(e?.message || 'Could not list machine identities.')
+        setPrincipalsLoading(false)
+      })
 
-    // Its own failure, swallowed to an empty map: `digital_thread:read` is a separate permission,
-    // and a caller without it still sees the identities, each reading No token on record.
+    // Its own failure, swallowed to an empty map: the token history is the Audit Trail's security
+    // lane, which only an Administrator or Auditor may read. A caller without it still sees the
+    // identities, each reading No token on record.
     api.listServiceTokens()
       .then(setTokens)
       .catch(() => setTokens(new Map()))
 
-    // The third read keeps the count honest: without it a badge reads 5 active tokens after four
-    // were withdrawn. api.listRevokedServiceTokens() already resolves to an empty Set on a refusal,
-    // so the .catch is for transport failure.
+    // Keeps the count honest: without it a badge reads 5 active tokens after four were revoked.
+    // api.listRevokedServiceTokens() already resolves to an empty Set on a refusal, so the .catch
+    // is for transport failure.
     api.listRevokedServiceTokens()
       .then(setRevokedJtis)
       .catch(() => setRevokedJtis(new Set()))
 
-    // The fourth read (0076). Its own, for the same reason as the third: different table,
-    // different authority, and an identity list that renders beats one blanked by a refusal.
+    // Its own read, for the same reason: different table, different authority, and an identity
+    // list that renders beats one blanked by a refusal.
     api.listRevokedServicePrincipals()
       .then(setRevokedPrincipals)
       .catch(() => setRevokedPrincipals(new Map()))
@@ -158,16 +184,15 @@ export function AccessControlTab({ showToast }) {
 
   useEffect(() => { load(true) }, [load])
 
-  // Not Realtime and not polled: nothing on this page changes on its own.
   // Counts per filter value, over the whole list, so the dropdown answers "is there any?" without
-  // being selected. Archived rows count only under Archived: 0038 has rotated their credential to
+  // being selected. Archived rows count only under Archived: archiving rotated their credential to
   // a password nobody holds, so their state is not one of the four.
   const filterCounts = useMemo(() => {
-    const counts = { current: 0, archived: 0 }
+    const counts = { active: 0, archived: 0 }
     for (const s of Object.values(CREDENTIAL_STATES)) counts[s] = 0
     for (const r of rows) {
       if (r.is_archived) { counts.archived += 1; continue }
-      counts.current += 1
+      counts.active += 1
       counts[credentialState(r, r.issued_at)] += 1
     }
     return counts
@@ -176,7 +201,7 @@ export function AccessControlTab({ showToast }) {
   const visible = useMemo(() => rows.filter(r => {
     if (credentialFilter === 'archived') return r.is_archived
     if (r.is_archived) return false
-    return credentialFilter === 'current' || credentialState(r, r.issued_at) === credentialFilter
+    return credentialFilter === 'active' || credentialState(r, r.issued_at) === credentialFilter
   }), [rows, credentialFilter])
 
   const clientsByUsername = useMemo(
@@ -226,89 +251,63 @@ export function AccessControlTab({ showToast }) {
     load()
   }, [load])
 
-  if (loading) {
-    return (
-      <div className="page-layout"><div className="page-main">
-        <div className="card" style={{ padding: '12px var(--inset)' }}>
-          <div className="loading-wrap"><div className="spinner" /> Loading credentials…</div>
-        </div>
-      </div></div>
-    )
-  }
+  const brokerBadge = (bs) => (
+    <Badge size="sm" tone={brokerStateTone(bs)} title={brokerStateExplanation(bs)}>
+      {brokerStateLabel(bs)}
+    </Badge>
+  )
+
+  // The credential filter is the only control on the page that can be off its default.
+  const filterCount = credentialFilter !== 'active' ? 1 : 0
+  const gatewayTotal = credentialFilter === 'archived' ? filterCounts.archived : filterCounts.active
 
   return (
     <div className="page-layout">
       <div className="page-main">
         <PageHeading icon={<IconLock size={15} />} title="Access Control">
-          Who and what may reach this stack, and with which credential. A gateway authenticates to
-          the broker as an account issued against it; the stack's own processes hold identities on
-          two separate planes — a database identity is a set of permissions, a broker identity is an
-          ACL entry, and nothing here holds both.
+          The credentials that let gateways and the stack's own processes reach the broker and the
+          database, kept on two separate planes.
         </PageHeading>
 
-        {/* Two sections, one page: a gateway's credential and a service's identity are different
+        {/* Two sections, one page: a gateway's credential and a machine identity are different
             questions with different actions, and interleaving their cards read as one long list.
-            The heading above does not change with the tab, because the subject does not. Same
-            tablist markup as the Capture page's subject switch. */}
-        <div
-          role="tablist"
-          aria-label="Access Control section"
-          style={{ display: 'flex', gap: '8px', marginBottom: 'var(--stack)' }}
-        >
-          <button
-            role="tab"
-            aria-selected={section === 'gateways'}
-            className={`btn btn-sm ${section === 'gateways' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => { setSection('gateways'); setOpenRole(null) }}
-            title="Every gateway's broker credential, and any broker account no gateway claims"
-          >
-            Gateways <span className="section-count">{rows.length}</span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={section === 'services'}
-            className={`btn btn-sm ${section === 'services' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setSection('services')}
-            title="The stack's own identities: database principals and broker roles"
-          >
-            Services <span className="section-count">{principals.length + platformAccounts.length + ROLE_ENTRIES.length}</span>
-          </button>
-        </div>
+            The heading above does not change with the tab, because the subject does not. */}
+        <TabStrip
+          ariaLabel="Access Control section"
+          value={section}
+          onChange={id => { setSection(id); if (id === 'gateways') setOpenRole(null) }}
+          tabs={[
+            { id: 'gateways', label: 'Gateways', title: "Every gateway's broker credential, and any broker account no gateway claims" },
+            { id: 'services', label: 'Services', title: "The stack's own identities: machine identities, broker accounts and broker roles" },
+          ]}
+        />
 
-        {section === 'gateways' && (<>
-        {/* One card for one list: title, description, controls and rows. The page states its own
-            limit before the first row, so a reader knows what it can and cannot see before acting
-            on one. */}
+        {section === 'gateways' && (
+        <div className="stack">
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Broker credentials{' '}
-              {/* Filtered of total when a filter is on, so a narrowed inventory does not read as a
-                  short one. */}
-              <span
-                className="section-count"
-                title={visible.length === rows.length
-                  ? `${rows.length} gateway${rows.length === 1 ? '' : 's'}`
-                  : `${visible.length} of ${rows.length} gateways shown`}
-              >
-                {visible.length === rows.length ? rows.length : `${visible.length}/${rows.length}`}
-              </span>
+              Broker credentials
+              <HelpTip
+                label="About broker credentials"
+                text="Each gateway connects to the broker as its own Sparkplug ID, confined to its edge node. Credential is what the platform issued and recorded; Broker is what the broker holds now, read live from Dynamic Security."
+              />
+              <SectionCount total={gatewayTotal} shown={visible.length} />
             </h3>
+          </div>
 
-            {/* The card's controls in its header. The filter is the Schemas page's status select:
-                counts in the labels, so the list's shape is readable without selecting. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div className="card-body">
+            <div className="filter-bar">
               <select
-                className="form-control"
-                style={{ width: '210px' }}
+                className="form-control control-lg"
                 value={credentialFilter}
                 onChange={e => setCredentialFilter(e.target.value)}
                 aria-label="Filter gateways by credential state"
                 title="Filter by the Credential column. An archived gateway's credential was rotated to a password nobody holds; it can be issued a new one only after being restored."
               >
-                <option value="current">Current ({filterCounts.current})</option>
+                <option value="active">Active ({filterCounts.active})</option>
                 <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
-                <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Bundle outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
+                <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Setup outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
                 <option value={CREDENTIAL_STATES.REVOKED}>Revoked ({filterCounts[CREDENTIAL_STATES.REVOKED]})</option>
                 <option value={CREDENTIAL_STATES.UNRECORDED}>No platform record ({filterCounts[CREDENTIAL_STATES.UNRECORDED]})</option>
                 <option value="archived">Archived ({filterCounts.archived})</option>
@@ -316,208 +315,174 @@ export function AccessControlTab({ showToast }) {
               <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Re-read credentials">
                 <IconRefreshCw size={14} /> Refresh
               </button>
+              <ClearFilters count={filterCount} onClear={() => setCredentialFilter('active')} />
             </div>
-          </div>
 
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
-            Every gateway authenticates to the broker as its own Sparkplug ID, confined by its own
-            role to that edge node, so no two gateways can share a connection. The{' '}
-            <strong>Credential</strong> column is what the platform issued and recorded; the{' '}
-            <strong>Broker</strong> column is what the broker holds right now, read live from its
-            Dynamic Security plugin.
-          </p>
-
-          {/* Shown only when the broker could not be read: the Broker column then reads Not read for
-              every row, and this says why once rather than on each. When it WAS read, the column is
-              the statement and no callout is needed. */}
-          {inventoryError && (
-            <div className="callout callout-warning">
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>
-                <strong>The broker was not read.</strong> The Broker column reads <em>Not read</em>{' '}
-                for every row. {inventoryError} Reading it requires an Administrator and a reachable
-                credential service; the Credential column, from the database, is unaffected.
+            {/* Shown only when the broker could not be read: the Broker column then reads Not read
+                for every row, and this says why once rather than on each. When it WAS read, the
+                column is the statement and no callout is needed. */}
+            {inventoryError && (
+              <div className="callout callout-warning">
+                <IconShieldAlert size={14} className="callout-icon" />
+                <div>
+                  <strong>The broker was not read.</strong> The Broker column reads <em>Not read</em>{' '}
+                  for every row. {inventoryError} Reading it requires an Administrator and a
+                  reachable credential service; the Credential column, from the database, is
+                  unaffected.
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {loadError && (
-            <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>{loadError}</div>
-            </div>
-          )}
-
-          <div className="table-wrap" style={{ marginTop: '12px' }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Gateway</th>
-                <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Shadow (republishes recorded captures)">Type</th>
-                <th>MQTT username</th>
-                <th title="What the platform issued and recorded, from the database">Credential</th>
-                <th title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.length === 0 && (
-                <tr><td colSpan={6} style={{ color: 'var(--text-muted)', padding: '14px' }}>
-                  {rows.length === 0 ? (
-                    <>
-                      No gateways registered. Create one on the Gateways tab —{' '}
-                      <code>tutorial/README.md</code> walks through it.
-                    </>
-                  ) : 'No gateway matches this filter.'}
-                </td></tr>
-              )}
-              {visible.map(g => {
-                const state = credentialState(g, g.issued_at)
-                const action = credentialAction(g)
-                return (
-                  <tr key={g.id}>
-                    <td>
-                      <div>{g.name}</div>
-                      {g.is_archived && (
-                        <span className="badge badge-neutral" style={{ fontSize: '11px' }}>ARCHIVED</span>
-                      )}
-                    </td>
-                    <td>
-                      {/* The same four words as the Gateways and Capture pages, from the same
-                          helper: a simulator and a shadow gateway hold a credential for different
-                          reasons. */}
-                      <span
-                        className={`badge badge-${gatewayTypeTone(gatewayType(g))}`}
-                        style={{ fontSize: '11px' }}
-                        title={gatewayTypeDescription(gatewayType(g))}
-                      >
-                        {gatewayTypeLabel(gatewayType(g))}
-                      </span>
-                    </td>
-                    {/* The username is the wire identity, retyped into a broker node's credential
-                        pair. Click-to-copy, because a transcription error is a gateway whose every
-                        publish is silently dropped by the ACL. */}
-                    <td>
-                      <CopyableId
-                        value={g.sparkplug_id}
-                        label="MQTT username"
-                        title={`Copy ${g.sparkplug_id} — the username this gateway authenticates as`}
-                        onNotify={showToast}
-                      />
-                    </td>
-                    <td>
-                      {/* The badge carries the explanation as its title as well, so the meaning is
-                          reachable from the row without the legend having to be on screen. */}
-                      <span
-                        className={`badge badge-${credentialStateTone(state)}`}
-                        style={{ fontSize: '11px' }}
-                        title={credentialStateExplanation(state, g)}
-                      >
-                        {credentialStateLabel(state)}
-                      </span>
-                      {(g.issued_at || g.enrolled_at) && state !== CREDENTIAL_STATES.REVOKED && (
-                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
-                          {new Date(g.issued_at || g.enrolled_at).toLocaleString()}
-                        </div>
-                      )}
-                    </td>
-                    {/* The live broker state beside the recorded one. The pair is the point: a
-                        gateway can read No platform record and Active (issued on the host), or
-                        Issued and Disabled (revoked at the broker since). */}
-                    <td>
-                      {(() => {
-                        const bs = brokerState(clientsByUsername.get(g.sparkplug_id), !!inventory)
-                        return (
-                          <span
-                            className={`badge badge-${brokerStateTone(bs)}`}
-                            style={{ fontSize: '11px' }}
-                            title={brokerStateExplanation(bs)}
-                          >
-                            {brokerStateLabel(bs)}
-                          </span>
-                        )
-                      })()}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {action === 'mint' && (
-                        <button
-                          className="btn btn-ghost"
-                          onClick={() => setCredentialForGw({
-                            gateway_id: g.id, gateway_name: g.name, sparkplug_id: g.sparkplug_id,
-                            // Decides which .env pairing the dialog prints. Without it a playback
-                            // gateway is told to edit a Node-RED node it does not have.
-                            is_shadow: g.is_shadow
-                          })}
-                          title="Mint a broker credential and show it once"
-                        >
-                          <IconLock size={13} /> Generate
-                        </button>
-                      )}
-                      {action === 'bundle' && (
-                        <button
-                          className="btn btn-ghost"
-                          onClick={() => setBundleForGw({
-                            gateway_id: g.id,
-                            gateway_name: g.name,
-                            sparkplug_id: g.sparkplug_id,
-                            status: g.status,
-                            confirmFirst: true
-                          })}
-                          title="Generate the bootstrap bundle; the appliance mints its own credential"
-                        >
-                          <IconDownload size={13} /> Bundle
-                        </button>
-                      )}
-                      {!action && (
-                        <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                          Restore to issue
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+            {loadError && (
+              <div className="callout callout-danger">
+                <IconShieldAlert size={14} className="callout-icon" />
+                <div>{loadError}</div>
+              </div>
+            )}
           </div>
 
+          {/* A failed read shows its callout alone: an empty state beside it would say nothing is
+              registered when the page simply could not tell. */}
+          {loading ? <LoadingState label="credentials" /> : loadError && rows.length === 0 ? null : visible.length === 0 ? (
+            <EmptyState
+              icon={<IconRadio size={36} />}
+              filtered={rows.length > 0}
+              message={<>
+                No gateways registered. Create one on the Gateways page —{' '}
+                <code>tutorial/README.md</code> walks through it.
+              </>}
+              filteredMessage="No gateway matches this filter."
+            />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Gateway</th>
+                    <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Shadow (republishes recorded captures)">Type</th>
+                    <th>MQTT username</th>
+                    <th title="What the platform issued and recorded, from the database">Credential</th>
+                    <th title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</th>
+                    <th className="row-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map(g => {
+                    const state = credentialState(g, g.issued_at)
+                    const action = credentialAction(g)
+                    return (
+                      <tr key={g.id} className={g.is_archived ? 'row-archived' : undefined}>
+                        <td>
+                          <div>{g.name}</div>
+                          {g.is_archived && <ArchivedBadge size="sm" />}
+                        </td>
+                        <td>
+                          {/* The same four words as the Gateways and Capture pages, from the same
+                              helper: a simulator and a shadow gateway hold a credential for
+                              different reasons. */}
+                          <Badge
+                            size="sm"
+                            tone={gatewayTypeTone(gatewayType(g))}
+                            title={gatewayTypeDescription(gatewayType(g))}
+                          >
+                            {gatewayTypeLabel(gatewayType(g))}
+                          </Badge>
+                        </td>
+                        {/* The username is the wire identity, retyped into a broker node's
+                            credential pair. Click-to-copy, because a transcription error is a
+                            gateway whose every publish is silently dropped by the ACL. */}
+                        <td>
+                          <CopyableId
+                            value={g.sparkplug_id}
+                            label="MQTT username"
+                            title={`Copy ${g.sparkplug_id} — the username this gateway authenticates as`}
+                            onNotify={showToast}
+                          />
+                        </td>
+                        <td>
+                          {/* The badge carries the explanation as its title as well, so the meaning
+                              is reachable from the row without the legend having to be on screen. */}
+                          <Badge
+                            size="sm"
+                            tone={credentialStateTone(state)}
+                            title={credentialStateExplanation(state, g)}
+                          >
+                            {credentialStateLabel(state)}
+                          </Badge>
+                          {(g.issued_at || g.enrolled_at) && state !== CREDENTIAL_STATES.REVOKED && (
+                            <div className="cell-meta">{formatDateTime(g.issued_at || g.enrolled_at)}</div>
+                          )}
+                        </td>
+                        {/* The live broker state beside the recorded one. The pair is the point: a
+                            gateway can read No platform record and Active (issued on the host), or
+                            Issued and Disabled (revoked at the broker since). */}
+                        <td>{brokerBadge(brokerState(clientsByUsername.get(g.sparkplug_id), !!inventory))}</td>
+                        <td className="row-actions">
+                          {action === 'mint' && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => setCredentialForGw({
+                                gateway_id: g.id, gateway_name: g.name, sparkplug_id: g.sparkplug_id,
+                                // Decides which .env pairing the dialog prints. Without it a
+                                // playback gateway is told to edit a Node-RED node it does not have.
+                                is_shadow: g.is_shadow
+                              })}
+                              title="Mint a broker credential and show it once"
+                            >
+                              <IconLock size={13} /> Generate
+                            </button>
+                          )}
+                          {action === 'bundle' && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => setBundleForGw({
+                                gateway_id: g.id,
+                                gateway_name: g.name,
+                                sparkplug_id: g.sparkplug_id,
+                                status: g.status,
+                                confirmFirst: true
+                              })}
+                              title="Generate the bootstrap bundle; the appliance mints its own credential"
+                            >
+                              <IconDownload size={13} /> Bundle
+                            </button>
+                          )}
+                          {!action && <span className="cell-meta">Restore to issue</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Accounts the broker holds that no gateway row claims. Shown only when the broker was read
-            AND there is at least one: an empty section on every healthy stack is noise. This is the
-            half the old page could never show -- a credential outliving its gateway used to be
-            invisible here. */}
+            AND there is at least one: an empty card on every healthy stack is noise. */}
         {orphanAccounts.length > 0 && (
-          <div className="card" style={{ marginTop: 'var(--stack)' }}>
+          <div className="card">
             <div className="card-header">
               <h3 className="section-title">
                 Accounts with no gateway
-                <span className="section-count">{orphanAccounts.length}</span>
                 <HelpTip
-                  label="About orphaned accounts"
-                  text="Broker accounts shaped like a gateway id that no gateway row claims: the gateway was deleted from the broker directly, or the account never had a row. revoke-orphaned-broker-accounts.mjs disables them; it never deletes."
+                  label="About accounts with no gateway"
+                  text="Broker accounts shaped like a gateway id that no gateway claims and nothing declares. scripts/revoke-orphaned-broker-accounts.mjs lists and disables them; it never deletes an account."
                 />
+                <SectionCount total={orphanAccounts.length} />
               </h3>
             </div>
-            <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
-              These authenticate as a gateway but match no gateway on this platform, and nothing in
-              the repository declares them.{' '}
-              <code>scripts/revoke-orphaned-broker-accounts.mjs</code> lists and disables them; it
-              never deletes an account.
-            </p>
-            <div className="table-wrap" style={{ marginTop: '12px' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>MQTT username</th>
-                  <th>Roles</th>
-                  <th>Broker</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orphanAccounts.map(c => {
-                  const bs = brokerState(c, true)
-                  return (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>MQTT username</th>
+                    <th>Roles</th>
+                    <th>Broker</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orphanAccounts.map(c => (
                     <tr key={c.username}>
                       <td>
                         <CopyableId
@@ -527,42 +492,32 @@ export function AccessControlTab({ showToast }) {
                           onNotify={showToast}
                         />
                       </td>
-                      <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {(c.roles || []).join(', ') || '—'}
-                      </td>
-                      <td>
-                        <span
-                          className={`badge badge-${brokerStateTone(bs)}`}
-                          style={{ fontSize: '11px' }}
-                          title={brokerStateExplanation(bs)}
-                        >
-                          {brokerStateLabel(bs)}
-                        </span>
-                      </td>
+                      <td className="mono cell-meta">{(c.roles || []).join(', ') || '—'}</td>
+                      <td>{brokerBadge(brokerState(c, true))}</td>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
-        </>)}
+        </div>
+        )}
 
-        {section === 'services' && (<>
-        {/* Service identities: two lists rather than one, because nothing holds an identity on both
-            planes. The ingestion daemon connects to the broker as `factoryplus_ingestion` and
-            reaches the database with the service-role key. */}
-        {/* The same column rhythm as the credentials table: an identity, what it holds, what that
-            reaches, where it comes from. */}
+        {section === 'services' && (
+        <div className="stack">
+        {/* Machine identities and the broker, as separate cards: nothing holds an identity on both
+            planes. The ingestion daemon connects to the broker as `aber_ingestion` and reaches the
+            database as Service_Ingestor. */}
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
-              Database principals
+              Machine identities
               <HelpTip
-                label="About database principals"
-                text="Identities for the stack's own processes. None has an email or password, so none can sign in: each is named by a token and holds permissions of its own rather than a person's role."
+                label="About machine identities"
+                text="Identities for the stack's own processes. None can sign in: each is named by a token and holds permissions of its own, not a person's role. They reach the database only, never the broker."
               />
+              <SectionCount total={principals.length} />
             </h3>
             {/* Offered only when the list could be read: a caller the RPC refused would be refused
                 here too, and a button that opens a dialog to fail is worse than none. */}
@@ -570,280 +525,258 @@ export function AccessControlTab({ showToast }) {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => setCreating(true)}
-                title="Create a database identity for a process that reads this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
+                title="Create a machine identity for a process that uses this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
               >
-                <IconPlus size={13} /> New Principal
+                <IconPlus size={13} /> New Machine Identity
               </button>
             )}
           </div>
 
           {principalError && (
-            <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>{principalError}</div>
+            <div className="card-body">
+              <div className="callout callout-danger">
+                <IconShieldAlert size={14} className="callout-icon" />
+                <div>{principalError}</div>
+              </div>
             </div>
           )}
-          {!principalError && (
+          {!principalError && (principalsLoading ? <LoadingState label="machine identities" /> :
+            principals.length === 0 ? (
+              <EmptyState
+                icon={<IconBot size={36} />}
+                message="No machine identities are registered. Every account on this stack belongs to a person."
+              />
+            ) : (
             <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Identity</th>
-                  {/* Its own column, as the Schemas page treats a UUID: it is the value a JWT's
-                      `sub` claim has to equal. */}
-                  <th>Principal ID</th>
-                  <th>Holds</th>
-                  <th>Reaches</th>
-                  {/* What is outstanding, not when it was last minted (tokenStatus()): a re-mint
-                      adds a live credential rather than replacing one. */}
-                  <th title="Long-lived tokens signed for this identity that have not yet expired">
-                    Tokens
-                  </th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {principals.length === 0 && (
-                  <tr><td colSpan={6} style={{ color: 'var(--text-muted)', padding: '14px' }}>
-                    No machine identities are registered. Every account on this stack belongs to a person.
-                  </td></tr>
-                )}
-                {principals.map(p => {
-                  // The row carries `name` and `purpose` for a principal created from the page
-                  // (0125); the registry answers for the three a migration pinned.
-                  const meta = describePrincipal(p.principal_id, p)
-                  // The denylist is passed so a withdrawn token stops counting as active.
-                  // `Date.now()` is spelled out because the third argument cannot be reached past a
-                  // defaulted second.
-                  const status = tokenStatus(tokens.get(p.principal_id), Date.now(), revokedJtis)
-                  const revocation = revokedPrincipals.get(p.principal_id) || null
-                  return (
-                    <tr key={p.principal_id}>
-                      {/* The purpose is a tooltip: three lines of background on a row whose other
-                          columns are the answer. The dotted underline says there is something to
-                          hover. */}
-                      <td>
-                        <span
-                          title={meta.purpose}
-                          style={{
-                            fontWeight: 600,
-                            textDecoration: 'underline dotted var(--text-muted)',
-                            textUnderlineOffset: '3px',
-                            cursor: 'help',
-                          }}
-                        >
-                          {meta.name}
-                        </span>
-                        {/* Only a row with a name of its own can be renamed: the three pinned
-                            identities are named in the registry, and the RPC refuses them. */}
-                        {p.name && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-icon"
-                            style={{ marginLeft: '4px', verticalAlign: 'middle' }}
-                            onClick={() => setDescribing(p)}
-                            title={`Rename ${meta.name} or change its purpose`}
-                            aria-label={`Describe ${meta.name}`}
-                          >
-                            <IconPencil size={12} />
-                          </button>
-                        )}
-                      </td>
-                      <td>
-                        <CopyableId
-                          value={p.principal_id}
-                          label="principal id"
-                          title={`Copy ${p.principal_id} — the subject a token for this identity must name`}
-                          onNotify={showToast}
-                        />
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                          {/* Permissions, not a role: these identities no longer hold `Operator`,
-                              whose every widening silently re-granted the stack's own processes. */}
-                          {(p.permissions || []).map(perm => (
-                            <span key={perm} className="badge badge-neutral" style={{ fontSize: '11px' }}>{perm}</span>
-                          ))}
-                          {/* Stated, not assumed: `can_sign_in` is returned by the RPC rather than
-                              inferred from the predicate it selected on. */}
-                          {p.can_sign_in === false && (
-                            <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
-                          )}
-                          {/* Beside the grants, because a revocation is a fact about the identity
-                              and outranks its tokens. */}
-                          {revocation && (
-                            <span
-                              className="badge badge-danger"
-                              style={{ fontSize: '11px', cursor: 'help' }}
-                              title={`Withdrawn ${new Date(revocation.revoked_at).toLocaleString()}`
-                                + (revocation.reason ? ` — ${revocation.reason}` : '')
-                                + '. Every token naming this identity is refused by the API, including any issued afterwards.'}
-                            >
-                              REVOKED
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '40ch' }}>
-                        {permissionReach(p.permissions)}
-                      </td>
-                      {/* Said once, as a tooltip with the dotted underline that says so. */}
-                      {/* The badge is the way in: a principal has N tokens and
-                          `revoke_service_token()` takes a jti, so a row-level Revoke would have to
-                          pick one. A plain badge when there is nothing to list. */}
-                      <td>
-                        {status.rows.length > 0 ? (
-                          <button
-                            type="button"
-                            className={`badge badge-${tokenStatusTone(status)}`}
-                            style={{
-                              fontSize: '11px',
-                              border: 'none',
-                              cursor: 'pointer',
-                              textDecoration: 'underline dotted currentColor',
-                              textUnderlineOffset: '3px',
-                            }}
-                            onClick={() => setTokensFor({ principal: p, name: meta.name, status })}
-                            title={`${tokenStatusDetail(status)} Click to list them and withdraw one.`}
-                          >
-                            {tokenStatusLabel(status)}
-                          </button>
-                        ) : (
-                          <span
-                            className={`badge badge-${tokenStatusTone(status)}`}
-                            style={{
-                              fontSize: '11px',
-                              textDecoration: 'underline dotted var(--text-muted)',
-                              textUnderlineOffset: '3px',
-                              cursor: 'help',
-                            }}
-                            title={tokenStatusDetail(status)}
-                          >
-                            {tokenStatusLabel(status)}
+              <table>
+                <thead>
+                  <tr>
+                    <th>Identity</th>
+                    {/* Its own column, as the Schemas page treats a UUID: it is the value a JWT's
+                        `sub` claim has to equal. */}
+                    <th>Principal ID</th>
+                    <th>Holds</th>
+                    <th>Reaches</th>
+                    {/* What is outstanding, not when it was last minted (tokenStatus()): a re-mint
+                        adds a live credential rather than replacing one. */}
+                    <th title="Long-lived tokens signed for this identity that have not yet expired">
+                      Tokens
+                    </th>
+                    <th className="row-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {principals.map(p => {
+                    // The row carries `name` and `purpose` for an identity created from the page;
+                    // the registry answers for the three a migration pinned.
+                    const meta = describePrincipal(p.principal_id, p)
+                    // The denylist is passed so a revoked token stops counting as active.
+                    // `Date.now()` is spelled out because the third argument cannot be reached past
+                    // a defaulted second.
+                    const status = tokenStatus(tokens.get(p.principal_id), Date.now(), revokedJtis)
+                    const revocation = revokedPrincipals.get(p.principal_id) || null
+                    return (
+                      <tr key={p.principal_id}>
+                        {/* The purpose is a tooltip: three lines of background on a row whose other
+                            columns are the answer. The dotted underline says there is something to
+                            hover. */}
+                        <td>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <strong className="hint-underline" title={meta.purpose}>{meta.name}</strong>
+                            {/* Only a row with a name of its own can be renamed: the three pinned
+                                identities are named in the registry, and the RPC refuses them. */}
+                            {p.name && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-icon"
+                                onClick={() => setDescribing(p)}
+                                title={`Rename ${meta.name} or change its purpose`}
+                                aria-label={`Describe ${meta.name}`}
+                              >
+                                <IconPencil size={12} />
+                              </button>
+                            )}
                           </span>
-                        )}
-                      </td>
-                      {/* A button where a token is actually read, and the command everywhere else.
-                          `isMintableFromPage()` decides: the two environment-key identities take
-                          their key from the environment at boot, so a minted token for them would
-                          be a second privileged credential nothing reads. They keep the rotate
-                          command. */}
-                      <td>
-                        {isMintableFromPage(meta) ? (
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                            {/* Minting is not offered for a withdrawn identity:
-                                record_service_token_issued() refuses it. Reinstating is the action
-                                available, so it is the one shown. */}
-                            {revocation ? (
-                              <button
-                                className="btn btn-ghost"
-                                onClick={() => setRevokeIdentity({
-                                  principal: p, name: meta.name, revocation, activeTokens: status.outstanding,
-                                })}
-                                title="This identity is withdrawn and cannot be issued a token. Reinstate it first — its previous tokens stay withdrawn."
-                              >
-                                Reinstate
-                              </button>
-                            ) : (
-                              <button
-                                className="btn btn-ghost"
-                                onClick={() => setMintFor({ principal: p, name: meta.name })}
-                                title="Sign a token for this identity and show it once. Recorded in the Digital Thread before it is returned, and revocable against the API afterwards."
-                              >
-                                <IconLock size={13} /> Issue Token
-                              </button>
-                            )}
-                            {/* Withdrawing is offered wherever minting is. */}
-                            {!revocation && (
-                              <button
-                                className="btn btn-ghost"
-                                onClick={() => setRevokeIdentity({
-                                  principal: p, name: meta.name, revocation: null, activeTokens: status.outstanding,
-                                })}
-                                title="Withdraw this identity. Every token naming it is refused by the API, including any issued afterwards — which is what makes this different from withdrawing tokens one at a time."
-                              >
-                                Withdraw
-                              </button>
-                            )}
-                            {/* Kept beside it: `mint-mcp-token.mjs` survives as break-glass for a
-                                stack whose only Administrator cannot sign in. */}
-                            <CopyableId
-                              value={meta.mintCommand.replace('{id}', p.principal_id)}
-                              label="mint command"
-                              display="Copy Command"
-                              variant="button"
-                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — the break-glass path, which works when nobody can sign in to this page.`}
-                              onNotify={showToast}
-                            />
-                          </div>
-                        ) : (
+                        </td>
+                        <td>
                           <CopyableId
-                            value={meta.mintCommand.replace('{id}', p.principal_id)}
-                            label="rotate command"
-                            display="Copy Command"
-                            variant="button"
-                            // The tooltip carries the distinction the label cannot: this is `npm
-                            // run keys:rotate`, because the identity's key lives in .env and is
-                            // read at boot.
-                            title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this identity's key lives in .env and is read at boot, so ROTATING it, not minting a new token, is what changes what the process presents. It records the issue before writing, and names the containers to restart.`}
+                            value={p.principal_id}
+                            label="principal id"
+                            title={`Copy ${p.principal_id} — the subject a token for this identity must name`}
                             onNotify={showToast}
                           />
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                            {(p.permissions || []).map(perm => (
+                              <Badge key={perm} size="sm">{perm}</Badge>
+                            ))}
+                            {/* Stated, not assumed: `can_sign_in` is returned by the RPC rather
+                                than inferred from the predicate it selected on. */}
+                            {p.can_sign_in === false && <Badge size="sm" tone="success">CANNOT SIGN IN</Badge>}
+                            {/* Beside the grants, because a withdrawal is a fact about the
+                                identity and outranks its tokens. */}
+                            {revocation && (
+                              <Badge
+                                size="sm"
+                                tone="danger"
+                                title={`Withdrawn ${formatDateTime(revocation.revoked_at)}`
+                                  + (revocation.reason ? ` — ${revocation.reason}` : '')
+                                  + '. Every token naming this identity is refused by the API, including any issued afterwards.'}
+                              >
+                                WITHDRAWN
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="cell-meta" style={{ maxWidth: '40ch' }}>
+                          {permissionReach(p.permissions)}
+                        </td>
+                        {/* The count is the way in: an identity has N tokens and
+                            `revoke_service_token()` takes a jti, so a row-level Revoke would have
+                            to pick one. A plain badge when there is nothing to list. */}
+                        <td>
+                          {status.rows.length > 0 ? (
+                            <button
+                              type="button"
+                              className="count-link"
+                              onClick={() => setTokensFor({ principal: p, name: meta.name, status })}
+                            >
+                              <Badge
+                                size="sm"
+                                tone={tokenStatusTone(status)}
+                                title={`${tokenStatusDetail(status)} Click to list them and revoke one.`}
+                              >
+                                {tokenStatusLabel(status)}
+                              </Badge>
+                            </button>
+                          ) : (
+                            <Badge
+                              size="sm"
+                              tone={tokenStatusTone(status)}
+                              className="hint-underline"
+                              title={tokenStatusDetail(status)}
+                            >
+                              {tokenStatusLabel(status)}
+                            </Badge>
+                          )}
+                        </td>
+                        {/* A button where a token is actually read, and the command everywhere
+                            else. `isMintableFromPage()` decides: the two environment-key identities
+                            take their key from the environment at boot, so a minted token for them
+                            would be a second privileged credential nothing reads. They keep the
+                            rotate command. */}
+                        <td className="row-actions">
+                          {isMintableFromPage(meta) ? (
+                            <>
+                              {/* Minting is not offered for a withdrawn identity:
+                                  record_service_token_issued() refuses it. Reinstating is the
+                                  action available, so it is the one shown. */}
+                              {revocation ? (
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => setRevokeIdentity({
+                                    principal: p, name: meta.name, revocation, activeTokens: status.outstanding,
+                                  })}
+                                  title="This identity is withdrawn and cannot be issued a token. Reinstate it first — its previous tokens stay revoked."
+                                >
+                                  Reinstate
+                                </button>
+                              ) : (
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => setMintFor({ principal: p, name: meta.name })}
+                                  title="Sign a token for this identity and show it once. Recorded in the Audit Trail before it is returned, and revocable against the API afterwards."
+                                >
+                                  <IconLock size={13} /> Issue Token
+                                </button>
+                              )}
+                              {/* Withdrawing is offered wherever minting is. */}
+                              {!revocation && (
+                                <button
+                                  className="btn btn-sm btn-danger btn-danger-reveal"
+                                  onClick={() => setRevokeIdentity({
+                                    principal: p, name: meta.name, revocation: null, activeTokens: status.outstanding,
+                                  })}
+                                  title="Withdraw this identity. Every token naming it is refused by the API, including any issued afterwards — which is what makes this different from revoking tokens one at a time."
+                                >
+                                  Withdraw
+                                </button>
+                              )}
+                              {/* Kept beside it: `mint-mcp-token.mjs` survives as break-glass for a
+                                  stack whose only Administrator cannot sign in. */}
+                              <CopyableId
+                                value={meta.mintCommand.replace('{id}', p.principal_id)}
+                                label="mint command"
+                                display="Copy Command"
+                                variant="button"
+                                className="btn-sm"
+                                title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — the break-glass path, which works when nobody can sign in to this page.`}
+                                onNotify={showToast}
+                              />
+                            </>
+                          ) : (
+                            <CopyableId
+                              value={meta.mintCommand.replace('{id}', p.principal_id)}
+                              label="rotate command"
+                              display="Copy Command"
+                              variant="button"
+                              className="btn-sm"
+                              // The tooltip carries the distinction the label cannot: this is `npm
+                              // run keys:rotate`, because the identity's key lives in .env and is
+                              // read at boot.
+                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this identity's key lives in .env and is read at boot, so ROTATING it, not minting a new token, is what changes what the process presents. It records the issue before writing, and names the containers to restart.`}
+                              onNotify={showToast}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
-
-          {/* Shown only while it is true of this stack. On a stack that has never rotated, the
-              token list is empty for the two most powerful credentials, because `npm run setup`
-              signs them before the database exists. The per-row badge says so; this footer restates
-              it only while it applies. */}
+          ))}
         </div>
 
         {/* The broker's own accounts, live. Every account that is not a gateway's, and any gateway
             -shaped account the repository declares as a fixture: those are created by the boot
             reconcile from the MQTT_*_USER pairs, not issued against a row, so they belong here and
             not among the gateways. */}
-        <div className="card" style={{ marginTop: 'var(--stack)' }}>
+        <div className="card">
           <div className="card-header">
             <h3 className="section-title">
               Broker accounts
-              {inventory && <span className="section-count">{platformAccounts.length}</span>}
               <HelpTip
                 label="About broker accounts"
-                text="The broker accounts the stack's own processes use, read live from Dynamic Security. mosquitto-init creates each at boot from its MQTT_<NAME>_USER and _PASSWORD pair; the validator's test gateway is one of them."
+                text="The broker's own accounts for the stack's processes, read live. mosquitto-init creates each at boot from its MQTT_<NAME>_USER and _PASSWORD pair, including the validator's test gateway. Purpose is that of the role held."
               />
+              <SectionCount total={platformAccounts.length} />
             </h3>
           </div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
-            {inventory
-              ? 'Created at boot from the stack\'s environment, one per platform process. The purpose is that of the role each holds.'
-              : 'The broker was not read, so its accounts cannot be listed.'}
-          </p>
-          {inventory && (
-            <div className="table-wrap" style={{ marginTop: '12px' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>MQTT username</th>
-                  <th>Roles</th>
-                  <th>Purpose</th>
-                  <th>Broker</th>
-                </tr>
-              </thead>
-              <tbody>
-                {platformAccounts.length === 0 && (
-                  <tr><td colSpan={4} style={{ color: 'var(--text-muted)', padding: '14px' }}>
-                    The broker holds no platform account. Every account it has belongs to a gateway.
-                  </td></tr>
-                )}
-                {platformAccounts.map(c => {
-                  const bs = brokerState(c, true)
-                  return (
+          {inventoryLoading ? <LoadingState label="broker accounts" /> : !inventory ? (
+            <EmptyState
+              icon={<IconRadio size={36} />}
+              message="The broker was not read, so its accounts cannot be listed."
+            />
+          ) : platformAccounts.length === 0 ? (
+            <EmptyState
+              icon={<IconRadio size={36} />}
+              message="The broker holds no platform account. Every account it has belongs to a gateway."
+            />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>MQTT username</th>
+                    <th>Roles</th>
+                    <th>Purpose</th>
+                    <th>Broker</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {platformAccounts.map(c => (
                     <tr key={c.username}>
                       <td>
                         <CopyableId
@@ -853,95 +786,95 @@ export function AccessControlTab({ showToast }) {
                           onNotify={showToast}
                         />
                       </td>
-                      <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {(c.roles || []).join(', ') || '—'}
-                      </td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>
-                        {c.name && <strong style={{ color: 'var(--text)' }}>{c.name}. </strong>}
+                      <td className="mono cell-meta">{(c.roles || []).join(', ') || '—'}</td>
+                      <td className="cell-meta" style={{ maxWidth: '46ch' }}>
+                        {c.name && <strong>{c.name}. </strong>}
                         {c.purpose || 'Holds no platform role; nothing in the repository declares it.'}
                       </td>
-                      <td>
-                        <span
-                          className={`badge badge-${brokerStateTone(bs)}`}
-                          style={{ fontSize: '11px' }}
-                          title={brokerStateExplanation(bs)}
-                        >
-                          {brokerStateLabel(bs)}
-                        </span>
-                      </td>
+                      <td>{brokerBadge(brokerState(c, true))}</td>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
 
-        <div className="card" style={{ marginTop: 'var(--stack)' }}>
+        <div className="card">
           <div className="card-header">
             <h3 className="section-title">
               Broker roles
               <HelpTip
                 label="About broker roles"
-                text="What each account may publish, receive and subscribe to, read live from Dynamic Security. What a role is for is declared in mosquitto/dynsec-roles.json and checked against the policy at build time."
+                text="What each role may publish, receive and subscribe to, read live from Dynamic Security. Open a rule count to read the rules. Purposes are declared in mosquitto/dynsec-roles.json and checked at build time."
               />
+              <SectionCount total={ROLE_ENTRIES.length} />
             </h3>
           </div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
-            {inventory
-              ? 'The rules are read live from the broker and open beside the table; the purpose beside each role is declared in the repository.'
-              : 'The broker was not read, so the rules cannot be shown. Each role and its purpose are declared in mosquitto/dynsec-roles.json.'}
-          </p>
-          <div className="table-wrap" style={{ marginTop: '12px' }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Role</th>
-                <th>Access</th>
-                <th title="How many rules the broker reports for the role; open one to read them">Rules</th>
-                <th>Purpose</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ROLE_ENTRIES.map(entry => {
-                const live = rolesByName.get(entry.rolename)
-                const allowed = (live?.acls || []).filter(a => a.allow)
-                const writes = live ? allowed.some(a => a.acltype === 'publishClientSend') : entry.writes
-                return (
-                  <tr key={entry.rolename} className={openRole === entry.rolename ? 'row-selected' : undefined}>
-                    <td className="mono" style={{ fontSize: '12px' }}>{entry.rolename}</td>
-                    <td>
-                      <span className={`badge badge-${writes ? 'pending' : 'ok'}`} style={{ fontSize: '11px' }}>
-                        {writes ? 'CAN PUBLISH' : 'READ ONLY'}
-                      </span>
-                    </td>
-                    {/* A count that opens the drawer, not the rules inline: the ingestion role alone
-                        is nine lines, and the table is for comparing roles. The drawer prints the
-                        plugin's own rules, verb and topic, for comparing against the policy. */}
-                    <td>
-                      {live ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => setOpenRole(entry.rolename)}
-                          title={`Open the ${allowed.length === 1 ? 'rule' : 'rules'} the broker holds for ${entry.rolename}`}
-                        >
-                          {allowed.length} {allowed.length === 1 ? 'rule' : 'rules'}
-                        </button>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Not read</span>
-                      )}
-                    </td>
-                    <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>{entry.purpose}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          {!inventoryLoading && !inventory && (
+            <div className="card-body">
+              <div className="callout callout-warning">
+                <IconShieldAlert size={14} className="callout-icon" />
+                <div>
+                  <strong>The broker was not read,</strong> so the rules cannot be shown. Each role
+                  and its purpose are declared in mosquitto/dynsec-roles.json.
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Role</th>
+                  <th>Access</th>
+                  <th title="How many rules the broker reports for the role; open one to read them">Rules</th>
+                  <th>Purpose</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ROLE_ENTRIES.map(entry => {
+                  const live = rolesByName.get(entry.rolename)
+                  const allowed = (live?.acls || []).filter(a => a.allow)
+                  const writes = live ? allowed.some(a => a.acltype === 'publishClientSend') : entry.writes
+                  const rules = `${allowed.length} ${allowed.length === 1 ? 'rule' : 'rules'}`
+                  return (
+                    <tr key={entry.rolename} className={openRole === entry.rolename ? 'row-selected' : undefined}>
+                      <td className="mono">{entry.rolename}</td>
+                      <td>
+                        <Badge size="sm" tone={writes ? 'pending' : 'success'}>
+                          {writes ? 'CAN PUBLISH' : 'READ ONLY'}
+                        </Badge>
+                      </td>
+                      {/* A count that opens the drawer, not the rules inline: the ingestion role
+                          alone is nine lines, and the table is for comparing roles. The drawer
+                          prints the plugin's own rules, verb and topic, for comparing against the
+                          policy. */}
+                      <td>
+                        {live ? (
+                          <button
+                            type="button"
+                            className="count-link"
+                            onClick={() => setOpenRole(entry.rolename)}
+                            aria-label={rules}
+                            title={`Open the ${allowed.length === 1 ? 'rule' : 'rules'} the broker holds for ${entry.rolename}`}
+                          >
+                            <span className="section-count">{allowed.length}</span>
+                          </button>
+                        ) : (
+                          <span className="cell-meta">Not read</span>
+                        )}
+                      </td>
+                      <td className="cell-meta" style={{ maxWidth: '46ch' }}>{entry.purpose}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
-        </>)}
+        </div>
+        )}
       </div>
 
       {/* One role at a time, beside the table it came from. */}
@@ -963,9 +896,9 @@ export function AccessControlTab({ showToast }) {
             onCopy={showToast}
             title={entry?.rolename || ''}
             subtitle={entry && (
-              <span className={`badge badge-${writes ? 'pending' : 'ok'}`} style={{ fontSize: '11px' }}>
+              <Badge size="sm" tone={writes ? 'pending' : 'success'}>
                 {writes ? 'CAN PUBLISH' : 'READ ONLY'}
-              </span>
+              </Badge>
             )}
             fields={entry ? [
               { label: 'Purpose', value: entry.purpose, full: true },
@@ -986,10 +919,10 @@ export function AccessControlTab({ showToast }) {
             {entry && (
               <div>
                 <div className="context-panel-section-label">Rules</div>
-                {/* THE PLUGIN'S OWN RULES, verb and topic. Not a paraphrase: someone comparing
-                    this against the policy should read the same topics on both sides. */}
+                {/* The plugin's own rules, verb and topic. Not a paraphrase: someone comparing this
+                    against the policy should read the same topics on both sides. */}
                 {allowed.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>The broker reports no rule for this role.</div>
+                  <div className="cell-meta">The broker reports no rule for this role.</div>
                 ) : (
                   <ul className="mono" style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '11px' }}>
                     {allowed.map((a, i) => (
@@ -1001,7 +934,7 @@ export function AccessControlTab({ showToast }) {
                   </ul>
                 )}
                 {denied.length > 0 && (
-                  <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '8px' }}>
+                  <div className="cell-meta" style={{ fontSize: '11px', marginTop: '8px' }}>
                     {denied.length} explicit den{denied.length === 1 ? 'ial' : 'ials'} not listed; the policy denies by default.
                   </div>
                 )}
@@ -1029,7 +962,7 @@ export function AccessControlTab({ showToast }) {
       )}
 
       {/* Not `afterAction`, which reloads the credential inventory; this reloads the token
-          inventory so the mint appears in the badge. `load()` refreshes all three reads. */}
+          inventory so the mint appears in the badge. `load()` refreshes every read. */}
       {mintFor && (
         <ServiceTokenModal
           principal={mintFor.principal}

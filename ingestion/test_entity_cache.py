@@ -17,7 +17,7 @@ without breaking two contracts that nothing else in the file states out loud is 
      record_declared_metrics() does `device["last_birth_metrics"] = ...` on the object
      resolve_device() cached, precisely so the next lookup inside the TTL sees the new state and
      does not re-detect the same change. A cache returning copies breaks that SILENTLY -- the
-     symptom is a duplicate UPDATE and a duplicate digital_thread row on every rebirth, not an
+     symptom is a duplicate UPDATE and a duplicate audit_trail row on every rebirth, not an
      error anyone would trace back to here.
   2. `None` IS A VALUE, NOT AN ABSENCE. The negative entry -- "this wire id resolved to nothing" --
      is what stops an unregistered device costing a directory round trip per message. A `get`

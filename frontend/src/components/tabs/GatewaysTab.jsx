@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat,
+  gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat, formatUptime,
   formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
@@ -22,6 +23,13 @@ import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { StatusBadge } from '../common/StatusBadge'
+import { Badge, ArchivedBadge } from '../common/Badge'
+import { SectionCount } from '../common/SectionCount'
+import { SearchInput } from '../common/SearchInput'
+import { ClearFilters } from '../common/ClearFilters'
+import { EmptyState } from '../common/EmptyState'
+import { LoadingState } from '../common/LoadingState'
+import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -41,16 +49,15 @@ import {
   IconBookOpen,
   IconExternalLink,
   IconShieldAlert,
+  IconAlertTriangle,
   IconLayoutDashboard,
-  IconX,
   IconDownload,
   IconLock
 } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
+export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [gateways, setGateways] = useState([])
@@ -58,38 +65,28 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const [cells, setCells]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
-  // The create/edit form is a modal written inline. Escape closes it through the shared stack, so
-  // an ArchiveModal opened over it answers first.
-  useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
-  // The context panel holds an id, not the gateway object: this page polls, and resolving the id
-  // every render keeps the drawer as live as the row. It closes itself if the entity disappears.
+  // The drawer holds an id, not the object: resolving it every render keeps it as live as the row.
   const [selectedId, setSelectedId] = useState(null)
-  // `location_scope` defaults to 'cell'. `deployment` is a different question: where the connector
-  // runs, not where the assets are. 'remote' is the default because it is the case that needs
-  // setup, and it finishes with a bundle to install.
+  // `location_scope` defaults to 'cell'. `deployment` is where the connector runs, not where its
+  // devices are; 'remote' is the default because it is the type that needs setup.
   const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL }
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
-  // Derived, not a second piece of state: the form carries `deployment` and `is_simulated` because
-  // that is what the API takes; the select carries one word.
+  // Derived: the form carries `deployment` and `is_simulated` (what the API takes); the select one word.
   const formType = gatewayType(form)
-  // Derived off the flags rather than `formType`: the rule belongs to
-  // `gateways_synthetic_has_no_cell`, which is written in terms of the two columns.
+  // Derived off the two flags: a simulated gateway cannot hold a cell.
   const formAcceptsCell = gatewayAcceptsCell(form)
   const [docsForGw, setDocsForGw] = useState(null)
-  // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
-  // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
+  // The gateway whose setup dialog is open, held as the object: the dialog stays open across a poll.
   const [bundleForGw, setBundleForGw] = useState(null)
-  // The host-run counterpart to bundleForGw. Separate state: the two are authorised differently,
-  // destroy different things, and only one puts a password on screen.
+  // The Host and Simulated counterpart to bundleForGw: only this one puts a password on screen.
   const [credentialForGw, setCredentialForGw] = useState(null)
-  // Whether this deployment can enrol an appliance, from gateway-bundle's GET. null until
-  // answered, and null when the probe failed: an unknown never blocks, since the function's own
-  // refusal still stands behind it.
+  // Whether this deployment can enrol an appliance, from gateway-bundle's GET. null until answered
+  // or when the probe failed: an unknown never blocks.
   const [enrolment, setEnrolment] = useState(null)
-  const [filterMode, setFilterMode] = useState('all')
+  const [filterMode, setFilterMode] = useState('active')
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -100,7 +97,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const [liveStatusFilter, setLiveStatusFilter] = useState('')
   const [kindFilter, setKindFilter] = useState('')
   const [quarantineOnly, setQuarantineOnly] = useState(false)
-  // The Playback gateway (0060). Off by default -- see the filter for why it is not a Type option.
+  // The Playback gateway: hidden by default, and not a Type option.
   const [showShadowGateways, setShowShadowGateways] = useState(false)
 
   useEffect(() => {
@@ -127,14 +124,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     setKindFilter('')
     setQuarantineOnly(false)
     setShowShadowGateways(false)
-    setFilterMode('all')
+    setFilterMode('active')
     handleClearSearch()
   }
 
   const load = useCallback(async (signal) => {
     try {
-      // Each gateway arrives with its devices embedded, so an assignment made anywhere shows on the
-      // next poll. The flat device list still surfaces devices that belong to no gateway.
+      // Each gateway arrives with its devices embedded; the flat device list surfaces the unassigned.
       const [g, a, c, ar] = await Promise.all([
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/devices', { signal }),
@@ -144,8 +140,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       ])
       setGateways(g); setAssets(a); setCells(c); setAreas(ar)
 
-      /* This person's open proposals, so the edit dialog can seed itself with an open patch rather
-         than replace it. Tolerated rather than required. */
+      // This person's open proposals, so the edit dialog can seed from an open patch. Optional.
       try {
         const proposals = await api.get('/api/v1/proposals', { signal })
         setOpenProposals((proposals || []).filter(pr => pr.status === 'open'))
@@ -161,28 +156,24 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     }
   }, [])
 
-  // Reconciliation loop, not the primary refresh (see useRealtimeTable). Ingestion stamps
-  // `last_heartbeat` on every NBIRTH / NDATA / NDEATH, so this is the highest-traffic subscription
-  // in the app and the reason the hook debounces.
+  // Realtime is debounced by the hook: `last_heartbeat` is stamped on every node message, so this
+  // is the busiest subscription in the app.
   usePolling(load, refreshInterval())
   useRealtimeTable(['gateways', 'devices', 'cells'], load, { enabled: REALTIME_ENABLED })
-  // Heartbeat staleness is derived from the wall clock by gatewayLiveStatus(), and a gateway going
-  // quiet produces no Realtime event. Re-renders only; issues no requests.
+  // Staleness is derived from the clock and a quiet gateway produces no event. Re-renders only.
   useClockTick(STALENESS_TICK_MS)
 
   // In-flight state for the form's Save and for whichever gateway is restoring.
   const [saving, runSave] = usePendingAction()
   const [restoringId, runRestore] = usePendingKey()
-  // Keyed rather than a single flag: the panel resolves its gateway every render, so a bare boolean
-  // would spin the button for whichever gateway happened to be selected when the request settled.
+  // Keyed: a bare boolean would spin the button of whichever gateway is selected when the request settles.
   const [rebirthingId, runRebirth] = usePendingKey()
 
   const save = async () => {
     try {
-      /* The fork is at the end: everything above is shared. A gateway can only be registered by an
-         Administrator, since the remote branch mints a bundle, which is not a thing to queue. */
+      // Proposing changes an existing gateway only: registering one issues setup, which cannot be queued.
       if (proposeMode) {
-        if (!editing) throw new Error('A gateway can only be registered by an Administrator.')
+        if (!editing) throw new Error(`${requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)} to register a gateway.`)
         const patch = patchFromForm('gateway', editing, form)
         await submitProposal({
           kind: 'gateway', entityId: editing.gateway_id, patch,
@@ -204,12 +195,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       const created = await api.post('/api/v1/gateways', form)
       setShowForm(false); load()
 
-      /**
-       * The remote branch. A host-run gateway is finished when its row exists; a remote one needs a
-       * bundle on a machine before it can publish, so the bundle modal opens immediately. It
-       * downloads without confirming: the row is seconds old, so there is no earlier bundle to
-       * invalidate. See GatewayBundleModal.
-       */
+      // A Remote gateway needs setup on a machine before it can publish, so the setup dialog opens at
+      // once and issues without confirming: the row is seconds old, so there is nothing to replace.
       if (form.deployment === 'remote') {
         setBundleForGw({
           gateway_id: created.id || created.gateway_id,
@@ -217,7 +204,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           sparkplug_id: created.sparkplug_id,
           confirmFirst: false
         })
-        showToast('Remote gateway created — download its bundle to finish setup', 'success')
+        showToast('Remote gateway created — issue its install command, or a bundle, to finish setup', 'success')
       } else {
         showToast('Gateway created', 'success')
       }
@@ -227,9 +214,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const archiveGateway = async (days) => {
     try {
       await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
-      // Closes after the request, which is what lets ArchiveModal hold its pending state for the
-      // whole round trip -- see the note on CellsTab.archiveCell.
-      setArchiveTarget(null); load(); showToast(`Gateway '${archiveTarget.gateway_name}' archived (Out of Commission)`, 'success')
+      // Closes after the request, so ArchiveModal holds its pending state for the whole round trip.
+      setArchiveTarget(null); load(); showToast(`Gateway '${archiveTarget.gateway_name}' archived`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -242,11 +228,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-  const canReadThread = hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   const canPropose = hasPermission(PERMISSION_UUIDS.PROPOSAL_CREATE)
 
-  /* One form, two endings (utils/proposeFromForm.js). Derived rather than stored, so it cannot
-     disagree with the permission. */
+  // One form, two endings (utils/proposeFromForm.js): derived, so it cannot disagree with the permission.
   const proposeMode = !canManage && canPropose
 
   // Asked by whoever could create a remote gateway, on mount and again each time the form opens,
@@ -264,47 +249,35 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const enrolmentProblems = enrolmentBlocked
     ? (enrolment.addresses || []).filter(a => a.problem).map(a => `${a.variable} is ${a.problem}`)
     : []
-  // Save is withheld for a gateway that would need a bundle this deployment cannot issue: a new
-  // Remote one, or an existing gateway being moved to Remote. Renaming a remote gateway is not
-  // that, and a proposal changes nothing until an approver acts.
+  // Save is withheld for a gateway that would need setup this deployment cannot issue: a new Remote
+  // one, or an existing gateway moved to Remote. Renaming a Remote gateway is not that.
   const remoteWithheld = !proposeMode && enrolmentBlocked && formType === GATEWAY_TYPES.REMOTE
     && (!editing || editing.deployment !== 'remote')
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
   const withheldFields = nonProposableFields('gateway')
 
-  /**
-   * The note under a field a proposal may not name. Disabled with the reason rather than hidden:
-   * `deployment` says where the connector runs, and moving it re-points a broker topic namespace.
-   */
+  /** The note under a field a proposal may not name: disabled with the reason rather than hidden. */
   const Withheld = ({ field }) => (
     proposeMode && withheldFields[field]
       ? <div className="form-hint-locked">{withheldFields[field]}</div>
       : null
   )
-  /**
-   * Who may open the forge: a role, mirroring the `forge` listener in supabase/envoy.yaml, which
-   * admits Administrator and Shopfloor_Manager by the role in the verified token. The UI agrees
-   * with the boundary; it does not implement it.
-   */
+  // Mirrors the `forge` listener in supabase/envoy.yaml, which admits these two roles.
   const canOpenForge = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
-  // The gateways that should be reporting and are not: the rail's amber for this page, and the
-  // same rule as gatewayFleetCounts(). Awaiting setup is an unfinished task, not a fault, and the
-  // playback lane is not a connector to any machine.
+  // The gateways that should be reporting and are not: the rail's amber, by the rule of
+  // gatewayFleetCounts(). Awaiting setup is not a fault, and the Playback gateway serves no machine.
   const offlineGateways = gateways.filter(g => !g.is_archived && !isShadowGateway(g) && !isGatewayPending(g) && !isGatewayOnline(g))
 
-  // Built from the flat device list: ingestion records the arriving edge node on a quarantined
-  // device, so a device held on a gateway is attributable before it is approved.
+  // From the flat device list: ingestion records the arriving edge node on a quarantined device.
   const gatewaysWithQuarantine = new Set(
     assets.filter(a => a.is_quarantined && a.active_gateway_id).map(a => a.active_gateway_id)
   )
 
   const filteredGateways = gateways.filter(g => {
-    // Hidden by default, like the Devices page's shadow devices: one seeded row on every stack with
-    // almost every action withdrawn. Not removed, because minting its broker credential happens
-    // here. Filtered separately from Type, since Shadow is its own type.
+    // The Playback gateway is hidden by default; its broker credential is issued from here.
     if (!showShadowGateways && g.is_shadow) return false
     if (filterMode === 'active'   && g.is_archived) return false
     if (filterMode === 'archived' && !g.is_archived) return false
@@ -316,55 +289,59 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       if (!haystack.includes(q)) return false
     }
     if (liveStatusFilter && gatewayLiveStatus(g) !== liveStatusFilter) return false
-    // Compared against the derived type, not against `deployment`: Simulated and Host are the same
-    // deployment and differ only in the flag beside it.
+    // The derived type, not `deployment`: Simulated and Host share a deployment.
     if (kindFilter && gatewayType(g) !== kindFilter) return false
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
 
-  // Counted across the whole fleet, not the filtered list: the toggle is offered when one exists,
-  // hidden or not. The count is not printed, since a stack holds one Playback gateway.
+  // Counted across the whole fleet: the toggle is offered whenever one exists, hidden or not.
   const shadowGatewayCount = gateways.filter(g => g.is_shadow).length
+  // The count's total: every gateway in the lifecycle lane the select names, so the page at rest
+  // reads a bare count and only the other filters narrow it to shown / total. The Playback gateway
+  // counts only once it is asked for.
+  const inLane = g => filterMode === 'all' || (filterMode === 'archived') === !!g.is_archived
+  const listable = gateways.filter(g => (showShadowGateways || !g.is_shadow) && inLane(g))
 
   const activeFilterCount =
     [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
-    (quarantineOnly ? 1 : 0) + (showShadowGateways ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+    (quarantineOnly ? 1 : 0) + (showShadowGateways ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
 
-  // Arriving from a cell's gateway chip, a device's Serving Gateway chip or the shopfloor map: the
-  // caller named ONE gateway, so open it. Identifier equality only -- see the hook.
+  // Arriving from a cell's gateway chip or a device's Serving Gateway chip names ONE gateway: open it.
   useArrivalSelection(
     searchQuery,
     gateways,
-    (g, term) => g.gateway_id === term || gatewaySparkplugId(g) === term,
+    (g, term) => g.gateway_id === term || (g.sparkplug_id || gatewaySparkplugId(g.gateway_id)) === term,
     (g) => setSelectedId(g.gateway_id)
   )
 
-  // Resolved fresh every render -- see the note on selectedId. A gateway that has been archived
-  // out of the current filter, or deleted, resolves to null and the drawer simply closes.
+  // Resolved fresh every render; a gateway that disappears resolves to null and the drawer closes.
   const selected = gateways.find(g => g.gateway_id === selectedId) || null
   const selectedDevices = selected?.devices || []
   const selectedCell = selected ? cells.find(c => c.cell_id === selected.cell_id) : null
 
+  // "None yet" only when the stack holds no gateway of its own; anything else is a filter's doing.
+  const isFiltered = gateways.some(g => !g.is_shadow) || activeFilterCount > 0
+
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
 
-      {/* Above the card: a page-level finding, and the first thing worth knowing on arrival. See
-          CellsTab's note on why it is not in the card body. */}
       {unassignedDevices.length > 0 && (
-        <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)' }}>
-          <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
-          {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
-          Assign them from the Devices page.
+        <div className="callout callout-warning callout-page">
+          <IconAlertTriangle size={18} className="callout-icon" />
+          <span>
+            <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
+            {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
+            Assign them from the Devices page.
+          </span>
         </div>
       )}
 
-      {/* Says what the rail's colour means before the table is read: which gateways are silent,
-          and that their devices are silent with them. */}
+      {/* Says what the rail's colour means before the table is read. */}
       {offlineGateways.length > 0 && (
-        <div style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <IconShieldAlert size={18} style={{ flexShrink: 0 }} />
+        <div className="callout callout-warning callout-page">
+          <IconShieldAlert size={18} className="callout-icon" />
           <span>
             <strong>{offlineGateways.length} gateway{offlineGateways.length === 1 ? '' : 's'} offline:</strong>{' '}
             {offlineGateways.slice(0, 5).map(g => g.gateway_name).join(', ')}{offlineGateways.length > 5 ? ', …' : ''}.
@@ -373,79 +350,73 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         </div>
       )}
 
-      {/* Said here, before a remote gateway is created, because the refusal otherwise arrives from
-          the bundle modal after the row exists. Only for those who could create one. */}
+      {/* Said before a Remote gateway is created, because the refusal otherwise arrives from the
+          setup dialog after the row exists. Only for those who could create one. */}
       {enrolmentBlocked && canManage && (
-        <div role="status" style={{ marginBottom: 'var(--stack)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px var(--inset)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <IconShieldAlert size={18} style={{ flexShrink: 0 }} />
+        <div className="callout callout-warning callout-page">
+          <IconShieldAlert size={18} className="callout-icon" />
           <span>
             <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
             {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
             the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
             in the chart&rsquo;s values and restart the functions service (docs/remote-gateways.md,
-            section 7). Host-run and simulated gateways are unaffected.
+            section 7). Host and Simulated gateways are unaffected.
           </span>
         </div>
       )}
 
-      {/* One card: title, description, primary action, filters, table. See CellsTab's note on why
-          the filter bar came inside rather than floating above. */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="section-title">
-            Gateways
-            <HelpTip
-              label="About gateways"
-              text="An edge node: what publishes to the broker, and the identity every topic beneath it is pinned to. Status is derived from its last heartbeat, not from anything the gateway asserts about itself."
-            />
-          </h3>
-          <button
-            className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
-            style={{ marginLeft: 'auto' }}
-            disabled={!canManage}
-            onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
-            title={!canManage ? 'Requires Admin permissions' : 'Register new gateway'}
-          >
-            <IconPlus size={14} /> New Gateway
-          </button>
-        </div>
+      <div className="card card-fill">
+        <CardHeading
+          icon={<IconRadio size={15} />}
+          title="Gateways"
+          description="The edge nodes that publish to the broker, each with its own broker credential, and the status each last reported."
+          count={<SectionCount total={listable.length} shown={filteredGateways.length} />}
+          actions={(
+            <>
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManage}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)}
+                onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}
+                title="Register new gateway"
+              >
+                <IconPlus size={14} /> New Gateway
+              </ActionButton>
+            </>
+          )}
+        />
 
         <div className="card-body">
       <div className="filter-bar">
         {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
         <select
-          className="form-control"
-          style={{ width: '150px' }}
+          className="form-control control-sm"
           value={filterMode}
           onChange={e => setFilterMode(e.target.value)}
           title="Filter by lifecycle state"
         >
-          <option value="all">All ({gateways.length})</option>
           <option value="active">Active ({gateways.filter(g => !g.is_archived).length})</option>
           <option value="archived">Archived ({gateways.filter(g => g.is_archived).length})</option>
+          <option value="all">All ({gateways.length})</option>
         </select>
 
-        <input
-          className="form-control"
-          style={{ width: '220px' }}
+        <SearchInput
           value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
+          onChange={setSearchQuery}
           placeholder="Search name, UUID or Sparkplug ID…"
-          title="Filter gateways by friendly name, internal UUID, or Sparkplug ID"
+          ariaLabel="Search gateways by name, UUID or Sparkplug ID"
         />
 
-        {/* Live status is derived from heartbeat age, not the stored `status` column -- a gateway
-            that died without sending NDEATH still reads ONLINE in the database. */}
-        <select className="form-control" style={{ width: '160px' }} value={liveStatusFilter} onChange={e => setLiveStatusFilter(e.target.value)} title="Filter by live heartbeat status (90s staleness threshold)">
+        {/* Derived from heartbeat age as well as the stored status: STALE is never stored. */}
+        <select className="form-control control-sm" value={liveStatusFilter} onChange={e => setLiveStatusFilter(e.target.value)} title="Filter by status; Stale is a heartbeat older than 90 seconds">
           <option value="">Any status</option>
           <option value="ONLINE">Online</option>
           <option value="STALE">Stale</option>
           <option value="OFFLINE">Offline</option>
         </select>
 
-        {/* Filters on the same value the Type column prints, through the same helper, so Simulated
-            can be separated from the real host-run connectors. */}
-        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), or Simulated (host-run, readings generated)">
+        {/* The same value the Type column prints, through the same helper. */}
+        <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), or Simulated (host-run, readings generated)">
           <option value="">Any type</option>
           {SELECTABLE_TYPES.map(t => (
             <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
@@ -460,33 +431,30 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
         </button>
 
-        {/* Shown only when one exists, like the Devices page's shadow toggle. */}
+        {/* Offered only when one exists. */}
         {shadowGatewayCount > 0 && (
           <button
             className={`btn btn-sm ${showShadowGateways ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadowGateways(v => !v)}
-            title="The Playback gateway publishes recorded captures as shadow devices and connects to no machine, so it is hidden by default. It stays reachable so its broker credential can be minted."
+            title="The Playback gateway publishes recorded captures as shadow devices and connects to no machine, so it is hidden by default. It stays reachable so its broker credential can be issued."
           >
             <IconRadio size={13} /> Show playback gateway
           </button>
         )}
 
-        {activeFilterCount > 0 && (
-          <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">
-            <IconX size={13} /> Clear filters ({activeFilterCount})
-          </button>
-        )}
-
+        <ClearFilters count={activeFilterCount} onClear={resetFilters} />
       </div>
 
         </div>{/* .card-body */}
 
-        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading gateways…</div> :
+        {loading ? <LoadingState label="gateways" /> :
          filteredGateways.length === 0 ? (
-           <div className="empty-state">
-             <div className="empty-icon"><IconRadio size={36} /></div>
-             <div className="empty-text">No gateways match the selected filter.</div>
-           </div>
+           <EmptyState
+             icon={<IconRadio size={36} />}
+             filtered={isFiltered}
+             message="No gateways yet."
+             filteredMessage="No gateways match these filters."
+           />
          ) : (
            <div className="table-wrap">
              <table>
@@ -496,7 +464,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                    <th title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</th>
                    <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Shadow (republishes recorded captures)">Type</th>
                    <th title="Where this gateway serves: a cell, a whole area, or the whole site">Location</th>
-                   <th title="Network connectivity status">Gateway Status</th>
+                   <th title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</th>
                    <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
                    <th title="Devices assigned to this gateway">Connected Devices</th>
                  </tr>
@@ -507,83 +475,73 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                    const onlineCount = gwAssets.filter(a => a.status === 'ONLINE' || !a.status).length
                    const offlineCount = gwAssets.filter(a => a.status === 'OFFLINE').length
                    const liveStatus = gatewayLiveStatus(g)
+                   const type = gatewayType(g)
 
                    return (
                      <React.Fragment key={g.gateway_id}>
-                       {/* The row is both a selector and a container of buttons, so the click is
-                           filtered -- see rowSelectHandler. Clicking Edit must not also select. */}
+                       {/* The row selects and contains buttons, so the click is filtered by
+                           rowSelectHandler. */}
                        <tr
-                         className={`row-selectable${selectedId === g.gateway_id ? ' row-selected' : ''}`}
-                         style={{ background: g.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
+                         className={`row-selectable${selectedId === g.gateway_id ? ' row-selected' : ''}${g.is_archived ? ' row-archived' : ''}`}
                          onClick={rowSelectHandler(() => setSelectedId(id => id === g.gateway_id ? null : g.gateway_id))}
                          title="Click to inspect this gateway in the details panel"
                        >
                          <td>
                            <strong>{g.gateway_name}</strong>
-                           {/* The kind of gateway is a column, and sorts. ARCHIVED stays a badge
-                               because it is a state, not a kind: a gateway of any type can be
-                               decommissioned. */}
+                           {/* A state, not a kind: a gateway of any type can be archived. */}
                            {g.is_archived && (
-                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned gateway">
-                               <IconArchive size={11} /> ARCHIVED
-                             </span>
+                             <ArchivedBadge size="sm" className="gateway-name-badge" title="Archived: out of service. Restore it from its drawer." />
                            )}
                          </td>
                          <td><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>
                          <td>
-                           <span
-                             className={`badge badge-${gatewayTypeTone(gatewayType(g))}`}
-                             style={{ fontSize: '11px' }}
-                             title={gatewayTypeDescription(gatewayType(g))}
-                           >
-                             {gatewayTypeLabel(gatewayType(g))}
-                           </span>
+                           <Badge tone={gatewayTypeTone(type)} size="sm" title={gatewayTypeDescription(type)}>
+                             {gatewayTypeLabel(type)}
+                           </Badge>
                          </td>
                          <td>
-                           {/* Four states, and the first is that the question does not apply: a
-                               synthetic gateway cannot hold a cell
-                               (`gateways_synthetic_has_no_cell`), so its stored `location_scope` is
-                               inert and is not printed. Site-Wide is still an answer for every
-                               other gateway and must not read as the unanswered case. */}
+                           {/* Four answers, the first being that the question does not apply: a
+                               simulated gateway cannot hold a cell, so its stored scope is inert and
+                               not printed. Site-Wide is an answer for every other gateway and must
+                               not read as the unanswered case. */}
                            {!gatewayAcceptsCell(g)
-                             ? <span style={{ fontSize: '11px', color: 'var(--text-dim)' }} title={`${gatewayTypeLabel(gatewayType(g))} gateways have no cell: their devices resolve to the ${gatewayTypeLabel(gatewayType(g))} lane, which takes precedence over cell membership.`}>—</span>
+                             ? <span className="cell-meta" title={`${gatewayTypeLabel(type)} gateways have no cell: their devices resolve to the ${gatewayTypeLabel(type)} lane, which takes precedence over cell membership.`}>—</span>
                              : g.location_scope === SCOPE_SITE_WIDE
-                               ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Serves the whole campus rather than one cell. Its devices need their own cell.">Site-Wide</span>
+                               ? <Badge tone="neutral" size="sm" title="Serves the whole campus rather than one cell. Its devices need their own cell.">Site-Wide</Badge>
                                : g.location_scope === SCOPE_AREA_WIDE
-                                 ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`Serves the whole of ${areas.find(ar => ar.area_id === g.area_id)?.area_name || 'its area'} rather than one cell. Its devices need their own cell.`}>Area-Wide</span>
+                                 ? <Badge tone="neutral" size="sm" title={`Serves the whole of ${areas.find(ar => ar.area_id === g.area_id)?.area_name || 'its area'} rather than one cell. Its devices need their own cell.`}>Area-Wide</Badge>
                                : g.cell_id
                                  ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
-                                 : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
+                                 : <span className="cell-meta gateway-cell-warning" title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
                          </td>
                          <td>
-                           {g.is_archived ? (
-                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)' }}>DECOMMISSIONED</span>
-                           ) : (
-                             <StatusBadge status={liveStatus} />
-                           )}
+                           {g.is_archived
+                             ? <span className="cell-meta">—</span>
+                             : <StatusBadge status={liveStatus} />}
                          </td>
                          <td
-                           style={{ fontSize: '11px', color: liveStatus === 'STALE' ? 'var(--warning)' : 'var(--text-muted)' }}
+                           className={`cell-meta${liveStatus === 'STALE' ? ' gateway-cell-warning' : ''}`}
                            title={g.last_heartbeat ? new Date(g.last_heartbeat).toLocaleString() : 'No Sparkplug B node message has ever been received from this edge node'}
                          >
                            {formatHeartbeat(g.last_heartbeat)}
                          </td>
                          <td>
                            {g.is_archived ? (
-                             <span className="badge badge-neutral">Archived (Inaccessible)</span>
+                             <span className="cell-meta">—</span>
                            ) : gwAssets.length === 0 ? (
-                             <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No devices assigned</span>
+                             <span className="cell-meta gateway-cell-italic">No devices assigned</span>
                            ) : (
-                             /* Collapsed past three, as the Devices Type column is. The Online /
-                                Offline summary is pinned because it is the question the column
-                                answers; a QUARANTINED device is pinned because it calls for action. */
+                             /* Collapsed past three (the TagList limit; the summary counts as one).
+                                The Online / Offline summary is pinned because it is the question
+                                the column answers, and a QUARANTINED device because it calls for
+                                action. */
                              <TagList
                                limit={3}
                                tags={[
                                  {
                                    key: '__summary__',
                                    priority: true,
-                                   className: 'badge badge-neutral',
+                                   className: 'badge badge-sm badge-neutral',
                                    title: 'Connected devices breakdown',
                                    content: `${onlineCount} Online / ${offlineCount} Offline`
                                  },
@@ -592,8 +550,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                                    // The tooltip on "+N" lists names, not the UUIDs these are keyed by.
                                    label: a.asset_name,
                                    priority: a.is_quarantined,
-                                   className: `badge ${a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`,
-                                   style: { fontSize: '11px' },
+                                   className: `badge badge-sm ${a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`,
                                    title: `${a.asset_name} — ${a.is_quarantined ? 'QUARANTINED' : a.status || 'ONLINE'}`,
                                    content: `${a.asset_name}${a.is_quarantined ? ' (quarantined)' : ''}`
                                  }))
@@ -612,123 +569,12 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       </div>
 
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-title">{editing ? 'Edit Gateway' : 'Register Gateway'}</div>
-            {/* The identifiers are facts, not fields, and live on the context drawer where they are
-                copyable. */}
-            <div className="form-group">
-              <label className="form-label">Gateway Name</label>
-              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Sim_Gateway_Cell1_Machining" />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows={2}
-                value={form.description || ''}
-                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                title="Optional free-text note about this gateway"
-                placeholder="e.g. Panel-mounted IPC in the machining cell, north wall"
-              />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Optional, and read by nothing — a note for whoever comes to this next.
-              </div>
-            </div>
-            {/* One control, not two checkboxes: `gateways_simulated_is_host` forbids a remote
-                simulator, so a select over the legal states cannot express the refused one
-                (utils/gatewayType.js). It comes before the cell zone because it governs it. */}
-            <div className="form-group">
-              <label className="form-label" htmlFor="gateway-type">Type</label>
-              <Withheld field="deployment" />
-              <select
-                id="gateway-type"
-                className="form-control"
-                disabled={proposeMode}
-                value={formType}
-                onChange={e => setForm(f => ({
-                  ...f,
-                  ...gatewayTypeFields(e.target.value),
-                  // Cleared here rather than left for the save: `gateways_synthetic_has_no_cell`
-                  // refuses a simulated gateway holding a cell, and the offending field is disabled
-                  // below.
-                  ...(e.target.value === GATEWAY_TYPES.SIMULATED
-                    ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
-                    : {})
-                }))}
-                title={proposeMode ? withheldFields.deployment : "Where this gateway's connector runs, and whether its readings are real"}
-              >
-                {SELECTABLE_TYPES.map(t => (
-                  <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
-                ))}
-              </select>
-            </div>
-            {/* The consequence, said before it is chosen: Remote means a bundle to download and
-                hardware to run it on. Shown for every type, since the Simulated description is
-                about what the readings are. */}
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
-              {gatewayTypeDescription(formType)}
-              {remoteWithheld
-                ? <> <strong style={{ color: 'var(--warning-text)' }}>This deployment cannot issue a bundle yet:</strong> {enrolmentProblems.join('; ')}. Save is withheld for a Remote gateway until it can; Host and Simulated are unaffected.</>
-                : !editing && formType === GATEWAY_TYPES.REMOTE
-                  && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
-            </div>
-            {/* One exclusive choice of scope, then the cell or the area it calls for. The
-                scopes are exclusive by CHECK (`gateways_site_wide_has_no_cell` and the area-wide
-                pair), which is what a radio group says. Reads as In a cell with none chosen for
-                a synthetic gateway whatever is stored: `device_locations` resolves `simulated`
-                ahead of the stored scope. A display fallback, not a write; clearing happens only
-                on the type change that would make the row unsavable. */}
-            <div className="form-group">
-              <label className="form-label">Location</label>
-              <LocationPicker
-                idPrefix="gateway"
-                form={form}
-                onChange={fields => setForm(f => ({ ...f, ...fields }))}
-                cells={cells}
-                areas={areas}
-                disabled={!formAcceptsCell}
-                title={formAcceptsCell
-                  ? undefined
-                  : 'A simulated gateway belongs to the Simulated lane, which resolves ahead of any cell'}
-                cellEmptyLabel="— No cell assigned —"
-                cellTitle="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
-              />
-
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                {!formAcceptsCell
-                  /* Says which lane it lands in instead, so the disabled control reads as an
-                     answer already given rather than as a field that failed to load. */
-                  ? 'Simulated gateways have no cell: their devices resolve to the Simulated lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing outright.'
-                  : form.location_scope === SCOPE_SITE_WIDE || form.location_scope === SCOPE_AREA_WIDE
-                    ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide or Area-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
-                    : form.cell_id
-                      ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
-                      : null}
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Gateway Access URL (Optional UI Console)</label>
-              <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
-            </div>
-            {proposeMode && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="gw-propose-rationale">Why (optional)</label>
-                <textarea
-                  id="gw-propose-rationale"
-                  className="form-control"
-                  rows={2}
-                  value={form.__rationale || ''}
-                  onChange={e => setForm(f => ({ ...f, __rationale: e.target.value }))}
-                  placeholder="e.g. this gateway moved to the finishing cell in March"
-                />
-              </div>
-            )}
-
-            <div className="modal-actions">
+        <Modal
+          title={editing ? 'Edit Gateway' : 'Register Gateway'}
+          size="md"
+          onClose={() => { setShowForm(false); setEditingProposal(null) }}
+          footer={
+            <>
               <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel">Cancel</button>
               <ActionButton
                 pending={saving}
@@ -746,14 +592,116 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
-            </div>
+            </>
+          }
+        >
+        <div className="form-group">
+          <label className="form-label">Gateway Name</label>
+          <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Sim_Gateway_Cell1_Machining" />
+          <div className="form-hint">
+            A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
           </div>
         </div>
+        <div className="form-group">
+          <label className="form-label">Description</label>
+          <textarea
+            className="form-control"
+            rows={2}
+            value={form.description || ''}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            title="Optional free-text note about this gateway"
+            placeholder="e.g. Panel-mounted IPC in the machining cell, north wall"
+          />
+          <div className="form-hint">
+            Optional, and read by nothing — a note for whoever comes to this next.
+          </div>
+        </div>
+        {/* One select over the legal states rather than two checkboxes, ahead of Location because
+            it governs it. */}
+        <div className="form-group">
+          <label className="form-label" htmlFor="gateway-type">Type</label>
+          <Withheld field="deployment" />
+          <select
+            id="gateway-type"
+            className="form-control"
+            disabled={proposeMode}
+            value={formType}
+            onChange={e => setForm(f => ({
+              ...f,
+              ...gatewayTypeFields(e.target.value),
+              // A simulated gateway cannot hold a cell, so it is cleared here and the picker is disabled.
+              ...(e.target.value === GATEWAY_TYPES.SIMULATED
+                ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
+                : {})
+            }))}
+            title={proposeMode ? withheldFields.deployment : "Where this gateway's connector runs, and whether its readings are real"}
+          >
+            {SELECTABLE_TYPES.map(t => (
+              <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
+            ))}
+          </select>
+          {/* The consequence, said before it is chosen. */}
+          <div className="form-hint">
+            {gatewayTypeDescription(formType)}
+            {remoteWithheld
+              ? <> <strong className="gateway-withheld">This deployment cannot issue an install command or bundle yet:</strong> {enrolmentProblems.join('; ')}. Save is withheld for a Remote gateway until it can; Host and Simulated gateways are unaffected.</>
+              : !editing && formType === GATEWAY_TYPES.REMOTE
+                && ' On save you will be given an install command, or a bundle, to run on that machine; it enrols itself and appears here as online.'}
+          </div>
+        </div>
+        {/* One exclusive scope, then the cell or area it calls for. A simulated gateway reads as In a
+            cell with none chosen whatever is stored, since its lane resolves ahead of the stored
+            scope; the stored value is cleared only on the type change that would make it unsaveable. */}
+        <div className="form-group">
+          <label className="form-label">Location</label>
+          <LocationPicker
+            idPrefix="gateway"
+            form={form}
+            onChange={fields => setForm(f => ({ ...f, ...fields }))}
+            cells={cells}
+            areas={areas}
+            disabled={!formAcceptsCell}
+            title={formAcceptsCell
+              ? undefined
+              : 'A simulated gateway belongs to the Simulated lane, which resolves ahead of any cell'}
+            cellEmptyLabel="— No cell assigned —"
+            cellTitle="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
+          />
+
+          <div className="form-hint">
+            {!formAcceptsCell
+              /* Says which lane it lands in instead, so the disabled control reads as an answer. */
+              ? 'Simulated gateways have no cell: their devices resolve to the Simulated lane, which takes precedence over cell membership.'
+              : form.location_scope === SCOPE_SITE_WIDE || form.location_scope === SCOPE_AREA_WIDE
+                ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide or Area-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
+                : form.cell_id
+                  ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
+                  : null}
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Gateway Access URL (Optional UI Console)</label>
+          <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
+        </div>
+        {proposeMode && (
+          <div className="form-group">
+            <label className="form-label" htmlFor="gw-propose-rationale">Why (optional)</label>
+            <textarea
+              id="gw-propose-rationale"
+              className="form-control"
+              rows={2}
+              value={form.__rationale || ''}
+              onChange={e => setForm(f => ({ ...f, __rationale: e.target.value }))}
+              placeholder="e.g. this gateway moved to the finishing cell in March"
+            />
+          </div>
+        )}
+        </Modal>
       )}
 
       {archiveTarget && (
         <ArchiveModal
-          entityType="gateways" entityId={archiveTarget.gateway_id} displayName={archiveTarget.gateway_name}
+          entityId={archiveTarget.gateway_id} displayName={archiveTarget.gateway_name}
           onArchive={archiveGateway} onCancel={() => setArchiveTarget(null)}
         />
       )}
@@ -772,19 +720,18 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         subtitle={selected && (
           <>
             <StatusBadge status={gatewayLiveStatus(selected)} />
-            {selected.deployment === 'host' && <span className="badge badge-neutral" style={{ fontSize: '11px' }}>HOST-RUN</span>}
-            {selected.is_simulated && <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Telemetry from this gateway is generated, not observed">SIMULATED</span>}
-            {selected.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
+            <Badge tone={gatewayTypeTone(gatewayType(selected))} title={gatewayTypeDescription(gatewayType(selected))}>
+              {gatewayTypeLabel(gatewayType(selected))}
+            </Badge>
+            {selected.is_archived && <ArchivedBadge title="Archived: out of service. Restore it below." />}
           </>
         )}
         fields={selected ? [
           { label: 'Gateway UUID', value: selected.gateway_id, mono: true, copyable: true },
-          // The id it publishes under, which is what a Sparkplug trace or an MQTT subscription is
-          // keyed on -- and the one identifier here that is not the UUID above it.
+          // The id it publishes under: what a Sparkplug trace or an MQTT subscription is keyed on.
           { label: 'Sparkplug Edge Node ID', value: selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id), mono: true, copyable: true },
           {
-            // The real group id where the gateway carries one, so the topic can be pasted into an
-            // MQTT client. Falls back to `+` only where the group is unrecorded.
+            // The real group id where recorded, so the topic can be pasted into an MQTT client; else `+`.
             label: 'Sparkplug Topic Path',
             value: `spBv1.0/${selected.sparkplug_group || '+'}/NDATA/${selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id)}`,
             mono: true,
@@ -795,9 +742,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           },
           {
             label: 'Location',
-            // A link when there is a cell to open. Site-Wide stays plain text: it asserts the
-            // gateway belongs to no cell. Same three-way as the column, since on a synthetic
-            // gateway the stored scope is inert.
+            // A link when there is a cell to open. Site-Wide stays plain text. Same cases as the
+            // column, since a simulated gateway's stored scope is inert.
             value: !gatewayAcceptsCell(selected)
               ? `${gatewayTypeLabel(gatewayType(selected))} — no cell`
               : selected.location_scope === SCOPE_SITE_WIDE
@@ -817,7 +763,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                     )
                   : (selected.cell_id || null),
             title: !gatewayAcceptsCell(selected)
-              ? `Its devices resolve to the ${gatewayTypeLabel(gatewayType(selected))} lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing.`
+              ? `Its devices resolve to the ${gatewayTypeLabel(gatewayType(selected))} lane, which takes precedence over cell membership.`
               : selected.location_scope === SCOPE_SITE_WIDE
                 ? 'A host-run or central connector serving the whole campus. Its devices inherit no cell from it.'
                 : selected.location_scope === SCOPE_AREA_WIDE
@@ -825,12 +771,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                   : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
-          /**
-           * What the appliance says about itself. Shown only once `health_reported_at` is set: a
-           * gateway that never reported is host-run or on an older bundle, and six rows of dashes
-           * would read as six faults. Current values with no history; the trend is in Grafana's
-           * Gateway Fleet Health dashboard.
-           */
+          // What the appliance reports about itself, once `health_reported_at` is set: a gateway that
+          // never reported would show a dozen rows of dashes. Current values only; the trend is in
+          // Grafana's Gateway Fleet Health dashboard.
           ...(selected.health_reported_at ? [
             {
               label: 'Health Reported',
@@ -838,11 +781,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               title: 'Age of the last heartbeat that carried appliance health. Separate from Last '
                 + 'Heartbeat on purpose: a gateway can keep beating while its collector has stopped.'
             },
-            /**
-             * The root this appliance holds, beside the one the platform publishes. Behind means
-             * it has not converged since the root was re-issued; the broker's leaf must not be
-             * switched to the new root until nothing is behind.
-             */
+            // The root this appliance holds, beside the one the platform publishes. Behind means it has
+            // not converged since the root was re-issued.
             {
               label: 'CA Expires',
               value: [
@@ -882,28 +822,20 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             },
             {
               label: 'Runtime Uptime',
-              value: selected.uptime_seconds === null || selected.uptime_seconds === undefined
-                ? null
-                : formatHeartbeat(new Date(Date.now() - selected.uptime_seconds * 1000).toISOString())
-                  .replace(' ago', ''),
+              value: formatUptime(selected.uptime_seconds),
               title: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
                 + 'host uptime: a restarted container resets it while the machine stays up.'
             },
             {
               label: 'Bundle',
               value: selected.agent_version || null,
-              title: 'The bundle version the appliance reports. Refreshed on every heartbeat since '
-                + '0035, so an appliance upgraded in place shows its new version without '
-                + 're-enrolling.'
+              title: 'The bundle version the appliance reports. Refreshed on every heartbeat, so an '
+                + 'appliance upgraded in place shows its new version without re-enrolling.'
             },
-            /**
-             * The drift check. `flow_hash` is what the appliance last deployed, reported on every
-             * heartbeat from the record flow-sync.mjs writes; `forge_head_flow_sha256` is the
-             * same digest at the head of main, recorded by forge-events on every push. Equal is
-             * convergence; different inside two sync intervals of the push is the puller not
-             * having ticked yet; beyond that it is drift, and `docker compose logs flow-sync` on
-             * the appliance says why (a refused commit, an unreachable forge).
-             */
+            // The drift check: `flow_hash` (what the appliance last deployed) against
+            // `forge_head_flow_sha256` (the head of main). Within the grace period of a push it is
+            // the puller not having ticked yet; beyond that it is drift, and the appliance's
+            // flow-sync log says why.
             {
               label: 'Flow',
               value: selected.flow_hash
@@ -918,10 +850,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + 'cannot reach the forge, and its flow-sync log says which. An edit made in the '
                 + 'Node-RED editor is not reflected here; the next approved deploy overwrites it.'
             },
-            /**
-             * Where main is, from the forge: forge-events records it on every push. The Flow row
-             * above is the comparison against it.
-             */
+            // Where main is, as the forge reported it on the last push.
             {
               label: 'Committed',
               value: selected.forge_head_sha
@@ -934,12 +863,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + '. The appliance deploys it on its next tick. Empty until the first push after '
                 + 'the repository got its webhook.'
             },
-            /**
-             * What the appliance says it is running, from the head of its own branch: forge-events
-             * records it on every push there, and only the appliance's key can push there. The
-             * flows.json on that branch is the one Node-RED is running, so a digest that differs
-             * from the heartbeat's is an edit made in the appliance's editor since the last deploy.
-             */
+            // What the appliance says it is running, from the head of its own branch. A digest that
+            // differs from the heartbeat's is an edit made in the appliance's editor since the deploy.
             {
               label: 'Reported',
               value: selected.forge_appliance_sha
@@ -956,11 +881,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + 'approved deploy overwrites that. The repository panel links the forge\'s diff '
                 + 'between the two branches. Empty until the appliance has reported once.'
             },
-            /**
-             * What the last hourly convergence did, from converged.json on the same branch (0106).
-             * The platform half says which version of the playbook this appliance is actually on,
-             * which is how a fleet mid-rollout is read one gateway at a time.
-             */
+            // What the last hourly convergence did, from converged.json on the appliance branch: which
+            // playbook version this appliance is on, so a fleet mid-rollout reads one gateway at a time.
             {
               label: 'Platform',
               value: selected.forge_appliance_platform_tag
@@ -980,11 +902,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 + 'request on platform.yml in this gateway\'s repository, so a fleet mid-rollout '
                 + 'shows different tags here. Empty on an appliance that runs the bundle alone.'
             },
-            /**
-             * The failure this lane is most likely to produce and least likely to notice: a
-             * bespoke adapter is a container on somebody else's hardware with no heartbeat of its
-             * own, and a gateway whose adapter is crash-looping still publishes and reads ONLINE.
-             */
+            // A bespoke adapter has no heartbeat of its own: a gateway whose adapter is crash-looping
+            // still publishes and reads ONLINE, so this row is the only place it shows.
             {
               label: 'Custom',
               value: selected.forge_appliance_custom_outcome
@@ -1012,13 +931,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           },
         ] : []}
         actions={selected ? [
-          /**
-           * Ask the node to restate its birth certificate: `Node Control/Rebirth` republishes the
-           * metric list, datatypes and alias table. The only command this dashboard sends; metric
-           * writes over NCMD are actuation and are deliberately not reachable from here. Not on an
-           * archived gateway, and not on the shadow gateway, whose playback worker only publishes
-           * and holds no subscription.
-           */
+          // Ask the node to republish its birth certificate (`Node Control/Rebirth`): the only command
+          // this dashboard sends. Not on an archived gateway, nor the Playback gateway, which holds
+          // no subscription.
           !selected.is_archived && !selected.is_shadow && canManage && {
             label: 'Request Rebirth',
             icon: <IconRefreshCw size={13} />,
@@ -1036,19 +951,14 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             pending: rebirthingId === selected.gateway_id,
             pendingLabel: 'Requesting…'
           },
-          /**
-           * Setup comes first while it is unfinished, above Launch UI and Edit; shown for
-           * AWAITING_BIRTH too, so an appliance that enrolled and never published can be re-issued.
-           * Absent once ONLINE, since re-issuing invalidates a working credential. Confirms first
-           * on this route, unlike the one straight after creation, because this gateway may already
-           * hold a live token.
-           */
+          // Setup while it is unfinished, and for AWAITING_BIRTH so an appliance that enrolled and never
+          // published can be re-issued. Absent once ONLINE, since re-issuing invalidates a working
+          // credential. Confirms first, unlike the dialog straight after creation.
           !selected.is_archived && selected.deployment === 'remote' && isGatewayPending(selected) && canManage && {
-            label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Bundle' : 'Download Setup Bundle',
+            label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Setup' : 'Set Up Gateway',
             icon: <IconDownload size={13} />,
             primary: true,
-            // Withheld, not hidden, while the deployment cannot issue one: the notice above the
-            // table says why, and the action returns when it can.
+            // Withheld, not hidden, while the deployment cannot issue setup: the banner says why.
             disabled: enrolmentBlocked,
             onClick: () => setBundleForGw({
               gateway_id: selected.gateway_id,
@@ -1061,12 +971,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               ? 'Remote gateways cannot be enrolled on this deployment yet'
               : selected.status === 'AWAITING_BIRTH'
                 ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
-                : 'Generate the bootstrap bundle for this gateway and download it'
+                : 'Issue an install command, or a bundle, to set this gateway up on its appliance'
           },
-          /* The host-run counterpart, mirrored: `deployment === 'host'` and no
-             `isGatewayPending()`, because a host-run gateway has no enrolment lifecycle. Not on an
-             archived gateway, since a credential minted then would resurrect the row. This is the
-             only place a password appears in the product, so the modal confirms unconditionally. */
+          // Host and Simulated gateways (`deployment === 'host'`) have no enrolment lifecycle. Not on an
+          // archived gateway, since a credential issued then would resurrect the row. This is the only
+          // place a password appears in the product.
           !selected.is_archived && selected.deployment === 'host' && canManage && {
             label: 'Generate Broker Credential',
             icon: <IconLock size={13} />,
@@ -1074,18 +983,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             onClick: () => setCredentialForGw({
               gateway_id: selected.gateway_id,
               gateway_name: selected.gateway_name,
-              sparkplug_id: selected.sparkplug_id
+              sparkplug_id: selected.sparkplug_id,
+              is_shadow: selected.is_shadow
             }),
-            // Named by the condition the action is gated on, `deployment === 'host'`: no appliance,
-            // so the credential is minted in the browser.
-            title: 'Mint this host-run gateway a broker account and show the password once. A Remote gateway enrols itself instead, and its credential never reaches a browser.'
+            title: 'Issue this Host or Simulated gateway a broker account and show the password once. A Remote gateway enrols itself instead, and its credential never passes through a browser.'
           },
           selected.access_url && {
             label: 'Launch UI', icon: <IconExternalLink size={13} />, href: selected.access_url, primary: true,
             title: 'Open this gateway’s own console — Node-RED for a host-run connector, the appliance’s web UI for a Remote one'
           },
-          // Restore REPLACES Edit on an archived gateway: editing one is refused anyway, and
-          // Restore is the only action that means anything there.
+          // Restore replaces Edit on an archived gateway: editing one is refused anyway.
           selected.is_archived ? {
             label: 'Restore Gateway', icon: <IconRefreshCw size={13} />,
             onClick: () => runRestore(selected.gateway_id, () => restoreGateway(selected.gateway_id, selected.gateway_name)),
@@ -1093,11 +1000,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             pendingLabel: 'Restoring…',
             disabled: !canArchive,
             primary: !selected.access_url,
-            title: !canArchive ? 'Requires Admin permissions' : 'Restore gateway back to active service'
+            title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore gateway back to active service'
           } : !selected.is_shadow && {
-            /* Withdrawn from the playback gateway: `gateways_shadow_is_simulated` refuses two of
-               the three Type options on this row, and nothing else on it needs editing. Renaming is
-               possible from the database. */
+            // Not offered for the Playback gateway: two of the three Type options are refused on it.
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
             onClick: () => {
               setEditing(selected)
@@ -1113,14 +1018,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             title: proposeMode
               ? 'Ask for a change to this gateway — an approver applies it, or says why not'
               : !canManage && !canPropose
-                ? 'Requires Admin permissions'
+                ? requiresRolesTitle(PERMISSION_UUIDS.PROPOSAL_CREATE)
                 : 'Edit gateway configuration'
           },
-          /* Withheld from a reader who may not open the page: the nav hides Digital Thread without
-             `digital_thread:read`. `.filter(Boolean)` drops it. */
-          canReadThread && {
-            label: 'View Digital Thread', icon: <IconHistory size={13} />,
-            onClick: () => onViewThread?.(selected),
+          // Withheld from a reader who may not open the Audit Trail page.
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            onClick: () => onViewTrail?.(selected),
             title: 'Open the immutable audit trace for this gateway'
           },
           {
@@ -1128,27 +1032,27 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             onClick: () => setDocsForGw(selected),
             title: 'Attach or edit links for this gateway — documents, an asset register, a file repository, any URL'
           },
-          /* Not offered for the playback gateway; the database refuses it as well. Archiving the
-             last shadow gateway would leave playback with no edge node, failing weeks later when a
-             job starts. */
+          // Not offered for the Playback gateway, and the database refuses it too: playback would be
+          // left with no edge node.
           !selected.is_archived && !selected.is_shadow && {
             label: 'Archive Gateway', icon: <IconArchive size={13} />,
             onClick: () => setArchiveTarget(selected),
             disabled: !canArchive,
             danger: true,
-            title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Gateway'
+            title: !canArchive
+              ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+              : 'Archive this gateway: its broker account is disabled and any unused setup token is burned'
           },
         ].filter(Boolean) : []}
-        /* With the metadata, above the actions: which devices is a fact about this gateway. */
+        // With the metadata, above the actions.
         beforeActions={selected && (
           <div>
             <div className="context-panel-section-label">Connected Devices ({selectedDevices.length})</div>
             {selectedDevices.length === 0
               ? <div className="context-field-empty" style={{ fontSize: '11px' }}>No devices assigned</div>
               : (
-                /* Chips that navigate, matching the Cell Zone and Schema chips elsewhere in this
-                   drawer. The lifecycle state is a dot rather than the chip's colour, because
-                   status colour would collide with `chip-link`'s hover. */
+                /* Chips that navigate. The lifecycle state is a dot, since a status colour would
+                   collide with `chip-link`'s hover. */
                 <div className="context-device-list">
                   {selectedDevices.map(d => {
                     const status = deviceLifecycleStatus(d)
@@ -1167,9 +1071,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 </div>
               )}
 
-            {/* With the device list: what this appliance is asked to run is a fact about the
-                gateway. Withheld from an archived gateway, and rendered as nothing for a role the
-                forge would refuse. */}
+            {/* Withheld from an archived gateway; renders nothing for a role the forge would refuse. */}
             {!selected.is_archived && (
               <div style={{ marginTop: '14px' }}>
                 <GatewayRepositoryPanel
@@ -1179,8 +1081,6 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               </div>
             )}
 
-            {/* The capture library lives on the Capture page, where captures are filed by subject
-                (gateway or device) with note, message count and manifest. */}
           </div>
         )}
       />
@@ -1199,8 +1099,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           confirmFirst={bundleForGw.confirmFirst}
           onClose={() => { setBundleForGw(null); load() }}
           showToast={showToast}
-          // Whether this deployment can mint the one-liner, from the same readiness answer that
-          // says whether it can enrol at all. Null until asked; the modal then offers the bundle.
+          // Whether this deployment can issue the install command. Null until asked: the bundle then.
           installer={enrolment?.installer || null}
         />
       )}

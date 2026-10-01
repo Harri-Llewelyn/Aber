@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 /**
  * The schema registry. The metric catalog left this page for its own (MetricsTab.test.jsx), so
@@ -41,6 +42,15 @@ beforeEach(() => {
   api.get.mockImplementation((path) => {
     const key = Object.keys(routes).find(r => path.startsWith(r))
     return Promise.resolve(key ? routes[key] : [])
+  })
+})
+
+describe('the schemas card header', () => {
+  it('names the page with its icon, title and description, and no title tip', async () => {
+    renderTab()
+    await waitForRegistry()
+    const header = expectCardHeading('Schemas', /modelled to publish/)
+    expect(header).toHaveTextContent('Build Schema from Catalog')
   })
 })
 
@@ -88,10 +98,9 @@ describe('what the page no longer loads', () => {
 })
 
 /**
- * The builder builds a schema. It used to register a device and download a spec sheet as well,
- * which put a second, worse device form on a page that is not about devices: no cell, no area, no
- * conformance policy, and a status the Devices page would have set correctly. A device is given its
- * schema on the Devices page; the definition is downloaded from this page's context panel.
+ * The builder builds a schema and nothing else. A device is given its schema on the Devices page,
+ * where its cell, area and conformance policy are decided too; the definition is downloaded from
+ * this page's context panel.
  */
 describe('the schema builder builds a schema', () => {
   const openBuilder = async () => {
@@ -190,5 +199,22 @@ describe('the builder says why it will not save', () => {
   it('explains the semantic id rather than leaving it to be guessed at', async () => {
     await openBuilder()
     expect(screen.getByRole('button', { name: /What a semantic ID is for/ })).toBeTruthy()
+  })
+
+  it('offers IRI and IRDI only, and types an IEC CDD id as an IRDI', async () => {
+    await openBuilder()
+    const type = screen.getByRole('combobox', { name: 'Reference Type' })
+    expect([...type.querySelectorAll('option')].map(o => o.value)).toEqual(['', 'IRI', 'IRDI'])
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: '0112/2///61987#ABA565#009' } })
+    expect(type.value).toBe('IRDI')
+
+    fireEvent.change(screen.getByLabelText(/Schema Name/), { target: { value: 'Nameplate_Schema' } })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/schemas',
+      expect.objectContaining({ semantic_id: '0112/2///61987#ABA565#009', semantic_id_type: 'IRDI' })
+    ))
   })
 })

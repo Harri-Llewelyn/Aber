@@ -3,6 +3,8 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
+import { PERMISSION_UUIDS } from '../constants'
+import { requiresRolesTitle } from '../hooks/usePermissions'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -62,10 +64,7 @@ const renderTab = (canManage = true) => render(
   <SchemasTab showToast={showToast} hasPermission={() => canManage} onSelectSchema={vi.fn()} />
 )
 
-/**
- * Located by its heading, not by its position: the two cards have swapped order before, and a
- * positional query silently points at the wrong table.
- */
+/** Located by its card heading. */
 const cardTable = (heading) => {
   const title = [...document.querySelectorAll('.card-header .section-title')]
     .find(h => h.textContent.includes(heading))
@@ -142,7 +141,7 @@ describe('Registry — read-only protections and status badges', () => {
     // Not a disabled Edit button: editing an active schema is not a thing that can be done,
     // permissions notwithstanding, so the shape of the action is never offered.
     expect(panel.queryByText('Edit Draft')).toBeNull()
-    expect(panel.getByText(/Create Version \(v2\)/)).toBeTruthy()
+    expect(panel.getByText(/Create Version v2/)).toBeTruthy()
   })
 
   it('shows the change description in the registry', async () => {
@@ -155,7 +154,7 @@ describe('Registry — read-only protections and status badges', () => {
     renderTab(false)
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const button = panelFor('Robot_Arm_Schema').getByTitle('Requires Admin permissions')
+    const button = panelFor('Robot_Arm_Schema').getByTitle(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
     expect(button.disabled).toBe(true)
   })
 
@@ -192,9 +191,9 @@ describe('Forking — the change description prompt', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version \(v2\)/))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version v2/))
 
-    expect(screen.getByText('Create Version v2')).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Create Version v2' })).toBeTruthy()
     expect(screen.getByLabelText(/Change Description/)).toBeTruthy()
     // The number is computed by fork_schema() from the parent; a field would imply otherwise.
     expect(screen.queryByLabelText(/^Version/)).toBeNull()
@@ -205,13 +204,13 @@ describe('Forking — the change description prompt', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version \(v2\)/))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version v2/))
     fireEvent.change(screen.getByLabelText(/Change Description/), {
       target: { value: 'Added spindle temperature threshold' }
     })
 
     schemaRows = [V1, DRAFT_V2]
-    fireEvent.click(screen.getByText('Create Draft v2'))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create Version v2' })).getByRole('button', { name: 'Create Version v2' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/schemas/v1-uuid/versions',
@@ -227,8 +226,8 @@ describe('Forking — the change description prompt', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version \(v2\)/))
-    fireEvent.click(screen.getByText('Create Draft v2'))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version v2/))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Create Version v2' })).getByRole('button', { name: 'Create Version v2' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/schemas/v1-uuid/versions', { change_description: '' }
@@ -258,7 +257,7 @@ describe('Downloading a version definition', () => {
   const downloadedText = () => captured[0].text()
 
   const clickRowDownload = async (name) => {
-    fireEvent.click(panelFor(name).getByText('Download Definition (JSON)'))
+    fireEvent.click(panelFor(name).getByText('Download JSON'))
   }
 
   it('offers the download from the context panel, not from the row', async () => {
@@ -269,7 +268,7 @@ describe('Downloading a version definition', () => {
     const row = rowFor('Robot_Arm_Schema')
     expect(within(row).queryByText(/Download/i)).toBeNull()
     expect(within(row).queryByTitle('More')).toBeNull()
-    expect(panelFor('Robot_Arm_Schema').getByText('Download Definition (JSON)')).toBeTruthy()
+    expect(panelFor('Robot_Arm_Schema').getByText('Download JSON')).toBeTruthy()
   })
 
   it('writes the stored definition verbatim, with no injected wrapper or title', async () => {
@@ -330,7 +329,7 @@ describe('Downloading a version definition', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const item = panelFor('Robot_Arm_Schema').getByText('Download Definition (JSON)').closest('button')
+    const item = panelFor('Robot_Arm_Schema').getByText('Download JSON').closest('button')
     expect(item.disabled).toBe(true)
     expect(item.getAttribute('title')).toBe('This version has no definition to download')
   })
@@ -459,6 +458,110 @@ describe('Detail modal — read-only vs draft', () => {
     fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
 
     expect(screen.queryByText(/Version History/)).toBeNull()
+  })
+})
+
+/**
+ * A schema's semantic id: shown on every version, and editable only on a draft, which inherits its
+ * parent's through fork_schema(). Clearing it is a legitimate edit, because it retracts a claim.
+ */
+describe('Detail modal — semantic id', () => {
+  const NAMEPLATE = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate'
+  const IEC_CDD = '0112/2///61987#ABA565#009'
+
+  const modal = () => within(document.querySelector('.modal'))
+  const idInput = () => modal().getByRole('textbox', { name: /Semantic ID/ })
+  const typeSelect = () => modal().getByRole('combobox', { name: 'Reference Type' })
+  const saveDraft = () => modal().getByRole('button', { name: 'Save Draft' })
+
+  const openDraft = async (draft) => {
+    schemaRows = [V1, draft]
+    renderTab()
+    await waitFor(() => expect(rowFor(draft.schema_name)).toBeTruthy())
+    fireEvent.click(panelFor(draft.schema_name).getByText('Edit Draft'))
+  }
+
+  /** The PUT as the database would take it, so a reload reads back what was saved. */
+  const storeOnPut = () => api.put.mockImplementation(async (path, body) => {
+    schemaRows = schemaRows.map(s => (path.endsWith(s.schema_uuid)
+      ? { ...s, semantic_id: body.semantic_id || null, semantic_id_type: body.semantic_id ? body.semantic_id_type : null }
+      : s))
+    return { id: path.split('/').pop() }
+  })
+
+  it('shows a published version’s id and type as text, with no control for either', async () => {
+    schemaRows = [{ ...V1, semantic_id: NAMEPLATE, semantic_id_type: 'IRI' }]
+    renderTab()
+    await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
+
+    expect(modal().getByText(NAMEPLATE)).toBeTruthy()
+    expect(modal().getByText('IRI')).toBeTruthy()
+    expect(modal().queryByRole('textbox', { name: /Semantic ID/ })).toBeNull()
+    expect(modal().queryByRole('combobox', { name: 'Reference Type' })).toBeNull()
+  })
+
+  it('shows an archived version’s id read-only too', async () => {
+    schemaRows = [{ ...ARCHIVED_V1, semantic_id: NAMEPLATE, semantic_id_type: 'IRI' }, ACTIVE_V2]
+    renderTab()
+    await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+    revealArchived()
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
+
+    expect(modal().getByText(NAMEPLATE)).toBeTruthy()
+    expect(modal().queryByRole('textbox', { name: /Semantic ID/ })).toBeNull()
+  })
+
+  it('edits a draft’s id, counts it as a change, and reads the saved pair back', async () => {
+    storeOnPut()
+    await openDraft({ ...DRAFT_V2, semantic_id: NAMEPLATE, semantic_id_type: 'IRI' })
+
+    expect(idInput().value).toBe(NAMEPLATE)
+    expect(typeSelect().value).toBe('IRI')
+    expect(saveDraft().disabled).toBe(true)
+
+    // The type was the guess for the old id, so it follows the new one.
+    fireEvent.change(idInput(), { target: { value: IEC_CDD } })
+    expect(typeSelect().value).toBe('IRDI')
+    expect(saveDraft().disabled).toBe(false)
+
+    fireEvent.click(saveDraft())
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const [path, body] = api.put.mock.calls[0]
+    expect(path).toBe('/api/v1/schemas/v2-uuid')
+    expect(body).toMatchObject({ semantic_id: IEC_CDD, semantic_id_type: 'IRDI' })
+
+    // Reloaded from the registry: the draft now holds the pair, so nothing is left to save.
+    await waitFor(() => expect(saveDraft().disabled).toBe(true))
+    expect(idInput().value).toBe(IEC_CDD)
+    expect(typeSelect().value).toBe('IRDI')
+  })
+
+  it('clears a draft’s id and its type together', async () => {
+    storeOnPut()
+    await openDraft({ ...DRAFT_V2, semantic_id: NAMEPLATE, semantic_id_type: 'IRI' })
+
+    fireEvent.change(idInput(), { target: { value: '' } })
+    expect(typeSelect().value).toBe('')
+    expect(typeSelect().disabled).toBe(true)
+
+    fireEvent.click(saveDraft())
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    expect(api.put.mock.calls[0][1]).toMatchObject({ semantic_id: '', semantic_id_type: '' })
+    await waitFor(() => expect(saveDraft().disabled).toBe(true))
+    expect(idInput().value).toBe('')
+  })
+
+  it('saves a semantic-id-only edit before publishing', async () => {
+    const order = []
+    api.put.mockImplementation(async (path, body) => { order.push(['save', body.semantic_id]); return { id: 'v2-uuid' } })
+    api.post.mockImplementation(async () => { order.push(['publish']); return { version: 2 } })
+    await openDraft({ ...DRAFT_V2, semantic_id: NAMEPLATE, semantic_id_type: 'IRI' })
+
+    fireEvent.change(idInput(), { target: { value: IEC_CDD } })
+    fireEvent.click(modal().getByText('Publish Version v2'))
+
+    await waitFor(() => expect(order).toEqual([['save', IEC_CDD], ['publish']]))
   })
 })
 

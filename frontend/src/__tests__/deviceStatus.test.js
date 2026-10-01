@@ -205,3 +205,13 @@ describe('deviceStatusBadge', () => {
     expect(deviceStatusBadge(born()).title).toMatch(/DBIRTH/)
   })
 })
+
+describe('deviceStatusBadge tone', () => {
+  const born = (over = {}) => device({ first_dbirth_at: new Date().toISOString(), ...over })
+  it('names the Badge tone for each state', () => {
+    expect(deviceStatusBadge(born()).tone).toBe('success')
+    expect(deviceStatusBadge(born({ status: 'OFFLINE' })).tone).toBe('neutral')
+    expect(deviceStatusBadge(device({ is_quarantined: true })).tone).toBe('warning')
+    expect(deviceStatusBadge(device({ status: 'OFFLINE', created_at: new Date().toISOString() })).tone).toBe('neutral')
+  })
+})

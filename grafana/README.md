@@ -38,8 +38,8 @@ dashboard tell an asset alert from a fleet one. A rule about a machine goes in a
 and needs a metric that exists in `metric_catalog`, which `check-docs-drift.mjs` asserts.
 
 **Datasources.** The `supabase` datasource connects as `grafana_reader`, which may `SELECT` the
-views the rules name (`platform_health`, `gateway_health`, `digital_thread_partition_health`,
-`storage_footprint`) and no base table, so a browser-SSO-fronted service never holds the plant's
+views the rules name (`platform_health`, `gateway_health`, `audit_trail_partition_health`,
+`storage_footprint`, `backup_health`) and no base table, so a browser-SSO-fronted service never holds the plant's
 inventory; a rule that queried `public.devices` fails as `permission denied` and sits in error
 health. `asset_config` lives in Supabase and `postgres_fdw` runs Supabase → TimescaleDB only, so a
 per-device limit travels as a published metric. The `prometheus` datasource exists only where the
@@ -66,9 +66,10 @@ enrolment is measured in hours, a queue changes when a person approves something
 Prometheus rules are rates over 5 to 15 minute windows.
 
 **Thresholds shared with the frontend are held in step by guards.** `check-docs-drift.mjs` reads
-the CA rule's thirty days against `CERT_EXPIRY_WARN_DAYS` and the archive rule's fourteen against
-`ARCHIVE_BACKLOG_TOLERANCE_DAYS`; `check-mirror-drift.mjs` holds the 90s staleness threshold
-between `gateway_status` and the frontend.
+the CA rule's thirty days against `CERT_EXPIRY_WARN_DAYS`, the archive rule's fourteen against
+`ARCHIVE_BACKLOG_TOLERANCE_DAYS` and the backup rule's 36 hours against `BACKUP_STALE_HOURS`;
+`check-mirror-drift.mjs` holds the 90s staleness threshold between `gateway_status` and the
+frontend.
 
 ## Delivery: the contact point and the policy tree
 
@@ -82,7 +83,7 @@ from the cause.
 
 **Grafana is not given `service_role`, and that is the whole point of the file.** The obvious way
 to let Grafana write to Supabase is to hand it the service-role key. That key bypasses RLS
-entirely and can rewrite `digital_thread`, and this stack has already corrected exactly this shape
+entirely and can rewrite `audit_trail`, and this stack has already corrected exactly this shape
 once: Grafana used to connect to the historian as the `postgres` superuser, a service fronted by
 browser SSO holding the credential that owns the database, and the fix was the read-only
 `grafana_reader` role. Handing it `service_role` would be strictly worse than the credential that
@@ -147,7 +148,8 @@ that never fired.
 ## Platform Conditions
 
 The stack's own health, not the machines'. Every rule reads one row per condition from
-`public.platform_health` (or `gateway_health`) through the `supabase` datasource.
+`public.platform_health` (or `gateway_health`, or `backup_health`) through the `supabase`
+datasource.
 
 ### Gateway Stale (`aber-gateway-stale`)
 
@@ -209,6 +211,47 @@ switched off. One hour because the exporter runs nightly: the number moves once 
 shorter window would only re-report the same reading. The view emits this row only while
 `archive.enabled` is on, so NoData means a stack that does not archive.
 
+### Backup Stale (`aber-backup-stale`)
+
+Critical, `for: 0s`, over 36 hours: a restore can reach no later than the last good backup. No
+platform backup (the backup service's dump of both databases, the keys and the volumes) has
+succeeded for a day and a half. The schedule is nightly by
+default (`backup.schedule`), so 36 hours is one missed night with half a day in hand for a slow run
+or a restart; the window is the delay, so there is no `for`. The Backups page shows its line on the
+same number, `BACKUP_STALE_HOURS`, and a guard holds the two equal. A site that sets a sparser
+schedule has to change both.
+
+The value is `backup_health.age_seconds` (0011), which is how `grafana_reader` sees `backup_jobs`,
+a table only an Administrator may read. The clock is the start of the last completed backup, the
+moment its data is as of; before the first success it is the first job recorded. That is what
+covers the case the page's failure line misses: a backup service that is not running records no
+failure, only a nightly job nobody claims. While no job has ever been recorded the view has no
+row, so a stack installed with `backupService.enabled: false`, and every CI run, reads NoData, which
+is OK. What the clock cannot tell apart from a fault: a service switched off after it has run keeps
+its history, and pg_cron keeps queueing a job no process claims, so the rule fires until the
+service returns or the rule is silenced. The same holds for a site that empties `backup.schedule`
+and backs up only on request.
+
+### Off-site Backup Stale (`aber-backup-offsite-stale`)
+
+Warning, `for: 0s`, over 12 hours: the newest platform backup has no copy at the off-site
+destination. The backup service copies each backup, encrypted, to the S3 endpoint the Backups page
+names, and a copy that fails is retried rather than failing the backup, so an endpoint that is
+unreachable, a credential that has been revoked or a NetworkPolicy with no egress rule for the
+endpoint fails quietly by design. This is where it stops being quiet: an upload that fails silently
+is the failure the copy exists to prevent, because the backups are then on the disk they protect.
+
+The value is `backup_offsite_health.age_seconds` (0018), read as `grafana_reader` through
+`backup_offsite_health_rows()`, which runs as its owner so the reader needs no privilege on
+`backups`, the settings or the Vault. The clock is when the newest backup was taken, or when the
+destination last changed if that is later, and it reads zero once the backup is copied. A copy
+usually lands within minutes of the backup; 12 hours leaves room for a large upload over a slow
+link, and for the retry backoff (every 15 minutes at most) to ride out a short outage, and still
+reports a nightly backup the same day. The window is the delay, so there is no `for`. While the
+destination is incomplete the view has no row, so a stack without one, and every CI run, reads
+NoData, which is OK. Warning rather than critical: the local backup exists, and Backup Stale is the
+rule for having none.
+
 ## Ingestion Pipeline
 
 Whether telemetry is being recorded at all. The views above cannot see the pipe between the broker
@@ -260,9 +303,9 @@ the remedies differ. Five minutes because the trigger is a directory that is bri
 and the daemon does not retry these, so recovery waits on the next rebirth timer or an operator's
 request.
 
-### Digital Thread Partitions Falling Behind (`aber-digital-thread-partitions`)
+### Audit Trail Partitions Falling Behind (`aber-audit-trail-partitions`)
 
-Warning, `for: 30m`. `digital_thread` is range-partitioned by month and a pg_cron job keeps three
+Warning, `for: 30m`. `audit_trail` is range-partitioned by month and a pg_cron job keeps three
 months ahead; a cron job that stops is silent. A default partition absorbs the rows so asset writes
 never fail, which is why this is a warning and not critical. The condition is `default_rows > 0`,
 because a row filed outside its month is never detached with it. Thirty minutes since the job runs

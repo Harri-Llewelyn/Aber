@@ -42,8 +42,8 @@ HOST_GW = "2e000000-0000-4000-8000-000000000001"
 
 # THE DEMO ACCOUNTS FROM supabase/seed.sql, NOT SYNTHETIC UUIDs, and that is not a convenience.
 #
-# `digital_thread.changed_by` carries a FOREIGN KEY to auth.users, and `gateways` fires
-# log_digital_thread_event() on every write -- so issuing a token (which moves the gateway to
+# `audit_trail.changed_by` carries a FOREIGN KEY to auth.users, and `gateways` fires
+# log_audit_trail_event() on every write -- so issuing a token (which moves the gateway to
 # PENDING_ENROLLMENT) writes an audit row attributed to auth.uid(). An invented user id therefore
 # fails the whole call with a foreign-key violation raised from inside the audit trigger, several
 # frames away from anything the test is about.
@@ -610,7 +610,7 @@ class TestBrokerCapturePolicies(GatewayEnrollmentBase):
         """
         THE ASYMMETRY IS THE DESIGN. An auditor's job is to see what the edge published; letting
         them upload would let them rewrite the record they exist to examine -- the same objection
-        that makes digital_thread append-only.
+        that makes audit_trail append-only.
         """
         path = f"{self.sparkplug_id}/auditor-read.json"
         self._insert_as(ADMIN_USER, "Administrator", path)

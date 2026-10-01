@@ -494,7 +494,7 @@
     "type": "comment",
     "z": "aber-tab",
     "name": "BROKER ROOT — what this appliance trusts, reported on the heartbeat",
-    "info": "bootstrap.mjs writes /data/certs/ca.json for the root enrolment installed, and\nacs-gateway-converge rewrites it whenever the platform publishes a bundle this appliance did\nnot already hold. This branch reads it every 60s into the flow cache, and the heartbeat reports\n`not_after_ms` from there as `Cert_Expires_At`.\n\nA FILE AND NOT AN ENVIRONMENT VARIABLE. The root changes between two container starts -- the\nconverge script installs a new bundle and restarts this container -- and a reload does not\nre-source gateway.env, so a value put there would be the enrolment root’s date forever.\n\nSame rule as the other two collector branches: this writes to a cache and the heartbeat reads\nit. An unreadable file costs one metric and never the heartbeat.\n",
+    "info": "bootstrap.mjs writes /data/certs/ca.json for the root enrolment installed, and\naber-gateway-converge rewrites it whenever the platform publishes a bundle this appliance did\nnot already hold. This branch reads it every 60s into the flow cache, and the heartbeat reports\n`not_after_ms` from there as `Cert_Expires_At`.\n\nA FILE AND NOT AN ENVIRONMENT VARIABLE. The root changes between two container starts -- the\nconverge script installs a new bundle and restarts this container -- and a reload does not\nre-source gateway.env, so a value put there would be the enrolment root’s date forever.\n\nSame rule as the other two collector branches: this writes to a cache and the heartbeat reads\nit. An unreadable file costs one metric and never the heartbeat.\n",
     "x": 400,
     "y": 840,
     "wires": []

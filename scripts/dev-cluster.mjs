@@ -16,7 +16,9 @@
  * Options:  --no-build          reuse the images already built (`up`)
  *           --only=a,b          build and import only these images (`up`)
  *           --no-tls            skip cert-manager, the broker's TLS listener and the databases' TLS (`up`)
- *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`)
+ *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`); when `up`
+ *                               upgrades a release, the Jobs are created suspended and start once
+ *                               every workload has rolled out, so they test the new pods
  *           --no-validate       skip validate.py, run the lane only (`test`)
  *           --filter=<text>     only suites whose path contains the text (`test`)
  *           --no-dns-check      run the lane on a machine where the Ingress hosts do not resolve;
@@ -89,9 +91,9 @@ const IMAGES = [
 const FORWARDS = [
   { local: 5433, service: 'timescaledb', remote: 5432, what: 'historian', relay: true },
   { local: 54322, service: 'supabase-db', remote: 5432, what: 'Supabase Postgres', relay: true },
-  { local: 54321, service: 'supabase-kong', remote: 8000, what: 'Supabase API (the gateway)' },
-  { local: 54323, service: 'supabase-kong', remote: 8001, what: 'Studio, behind the gateway login' },
-  { local: 3003, service: 'supabase-kong', remote: 8002, what: 'the forge, behind the gateway' },
+  { local: 54321, service: 'supabase-envoy', remote: 8000, what: 'Supabase API (the gateway)' },
+  { local: 54323, service: 'supabase-envoy', remote: 8001, what: 'Studio, behind the gateway login' },
+  { local: 3003, service: 'supabase-envoy', remote: 8002, what: 'the forge, behind the gateway' },
   // The forge over SSH, which the appliance suites push to with a deploy key: the k3d load
   // balancer publishes 22 on the cluster network only.
   { local: 2222, service: 'gitea', remote: 22, what: 'the forge over SSH' },
@@ -208,6 +210,20 @@ function ensureCluster () {
   console.log(`  context k3d-${CLUSTER}, API on 127.0.0.1:${port}`)
 }
 
+// The runbook's Traefik setting, applied the same way, so the dev loop measures the client address
+// a site gets. k3s's helm controller redeploys Traefik with it; the Service changing is the signal.
+async function ensureTraefikConfig () {
+  step('Traefik keeps the client address')
+  const policy = () => capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik',
+    '-o', 'jsonpath={.spec.externalTrafficPolicy}']).out
+  must('kubectl', ['apply', '-f', 'deploy/k8s/traefik-config.yaml'], 'the Traefik HelmChartConfig did not apply')
+  for (let i = 0; i < 60; i++) {
+    if (policy() === 'Local') { console.log('  externalTrafficPolicy Local'); return }
+    await sleep(3000)
+  }
+  die(`Traefik's Service is on externalTrafficPolicy ${policy() || '(none)'} after 3 minutes, not Local`)
+}
+
 function lbPublishes (port) {
   return capture('docker', ['port', `k3d-${CLUSTER}-serverlb`]).out.split('\n').some(l => l.startsWith(`${port}/tcp`))
 }
@@ -296,6 +312,21 @@ function restartWorkloadsUsing (refs) {
   }
 }
 
+const E2E_JOBS = [`${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`]
+
+/**
+ * Starts the e2e Jobs an upgrade created suspended (e2e.suspend), once every workload has rolled
+ * out. Helm creates them during the upgrade and the rebuilt workloads restart after it; a run
+ * started then meets the old pods, and deleting it later does not undo what it did.
+ */
+function resumeE2eJobs () {
+  step('start the e2e Jobs, now that every workload has rolled out')
+  for (const job of E2E_JOBS) {
+    must('kubectl', ['-n', NS, 'patch', 'job', job, '--type=merge', '-p', '{"spec":{"suspend":false}}'],
+      `${job} could not be resumed`)
+  }
+}
+
 function assertImagesPresent (version) {
   const present = imagesInNode()
   const missing = IMAGES.map(i => `${IMG_NS}/${i.name}:${version}`).filter(r => !present.includes(r))
@@ -336,7 +367,7 @@ function keptSecret (key) {
   return releaseValues().secrets?.[key] || crypto.randomBytes(32).toString('hex')
 }
 
-async function installChart ({ tls, e2e }) {
+async function installChart ({ tls, e2e, holdE2e = false }) {
   const domain = option('domain') || 'localhost'
   step(`helm upgrade --install ${RELEASE} on ${domain} (${tls ? 'broker TLS on' : 'no TLS'}${e2e ? ', e2e Jobs on' : ''})`)
   must('node', ['scripts/sync-helm-chart-files.mjs'], 'the chart files are not mirrored')
@@ -347,7 +378,9 @@ async function installChart ({ tls, e2e }) {
     '--set', 'backup.enabled=true', '--set', 'backupService.enabled=true',
     '--set', 'backup.includeStorage=true', '--set', 'backup.includeForge=true',
     '--set', 'backup.includeBroker=true',
-    '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`]
+    '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`,
+    // Empty leaves an archived gateway's broker credential working; the stack lane asserts it stops.
+    '--set', `secrets.gatewayRevokeSecret=${keptSecret('gatewayRevokeSecret')}`]
   // What an appliance is told to dial. The browser-facing hosts stay on the loopback domain, which
   // resolves on this machine whatever the resolver does; the two functions that hand an appliance
   // an address refuse loopback, so they get this machine's LAN address instead. An appliance
@@ -373,6 +406,7 @@ async function installChart ({ tls, e2e }) {
     // domain; hostAliases point them at Traefik instead.
     const ip = capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik', '-o', 'jsonpath={.spec.clusterIP}']).out
     sets.push('--set', 'e2e.enabled=true', '--set', `e2e.ingressIp=${ip}`)
+    if (holdE2e) sets.push('--set', 'e2e.suspend=true')
     // Plain Jobs, not hooks, and a Job's pod template is immutable: a completed run left in place
     // makes the next upgrade fail with `field is immutable` the moment their spec changes.
     run('kubectl', ['-n', NS, 'delete', 'job', `${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`, '--ignore-not-found'])
@@ -694,6 +728,7 @@ async function up () {
     if (unknown.length) die(`--only names no image: ${unknown.join(', ')}. Known: ${IMAGES.map(i => i.name).join(', ')}`)
   }
   ensureCluster()
+  await ensureTraefikConfig()
   if (tls) ensureCertManager()
   if (flag('no-build')) {
     assertImagesPresent(version)
@@ -701,11 +736,15 @@ async function up () {
     buildImages(version, only)
     importImages(version, only)
   }
-  await installChart({ tls, e2e: flag('e2e') })
+  // An upgrade creates the e2e Jobs suspended, to start once the workloads have rolled out. An
+  // install has no older pods for them to meet, and creates them running, as CI's does.
+  const holdE2e = flag('e2e') && capture('helm', ['status', RELEASE, '-n', NS]).ok
+  await installChart({ tls, e2e: flag('e2e'), holdE2e })
   if (!flag('no-build')) {
     restartWorkloadsUsing(IMAGES.filter(i => !only || only.includes(i.name)).map(i => `${IMG_NS}/${i.name}:${version}`))
   }
   await waitForStack()
+  if (holdE2e) resumeE2eJobs()
   helmTest()
   if (flag('e2e')) await waitForE2e()
   status()

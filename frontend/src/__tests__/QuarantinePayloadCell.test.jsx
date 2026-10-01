@@ -17,7 +17,7 @@ const EIGHT = [
 describe('QuarantinePayloadCell', () => {
   it('collapses a long payload behind a count instead of rendering it whole', () => {
     // The regression this guards: an unconstrained cell widened the table until
-    // "Approve & Assign" was off-screen, so the queue's whole purpose needed a scroll first.
+    // "Approve & Onboard" was off-screen, so the queue's whole purpose needed a scroll first.
     renderCell({ metrics: EIGHT })
 
     expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy()

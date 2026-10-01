@@ -44,4 +44,6 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   // The chart's appVersion. Blank on a plain image build, which means the account menu says
   // nothing about drift -- there is no release to be out of step with.
   VITE_RELEASE_VERSION: '',
+  // backup.retentionDays. Blank: the Backups page does not say which backups the window has passed.
+  VITE_BACKUP_RETENTION_DAYS: '',
 };

@@ -200,7 +200,8 @@ function main() {
   log(
     `wrote ${FILE}: ${config.clients.length} client(s), ${config.roles.length} role(s); `
     + `${report.managed.length} managed, ${report.gateways.length} gateway(s) kept`
-    + (report.unmanaged.length ? `, unmanaged kept as-is: ${report.unmanaged.join(', ')}` : ''),
+    + (report.unmanaged.length ? `, unmanaged kept as-is: ${report.unmanaged.join(', ')}` : '')
+    + (report.retired.length ? `, retired platform account(s) removed: ${report.retired.join(', ')}` : ''),
   );
 }
 

@@ -5,7 +5,7 @@ import {
 } from '../components/common/Icons'
 
 /**
- * The area icon registry. Mirrors the `areas_icon_valid` CHECK constraint (0097) the way
+ * The area icon registry. Mirrors the `areas_icon_valid` CHECK constraint (0001_baseline_schema.sql) the way
  * utils/cellIcon.jsx mirrors `cells_icon_valid`: the database stores a key, only a bundled component
  * can render it, and adding one is two edits. `label` names what the area is for.
  */
@@ -31,7 +31,7 @@ export function areaIconComponent(key) {
 }
 
 /** Render an area's icon. Takes the area so every render site shares the fallback. */
-export function AreaIcon({ area, size = 16, className = '' }) {
+export function AreaIcon({ area, size = 16 }) {
   const Icon = areaIconComponent(area?.icon)
-  return <Icon size={size} className={className} />
+  return <Icon size={size} />
 }

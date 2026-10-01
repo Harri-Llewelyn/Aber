@@ -31,6 +31,14 @@ const stripComments = (src) =>
 const APP_JSX = stripComments(fs.readFileSync(path.resolve(__dirname, '../App.jsx'), 'utf8'))
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
+/** Every .js/.jsx file under a directory. */
+const sourceFilesUnder = (dir) =>
+  fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) return sourceFilesUnder(full)
+    return /\.jsx?$/.test(entry.name) ? [full] : []
+  })
+
 /** Every custom property the stylesheet actually defines. */
 const definedVars = new Set(
   [...APP_CSS.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gim)].map(m => m[1])
@@ -56,6 +64,27 @@ describe('AuthScreen theming', () => {
   it('references no CSS variable that the stylesheet does not define', () => {
     const referenced = [...APP_JSX.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)].map(m => m[1])
     const undefinedVars = [...new Set(referenced)].filter(v => !definedVars.has(v))
+    expect(undefinedVars).toEqual([])
+  })
+
+  it('references no undefined CSS variable in App.css or under components/', () => {
+    const src = path.resolve(__dirname, '..')
+    const files = [
+      { file: 'App.css', text: APP_CSS },
+      ...sourceFilesUnder(path.join(src, 'components')).map(f => ({
+        file: path.relative(src, f),
+        text: fs.readFileSync(f, 'utf8')
+      }))
+    ]
+    // Also declared where a rule or an inline style sets one for its own subtree, as in
+    // `.badge-drive { --x: ... }` and `style={{ '--x': value }}`.
+    const declared = new Set(files.flatMap(({ text }) =>
+      [...text.matchAll(/(--[a-z0-9-]+)['"]?\s*:/gi)].map(m => m[1])))
+    const undefinedVars = files.flatMap(({ file, text }) =>
+      [...new Set([...text.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)].map(m => m[1]))]
+        .filter(v => !declared.has(v))
+        .map(v => `${file}: ${v}`)
+    )
     expect(undefinedVars).toEqual([])
   })
 

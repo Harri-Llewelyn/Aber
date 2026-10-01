@@ -24,21 +24,23 @@ const fail = (m) => { failed = true; console.log(`  FAIL  ${m}`); };
 const pass = (m) => console.log(`  ok    ${m}`);
 
 /**
- * Everything `0001`'s `DROP SERVER ... CASCADE` removes, with the migration that must put it back.
- * The `created_by` column turns "storage_footprint is missing" into "the chain did not reach 0027".
+ * Everything `0001`'s `DROP SERVER ... CASCADE` removes, with the live migration that must put it
+ * back. `created_by` is a label, never read as a filename: the lowest missing one is printed as
+ * where the chain stopped, so "telemetry_raw_window is missing" becomes "the chain did not finish
+ * 0005". Since the fold, `0001` recreates all but that one.
  */
 const SURFACE = [
   { relation: 'public.telemetry',            created_by: '0001' },
   { relation: 'timescale.telemetry',         created_by: '0001' },
-  { relation: 'timescale.telemetry_latest',  created_by: '0010' },
-  { relation: 'timescale.telemetry_1m',      created_by: '0010' },
-  { relation: 'timescale.telemetry_5m',      created_by: '0010' },
-  { relation: 'timescale.telemetry_1h',      created_by: '0010' },
-  { relation: 'public.telemetry_1h',         created_by: '0010' },
-  { relation: 'timescale.telemetry_horizons', created_by: '0111' },
-  { relation: 'public.telemetry_horizons',   created_by: '0111' },
-  { relation: 'timescale.storage_footprint', created_by: '0027' },
-  { relation: 'public.storage_footprint',    created_by: '0027' },
+  { relation: 'timescale.telemetry_latest',  created_by: '0001' },
+  { relation: 'timescale.telemetry_1m',      created_by: '0001' },
+  { relation: 'timescale.telemetry_5m',      created_by: '0001' },
+  { relation: 'timescale.telemetry_1h',      created_by: '0001' },
+  { relation: 'public.telemetry_1h',         created_by: '0001' },
+  { relation: 'timescale.telemetry_horizons', created_by: '0001' },
+  { relation: 'public.telemetry_horizons',   created_by: '0001' },
+  { relation: 'timescale.storage_footprint', created_by: '0001' },
+  { relation: 'public.storage_footprint',    created_by: '0001' },
   { relation: 'timescale.telemetry_raw_window', created_by: '0005' },
 ];
 
@@ -51,7 +53,7 @@ function psql(sql) {
   return { ok: r.status === 0, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }
 
-console.log('Schema surface: the objects 0001 drops and later migrations must recreate.\n');
+console.log('Schema surface: the objects 0001 drops and the chain must recreate.\n');
 
 const ready = spawnSync('kubectl', ['-n', NAMESPACE, 'get', 'statefulset/supabase-db',
   '-o', 'jsonpath={.status.readyReplicas}'], { encoding: 'utf8' });
@@ -78,7 +80,7 @@ console.log('');
 if (missing.length) {
   const earliest = missing.map((m) => m.created_by).sort()[0];
   console.log(`The migration chain did not complete. The earliest missing object is created by ${earliest},`);
-  console.log('so the chain aborted before it — and 0001 had already dropped the whole read surface');
+  console.log('so the chain stopped before that file finished — and 0001 had already dropped the read surface');
   console.log('by then. The stack will otherwise look healthy: PostgREST answers, Grafana\'s');
   console.log('datasource reports OK, and only the panels fail.');
   console.log('');

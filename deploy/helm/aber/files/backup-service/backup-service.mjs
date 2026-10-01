@@ -3,18 +3,21 @@
 // one process beside the volumes holding a superuser credential, so it can pg_dump both databases,
 // tar the storage objects and the broker's document, copy the forge consistently and archive the
 // keys. It serves nothing but /healthz and hands no bytes to anybody: restore is a runbook run from
-// a shell against the volume. Runs on an image built from the database's own, so pg_dump is at least
-// the server's version. Reasoning: supabase/README.md, "Backup and Recovery", "How the service takes
-// a backup".
+// a shell against the volume or the bucket. When the Backups page names an S3 destination it copies
+// every backup there, each file encrypted with age. Runs on an image built from the database's own,
+// so pg_dump is at least the server's version. Reasoning: supabase/README.md, "Backup and Recovery",
+// "How the service takes a backup", "An encrypted copy off site".
 import { spawnSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync,
-  writeFileSync, copyFileSync,
+  createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync,
+  rmSync, statSync, writeFileSync, copyFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { join, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, join, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 
 const BACKUP_DIR = process.env.BACKUP_DIR || '/backups';
 const RETENTION_DAYS = Number.parseInt(process.env.BACKUP_RETENTION_DAYS || '14', 10);
@@ -55,6 +58,12 @@ const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 // pgsodium's root key, relative to the data directory where the chart's getkey script keeps it.
 // Vault's rows are ciphertext under it and nothing else. Empty: not archived.
 const VAULT_KEY_FILE = process.env.VAULT_KEY_FILE ?? 'pgsodium_root.key';
+// An encrypted file up to this size is one PUT; a larger one is a multipart upload of parts this
+// size. S3 takes at most 10,000 parts, so 64 MiB bounds one file at 640 GiB.
+const OFFSITE_PART_BYTES = Math.max(5 * 1024 * 1024,
+  Number.parseInt(process.env.BACKUP_OFFSITE_PART_BYTES || String(64 * 1024 * 1024), 10));
+// The ciphertext of the file being uploaded, on the backup volume; removed after each copy.
+const OFFSITE_STAGE = join(BACKUP_DIR, '.offsite-stage');
 
 const log = (...args) => console.log(`[backup-service] ${new Date().toISOString()}`, ...args);
 
@@ -97,7 +106,11 @@ function sql(statement, vars = {}) {
     maxBuffer: 1 << 24,
   });
   if (r.status !== 0) {
-    throw new Error(`psql: ${(r.stderr || '').trim().split('\n').slice(-3).join(' ') || `exit ${r.status}`}`);
+    // The ERROR line says what failed; the CONTEXT after it can run to many lines of SQL.
+    const lines = (r.stderr || '').trim().split('\n');
+    const error = lines.find((line) => /\bERROR:/.test(line));
+    const detail = error ? [error, lines.at(-1)].filter((l, i, all) => all.indexOf(l) === i) : lines.slice(-3);
+    throw new Error(`psql: ${detail.join(' ').trim() || `exit ${r.status}`}`);
   }
   return (r.stdout || '').trim();
 }
@@ -116,17 +129,32 @@ const db = {
   schedule: (cron) => sql("SELECT public.backup_schedule(:'cron')", { cron }),
   prunable: (days) => JSON.parse(sql("SELECT public.backup_prunable(:'days'::integer)", { days: String(days) }) || '[]'),
   forget: (id, reason) => sql("SELECT public.backup_forget(:'id'::uuid, :'reason')", { id, reason }),
+  // The destination carries the secret key: it is parsed here and handed to the aws CLI's
+  // environment, and never logged.
+  offsiteDestination: () => {
+    const out = sql('SELECT public.backup_offsite_destination()');
+    return out ? JSON.parse(out) : null;
+  },
+  offsiteNext: () => {
+    const out = sql('SELECT public.backup_offsite_next()');
+    return out ? JSON.parse(out) : null;
+  },
+  offsiteRecord: (id, location, objects, error) => sql(
+    "SELECT public.backup_offsite_record(:'id'::uuid, NULLIF(:'location', ''), NULLIF(:'objects', '')::jsonb, NULLIF(:'error', ''))",
+    { id, location: location || '', objects: objects ? JSON.stringify(objects) : '', error: error || '' }
+  ),
 };
 
 const STAMP_RE = /^\d{8}T\d{6}Z$/;
 const stampNow = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 
-function sha256(path) {
+function sha256Raw(path) {
   return new Promise((resolvePromise, reject) => {
     const hash = createHash('sha256');
-    createReadStream(path).on('data', (d) => hash.update(d)).on('end', () => resolvePromise(hash.digest('hex'))).on('error', reject);
+    createReadStream(path).on('data', (d) => hash.update(d)).on('end', () => resolvePromise(hash.digest())).on('error', reject);
   });
 }
+const sha256 = async (path) => (await sha256Raw(path)).toString('hex');
 
 function run(cmd, args, { env = {}, stdoutTo = null } = {}) {
   return new Promise((resolvePromise) => {
@@ -136,6 +164,19 @@ function run(cmd, args, { env = {}, stdoutTo = null } = {}) {
     if (stdoutTo) child.stdout.pipe(stdoutTo);
     child.on('close', (status) => resolvePromise({ status, stderr: stderr.trim() }));
     child.on('error', (err) => resolvePromise({ status: -1, stderr: err.message }));
+  });
+}
+
+// run(), keeping stdout: the aws CLI answers in JSON.
+function capture(cmd, args, env = {}) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(cmd, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (status) => resolvePromise({ status, stdout, stderr: stderr.trim() }));
+    child.on('error', (err) => resolvePromise({ status: -1, stdout: '', stderr: err.message }));
   });
 }
 
@@ -347,6 +388,8 @@ async function takeBackup(job) {
   }, null, 2) + '\n');
 
   renameSync(partialDir, finalDir);
+  // From here a failure removes the renamed directory: a finalise that throws leaves no row for it.
+  current.partialDir = finalDir;
   const total = components.reduce((n, c) => n + c.size_bytes, 0);
   const backupId = db.finalise(job.id, stamp, finalDir, components, total);
   log(`  ok ${stamp}: ${components.length} component(s), ${total} bytes, backups row ${backupId}`);
@@ -363,26 +406,205 @@ function abandon(reason) {
   lastRun = { at: new Date().toISOString(), ok: false, error: reason };
 }
 
+// ---------------------------------------------------------------------------------------------
+// The off-site copy
+// ---------------------------------------------------------------------------------------------
+let copying = null; // the stamp being copied, for /healthz
+
+// The aws CLI's whole environment for one destination: the credential, the region, the addressing
+// style, and no second source of either (no shared credentials file, no instance metadata).
+// Checksums only where asked for: the explicit ChecksumSHA256 goes as a header, which every S3
+// implementation reads, rather than as the trailer the CLI would otherwise add.
+function awsEnv(dest) {
+  const config = join(tmpdir(), 'aber-backup-aws-config');
+  writeFileSync(config, `[default]\ns3 =\n  addressing_style = ${dest.path_style ? 'path' : 'virtual'}\n`);
+  return {
+    AWS_ACCESS_KEY_ID: dest.access_key_id,
+    AWS_SECRET_ACCESS_KEY: dest.secret_key,
+    AWS_REGION: dest.region,
+    AWS_DEFAULT_REGION: dest.region,
+    AWS_CONFIG_FILE: config,
+    AWS_SHARED_CREDENTIALS_FILE: '/dev/null',
+    AWS_EC2_METADATA_DISABLED: 'true',
+    AWS_PAGER: '',
+    AWS_RETRY_MODE: 'standard',
+    AWS_MAX_ATTEMPTS: '5',
+    AWS_REQUEST_CHECKSUM_CALCULATION: 'when_required',
+    AWS_RESPONSE_CHECKSUM_VALIDATION: 'when_required',
+  };
+}
+
+async function aws(dest, env, args) {
+  const r = await capture('aws', ['--endpoint-url', dest.endpoint, '--output', 'json', ...args], env);
+  if (r.status !== 0) {
+    throw new Error(`aws ${args.slice(0, 2).join(' ')}: ${r.stderr.split('\n').filter(Boolean).slice(-2).join(' ') || `exit ${r.status}`}`);
+  }
+  return r.stdout.trim() ? JSON.parse(r.stdout) : {};
+}
+
+async function copyRange(src, dest, start, length) {
+  await pipeline(createReadStream(src, { start, end: start + length - 1 }), createWriteStream(dest));
+}
+
+// Parts of OFFSITE_PART_BYTES, each sent with its own ChecksumSHA256. Returns the digest S3 keeps
+// for such an object: the SHA-256 of the parts' digests, then -<parts>.
+async function multipartUpload(dest, env, staged, size, key) {
+  const { UploadId } = await aws(dest, env, [
+    's3api', 'create-multipart-upload', '--bucket', dest.bucket, '--key', key, '--checksum-algorithm', 'SHA256',
+  ]);
+  const parts = [];
+  const digests = [];
+  const part = join(OFFSITE_STAGE, 'part');
+  try {
+    for (let n = 1, offset = 0; offset < size; n += 1, offset += OFFSITE_PART_BYTES) {
+      await copyRange(staged, part, offset, Math.min(OFFSITE_PART_BYTES, size - offset));
+      const digest = await sha256Raw(part);
+      const { ETag } = await aws(dest, env, [
+        's3api', 'upload-part', '--bucket', dest.bucket, '--key', key, '--upload-id', UploadId,
+        '--part-number', String(n), '--body', part, '--checksum-sha256', digest.toString('base64'),
+      ]);
+      parts.push({ PartNumber: n, ETag, ChecksumSHA256: digest.toString('base64') });
+      digests.push(digest);
+      rmSync(part, { force: true });
+    }
+    const manifest = join(OFFSITE_STAGE, 'parts.json');
+    writeFileSync(manifest, JSON.stringify({ Parts: parts }));
+    await aws(dest, env, [
+      's3api', 'complete-multipart-upload', '--bucket', dest.bucket, '--key', key, '--upload-id', UploadId,
+      '--multipart-upload', `file://${manifest}`,
+    ]);
+  } catch (err) {
+    await capture('aws', ['--endpoint-url', dest.endpoint, 's3api', 'abort-multipart-upload',
+      '--bucket', dest.bucket, '--key', key, '--upload-id', UploadId], env);
+    throw err;
+  }
+  return `${createHash('sha256').update(Buffer.concat(digests)).digest('base64')}-${digests.length}`;
+}
+
+// One file: encrypted to every recipient, uploaded with the digest the store checks on write, then
+// a HEAD that confirms the size and the digest the store computed for itself. An implementation
+// that returns no checksum has still checked it on write, so absent is not a mismatch.
+async function uploadEncrypted(dest, env, src, key) {
+  const staged = join(OFFSITE_STAGE, 'object.age');
+  const enc = await capture('age', [...dest.recipients.flatMap((r) => ['-r', r]), '-o', staged, src]);
+  if (enc.status !== 0) throw new Error(`age could not encrypt ${basename(src)}: ${enc.stderr.split('\n').pop()}`);
+  const size = statSync(staged).size;
+  const digest = await sha256Raw(staged);
+  let expected = digest.toString('base64');
+  if (size <= OFFSITE_PART_BYTES) {
+    await aws(dest, env, [
+      's3api', 'put-object', '--bucket', dest.bucket, '--key', key, '--body', staged,
+      '--checksum-sha256', expected, '--content-type', 'application/octet-stream',
+    ]);
+  } else {
+    expected = await multipartUpload(dest, env, staged, size, key);
+  }
+  const head = await aws(dest, env, [
+    's3api', 'head-object', '--bucket', dest.bucket, '--key', key, '--checksum-mode', 'ENABLED',
+  ]);
+  if (Number(head.ContentLength) !== size) {
+    throw new Error(`${key} is ${head.ContentLength} bytes on the store, ${size} were sent`);
+  }
+  if (head.ChecksumSHA256 && head.ChecksumSHA256 !== expected) {
+    throw new Error(`${key}: the store holds checksum ${head.ChecksumSHA256}, ${expected} was sent`);
+  }
+  rmSync(staged, { force: true });
+  return { file: basename(src), key, size_bytes: size, sha256: digest.toString('hex') };
+}
+
+// The manifests last, so a copy holding manifest.json.age holds every file the manifest names.
+const uploadOrder = (name) => (name === 'manifest.json' ? 2 : name.startsWith('manifest-') ? 1 : 0);
+
+// The next backup without a copy at the current destination, if there is one: one per idle poll,
+// so a requested backup waits behind one upload at most. A failure is recorded and retried after
+// a backoff; it never touches the backup itself.
+async function copyOffsite() {
+  let dest;
+  let backup;
+  try {
+    dest = db.offsiteDestination();
+    backup = dest && db.offsiteNext();
+  } catch (err) { log(`off-site: ${err.message}`); return; }
+  if (!backup) return;
+
+  const location = `${dest.base}${backup.stamp}/`;
+  copying = backup.stamp;
+  log(`off-site: copying ${backup.stamp} to ${location}`);
+  try {
+    if (!STAMP_RE.test(backup.stamp) || !insideBackupDir(backup.location) || !existsSync(backup.location)) {
+      throw new Error(`${backup.location} is not a backup directory on this volume`);
+    }
+    mkdirSync(OFFSITE_STAGE, { recursive: true });
+    const env = awsEnv(dest);
+    const files = readdirSync(backup.location)
+      .filter((f) => statSync(join(backup.location, f)).isFile())
+      .sort((a, b) => uploadOrder(a) - uploadOrder(b) || a.localeCompare(b));
+    const objects = [];
+    for (const file of files) {
+      objects.push(await uploadEncrypted(dest, env, join(backup.location, file), `${dest.prefix}/${backup.stamp}/${file}.age`));
+    }
+    db.offsiteRecord(backup.id, location, objects, null);
+    log(`  off-site ok ${backup.stamp}: ${objects.length} object(s), ${objects.reduce((n, o) => n + o.size_bytes, 0)} bytes`);
+  } catch (err) {
+    log(`off-site: ${backup.stamp} failed: ${err.message}`);
+    try { db.offsiteRecord(backup.id, null, null, err.message); } catch (e) { log(`off-site: could not record the failure: ${e.message}`); }
+  } finally {
+    copying = null;
+    rmSync(OFFSITE_STAGE, { recursive: true, force: true });
+  }
+}
+
+// A pruned backup's copy, deleted where the current destination reaches it. It never holds back
+// the local prune: a credential that may not delete (Object Lock, or no s3:DeleteObject, with a
+// lifecycle rule expiring copies instead) is a supported arrangement, and the reason says so.
+async function pruneOffsite(row, dest) {
+  if (!dest) {
+    return row.offsite_location ? `; its off-site copy at ${row.offsite_location} was left: no destination is set` : '';
+  }
+  const here = `${dest.base}${row.stamp}/`;
+  let said = row.offsite_location && !row.offsite_location.startsWith(dest.base)
+    ? `; its off-site copy at ${row.offsite_location} was left: the destination has changed since` : '';
+  try {
+    const env = awsEnv(dest);
+    const listing = await aws(dest, env, ['s3api', 'list-objects-v2', '--bucket', dest.bucket, '--prefix', `${dest.prefix}/${row.stamp}/`]);
+    const keys = (listing.Contents || []).map((o) => o.Key);
+    for (const key of keys) await aws(dest, env, ['s3api', 'delete-object', '--bucket', dest.bucket, '--key', key]);
+    if (keys.length) said += `; its off-site copy at ${here} was deleted`;
+  } catch (err) {
+    log(`prune: the off-site copy of ${row.stamp}: ${err.message}`);
+    said += `; its off-site copy at ${here} was not deleted: ${err.message.slice(0, 300)}`;
+  }
+  return said;
+}
+
 // Retention: a scheduled backup older than the window is deleted and the row forgotten only after
-// the files are gone; a requested one is pinned until an Administrator releases it.
-function prune() {
+// the files are gone; a requested one is pinned until an Administrator releases it, and
+// backup_prunable() never returns the newest three. Runs after a failed job too: when the failure
+// was a full volume, the prune is what lets the next run succeed. A pruned backup's off-site copy
+// goes with it, so the copies follow the same rules.
+async function prune() {
   let rows;
   try { rows = db.prunable(RETENTION_DAYS); } catch (err) { log(`prune: ${err.message}`); return; }
+  if (!rows.length) return;
+  let dest = null;
+  try { dest = db.offsiteDestination(); } catch (err) { log(`prune: the off-site destination: ${err.message}`); }
   for (const row of rows) {
     if (!STAMP_RE.test(row.stamp) || !insideBackupDir(row.location)) {
       log(`prune: refusing ${row.id}: location ${row.location} is not a backup directory`);
       continue;
     }
+    const offsite = await pruneOffsite(row, dest);
     rmSync(row.location, { recursive: true, force: true });
-    db.forget(row.id, `older than the ${RETENTION_DAYS}-day retention window`);
-    log(`pruned ${row.stamp}`);
+    db.forget(row.id, `older than the ${RETENTION_DAYS}-day retention window${offsite}`);
+    log(`pruned ${row.stamp}${offsite}`);
   }
 }
 
-// A .partial-* directory at start is a backup the previous process did not finish.
+// A .partial-* directory at start is a backup the previous process did not finish, and a staged
+// ciphertext is a copy it did not finish.
 function sweepPartials() {
   for (const entry of readdirSync(BACKUP_DIR)) {
-    if (entry.startsWith('.partial-')) {
+    if (entry.startsWith('.partial-') || entry === basename(OFFSITE_STAGE)) {
       rmSync(join(BACKUP_DIR, entry), { recursive: true, force: true });
       log(`removed incomplete ${entry}`);
     }
@@ -402,14 +624,17 @@ async function tick() {
     if (Number(stale) > 0) log(`failed ${stale} job(s) that no service was running`);
     job = db.claim();
   } catch (err) { log(`claim: ${err.message}`); return; }
-  if (!job) return;
+  if (!job) {
+    await copyOffsite();
+    return;
+  }
   try {
     await takeBackup(job);
   } catch (err) {
     log(`backup failed: ${err.message}`);
     abandon(err.message);
   }
-  prune();
+  await prune();
 }
 
 async function waitForDatabase() {
@@ -429,7 +654,7 @@ async function main() {
   const scheduled = db.schedule(SCHEDULE);
   log(scheduled === 't' ? `scheduled backups: ${SCHEDULE}` : 'scheduled backups: off (BACKUP_SCHEDULE is empty)');
   log(`retention: ${RETENTION_DAYS > 0 ? `${RETENTION_DAYS} days` : 'off'}; format: ${FORMAT}; polling every ${POLL_SECONDS}s`);
-  prune();
+  await prune();
 
   const loop = async () => {
     await tick();
@@ -442,7 +667,7 @@ async function main() {
 createServer((req, res) => {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, in_flight: current ? current.stamp : null, last_run: lastRun }));
+    res.end(JSON.stringify({ ok: true, in_flight: current ? current.stamp : null, copying, last_run: lastRun }));
     return;
   }
   res.writeHead(404);

@@ -31,7 +31,7 @@ So the two failures this suite exists to catch pull in opposite directions:
 test_deleting_the_original_still_works is the second half and is the reason this file exists rather
 than a single negative assertion.
 
-EVERY TEST ROLLS BACK. Writes to `devices` fire the digital-thread trigger, and that table is
+EVERY TEST ROLLS BACK. Writes to `devices` fire the audit-trail trigger, and that table is
 append-only to every application role and cannot be pruned by the application at all.
 """
 import os

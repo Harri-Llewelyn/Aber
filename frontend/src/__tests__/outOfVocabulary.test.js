@@ -5,7 +5,7 @@ import {
 } from '../utils/deviceTags'
 
 /**
- * The finding the vocabulary check exists to make visible: a demo flow once set
+ * The finding the vocabulary check exists to make visible: a flow once set
  * `Controller/EXECUTION` to `RUNNING`, which MTConnect does not define, and nothing in the stack
  * could say it was wrong.
  */

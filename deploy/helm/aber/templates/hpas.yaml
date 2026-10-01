@@ -5,7 +5,7 @@
 HorizontalPodAutoscalers -- FOUR COMPONENTS, AND ONLY THESE FOUR.
 
   supabase-rest       PostgREST: stateless, a connection pool per replica
-  supabase-kong       the gateway: declarative config, no state
+  supabase-envoy      the gateway: declarative config, no state
   supabase-functions  the edge runtime: a request router, workers are per-request isolates
   frontend            NGINX serving static files
 
@@ -45,7 +45,7 @@ unreachable code.
 Values lookups cannot be derived from names -- `.Values.supabaseRest.enabled` is not spelled like
 its component -- so the mapping is written out and then ASSERTED.
 
-THE ASSERTION COMPARES NAMES AND CANNOT SEE A DEAD VALUES PATH. `supabase-kong` sat here until
+THE ASSERTION COMPARES NAMES AND CANNOT SEE A DEAD VALUES PATH. Kong's workload sat here until
 b7989a0 deleted Kong and its values block; both sides still agreed, so the check passed and the
 render died a line earlier on a nil pointer -- and only under `autoscaling.enabled`, which is
 values-prod.yaml.example alone. A name removed from one side belongs removed from the other AND

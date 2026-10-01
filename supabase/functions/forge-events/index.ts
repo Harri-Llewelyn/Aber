@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
@@ -18,7 +17,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * pass, since the edge runtime boots with VERIFY_JWT=false.
  *
  * A push to any OTHER branch is a proposal. Nothing on the gateway row moves, but the flows.json
- * at that commit is checked for shape and the `acs/flow-shape` status main requires is posted, so
+ * at that commit is checked for shape and the `aber/flow-shape` status main requires is posted, so
  * a file uploaded through the forge's own UI meets a check before an administrator merges it
  * rather than being refused on the appliance afterwards.
  *
@@ -77,7 +76,7 @@ function hex(bytes: ArrayBuffer | Uint8Array): string {
   return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function hmacSha256Hex(secret: string, body: Uint8Array): Promise<string> {
+async function hmacSha256Hex(secret: string, body: BufferSource): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -96,7 +95,7 @@ function sameHex(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function signatureIsValid(presented: string | null, body: Uint8Array, secret: string): Promise<boolean> {
+export async function signatureIsValid(presented: string | null, body: BufferSource, secret: string): Promise<boolean> {
   if (!presented) return false;
   return sameHex(presented.trim().toLowerCase(), await hmacSha256Hex(secret, body));
 }
@@ -358,4 +357,4 @@ export default async function handler(req: Request): Promise<Response> {
   return json({ recorded: { sparkplug_id: sparkplugId, branch, sha, flow_sha256: flowSha256 } }, 200);
 }
 
-serve(handler);
+Deno.serve(handler);

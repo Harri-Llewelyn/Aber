@@ -1,5 +1,5 @@
 /**
- * Telemetry value formatting, shared by the device telemetry drawer, the export dialog and the CSV
+ * Telemetry value formatting, shared by the device telemetry modal, the export dialog and the CSV
  * writer. The `telemetry` hypertable stores `val_double`, `val_string` and `val_bool` with exactly
  * one populated per row, so "the value" is whichever is not null. Each column is tested for null
  * explicitly, never for truthiness, so a genuine `false` or `0` is a value.
@@ -27,7 +27,7 @@ export function telemetryValueType(row) {
 }
 
 /**
- * Display text for a value. `emptyLabel` is what an absent value reads as; the drawer passes "— no
+ * Display text for a value. `emptyLabel` is what an absent value reads as; the modal passes "— no
  * data —" for a metric a device declared but has never published.
  */
 export function formatTelemetryValue(row, emptyLabel = 'null') {

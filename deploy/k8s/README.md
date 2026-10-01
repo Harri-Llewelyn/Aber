@@ -100,11 +100,11 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | `telemetry_5m` (not compressed) | `fiveMinuteRetainFor`, 1 year | ~19 GB | ~188 GB |
 | `telemetry_1h` (not compressed) | `oneHourRetainFor`, 5 years | ~8 GB | ~81 GB |
 | WAL, each database | `max_wal_size`, 1 GB by default | 1 GB | 1 GB |
-| `digital_thread` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
+| `audit_trail` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
 | Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
 | Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
 | Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
-| Storage (models, captures, floor plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
+| Storage (models, captures, area plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
 | Backups | `backup.retentionDays` (14), on a 20 Gi volume | each backup includes the historian | see #403 |
 
 **The rollups dominate, and they are not compressed.** At S the 1-minute rollup alone reaches
@@ -187,9 +187,14 @@ resolves only where the resolver answers nip.io names carrying private addresses
 refuse to, as DNS-rebind protection). `--domain=<LAN address>.nip.io` moves every host onto the LAN
 where it does, and those two logins then need `ingress.tls`. `up` also enables the
 backup service, taking storage and the forge too, and generates the forge
-sweep secret once; the stack lane exercises all of it. `--no-tls` leaves the listener off,
+sweep secret once; the stack lane exercises all of it. It applies Traefik's client-address setting from *Install* too, before cert-manager. `--no-tls` leaves the listener off,
 `--no-build` reuses the images already in the node, `--only=ingestion` rebuilds a subset, `--e2e`
-adds the in-cluster conformance Jobs.
+adds the in-cluster conformance Jobs. Helm creates those Jobs during the upgrade, before `up`
+restarts the workloads whose image it rebuilt under the same tag, so on an upgrade `up` sets
+`e2e.suspend` and starts the Jobs only once every workload has rolled out: they test the new pods,
+not the ones being replaced. Deleting a run that started early would not be enough, because what it
+did stays done (a rebirth request starts the node's throttle, which a second run then meets). A
+first install has no older pods, and creates its Jobs running.
 
 The port-forwards carry the port numbers every host-side script and suite defaults to (`5433` for the historian,
 `54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
@@ -201,7 +206,54 @@ the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 ## Install
 
 Two paths, and they are for genuinely different situations. **From the registry** if you want to
-run this stack; **from a checkout** if you are changing it.
+run this stack; **from a checkout** if you are changing it. Both start with one change to Traefik.
+
+### First: Traefik keeps each client's address
+
+Once per cluster, before installing. This is
+[`traefik-config.yaml`](traefik-config.yaml), which the development loop applies too:
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        externalTrafficPolicy: Local
+EOF
+
+# k3s's helm controller redeploys Traefik within a minute; then this prints Local.
+kubectl -n kube-system get svc traefik -o jsonpath='{.spec.externalTrafficPolicy}'
+```
+
+**Why.** GoTrue limits sign-in, token refresh, OTP and MFA per client, keyed on the first address
+in `X-Forwarded-For` (`supabaseAuth.rateLimitHeader`), and Traefik writes that header from the
+connection it receives. k3s installs Traefik's Service with `externalTrafficPolicy: Cluster`, under
+which kube-proxy rewrites every outside request's source to the node's own pod-network address, so
+the whole site is one client with one limit: thirty sign-ins, then one every two seconds, shared by
+everyone, and one person guessing passwords locks everybody out. `Local` delivers each request with
+its source intact. [`docs/gateway.md`](../../docs/gateway.md#the-clients-address) has the path end
+to end.
+
+**On more than one node,** ServiceLB then lists only the nodes running a ready Traefik pod as the
+Service's addresses, and a node without one drops traffic sent to it rather than forwarding it:
+point DNS at the listed addresses. **If outside traffic reaches the nodes through NAT** (a public
+cloud's addresses, for example), do not set k3s's `node-external-ip` on any node: k3s documents
+that `Local` does not work with it.
+
+**Where the address cannot be kept,** set `supabaseAuth.rateLimitHeader: ""`. That turns GoTrue's
+limits off, which is better than the one limit shared by the whole site that you would get otherwise.
+
+**A proxy of your own in front of the cluster** makes every request arrive from the proxy. Add its
+address to Traefik's trusted senders in the same `valuesContent`, under
+`ports.web.forwardedHeaders.trustedIPs` (and `ports.websecure` with ingress TLS), and have the
+proxy *replace* any `X-Forwarded-For` a client sent rather than append to it: GoTrue takes the
+first address, and an appended header leaves that one in the client's hands.
 
 ### A. From the published chart (no checkout, no image builds)
 
@@ -409,12 +461,12 @@ Eight subdomains, all on one Ingress, all derived from `global.publicBaseDomain`
 | Host | Backend |
 |---|---|
 | `app.<domain>` | `frontend:3000` |
-| `api.<domain>` | `supabase-kong:8000` |
+| `api.<domain>` | `supabase-envoy:8000` |
 | `nodered.<domain>` | `node-red:1880` |
 | `grafana.<domain>` | `grafana:3000` |
-| `studio.<domain>` | `supabase-kong:8001` (the gateway's studio listener — **off by default**) |
+| `studio.<domain>` | `supabase-envoy:8001` (the gateway's studio listener — **off by default**) |
 | `docs.<domain>` | `swagger-ui:8080` |
-| `git.<domain>` | `supabase-kong:8002` (the gateway's forge listener; never `gitea:3000`) |
+| `git.<domain>` | `supabase-envoy:8002` (the gateway's forge listener; never `gitea:3000`) |
 | `mqtt.<domain>` | `mosquitto:9001` (WebSockets) |
 | — | `mosquitto-external:1883` (LoadBalancer) |
 | — | `<release>-ingress-gitea-ssh:22` (LoadBalancer; `gitea.ssh.external`) |
@@ -440,7 +492,7 @@ helm upgrade ... --set ingress.routes.docs=false
 ```
 
 **`studio` goes the other way: it is off by default and turning it on is the deliberate act.** The
-route publishes `supabase-kong:8001` — the gateway's studio listener, which runs an OAuth flow
+route publishes `supabase-envoy:8001` — the gateway's studio listener, which runs an OAuth flow
 against this stack's own GoTrue and admits `Administrator` alone — and never `supabase-studio:3000`,
 which is a database console with no login of its own, running as the database owner. The
 NetworkPolicy follows the same shape: the ingress controller may reach the gateway on `8001`, the
@@ -573,7 +625,7 @@ is:
 Gateways dial the broker **by IP address** — there is rarely plant DNS for it. A certificate carrying
 only `mosquitto` verifies perfectly from inside the cluster, which is where you will test it, and
 fails on every gateway with a hostname mismatch **the broker does not log**. The stack reports
-healthy, the demo simulator keeps producing telemetry, and the fleet is silently off.
+healthy, the host-run gateways keep producing telemetry, and the fleet is silently off.
 
 The chart refuses to render a LoadBalancer deployment whose certificate has no external identity at
 all. Get the address and put it in the SANs:
@@ -736,7 +788,7 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 | Component | Status |
 |---|---|
 | `timescaledb`, `supabase-db` StatefulSets | deployed |
-| `supabase-kong`, `supabase-auth`, `supabase-rest` | deployed |
+| `supabase-envoy`, `supabase-auth`, `supabase-rest` | deployed |
 | `realtime-dev` Service + `supabase-realtime` Deployment | deployed |
 | `supabase-storage`, `supabase-functions` | deployed |
 | `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
@@ -800,8 +852,9 @@ docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 # with nothing logged at either end. The code is NOT baked in — the chart mounts it from a ConfigMap.
 docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
 
-# The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar. The
-# code itself is projected from a ConfigMap (scripts/backup-service.mjs), so this is runtime only.
+# The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, and age and
+# the AWS CLI for the off-site copy. The code itself is projected from a ConfigMap
+# (scripts/backup-service.mjs), so this is runtime only.
 docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
 
 # The API documentation site — THE SPECS, baked in. swaggerapi/swagger-ui with docs/openapi.yaml
@@ -1068,8 +1121,11 @@ that would, and where each is switched off:
 - Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
   palette manager's Install tab and its update badges read it.
 - The dashboard's fonts come from Google Fonts (#438).
-- The edge functions fetch their dependencies from esm.sh and deno.land on first load (#437).
 - Destinations a site configures itself, such as a remote cold archive or backup target.
+
+The edge functions load their dependencies from the image. The image build resolves them against
+a lock file and boots every function with no network, so a function that would fetch fails the
+build instead (`supabase/README.md`, *Edge function dependencies*).
 
 An administrator can opt Node-RED into update notifications from its User Settings. The runtime
 keeps that choice over `settings.js`.
@@ -1124,6 +1180,23 @@ the pod to that pod's node — on a cluster where those pods sit on different no
 ones that share one. The mechanism, the tables and the restore runbook are in
 [`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-0101).
 
+**A copy off site, from the same service.** On `local-path` the backup PVC sits on the node, and
+usually the disk, that holds both databases, so it survives a dropped table and not a lost disk,
+node or site. Set a destination on the **Backups** page (an S3 endpoint, bucket, prefix, access key
+and an age public key) and the service copies every backup there, each file encrypted before it
+leaves the pod, checked against its SHA-256 by the store and by a `HEAD`, and pruned by the same
+rules as the local copy. A failed upload leaves the backup COMPLETED and is retried; *Off-site
+Backup Stale* fires when the newest backup has had no copy for 12 hours. Keep the bucket
+credentials and the age identity outside the cluster: the Vault holding the secret key is inside
+every backup. **Under `networkPolicy.enabled` the endpoint needs an egress rule**, listed in
+`backupService.offsiteEgress`, or every copy fails at connect time. The design and the runbook that
+starts from the bucket are in
+[`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0018).
+
+The CronJob writes to the PVC only. Its `backup.destination: s3` and `backup.s3.*` are retired, and
+a values file that still sets them fails the render: the upload could not run, having no `aws` CLI
+in its image, and it left the storage archive behind and pruned nothing in the bucket.
+
 Ad hoc, without waiting for the schedule:
 
 ```bash
@@ -1157,18 +1230,16 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
 - **Ownership and privileges are kept in the dump on purpose.** Objects are owned by those roles and
   RLS policies reference them by name; a dump stripped of ownership restores into a database where
   every policy denies.
-- **`digital_thread` is the reason this matters most** — telemetry can be re-derived from a rebirth, an
+- **`audit_trail` is the reason this matters most** — telemetry can be re-derived from a rebirth, an
   append-only audit trail cannot.
 - **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
   wants pgBackRest or WAL archiving.
-- **`destination: s3` needs an image with the `aws` CLI.** The `supabase/postgres` image has none, and
-  the Job refuses rather than producing an unsigned request.
 
 **Test a restore.** An untested backup is a belief, not a capability.
 
 > **The historian restore needs TimescaleDB's guards.** `_timescaledb_catalog.continuous_agg`
 > carries circular foreign keys, and restoring it with the extension's background workers live
-> leaves the three rollups from migration `0010` registered but never refreshing — retention and
+> leaves the three rollups from archived migration `0010` registered but never refreshing — retention and
 > compression stop with them, and nothing about the running stack looks wrong until the disk fills.
 > Wrap it:
 >
@@ -1185,9 +1256,10 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
 
 **`.github/workflows/restore-rehearsal.yml` performs a full cycle every Sunday** against a
 disposable k3d cluster: seed known data → back up **through the backup service**, as the seeded
-Administrator through PostgREST → **destroy the namespace and its volumes** → reinstall → restore
-→ assert → back up again. It also runs on `workflow_dispatch`, which is what to use before a
-migration you are nervous about.
+Administrator through PostgREST, and wait for its **encrypted copy in a MinIO** that outlives the
+namespace → **destroy the namespace and its volumes** → reinstall → **fetch the copy from the bucket
+and decrypt it** → restore → assert → back up again. It also runs on `workflow_dispatch`, which is
+what to use before a migration you are nervous about.
 
 **Destroying the volumes is the point.** A restore into a namespace that still has its PVCs proves
 almost nothing, because the data was never gone — so the workflow deletes the namespace, waits for
@@ -1200,10 +1272,14 @@ The same code runs by hand against any cluster:
 ```bash
 export NS=aber POSTGRES_PASSWORD=... DB_PASSWORD=...
 scripts/rehearse-restore.sh seed
+kubectl apply -f test-harness/restore-rehearsal/minio.yaml     # the off-site store
+scripts/rehearse-restore.sh offsite-setup ./identity.txt       # before the snapshot: it writes rows
 scripts/rehearse-restore.sh snapshot before.txt
 scripts/rehearse-restore.sh backup ./rehearsal
+scripts/rehearse-restore.sh offsite-wait <stamp>
 # ... destroy and reinstall ...
-scripts/rehearse-restore.sh restore ./rehearsal <stamp>
+scripts/rehearse-restore.sh fetch ./offsite <stamp> ./identity.txt
+scripts/rehearse-restore.sh restore ./offsite <stamp>
 scripts/rehearse-restore.sh snapshot after.txt
 scripts/rehearse-restore.sh compare before.txt after.txt
 scripts/rehearse-restore.sh assert
@@ -1215,7 +1291,7 @@ because every one of these can be missing while the counts agree:
 
 | Assertion | What its absence looks like |
 | :--- | :--- |
-| `digital_thread` append-only trigger and revoked grants | an audit table that is quietly editable |
+| `audit_trail` append-only trigger and revoked grants | an audit table that is quietly editable |
 | RLS enabled, with both lane policies | the security audit lane readable by every logged-in user |
 | Still range-partitioned, nothing in the DEFAULT partition | retention by `DETACH` silently retires nothing |
 | No application role can reach a partition directly | `TRUNCATE` on a month, which no row trigger refuses |
@@ -1230,6 +1306,7 @@ because every one of these can be missing while the counts agree:
 | The forge's published SSH host key has the same digest as before the backup | every appliance refuses to clone: a host-key mismatch, which reads as an attack |
 | The seeded broker account is in the restored document and the plugin answers for it | every gateway re-issued |
 | The job the dump carried as RUNNING is FAILED, and a second backup completes | a restored stack that refuses every new backup |
+| The copy fetched from the bucket decrypts, matches its manifest and is the volume's byte for byte, and the restored stack copies its own backup there | a restore after losing the site starts from a copy that is incomplete, unreadable or different, or the restored Vault cannot decrypt the bucket's key |
 
 **A failure files itself.** A weekly job nobody watches is the same as no job, so a scheduled failure
 opens an issue labelled `restore-rehearsal` — or comments on the existing one rather than opening a
@@ -1285,7 +1362,7 @@ Two need more:
 
 ```bash
 # The gateway's API keys are substituted by an initContainer:
-kubectl -n aber rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-envoy
 # The OAuth client secrets are HASHED INTO auth.oauth_clients by db-init:
 helm upgrade ...   # re-runs the post-upgrade hook
 ```
@@ -1326,15 +1403,15 @@ RWO permits several pods only within one node, so without it the Job schedules e
 is also why it is off by default — a backup that silently stops running is worse than one never
 enabled.
 
-### Trimming the Digital Thread
+### Trimming the Audit Trail
 
-`public.digital_thread` is range-partitioned by month on `recorded_at` (`0079`), so history is
+`public.audit_trail` is range-partitioned by month on `recorded_at` (`0079`), so history is
 retired by **detaching a partition**, not by deleting rows. That distinction is the whole point:
 `DELETE` over a large audit table is fully logged, bloats the heap and needs a `VACUUM` afterwards,
 while `DETACH` is instant, writes almost nothing, and leaves the data queryable as a standalone
 table you can inspect before it is destroyed.
 
-**A pg_cron job keeps three months of partitions ahead of the writes** (`digital_thread_partitions`,
+**A pg_cron job keeps three months of partitions ahead of the writes** (`audit_trail_partitions`,
 daily at 03:20). Nothing routine is required of you. There is also a DEFAULT partition, so a lapsed
 job cannot refuse an audit write — which matters more than it sounds, because the audit INSERT is a
 trigger on `cells`, `gateways` and `devices`: a refused audit row fails **the asset write that
@@ -1343,7 +1420,7 @@ caused it**, and the operator sees "cannot create device" with the audit table n
 Check the state before doing anything:
 
 ```sql
-SELECT * FROM public.digital_thread_partition_health;
+SELECT * FROM public.audit_trail_partition_health;
 --  partition_count | default_rows |     covered_until
 -- -----------------+--------------+------------------------
 --               28 |            0 | 2027-01-01 00:00:00+00
@@ -1351,13 +1428,13 @@ SELECT * FROM public.digital_thread_partition_health;
 
 `default_rows` must be **0**. Anything else means the job has stopped and rows are landing outside
 their month — they are not lost, but they will not be detached with the month they belong to. The
-Grafana rule *Digital Thread Partitions Falling Behind* watches exactly this. Repair it with:
+Grafana rule *Audit Trail Partitions Falling Behind* watches exactly this. Repair it with:
 
 ```sql
-SELECT public.ensure_digital_thread_partitions(3);
+SELECT public.ensure_audit_trail_partitions(3);
 SELECT j.jobname, d.status, d.return_message, d.start_time
   FROM cron.job_run_details d JOIN cron.job j USING (jobid)
- WHERE j.jobname = 'digital_thread_partitions' ORDER BY d.start_time DESC LIMIT 5;
+ WHERE j.jobname = 'audit_trail_partitions' ORDER BY d.start_time DESC LIMIT 5;
 ```
 
 Rows already in the default partition stay there. Moving them means an owner-level
@@ -1372,19 +1449,19 @@ only chance to check the archive before the data stops existing.
 
 ```bash
 # 1. DETACH -- instant, and reversible with ATTACH until you drop it.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.digital_thread DETACH PARTITION public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "ALTER TABLE public.audit_trail DETACH PARTITION public.audit_trail_2026_03;"
 
 # 2. VERIFY -- copy it out, then confirm the object exists and is the size you expect.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.digital_thread_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "\copy (SELECT * FROM public.audit_trail_2026_03) TO '/tmp/dt_2026_03.csv' CSV HEADER"
 #    ...then move it off the pod and into wherever your retained audit lives.
 
 # 3. DROP -- only once step 2's artefact has been checked.
-kubectl exec -n acs deploy/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.digital_thread_2026_03;"
+kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c   "DROP TABLE public.audit_trail_2026_03;"
 ```
 
 > **`DETACH` alone does not free any space.** The table is still there, still on the PVC, just no
 > longer part of the parent. If you detached to reclaim a full disk, nothing changes until step 3 —
-> and a detached partition is invisible to `SELECT ... FROM digital_thread`, so it is easy to
+> and a detached partition is invisible to `SELECT ... FROM audit_trail`, so it is easy to
 > believe the space was recovered.
 
 **Clearing audit rows requires an owner connection, and that is deliberate.** `0003`'s append-only
@@ -1414,6 +1491,7 @@ Retention is thirty days in both stores. Nothing to enable; nothing to install f
 | `supabase-rest` | 3001 | `/metrics` | nothing — the admin listener is always bound |
 | `grafana` | 3000 | `/metrics` | nothing |
 | `mosquitto` | 9234 | `/metrics` | `mosquitto.metrics.enabled` (the exporter sidecar) |
+| `supabase-db`, `timescaledb` | 9187 | `/metrics` | `databaseMetrics.enabled` (default on; the postgres_exporter sidecars) |
 | `prometheus`, `loki`, `alloy` | 9090, 3100, 12345 | `/metrics` | nothing |
 
 **The node's kubelet is scraped as well** (`observability.alloy.kubeletMetrics`, default on): its
@@ -1432,6 +1510,20 @@ the root filesystem is an overlay the exporter excludes, so Root Disk Used is bl
   two stores, Grafana to the stores, and Alloy to the API server on `networkPolicy.apiServerCidr`.
   An empty `apiServerCidr` leaves Alloy unable to discover anything: the DaemonSet is healthy, the
   dashboards are empty, and nothing logs a policy decision.
+- **Alloy's memory follows the series it holds, so three settings keep them few.** On 2026-09-28 a
+  host restart left the WAL holding 40,173 series against 12,965 in Prometheus, and Alloy reached
+  92% of its 768Mi limit. Each setting targets one source:
+  - A pod's series carry the pod's name as `instance`, not its IP. A restart gives every pod a new
+    address, so an address in `instance` re-mints every series. A pod that keeps its name keeps its
+    series: the StatefulSet pods and Alloy's own, which a restart only restarts in place.
+  - The WAL is truncated every 30 minutes rather than every two hours. A restart that replaces a
+    Deployment's pods, as a k3d node restart does, and every rollout, still mint new series under
+    the new pod names. The truncation bounds how long the old ones stay in memory.
+  - Grafana's embedded API server, storage and access-control families, and its one-per-toggle
+    info series, are dropped. They were 1,843 of 13,888 series, and no dashboard or rule reads them.
+
+  Alloy sets its own `GOMEMLIMIT` at 90% of the limit. The rest of its working set is its own
+  mapped binary (about 170 MiB) and page cache, which is why the limit is 768Mi.
 - **Mosquitto's metrics are prefixed `broker_`, not `mosquitto_`.** Alerts and dashboards written
   against the latter match nothing and render as empty panels rather than as errors.
 - **Grafana is inside the thing being monitored.** A `supabase-db` failure takes the Factory+
@@ -1480,7 +1572,7 @@ Also available, all documented above: **broker TLS on 8883**, the **internal CA*
 
 ### Service names are not release-prefixed, and must not be
 
-`timescaledb`, `supabase-db`, `mosquitto`, `supabase-kong` — the names every in-cluster URL in
+`timescaledb`, `supabase-db`, `mosquitto`, `supabase-envoy` — the names every in-cluster URL in
 `grafana.ini`, `settings.js` and the edge-function environment carries, so each
 resolves unchanged. Prefixing them would break all of that and buy
 nothing: **two releases in one namespace is not supported** (they would contend for the MQTT host
@@ -1504,9 +1596,9 @@ What that costs is *not uniform*, and the difference is worth knowing before cho
 
 | Volume | What a node loss costs |
 | :--- | :--- |
-| `supabase-db` | Recoverable from the nightly `pg_dump`, to the last run and no finer. Its `digital_thread` rows are append-only audit — **unreconstructable**, not merely inconvenient — so the dump is the whole safety net |
+| `supabase-db` | Recoverable from the nightly `pg_dump`, to the last run and no finer. Its `audit_trail` rows are append-only audit — **unreconstructable**, not merely inconvenient — so the dump is the whole safety net |
 | `timescaledb` | The same, but the dump is large and slow; a replicated class is what keeps the restore window sane |
-| `supabase-storage` | **Not in any dump** unless `backup.includeStorage` is on. It holds the 3D model objects, and `devices.model_3d_path` in the *backed-up* database points at them — so restoring the database alone leaves every row pointing at objects that no longer exist. An AAS shell then exports a `File` element with a dead URL, **silently**: the exporter composes that URL from the key without fetching it, so nothing detects the break until a viewer opens the shell |
+| `supabase-storage` | **Not in any dump** unless `backup.includeStorage` is on. It holds every bucket's objects (3D models, area plans, broker captures, export bundles), and rows in the *backed-up* database point at them, `devices.model_3d_path` among them — so restoring the database alone leaves those rows pointing at objects that no longer exist. An AAS shell then exports a `File` element with a dead URL, **silently**: the exporter composes that URL from the key without fetching it, so nothing detects the break until a viewer opens the shell |
 | `grafana` | SSO-created users, their org roles, and any dashboard saved through the UI. Provisioned dashboards come back from the repository; these do not |
 | `node-red` | The encrypted credentials, editor sessions and the editor-users map |
 
@@ -1534,11 +1626,12 @@ FDW gate exists to catch exactly that.
 
 Envoy reads its bootstrap once at start. The pod's `checksum/envoy-template` annotation
 rolls it when the **routes** change, but the API keys come from the Secret — which the chart may
-not even be able to see (`existingSecret`). After rotating `SUPABASE_ANON_KEY` or
+not even be able to see (`existingSecret`). After rotating any of the four keys its init container
+substitutes, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_ANON_KEY` or
 `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```bash
-kubectl -n aber rollout restart deployment/supabase-kong
+kubectl -n aber rollout restart deployment/supabase-envoy
 ```
 
 ### The init hooks are safe to re-run, and that is load-bearing
@@ -1618,7 +1711,7 @@ install and preserved thereafter (`resource-policy: keep` plus a `lookup` throug
 > used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
 > a correctly bound device. The roles in `mosquitto/dynsec-roles.json` now confine
-> `factoryplus_ingestion` (read plus NCMD only), `factoryplus_i3x` (read only), `factoryplus_monitor`
+> `aber_ingestion` (read plus NCMD only), `aber_i3x` (read only), `aber_monitor`
 > (`$SYS` only), the plugin's admin (`$CONTROL` only) and every gateway (its own edge node, through
 > a role generated for it). **The gateway usernames must be `sparkplug_id`s** — the chart fails the
 > render otherwise, because a friendly name authenticates perfectly and then has every publish
@@ -1642,7 +1735,7 @@ it in values and upgrade.
 
 The two browser-facing URLs are set with `GF_*` environment variables rather than in the file:
 `GF_SERVER_ROOT_URL` and `GF_AUTH_GENERIC_OAUTH_AUTH_URL`. `token_url` and `api_url` inside the
-file are in-cluster (`http://supabase-kong:8000`) and are correct untouched.
+file are in-cluster (`http://supabase-envoy:8000`) and are correct untouched.
 
 Its datasource is rendered by an initContainer, same as the gateway's config and for the same reason — with
 `existingSecret` the chart cannot see the password, and Helm would substitute an empty string. That

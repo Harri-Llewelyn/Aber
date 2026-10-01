@@ -73,7 +73,7 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
   const card = rgb(t['--bg-card'])
   const base = rgb(t['--bg-base'])
   const surface = rgb(t['--bg-surface'])
-  // .stat-card-alert lays rgba(255,179,0,0.07) over the card.
+  // The lightest amber tint (0.07) over the card: a margin case for text on any amber-tinted surface.
   const alertCard = tint([255, 179, 0], 0.07, card)
 
   /**
@@ -86,6 +86,11 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ? tint([255, 255, 255], 0.04, base)
     : tint([0, 0, 0], 0.02, base)
 
+  /** --accent-dim composited onto a ground: the fill .badge-info and .trail-badge-operational paint. */
+  const accentDim = (base) => themeName === 'dark'
+    ? tint([0, 212, 255], 0.15, base)
+    : tint([2, 132, 199], 0.12, base)
+
   const cases = [
     // [label, foreground token, background, threshold]
     ['--text-primary on card',       '--text-primary', card,      AA_TEXT],
@@ -93,11 +98,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--text-muted on card',         '--text-muted',   card,      AA_TEXT],
     ['--text-muted on base',         '--text-muted',   base,      AA_TEXT],
     ['--text-muted on surface',      '--text-muted',   surface,   AA_TEXT],
-    // Sub-text on the stat cards -- the reported dark-mode legibility bug.
+    // Sub-text on a bare card or the page ground.
     ['--text-dim on card',           '--text-dim',     card,      AA_TEXT],
     ['--text-dim on base',           '--text-dim',     base,      AA_TEXT],
-    // The alert card tints its background, which costs contrast; its sub-text is stepped up
-    // to --text-muted precisely so this still clears AA.
+    // An amber tint costs contrast, so sub-text on it is --text-muted, which still clears AA.
     ['--text-muted on alert card',   '--text-muted',   alertCard, AA_TEXT],
     // Warning used as text must clear AA; --warning itself is only safe for borders and icons.
     // Warning text sits on an amber-tinted fill (.badge-warning at 0.15, the banners at 0.08 and
@@ -123,9 +127,8 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
     ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
-    // The two derived lanes tint their own ground, and `.zone-empty` is the only text that sits
-    // directly on it. It is set in --text-muted because --text-dim measures exactly 4.50:1 on a
-    // bare card, so any tint pushes it under AA.
+    // The two derived lanes tint their own ground; --text-muted is the text on it, because
+    // --text-dim measures exactly 4.50:1 on a bare card, so any tint pushes it under AA.
     ['--text-muted on site-wide lane', '--text-muted',  tint([0,212,255], 0.05, card),     AA_TEXT],
     ['--text-muted on unassigned lane','--text-muted',  tint([255,179,0], 0.06, card),     AA_TEXT],
 
@@ -135,7 +138,7 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--text-dim on panel surface',    '--text-dim',    surface,                           AA_TEXT],
     ['--text-primary on panel surface','--text-primary', surface,                          AA_TEXT],
     // CopyableId is the pattern every identifier uses, on the card, on the surface and in the
-    // digital thread. It reveals a --bg-glass hover ground, so the hover state is measured rather
+    // audit trail. It reveals a --bg-glass hover ground, so the hover state is measured rather
     // than assumed.
     ['--accent id on card',            '--accent',      card,                              AA_LARGE],
     ['--accent id on glass hover',     '--accent',      glass(card),                       AA_LARGE],
@@ -157,6 +160,21 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     // colours themselves are not legible as text -- see the negative guard below.
     ['sharepoint badge label',         '--text-primary', tint([0,120,212], 0.15, surface),  AA_TEXT],
     ['drive badge label',              '--text-primary', tint([15,157,88], 0.15, surface),  AA_TEXT],
+    // Badges labelled in the accent on an accent tint, at 12px. --accent measured 3.51:1 on
+    // --accent-dim in light, so the label is --accent-text; pending and provisioned tint cyan.
+    ['info badge label',               '--accent-text',  accentDim(card),                   AA_TEXT],
+    ['info badge label on hover',      '--accent-text',  accentDim(glass(card)),            AA_TEXT],
+    ['operational badge in the drawer','--accent-text',  accentDim(surface),                AA_TEXT],
+    ['pending badge label',            '--accent-text',  tint([0,212,255], 0.15, card),     AA_TEXT],
+    ['pending badge label on hover',   '--accent-text',  tint([0,212,255], 0.15, glass(card)), AA_TEXT],
+    ['provisioned badge label',        '--accent-text',  tint([0,212,255], 0.07, card),     AA_TEXT],
+    // The toast types and the bell's badge tones, each ink on its own 0.15 tint over --bg-card.
+    ['info toast label',               '--accent-text',  tint([0,212,255], 0.15, card),     AA_TEXT],
+    ['warning toast label',            '--warning-text', tint([255,179,0], 0.15, card),     AA_TEXT],
+    ['success toast label',            '--success-text', tint([0,232,150], 0.15, card),     AA_TEXT],
+    ['error toast label',              '--danger-text',  tint([255,77,109], 0.15, card),    AA_TEXT],
+    // The notification list: the timestamp is the dimmest text in it.
+    ['notification time',              '--text-dim',     card,                              AA_TEXT],
   ]
 
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {
@@ -243,6 +261,17 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
       ).not.toMatch(/^#(000000|0b0e14|0f172a)$/)
     }
   })
+})
+
+/** The cases above measure --accent-text; this holds the four badges to it rather than to --accent. */
+describe('accent badges', () => {
+  it.each(['.badge-info', '.badge-pending', '.badge-provisioned', '.trail-badge-operational'])(
+    '%s labels in --accent-text', (selector) => {
+      const rule = APP_CSS.match(new RegExp(`\\n\\${selector}\\s*\\{([^}]*)\\}`))
+      expect(rule, `no rule for ${selector} in App.css`).toBeTruthy()
+      expect(rule[1]).toMatch(/(^|[;{\s])color:\s*var\(--accent-text\)/)
+    }
+  )
 })
 
 /**
@@ -364,7 +393,17 @@ describe('type scale floor', () => {
 
   // System identifiers and numeric readouts stay monospace.
   it('keeps identifiers monospace', () => {
-    expect(APP_CSS.match(/\n\.mono \{([\s\S]*?)\n\}/)[1]).toMatch(/JetBrains Mono/)
+    expect(APP_CSS.match(/\n\.mono \{([\s\S]*?)\n\}/)[1]).toMatch(/var\(--font-mono\)/)
+    expect(APP_CSS).toMatch(/--font-mono:\s*'JetBrains Mono'/)
+  })
+
+  // The two faces are written once, as tokens; every font-family elsewhere reads them.
+  it('writes no literal font stack outside the token definitions', () => {
+    const outside = APP_CSS.replace(/--font-(?:mono|display):[^;]*;/g, '')
+    expect(outside).not.toMatch(/Outfit|JetBrains/)
+    const families = [...outside.matchAll(/font-family:\s*([^;]+);/g)].map(m => m[1].trim())
+    expect(families.length).toBeGreaterThan(10)
+    for (const f of families) expect(f).toMatch(/^(var\(--font-(display|mono)\)|inherit)$/)
   })
 })
 
@@ -398,7 +437,11 @@ describe('toast opacity', () => {
     }
   })
 
-  it.each(['.toast-success', '.toast-error'])(
+  it.each([
+    '.toast-success', '.toast-info', '.toast-warning', '.toast-error',
+    // The bell's unread badge uses the same tints on the same opaque base.
+    '.notif-badge-info', '.notif-badge-warning', '.notif-badge-error'
+  ])(
     '%s tints with background-image and never resets the opaque colour',
     (selector) => {
       const rule = ruleFor(selector)

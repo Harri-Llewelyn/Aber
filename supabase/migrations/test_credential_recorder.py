@@ -92,7 +92,7 @@ class RecorderBase(unittest.TestCase):
         row_id = self.cur.fetchone()[0]
         self.cur.execute(
             "SELECT entity_type, action, changed_by, actor_source, new_data "
-            "FROM public.digital_thread WHERE id = %s;",
+            "FROM public.audit_trail WHERE id = %s;",
             (row_id,),
         )
         return self.cur.fetchone()
@@ -156,7 +156,7 @@ class TestTheRowItWrites(RecorderBase):
     def test_carries_no_password_and_nothing_shaped_like_one(self):
         gid, _ = self.a_gateway()
         body = json.dumps(self.record(gid, '{"os_user": "ci", "host": "h", "password": "hunter2"}')[4])
-        # The row lands in an append-only table readable by any holder of `digital_thread:read`.
+        # The row lands in an append-only table readable by any holder of `audit_trail:read`.
         # A secret in it would be a secret with no revocation story at all.
         self.assertNotIn("hunter2", body)
         self.assertNotIn("password", body)

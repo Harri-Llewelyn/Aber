@@ -38,7 +38,8 @@ python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 # The JSON encoding the appliance publishes: a metric's own timestamp survives the parse, so a
-# report-by-exception refresh or a batched reading is filed when it was taken.
+# report-by-exception refresh or a batched reading is filed when it was taken, and every value
+# reads as test-harness/fixtures/sparkplug-json-values.json says, which the i3X suite asserts too.
 python ingestion/test_json_payload.py
 python ingestion/test_mqtt_tls.py
 # The Directory's MQTT half. Mostly assertions about what it does NOT do: the publisher is
@@ -73,6 +74,10 @@ python ingestion/test_structured_logging.py
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
 # the log store exists to keep is actually being kept.
 python test-harness/test_log_pipeline.py
+# Sign-in is limited per client, through Traefik and the gateway. Needs the stack up. A probe pod
+# spends its limit and the host must still sign in: it fails if GoTrue limits nothing, and if
+# Traefik forwards one address for every client (deploy/k8s/traefik-config.yaml not applied).
+python supabase/test_auth_rate_limit.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction
@@ -179,17 +184,22 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # repository gets its appliance and catch-all rules back and main closed again; a key downgraded
 # to read-only is re-registered read-write; an archived gateway's key is removed from both
 # repositories; one sweep publishes the platform playbook, tags it and protects it, and a second
-# publishes nothing; and the database's own sweep_forge() answers true. FORGE_SWEEP_SECRET is the
-# release Secret's value. Skips without it.
+# publishes nothing; and the database's own sweep_forge() answers true. One pass at a time (0025):
+# each test holds the sweep lease and runs its passes under it, a call meeting a held lease answers
+# already_sweeping at once and pg_net records it as 200, a lapsed lease is taken over, and a second
+# push webhook of ours is removed. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects and the forge,
-# digests matching the row, a manifest restore-databases.sh reads -- and the thread names who asked
+# digests matching the row, a manifest restore-databases.sh reads -- and the trail names who asked
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
-# backup is released once. Takes a real backup and removes it afterwards; stops the service
-# container for a few seconds for the cancel case.
+# backup is released once; a job that fails is followed by a prune that leaves the newest three
+# backups alone (0017); a backup is copied off site, age-encrypted, to a MinIO the test starts, and a
+# pruned backup's copy goes with it (0018). Takes real backups and removes them afterwards; stops the
+# service container for a few seconds for the cancel case, fails one job with a trigger it drops
+# afterwards, and deletes the MinIO's namespace when done.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 
 # The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
@@ -210,13 +220,14 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # The broker-credential machinery whose failure is silent, in isolation and with no stack: the
 # boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
-# `factoryplus_ingestion` and stopping the stack ingesting.
+# `aber_ingestion` and stopping the stack ingesting. Also node-red-init against a volume from
+# before the rename to Aber, which must keep its flow byte for byte apart from the moved node.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
 # time against it. There is no migrations ledger, so "a second run must match no rows" is what
 # the whole schema rests on, and it used to be upheld by review alone. Asserts only what a
-# migration can move (the schema digest, and digital_thread's `migration` lane) and treats a FALL
+# migration can move (the schema digest, and audit_trail's `migration` lane) and treats a FALL
 # in operator row counts as failure while ignoring a rise, so a live daemon cannot make it flaky.
 # DID THE CHAIN FINISH? There is no migrations ledger, and an aborted db-init leaves the stack
 # running on a partially-migrated database -- with the telemetry read surface DROPPED rather than
@@ -234,6 +245,7 @@ node scripts/check-migration-idempotency.mjs
 #
 # Brings up a disposable supabase/postgres, applies the same auth fixture CI uses, replays
 # every migration, runs every suite, and destroys the container. `--keep` leaves it up;
+# `--reuse` replays the chain onto the one `--keep` left and runs again (the second boot, below);
 # `-k <substring>` runs a subset; `--no-run` migrates and stops.
 npm run test:db
 
@@ -244,7 +256,9 @@ python supabase/migrations/test_user_roles_rls.py
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
 # nameplate. The rest cover the two properties a simplification would remove first -- that an
 # invalid patch aborts its own approval rather than becoming a record of something that did not
-# happen, and that both caps are in the database rather than in a disabled button.
+# happen, and that both caps are in the database rather than in a disabled button. An approval's
+# PROPOSAL_APPLIED row and the UPDATE it made share one causation_id, which the drawer's page
+# counts as one act, and an expiry run stamps its own (0021).
 python supabase/migrations/test_change_proposals.py
 # The Administrator / Shopfloor_Manager split (0069), in both halves: the grants diverged, AND the
 # withdrawal reaches Postgres. The second half is the one worth having -- no RLS policy reads
@@ -252,12 +266,12 @@ python supabase/migrations/test_change_proposals.py
 # documents: a blocked INSERT raises 42501, a blocked UPDATE or DELETE reports success over zero
 # rows, so those pair the refusal with an Administrator reaching the same row.
 python supabase/migrations/test_role_permission_split.py
-# The digital thread's two lanes (0070): the classifier, the stamp a caller cannot override, and
+# The audit trail's two lanes (0070): the classifier, the stamp a caller cannot override, and
 # the reads. Every test rolls back -- the rows they provoke are audit rows and 0003 makes the table
 # append-only, so a committed fixture is permanent.
 python supabase/migrations/test_audit_domain.py
 python supabase/migrations/test_schema_versioning.py
-python supabase/migrations/test_digital_thread_guard.py
+python supabase/migrations/test_audit_trail_guard.py
 # The keyset cursor (0077). THE CONTROL TEST IS THE ONE THAT MATTERS: it runs the naive
 # recorded_at-only cursor against the same fixture and asserts it LOSES rows. Without that,
 # every other test in the file would pass just as well against a broken cursor on a fixture
@@ -269,21 +283,21 @@ python supabase/migrations/test_digital_thread_guard.py
 # And the two labels no audit payload carries (0115, 0118): a person, and a backup job's note
 # and produced stamp. Both matchers are gated on has_role(), so this suite asserts their shape
 # rather than their answers -- it connects as the owner, which holds no role.
-python supabase/migrations/test_digital_thread_paging.py
+python supabase/migrations/test_audit_trail_paging.py
 # The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
 # its place is that a REAL gateway is not a delivery target, because a true there writes a real
 # machine's broker password into a file the replay worker reads -- and its broker role would then
 # let it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
-# The monthly partitioning of digital_thread (0079). THE INTERESTING TESTS ARE THE BORING ONES:
+# The monthly partitioning of audit_trail (0079). THE INTERESTING TESTS ARE THE BORING ONES:
 # converting a populated table to partitioned means rebuilding by hand every object PostgreSQL
 # does not carry across -- the primary key, the FK, three indexes, two triggers, RLS and its two
 # policies, and the ACL -- and a missing ENABLE ROW LEVEL SECURITY would publish the security
 # audit lane to every logged-in user with nothing else in the stack saying so. It also pins the
 # one hole partitioning opens: a partition does not inherit the parent's ACL, gets the image's
 # default grants instead, and TRUNCATE raises no row trigger.
-python supabase/migrations/test_digital_thread_partitioning.py
+python supabase/migrations/test_audit_trail_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
@@ -297,6 +311,15 @@ python supabase/migrations/test_sparkplug_group_setting.py
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the
 # writer is callable by db-init only.
 python supabase/migrations/test_directory_images.py
+# The Backup Stale rule's clock (0011). No row while no backup job exists; the first job recorded
+# until one succeeds, then the start of the last success, which a later failure does not move; and
+# anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
+# And the retention floor (0017): backup_prunable() never returns any of the newest three backups.
+# And the off-site copy (0018): the destination is an Administrator's, checked on write, its key
+# write-only; the service's gates refuse every PostgREST role, hand out the newest backup without a
+# copy and back off a failed one; and Off-site Backup Stale's view counts from the later of the
+# newest backup and the last destination change.
+python supabase/migrations/test_backup_health.py
 # Naming a person in the audit trail (0116). A read surface over auth.users whose every safety
 # property is in the function body rather than in a grant, so a gate that stops working fails open
 # with the page looking exactly as it should. Both directions per role, and `anon` stopped by the
@@ -318,8 +341,8 @@ python supabase/migrations/test_archive_purge_cascade.py
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,
 # because the job is one transaction; a replay lane is archived, restored and deleted with its
 # original; a deleted row that was archived leaves a tombstone in retired_entities pointing at the
-# thread's DELETE row, and one that was never archived leaves none; the tombstone table has one
-# SELECT policy and no way in for authenticated; an export reaches the thread as EXPORTED.
+# trail's DELETE row, and one that was never archived leaves none; the tombstone table has one
+# SELECT policy and no way in for authenticated; an export reaches the trail as EXPORTED.
 python supabase/migrations/test_archiving_is_a_lifecycle.py
 # How far behind the cold archive is (0133), and chiefly the property the rest of the platform's
 # alerting rests on. `platform_health_rows()` is ONE UNION and postgres_fdw raises on CONNECT, not
@@ -361,7 +384,9 @@ python supabase/migrations/test_credential_revocation.py
 # as the archive lands rather than leaving it to the quarter-hour timer, and the gates on that ask
 # are what this pins -- above all the transition guard, without which every ordinary edit to an
 # archived gateway would walk the whole forge. Asserted on the pg_net queue, which the rollback
-# un-queues; the sweep's own half needs a forge and lives in test_forge_sweep.py.
+# un-queues; the sweep's own half needs a forge and lives in test_forge_sweep.py. Also the sweep
+# lease (0025): one winner of two simultaneous claims, a lapsed lease taken over, only the holder
+# renewing or releasing, and one follow-up pass queued for any calls refused while it was held.
 python supabase/migrations/test_forge_follows_the_archive.py
 # Service-token revocation (0074): the denylist, and the PostgREST db-pre-request hook that reads
 # it. THE FAIL-OPEN TESTS ARE THE POINT and come first in the file -- auth_pre_request() runs
@@ -380,7 +405,14 @@ python supabase/migrations/test_service_principal_revocation.py
 # overload whose extra arguments default makes every RPC call ambiguous). The name table reads for
 # Administrator and Auditor and for nobody else. describe_machine_principal() (0126) is the one
 # write path after creation: rows that exist only, an unchanged save writes nothing, and every
-# change is a PRINCIPAL_DESCRIBED row carrying what it replaced.
+# change is a PRINCIPAL_DESCRIBED row carrying what it replaced. Machines propose, people decide
+# (0013): every permission is allowed or refused with its own reason, and each allowed grant is
+# exercised AS THE MACHINE -- it forks and publishes a schema, files a proposal only a person can
+# decide, reads the asset lane and never the security lane -- and a revoked identity or token is
+# refused before its write runs, the way PostgREST runs auth_pre_request() first. A machine's write
+# is filed as 'service' whatever X-Aber-Actor header it sends (0020), while the ingestion principal
+# and the owner's tokenless session are still believed. Whoever may decide a machine's proposal
+# reads its name through list_proposer_names() (0022); an Operator or Auditor gets nothing.
 python supabase/migrations/test_machine_principal_naming.py
 # The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
 # PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a
@@ -417,6 +449,40 @@ sh scripts/wait-for-ingestion-consuming.sh
 # validate.py and the whole stack lane, through port-forwards, with the credentials read out of
 # the release Secret. What CI runs.
 npm run dev:test
+# validate.py alone: the filter matches no stack suite. Its checks 12 and 17 are the live i3X
+# checks: what the server says about a seeded plant against the Directory, then its quality and
+# subscriptions against what the run publishes (i3x/README.md -> Testing).
+npm run dev:test -- --filter=i3x
+```
+
+### What validate.py leaves behind
+
+Nothing, when its check 16 passes. The run deletes what it created: the Directory rows its `SEEDED`
+map names, plus any an interrupted run left under a VALIDATE name; their audit rows, through the owner
+connection because `audit_trail` is append-only for every API role; their birth parameters in
+`asset_config`; and in the historian, the telemetry and `assets` rows of exactly those devices. A
+step that fails fails check 16, and the steps after it still run.
+
+The historian half is **one DELETE per device, with its `sparkplug_id` as a literal**. TimescaleDB
+decompresses only the compressed batches whose `segmentby` columns (`asset_id, metric_name`, set in
+`timescaledb/retention.sql`) match a constant, and it caps what one transaction may decompress
+(`timescaledb.max_tuples_decompressed_per_dml_transaction`, 100,000). The cleanup this replaced chose
+its rows with a subquery, `asset_id IN (SELECT asset_id FROM assets WHERE asset_name LIKE
+'VALIDATE_%')`, which matches no segment. Measured on the dev cluster on 2026-09-28: 72 rows matched,
+and the DELETE had to decompress all 4,437,012 in the table. It failed at the cap, took the `assets`
+DELETE in the same `try` with it, and printed a warning after the verdict.
+
+**Rows earlier runs left** stay in the historian until they leave the raw window
+(`telemetry_raw_window`). To remove them sooner, run this as the historian's owner while no
+validate.py run is in progress (`kubectl -n aber exec -it timescaledb-0 -c timescaledb -- psql -U
+postgres`). `\gexec` runs each generated DELETE as its own statement, and psql's autocommit makes
+each its own transaction:
+
+```sql
+SELECT format('DELETE FROM telemetry WHERE asset_id = %L', asset_id)
+  FROM assets WHERE asset_name LIKE 'VALIDATE%' \gexec
+DELETE FROM assets a WHERE a.asset_name LIKE 'VALIDATE%'
+   AND NOT EXISTS (SELECT 1 FROM telemetry t WHERE t.asset_id = a.asset_id);
 ```
 
 ### An empty database cannot exercise an assertion about history
@@ -426,7 +492,7 @@ self-check each migration runs at the end of itself. A migration that asserts ov
 rows* is invisible to all three, and the first thing it meets is a deployment.
 
 `0120` is the worked example. It moved `schemas` into the audit-domain asset lane, backfilled the
-rows already recorded, and then asserted that **no row in `digital_thread`** disagreed with the
+rows already recorded, and then asserted that **no row in `audit_trail`** disagreed with the
 classifier. True of an empty database. False of any stack with history: a retired entity type's
 rows keep the lane they were stamped with, nothing backfills them, and the classifier's answer
 about them is its fail-closed default rather than a judgement. The dev cluster carried ten
@@ -459,7 +525,7 @@ no migration reads.
 **What the suites do against history, and the one that does not.** Twenty-eight of the twenty-nine
 database suites pass unchanged against a real stack's rows — most scope their assertions to ids
 they seeded and genuinely do not care what else is in the table.
-`test_digital_thread_paging.py` is the exception, and not because paging is broken. Its `walk()`
+`test_audit_trail_paging.py` is the exception, and not because paging is broken. Its `walk()`
 follows at most 100 pages of 7, and its fixture is stamped `2026-01-01`, older than every real
 row; on a stack carrying 4,075 events the newest-first walk spends its whole budget before
 reaching the rows it seeded. The same bound quietly costs that file its control — the test
@@ -475,6 +541,27 @@ about on `devices`, `schemas` and `metric_catalog`. `postgres` is not a superuse
 but Supabase grants it that setting. And the tables emptied first are chosen **by privilege, not by
 ownership**: `auth.users` is owned by `supabase_auth_admin` and `postgres` may still truncate it,
 while `auth.schema_migrations` it may not.
+
+### The second boot, without a cluster
+
+`db-init` replays the chain on every upgrade, onto a database that the chain and everything since
+have already written to. `--reuse` reproduces that without a cluster: it keeps the container a
+`--keep` run left, with every row that run committed, replays the chain onto it, lints the schema
+and runs the lane again.
+
+```bash
+npm run test:db -- --keep     # first boot: the chain onto an empty database, then the lane
+npm run test:db -- --reuse    # second boot: the chain onto what the first left, then the lane
+```
+
+Run both for a new migration. A statement that is not idempotent, or a self-check that counts a
+total rather than what its own migration did, passes the first boot and fails the second: archived
+migration 0069 counted Administrator's permissions, and failed every boot after the one on which
+archived migration 0086 added one. `--reuse` skips the auth fixture, which the container
+already holds, and uses the port the kept container was published on. Without `--keep` it removes
+the container at the end, as every other run does; add `--keep` to go round again or to look at a
+failure. The rows it replays onto are the suites' own; a deployed stack's rows are
+`--with-history`'s, above.
 
 
 ### The URLs that are names, not forwards
@@ -519,13 +606,13 @@ hid a stale assertion that was red on `main` for days (#207). `REQUIRE_SEEDED_AC
 database on 54322. So the documented invocation — `python
 supabase/migrations/test_audit_domain.py`, nothing set — connected to the running stack.
 
-Most of the suites roll back, which helps less than it sounds. `digital_thread` is append-only by
+Most of the suites roll back, which helps less than it sounds. `audit_trail` is append-only by
 `0003`, so the rows a rolled-back test provokes are exactly the ones a *committed* fixture leaves
 behind for good. Measured on a development stack:
 
 | | rows |
 | :--- | ---: |
-| `digital_thread` total | 525 |
+| `audit_trail` total | 525 |
 | stamped `actor_source = 'migration'` | 346 (66%) |
 | …of those, written by an actual migration | **0** |
 
@@ -585,7 +672,10 @@ Three suites have a second half elsewhere, and both halves must move together:
 `test_modelled_metrics_contract.py` and `test_rbe_telemetry.py` each pair with a JavaScript suite in
 the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
-[`i3x/README.md`](../i3x/README.md).
+[`i3x/README.md`](../i3x/README.md). The i3X server has a third check besides those two: `validate.py`'s
+checks 12 and 17 compare its answers about a seeded plant with the Directory's, and its quality and
+subscriptions with what the run publishes, the meaning neither the conformance suite nor the unit
+suite can see.
 
 CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
 

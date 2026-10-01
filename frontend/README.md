@@ -25,7 +25,7 @@ src/
 ├── components/
 │   ├── tabs/                one file per tab, lazy-loaded
 │   ├── modals/              detail and edit dialogs
-│   └── common/              ActionMenu, TagList, Model3DUploader, VocabularyPanel
+│   └── common/              TagList, Model3DUploader, VocabularyPanel
 ├── help/                    one markdown file per page, bundled -- see Contextual help
 ├── hooks/                   usePermissions, usePolling, useRealtimeTable, useToast, …
 ├── utils/                   pure, unit-tested derivations
@@ -57,17 +57,20 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/deviceTags.js` | `ingestion/validate.py`'s Python mirror |
 | `utils/sparkplugDatatype.js` | `functions/_shared/aas/sparkplugToXsd.ts` |
 | `utils/model3d.js` | `functions/_shared/aas/model3dContentType.ts` |
+| `utils/standards.js` (`mtconnectSemanticId()`) | `mtconnect_vocabulary.semantic_id`, as `0002` seeds it |
+| `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
+| `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 
-All eight are now guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or
-`test_aas_export.py`. `sparkplugId.js` matters most — it derives an **immutable wire identity**, so
-a divergence cannot be corrected in place.
+Each is guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or `test_aas_export.py`.
+`sparkplugId.js` matters most — it derives an **immutable wire identity**, so a divergence cannot
+be corrected in place.
 
 `check-mirror-drift.mjs` reads the **whole applied migration chain in filename order and takes the
 last definition of each function**, because migrations are replayed on every boot with no ledger:
-`ensure_gateway_status_view()` is declared in `0001` and redeclared in `0025`, and for a while the
-guard was reading the dead one.
+`ensure_gateway_status_view()` was declared in `0001` and redeclared in archived `0025`, and for a
+while the guard was reading the dead one.
 
-A ninth mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
+One more mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
 contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by four implementations in
 three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 
@@ -139,9 +142,9 @@ handed to a third party, and `'0'` cannot begin an `idShort`, so the shell fails
 The lesson is the one the fixture already taught: *an implementation that is not listed in the
 fixture is an implementation that is not checked.*
 
-### Why the Digital Thread groups overlapping markers into a badge
+### Why the Audit Trail groups overlapping markers into a badge
 
-`components/tabs/DigitalThreadTab.jsx` draws one lane per asset with a marker per event. Events
+`components/tabs/AuditTrailTab.jsx` draws one lane per asset with a marker per event. Events
 written by one transaction share a timestamp exactly (`recorded_at` is the transaction start time),
 so a commissioning burst of five or six rows lands on one pixel. Two fixes were tried and rejected:
 
@@ -161,23 +164,35 @@ members share a `causation_id` (one act) or merely a timestamp. Ordering inside 
 back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
 the rows of one transaction.
 
-### What the Access Control page deliberately does not claim
+### What the Access Control page claims, and how it says so
 
-`components/tabs/AccessControlTab.jsx` is not an inventory of the broker. Mosquitto's accounts live
-in a file reachable only by `gateway-credential-service`, which is add-only and cannot list
-anything back; giving it a LIST verb would hand whoever holds one bearer token the whole account
-table. So the page shows what the **platform issued and recorded**, and the difference shows up
-wherever a credential was minted outside a dashboard session: `record_gateway_credential_issued()`
-cannot be called on a script's behalf, because `has_role()` resolves through `auth.uid()`, which is
-NULL for the service-role key. Such a gateway reads *No platform record* and connects perfectly
-well. The state is named for the record and not for the credential: *No credential* would be a
-claim about the broker, which is the one thing the page cannot see.
+`components/tabs/AccessControlTab.jsx` shows two sources side by side and never merges them. The
+**Credential** column is what the platform issued and recorded; the **Broker** column is what the
+broker holds right now, read live from its Dynamic Security plugin through `broker-inventory`. The
+difference shows up wherever a credential was minted outside a dashboard session:
+`record_gateway_credential_issued()` cannot be called on a script's behalf, because `has_role()`
+resolves through `auth.uid()`, which is NULL for the service-role key. Such a gateway reads *No
+platform record* and *Active*, and connects perfectly well. The recorded state is named for the
+record and not for the credential: *No credential* would be a claim about the broker.
+
+The broker read may fail without failing the page. The Broker column then reads *Not read*, which
+is a fact about the page load and not about any account, and the reason is stated once in the
+card. The page does not show sessions: an *Active* account is one that may connect.
+
+### Why the cold-archive secret is a dialog
+
+`ArchiveCredentialModal` is a dialog rather than a field on the Cold Storage card because saving is
+the one act on that page with no undo and no read-back. `set_archive_credential()` overwrites the
+secret in the vault when one exists, nothing in the stack can show either value again, and a
+mistyped one is not discovered until the nightly export fails to authenticate. Replacing a key asks
+first; setting the first one does not, since there is nothing to lose and friction only buys
+attention while it stays rare.
 
 ---
 
 ## Realtime
 
-`supabase-realtime` publishes `cells`, `gateways`, `devices` and `digital_thread`. Tabs subscribe
+`supabase-realtime` publishes `cells`, `gateways`, `devices` and `audit_trail`. Tabs subscribe
 through `hooks/useRealtimeTable.js`.
 
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
@@ -284,16 +299,16 @@ supplies no release version, is not evidence of drift.
 
 | Tab | Notes |
 | :--- | :--- |
-| `OverviewTab` | The Site Map page (tab id `overview`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area as a thumbnail of one of its floors (three to a row; the selector under each plan steps its floors) and, once opened, that area's floor plan with its cells as pins. Read only: nothing is filed or placed here. The side column holds All areas, the zoom, the floor rail and the tray of unplaced cells and Area-Wide assets; the plan is sized to the room the page measures, so it fits without scrolling. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/floorPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities |
-| `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. Area, floor and the place on the floor's plan are on the form; the place is picked by clicking the plan (`common/FloorPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin |
-| `GatewaysTab` | **Launch UI** and **Edit** visible, the rest in an `ActionMenu`; **Restore replaces Edit** on an archived row |
-| `DevicesTab` | Quarantined devices render **in the onboarding queue banner only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. Two visible actions, not seven |
+| `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins, one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its plan, its unplaced cells and its Area-Wide assets) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
+| `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities |
+| `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin |
+| `GatewaysTab` | **Launch UI** and **Edit** visible, the rest in the details drawer; **Restore replaces Edit** on an archived row |
+| `DevicesTab` | Quarantined devices render **in the Quarantine queue card only** (the first card, always shown) — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. Two visible actions, not seven |
 | `SchemasTab` | Metric catalog, the standard-vocabulary reference card, and the schema registry. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `TelemetryTab` | Time-series viewer over the FDW view. A time window is required whenever a tag filter is active |
-| `DigitalThreadTab` | Audit trail. Filtering by tag matches devices carrying it **now**; the log records what was true then, and the UI says so |
+| `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `DirectoryTab` | Directory service configuration and the GitOps flow push |
-| `ArchivesTab` | Two cards of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Digital Thread page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `ArchivesTab` | Two cards of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 
@@ -345,7 +360,7 @@ The same component the entity pages use, with `subject="help"` for its region la
 control. It is a sibling of `.content` rather than of a page's list, so it survives a tab switch,
 works on pages that have no drawer of their own, and cannot be unmounted by the page it describes —
 `tabId` follows the active tab, so it re-reads as you navigate. Both drawers can be open at once on
-Devices; the flex row narrows the table rather than stacking them, and below 1100px it takes the
+Devices; the flex row narrows the table rather than stacking them, and below 800px it takes the
 same dismissible overlay treatment every other drawer takes.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
@@ -356,6 +371,46 @@ nothing was keeping it out of the text.
 
 ---
 
+## Toasts and the notification history
+
+`showToast(msg, type)` (`hooks/useToast.js`) is the one call every page makes, with `type` one of
+`success` (the default), `info`, `warning` or `error`. Each call puts a toast in the bottom-right
+corner and records the same message in the history behind the bell in the top bar.
+
+- **Each toast owns its timer.** Up to three stack, each keyed by its id; a fourth pushes the oldest
+  off. A message already on screen is replaced, restarting its timer, rather than shown twice. The
+  single slot this replaced let a second toast inherit what was left of the first one's 3.2 s.
+- **How long it stays.** Success and info 4 s, warning 8 s, or the reading time if that is longer:
+  1 s plus 60 ms a character, capped at 20 s (`toastDuration` in `common/Toast.jsx`). An error
+  stays until it is dismissed. The pointer or focus on a toast pauses it, and leaving resumes it
+  with at least 2 s left. Every toast has a Dismiss button. Escape is not bound to toasts, because
+  it already closes the modal or drawer beneath them. Pause, dismiss and sticky errors are what
+  WCAG 2.2 SC 2.2.1 (Timing Adjustable) asks for.
+- **Announced.** `ToastStack` renders two live regions all the time, empty when idle, because a
+  region inserted together with its first message is not announced: errors in `role="alert"`, the
+  rest in `role="status"`. A warning or an error is prefixed "Warning:" or "Error:" in text only a
+  screen reader reads.
+- **The history** (`common/NotificationHistory.jsx`) keeps the latest 50 messages, newest first. A
+  repeat of the newest entry is counted on it rather than filling the list. The bell's badge counts
+  the unread entries, is not rendered at zero, and takes the tone of the worst unread entry; a
+  success leaves it neutral. Opening the list reads everything in it, dismissing a toast reads its
+  entry, and a toast that times out stays unread. The list is a `role="dialog"` popover built like
+  the alert pill's (`useEscapeKey`, `useClickOutside`): focus moves into it as it opens, and Escape
+  or its close button hands focus back to the bell.
+- **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
+  reload and stays in that browser tab. It holds message text only, and every read and write is
+  wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
+  session (Sign Out, a sign-out in another tab, a rejected stored session), so the next person to
+  sign in there starts with an empty list. Nothing goes to the server: most entries never touched
+  it, and an unread state that followed a user between browsers would need a per-user table with
+  RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
+  cannot fan one event out to several signed-in users.
+- **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act.
+  The history says what the toasts said, resolved and routine messages included; merging the two
+  would fill the pill's count with entries nobody needs to act on.
+
+---
+
 ## Theming
 
 Colours come from **CSS variables in `App.css`** (`:root` / `[data-theme="light"]`). There is no
@@ -363,11 +418,12 @@ Tailwind in this project. Prefer `.card`, `.form-control`, `.form-label` over in
 
 Two rules that were each learned from a real bug:
 
-- **A floating surface needs an opaque background.** The toast is `position: fixed` over arbitrary
-  content, so its `rgba(…, 0.15)` tint composited against whatever table was underneath. It now
-  paints the tint as a `background-image` over an opaque `background-color: var(--bg-card)`.
-  **Never fold those into the `background:` shorthand** — that resets `background-color` and brings
-  the transparency straight back. `themeContrast.test.js` asserts both halves.
+- **A floating surface needs an opaque background.** A toast floats over arbitrary content, so its
+  `rgba(…, 0.15)` tint composited against whatever table was underneath. Each of the four types
+  now paints its tint as a `background-image` over an opaque `background-color: var(--bg-card)`,
+  and the bell's unread badge does the same. **Never fold those into the `background:` shorthand** —
+  that resets `background-color` and brings the transparency straight back. `themeContrast.test.js`
+  asserts both halves for every toast type and badge tone.
 - **Do not give `var()` a hardcoded fallback.** The sign-in card rendered white-on-white in light
   mode because it referenced `--text-main` / `--bg-main`, neither of which exists; the fallbacks
   made the typo look correct in dark mode and fail silently in light mode.
@@ -381,14 +437,7 @@ Two rules that were each learned from a real bug:
 - **Constrain cells holding variable-length data.** `.table-wrap` scrolls horizontally, so an
   unconstrained cell pushes the row's action buttons off-screen. This has bitten the quarantine
   queue twice.
-- **A popover in a table row must be portalled.** Same cause, third symptom: `.table-wrap` is
-  `overflow-x: auto`, so a menu positioned inside the row is clipped to a sliver. `ActionMenu`
-  renders into `document.body` at `position: fixed` — which is why it closes on scroll and resize
-  rather than trying to follow. Its `z-index` (900) sits under `.modal-overlay` (1000)
-  deliberately; a menu floating over an open modal is unreachable.
-- **Row actions belong in `common/ActionMenu.jsx`.** The Devices cell reached seven controls and
-  over half the row's width. Keep one or two primary actions visible; a menu item can also carry
-  *why* it is disabled, which reads far better than a greyed-out button.
+- **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
   cut — the entry that matters most is not the one that sorts first.
 

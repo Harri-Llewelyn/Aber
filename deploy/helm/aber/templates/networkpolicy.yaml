@@ -1,11 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $fullname := include "aber.fullname" . -}}
-{{- $gw := include "aber.gatewayComponent" . -}}
-{{/* The gateway's SERVICE name, which is not its component: at promotion Envoy adopts the name
-     `supabase-kong` so consumers keep resolving, while its pods still carry `supabase-envoy`.
-     $componentOf below is keyed by service name and must bridge the two, or the ingress
-     controller is denied the gateway and every inbound request is dropped. */}}
-{{- $gwService := ternary .Values.supabaseEnvoy.serviceName "supabase-kong" .Values.supabaseEnvoy.enabled -}}
+{{- $gw := "supabase-envoy" -}}
 {{/*
 =================================================================================================
 M4 -- default-deny, plus one explicit allow per flow.
@@ -125,8 +120,6 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
 -}}
 {{- /* Filter to edges whose BOTH ends are actually deployed, so a partial install does not carry
      rules naming absent components -- harmless, but it makes the rendered policy misleading. */ -}}
-{{/* $gw, not a literal: NetworkPolicy selects POD LABELS, which the Service name does not
-     change. A hard-coded "supabase-kong" here denies every flow to the gateway while looking right. */}}
 {{- $enabledComponents := dict
       "timescaledb" .Values.timescaledb.enabled
       "supabase-db" .Values.supabaseDb.enabled
@@ -181,7 +174,6 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
 {{- $_ := set $published .service (append (index $published .service | default list) .port) -}}
 {{- end -}}
 {{- end -}}
-{{- $componentOf := dict "frontend" "frontend" $gwService $gw "node-red" "node-red" "grafana" "grafana" "supabase-studio" "supabase-studio" "swagger-ui" "swagger-ui" "mosquitto" "mosquitto" -}}
 ---
 {{/*
 DEFAULT DENY, both directions, for every pod in the namespace.
@@ -291,6 +283,8 @@ The ingress controller reaching the published HTTP services.
 
 THE BACKEND LIST COMES FROM aber.ingressRoutes, the same helper the Ingress itself uses, so the
 policy and the routing cannot disagree about what is published -- per-route opt-outs included.
+It selects pods by each route's Service name, so a published Service must carry its component's
+name.
 
 THE NAMESPACE IS ENVIRONMENT-SPECIFIC AND CANNOT BE INFERRED: Traefik runs in kube-system on k3s,
 ingress-nginx usually in its own namespace. Get it wrong and every route 502s from the controller
@@ -309,7 +303,7 @@ spec:
         operator: In
         values:
           {{- range $svc, $ports := $published }}
-          - {{ index $componentOf $svc | default $svc }}
+          - {{ $svc }}
           {{- end }}
       - key: app.kubernetes.io/instance
         operator: In
@@ -417,6 +411,8 @@ spec:
 {{- $apiClients := list -}}
 {{- if .Values.e2e.enabled }}{{- $apiClients = append $apiClients "e2e-aas-export" -}}{{- end -}}
 {{- if .Values.observability.enabled }}{{- $apiClients = append $apiClients "alloy" -}}{{- end -}}
+{{- /* The backup service reads the CA's Secret through the API when backup.ca names one. */ -}}
+{{- if and .Values.backup.enabled .Values.backupService.enabled .Values.backup.ca.secretName .Values.backup.ca.namespace }}{{- $apiClients = append $apiClients "backup-service" -}}{{- end -}}
 {{- if and $apiClients .Values.networkPolicy.apiServerCidr }}
 ---
 {{/*
@@ -489,6 +485,25 @@ spec:
         - protocol: TCP
           port: 10250
 {{- end }}
+{{- if and .Values.backup.enabled .Values.backupService.enabled .Values.backupService.offsiteEgress }}
+---
+{{/* The backup service's off-site destination, set on the Backups page and so not derivable
+     here: the rules backupService.offsiteEgress lists, for that one pod. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-offsite-egress-backup-service" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "backup-service") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "backup-service") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- toYaml .Values.backupService.offsiteEgress | nindent 4 }}
+{{- end }}
 {{- with .Values.networkPolicy.extraEgress }}
 ---
 {{/*
@@ -545,7 +560,7 @@ spec:
 {{- end }}
 {{- if and .Values.gitea.enabled .Values.networkPolicy.protectForge (not .Values.networkPolicy.enabled) }}
 {{- $fullname := include "aber.fullname" . -}}
-{{- $gw := include "aber.gatewayComponent" . -}}
+{{- $gw := "supabase-envoy" -}}
 ---
 {{/*
 =================================================================================================

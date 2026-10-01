@@ -6,7 +6,7 @@ const COLLAPSED_LIMIT = 3
 
 /**
  * The birth payload of a quarantined device, as a width-constrained cell showing metric names
- * rather than raw JSON, so a device announcing many metrics cannot push Approve & Assign off the
+ * rather than raw JSON, so a device announcing many metrics cannot push Approve & Onboard off the
  * right-hand edge.
  */
 export function QuarantinePayloadCell({ metrics, fallbackJson }) {

@@ -37,7 +37,7 @@ export function cellIconComponent(key) {
  * Render a cell's icon. Takes the cell rather than the key so every render site shares the
  * fallback.
  */
-export function CellIcon({ cell, size = 16, className = '' }) {
+export function CellIcon({ cell, size = 16 }) {
   const Icon = cellIconComponent(cell?.icon)
-  return <Icon size={size} className={className} />
+  return <Icon size={size} />
 }

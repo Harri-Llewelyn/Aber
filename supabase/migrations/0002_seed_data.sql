@@ -11,10 +11,10 @@
 --   * Reference vocabularies use DO UPDATE, because they are maintained by editing this file.
 --     MTConnect re-stamps only `category`: `semantic_id` is a hand-corrected assertion.
 --   * Everything operator-facing uses DO NOTHING. A DO UPDATE on `devices` fires
---     log_digital_thread_event() whether or not a value differs, appending an audit row on
+--     log_audit_trail_event() whether or not a value differs, appending an audit row on
 --     every boot forever.
 --
--- Not here: `digital_thread` (written by trigger as a side effect of the inserts below);
+-- Not here: `audit_trail` (written by trigger as a side effect of the inserts below);
 -- `user_roles` and the demo accounts (GoTrue's, seeded by `supabase/seed.sql`); `cells`
 -- (Unassigned and Site-Wide are derived lanes, never rows); the `storage.buckets` row (created
 -- by `scripts/storage-init.mjs`).
@@ -35,7 +35,7 @@ INSERT INTO public.roles VALUES (2, 'Shopfloor_Manager', 'Can manage devices, ce
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.roles VALUES (3, 'Operator', 'Operational dashboard view, live telemetry streaming, and document viewing')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only audit trace and digital thread access')
+INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only access to the audit trail')
 ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
@@ -71,7 +71,9 @@ INSERT INTO public.permissions VALUES ('f123d456-7890-4c1d-8706-933e08544e40', '
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('c234e567-8901-4c1d-8706-933e08544e41', 'gitops:manage', 'Deploy flows and manage GitOps edge configurations')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'digital_thread:read', 'View continuous Digital Thread audit log entries')
+-- `audit_trail:read`, renamed with the page before 1.0. THE ID DOES NOT MOVE, as with `link:manage`
+-- above; `0000` renames an existing row, which ON CONFLICT (id) DO NOTHING cannot correct.
+INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'audit_trail:read', 'View the audit trail')
 ON CONFLICT (id) DO NOTHING;
 
 -- Granted to all three working roles below, which no other permission is: a manager drafting a
@@ -455,7 +457,9 @@ ON CONFLICT DO NOTHING;
 -- `name` is immutable (`enforce_metric_catalog_immutability()`), so DO UPDATE would be rejected
 -- by the trigger. Changing a metric is deprecate-and-supersede. `OEE/PERFORMANCE` is deprecated
 -- in favour of `OEE/EFFECTIVENESS` (ISO 22400-2's name); both carry the same semantic_id, which
--- is why that index is not unique.
+-- is why that index is not unique. An MTConnect row carries its data item type's
+-- `mtconnect_vocabulary` id, as the standards seed below does (#457). The two local extensions
+-- carry none: no vocabulary names them, and an id minted here would resolve nowhere.
 
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000007', 'OEE/AVAILABILITY', 10, 'ISO 22400 availability ratio -- NOT MTConnect AVAILABILITY, which means "device connected"', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://aber.local/semantics/iso22400/AVAILABILITY', 'IRI')
 ON CONFLICT (name) DO NOTHING;
@@ -465,27 +469,27 @@ INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000010'
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000008', 'OEE/PERFORMANCE', 10, 'ISO 22400 performance ratio', true, 'c0000001-0000-4000-8000-000000000010', '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://aber.local/semantics/iso22400/EFFECTIVENESS', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000001', 'Systems/TEMPERATURE', 10, 'Machine system temperature', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Systems/TEMPERATURE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000001', 'Systems/TEMPERATURE', 10, 'Machine system temperature', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/TEMPERATURE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000002', 'Axes/DISPLACEMENT', 10, 'Axis displacement amplitude (was: vibration)', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'MILLIMETER', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Axes/DISPLACEMENT', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000002', 'Axes/DISPLACEMENT', 10, 'Axis displacement amplitude (was: vibration)', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'MILLIMETER', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000003', 'Controller/EXECUTION', 12, 'Controller execution state: READY / ACTIVE / INTERRUPTED / FEED_HOLD / STOPPED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Controller/EXECUTION', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000003', 'Controller/EXECUTION', 12, 'Controller execution state: READY / ACTIVE / INTERRUPTED / FEED_HOLD / STOPPED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/EXECUTION', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000004', 'Controller/EMERGENCY_STOP', 12, 'Emergency stop circuit: ARMED (healthy) or TRIGGERED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Controller/EMERGENCY_STOP', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000004', 'Controller/EMERGENCY_STOP', 12, 'Emergency stop circuit: ARMED (healthy) or TRIGGERED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/EMERGENCY_STOP', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000005', 'Controller/FIRMWARE', 12, 'Controller firmware version', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Controller/FIRMWARE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000005', 'Controller/FIRMWARE', 12, 'Controller firmware version', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/FIRMWARE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000006', 'SERIAL_NUMBER', 12, 'Manufacturer serial number', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/SERIAL_NUMBER', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000006', 'SERIAL_NUMBER', 12, 'Manufacturer serial number', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/SERIAL_NUMBER', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000011', 'Axes/C/ANGLE', 10, 'Angular position of the C axis (MTConnect ANGLE on the Axes component)', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'DEGREE', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/Axes/C/ANGLE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000011', 'Axes/C/ANGLE', 10, 'Angular position of the C axis (MTConnect ANGLE on the Axes component)', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'DEGREE', NULL, 'MTConnect', 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000012', 'Machine/OperatingMode', 12, 'Machine operating mode -- Processing, Setup, Maintenance or Normal. OPC 40001 calls this browse name MachineryOperationMode; the semantic id binds this metric to that concept.', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'EVENT', NULL, NULL, 'OPC UA', 'http://opcfoundation.org/UA/Machinery/MachineryOperationMode', 'IRI')
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000013', 'MotionDevice/OverridePercent', 10, 'Operator speed override applied to programmed motion. OPC 40010 calls this browse name SpeedOverride; the semantic id binds this metric to that concept.', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'PERCENT', NULL, 'OPC UA', 'http://opcfoundation.org/UA/Robotics/SpeedOverride', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('e5f5b550-25f7-4c28-9cd4-36eb9c2224af', 'safety_interlock', 11, 'Safety interlock present/enabled (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'EVENT', NULL, NULL, NULL, 'https://aber.local/semantics/local/safety_interlock', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('e5f5b550-25f7-4c28-9cd4-36eb9c2224af', 'safety_interlock', 11, 'Safety interlock present/enabled (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'EVENT', NULL, NULL, NULL, NULL, NULL)
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('a469cb73-0d73-46b3-928e-7ecfd7fc43f0', 'max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, NULL, 'https://aber.local/semantics/local/max_temp_threshold', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('a469cb73-0d73-46b3-928e-7ecfd7fc43f0', 'max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, NULL, NULL, NULL)
 ON CONFLICT (name) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
@@ -2318,6 +2322,11 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
   semantic_id = EXCLUDED.semantic_id;
 -- <<< END GENERATED opcua_vocabulary_companion_extensions
 
+-- >>> BEGIN GENERATED opcua_vocabulary_table_comment
+-- GENERATED by scripts/generate-opcua-vocabulary.mjs from every opcua_vocabulary row in this file.
+COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data points: OPC 30050 PackML, OPC 40001 Machinery, OPC 40001-4 Machinery Energy, OPC 40010 Robotics, OPC 40501 Machine Tools, OPC 40540 Additive Manufacturing. Reference data, not deployment state. The OPC 30050 PackML, OPC 40001-4 Machinery Energy, OPC 40501 Machine Tools, OPC 40540 Additive Manufacturing rows are verified against the OPC Foundation NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs; the OPC 40001 Machinery, OPC 40010 Robotics rows are hand-written. node_id holds a browse path, not a resolvable numeric NodeId.';
+-- <<< END GENERATED opcua_vocabulary_table_comment
+
 -- -------------------------------------------------------------------------------------------
 -- Default schema  (0 rows)
 -- -------------------------------------------------------------------------------------------
@@ -2344,10 +2353,10 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
 -- before the first probe says "not yet known" rather than asserting health nobody checked.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
--- ON CONFLICT (id), not (service_name), for this row alone: a database seeded before 0016 holds
--- this id under the OLD name, and a name-targeted clause does not catch a primary-key collision
--- -- the insert would raise on every boot instead of being skipped. 0016 then does the rename.
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880', 'UNKNOWN', NULL, NULL)
+-- ON CONFLICT (id), not (service_name): a database seeded earlier holds this id under an OLD name,
+-- and a name-targeted clause does not catch a primary-key collision -- the insert would raise on
+-- every boot instead of being skipped. 0024 then does the rename.
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Host-Run Gateways)', 'EDGE_NODE', 'http://localhost:1880', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
@@ -2355,8 +2364,8 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
--- ON CONFLICT (id) for this row too: a database from before 0096 holds the id under the old name
--- 'Supabase API Gateway (Kong)'. 0096 then does the rename.
+-- ON CONFLICT (id) for this row too: a database from before archived migration 0096 holds the id
+-- under the old name 'Supabase API Gateway (Kong)'. 0000 then does the rename.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000007', 'Supabase API Gateway (Envoy)', 'API_GATEWAY', 'http://127.0.0.1:54321', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000008', 'Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1', 'UNKNOWN', NULL, NULL)
@@ -2633,7 +2642,7 @@ SELECT public.ensure_cron_job(
 -- 3. Honour the archive retention timer ------------------------------------------------------
 --
 -- `auto_delete_at` is set per row by the Archive dialog; NULL means permanent retention, so the
--- NOT NULL test is load-bearing. These DELETEs fire log_digital_thread_event() by design.
+-- NOT NULL test is load-bearing. These DELETEs fire log_audit_trail_event() by design.
 --
 -- EVERY ROW HERE IS DELETED ON ITS OWN TIMER AND NOBODY ELSE'S, which is a property of the FKs
 -- rather than of this order: since 0112 every child of a purged parent is SET NULL, so a gateway
@@ -2937,11 +2946,12 @@ SELECT set_config('aber.gitea_oauth_client_secret', '', false);
 -- The metric group these concepts file under
 -- ---------------------------------------------------------------------------------------------
 -- One group, not one per concept: `enforce_metric_group_spelling()` makes the first spelling
--- permanent, and the standard is not yet published. A BMS point is named `Building/<concept>`.
+-- permanent, and the standard is not yet published. A BMS point is named `BMS/<concept>`, the
+-- group the standards seed files its 223P metrics under (0008 retires the earlier `Building`).
 
 INSERT INTO public.metric_groups (id, name, description, standard)
-VALUES ('9d3a4f2e-6b1c-4e58-9a77-2f5c8d1b4e60', 'Building',
-        'ASHRAE 223P building system points -- HVAC, electrical and the sensing around them',
+VALUES ('5868dc1c-b33f-41e1-92a7-bddd7e57a3ac', 'BMS',
+        'ASHRAE 223P building management system points -- HVAC, electrical and the sensing around them',
         'ASHRAE 223P')
 ON CONFLICT DO NOTHING;
 
@@ -7603,7 +7613,7 @@ ON CONFLICT (name) DO NOTHING;
 -- on every replay while leaving the value alone, so an operator's change survives a restart.
 --
 -- Every one has a reader; a setting nothing reads is a control that does nothing.
--- `ui.digital_thread_lane_limit` was declared here until the Digital Thread stopped capping its
+-- `ui.digital_thread_lane_limit` was declared here until the Audit Trail stopped capping its
 -- lanes, and `0000` removes the row from a stack that still holds it.
 --
 -- THREE OF THESE ARE NOT CONSTANTS. `sparkplug.group_id`, `archive.site_key` and the five S3
@@ -7628,14 +7638,14 @@ SELECT set_config('aber.archive_access_key_id', :'archive_access_key_id', false)
 SELECT set_config('aber.archive_path_style',    :'archive_path_style',    false);
 
 SELECT public.seed_setting(
-    'ui.digital_thread_poll_seconds',
+    'ui.audit_trail_poll_seconds',
     to_jsonb(60),
     'number',
-    'Digital Thread',
+    'Audit Trail',
     'Refresh interval (seconds)',
-    'How often the Digital Thread re-reads the audit log. The page is an audit trail rather than '
+    'How often the Audit Trail re-reads the audit log. The page is a record to read rather than '
     'a live feed, so this is deliberately not a live-tail interval.',
-    'the 60_000 ms interval in DigitalThreadTab.jsx'
+    'the 60_000 ms interval in AuditTrailTab.jsx'
 );
 
 SELECT public.seed_setting(
@@ -7686,7 +7696,7 @@ SELECT public.seed_setting(
     'Approvals',
     'Closed proposals kept for (days)',
     'How long an applied, rejected, withdrawn or expired proposal is kept before the nightly '
-    'prune removes it. What an approval CHANGED lives in digital_thread under its own retention; '
+    'prune removes it. What an approval CHANGED lives in audit_trail under its own retention; '
     'this governs only the queue entry and the rationale attached to it.',
     'the ninety-day fallback in prune_closed_proposals()'
 );
@@ -8057,7 +8067,7 @@ UPDATE public.system_settings
 -- JWT for it with the stack's HS256 secret, so PostgREST validates it as it validates a GoTrue
 -- token. Not `service_role`: the i3X server passes the caller's bearer through so that it
 -- queries as them. Not a demo persona: a machine credential borrowing a human account conflates
--- two lifecycles. Its grant is `telemetry:read`, never `digital_thread:read`: the MCP client has
+-- two lifecycles. Its grant is `telemetry:read`, never `audit_trail:read`: the MCP client has
 -- no surface for the audit trail.
 -- =============================================================================================
 
@@ -8066,7 +8076,7 @@ UPDATE public.system_settings
 -- ---------------------------------------------------------------------------------------------
 -- `id` is the only column on this image's `auth.users` without a default. The row is minimal:
 -- this account cannot sign in. It exists so a JWT subject resolves to something real and
--- `digital_thread.changed_by` has a foreign key to satisfy.
+-- `audit_trail.changed_by` has a foreign key to satisfy.
 INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000001')
 ON CONFLICT (id) DO NOTHING;
@@ -8096,7 +8106,7 @@ INSERT INTO auth.users (id)
 VALUES ('b0000000-0000-4000-8000-000000000003')
 ON CONFLICT (id) DO NOTHING;
 
--- No role is assigned here (see the MCP reader above). `digital_thread:read` is deliberately
+-- No role is assigned here (see the MCP reader above). `audit_trail:read` is deliberately
 -- not among this principal's grants: the worker holds broker publish rights and neither writes
 -- nor reads the audit trail.
 
@@ -8165,7 +8175,7 @@ INSERT INTO public.directory_liveness_probe (id) VALUES (true) ON CONFLICT (id) 
 -- Unscheduled before scheduled: `cron.schedule` appends rather than reconciling.
 --
 -- The nightly ones are spaced so a morning reading of the cron history has one thing at a time:
--- 03:00 prune_cron_history, 03:15 prune_platform_alerts, 03:20 digital_thread_partitions,
+-- 03:00 prune_cron_history, 03:15 prune_platform_alerts, 03:20 audit_trail_partitions,
 -- 03:30 purge_expired_archives, 03:45 expire_open_proposals, 03:50 prune_closed_proposals.
 
 -- Daily, and separate from the archive-retention job: that honours a per-row date the user
@@ -8204,9 +8214,9 @@ SELECT cron.schedule('sweep-gateway-credential-revocations', '*/15 * * * *',
 -- called by 0001 at migration time, so a fresh database has its partitions before the first
 -- write rather than on the first night.
 SELECT public.ensure_cron_job(
-  'digital_thread_partitions',
+  'audit_trail_partitions',
   '20 3 * * *',
-  $job$SELECT public.ensure_digital_thread_partitions(3)$job$
+  $job$SELECT public.ensure_audit_trail_partitions(3)$job$
 );
 
 SELECT public.ensure_cron_job(
@@ -8391,11 +8401,11 @@ UPDATE public.webhook_endpoints
 
 \if :{?supabase_functions_url}
 \else
-\set supabase_functions_url 'http://supabase-kong:8000/functions/v1'
+\set supabase_functions_url 'http://supabase-envoy:8000/functions/v1'
 \endif
-\if :{?supabase_anon_key}
+\if :{?supabase_publishable_key}
 \else
-\set supabase_anon_key ''
+\set supabase_publishable_key ''
 \endif
 \if :{?gateway_revoke_secret}
 \else
@@ -8407,7 +8417,7 @@ UPDATE public.webhook_endpoints
 \endif
 
 SELECT set_config('aber.fn_url',      :'supabase_functions_url', false);
-SELECT set_config('aber.anon_key',    :'supabase_anon_key', false);
+SELECT set_config('aber.publishable_key', :'supabase_publishable_key', false);
 SELECT set_config('aber.revoke_key',  :'gateway_revoke_secret', false);
 SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false);
 
@@ -8418,45 +8428,46 @@ SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false);
 -- not be readable by `anon` or `authenticated`:
 --
 --   supabase_functions_url        where the gateway serves /functions/v1 on this target
---   supabase_anon_key             gets past the gateway's key filter and proves nothing else.
---                                 The name is the role, not the format: it holds whichever key
---                                 format the deployment registered (db-init passes the
---                                 publishable key where one exists), and is not renamed because
---                                 nothing in SQL parses it.
+--   supabase_publishable_key      gets past the gateway's key filter and proves nothing else
 --   gateway_revoke_secret         what actually authorises the revocation, checked by the function
 --   forge_sweep_secret            what authorises the forge sweep (0099), checked by forge-sweep
+--
+-- All four are rewritten from db-init's variables on every boot, so the publishable key's secret
+-- was renamed from `supabase_anon_key` by deleting the old name here: there is no stored value to
+-- carry across.
 DO $vault$
 DECLARE
   v_url    text := btrim(coalesce(current_setting('aber.fn_url', true), ''));
-  v_anon   text := btrim(coalesce(current_setting('aber.anon_key', true), ''));
+  v_key    text := btrim(coalesce(current_setting('aber.publishable_key', true), ''));
   v_secret text := btrim(coalesce(current_setting('aber.revoke_key', true), ''));
   v_sweep  text := btrim(coalesce(current_setting('aber.sweep_key', true), ''));
   v_id     uuid;
 BEGIN
-  IF v_secret = '' OR v_anon = '' THEN
+  IF v_secret = '' OR v_key = '' THEN
     RAISE NOTICE
-      '0038: GATEWAY_REVOKE_SECRET or SUPABASE_ANON_KEY is unset; credential revocation is INERT '
-      'on this stack. Archiving will not revoke, and the sweep will do nothing.';
+      '0038: GATEWAY_REVOKE_SECRET or SUPABASE_PUBLISHABLE_KEY is unset; credential revocation is '
+      'INERT on this stack. Archiving will not revoke, and the sweep will do nothing.';
   END IF;
-  IF v_sweep = '' OR v_anon = '' THEN
+  IF v_sweep = '' OR v_key = '' THEN
     RAISE NOTICE
-      '0099: FORGE_SWEEP_SECRET or SUPABASE_ANON_KEY is unset; the forge sweep is INERT on this '
-      'stack. A revoked login keeps its forge team membership until it next passes the door.';
+      '0099: FORGE_SWEEP_SECRET or SUPABASE_PUBLISHABLE_KEY is unset; the forge sweep is INERT on '
+      'this stack. A revoked login keeps its forge team membership until it next passes the door.';
   END IF;
 
   -- REPLACED, NOT MERGED. A rotated value must overwrite the stored one and vault.create_secret
-  -- refuses a duplicate name, so the old row goes first. Same shape 0006 uses.
+  -- refuses a duplicate name, so the old row goes first. Same shape 0006 uses. The retired name
+  -- `supabase_anon_key` goes with them and is not written again.
   FOR v_id IN SELECT id FROM vault.secrets
-               WHERE name IN ('supabase_functions_url', 'supabase_anon_key', 'gateway_revoke_secret',
-                              'forge_sweep_secret')
+               WHERE name IN ('supabase_functions_url', 'supabase_publishable_key', 'gateway_revoke_secret',
+                              'forge_sweep_secret', 'supabase_anon_key')
   LOOP
     DELETE FROM vault.secrets WHERE id = v_id;
   END LOOP;
 
   PERFORM vault.create_secret(v_url, 'supabase_functions_url',
     'Base URL of the edge function router on this target, read by revoke_gateway_credential().');
-  PERFORM vault.create_secret(v_anon, 'supabase_anon_key',
-    'Anon key, used only to pass the gateway key check on the revocation call. Not authorisation.');
+  PERFORM vault.create_secret(v_key, 'supabase_publishable_key',
+    'Publishable key, used only to pass the gateway key check on the revocation and sweep calls. Not authorisation.');
   PERFORM vault.create_secret(v_secret, 'gateway_revoke_secret',
     'Shared secret the revoke-gateway-credential function verifies. This is the authorisation.');
   PERFORM vault.create_secret(v_sweep, 'forge_sweep_secret',

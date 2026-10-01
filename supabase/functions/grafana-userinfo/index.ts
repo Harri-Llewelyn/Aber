@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "@supabase/supabase-js";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
@@ -16,7 +15,7 @@ import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
  * Supabase RBAC role to Grafana org role. Operator and Auditor both map to Viewer: Grafana has no
- * read-only-plus-audit tier, and the Auditor's privilege is over digital_thread in Supabase.
+ * read-only-plus-audit tier, and the Auditor's privilege is over audit_trail in Supabase.
  */
 const ROLE_MAP: Record<string, string> = {
   Administrator: "Admin",
@@ -96,4 +95,4 @@ export default async function handler(req: Request): Promise<Response> {
   }
 }
 
-serve(handler);
+Deno.serve(handler);

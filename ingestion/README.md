@@ -11,10 +11,10 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 47 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 77 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
-| [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
+| [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog, a device that publishes again |
 | [`test_device_location.py`](test_device_location.py) | Invariant: the daemon never writes an asset's location |
 | [`test_entity_cache.py`](test_entity_cache.py) | The bounded resolution caches: LRU eviction, and the in-place-mutation and negative-entry contracts |
 | [`test_telemetry_writer.py`](test_telemetry_writer.py) | The historian writer: several messages become one transaction, and one bad message still loses one |
@@ -162,7 +162,7 @@ function, which calls the atomic `public.approve_quarantined_device()` RPC.
 ## Schema Conformance
 
 Every DDATA metric is evaluated against the schemas bound to its device, and what fails is recorded
-in `digital_thread` through `record_ingestion_rejection()` (`0026`). Since `0050` a device can also
+in `audit_trail` through `record_ingestion_rejection()` (`0026`). Since `0050` a device can also
 be set to **reject** what fails, rather than only report it.
 
 ### `audit` and `enforce`
@@ -171,7 +171,7 @@ be set to **reject** what fails, rather than only report it.
 
 | | `audit` (default) | `enforce` |
 | :--- | :--- | :--- |
-| Violation recorded in `digital_thread` | yes | yes |
+| Violation recorded in `audit_trail` | yes | yes |
 | Sample written to the historian | **yes** | **no**, for the offending metric |
 | Rest of the message | written | written |
 
@@ -245,7 +245,7 @@ device, so the loss is made **loud** instead:
 - a per-message summary follows, naming how to switch the device back to `audit`;
 - `aber_ingestion_schema_rejected_total` counts it, beside `aber_ingestion_metrics_written_total`.
 
-A metric dropped this way is still recorded in `digital_thread`, and that row is then the **only**
+A metric dropped this way is still recorded in `audit_trail`, and that row is then the **only**
 remaining evidence the device sent anything — which is why enforcement does not switch recording
 off, and why `conformance_policy` has no third value that would.
 
@@ -334,7 +334,7 @@ of what arrived — and the shape is the one `parse_sparkplug_payload()` already
 fallback, so a hand-edit valid in the file is valid to the daemon.
 
 **Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
-Node-RED simulator flow publishes JSON, Remote gateways publish protobuf — and they enter the
+gateway appliance's flow publishes JSON, a standard Sparkplug B edge node protobuf — and they enter the
 daemon down different branches of `parse_sparkplug_payload()`. Replaying a JSON fleet as protobuf
 would mean a fault reproduced through this tool could be one the playback introduced, or one it
 silently repaired.
@@ -492,7 +492,7 @@ is added to the `supabase_realtime` publication explicitly, and the page sets `s
 the daemon to observe on its next message. A flag also survives a page reload, which a fired-off
 POST would not.
 
-**`capture_jobs` deliberately has no digital-thread trigger.** That trigger is opt-in per table, and
+**`capture_jobs` deliberately has no audit-trail trigger.** That trigger is opt-in per table, and
 adding it here would look like consistency while writing a row per progress tick into an append-only
 table no application role can prune.
 
@@ -881,6 +881,28 @@ failing to start and taking the diagnosis with it.
 
 `Asset_ID` and `Asset_Name` are excluded — they carry identity, not telemetry.
 
+**Signed integers are read through the metric's datatype.** Sparkplug carries Int8, Int16 and
+Int32 in the `uint32` `int_value` and Int64 in the `uint64` `long_value` as two's complement, so
+without the datatype an Int32 of −5 reads as 4294967291. Only a birth must carry `datatype`, so the
+daemon keeps the datatypes each NBIRTH and DBIRTH declares, by alias per edge node and by name per
+device, beside the alias table, and reads a DDATA that omits it through them. A signed value is
+masked to its width and sign-extended, which accepts both encodings in use (an Int8 of −5 as
+`0xFFFFFFFB` from Tahu's Java encoder, `0xFB` from its Python one); unsigned types and DateTime
+(epoch milliseconds) are stored as they arrive. With no declared datatype the value is stored
+unsigned, as before, and counted in `aber_ingestion_integer_datatype_unknown_total`: guessing a
+width would corrupt an unsigned counter to repair a signed one. `i3x/i3x_service.py` mirrors all
+of this.
+
+**The JSON encoding reads into the same protobuf metric.** `json_metric_value()` takes the first of
+`int_value`, `long_value`, `float_value`, `double_value`, `boolean_value`, `string_value` and a bare
+`value`, which is typed by what it holds. An integer goes into `int_value` as its two's complement,
+or into `long_value` when the key, a 64-bit datatype (Int64, UInt64, DateTime) or its size needs 64
+bits; a negative one with no datatype is marked Int32 or Int64 so it reads back signed. A
+`float_value` is rounded to 32 bits, as the protobuf field would round it. A value that is not the
+JSON type its key names, or does not fit its field, drops that metric with a warning and the rest
+of the payload lands. i3X reads JSON through a mirrored copy of the function, and both suites
+assert `test-harness/fixtures/sparkplug-json-values.json`.
+
 Rows are keyed by **`sparkplug_id`**, never by name, so a rename never breaks a series. The
 `assets` dimension row is upserted on every write with the current display label.
 
@@ -1018,7 +1040,10 @@ birth again for weeks. Without a way to ask, an ingestion restart would silently
 every alias-optimised device on the plant until someone power-cycled its gateway.
 
 On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
-`spBv1.0/<group>/NCMD/<edge_node>`.
+`spBv1.0/<group>/NCMD/<edge_node>`. It asks the same way on a sequence gap, and on DDATA from a
+device held OFFLINE that has not been born since (see
+[A device that publishes again](#a-device-that-publishes-again)). An operator's request from the
+dashboard and a broker capture ask too, past the rate limit below.
 
 - **Rate limited per edge node** (`REBIRTH_REQUEST_INTERVAL_SECONDS`, default 300s). This is the
   load-bearing half: a gateway that answers a rebirth by restarting, or one that never answers at
@@ -1139,29 +1164,30 @@ uns/<enterprise>/<site>/<device>/<metric>                   site-wide -- serves 
 | :--- | :--- | :--- |
 | `<enterprise>` | Enterprise | The message's Sparkplug group (`gateways.sparkplug_group`), already on the wire |
 | `<site>` | Site | The `site.name` setting. One campus, so one value; a second campus is the migration that makes it a table |
-| `<area>` | Area | `areas.name` (`0097`) — a building. A cell files into one; an area-wide asset names one |
+| `<area>` | Area | `areas.name` (`0097`) — one part of the site. A cell files into one; an area-wide asset names one |
 | `<cell>` | Work center | `cells.name`, through `device_locations.effective_cell_id` |
 | `<device>` | Work unit | `devices.name` |
 | `<metric>` | | The metric name as the leaf. A catalog name with a `/` group prefix becomes a subtree |
 
-The floor a cell is on is a number on the cell for the Overview map and is deliberately **not** a
-segment: ISA-95 has no rung for it and a consumer subscribing per building or per cell does not
-want one. The words in the data model stay the stack's (`gateways`, `devices`, `cells`; `areas` is
-already the standard's) and the ISA-95 words appear where the hierarchy is being named: here, and in
-the Summary of each page's help.
+A floor is **not** a segment, and is not modelled at all: ISA-95 has no rung for it, so a building
+with two floors is two areas. A cell's place on its area's plan is for the Site Map alone and is not
+a segment either; a consumer subscribes per area or per cell. The words in the data model stay the
+stack's (`gateways`, `devices`, `cells`; `areas` is already the standard's) and the ISA-95 words
+appear where the hierarchy is being named: here, and in the Summary of each page's help.
 
 **Renaming `cells` to work centers was considered and declined.** "Cell" is not a plant word the
 standard lacks: a process cell is one of ISA-95's work center types, so the rename would have traded
 a concrete word operators recognise for the category it belongs to, and left the standard's own
 ambiguity (a work cell is a work unit type) where it was. It would also have been a table, its API
-routes, the `cell:manage` permission name, the proposal lane, the `CELL` thread kind and every page,
-across two releases and directly ahead of the migration squash. `devices` stays for the same reason
-it always did: it is Sparkplug's word and the row is a Sparkplug device. The topics were never at
-stake: a cell is not addressed on the wire, and `<cell>` is the cell's name, not the table's.
+routes, the `cell:manage` permission name, the proposal lane, the `CELL` kind on the Audit Trail
+and every page, across two releases and directly ahead of the migration squash. `devices` stays
+for the same reason it always did: it is Sparkplug's word and the row is a Sparkplug device. The
+topics were never at stake: a cell is not addressed on the wire, and `<cell>` is the cell's name,
+not the table's.
 
 **An incomplete path is skipped, never filled with a placeholder.** A device that is unassigned, a
 cell filed in no area, a site whose name is unset: none is published, each is counted under
-`aber_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Overview's
+`aber_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Site Map's
 Unassigned lane are where an operator completes the path. An invented segment would put a word
 nobody chose in every topic, which is the trap the derived lanes exist to avoid. Names are checked
 for `/`, `+` and `#` on the way in (`areas_name_topic_safe`, `cells_name_topic_safe`; the cell
@@ -1216,11 +1242,12 @@ Three properties keep it from becoming an audit-row generator or a false-alarm g
 
 - **Only devices seen in *this process* are candidates.** An empty map after a restart is an
   absence of evidence, not evidence of absence. Seeding it from the database would mark a whole
-  fleet OFFLINE on every restart — one `digital_thread` row each, in an append-only table — which
+  fleet OFFLINE on every restart — one `audit_trail` row each, in an append-only table — which
   is a far worse failure than the stale ONLINE this fixes.
-- **The UPDATE carries `status = ONLINE` as a filter**, so an already-OFFLINE row matches nothing,
-  no UPDATE runs, and `log_digital_thread_event()` never fires. That is a database-side guarantee,
-  not a client-side intention.
+- **The write goes through `ingest_mark_device_offline()`, whose UPDATE carries
+  `status IS DISTINCT FROM 'OFFLINE'` as a filter**, so an already-OFFLINE row matches nothing, no
+  UPDATE runs, and `log_audit_trail_event()` never fires. That is a database-side guarantee,
+  not a client-side intention. The function answers whether it moved the row.
 - **A swept device is dropped from tracking**, so it is written once per quiet period rather than
   once per 30s tick. A failed write keeps it tracked, so the next sweep retries rather than
   silently concluding it was handled.
@@ -1231,6 +1258,33 @@ authoritative answer and needs no second opinion.
 > **Tuning.** Too *low* a value reports a healthy machine offline, which is the more misleading of
 > the two failures. Raise the window for event-driven devices that legitimately stay quiet, or set
 > `0` to disable.
+
+### A device that publishes again
+
+What DDATA from a device the Directory holds OFFLINE does depends on why it is OFFLINE. The data is
+stored either way.
+
+- **The watchdog timed it out, and its node has sent no NBIRTH or NDEATH since.** Silence was the
+  only evidence, and the DDATA refutes it: the daemon sets the device ONLINE through
+  `ingest_set_device_state()`, the gate a DBIRTH uses, leaving `identity_source` and
+  `first_dbirth_at` to the next birth. It logs `WATCHDOG: device ... is publishing again` and
+  requests no rebirth. The node's aliases and birth metrics still stand, and a lost message would
+  already show as a sequence gap, which requests one anyway. Asking here would spend the node's
+  rate limit on a device that is fine.
+- **Anything else**: a DDEATH, the node's NBIRTH or NDEATH since the device was last heard, a
+  sweep that found the row already OFFLINE, or an OFFLINE row this process has not seen born (after
+  a restart, or a device registered and never born). DDATA without a DBIRTH is out of protocol
+  there, so the device stays OFFLINE and the daemon requests a rebirth of its node, rate limited
+  as above. The DBIRTH that answers sets it ONLINE.
+
+Which case applies is held in memory, beside the watchdog's own map, and nothing in the database
+records it. The sweep takes `ingest_mark_device_offline()`'s answer, so only a sweep that moved the
+row counts as a timeout. After a restart every OFFLINE row is the second case, which costs one
+rebirth request per node.
+
+`test_declared_metrics.py` (`TestADeviceThatPublishesAgain`) covers both cases. `validate.py`
+check 10b publishes DDATA from the device check 10 timed out and expects it ONLINE; like check 10,
+it runs only when `DEVICE_OFFLINE_TIMEOUT_SECONDS` is 90 or less.
 
 ---
 
@@ -1317,7 +1371,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | The in-cluster Service name |
-| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
+| `MQTT_USER` / `MQTT_PASSWORD` | `aber_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
@@ -1447,13 +1501,14 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
 | `aber_ingestion_timestamps_rejected_total` | `edge_node` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. The label names the appliance, which is almost always a clock rather than a device — read it beside the gauge below. |
 | `aber_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
+| `aber_ingestion_integer_datatype_unknown_total` | — | An integer arrived whose datatype neither the message nor a birth since startup declared, and was stored unsigned. A negative signed reading among them is recorded as a large positive number. Sustained means a publisher that never declares datatypes. |
 | `aber_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
 | `aber_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
 | `aber_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
 | `aber_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
 | `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
 | `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
-| `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (archived migration 0026). The telemetry was still written. |
+| `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `audit_trail` (archived migration 0026). The telemetry was still written. |
 | `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
 | `aber_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
 | `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by the directory plus `MAX_ENTITIES_PER_CACHE`. |
@@ -1673,9 +1728,9 @@ would expect.
 npm run dev:test          # validate.py, then the stack lane
 ```
 
-> **`validate.py` needs `SUPABASE_SERVICE_ROLE_KEY`**, which `dev:test` reads out of the release
-> Secret. Without it the script seeds nothing and fails ~12 of 20 checks in a way that reads like a
-> schema fault, with the real cause one line up: `Service role key: MISSING`. Its own host and port
+> **`validate.py` needs `SUPABASE_SECRET_KEY`**, which `dev:test` reads out of the release
+> Secret. Without it the script seeds nothing and fails most of its checks in a way that reads like a
+> schema fault, with the real cause in its banner: `Secret key   : MISSING`. Its own host and port
 > defaults are the port-forwards' addresses, so nothing else is set.
 
 **In-cluster, as a Job in the namespace:**
@@ -1686,7 +1741,7 @@ helm upgrade aber deploy/helm/aber -n aber \
 kubectl -n aber logs -f job/aber-e2e-validate
 ```
 
-**No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-kong` *are* the
+**No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-envoy` *are* the
 Service names, so the defaults are the configuration —
 there is nothing to rewrite and nothing to port-forward. The Job's environment states the topology
 explicitly all the same, so it reads as a complete description rather than relying on defaults.
@@ -1714,16 +1769,17 @@ The write is deliberately forgiving of IO errors: a read-only or full filesystem
 heartbeat — which correctly reports unhealthy — rather than crash a daemon that is otherwise fine.
 `test_health_heartbeat.py` pins all of that, including the disconnected case.
 
-It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts 20
-outcomes covering quarantine, identity diagnostics, birth observation, multi-submodel conformance,
-digital-thread triggers, telemetry mapping, rename safety and quarantine gating.
+It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts the
+outcomes counted in the table above: quarantine, identity diagnostics, birth observation,
+multi-submodel conformance, audit-trail triggers, telemetry mapping, rename safety, quarantine
+gating, and what the i3X server answers (checks 12 and 17).
 
-**Every assertion is scoped to the run's own entities.** The stack always has audit rows, telemetry
-and devices from the demo simulator, so a check that queried a whole table and asserted "not empty"
-would pass regardless of whether anything was exercised.
+**Every assertion is scoped to the run's own entities.** A stack in use holds audit rows, telemetry
+and devices of its own, so a check that queried a whole table and asserted "not empty" would pass
+regardless of whether anything was exercised.
 
 Its cleanup uses a **direct owner connection** to Supabase Postgres for audit rows, because
-`public.digital_thread` is genuinely append-only — the trigger added in
+`public.audit_trail` is genuinely append-only — the trigger added in
 [`0003`](../supabase/migrations/archive/0003_audit_immutability_and_quarantine_rpc.sql) refuses `DELETE`
 for `service_role` too. Clearing audit rows is meant to require owner authority.
 

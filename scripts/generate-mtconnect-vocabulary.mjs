@@ -51,8 +51,9 @@ const END_MARKER = '-- <<< END GENERATED mtconnect_vocabulary';
  * semantic id on a fresh database. Emitting the fourth column here is what makes the seed
  * generable at all; it is not a convenience.
  *
- * The form matches 0032's SQL expression exactly, and both are mirrored by `mtconnectSemanticId()`
- * in `frontend/src/utils/standards.js`:
+ * The form matches 0032's SQL expression exactly, and both are mirrored by
+ * `mtconnectVocabularySemanticId()` in `frontend/src/utils/standards.js`, which the Add Metric form
+ * derives an MTConnect metric's id through (check-mirror-drift.mjs check 7):
  *
  *     https://aber.local/semantics/mtconnect/v2.0/<Kind>/<name>
  *

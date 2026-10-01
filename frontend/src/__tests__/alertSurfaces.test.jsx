@@ -115,9 +115,9 @@ describe('context drawer alert banner', () => {
 })
 
 describe('grafanaAlertUrl', () => {
-  it('defaults to 3002, which is where compose publishes Grafana', () => {
-    // NOT Grafana's own 3000: the frontend already has that port, so compose republishes it. A link
-    // to :3000 lands back on this dashboard and reads as "Grafana is broken".
+  it('defaults to 3002, which is where npm run dev:forward publishes Grafana', () => {
+    // NOT Grafana's own 3000: the frontend already has that port, so the forward moves Grafana. A
+    // link to :3000 lands back on this dashboard and reads as "Grafana is broken".
     expect(GRAFANA_URL).toBe('http://localhost:3002')
   })
 

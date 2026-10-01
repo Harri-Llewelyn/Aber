@@ -9,10 +9,10 @@
 
 Aber is Welsh for a river mouth, where many streams converge and leave as one. That is the
 ingestion topology: telemetry from every gateway on the shopfloor converges on one broker and one
-historian, and leaves through one API, one Unified Namespace and one digital thread.
+historian, and leaves through one API, one Unified Namespace and one audit trail.
 
 An industrial, asset-centric platform: real-time telemetry streaming, shopfloor cell mapping,
-zero-touch edge device onboarding, row-level security, continuous Digital Thread audit logging,
+zero-touch edge device onboarding, row-level security, a continuous, append-only audit trail,
 AAS V3 export, and edge flow management. It speaks Factory+ Sparkplug B on the wire, and it was
 inspired by the **AMRC Connectivity Stack (ACS)**; [how far that goes](#relationship-to-acs) is below.
 
@@ -54,7 +54,7 @@ cron writer, and AAS is an **adapter on the way out**, not an adopted metamodel.
 ```mermaid
 flowchart TB
     subgraph Edge ["Edge & Physical Shopfloor"]
-        NR["Node-RED Gateway Simulator<br/>(Port 1880)"]
+        NR["Node-RED host-run gateways<br/>(Port 1880)"]
         DEV["Remote Sparkplug B Gateways"]
     end
 
@@ -70,7 +70,7 @@ flowchart TB
     subgraph Supabase ["Supabase BaaS"]
         GW["Envoy API Gateway<br/>(54321) apikey check"]
         AUTH["GoTrue Auth"]
-        PGRST["PostgREST<br/>RLS - digital_thread"]
+        PGRST["PostgREST<br/>RLS - audit_trail"]
         RT["Realtime WebSocket"]
         STO["Storage<br/>asset-3d-models"]
     end
@@ -102,7 +102,7 @@ flowchart TB
 **Data flow.** Devices publish `DBIRTH`/`DDATA` to Mosquitto, confined by ACL to their own edge-node
 subtree → ingestion resolves topic to `sparkplug_id`, verifies the device is **bound to the
 publishing gateway**, and quarantines anything unknown or contradictory → valid telemetry lands in
-the hypertable → Postgres triggers log every metadata change to the append-only `digital_thread` →
+the hypertable → Postgres triggers log every metadata change to the append-only `audit_trail` →
 the dashboard reads PostgREST and subscribes to Realtime.
 
 ---
@@ -176,7 +176,7 @@ neither of which is HTTP and so neither of which can ride an Ingress.
   install; for anything another person can reach, start from `values-prod.yaml.example` and point
   `secrets.existingSecret` at an externally managed Secret.
 - **`npm run dev:reset` is the way back to a blank stack**: it uninstalls, drops every claim and
-  reinstalls on the same cluster and images. `digital_thread` is append-only to every application
+  reinstalls on the same cluster and images. `audit_trail` is append-only to every application
   role, so dropping the volume is the only way to an empty audit trail.
 - **The chart validates its own values and fails the render, not the pod** — a partial credential
   set, a wrong-length Realtime key, a renamed Realtime Service, TLS with `scheme: http`, or an HPA
@@ -188,11 +188,15 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 ## The schema every install applies
 
 Every file in `supabase/migrations/` is applied by the `db-init` Job on every install and upgrade, and re-applied
-harmlessly each time: the schema baseline (`0001`), seed data (`0002`), then `0003` audit
-immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007` metric-name format, `0008` Sparkplug
-group, `0009` withdraws residual `anon` function grants, `0010` telemetry rollups and latest-value
-view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permitted values of a
-discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
+harmlessly each time. The schema baseline (`0001`) and seed data (`0002`) fold the incremental
+chain kept in [`supabase/migrations/archive/`](supabase/migrations/archive/README.md), whose
+lower numbers are reused by live migrations, so each of those says "archived". The chain is how
+the schema came to be: archived `0003` audit immutability, archived `0004`, archived `0005`,
+archived `0006` Node-RED SSO, archived `0007` metric-name format, archived `0008` Sparkplug
+group, archived `0009` withdraws residual `anon` function grants, archived `0010` telemetry
+rollups and latest-value view, archived `0011` IDTA Digital Nameplate and per-device nameplate
+data, archived `0012` permitted values of a
+discrete metric, archived `0013` ASHRAE 223P vocabulary, archived `0014` repoints locally-minted semantic
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
 one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
@@ -204,7 +208,7 @@ Realtime, `0024` adds an optional free-text `description` to devices and gateway
 Remote-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
 the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
 `AWAITING_BIRTH` lifecycle states — `0026` stamps every audit row with the transaction that wrote
-it (`digital_thread.causation_id`, from `txid_current()`) so the several rows one operator action
+it (`audit_trail.causation_id`, from `txid_current()`) so the several rows one operator action
 produces can be read back as one act, and adds `record_ingestion_rejection()` — the narrow
 SECURITY DEFINER gate through which the ingestion daemon records a payload it judged
 non-conforming, replacing `service_role`'s direct INSERT on the audit table — and `0027` maps the
@@ -253,16 +257,16 @@ deliberately unreachable from a browser, so the alternative to a four-column fun
 grant on the two tables that decide who is who — and `0043` adds
 `record_service_token_issued()`, which writes a **`TOKEN_MINTED`** row for a long-lived JWT and
 refuses two things outright: a subject that can sign in, and any expiry beyond
-`service_token_max_days()` — **90 days, because these tokens cannot be revoked** and the expiry is
-the only bound that exists — and `0044` adds `create_service_principal()`, which creates a machine
-identity the way `0034` does (`id` alone, so it has no email, no password and no identity provider)
-and accepts **only a read-only role**, since a privileged machine identity becomes an unrevocable
-write credential the moment a token is signed for it — and `0045` scopes `digital_thread_page()`'s
+`service_token_max_days()` — **90 days**, because a revocation (`0074`) reaches PostgREST alone and
+the expiry is the only bound on every other service — and `0044` adds `create_service_principal()`,
+which creates a machine identity the way `0034` does (`id` alone, so it has no email, no password
+and no identity provider) and accepted **only a read-only role** while no token could be revoked;
+what a machine may hold now is under [Machine identities](#machine-identities) — and `0045` scopes `audit_trail_page()`'s
 **deleted-asset filter to the three types that have a table behind them**: `0039` derived it as an
 anti-join against cells, gateways and devices and deliberately did not narrow it by entity type, so
 `service_principals` rows answered *"absent from all three"* and **the audit trail this feature
 exists to produce was hidden as deleted** — and `0039`
-adds `digital_thread_page()`, which applies the **deleted-asset
+adds `audit_trail_page()`, which applies the **deleted-asset
 filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
 it will actually show: hiding them afterwards had the page list four assets on a stack of
 twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — and `0040`
@@ -273,15 +277,16 @@ the rows it removes are rows an operator may deliberately want back, and a delet
 boot would silently undo every provisioning run — which is what `public.one_shot_migrations` is
 for — plus demo accounts (`supabase/seed.sql`).
 
-> **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
-> because `0005` already implements one; a second declaration of `log_digital_thread_event()`
-> would win by filename order on every boot and would have regressed the `actor_source`
-> attribution `0005` adds. The gap in the numbering is deliberate and the reasoning is in
-> [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
+> **The archive has no `0017`.** It was drafted as an audit-trigger change guard and then not written,
+> because archived `0005` already implements one; a second declaration of
+> `log_audit_trail_event()` would win by filename order on every boot and would have regressed
+> the `actor_source` attribution it adds. The gap in the numbering is deliberate and the reasoning
+> is in [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-archived-migration-0005).
 >
-> `0026` is that later declaration, written deliberately and on those terms: it reproduces `0005`'s
-> body **in full** and adds two lines, rather than patching it. Its self-check asserts that both the
-> heartbeat suppression guard and the causation stamp are present in the live definition, because
+> Archived `0026` is that later declaration, written deliberately and on those terms: it reproduces
+> archived `0005`'s body **in full** and adds two lines, rather than patching it. Its self-check
+> asserts that both the heartbeat suppression guard and the causation stamp are present in the
+> live definition, because
 > `check-docs-drift.mjs` can verify a redeclaration was *intended* and cannot verify it was
 > *complete*.
 
@@ -309,7 +314,7 @@ demonstrator, it is the only one.
 | `admin@aber.local` | `Administrator` | Full CRUD |
 | `manager@aber.local` | `Shopfloor_Manager` | Full CRUD |
 | `operator@aber.local` | `Operator` | Read-only + telemetry |
-| `auditor@aber.local` | `Auditor` | Digital Thread read-only |
+| `auditor@aber.local` | `Auditor` | Audit Trail read-only |
 
 Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
 `Administrator` must promote them.
@@ -384,7 +389,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `storage-policies` | `supabase/postgres:17.6.1.175` | hook Job: the storage RLS policies |
 | `supabase-auth` | `supabase/gotrue:v2.189.0` | behind `api.<domain>/auth/v1` |
 | `supabase-db` | `supabase/postgres:17.6.1.175`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
-| `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (Service `supabase-kong:8000`), Studio on 8001, the forge on 8002 |
+| `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (in-cluster `supabase-envoy:8000`), Studio on 8001, the forge on 8002 |
 | `supabase-functions` | `ghcr.io/harri-llewelyn/aber/edge-runtime` | behind `api.<domain>/functions/v1` |
 | `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
 | `supabase-rest` | `postgrest/postgrest:v14.12` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
@@ -409,7 +414,7 @@ unrecognised role produces `403`.
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise, once `INGEST_WRITER_PASSWORD` and `INGEST_DB_USER` are set: `ingest_writer` may INSERT and cannot UPDATE, DELETE or TRUNCATE. Unset, the daemon keeps the admin credential and the guarantee is the Python's again — see [Historian roles](#historian-roles) |
 | **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
-| **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
+| **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
 | **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default on Kubernetes |
@@ -514,14 +519,18 @@ Two consequences worth stating on the front page; both are detailed in
 
 Five identities here are held by software rather than people, and each is narrow by construction:
 `Service_Ingestor`, `Service_Playback` and the MCP reader hold `telemetry:read` **as a grant of their
-own** rather than a person's role (`0080`), `factoryplus_i3x` reads the broker namespace and
+own** rather than a person's role (`0080`), `aber_i3x` reads the broker namespace and
 publishes nothing, and `gateway-credential-service` can add one broker account and do nothing else.
 The three database identities are `auth.users` rows with no email, no password and no identity
 provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening
 `Operator` for the people who hold it cannot widen them by accident. An Administrator can create a
-further one from the **Access Control** page (`0125`): a name, a purpose and a set of read-only
-permissions from a fixed menu, then its first token shown once. Such an identity reaches the
-database only, never the broker.
+further one from the **Access Control** page (`0125`): a name, a purpose and permissions from a
+fixed menu, then its first token shown once. Such an identity reaches the database only, never the
+broker. **Machines propose, people decide** (`0013`): the menu is four reads and two writes, filing
+change proposals and versioning schemas, and `create_machine_principal()` refuses a machine device
+writes, quarantine and proposal decisions, and access control, each with its reason. The Audit
+Trail files a machine's writes as a service's whatever it declares (`0020`), and the person
+deciding its proposal sees it by name (`0022`).
 
 **The ingestion daemon does not hold `SUPABASE_SERVICE_ROLE_KEY`.** It used to, and that was the one
 credential whose compromise no policy written anywhere else could contain, sitting in the process
@@ -531,7 +540,7 @@ checks the caller is that principal. Its `telemetry:read` grant being insufficie
 an oversight: it makes those gates the only route rather than the tidy one.
 
 **Tokens are revocable at PostgREST** (`0074`–`0076`): `auth_pre_request` runs before every request
-and refuses a JWT whose `jti` has been revoked, and a whole service principal can be put beyond use.
+and refuses a JWT whose `jti` has been revoked, and a whole machine identity can be withdrawn.
 Expiry still bounds everything else — 90 days for any token naming a **principal**, ten years only
 for the anon and service-role keys, which name nobody. Storage, Realtime, the edge runtime and Studio
 verify the signature for themselves and are not reached by a revocation (see
@@ -567,7 +576,7 @@ side-channel on shift patterns, commissioning activity and the rate of configura
 **It cannot be fixed here** — it is upstream `supabase/realtime` behaviour. The gateway's `apikey`
 check does not mitigate it either: the publishable key is a registered key that is necessarily
 shipped to every browser, so holding it proves nothing about the caller. What *was* done is narrowing the
-publication: `digital_thread` was removed from it, being the most operationally sensitive stream and
+publication: `audit_trail` was removed from it, being the most operationally sensitive stream and
 one nothing subscribed to.
 
 **Accepted because** the target environment is an isolated shopfloor network reached over VPN, with
@@ -587,8 +596,9 @@ Storage, Realtime, the edge runtime and Studio verify the HS256 signature for th
 no table, so a revoked token still opens those doors until its own `exp` — at most 90 days for a
 token naming a principal.
 
-**Accepted because** every write that matters goes through PostgREST and RLS, the other surfaces
-are read-side or gated by a separate login, and the ceiling bounds the exposure.
+**Accepted because** every write that matters goes through PostgREST and RLS, including the two a
+machine identity may hold, the other surfaces are read-side or gated by a separate login, and the
+ceiling bounds the exposure.
 
 **Revisit if** tokens are issued to parties outside the operating organisation, or if a write path
 that bypasses PostgREST is ever added.
@@ -719,7 +729,7 @@ port-forwards**, and the two agreeing is the wiring check.
 - **A fresh install has no cells, no gateways, no devices and no schemas, and Node-RED opens on an
   empty editor.** It used to come up with a four-cell simulated shopfloor seeded by `0002` and a
   Node-RED publishing under four gateway identities, which meant every install began with assets
-  nobody had asked for and a Digital Thread already describing them. All of it is gone rather than
+  nobody had asked for and an Audit Trail already describing them. All of it is gone rather than
   opt-in: the demonstration floor, the simulator flow, the provisioning script and the seeded
   schemas. [`tutorial/README.md`](tutorial/README.md) walks through building one machine by hand
   instead, which is the same knowledge without the plant. `0040` and `0073` retire the assets and

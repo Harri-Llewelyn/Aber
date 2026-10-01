@@ -2,6 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
+import { POLL_INTERVAL_MS, RECONCILE_MS } from '../hooks/usePlatformAlerts'
 
 /**
  * The top bar's alert counter. What is pinned: it is permanent, including when healthy, because an
@@ -92,7 +93,7 @@ describe('AlertPill', () => {
     })
 
     it('takes the critical treatment when any alert is critical', () => {
-      // A floor with one critical and four warnings is a floor with a critical on it. Averaging the
+      // A site with one critical and four warnings is a site with a critical on it. Averaging the
       // severities would be a summary nobody asked for.
       render(<AlertPill alerts={[alert({ severity: 'warning' }), alert({ id: 'a2', fingerprint: 'fp-2' })]} />)
       expect(pill()).toHaveClass('alert-pill-critical')
@@ -127,7 +128,7 @@ describe('AlertPill', () => {
   describe('the list behind it', () => {
     it('is collapsed until asked, then lists each alert with its summary and id', () => {
       render(<AlertPill alerts={[alert()]} />)
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
 
       fireEvent.click(pill())
 
@@ -145,10 +146,13 @@ describe('AlertPill', () => {
       expect(screen.getByText(/Evaluated by Grafana/i)).toBeInTheDocument()
     })
 
-    /** The feed mode lives in this footer, beside the count whose freshness it describes. */
+    /**
+     * The feed mode lives in this footer, beside the count whose freshness it describes. The
+     * figures must be usePlatformAlerts' own intervals, not a literal that can drift from them.
+     */
     it.each([
-      [true, /Delivered live, reconciled every 60s/i],
-      [false, /Polled every 3s/i]
+      [true, new RegExp(`Delivered live, reconciled every ${RECONCILE_MS / 1000}s`, 'i')],
+      [false, new RegExp(`Polled every ${POLL_INTERVAL_MS / 1000}s \\(Realtime disabled\\)`, 'i')]
     ])('states how the count is delivered when realtime=%s', (realtime, expected) => {
       render(<AlertPill alerts={[alert()]} realtime={realtime} />)
       fireEvent.click(pill())
@@ -159,13 +163,13 @@ describe('AlertPill', () => {
       render(<AlertPill alerts={[alert()]} />)
 
       fireEvent.click(pill())
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
       fireEvent.click(pill())
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
 
       fireEvent.click(pill())
       fireEvent.click(screen.getByLabelText('Close alert list'))
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('renders an alert with no summary without inventing one', () => {
@@ -201,7 +205,7 @@ describe('AlertPill', () => {
       // The sparkplug id, not a name: platform_alerts carries no device name, and the Devices search
       // matches on the id anyway.
       expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('leaves a row inert when there is nowhere for it to go', () => {
@@ -226,8 +230,8 @@ describe('AlertPill', () => {
   })
 
   /**
-   * Where a row goes is decided by the alert's declared scope, not the id's prefix: of the rules
-   * shipped, four are gateway-scoped and five platform-scoped, and a stale gateway must not send an
+   * Where a row goes is decided by the alert's declared scope, not the id's prefix: of the 33 rules
+   * shipped, 5 are gateway-scoped and 28 platform-scoped, and a stale gateway must not send an
    * operator to a Devices search.
    */
   describe('routing by the subject the alert is about', () => {
@@ -267,7 +271,7 @@ describe('AlertPill', () => {
       fireEvent.click(link)
       expect(onSelectGateway).toHaveBeenCalledWith('gwy160000000000400080000')
       expect(onSelectDevice).not.toHaveBeenCalled()
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('still sends a device alert to the Devices page', () => {
@@ -335,7 +339,7 @@ describe('AlertPill', () => {
       render(<AlertPill alerts={[platformAlert()]} />)
       fireEvent.click(pill())
       // An empty mono line reads as a lookup that failed. This one has no asset BY CONSTRUCTION --
-      // `platform_alerts_asset_has_wire_id` (0023) requires sparkplug_id to be null here.
+      // `platform_alerts_asset_has_wire_id` (0001_baseline_schema.sql) requires sparkplug_id to be null here.
       expect(screen.getByText('Platform-wide')).toBeInTheDocument()
     })
   })
@@ -350,10 +354,10 @@ describe('AlertPill', () => {
         </div>
       )
       fireEvent.click(pill())
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
 
       fireEvent.mouseDown(screen.getByRole('button', { name: 'Somewhere else' }))
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('stays open when the pointer goes down inside the panel', () => {
@@ -362,17 +366,17 @@ describe('AlertPill', () => {
       render(<AlertPill alerts={[alert()]} />)
       fireEvent.click(pill())
       fireEvent.mouseDown(screen.getByText('Thermal Excursion'))
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
     })
 
     it('lets the pill itself still toggle, rather than closing and reopening on one click', () => {
       // The ref is on the WRAPPER, so the button that opens the panel counts as inside it.
       render(<AlertPill alerts={[alert()]} />)
       fireEvent.click(pill())
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByRole('dialog', { name: /Firing alerts/i })).toBeInTheDocument()
       fireEvent.mouseDown(pill())
       fireEvent.click(pill())
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
 
     it('binds nothing while it is closed', () => {

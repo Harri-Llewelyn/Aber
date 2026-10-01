@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  browsePath, namespaceUri, suggestedGroup, sparkplugDatatypeFor, categoryFor,
+  browsePath, suggestedGroup, sparkplugDatatypeFor, categoryFor,
   dataPoints, dataPointByName, opcuaSections, opcuaPrefill, dataPointTooltip
 } from '../utils/opcua'
 import { STANDARDS } from '../utils/standards'
@@ -35,9 +35,8 @@ const vocabulary = [
 ]
 
 describe('ExpandedNodeId parsing', () => {
-  it('splits the namespace from the browse path', () => {
+  it('reads the browse path from the node id', () => {
     const nodeId = vocabulary[0].node_id
-    expect(namespaceUri(nodeId)).toBe('http://opcfoundation.org/UA/Robotics/')
     expect(browsePath(nodeId)).toBe('MotionDevice/Axes/Axis/ActualPosition')
   })
 
@@ -52,7 +51,6 @@ describe('ExpandedNodeId parsing', () => {
     expect(browsePath(null)).toBe('')
     expect(browsePath('')).toBe('')
     expect(browsePath('i=1234')).toBe('')
-    expect(namespaceUri('nonsense')).toBe('')
   })
 })
 
@@ -182,6 +180,10 @@ describe('opcuaPrefill', () => {
 
   it('leaves the instance out — which axis is the part the specification cannot know', () => {
     expect(opcuaPrefill(vocabulary[0])).not.toHaveProperty('instance')
+  })
+
+  it('carries the companion specification, which a browse name two specifications share needs', () => {
+    expect(opcuaPrefill(vocabulary[0]).companionSpec).toBe('OPC 40010 Robotics')
   })
 
   it('returns null for nothing', () => {

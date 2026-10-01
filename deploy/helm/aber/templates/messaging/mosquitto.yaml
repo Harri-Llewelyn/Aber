@@ -67,7 +67,7 @@ THE SAN LIST IS THE WHOLE DIFFICULTY, and it is asymmetric in a way that hides t
     is enabled. That is where you will test.
   - GATEWAYS dial an IP ADDRESS, because there is rarely plant DNS for the broker. If it is not in
     ipAddresses below, every gateway fails verification while the in-cluster clients are happy --
-    the stack reports healthy, the simulator keeps producing, and the fleet is off.
+    the stack reports healthy, the host-run gateways keep producing, and the fleet is off.
 
 `external.loadBalancerIP` is included automatically when set. Everything else the fleet dials goes
 in `tls.extraIpSans` / `tls.extraDnsSans`.
@@ -343,6 +343,10 @@ spec:
         # rebind of 1883 is a listener change too, so its flag is in the checksum for the same reason.
         checksum/policy: {{ printf "%s%s%s%s" $conf $roles (ternary $tlsConf "" $tls.enabled) (ternary "loopback" "" $plaintextLoopback) | sha256sum }}
         checksum/scripts: {{ printf "%s%s%s%s%s" $init $service $libCredentials $libDynsec $libControl | sha256sum }}
+        # The platform principals' usernames: a renamed account is created, and a retired one
+        # removed, only by the reconcile at start. Names only, never a password.
+        {{- $s := .Values.secrets }}
+        checksum/principals: {{ printf "%s %s %s %s %s" $s.mqttIngestionUser $s.mqttI3xUser $s.mqttValidatorUser $s.mqttMonitorUser $s.mqttDynsecAdminUser | sha256sum }}
         {{- if .Values.mosquitto.metrics.enabled }}
         # The exporter sidecar; the broker itself has no HTTP surface.
         {{- include "aber.scrapeAnnotations" (dict "port" .Values.mosquitto.metrics.port "path" "/metrics") | nindent 8 }}

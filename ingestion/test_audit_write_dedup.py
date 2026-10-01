@@ -3,9 +3,9 @@ Unit tests for ingestion's write deduplication on the DBIRTH and node-heartbeat 
 
 WHAT THIS PROTECTS, AND WHY IT IS NOT THE SAME THING AS THE AUDIT GUARD.
 
-archived migration 0005 already stops an unchanged UPDATE from writing a `digital_thread` row, and stops a
+archived migration 0005 already stops an unchanged UPDATE from writing an `audit_trail` row, and stops a
 heartbeat-only UPDATE from writing one either. That is the DATABASE half, and
-`supabase/migrations/test_digital_thread_guard.py` covers it.
+`supabase/migrations/test_audit_trail_guard.py` covers it.
 
 This suite covers the DAEMON half, which 0005 cannot reach: the UPDATE statement itself. A write
 that changes nothing still costs a PostgREST round trip, still produces a WAL record, and -- because
@@ -131,7 +131,7 @@ class DBirthDedupTestCase(unittest.TestCase):
             ("verify_gateway_binding", lambda device, gw, group=None: None),
             ("store_birth_parameters", lambda sparkplug_id, payload: None),
             ("record_declared_metrics", lambda device, payload: None),
-            ("mark_device_seen", lambda device: None),
+            ("mark_device_seen", lambda *a, **k: None),
             ("register_birth_aliases", lambda *a, **k: 0),
         ):
             self._patched[name] = getattr(ingestion, name)
@@ -154,7 +154,7 @@ class DBirthDedupTestCase(unittest.TestCase):
         fixed and NULL means "leave alone", so the changed-field set that used to be the UPDATE
         payload is now the non-NULL parameters -- normalised back to column names here so the
         assertions keep saying what they said. The property is unchanged: a steady-state rebirth
-        must produce no call at all, because log_digital_thread_event() fires on every UPDATE to
+        must produce no call at all, because log_audit_trail_event() fires on every UPDATE to
         `devices` and a birth certificate is repeated on a timer.
         """
         columns = (("status", "p_status"),

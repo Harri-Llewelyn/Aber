@@ -41,8 +41,9 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off.
-const SETTINGS_VERSION = 6;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor-users
+// map renamed for Aber.
+const SETTINGS_VERSION = 7;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -90,9 +91,27 @@ const runtimeConfigPath = path.join(DATA_DIR, '.config.runtime.json');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// The two files under /data named for Factory+ before the rename to Aber are moved, not re-created:
+// a volume that lost its seed marker would be re-seeded blank over its flows, and one that lost the
+// editor-users map would drop every signed-in Administrator to a read-only editor. A failed move
+// stops the boot rather than risk either.
+const SEED_MARKER_NAME = '.aber-seeded';
+const EDITOR_USERS_NAME = '.aber-editor-users.json';
+for (const [legacy, current] of [
+  ['.factoryplus-seeded', SEED_MARKER_NAME],
+  ['.factoryplus-editor-users.json', EDITOR_USERS_NAME]
+]) {
+  const from = path.join(DATA_DIR, legacy);
+  const to = path.join(DATA_DIR, current);
+  if (fs.existsSync(from) && !fs.existsSync(to)) {
+    fs.renameSync(from, to);
+    console.log(`[node-red-init] moved ${from} to ${to}`);
+  }
+}
+
 // 1. Seed the flow definition: first run only. The guard is a marker file, not `flows.json`
 // existing, because the image ships a placeholder and Docker pre-populates a fresh volume from it.
-const SEED_MARKER = path.join(DATA_DIR, '.factoryplus-seeded');
+const SEED_MARKER = path.join(DATA_DIR, SEED_MARKER_NAME);
 const seededBefore = fs.existsSync(SEED_MARKER);
 const seededFlow = !seededBefore || forceSeed;
 
@@ -135,12 +154,38 @@ if (seededFlow) {
   );
 }
 
+// 1a. The broker's tls-config node was named for Factory+ before the rename to Aber. It is moved
+// in the file's text, so flows.json is otherwise byte-identical: the node's id and every reference
+// to it are the same whole JSON string. Only when the old id is present and the new one is not.
+const TLS_NODE_ID = 'aber-tls-config';
+const TLS_NODE_NAME = 'Aber internal CA';
+const LEGACY_TLS_NODE = { id: 'factoryplus-tls-config', name: 'Factory+ internal CA' };
+if (fs.existsSync(flowsPath)) {
+  const text = fs.readFileSync(flowsPath, 'utf8');
+  let nodes = [];
+  try { nodes = JSON.parse(text); } catch { /* read again below, where an unreadable flow stops the boot */ }
+  const legacy = Array.isArray(nodes) ? nodes.find((n) => n?.id === LEGACY_TLS_NODE.id) : undefined;
+  if (legacy && !nodes.some((n) => n?.id === TLS_NODE_ID)) {
+    const quoted = (s) => JSON.stringify(s);
+    const occurrences = text.split(quoted(LEGACY_TLS_NODE.id)).length - 1;
+    let moved = text.split(quoted(LEGACY_TLS_NODE.id)).join(quoted(TLS_NODE_ID));
+    // The name moves only while it is the one this script wrote and nothing else carries it.
+    if (legacy.name === LEGACY_TLS_NODE.name && moved.split(quoted(LEGACY_TLS_NODE.name)).length === 2) {
+      moved = moved.replace(quoted(LEGACY_TLS_NODE.name), () => quoted(TLS_NODE_NAME));
+    }
+    fs.writeFileSync(flowsPath, moved);
+    console.log(
+      `[node-red-init] moved tls-config node '${LEGACY_TLS_NODE.id}' to '${TLS_NODE_ID}' ` +
+        `(${occurrences - 1} reference(s) with it)`
+    );
+  }
+}
+
 // 1b. Reconcile the broker node's transport settings (host, port, TLS) on every boot: where the
 // broker is is deployment configuration, not user content. Writes a narrow set of keys, only when
 // they are explicitly configured. Must run before the credential section, which exits early on
 // volumes that hold credentials.
 const BROKER_NODE_ID = 'mqtt-broker-config';
-const TLS_NODE_ID = 'factoryplus-tls-config';
 
 const mqttTlsEnabled = /^(1|true|yes|on)$/i.test((process.env.MQTT_TLS_ENABLED || '').trim());
 const mqttTlsCaFile = (process.env.MQTT_TLS_CA_FILE || '').trim();
@@ -221,8 +266,9 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
       flow.push(tlsNode);
       changes.push(`added tls-config node '${TLS_NODE_ID}'`);
     }
-    Object.assign(tlsNode, {
-      name: 'Factory+ internal CA',
+    // Through setField, so a node that differs only here (a moved CA path) is still written.
+    for (const [key, value] of Object.entries({
+      name: TLS_NODE_NAME,
       // certType 'files' means cert/key/ca are paths read at deploy time. Stated explicitly because
       // 05-tls.js defaults it and a default change would silently reinterpret `ca`.
       certType: 'files',
@@ -235,7 +281,7 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
       verifyservercert: true,
       servername: '',
       alpnprotocol: ''
-    });
+    })) setField(tlsNode, key, value);
   };
 
   // The inverse of applyTls. Turning TLS off used to move the port and leave `usetls: true`, a TLS
@@ -324,7 +370,7 @@ const SETTINGS_JS = `/**
  *                          that deploy-nodered forwards from the operator who triggered it.
  *   httpNodeAuth        -- the http-in nodes (POST /hooks/quarantine). adminAuth does NOT
  *                          cover these: they mount under httpNodeRoot, a separate Express
- *                          mount (node-red/red.js:426), which is why the webhook stayed open
+ *                          mount (Node-RED's red.js:426), which is why the webhook stayed open
  *                          in every design that only set adminAuth.
  */
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
@@ -404,7 +450,7 @@ const CACHE_TTL_MS = 30000;
  */
 // path.posix, not path.join: this string is baked into a file that only ever runs inside the
 // container, but the generator can be run from Windows, where join() would emit a backslash path.
-const EDITOR_USERS_FILE = ${JSON.stringify(path.posix.join(DATA_DIR, '.factoryplus-editor-users.json'))};
+const EDITOR_USERS_FILE = ${JSON.stringify(path.posix.join(DATA_DIR, EDITOR_USERS_NAME))};
 const editorUsers = new Map();
 
 try {

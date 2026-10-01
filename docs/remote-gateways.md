@@ -304,8 +304,8 @@ perfectly and then connects to nothing — the hardest version of this failure t
 
 | Variable | What breaks if it is in-stack |
 | :--- | :--- |
-| `SUPABASE_PUBLIC_URL` | `gateway-bundle` answers `503` and mints no token. `supabase-kong`, `localhost` and loopback addresses are all refused. |
-| `MQTT_PUBLIC_HOST` | `enroll-gateway` answers `503` **without consuming the token**. `mosquitto`, `supabase-kong`, `localhost` and loopback addresses are refused. |
+| `SUPABASE_PUBLIC_URL` | `gateway-bundle` answers `503` and mints no token. `supabase-envoy`, `localhost` and loopback addresses are all refused. |
+| `MQTT_PUBLIC_HOST` | `enroll-gateway` answers `503` **without consuming the token**. `mosquitto`, `supabase-envoy`, `localhost` and loopback addresses are refused. |
 
 Both name the same machine. The chart derives both from `global.publicBaseDomain`, which
 `npm run setup` asks for (`--domain=<base>` answers it from a script; blank keeps the loopback
@@ -713,7 +713,7 @@ by mistake is now caught in the forge rather than on the appliance, below.
 
 ### The forge checks the shape before you can merge it
 
-`main` on every gateway repository requires the status **`acs/flow-shape`**. The platform posts it:
+`main` on every gateway repository requires the status **`aber/flow-shape`**. The platform posts it:
 every push to a proposal branch is delivered to `forge-events`, which reads the `flows.json` at
 that commit and applies the same two checks the appliance's puller applies. A red check means the
 merge button is refused, with *"Not all required status checks successful"*.

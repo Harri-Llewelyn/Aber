@@ -555,7 +555,7 @@ class SchemaEnforcementTestCase(BatchingTestCase):
     def test_a_dropped_metric_is_still_reported_as_a_violation(self):
         """
         Enforcement must not cost the audit trail. The metric is gone from the historian, so the
-        digital_thread row is the ONLY remaining evidence that the device sent anything at all.
+        audit_trail row is the ONLY remaining evidence that the device sent anything at all.
         """
         self.enforce()
         recorded = []

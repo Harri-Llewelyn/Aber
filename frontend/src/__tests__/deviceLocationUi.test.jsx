@@ -46,7 +46,7 @@ const device = (overrides = {}) => ({
 const GATEWAYS = [
   { gateway_id: 'gw-1', gateway_name: 'Line_A_Gateway', sparkplug_id: 'gwy-1-sparkplug', cell_id: CELL_1, location_scope: 'cell', status: 'ONLINE', is_archived: false, devices: [] },
   { gateway_id: 'gw-host', gateway_name: 'Host_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] },
-  // `gateways_synthetic_has_no_cell` (0059) forbids a cell here, so cell_id is null by constraint
+  // `gateways_synthetic_has_no_cell` (0001_baseline_schema.sql) forbids a cell here, so cell_id is null by constraint
   // rather than by omission -- the fixture cannot be written any other way.
   { gateway_id: 'gw-sim', gateway_name: 'Sim_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', is_simulated: true, status: 'ONLINE', is_archived: false, devices: [] }
 ]
@@ -80,8 +80,8 @@ const openEdit = (name = 'CNC_01') => {
 beforeEach(() => vi.clearAllMocks())
 
 describe('the cell column', () => {
-  // Scoped to the row's Cell cell specifically. Cell names also appear in the filter dropdown,
-  // and "Unassigned" is additionally the empty option of the row's own gateway picker.
+  // Scoped to the roster's Cell column. Cell names also appear in the filter dropdown. The only
+  // table is the roster while the Quarantine queue is empty.
   const cellColumn = () =>
     within(screen.getByRole('table')).getAllByRole('row')[1].querySelectorAll('td')[4]
 
@@ -251,13 +251,13 @@ describe('the edit form', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'site_wide' })
   })
 
-  it('says the device will land in the Unassigned queue when nothing can supply a cell', async () => {
+  it('says the device will show under Unassigned when nothing can supply a cell', async () => {
     await show([device({
       active_gateway_id: 'gw-host', effective_cell_id: null, gateway_cell_id: null,
       location_source: 'unassigned'
     })])
     openEdit()
-    expect(screen.getByText(/will appear in the Unassigned queue/i)).toBeInTheDocument()
+    expect(screen.getByText(/will show under Unassigned in the Cell filter/i)).toBeInTheDocument()
   })
 
   it('keeps an archived cell selectable when the device already points at it', async () => {
@@ -280,7 +280,7 @@ describe('the edit form', () => {
     expect(within(cellPicker()).queryByRole('option', { name: /Site-Wide/i })).toBeNull()
 
     fireEvent.click(screen.getByRole('radio', { name: /Site-Wide/i }))
-    expect(document.querySelector('#device-cell-zone')).toBeNull()
+    expect(document.querySelector('#device-cell')).toBeNull()
   })
 
   it('withholds Area-Wide until an area exists, and names the only one without asking', async () => {
@@ -289,12 +289,12 @@ describe('the edit form', () => {
     expect(screen.getByRole('radio', { name: /Area-Wide/i })).toBeDisabled()
     cleanup()
 
-    await show([device()], { areas: [{ area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 }] })
+    await show([device()], { areas: [{ area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 }] })
     openEdit()
     fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
     // One area: no dropdown, its name is stated and the save carries it.
     expect(document.querySelector('#device-area')).toBeNull()
-    expect(screen.getByText('Building 1')).toBeInTheDocument()
+    expect(screen.getByText('Area 1')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: 'area-1', location_scope: 'area_wide' })
@@ -303,8 +303,8 @@ describe('the edit form', () => {
   it('asks which area when there are several, and holds the save until one is chosen', async () => {
     await show([device()], {
       areas: [
-        { area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 },
-        { area_id: 'area-2', area_name: 'Building 2', cells: [], cell_count: 0 }
+        { area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 },
+        { area_id: 'area-2', area_name: 'Area 2', cells: [], cell_count: 0 }
       ]
     })
     openEdit()
@@ -326,7 +326,7 @@ describe('the edit form', () => {
     // withheld.
     await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
     openEdit()
-    expect(document.querySelector('#device-cell-zone').disabled).toBe(true)
+    expect(document.querySelector('#device-cell').disabled).toBe(true)
     expect(screen.getByText(/belong to the Simulated lane/i)).toBeInTheDocument()
   })
 
@@ -392,8 +392,6 @@ describe('the Sparkplug topic in the context panel', () => {
   })
 
   it('no longer duplicates the identifiers inside the edit dialog', async () => {
-    // The removal itself, asserted -- otherwise the three blocks could drift back in and only the
-    // absence of a test would notice.
     await show([device()])
     openEdit()
     const modal = document.querySelector('.modal')
@@ -448,6 +446,10 @@ describe('approving a quarantined device', () => {
     entity_type: 'DEVICE'
   }
 
+  // The row's button and the dialog's submit share a label; the dialog's is the one inside it.
+  const approveButton = () =>
+    within(screen.getByRole('dialog')).getByRole('button', { name: /Approve & Onboard/i })
+
   const openApproval = async () => {
     await show([], { quarantine: [quarantined], expect: 'Unknown_Robot' })
     fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
@@ -460,16 +462,16 @@ describe('approving a quarantined device', () => {
     expect(picker.value).toBe('')
   })
 
-  it('warns that a host-run gateway cannot supply a cell', async () => {
+  it('warns that a gateway with no cell leaves the device without one', async () => {
     await openApproval()
-    expect(screen.getByText(/land in the Unassigned queue/i)).toBeInTheDocument()
+    expect(screen.getByText(/will show under Unassigned in the Cell filter/i)).toBeInTheDocument()
   })
 
   it('forwards the chosen cell to the edge function', async () => {
     supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
     await openApproval()
     fireEvent.change(screen.getByTitle(/Where this device sits/i), { target: { value: CELL_2 } })
-    fireEvent.click(screen.getByRole('button', { name: /Approve & Onboard/i }))
+    fireEvent.click(approveButton())
 
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
     expect(supabase.functions.invoke.mock.calls[0][1].body).toMatchObject({
@@ -482,8 +484,8 @@ describe('approving a quarantined device', () => {
     api.get.mockImplementation(routeGet([], {
       quarantine: [quarantined],
       areas: [
-        { area_id: 'area-1', area_name: 'Building 1', cells: [], cell_count: 0 },
-        { area_id: 'area-2', area_name: 'Building 2', cells: [], cell_count: 0 }
+        { area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 },
+        { area_id: 'area-2', area_name: 'Area 2', cells: [], cell_count: 0 }
       ]
     }))
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
@@ -492,9 +494,9 @@ describe('approving a quarantined device', () => {
     await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
 
     fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
-    expect(screen.getByRole('button', { name: /Approve & Onboard/i })).toBeDisabled()
+    expect(approveButton()).toBeDisabled()
     fireEvent.change(document.querySelector('#approve-area'), { target: { value: 'area-2' } })
-    fireEvent.click(screen.getByRole('button', { name: /Approve & Onboard/i }))
+    fireEvent.click(approveButton())
 
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
     expect(supabase.functions.invoke.mock.calls[0][1].body).toMatchObject({
@@ -507,7 +509,7 @@ describe('approving a quarantined device', () => {
     // always answers, so it always sends the key.
     supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
     await openApproval()
-    fireEvent.click(screen.getByRole('button', { name: /Approve & Onboard/i }))
+    fireEvent.click(approveButton())
 
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
     const body = supabase.functions.invoke.mock.calls[0][1].body
@@ -567,8 +569,9 @@ describe('replay lanes', () => {
     // those combinations unreachable.
     await show([device(), shadow({ is_archived: true })])
     fireEvent.click(await screen.findByText(/Show shadow devices \(1\)/))
+    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
-    expect(screen.getByText('ARCHIVED')).toBeInTheDocument()
+    expect(screen.getAllByText('ARCHIVED').length).toBeGreaterThan(0)
   })
 })
 
@@ -605,9 +608,8 @@ describe('the actions a shadow device does not offer', () => {
     expect(panel.queryByText('Attached Links')).toBeNull()
   })
 
-  it('still offers the AAS exports, which 0060 designed for', async () => {
-    /* Deliberately kept: a shadow exports without a Nameplate submodel, which produces a shell with
-       no asset identity to collide with. */
+  it('still offers the AAS exports on a replay lane', async () => {
+    // A replay lane exports without a Nameplate submodel: a shell with no asset identity.
     const panel = await openShadowPanel()
     expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
   })

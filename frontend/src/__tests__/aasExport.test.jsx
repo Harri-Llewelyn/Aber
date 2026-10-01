@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
+import { PERMISSION_UUIDS } from '../constants'
 import { downloadJSON } from '../utils/downloadJSON'
 import { downloadBlob } from '../utils/downloadBlob'
 
@@ -73,7 +74,7 @@ beforeEach(() => {
 })
 
 describe('Export AAS action', () => {
-  it('offers both formats on every device row', async () => {
+  it('offers both formats in the device drawer', async () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
     const items = openPanel().getAllByRole('button').map(i => i.textContent)
@@ -171,7 +172,7 @@ describe('Export AAS action', () => {
     expect(downloadJSON).not.toHaveBeenCalled()
   })
 
-  it('re-enables the menu after a failure, so the export can be retried', async () => {
+  it('re-enables the export after a failure, so it can be retried', async () => {
     api.post.mockRejectedValue(new Error('boom'))
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
@@ -238,5 +239,44 @@ describe('Export AAS — AASX package', () => {
 
     await waitFor(() => expect(downloadJSON).toHaveBeenCalled())
     expect(downloadBlob).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The bundle carries the device's Audit Trail, and aas-export refuses it to a caller without
+ * `audit_trail:read`. The action is withheld from that reader, as View Audit Trail is.
+ */
+describe('Export Bundle — for the readers of the Audit Trail', () => {
+  const BUNDLE = /Export Bundle \(with history\)/i
+
+  const panelFor = async (hasPermission) => {
+    render(<DevicesTab showToast={vi.fn()} onSelectDevice={() => {}} hasPermission={hasPermission} />)
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    return openPanel()
+  }
+
+  it('is offered to a role that holds audit_trail:read, even without the manage permissions', async () => {
+    // The Auditor's grant: the trail and nothing else.
+    const panel = await panelFor((p) => p === PERMISSION_UUIDS.AUDIT_TRAIL_READ)
+    expect(panel.getByText(BUNDLE).closest('button').disabled).toBe(false)
+  })
+
+  it('is withheld from a role without it, which keeps both plain exports', async () => {
+    // The Operator's grants: telemetry, the quarantine view and proposals.
+    const operator = [PERMISSION_UUIDS.TELEMETRY_READ, PERMISSION_UUIDS.QUARANTINE_VIEW, PERMISSION_UUIDS.PROPOSAL_CREATE]
+    const panel = await panelFor((p) => operator.includes(p))
+    expect(panel.queryByText(BUNDLE)).toBeNull()
+    expect(panel.getByText(/Export AAS JSON/i)).toBeInTheDocument()
+    expect(panel.getByText(/Export AASX package/i)).toBeInTheDocument()
+  })
+
+  it('posts the device to the bundle route when offered', async () => {
+    api.post.mockResolvedValue({ blob: new Blob(['PK']), filename: 'CNC_01-bundle.aasx', stats: { bundle: { stored: true } } })
+    const panel = await panelFor(() => true)
+    fireEvent.click(panel.getByText(BUNDLE))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/devices/asset-export', { device_id: DEVICE.asset_id }
+    ))
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'CNC_01-bundle.aasx'))
   })
 })

@@ -236,7 +236,7 @@ class TestServesOnlyReads(unittest.TestCase):
     Writes are not implemented, and the self-description says so.
 
     A repository that advertised SSP-001 would be promising POST/PUT/DELETE. Asset data is authored
-    through the dashboard, which has the role model and writes `digital_thread`; a write here would
+    through the dashboard, which has the role model and writes `audit_trail`; a write here would
     bypass both.
     """
 

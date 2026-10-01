@@ -21,6 +21,11 @@ playbook's module for the edge runtime
 ([`scripts/sync-gateway-platform.mjs`](scripts/sync-gateway-platform.mjs)); edit the source,
 run the script, and CI's `--check` refuses a stale copy.
 
+**A rename retires the old name.** Add it to `RETIRED` in check 19c of
+[`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs), one line, and each place that
+has to keep naming it to `KEPT` with its reason: the code that moves it, a test that plants it,
+history. After that the old name fails CI anywhere else.
+
 **Sweeping a surface for the comment rule** means proving the sweep changed no behaviour, and the
 comparison depends on what the surface is. For Python, compare the AST minus docstrings; for YAML,
 compare the parsed data; for everything else, compare the comment-stripped text. For the Helm chart

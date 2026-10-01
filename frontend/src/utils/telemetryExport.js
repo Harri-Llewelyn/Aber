@@ -30,7 +30,7 @@ export const EXPORT_RESOLUTIONS = [
     note: 'Averaged per hour, with the min and max kept.' }
 ]
 
-export const RAW_RESOLUTION = EXPORT_RESOLUTIONS[0]
+const RAW_RESOLUTION = EXPORT_RESOLUTIONS[0]
 
 /** The entry for a key, falling back to raw so an unknown key can never select a rollup. */
 export function resolutionByKey(key) {
