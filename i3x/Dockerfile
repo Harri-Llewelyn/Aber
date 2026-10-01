@@ -17,7 +17,9 @@ FROM python:3.13-slim
 # undecodable. It does NOT match the pinned runtime and does not need to -- apt supplies libprotoc
 # 3.21.12 against a 5.x runtime. See ingestion/requirements.txt for why that pairing is deliberate;
 # this image and that one must keep making the same choice, since both decode the same wire format.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` takes the base to Debian's current fixes, as ingestion/Dockerfile does.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
