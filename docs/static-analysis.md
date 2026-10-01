@@ -21,7 +21,17 @@ npm run audit:deps        # npm audit and pip-audit
 
 Every check needs Docker. `lint:js` also needs npm, `scan:config` needs helm, and the rulesets,
 advisory databases, the first ESLint install and `lint:deno`, which reads the edge functions' npm
-registry metadata on every run, need network access. CI does not run them yet (#387).
+registry metadata on every run, need network access.
+
+CI runs all nine on a clean `ubuntu-latest` runner, in two jobs of [`ci.yml`](../.github/workflows/ci.yml):
+
+- **Secret Scan** runs `scan:secrets` on every push, documentation included, over a full clone
+  (`fetch-depth: 0`), because a secret pasted into a README is the case it exists for.
+- **Static Analysis** runs the other eight with `node scripts/lint-all.mjs --skip=secrets`, on
+  every push that changes more than documentation (the `changes` gate that also guards the
+  end-to-end stack). Its setup is Node 24 and Helm 3.16.3; Docker is on the runner already.
+
+Nothing is cached between runs: the pinned ESLint installs into `.cache/lint/eslint` each time.
 
 | Check | Tool | What it reads | What it judges | Allow-list |
 | :--- | :--- | :--- | :--- | :--- |
@@ -63,5 +73,5 @@ node scripts/scan-secrets.mjs --git-dir=/tmp/aber-mirror.git
 ```
 
 Once the repository is public, CodeQL, Dependabot alerts and secret scanning are free on GitHub and
-cover `scan:source`, `audit:deps` and `scan:secrets` in CI. Until then these scripts are the only
-coverage (#387).
+cover `scan:source`, `audit:deps` and `scan:secrets`. Until then the two CI jobs above are the only
+coverage.
