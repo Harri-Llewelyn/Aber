@@ -6,7 +6,9 @@ const SIZES = { sm: 'modal-sm', md: 'modal-md', lg: 'modal-lg', xl: 'modal-xl', 
 
 /**
  * The frame every dialog shares: overlay, header row (icon, title, close button), an optional lead
- * paragraph, the body, an error slot and a footer. It renders `role="dialog"`, `aria-modal` and an
+ * paragraph, the body, an error slot and a footer. The header and the footer stay in view: only the
+ * body (the lead and the children, in `.modal-body`) scrolls when the dialog is taller than the
+ * window, and the error slot sits above the footer outside it. It renders `role="dialog"`, `aria-modal` and an
  * `aria-labelledby` pointing at the title, and closes on Escape through the shared `useEscapeKey`
  * stack, so a Modal opened over another one answers the keypress first.
  *
@@ -48,6 +50,10 @@ const SIZES = { sm: 'modal-sm', md: 'modal-md', lg: 'modal-lg', xl: 'modal-xl', 
  * renders nothing. Show a failure here rather than only in a toast, which is gone by the time the
  * operator looks back at the dialog.
  *
+ * @param {boolean} [fill] Makes the body a flex column, so one child with class `modal-fill` takes the
+ * height left over (and scrolls inside itself) instead of its own height guess. Without it the body
+ * is an ordinary block.
+ *
  * @param {React.ReactNode} [footer] The buttons, as siblings (the row is `.modal-actions`).
  * Convention, not enforced: dismiss on the left (ghost "Cancel", or "Close" for a read-only
  * dialog), the primary act on the right, and a destructive act rightmost and styled
@@ -72,6 +78,7 @@ export function Modal({
   footer = null,
   closeOnOverlay = false,
   headerActions = null,
+  fill = false,
   layer,
   children
 }) {
@@ -108,9 +115,10 @@ export function Modal({
           </div>
         </div>
 
-        {lead && <p className="modal-lead">{lead}</p>}
-
-        {children}
+        <div className={`modal-body${fill ? ' modal-body-fill' : ''}`}>
+          {lead && <p className="modal-lead">{lead}</p>}
+          {children}
+        </div>
 
         {error && (
           <div className="modal-error" role="alert">

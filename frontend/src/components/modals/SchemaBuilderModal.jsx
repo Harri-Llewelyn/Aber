@@ -118,6 +118,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
       title="Build Schema from Catalog"
       icon={<IconFileCode size={18} />}
       size="wide"
+      fill
       onClose={onCancel}
       footer={
         <>
@@ -169,7 +170,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
         }}
       />
 
-      <div className="form-group">
+      <div className="form-group modal-fill" style={{ display: 'flex', flexDirection: 'column', minHeight: '260px' }}>
         <label className="form-label">
           Metrics <RequiredMark />
           <span className="section-count">{selectedMetrics.length} selected</span>
@@ -199,9 +200,8 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
             ))}
           </select>
         </div>
-        {/* Scales with the viewport but stays capped, since `.modal` caps its own height and an
-            uncapped list would move the scrollbar outwards and take the search box off screen. */}
-        <div style={{ maxHeight: 'min(46vh, 440px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        {/* Takes the height the fields above leave, and scrolls inside itself. */}
+        <div style={{ flex: '1 1 auto', minHeight: '160px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
           {filteredCatalog.length === 0 ? (
             <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
           ) : (

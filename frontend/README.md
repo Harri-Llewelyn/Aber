@@ -102,6 +102,15 @@ So `filteredAssets`, `attentionCount` and `tagOptions` are `useMemo`d, and the p
 **Miss a dependency and the table silently stops responding to that filter** — a worse bug than the
 slowness, so the list names every value the predicate reads, in the order it reads them.
 
+### A dialog keeps its buttons in view
+
+`Modal` is a flex column capped at the window height. The header row, the error slot and the footer
+(`.modal-actions`) keep their size; only `.modal-body` (the lead and the children) scrolls, so Save
+never scrolls away and an error never pushes it down. `.modal` itself must not scroll. A dialog
+whose list should take the leftover height passes `fill` and marks that child `modal-fill`; the
+schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
+window and is not needed any more.
+
 ---
 
 ## Migrated design notes
