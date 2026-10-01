@@ -6,8 +6,8 @@
 apiVersion: 1
 
 groups:
-  # Platform Conditions: rows of public.platform_health and gateway_health, read as grafana_reader
-  # through the Supabase datasource. NoData is OK throughout: the views emit a row only for a condition.
+  # Platform Conditions: rows of public.platform_health, gateway_health and backup_health, read as
+  # grafana_reader through the Supabase datasource. NoData is OK throughout: no row is nothing to report.
   - orgId: 1
     name: Platform Conditions
     folder: Aber - Platform Infrastructure
@@ -313,6 +313,122 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # Backup Stale: no successful platform backup for 36h, counted from the first job recorded
+      # until one succeeds. The window is the delay. No row while no job exists.
+      - uid: aber-backup-stale
+        title: Backup Stale
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            No platform backup has succeeded for {{ humanizeDuration $values.B.Value }}. The
+            Backups page names the last good one and why later runs failed; a job queued and never
+            claimed means the backup service is not running.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       age_seconds  AS since_success_seconds
+                  FROM public.backup_health
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [129600]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Off-site Backup Stale: the newest backup has had no copy at the off-site destination for 12h,
+      # counted from when it was taken or the destination last changed. No row while no destination.
+      - uid: aber-backup-offsite-stale
+        title: Off-site Backup Stale
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The newest platform backup has had no off-site copy for
+            {{ humanizeDuration $values.B.Value }}. The Backups page shows why the copy failed;
+            check the S3 endpoint, the credential and, under a NetworkPolicy, the egress rule.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       age_seconds  AS without_copy_seconds
+                  FROM public.backup_offsite_health
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [43200]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
   # Ingestion Pipeline: the daemon's Prometheus counters, which see the pipe the views cannot. Resolves
   # only where a datasource with uid `prometheus` exists; elsewhere DatasourceError, routed by the policy.
   - orgId: 1
@@ -557,10 +673,10 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # Digital Thread Partitions Falling Behind: rows in the DEFAULT partition, for 30m. The view
+      # Audit Trail Partitions Falling Behind: rows in the DEFAULT partition, for 30m. The view
       # always returns one row, so an empty frame is the datasource.
-      - uid: aber-digital-thread-partitions
-        title: Digital Thread Partitions Falling Behind
+      - uid: aber-audit-trail-partitions
+        title: Audit Trail Partitions Falling Behind
         condition: C
         for: 30m
         noDataState: OK
@@ -570,10 +686,10 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            {{ printf "%.0f" $values.B.Value }} audit row(s) have landed in the digital_thread
+            {{ printf "%.0f" $values.B.Value }} audit row(s) have landed in the audit_trail
             DEFAULT partition, so the monthly partition job has stopped. Nothing is lost and
             nothing is refused, but retention by DETACH will skip these rows. Run
-            SELECT public.ensure_digital_thread_partitions(3); and check cron.job_run_details.
+            SELECT public.ensure_audit_trail_partitions(3); and check cron.job_run_details.
         data:
           - refId: A
             relativeTimeRange:
@@ -591,7 +707,7 @@ groups:
               rawSql: |
                 SELECT now()        AS "time",
                        default_rows AS default_partition_rows
-                  FROM public.digital_thread_partition_health
+                  FROM public.audit_trail_partition_health
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1927,3 +2043,8 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
+
+deleteRules:
+  # The partitions rule's uid before the page was renamed; a Grafana that loaded it drops it.
+  - orgId: 1
+    uid: aber-digital-thread-partitions

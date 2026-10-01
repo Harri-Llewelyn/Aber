@@ -1,14 +1,14 @@
 {{- include "aber.validate" . -}}
-Factory+ {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+Aber {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
 
-  PHASES 1-5 ARE INSTALLED: the whole stack bar in-cluster CI and hardening.
+  The shopfloor data platform. What this release runs:
 
 Data tier
   timescaledb        StatefulSet   {{ .Values.timescaledb.persistence.size }} on {{ .Values.timescaledb.persistence.storageClass | default .Values.global.storageClass }}
   supabase-db        StatefulSet   {{ .Values.supabaseDb.persistence.size }} on {{ .Values.supabaseDb.persistence.storageClass | default .Values.global.storageClass }}
 
 Control plane
-  supabase-kong      :8000   the gateway (Envoy); config rendered by an initContainer
+  supabase-envoy     :8000   the gateway (Envoy); config rendered by an initContainer
   supabase-auth      :9999   GoTrue — also the OAuth 2.1 server Grafana and Node-RED use
   supabase-rest      :3000   PostgREST
   {{ .Values.realtime.serviceName }}       :{{ .Values.realtime.port }}   Realtime — named for the TENANT, do not rename
@@ -20,8 +20,13 @@ Control plane
 
 Init hooks, in order (post-install and post-upgrade):
   0   db-roles-init    passwords for supabase_auth_admin / authenticator / supabase_storage_admin
+{{- if and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled }}
+  5   timescaledb-maintenance  the historian's retention, compression and rollups
+{{- end }}
   10  db-init          migrations + seed, replayed idempotently on every upgrade
-  20  storage-init     creates the {{ .Values.supabaseStorage.bucket }} bucket via the Storage REST API
+  18  storage-policies the RLS policies and grants on storage.objects
+  20  storage-init     creates or reconciles the four buckets via the Storage REST API:
+                       {{ .Values.supabaseStorage.bucket }}, {{ .Values.supabaseStorage.captureBucket }}, asset-exports, area-plans
 
 Messaging and edge
   mosquitto          :1883 :9001  broker; policy from a ConfigMap, credentials from a Secret
@@ -56,7 +61,7 @@ Raw MQTT (1883) is NOT on the ingress -- it is TCP, not HTTP:
 {{- else }}
 NO INGRESS. Reach the HTTP services with port-forward:
   kubectl -n {{ .Release.Namespace }} port-forward svc/frontend 3000:3000
-  kubectl -n {{ .Release.Namespace }} port-forward svc/supabase-kong 54321:8000
+  kubectl -n {{ .Release.Namespace }} port-forward svc/supabase-envoy 54321:8000
 {{- end }}
 
 OFF BY DEFAULT, and opt-in rather than missing. Each is built and tested; enable what the cluster

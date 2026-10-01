@@ -20,7 +20,7 @@ const gateway = {
   gateway_id: 'gw-1',
   gateway_name: 'Host_Gateway_NodeRED',
   cell_id: 'cell-1',
-  // NOT NULL DEFAULT 'cell' (archived migration 0036), so every real payload carries it. Host and
+  // NOT NULL DEFAULT 'cell' (archived migration 20260101000036_device_location), so every real payload carries it. Host and
   // site-wide are independent: this fixture is a host-run gateway that has been given a cell.
   location_scope: 'cell',
   status: 'ONLINE',
@@ -111,7 +111,7 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    expect(screen.queryByText(/not linked to any cell zone/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not linked to any cell/i)).not.toBeInTheDocument()
   })
 
   it('flags devices that belong to no cell instead of hiding them', async () => {
@@ -122,8 +122,12 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
 
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
-    await waitFor(() => expect(screen.getByText(/1 device not linked to any cell zone/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/1 device not linked to any cell/i)).toBeInTheDocument())
     expect(screen.getByText(/Orphan_CNC/)).toBeInTheDocument()
+    // The banner offers both ways out of a wide scope.
+    const banner = screen.getByText(/1 device not linked to any cell/i).closest('.callout-page')
+    expect(banner).toHaveClass('callout', 'callout-warning')
+    expect(banner).toHaveTextContent(/Site-Wide or Area-Wide/)
   })
 })
 
@@ -219,13 +223,13 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
   })
 })
 
-// Paging a fleet-wide stream has no equivalent in the per-device drawer, which shows the latest
-// value per metric and defers history to the CSV export. See deviceTelemetryAccordion.test.jsx.
+// Paging a fleet-wide stream has no equivalent in the per-device telemetry modal, which shows the
+// latest value per metric and defers history to the CSV export. See telemetryModal.test.jsx.
 
 // Site Map -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
 // the cell id, and Cells consumes it the way Gateways and Devices consume theirs.
 describe('The Site Map hands a cell over to the Cells page', () => {
-  const area = { area_id: 'area-1', area_name: 'Building A', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
+  const area = { area_id: 'area-1', area_name: 'North Shop', icon: 'Factory', plan_path: null, plan_aspect: null, cells: [] }
   const placedCell = { ...cell, area_id: 'area-1', plan_x: 0.4, plan_y: 0.6 }
   const routes = (path) => {
     if (path.startsWith('/api/v1/areas')) return Promise.resolve([area])
@@ -240,7 +244,7 @@ describe('The Site Map hands a cell over to the Cells page', () => {
   )
 
   const openPanel = async () => {
-    fireEvent.click(await screen.findByRole('button', { name: 'Building A' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'North Shop' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Assembly Line 1' }))
     return screen.findByRole('button', { name: /Open on Cells page/ })
   }
@@ -303,7 +307,7 @@ describe('CellsTab consumes a handed-over cell filter', () => {
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.change(screen.getByPlaceholderText(/Search by Cell ID or name/), { target: { value: 'Weld' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search by Cell UUID or name/), { target: { value: 'Weld' } })
 
     expect(screen.getByText('Weld Bay 2')).toBeInTheDocument()
     expect(screen.queryByText('Assembly Line 1')).not.toBeInTheDocument()

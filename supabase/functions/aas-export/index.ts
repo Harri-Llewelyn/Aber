@@ -1,6 +1,6 @@
 /**
  * AAS export: emit an Asset Administration Shell (IEC 63278) V3 document for one device, as JSON,
- * as an `.aasx` package, or as a `bundle` -- the same `.aasx` with the device's digital thread, the
+ * as an `.aasx` package, or as a `bundle` -- the same `.aasx` with the device's audit trail, the
  * telemetry still in the live historian and a manifest naming the cold objects added as
  * supplementary parts, stored beside the cold tier and recorded in `asset_exports`. An adapter,
  * not a migration: the database keeps its own shape and this projects it on the way out. The
@@ -8,18 +8,19 @@
  * same machine differently, and the bundle's parts in `../_shared/aas/bundle.ts`; what remains
  * here is the role ladder, the OPC packaging, and what to do when a bundled model cannot be
  * reached. The caller's JWT resolves their role, and the service-role client is used only after
- * that check; `aas-api` deliberately does not hold that key.
+ * that check; `aas-api` deliberately does not hold that key. A bundle's trail and cold catalogue
+ * are read as the caller.
  */
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
-import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
+import { strToU8 } from "fflate";
+import { zip } from "../_shared/zip.ts";
 import { modelContentType } from "../_shared/aas/model3dContentType.ts";
 import {
   BUNDLE_PARTS,
   DEFAULT_MAX_TELEMETRY_ROWS,
-  DEFAULT_MAX_THREAD_ROWS,
+  DEFAULT_MAX_TRAIL_ROWS,
   EXPORT_BUCKET,
   EXPORT_CONTENT_TYPE,
   HOURLY_COLUMNS,
@@ -31,7 +32,7 @@ import {
   loadColdObjects,
   loadHorizons,
   loadTelemetry,
-  loadThread,
+  loadTrail,
   sha256Hex,
 } from "../_shared/aas/bundle.ts";
 import {
@@ -54,12 +55,29 @@ const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 // that hand a shell to a partner. Still an allow-list, so an unmapped role is refused.
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"];
 
+// A bundle carries the device's Audit Trail, so it also needs the permission that opens the
+// trail's asset lane. The Devices page gates its action on the same name; role_permissions
+// decides who holds it, and test_aas_export.py holds that to the roles asset_exports admits.
+const BUNDLE_PERMISSION = "audit_trail:read";
+
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 
+/** Asked of the database as the caller. A failed lookup is a refusal, as a failed role lookup is. */
+// deno-lint-ignore no-explicit-any -- the caller's client is created without a schema type
+async function callerHolds(client: SupabaseClient<any, any, any>, permission: string): Promise<boolean> {
+  const { data, error } = await client.rpc("has_authority", { allowed_permissions: [permission] });
+  if (error) {
+    console.error(`[aas-export] permission lookup for ${permission} failed: ${error.message}`);
+    return false;
+  }
+  return data === true;
+}
+
 /**
- * AAS Part 5 media type for an AASX package. The `+xml` suffix is correct: an AASX is an Open
- * Packaging Conventions container, and OPC's registered types carry it.
+ * The media type AAS Part 2 v3.0 and v3.1 give an AASX serialisation, the API version aas-api
+ * declares its profiles against. Part 2 and Part 5 v3.2 replace it with the IANA-registered
+ * `application/aas+zip`: change it with those profiles, and with docs/openapi.yaml.
  */
 const AASX_MEDIA_TYPE = "application/asset-administration-shell-package+xml";
 
@@ -78,7 +96,7 @@ const AASX_SPEC_PART = "aasx/aasenv-root.json";
  */
 type SupplementaryFile = { part: string; bytes: Uint8Array; contentType: string };
 
-function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[] = []): Uint8Array {
+function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[] = []) {
   // One Override per supplementary part rather than a Default per extension: two models could
   // share an extension, and an Override names the part exactly. Deduplicated by part name.
   const overrides = supplements
@@ -133,7 +151,7 @@ ${
     for (const s of supplements) entries[s.part] = s.bytes;
   }
 
-  return zipSync(entries);
+  return zip(entries);
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -190,6 +208,13 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ error: "format must be 'json', 'aasx' or 'bundle'" }, 400);
     }
     const format = requestedFormat;
+
+    if (format === "bundle" && !(await callerHolds(supabaseUser, BUNDLE_PERMISSION))) {
+      return json({
+        error: "Forbidden: the bundle carries this device's Audit Trail, which your role may not " +
+          "read. Export the AAS JSON or the AASX package instead.",
+      }, 403);
+    }
 
     const supabaseAdmin = serviceRoleClient(supabaseUrl, supabaseServiceRoleKey);
 
@@ -285,17 +310,17 @@ export default async function handler(req: Request): Promise<Response> {
       const takenAt = new Date().toISOString();
       const caps = {
         telemetry: boundedInt(Deno.env.get("ASSET_EXPORT_MAX_TELEMETRY_ROWS"), DEFAULT_MAX_TELEMETRY_ROWS),
-        thread: boundedInt(Deno.env.get("ASSET_EXPORT_MAX_THREAD_ROWS"), DEFAULT_MAX_THREAD_ROWS),
+        trail: boundedInt(Deno.env.get("ASSET_EXPORT_MAX_TRAIL_ROWS"), DEFAULT_MAX_TRAIL_ROWS),
       };
       const sparkplugId = String(device.sparkplug_id ?? "");
 
       // One historian scan at a time: concurrent range scans over the FDW are the load pattern
-      // the telemetry export dialog avoids too. The thread and the horizons are the platform's
-      // own tables and run together.
+      // the telemetry export dialog avoids too. The trail and the horizons are the platform's
+      // own tables and run together. The trail is read as the caller, so RLS decides its rows.
       const raw = await loadTelemetry(supabaseAdmin, "telemetry", sparkplugId, caps.telemetry);
       const hourly = await loadTelemetry(supabaseAdmin, "telemetry_1h", sparkplugId, caps.telemetry);
-      const [thread, horizons] = await Promise.all([
-        loadThread(supabaseAdmin, String(device.id), caps.thread),
+      const [trail, horizons] = await Promise.all([
+        loadTrail(supabaseUser, String(device.id), caps.trail),
         loadHorizons(supabaseAdmin).catch((err) => {
           console.warn(`[aas-export] horizons unavailable for the bundle: ${err instanceof Error ? err.message : String(err)}`);
           return {} as Record<string, string | null>;
@@ -312,7 +337,7 @@ export default async function handler(req: Request): Promise<Response> {
         caps,
         raw,
         hourly,
-        thread,
+        trail,
         horizons,
         cold,
         bundled3dModel,
@@ -321,7 +346,7 @@ export default async function handler(req: Request): Promise<Response> {
       // Oldest first in the files, as a history reads; the loaders page newest first so a cap
       // keeps the most recent rows.
       supplements.push(
-        { part: BUNDLE_PARTS.thread, bytes: strToU8(JSON.stringify(thread.rows, null, 2)), contentType: "application/json" },
+        { part: BUNDLE_PARTS.trail, bytes: strToU8(JSON.stringify(trail.rows, null, 2)), contentType: "application/json" },
         { part: BUNDLE_PARTS.raw, bytes: strToU8(csvOf([...raw.rows].reverse(), RAW_COLUMNS)), contentType: "text/csv" },
         { part: BUNDLE_PARTS.hourly, bytes: strToU8(csvOf([...hourly.rows].reverse(), HOURLY_COLUMNS)), contentType: "text/csv" },
         { part: BUNDLE_PARTS.manifest, bytes: strToU8(JSON.stringify(manifest, null, 2)), contentType: "application/json" },
@@ -338,9 +363,9 @@ export default async function handler(req: Request): Promise<Response> {
       const bundleStats = {
         raw_rows: raw.rows.length,
         hourly_rows: hourly.rows.length,
-        thread_rows: thread.rows.length,
+        trail_rows: trail.rows.length,
         cold_objects: cold.objects.length,
-        truncated: raw.truncated || hourly.truncated || thread.truncated,
+        truncated: raw.truncated || hourly.truncated || trail.truncated,
         not_included: manifest.not_included,
       };
       try {
@@ -425,4 +450,4 @@ export default async function handler(req: Request): Promise<Response> {
   }
 }
 
-serve(handler);
+Deno.serve(handler);

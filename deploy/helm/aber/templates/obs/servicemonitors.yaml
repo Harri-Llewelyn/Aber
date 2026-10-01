@@ -78,15 +78,11 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
       "path" "/metrics"
       "why" "native, unauthenticated, on the normal HTTP port") -}}
 {{- end -}}
-{{/*
-  `component` comes from the same helper NetworkPolicy uses, because a ServiceMonitor selects POD
-  LABELS and the promoted Service name does not change them.
-*/}}
 {{- if and .Values.supabaseEnvoy.enabled .Values.supabaseEnvoy.metrics.enabled -}}
 {{- $targets = append $targets (dict
       "name" "supabase-envoy"
-      "component" (include "aber.gatewayComponent" .)
-      "service" .Values.supabaseEnvoy.serviceName
+      "component" "supabase-envoy"
+      "service" "supabase-envoy"
       "port" "metrics"
       "path" "/stats/prometheus"
       "why" "Envoy's admin listener, which serves the scrape and the readiness probe") -}}

@@ -1,7 +1,7 @@
 /**
  * The per-asset bundle: what `aas-export` adds to an AASX when a device is taken away before it is
  * taken out of service. The package stays an AASX -- the same Environment, the same OPC chain --
- * and gains supplementary parts under aasx/files/aber/: the device's digital thread, the
+ * and gains supplementary parts under aasx/files/aber/: the device's audit trail, the
  * telemetry still in the live historian at two resolutions, and a manifest that says what each
  * part holds, where it was cut off, and which cold-tier objects hold what the live historian no
  * longer does. A reader that knows nothing of the parts ignores them.
@@ -17,13 +17,14 @@
  * Node from this file's own source; the loaders take a Supabase client.
  */
 
-export const BUNDLE_SCHEMA = "aber/asset-bundle/1";
+/** The manifest's layout. It moves whenever a part or a manifest key does, so a reader can tell. */
+export const BUNDLE_SCHEMA = "aber/asset-bundle/2";
 
 /** Where the parts sit inside the package. `aasx/files/` is where AASX readers expect supplements. */
 export const BUNDLE_PART_DIR = "aasx/files/aber";
 export const BUNDLE_PARTS = {
   manifest: `${BUNDLE_PART_DIR}/manifest.json`,
-  thread: `${BUNDLE_PART_DIR}/digital-thread.json`,
+  trail: `${BUNDLE_PART_DIR}/audit-trail.json`,
   raw: `${BUNDLE_PART_DIR}/telemetry-raw.csv`,
   hourly: `${BUNDLE_PART_DIR}/telemetry-1h.csv`,
 } as const;
@@ -34,7 +35,7 @@ export const BUNDLE_PARTS = {
  * reached only by a device with years of history, which is the device an export is taken for.
  */
 export const DEFAULT_MAX_TELEMETRY_ROWS = 200_000;
-export const DEFAULT_MAX_THREAD_ROWS = 20_000;
+export const DEFAULT_MAX_TRAIL_ROWS = 20_000;
 /** One PostgREST page. Keyset-paged on time, so the remote scan stops after this many rows. */
 export const TELEMETRY_PAGE_SIZE = 5_000;
 
@@ -203,21 +204,24 @@ export async function loadTelemetry(
 }
 
 /**
- * The device's own thread: every row keyed by its id, which is the devices rows and the nameplate
- * rows (device_nameplate is keyed by device id). Oldest first, so the part reads as a history.
+ * The device's own trail: every asset-lane row keyed by its id, which is the devices rows and the
+ * nameplate rows (device_nameplate is keyed by device id). Oldest first, so the part reads as a
+ * history. Pass the CALLER's client: RLS then decides what the part holds, and the lane filter
+ * keeps a security-lane row out even for a role that may read that lane.
  */
-export async function loadThread(
-  client: Client,
+export async function loadTrail(
+  userClient: Client,
   deviceId: string,
   cap: number,
 ): Promise<{ rows: Record<string, unknown>[]; truncated: boolean }> {
-  const { data, error } = await client
-    .from("digital_thread")
+  const { data, error } = await userClient
+    .from("audit_trail")
     .select("id,entity_type,entity_id,action,old_data,new_data,changed_by,actor_source,causation_id,recorded_at,audit_domain")
     .eq("entity_id", deviceId)
+    .eq("audit_domain", "asset")
     .order("id", { ascending: true })
     .limit(cap + 1);
-  if (error) throw new Error(`digital_thread: ${error.message}`);
+  if (error) throw new Error(`audit_trail: ${error.message}`);
   const rows = (data ?? []) as Record<string, unknown>[];
   return { rows: rows.slice(0, cap), truncated: rows.length > cap };
 }
@@ -269,7 +273,7 @@ export async function loadColdObjects(
   return { objects };
 }
 
-export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+export async function sha256Hex(bytes: BufferSource): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -279,10 +283,10 @@ export interface ManifestInput {
   takenBy: { id: string; email: string | null };
   device: Record<string, unknown>;
   gateway: Record<string, unknown> | null;
-  caps: { telemetry: number; thread: number };
+  caps: { telemetry: number; trail: number };
   raw: TelemetryPart;
   hourly: TelemetryPart;
-  thread: { rows: Record<string, unknown>[]; truncated: boolean };
+  trail: { rows: Record<string, unknown>[]; truncated: boolean };
   horizons: Record<string, string | null>;
   cold: ColdObjects;
   bundled3dModel: boolean;
@@ -293,14 +297,14 @@ export interface ManifestInput {
  * same inputs give the same document and the suite can hold it to a fixture.
  */
 export function buildBundleManifest(input: ManifestInput): Record<string, unknown> {
-  const { device, gateway, raw, hourly, thread, horizons, cold, caps } = input;
+  const { device, gateway, raw, hourly, trail, horizons, cold, caps } = input;
   const notIncluded: string[] = [];
 
   if (raw.truncated) notIncluded.push(`raw telemetry older than ${raw.oldest ?? "the oldest included row"} (cap of ${caps.telemetry} rows)`);
   if (raw.stopped) notIncluded.push(`raw telemetry: paging stopped because ${raw.stopped}`);
   if (hourly.truncated) notIncluded.push(`hourly telemetry older than ${hourly.oldest ?? "the oldest included row"} (cap of ${caps.telemetry} rows)`);
   if (hourly.stopped) notIncluded.push(`hourly telemetry: paging stopped because ${hourly.stopped}`);
-  if (thread.truncated) notIncluded.push(`digital thread rows after the first ${caps.thread}`);
+  if (trail.truncated) notIncluded.push(`audit trail rows after the first ${caps.trail}`);
   notIncluded.push("the 1-minute and 5-minute rollups: the hourly one reaches furthest back and is the one included");
   notIncluded.push("cold telemetry objects: named below, never read back (the no-read-back rule of the cold tier)");
   if (cold.unavailable) notIncluded.push(`the cold catalogue: ${cold.unavailable}`);
@@ -321,11 +325,11 @@ export function buildBundleManifest(input: ManifestInput): Record<string, unknow
     },
     parts: {
       environment: "aasx/aasenv-root.json",
-      digital_thread: BUNDLE_PARTS.thread,
+      audit_trail: BUNDLE_PARTS.trail,
       telemetry_raw: BUNDLE_PARTS.raw,
       telemetry_1h: BUNDLE_PARTS.hourly,
     },
-    digital_thread: { rows: thread.rows.length, cap: caps.thread, truncated: thread.truncated },
+    audit_trail: { rows: trail.rows.length, cap: caps.trail, truncated: trail.truncated },
     telemetry: {
       // The historian keys every reading by this and nothing else; a reader joining the parts to
       // the cold objects needs it stated once.

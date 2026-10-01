@@ -15,7 +15,7 @@ needed no gate at all -- and `playback_worker._credentials()` calls itself "tier
 precisely because the worker cannot authenticate as a gateway whose password it was not given. A
 minting worker is a worker that can publish as any machine on the site.
 
-Every test rolls back. Gateways are audited into the append-only `digital_thread`, so a committed
+Every test rolls back. Gateways are audited into the append-only `audit_trail`, so a committed
 fixture leaves rows that cannot be removed.
 """
 

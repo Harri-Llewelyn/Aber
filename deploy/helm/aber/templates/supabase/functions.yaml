@@ -89,7 +89,7 @@ spec:
             - name: AAS_HISTORIAN_ENDPOINT
               value: {{ .Values.supabaseFunctions.aas.historianEndpoint | default (printf "%s/rest/v1/telemetry" $supabasePublic) | quote }}
             # Public base for the 3D models a VisualRepresentation submodel points at. It CANNOT be
-            # derived from SUPABASE_URL above: in-cluster that is http://supabase-kong:8000, which
+            # derived from SUPABASE_URL above: in-cluster that is http://supabase-envoy:8000, which
             # resolves for this worker and for nothing outside the cluster, so a shell handed to a
             # partner would carry a dead link.
             - name: AAS_MODEL_PUBLIC_BASE
@@ -106,7 +106,7 @@ spec:
               REMOTE GATEWAY ENROLMENT (enroll-gateway, gateway-bundle).
 
               EVERY ONE OF THESE IS AN OUTBOUND ADDRESS OR A NARROW CREDENTIAL, and none can be
-              derived from SUPABASE_URL above -- that is `supabase-kong:8000`, which resolves
+              derived from SUPABASE_URL above -- that is `supabase-envoy:8000`, which resolves
               inside this cluster and nowhere a shopfloor appliance lives. A bundle carrying it
               enrols nothing: bootstrap fails at its first fetch against a plausible-looking URL.
 

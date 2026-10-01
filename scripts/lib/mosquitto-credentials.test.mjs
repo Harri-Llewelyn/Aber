@@ -89,7 +89,7 @@ describe('assertGatewayId', () => {
 
 describe('assertUsername', () => {
   test('accepts the platform principals and refuses what a shell or the plugin would misread', () => {
-    for (const ok of ['factoryplus_ingestion', 'dynsec-admin', GW_A, 'bi.reader']) {
+    for (const ok of ['aber_ingestion', 'dynsec-admin', GW_A, 'bi.reader']) {
       assert.equal(assertUsername(ok), ok);
     }
     for (const bad of ['', 'has space', "a'b", 'x'.repeat(65), null]) {
@@ -149,16 +149,16 @@ describe('hashArgv', () => {
   test('the platform form takes any broker username and any printable password', () => {
     const password = generatePassword();
     assert.deepStrictEqual(
-      hashArgvForUsername('factoryplus_ingestion', password),
-      ['-c', hashScript(), '--', 'factoryplus_ingestion', password],
+      hashArgvForUsername('aber_ingestion', password),
+      ['-c', hashScript(), '--', 'aber_ingestion', password],
     );
     assert.throws(() => hashArgvForUsername('has space', password), CredentialError);
     // An operator's own value: short and outside base64url is theirs to choose, because the
     // value is a positional parameter and never a command line.
-    assert.equal(hashArgvForUsername('factoryplus_ingestion', 'aber123')[4], 'aber123');
-    assert.equal(hashArgvForUsername('factoryplus_ingestion', "it's fine!")[4], "it's fine!");
-    assert.throws(() => hashArgvForUsername('factoryplus_ingestion', ''), CredentialError);
-    assert.throws(() => hashArgvForUsername('factoryplus_ingestion', 'has\nnewline'), CredentialError);
+    assert.equal(hashArgvForUsername('aber_ingestion', 'aber123')[4], 'aber123');
+    assert.equal(hashArgvForUsername('aber_ingestion', "it's fine!")[4], "it's fine!");
+    assert.throws(() => hashArgvForUsername('aber_ingestion', ''), CredentialError);
+    assert.throws(() => hashArgvForUsername('aber_ingestion', 'has\nnewline'), CredentialError);
     // The gateway form keeps the stricter rule: its password can reach a command line in the CLI.
     assert.throws(() => hashArgv(GW_A, 'short'), CredentialError);
   });

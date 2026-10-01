@@ -25,20 +25,17 @@ const CUTS = {
   },
 }
 
-export function AberMark({ size = 28, cut, title, className = '' }) {
+export function AberMark({ size = 28 }) {
   // useId's colons are not valid in the url(#…) reference the mask is applied through.
   const maskId = `aber-mark-${useId().replace(/:/g, '')}`
-  const { width, lines } = CUTS[cut ?? (size >= 48 ? 'full' : 'small')]
+  const { width, lines } = CUTS[size >= 48 ? 'full' : 'small']
 
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 64 64"
-      className={className}
-      role={title ? 'img' : undefined}
-      aria-label={title}
-      aria-hidden={title ? undefined : true}
+      aria-hidden="true"
     >
       {/* Mask luminance, not colour: white keeps the shape, black cuts it away. */}
       <mask id={maskId}>

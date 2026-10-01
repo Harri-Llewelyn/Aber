@@ -137,7 +137,7 @@ against another is corrected on the next start instead of failing at connect tim
 ### What you should see
 
 The gateway goes `ONLINE` on the Gateways tab within a heartbeat. The device appears on Devices with
-telemetry flowing into TimescaleDB. The Digital Thread records every step you just took — which is
+telemetry flowing into TimescaleDB. The Audit Trail records every step you just took — which is
 the argument for doing it by hand: on a fresh stack that log is your own work and nothing else.
 
 ---
@@ -411,11 +411,11 @@ Confined principals replace it, each holding a role from
 
 | Principal | May do |
 | :--- | :--- |
-| `factoryplus_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), the Directory and the Unified Namespace |
-| `factoryplus_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
+| `aber_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), the Directory and the Unified Namespace |
+| `aber_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
 | any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
 | `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
-| `factoryplus_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
+| `aber_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
 | `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |
 
 **The gateway usernames are `sparkplug_id`s and cannot be friendly names.** The gateway's role
@@ -477,16 +477,16 @@ The first time a `DBIRTH` arrives for an unrecognised Sparkplug ID, ingestion au
 onboarding flow, not an error.
 
 1. Open the **Devices** tab.
-2. Find the **Zero-Touch Onboarding Quarantine Queue** banner — the device is listed with the id it
-   published under and why it was held.
-3. As **Administrator** or **Shopfloor_Manager**, approve it (assigning a gateway, and optionally a
-   cell) or reject it.
+2. Find the **Quarantine queue** card, the first card on the page — the device is listed with the id
+   it published under and why it was held.
+3. As **Administrator** or **Shopfloor_Manager**, use **Approve & Onboard** (assigning a gateway,
+   and optionally a cell) or reject it.
 4. Subsequent `DDATA` starts flowing into TimescaleDB.
 
 The device keeps publishing under the id it announced; the platform records that on the row rather
 than demanding the device be reconfigured. Approval runs through the atomic
 `public.approve_quarantined_device()` RPC, so a merge cannot half-complete, and the approving
-operator is recorded in the Digital Thread.
+operator is recorded in the Audit Trail.
 
 ---
 

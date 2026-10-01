@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { captureManifest, CAPTURE_VERSION } from '../../api'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
-import { IconShieldAlert } from '../common/Icons'
+import { Modal } from '../common/Modal'
+import { IconShieldAlert, IconUpload } from '../common/Icons'
+import { plural } from '../../utils/format'
 
 /**
  * Take a capture file and file it against a subject. A capture is stored per subject, so the dialog
@@ -20,16 +21,13 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
 
-  useEscapeKey(pending ? () => {} : onCancel)
-
   // Read once, here, so the summary below and the manifest sent on submit come from the same parse.
   React.useEffect(() => {
     let cancelled = false
     file.text()
       .then(text => {
         const doc = JSON.parse(text)
-        // A capture recorded before 1.0 carries the key under the platform's former name.
-        const version = doc?.aber_capture_version ?? doc?.acs_capture_version
+        const version = doc?.aber_capture_version
         if (version === undefined) {
           throw new Error('That file carries no aber_capture_version, so it is not a broker capture.')
         }
@@ -71,101 +69,14 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
   })
 
   return (
-    <div className="modal-overlay">
-      <div className="modal modal-sm">
-        <div className="modal-title">Upload capture</div>
-
-        <p className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '10px 0 0' }}>
-          {file.name}
-        </p>
-
-        {parsed === undefined && (
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Reading…</p>
-        )}
-
-        {readError && (
-          <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)', marginTop: '10px' }}>
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div style={{ fontSize: '12px' }}>{readError}</div>
-          </div>
-        )}
-
-        {parsed && (
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-            {parsed.messages.length} message{parsed.messages.length === 1 ? '' : 's'}
-            {manifest?.device_ids?.length
-              ? `, ${manifest.device_ids.length} device id${manifest.device_ids.length === 1 ? '' : 's'}`
-              : ', no device-level traffic'}
-            {manifest && !manifest.birth_captured && ' — no birth certificate'}
-          </p>
-        )}
-
-        {/* Only when the capture actually depends on the alias table -- see StartPlaybackModal. */}
-        {parsed && manifest && !manifest.birth_captured && manifest.uses_aliases && (
-          <div className="callout callout-warning" style={{ marginTop: '10px' }}>
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div style={{ fontSize: '12px' }}>
-              This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
-              carried by <strong>alias</strong>. A playback will drop every one of them and still
-              report success.
-            </div>
-          </div>
-        )}
-
-        {parsed && (
-          <div className="form-group" style={{ marginTop: '16px' }}>
-            <label className="form-label" htmlFor="upload-subject">File it against</label>
-            <select
-              id="upload-subject"
-              className="form-control"
-              value={subjectKey}
-              onChange={e => setSubjectKey(e.target.value)}
-              disabled={pending}
-            >
-              <option value="">Choose a gateway or device…</option>
-              <optgroup label="Gateways">
-                {subjects.filter(s => s.kind === 'gateway').map(s => (
-                  <option key={`gateway:${s.id}`} value={`gateway:${s.id}`}>
-                    {s.name}{s.capture ? ' — replaces the stored capture' : ''}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Devices">
-                {subjects.filter(s => s.kind === 'device').map(s => (
-                  <option key={`device:${s.id}`} value={`device:${s.id}`}>
-                    {s.name}{s.capture ? ' — replaces the stored capture' : ''}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
-              A capture is stored per subject, and the file is filed under that subject's own
-              prefix — which is what the storage policy checks.
-            </p>
-          </div>
-        )}
-
-        {/* The same decision StartCaptureModal guards, naming the same facts: an upload destroys a
-            stored capture exactly as a re-record does. */}
-        {subject?.capture && (
-          <div className="callout callout-warning" style={{ marginTop: '10px' }}>
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div style={{ fontSize: '12px' }}>
-              This replaces the capture of <strong>{subject.name}</strong>
-              {subject.capture.note ? <> — <strong>{subject.capture.note}</strong></> : null}.
-              That recording is destroyed and cannot be recovered.
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)', marginTop: '10px' }}>
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div style={{ fontSize: '12px' }}>{error}</div>
-          </div>
-        )}
-
-        <div className="modal-actions">
+    <Modal
+      title="Upload capture"
+      icon={<IconUpload size={18} />}
+      size="sm"
+      onClose={pending ? () => {} : onCancel}
+      error={error}
+      footer={
+        <>
           <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
           <ActionButton
             className={subject?.capture ? 'btn btn-danger' : 'btn btn-primary'}
@@ -177,8 +88,87 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
           >
             {subject?.capture ? 'Replace and upload' : 'Upload'}
           </ActionButton>
+        </>
+      }
+    >
+      <p className="mono form-hint">{file.name}</p>
+
+      {parsed === undefined && <p className="form-hint">Reading…</p>}
+
+      {readError && (
+        <div className="callout callout-danger">
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div>{readError}</div>
         </div>
-      </div>
-    </div>
+      )}
+
+      {parsed && (
+        <p className="form-hint">
+          {plural(parsed.messages.length, 'message')}
+          {manifest?.device_ids?.length
+            ? `, ${plural(manifest.device_ids.length, 'device id')}`
+            : ', no device-level traffic'}
+          {manifest && !manifest.birth_captured && ' — no birth certificate'}
+        </p>
+      )}
+
+      {/* Only when the capture actually depends on the alias table -- see StartPlaybackModal. */}
+      {parsed && manifest && !manifest.birth_captured && manifest.uses_aliases && (
+        <div className="callout callout-warning">
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div>
+            This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
+            carried by <strong>alias</strong>. A playback will drop every one of them and still
+            report success.
+          </div>
+        </div>
+      )}
+
+      {parsed && (
+        <div className="form-group">
+          <label className="form-label" htmlFor="upload-subject">File it against</label>
+          <select
+            id="upload-subject"
+            className="form-control"
+            value={subjectKey}
+            onChange={e => setSubjectKey(e.target.value)}
+            disabled={pending}
+          >
+            <option value="">Choose a gateway or device…</option>
+            <optgroup label="Gateways">
+              {subjects.filter(s => s.kind === 'gateway').map(s => (
+                <option key={`gateway:${s.id}`} value={`gateway:${s.id}`}>
+                  {s.name}{s.capture ? ' — replaces the stored capture' : ''}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Devices">
+              {subjects.filter(s => s.kind === 'device').map(s => (
+                <option key={`device:${s.id}`} value={`device:${s.id}`}>
+                  {s.name}{s.capture ? ' — replaces the stored capture' : ''}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+          <p className="form-hint">
+            A capture is stored per subject, and the file is filed under that subject's own
+            prefix — which is what the storage policy checks.
+          </p>
+        </div>
+      )}
+
+      {/* The same decision StartCaptureModal guards: an upload destroys a stored capture exactly as
+          a re-record does. */}
+      {subject?.capture && (
+        <div className="callout callout-warning">
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div>
+            This replaces the capture of <strong>{subject.name}</strong>
+            {subject.capture.note ? <> — <strong>{subject.capture.note}</strong></> : null}.
+            That recording is destroyed and cannot be recovered.
+          </div>
+        </div>
+      )}
+    </Modal>
   )
 }

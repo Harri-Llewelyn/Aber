@@ -28,6 +28,15 @@
 # restore proves the restored stack can back itself up.
 #
 # =================================================================================================
+# THE RESTORE STARTS FROM THE BUCKET. Before the backup, the destination is set the way the Backups
+# page sets it, to a MinIO in a namespace of its own (test-harness/restore-rehearsal/minio.yaml),
+# with an age key pair made on the runner. The service copies the backup there, encrypted; the
+# namespace goes with the backup volume in it; and the restore fetches the copy from the bucket,
+# decrypts it with the identity the stack never held, and checks it against the copy taken off the
+# volume before. The restored stack's own backup must reach the bucket too, which needs the
+# restored Vault to decrypt the secret key.
+#
+# =================================================================================================
 # WHAT THIS INSTALLS, AND WHAT IT THEREFORE DOES NOT REHEARSE
 #
 # Most of the stack is switched off: frontend, Node-RED, i3X, ingestion, playback, the cold
@@ -49,7 +58,7 @@
 #                              backups.
 #   supabase-auth              so the rehearsal can prove a password set before the backup still
 #                              works after it, which is GoTrue's schema AND the JWT secret
-#   supabase-storage           the 3D model objects live on its volume
+#   supabase-storage           every bucket's objects live on its volume
 #   supabase-rest, envoy       the gateway the storage, auth and backup-request paths sit behind
 #   db-init                    the migration chain
 #
@@ -90,6 +99,8 @@ jobs:
       RELEASE: aber
       NS: aber
       BACKUP_DIR: ${{ github.workspace }}/rehearsal-backups
+      # The same backup, fetched from the bucket and decrypted: what the restore reads.
+      OFFSITE_DIR: ${{ github.workspace }}/rehearsal-offsite
       # values-dev.yaml's credentials, which is what this installs with. Named here so the script's
       # psql calls and the chart cannot disagree about them.
       POSTGRES_PASSWORD: postgres
@@ -117,6 +128,15 @@ jobs:
           sudo apt-get install -y postgresql-client-17
           psql --version
           pg_dump --version
+
+      # age decrypts the off-site copy on the runner, as an operator would after losing the site.
+      # The aws CLI is on the runner image already.
+      - name: Install age
+        run: |
+          set -eu
+          sudo apt-get install -y age
+          age --version
+          aws --version
 
       - name: Set up k3d
         run: |
@@ -185,11 +205,24 @@ jobs:
       - name: Wait For The Stack
         run: bash .github/scripts/wait-for-stack.sh
 
+      # In its own namespace, so it outlives the release's and the backup volume in it.
+      - name: Start The Off-site Store
+        run: |
+          set -eu
+          kubectl apply -f test-harness/restore-rehearsal/minio.yaml
+          kubectl -n rehearsal-offsite rollout status deploy/minio --timeout=5m
+
       # --------------------------------------------------------------------------------------
       # SEED AND BACK UP
       # --------------------------------------------------------------------------------------
       - name: Seed Known Data
         run: bash scripts/rehearse-restore.sh seed
+
+      # The key pair is made here and the identity stays on the runner; the recipient, the bucket
+      # and its credential go in through the dialog's two RPCs. Before the snapshot: the settings,
+      # their audit rows and the Vault secret are data the backup carries and the compare counts.
+      - name: Set The Off-site Destination
+        run: bash scripts/rehearse-restore.sh offsite-setup "$RUNNER_TEMP/offsite-identity.txt"
 
       - name: Snapshot The Counts Before
         run: bash scripts/rehearse-restore.sh snapshot "$RUNNER_TEMP/before.txt"
@@ -224,6 +257,11 @@ jobs:
             [ "$SZ" -ge "$MIN" ] || { echo "::error::$FILE is only $SZ bytes"; exit 1; }
             echo "  ok $name: $FILE ($SZ bytes)"
           done
+
+      # Every file uploaded, encrypted, and checked by the store and by a HEAD, before the volume
+      # holding the only other copy is destroyed.
+      - name: Wait For The Off-site Copy
+        run: bash scripts/rehearse-restore.sh offsite-wait "${{ steps.backup.outputs.stamp }}"
 
       # --------------------------------------------------------------------------------------
       # DESTROY -- and the PVCs are the point
@@ -294,8 +332,18 @@ jobs:
       # --------------------------------------------------------------------------------------
       # RESTORE AND ASSERT
       # --------------------------------------------------------------------------------------
+      # The runbook's first step after losing the site: the copy from the bucket, decrypted and
+      # checked against its manifest, and then byte for byte against the copy taken off the volume.
+      - name: Fetch The Backup From The Bucket
+        run: |
+          set -eu
+          STAMP="${{ steps.backup.outputs.stamp }}"
+          bash scripts/rehearse-restore.sh fetch "$OFFSITE_DIR" "$STAMP" "$RUNNER_TEMP/offsite-identity.txt"
+          diff -r "$BACKUP_DIR/$STAMP" "$OFFSITE_DIR/$STAMP"
+          echo "the bucket's copy is the volume's, byte for byte"
+
       - name: Restore The Backup
-        run: bash scripts/rehearse-restore.sh restore "$BACKUP_DIR" "${{ steps.backup.outputs.stamp }}"
+        run: bash scripts/rehearse-restore.sh restore "$OFFSITE_DIR" "${{ steps.backup.outputs.stamp }}"
 
       - name: Snapshot The Counts After
         run: bash scripts/rehearse-restore.sh snapshot "$RUNNER_TEMP/after.txt"
@@ -324,6 +372,7 @@ jobs:
           kubectl -n "$NS" get pods -o wide || true
           kubectl -n "$NS" get pvc || true
           kubectl -n "$NS" describe pods | tail -120 || true
+          kubectl -n rehearsal-offsite logs deploy/minio --tail 40 || true
           for c in supabase-db timescaledb supabase-storage supabase-auth supabase-realtime backup-service gitea mosquitto; do
             echo "--- logs: $c"
             kubectl -n "$NS" logs "deploy/$c" --tail 60 2>/dev/null \
@@ -371,13 +420,17 @@ jobs:
               '| Step | What it means |',
               '| :--- | :--- |',
               '| Seed Known Data | the forge or the broker refused the seed — the request_backup() path was never reached |',
+              '| Start The Off-site Store | the MinIO image did not pull or start — test-harness/restore-rehearsal/minio.yaml pins it by digest |',
+              '| Set The Off-site Destination | the bucket could not be made, or a destination RPC refused a value — the error is in the log |',
               '| Take The Backup | the service failed or never claimed the job, or a digest did not match — the service logs are under Cluster State On Failure |',
               '| Assert The Backup Is Real | a component is missing or short — look at `backup-service.mjs` and the chart values the rehearsal installs with |',
+              '| Wait For The Off-site Copy | the service could not copy the backup to the bucket: the row\'s offsite_error, and the backup-service log, say why |',
               '| Destroy The Namespace And Its Volumes | volumes outlived the namespace, so nothing downstream was meaningful |',
               '| Assert The Fresh Stack Is Empty | the same, caught one step later |',
+              '| Fetch The Backup From The Bucket | the copy is incomplete, did not decrypt with the identity, or differs from the copy taken off the volume |',
               '| Restore The Backup | `restore-databases.sh` refused or failed, or a volume did not take its archive — the log names which |',
               '| Compare The Counts | rows, repositories or accounts did not come back, or the forge\'s host key changed — the diff names which |',
-              '| Assert What A Count Cannot Catch | data came back without a trigger, a policy, a grant, the partitioning, the pgsodium key, the branch protection or the broker account; or the restored stack could not take a backup |',
+              '| Assert What A Count Cannot Catch | data came back without a trigger, a policy, a grant, the partitioning, the pgsodium key, the branch protection or the broker account; or the restored stack could not take a backup or copy it off site |',
               '| Helm Test — postgres_fdw Cross-Database Check | the two databases were restored to inconsistent points |',
             ].join('\n');
 

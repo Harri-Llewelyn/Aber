@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -300,6 +301,7 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         self.assertEqual(publish.returncode, 0,
                          f"the enrolled credential was refused: {publish.stderr.strip()}")
 
+
     def test_the_ca_returned_verifies_the_broker_certificate(self):
         """The CA must be the one the broker is actually serving, not merely a valid PEM."""
         token = self.issue_token()
@@ -318,6 +320,31 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         else:
             self.assertEqual(verify.returncode, 0, verify.stderr)
 
+
+class TestDecommissioning(EnrollGatewayBase):
+    def test_archiving_a_gateway_stops_its_broker_credential(self):
+        """
+        The whole path, from the row to the broker. The archive trigger asks through pg_net, which
+        reports a call that never arrives to no one, so only the broker's answer proves it.
+        """
+        _, payload = enroll(self.issue_token())
+
+        def publish():
+            return stack_exec.run(
+                "broker", "mosquitto_pub",
+                "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
+                "-u", payload["mqtt_username"], "-P", payload["mqtt_password"],
+                "-t", f"spBv1.0/{payload['sparkplug_group']}/NDATA/{payload['sparkplug_id']}", "-m", "x",
+            )
+
+        before = publish()
+        self.assertEqual(before.returncode, 0, f"the credential was refused before the archive: {before.stderr.strip()}")
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
+        deadline, after = time.monotonic() + 60, before
+        while after.returncode == 0 and time.monotonic() < deadline:
+            time.sleep(2)
+            after = publish()
+        self.assertNotEqual(after.returncode, 0, "an archived gateway's broker credential still publishes after 60s")
 
 class TestTokenRejection(EnrollGatewayBase):
     def test_unknown_token_is_rejected(self):

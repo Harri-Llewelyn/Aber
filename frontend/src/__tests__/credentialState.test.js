@@ -13,8 +13,8 @@ const hostRun = (over = {}) => ({ deployment: 'host', is_archived: false, status
 
 describe('credentialState', () => {
   /**
-   * The state the whole page turns on: a demonstration stack has working credentials issued by
-   * `provision-gateways.mjs` with no record of them, because `record_gateway_credential_issued()`
+   * The state the whole page turns on: an account issued by
+   * `scripts/mosquitto-provision-gateway.mjs` has no platform record, because `record_gateway_credential_issued()`
    * cannot be called for a script. Reporting that as "no credential" would be a claim about the
    * broker the frontend cannot make.
    */
@@ -26,8 +26,8 @@ describe('credentialState', () => {
   })
 
   /**
-   * Revoked outranks issued: archiving rotates the account to a password nobody records, so a
-   * gateway carrying both is one whose issue came first.
+   * Revoked outranks issued: archiving disables the broker account, so a gateway carrying both
+   * is one whose issue came first.
    */
   it('ranks revocation above an earlier issue record', () => {
     const g = remote({

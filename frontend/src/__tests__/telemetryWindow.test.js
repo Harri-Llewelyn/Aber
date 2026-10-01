@@ -3,9 +3,9 @@ import { api, telemetryLowerBound, TELEMETRY_DEFAULT_WINDOW_MINUTES } from '../a
 
 /**
  * The property under test is "never unbounded", not "the default is 60". `public.telemetry` is a
- * postgres_fdw projection: the wrapper pushes WHERE down but not LIMIT, so a query with no lower
- * time bound drags an asset's whole history across the wrapper. `gte('time', ...)` must be present
- * on every path out of queryTelemetry, including the ones no UI code takes today.
+ * postgres_fdw projection: the wrapper pushes WHERE down, and LIMIT only for small limits, so a
+ * query with no lower time bound can drag an asset's whole history across the wrapper.
+ * `gte('time', ...)` must be present on every path out of queryTelemetry, including the ones no UI code takes today.
  */
 
 const calls = { gte: [], lte: [], eq: [], in: [], range: [] };
@@ -105,6 +105,7 @@ describe('queryTelemetry always bounds time', () => {
   it('bounds the device-scoped latest query', async () => {
     await api.get(`/api/v1/devices/${key}/telemetry/latest`);
     expect(timeBounds()).toHaveLength(1);
+    expect(calls.eq).toContainEqual(['asset_id', key]);
   });
 
   it('bounds a query carrying only an upper bound', async () => {

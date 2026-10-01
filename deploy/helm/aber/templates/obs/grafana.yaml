@@ -348,9 +348,9 @@ spec:
               reads as a Grafana fault.
 
               auth_url is FOLLOWED BY THE BROWSER, so it is the ingress address. token_url and
-              api_url stay as grafana.ini has them -- http://supabase-kong:8000 -- because those are
+              api_url stay as grafana.ini has them -- http://supabase-envoy:8000 -- because those are
               called by the CONTAINER. Using one address for both is the classic way this breaks: a
-              browser cannot resolve `supabase-kong`, and the container's 127.0.0.1 is itself.
+              browser cannot resolve `supabase-envoy`, and the container's 127.0.0.1 is itself.
             */}}
             - name: GF_SERVER_ROOT_URL
               value: {{ printf "%s/" $grafanaPublic | quote }}

@@ -7,7 +7,7 @@
  * Usage: node scripts/check-mirror-drift.mjs
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -373,6 +373,67 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   const pyService = need(py, /^LOCAL_SERVICE_NOTE = "([^"]+)"/m, 'LOCAL_SERVICE_NOTE in directory_publish.py');
   if (tsService && pyService) {
     compare('directoryServiceNote', 'the local-service qualification', pyService[1], tsService[1]);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 7. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
+// for that data item type, and the id every MTConnect catalog row in the seed carries (#457). The
+// form's own function is run, so a change to the namespace or the kind segment on either side
+// fails here rather than as a form-created metric naming no concept.
+// -------------------------------------------------------------------------------------------------
+{
+  const { mtconnectSemanticId } = await import(pathToFileURL(join(ROOT, 'frontend/src/utils/standards.js')).href);
+  const vocabulary = [...SCHEMA.matchAll(
+    /^INSERT INTO public\.mtconnect_vocabulary VALUES \('DATA_ITEM_TYPE', '([^']+)', (?:'[^']*'|NULL), '([^']+)'\)/gm
+  )];
+  const catalog = [...SCHEMA.matchAll(
+    /^INSERT INTO public\.metric_catalog VALUES \('[^']*', '([^']+)',.*'MTConnect', '([^']*)', 'IRI'\)/gm
+  )];
+  if (vocabulary.length === 0 || catalog.length === 0) {
+    problems.push('mtconnectSemanticId: found no seeded DATA_ITEM_TYPE or MTConnect catalog row -- the seed\'s shape changed, so this check is no longer checking anything');
+  } else {
+    const strays = [
+      ...vocabulary.filter(([, type, id]) => mtconnectSemanticId(type) !== id)
+        .map(([, type, id]) => `vocabulary ${type}: seeded ${id}, form derives ${mtconnectSemanticId(type)}`),
+      ...catalog.filter(([, name, id]) => mtconnectSemanticId(name.split('/').pop()) !== id)
+        .map(([, name, id]) => `catalog ${name}: seeded ${id}, form derives ${mtconnectSemanticId(name.split('/').pop())}`),
+    ];
+    if (strays.length) problems.push(`mtconnectSemanticId: ${strays.slice(0, 5).join('; ')}`);
+    else ok.push(`mtconnectSemanticId: ${vocabulary.length} data item types and ${catalog.length} catalog rows agree`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 8. The ASHRAE 223P metric group. The form's prefill (utils/ashrae223.js) and the seed must name the
+// same one, and it must be the only group registered under the standard: they forked once (#456),
+// the form filing under `Building` while the seeded metrics sat under an unregistered `BMS`.
+// -------------------------------------------------------------------------------------------------
+{
+  const js = need(read('frontend/src/utils/ashrae223.js'), /export const ASHRAE223_GROUP = '([^']+)'/,
+    'ASHRAE223_GROUP in utils/ashrae223.js');
+  const registered = [...SCHEMA.matchAll(
+    /INSERT INTO public\.metric_groups \(id, name, description, standard\)\s*VALUES \('[^']*', '([^']+)',\s*'(?:[^']|'')*',\s*'ASHRAE 223P'\)/g
+  )].map((m) => m[1]);
+  // Both seed forms: one row per INSERT, and an INSERT ... SELECT over a VALUES list that names the
+  // standard once in the SELECT.
+  const seededGroups = new Set([
+    ...[...SCHEMA.matchAll(/^INSERT INTO public\.metric_catalog VALUES \('[^']*', '([^'/]+)\/[^']*',.*'ASHRAE 223P', '/gm)]
+      .map((m) => m[1]),
+    ...[...SCHEMA.matchAll(/INSERT INTO public\.metric_catalog \([^)]*\)\s*SELECT[^;]*?'ASHRAE 223P'[^;]*?FROM \(VALUES([\s\S]*?)\) AS /g)]
+      .flatMap((m) => [...m[1].matchAll(/\(\s*'([^'/]+)\/[^']*',/g)].map((v) => v[1])),
+  ]);
+  if (js && seededGroups.size === 0) {
+    problems.push('ashrae223Group: found no seeded ASHRAE 223P metric -- the seed\'s shape changed, so half of this check is no longer checking anything');
+  }
+  if (js && registered.length !== 1) {
+    problems.push(`ashrae223Group: expected one metric group registered under ASHRAE 223P, found ${JSON.stringify(registered)}`);
+  } else if (js) {
+    compare('ashrae223Group', 'the group 223P metrics file under', js[1], registered[0]);
+    const strays = [...seededGroups].filter((g) => g !== registered[0]);
+    if (strays.length) {
+      problems.push(`ashrae223Group: seeded 223P metrics file under ${JSON.stringify(strays)}, not the registered '${registered[0]}'`);
+    }
   }
 }
 

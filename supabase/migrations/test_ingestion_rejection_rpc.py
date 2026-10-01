@@ -9,7 +9,7 @@ TWO THINGS, AND THE SECOND IS A SECURITY BOUNDARY.
 
   2. THE NARROW GATE. `record_ingestion_rejection()` is a SECURITY DEFINER function that PINS
      `actor_source` to 'ingestion' and `changed_by` to NULL, and 0026 revokes `service_role`'s
-     direct INSERT on `digital_thread` so the function is the only way in.
+     direct INSERT on `audit_trail` so the function is the only way in.
 
      THAT REVOKE IS THE POINT AND IT IS WHY THIS SUITE EXISTS. The service-role key ships in .env
      and is held by the ingestion daemon and every edge function. While it could INSERT directly,
@@ -57,7 +57,7 @@ class RejectionRpcTestCase(unittest.TestCase):
     Every test runs inside one transaction and rolls back.
 
     ROLLBACK IS WHAT MAKES THIS SAFE TO RUN AGAINST A LIVE STACK, and it is not merely tidiness:
-    `digital_thread` is append-only to every application role, so a committed scratch row could not
+    `audit_trail` is append-only to every application role, so a committed scratch row could not
     be removed afterwards without the owner exemption this suite deliberately does not rely on.
     """
 
@@ -68,12 +68,12 @@ class RejectionRpcTestCase(unittest.TestCase):
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT 1 FROM information_schema.columns
-                     WHERE table_schema = 'public' AND table_name = 'digital_thread'
+                     WHERE table_schema = 'public' AND table_name = 'audit_trail'
                        AND column_name = 'causation_id'
                 """)
                 if not cur.fetchone():
                     raise RuntimeError(
-                        "digital_thread.causation_id is missing -- 0026 has not been applied."
+                        "audit_trail.causation_id is missing -- 0026 has not been applied."
                     )
 
                 cur.execute("SELECT to_regprocedure('public.record_ingestion_rejection(uuid, jsonb, timestamptz)')")
@@ -104,7 +104,7 @@ class RejectionRpcTestCase(unittest.TestCase):
 
         The claim alone, with no SET ROLE: `is_ingestion_caller()` reads `auth.uid()` out of
         `request.jwt.claims`, so this is what the guard actually tests. Staying owner keeps the
-        assertions below able to read `digital_thread`, which is what they are here for.
+        assertions below able to read `audit_trail`, which is what they are here for.
         """
         self.cur.execute(
             "SELECT set_config('request.jwt.claims', %s, true)",
@@ -127,7 +127,7 @@ class RejectionRpcTestCase(unittest.TestCase):
         self.cur.execute(
             "SELECT entity_type, entity_id, action, old_data, new_data, changed_by, "
             "       actor_source, causation_id "
-            "  FROM public.digital_thread WHERE id = %s",
+            "  FROM public.audit_trail WHERE id = %s",
             (audit_id,),
         )
         cols = ("entity_type", "entity_id", "action", "old_data", "new_data",
@@ -148,7 +148,7 @@ class RejectionRpcTestCase(unittest.TestCase):
 
         self.cur.execute(
             "SELECT count(*), count(DISTINCT causation_id) "
-            "  FROM public.digital_thread WHERE causation_id = txid_current()")
+            "  FROM public.audit_trail WHERE causation_id = txid_current()")
         written, distinct = self.cur.fetchone()
 
         self.assertGreaterEqual(written, 2)
@@ -181,7 +181,7 @@ class RejectionRpcTestCase(unittest.TestCase):
         """
         `name` is mutable and a device can later be renamed or hard-purged. A row that could only be
         read by joining to a live row would lose its meaning in exactly the cases it matters most --
-        which is the same argument the purged-entity fallback in DigitalThreadTab.jsx rests on.
+        which is the same argument the purged-entity fallback in AuditTrailTab.jsx rests on.
         """
         audit_id = self.record([{"metric": "M", "code": "unmodelled_metric"}])
         payload = self.row(audit_id)["new_data"]
@@ -195,12 +195,12 @@ class RejectionRpcTestCase(unittest.TestCase):
         The daemon computing an empty list is the ordinary healthy case. A caller should not have to
         guard against its own success, so this returns NULL rather than raising.
         """
-        self.cur.execute("SELECT count(*) FROM public.digital_thread")
+        self.cur.execute("SELECT count(*) FROM public.audit_trail")
         before = self.cur.fetchone()[0]
 
         self.assertIsNone(self.record([]))
 
-        self.cur.execute("SELECT count(*) FROM public.digital_thread")
+        self.cur.execute("SELECT count(*) FROM public.audit_trail")
         self.assertEqual(self.cur.fetchone()[0], before)
 
     def test_an_unknown_device_is_refused(self):
@@ -272,7 +272,7 @@ class ServiceRoleCannotForgeAuditRowsTestCase(unittest.TestCase):
         self.as_service_role()
         with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
             self.cur.execute("""
-                INSERT INTO public.digital_thread
+                INSERT INTO public.audit_trail
                        (entity_type, entity_id, action, new_data, actor_source, changed_by)
                 VALUES ('devices', gen_random_uuid(), 'SCHEMA_REJECTION',
                         '{"forged": true}'::jsonb, 'user', gen_random_uuid())
@@ -281,10 +281,10 @@ class ServiceRoleCannotForgeAuditRowsTestCase(unittest.TestCase):
     def test_service_role_still_cannot_update_or_delete(self):
         """0003's append-only trigger, re-asserted because 0026 rewrites the grants around it."""
         for statement in (
-            "UPDATE public.digital_thread SET action = 'TAMPERED' WHERE id = "
-            "(SELECT id FROM public.digital_thread ORDER BY id DESC LIMIT 1)",
-            "DELETE FROM public.digital_thread WHERE id = "
-            "(SELECT id FROM public.digital_thread ORDER BY id DESC LIMIT 1)",
+            "UPDATE public.audit_trail SET action = 'TAMPERED' WHERE id = "
+            "(SELECT id FROM public.audit_trail ORDER BY id DESC LIMIT 1)",
+            "DELETE FROM public.audit_trail WHERE id = "
+            "(SELECT id FROM public.audit_trail ORDER BY id DESC LIMIT 1)",
         ):
             with self.subTest(statement=statement.split()[0]):
                 self.conn.rollback()
@@ -298,7 +298,7 @@ class ServiceRoleCannotForgeAuditRowsTestCase(unittest.TestCase):
         functions do it.
         """
         self.as_service_role()
-        self.cur.execute("SELECT count(*) FROM public.digital_thread")
+        self.cur.execute("SELECT count(*) FROM public.audit_trail")
         self.assertIsNotNone(self.cur.fetchone()[0])
 
     def test_service_role_can_still_reach_the_rpc(self):

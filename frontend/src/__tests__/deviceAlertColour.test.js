@@ -108,7 +108,7 @@ describe('only DEVICE alerts can redden a device', () => {
     expect(index.get('gwy120000000000400080000')?.alert_name).toBe('Gateway Stale')
   })
 
-  it('treats a row with no entity_type as a device, for rows written before 0023 was generalised', () => {
+  it('treats a row with no entity_type as a device, for rows written before archived migration 0023_device_alerts was generalised', () => {
     const legacy = { fingerprint: 'l1', sparkplug_id: 'dev220000000000400080000',
                      alert_name: 'Thermal Excursion', severity: 'critical' }
     expect(alertForDevice(alertIndex([legacy]), device())?.alert_name).toBe('Thermal Excursion')

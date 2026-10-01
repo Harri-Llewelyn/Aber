@@ -20,7 +20,7 @@
 #
 # RESTORE INTO A FRESHLY INITIALISED DATABASE. --clean lets the dump replace the auth and storage
 # schemas the image ships. What it cannot drop is a partition's inherited primary key, and a fresh
-# stack always has partitions (Realtime's daily ones, digital_thread's monthly ones); the
+# stack always has partitions (Realtime's daily ones, audit_trail's monthly ones); the
 # preflight below drops every partition first.
 #
 # Full runbook:  supabase/README.md -> "Backup and Recovery"
@@ -183,13 +183,13 @@ log "  ok -- all $(echo "$REQUIRED_ROLES" | wc -w | tr -d ' ') present"
 # `--clean` tries to, before any DROP TABLE:
 #
 #     ERROR:  cannot drop inherited constraint "messages_2026_09_24_pkey" of relation "messages_2026_09_24"
-#     ERROR:  cannot drop inherited constraint "digital_thread_default_pkey" of relation "digital_thread_default"
+#     ERROR:  cannot drop inherited constraint "audit_trail_default_pkey" of relation "audit_trail_default"
 #
 # A freshly installed stack always holds partitions with the dump's names: Realtime creates its
-# daily realtime.messages_* on every start, and 0001 creates digital_thread's monthly partitions
+# daily realtime.messages_* on every start, and 0001 creates audit_trail's monthly partitions
 # and its DEFAULT. So every partition of every partitioned table is dropped first; the dump
 # recreates each with its rows. CASCADE, because a view may read a partition by name
-# (digital_thread_partition_health does), and the dump recreates the view too. Found by the first
+# (audit_trail_partition_health does), and the dump recreates the view too. Found by the first
 # rehearsal to reach this step (docs/incidents.md, "The restore path never met a partitioned
 # table").
 log "preflight: dropping every partition the dump will recreate"
@@ -212,7 +212,7 @@ log "  ok"
 # created in `public` by supabase_admin or postgres is granted ALL to anon, authenticated and
 # service_role at creation. A dump's GRANT and REVOKE statements are a diff from PostgreSQL's
 # built-in default, not from those, so a replay creates each object with the surplus and then
-# grants what the source had on top of it: service_role could UPDATE digital_thread after a
+# grants what the source had on top of it: service_role could UPDATE audit_trail after a
 # restore, and anon could execute every function 0101 revoked from PostgREST roles. Every default
 # ACL is revoked here for every grantee but its owner and PUBLIC; the dump's own
 # ALTER DEFAULT PRIVILEGES statements, which pg_dump writes after every object and grant,
@@ -279,7 +279,7 @@ log "  ok -- $AGGS continuous aggregate(s) present"
 
 # --- 3. Storage objects ------------------------------------------------------------------------
 if [ "$RESTORE_STORAGE" = "true" ] && [ -n "$STORAGE_NAME" ]; then
-  log "restoring 3D model objects"
+  log "restoring the storage objects (every bucket)"
   log "  SKIPPED: this script cannot reach the volume. Untar $STORAGE_NAME into the storage path."
 elif [ -z "$STORAGE_NAME" ]; then
   log "no storage archive in this backup -- devices.model_3d_path will point at absent objects"

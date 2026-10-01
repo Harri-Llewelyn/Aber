@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { ValidatePayloadModal } from '../modals/ValidatePayloadModal'
 import { SchemaBuilderModal } from '../modals/SchemaBuilderModal'
 import { SchemaDetailModal } from '../modals/SchemaDetailModal'
@@ -13,10 +14,16 @@ import {
 } from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { ActionButton } from '../common/ActionButton'
+import { SectionCount } from '../common/SectionCount'
+import { SearchInput } from '../common/SearchInput'
+import { ClearFilters } from '../common/ClearFilters'
+import { EmptyState } from '../common/EmptyState'
+import { LoadingState } from '../common/LoadingState'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
+  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash
 } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
+import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 /**
@@ -31,42 +38,36 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const [schemas, setSchemas]         = useState([])
   const [catalog, setCatalog]         = useState([])
   const [devices, setDevices]         = useState([])
-  const [loading, setLoading]         = useState(true)
+  // True after the first read, so a reload keeps the rows on screen.
+  const [loaded, setLoaded]           = useState(false)
   const [showValidateModal, setShowValidateModal] = useState(false)
   const [showBuilderModal, setShowBuilderModal] = useState(false)
-  // Version lifecycle. `detailSchema` is the version being read or edited; `forkTarget` the one a
-  // new version is cut from. Two states, because forking is reachable from the table and from the
-  // detail modal. An id rather than the object: the list reloads after every fork, publish and
-  // deprecate.
+  // `selectedId` is the row whose drawer is open, an id rather than the object because the list
+  // reloads after every version created, publish and discard. `detailSchema` is the version being
+  // read or edited; `forkTarget` the one a new version is created from, reachable from the drawer
+  // and from the detail dialog.
   const [selectedId, setSelectedId] = useState(null)
   const [detailSchema, setDetailSchema] = useState(null)
   const [forkTarget, setForkTarget] = useState(null)
   // The draft awaiting a discard confirmation. Held as the OBJECT so the dialog can name the
   // version it is about -- "discard the draft" is not a sentence somebody should have to trust.
   const [discardTarget, setDiscardTarget] = useState(null)
-  /**
-   * The registry's two filters. Status replaces the old Archived Versions toggle, which was a
-   * status filter wearing a button. `current` is the default, so superseded versions stay out of
-   * the working list until asked for.
-   */
+  // `current` is the default status, so superseded versions stay out of the working list until
+  // asked for.
   const [statusFilter, setStatusFilter] = useState('current')
   const [schemaSearch, setSchemaSearch] = useState('')
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
-      // The catalog is still read here, for the schema builder and the detail modal's metric
-      // picker: a schema is built from catalog rows, so the page that builds one needs them even
-      // though it no longer lists them. Devices are for the per-schema counts. Gateways are not
-      // read at all -- a schema is bound to a device, and which gateway serves that device is the
-      // Devices page's question.
+      // The catalog feeds the schema builder and the detail dialog's metric picker. Devices are for
+      // the per-schema counts.
       const [sch, cat, dev] = await Promise.all([
         api.get('/api/v1/schemas'),
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/devices'),
       ])
       setSchemas(sch); setCatalog(cat); setDevices(dev)
-    } finally { setLoading(false) }
+    } finally { setLoaded(true) }
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -83,12 +84,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
   const deviceCountFor = (schemaUuid) => devicesForSchema(schemaUuid).length
 
-  /**
-   * Save a schema the builder composed, and nothing else. The dialog used to register a device and
-   * download a spec sheet as well; a device is given its schema on the Devices page, where its
-   * gateway, cell and conformance policy are decided too, and the definition is downloaded from
-   * this page's context panel.
-   */
+  /** Save a schema the builder composed. A device is given its schema on the Devices page. */
   const handleBuilderSubmit = async (schemaPayload) => {
     try {
       await api.post('/api/v1/schemas', schemaPayload)
@@ -101,7 +97,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   }
 
   /**
-   * Fork an active schema into the next draft version. The version number is derived by
+   * Create the next version of an active schema, as a draft. The version number is derived by
    * `fork_schema()`, and `enforce_schema_version_provenance()` refuses an insert that names one.
    * The draft opens immediately.
    */
@@ -154,10 +150,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     }
   }
 
-  /**
-   * Discard the open draft. One draft may exist per lineage, so without this the only way out of an
-   * unwanted draft was to publish it.
-   */
+  /** Discard the open draft. One draft may exist per lineage, so this is the way out besides publishing. */
   const handleDiscardDraft = async () => {
     if (!discardTarget) return
     try {
@@ -199,8 +192,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   }
 
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
-  // Superseded versions stay out of the working list until asked for. Drafts do not: opening one is
-  // the only way to finish it. See isCurrentSchema().
+  // Drafts stay in the working list: opening one is the only way to finish it. See isCurrentSchema().
   const archivedCount = schemas.filter(s => !isCurrentSchema(s)).length
   const currentCount = schemas.length - archivedCount
   const draftCount = schemas.filter(s => schemaStatus(s) === SCHEMA_STATUS.DRAFT).length
@@ -221,7 +213,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     !schemaSearchTerm || [s.schema_name, s.schema_uuid, s.change_description]
       .some(field => String(field || '').toLowerCase().includes(schemaSearchTerm))
 
-  const visibleSchemas = schemas.filter(s => matchesStatusFilter(s) && matchesSchemaSearch(s))
+  const inStatusView = schemas.filter(matchesStatusFilter)
+  const visibleSchemas = inStatusView.filter(matchesSchemaSearch)
   // Drives the Clear button and its count. `current` is the resting state, not a filter.
   const schemaFilterCount = (statusFilter !== 'current' ? 1 : 0) + (schemaSearchTerm ? 1 : 0)
   const clearSchemaFilters = () => { setStatusFilter('current'); setSchemaSearch('') }
@@ -250,120 +243,83 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     }
   )
 
-  // Resolved fresh every render -- see the note on selectedId.
+  // Resolved fresh every render, from the id.
   const selectedSchema = schemas.find(s => s.schema_uuid === selectedId) || null
   const selectedStatus = selectedSchema ? schemaStatus(selectedSchema) : null
-  // A lineage may hold at most one open draft (a partial unique index), so forking again before it
-  // is published or discarded is refused.
+  // A lineage may hold at most one open draft (a partial unique index), so creating another
+  // version before it is published or discarded is refused.
   const selectedDraft = selectedSchema
     ? schemas.find(s => s.parent_schema_id === selectedSchema.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT)
     : null
   const selectedForkBlocked = !canManageSchema || !!selectedDraft
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
 
-      {/* No PageHeading: one card, whose header is already the page's title, as on every other
-          single-card page. It carried one while the metric catalogue shared the page and neither
-          card could speak for both. */}
-      <div className="card" style={{ marginBottom: 'var(--stack)' }}>
-        <div className="card-header">
-          {/* FILTERED OF TOTAL, not a bare count. A narrowed registry would otherwise read as a
-              short one, which is the wrong thing to believe about a version history. */}
-          <h3 className="section-title">
-            Schemas
-            <HelpTip
-              label="About schemas"
-              text="What a device is modelled to publish, built from the Metrics page. A published schema is read-only: create the next version to get an editable draft. Publishing it moves every device across at once."
-            />
-            {visibleSchemas.length !== schemas.length && (
-              <span
-                className="section-count"
-                title={`${visibleSchemas.length} of ${schemas.length} versions match the current filters`}
+      <div className="card card-fill">
+        <CardHeading
+          icon={<IconClipboardList size={15} />}
+          title="Schemas"
+          description="What each device is modelled to publish, built from the Metrics page. A published schema is read-only; version it to edit."
+          count={<SectionCount total={inStatusView.length} shown={visibleSchemas.length} />}
+          actions={(
+            <>
+              {/* The only way to create a schema. Building from the catalog is what guarantees every
+                  metric has a standard and a semantic id, which device tags, unmodelled detection and
+                  the tag filters all read. */}
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManageSchema}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                title="Compose a schema from catalog metrics. Attach it to a device on the Devices page"
+                onClick={() => setShowBuilderModal(true)}
               >
-                {`${visibleSchemas.length}/${schemas.length}`}
-              </span>
-            )}
-          </h3>
-          {/* The page's primary action, in the header of the card it acts on. Validate Candidate
-              Payload is a schema's own action in the drawer, where the target is already chosen. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            {/* The only way to create a schema. Building from the catalog is what guarantees every
-                metric has a standard and a semantic id, which device tags, unmodelled detection and
-                the tag filters all read. */}
-            <button
-              className={`btn btn-primary btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
-              disabled={!canManageSchema}
-              onClick={() => canManageSchema && setShowBuilderModal(true)}
-              title={!canManageSchema ? 'Requires Admin permissions' : 'Compose a schema from catalog metrics. Attach it to a device on the Devices page'}
+                <IconClipboardList size={14} /> Build Schema from Catalog
+              </ActionButton>
+            </>
+          )}
+        />
+
+        <div className="card-body">
+          <div className="filter-bar">
+            <select
+              className="form-control control-md"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              aria-label="Filter schemas by lifecycle state"
+              title="Filter by lifecycle state. Current hides superseded versions."
             >
-              <IconClipboardList size={14} /> Build Schema from Catalog
-            </button>
-          {/* The Archived Versions toggle is an option in the status select above. */}
+              {/* Counts in the labels: they answer "is there any history at all?" without selecting. */}
+              <option value="current">Current ({currentCount})</option>
+              <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
+              <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
+              <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
+              <option value="all">All versions ({schemas.length})</option>
+            </select>
+
+            <SearchInput
+              value={schemaSearch}
+              onChange={setSchemaSearch}
+              placeholder="Search name, UUID or description…"
+              ariaLabel="Search the schema registry"
+            />
+
+            <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />
           </div>
         </div>
 
-        <div className="card-body">
-      {/* The registry gains a row per publish rather than per schema, so it outgrows a plain list
-          faster than anything else here. */}
-      <div className="filter-bar">
-        <select
-          className="form-control"
-          style={{ width: '190px' }}
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          aria-label="Filter schemas by lifecycle state"
-          title="Filter by lifecycle state. Current hides superseded versions."
-        >
-          {/* Counts in the labels, as on Cells and Gateways: it is how the archived count survived
-              losing its badge, and it answers "is there any history at all?" without selecting. */}
-          <option value="current">Current ({currentCount})</option>
-          <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
-          <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
-          <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
-          <option value="all">All versions ({schemas.length})</option>
-        </select>
-
-        <input
-          className="form-control"
-          style={{ width: '260px' }}
-          value={schemaSearch}
-          onChange={e => setSchemaSearch(e.target.value)}
-          placeholder="Search name, UUID or description…"
-          aria-label="Search the schema registry"
-          title="Filter schemas by name, UUID or change description"
-        />
-
-        {schemaFilterCount > 0 && (
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={clearSchemaFilters}
-            title="Clear every filter"
-          >
-            <IconX size={13} /> Clear filters ({schemaFilterCount})
-          </button>
-        )}
-      </div>
-        </div>{/* .card-body */}
-        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : visibleSchemas.length === 0 ? (
-          /* Says why it is empty, as the catalog's empty state does: a blank table reads as a
-             failed load rather than a filter doing its job. */
-          <div className="empty-state" style={{ padding: '20px var(--inset)' }}>
-            <div className="empty-icon"><IconClipboardList size={36} /></div>
-            <div className="empty-text">
-              {schemas.length === 0
-                ? 'No schemas registered yet — build one from the metric catalog.'
-                : schemaSearchTerm
-                  ? <>No schema matches <strong>{schemaSearch.trim()}</strong>.</>
-                  : 'No schema versions in this lifecycle state.'}
-            </div>
-          </div>
+        {!loaded ? <LoadingState label="schemas" /> : visibleSchemas.length === 0 ? (
+          <EmptyState
+            icon={<IconClipboardList size={36} />}
+            filtered={schemas.length > 0}
+            message="No schemas registered yet — build one from the metric catalog."
+            filteredMessage={schemaSearchTerm
+              ? <>No schema matches <strong>{schemaSearch.trim()}</strong>.</>
+              : 'No schema versions in this lifecycle state.'}
+          />
         ) : (
-          /* `.table-scroll` still caps the height and pins the header row. It is no longer holding
-             a second card open below -- the catalog has its own page -- but the registry gains a
-             row per publish rather than per schema, so it is the list here that runs away. */
-          <div className="table-wrap table-scroll">
+          <div className="table-wrap">
             <table>
               <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Lineage position and lifecycle state. Only a draft is editable.">Version</th><th title="Why this version exists, recorded when it was created">Change Description</th><th title="Schema unique UUID">Schema UUID</th><th title="Devices provisioned with this schema">Devices</th></tr></thead>
               <tbody>
@@ -373,18 +329,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                   return (
                     <tr
                       key={sch.schema_uuid}
-                      className={`row-selectable${selectedId === sch.schema_uuid ? ' row-selected' : ''}`}
-                      style={status === SCHEMA_STATUS.ARCHIVED ? { opacity: 0.6 } : undefined}
+                      className={`row-selectable${selectedId === sch.schema_uuid ? ' row-selected' : ''}${status === SCHEMA_STATUS.ARCHIVED ? ' row-archived' : ''}`}
                       onClick={rowSelectHandler(() => setSelectedId(id => id === sch.schema_uuid ? null : sch.schema_uuid))}
                       title="Click to inspect this schema in the details panel"
                     >
                       <td>
                         <strong>{sch.schema_name}</strong>
-                        {/* A published version is read-only, and the lock says so on the row
-                            rather than only once the modal is open. */}
+                        {/* A published version is read-only, and the lock says so on the row. */}
                         {!isSchemaEditable(sch) && (
                           <span
-                            style={{ marginLeft: '6px', color: 'var(--text-dim)', verticalAlign: 'middle' }}
+                            className="cell-meta badge-follow"
                             title={`Read-only — this version is ${statusLabel(status)}`}
                           >
                             <IconLock size={11} />
@@ -393,7 +347,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                       </td>
                       <td>
                         <span
-                          className={`badge ${statusBadgeClass(status)}`}
+                          className={`badge badge-sm ${statusBadgeClass(status)}`}
                           title={isSchemaEditable(sch)
                             ? 'Draft — editable until published'
                             : `${statusLabel(status)} and immutable`}
@@ -401,9 +355,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                           {schemaVersionLabel(sch)}
                         </span>
                       </td>
-                      {/* Constrained: a change description is free text and `.table-wrap` scrolls
-                          horizontally, so an unbounded cell pushes the action buttons off-screen. */}
-                      <td style={{ maxWidth: '280px', color: sch.change_description ? 'var(--text-muted)' : 'var(--text-dim)', fontSize: '12px' }}>
+                      {/* Capped: a change description is free text, and an unbounded cell widens the table. */}
+                      <td className="cell-meta schema-change-cell">
                         {sch.change_description || '—'}
                       </td>
                       <td><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
@@ -452,10 +405,11 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       )}
 
       {/* Typed confirmation, because this destroys work: a draft is somebody's editing session, and
-          the delete cascades to device attachments made to try it out. Same guard the archive flows
-          use. */}
+          the delete cascades to device attachments made to try it out. */}
       {discardTarget && (
         <ConfirmModal
+          title="Discard draft"
+          icon={<IconTrash size={18} />}
           message={
             <>
               Discard draft <strong>{discardTarget.schema_name}</strong> (v{discardTarget.version})?
@@ -482,7 +436,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         />
       )}
 
-      {/* The drawer's selection is the starting target; the modal's own select still lets it be
+      {/* The drawer's selection is the starting target; the dialog's own select still lets it be
           changed, so one payload can be tested against two versions without retyping it. */}
       {showValidateModal && (
         <ValidatePayloadModal
@@ -502,10 +456,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         title={selectedSchema?.schema_name || ''}
         subtitle={selectedSchema && (
           <>
-            <span className={`badge ${statusBadgeClass(selectedStatus)}`} style={{ fontSize: '11px' }}>
+            <span className={`badge badge-sm ${statusBadgeClass(selectedStatus)}`}>
               {statusLabel(selectedStatus)}
             </span>
-            <span className="badge badge-neutral" style={{ fontSize: '11px' }}>{schemaVersionLabel(selectedSchema)}</span>
+            <span className="badge badge-sm badge-neutral badge-follow">{schemaVersionLabel(selectedSchema)}</span>
           </>
         )}
         fields={selectedSchema ? [
@@ -516,7 +470,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             value: statusLabel(selectedStatus),
             title: isSchemaEditable(selectedSchema)
               ? 'A draft. This is the only state in which a schema can be edited.'
-              : 'Published or archived, and therefore immutable. Fork it to make changes.'
+              : 'Published or archived, and therefore immutable. Create a version to make changes.'
           },
           { label: 'Change Description', value: selectedSchema.change_description || null, full: true },
           {
@@ -525,7 +479,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               ? (schemas.find(s => s.schema_uuid === selectedSchema.parent_schema_id)?.schema_name || selectedSchema.parent_schema_id)
               : null,
             full: true,
-            title: 'The version this one was forked from. Absent on the first version of a lineage.'
+            title: 'The version this one was created from. Absent on the first version of a lineage.'
           },
           {
             // The chips answer which devices; the action below opens the Devices page filtered to
@@ -564,19 +518,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               ? 'Edit this draft version and publish it'
               : 'View this version — its definition, change description and lineage'
           },
-          // Offered only on a version that can be forked: a draft is not a lineage head and an
-          // archived version is history. Shown disabled where meaningful but blocked, never where
-          // meaningless.
+          // Offered only on the head of a lineage: a draft is not one and an archived version is
+          // history. Shown disabled where meaningful but blocked, never where meaningless.
           canForkSchema(selectedSchema) && {
-            label: `Create Version (v${nextVersion(selectedSchema)})`,
+            label: `Create Version v${nextVersion(selectedSchema)}`,
             icon: <IconGitBranch size={13} />,
             onClick: () => setForkTarget(selectedSchema),
             disabled: selectedForkBlocked,
             title: !canManageSchema
-              ? 'Requires Admin permissions'
+              ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
               : selectedDraft
                 ? `A draft (${selectedDraft.schema_name}) already exists — publish or discard it first`
-                : `Fork this schema into an editable draft at v${nextVersion(selectedSchema)}`
+                : `Create Version v${nextVersion(selectedSchema)}: an editable Draft v${nextVersion(selectedSchema)}, carrying every metric this version models`
           },
           {
             label: `View ${deviceCountFor(selectedSchema.schema_uuid)} Provisioned Device(s)`,
@@ -596,9 +549,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               : 'This version has no definition to validate against'
           },
           {
-            // Was the sole item behind the row's "More" menu. With the Actions column gone this is
-            // its only home, and here it costs a line rather than a click to reveal a click.
-            label: 'Download Definition (JSON)', icon: <IconDownload size={13} />,
+            label: 'Download JSON', icon: <IconDownload size={13} />,
             onClick: () => handleDownloadSchema(selectedSchema),
             disabled: !selectedSchema.schema_definition,
             title: selectedSchema.schema_definition

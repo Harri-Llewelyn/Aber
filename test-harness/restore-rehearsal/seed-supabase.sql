@@ -4,14 +4,14 @@
 -- every id here is a literal. A generated id would make the post-restore assertion "a device
 -- exists", which is satisfied by a restore that lost this one and kept another.
 --
--- WHY THIS SEEDS THROUGH THE NORMAL TABLES rather than writing digital_thread directly. The audit
--- rows this produces are written by `log_digital_thread_event()`, which is the trigger a restore
+-- WHY THIS SEEDS THROUGH THE NORMAL TABLES rather than writing audit_trail directly. The audit
+-- rows this produces are written by `log_audit_trail_event()`, which is the trigger a restore
 -- has to bring back; seeding the audit table by hand would test the dump's ability to carry rows
 -- and not its ability to carry the machinery that writes them.
 --
 -- IDEMPOTENT, because the rehearsal seeds the FIRST install and a re-run against a surviving
 -- cluster must not fail on a duplicate key. It is not idempotent in the audit trail and cannot be:
--- 0003 makes digital_thread append-only, so a second seed adds a second set of audit rows. That is
+-- 0003 makes audit_trail append-only, so a second seed adds a second set of audit rows. That is
 -- why the count snapshot is taken after seeding rather than assumed.
 
 \set ON_ERROR_STOP on

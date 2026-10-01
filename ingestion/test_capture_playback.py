@@ -186,6 +186,31 @@ class PayloadRoundTripTests(unittest.TestCase):
         self.assertFalse(restored.metrics[0].HasField("name"))
         self.assertEqual(restored.metrics[0].alias, 3)
 
+    def test_a_signed_integer_is_recorded_as_its_wire_pattern(self):
+        # The file holds what the wire carried, datatype included, so playback reproduces the
+        # bytes and the daemon reads the value back signed.
+        payload = sparkplug_b_pb2.Payload()
+        m = payload.metrics.add()
+        m.name = "Offset"
+        m.datatype = 3  # Int32
+        m.int_value = (-5) & 0xFFFFFFFF
+        data, restored = self._round_trip(payload)
+        self.assertEqual(data["metrics"][0], {"name": "Offset", "datatype": 3, "int_value": 4294967291})
+        self.assertEqual(restored.SerializeToString(), payload.SerializeToString())
+
+    def test_a_negative_integer_in_the_file_is_encoded_as_twos_complement(self):
+        # A JSON message or a hand edit carries the number itself; protobuf's unsigned fields
+        # refuse it, so it is written as the pattern a signed encoder would have sent.
+        restored = capture.dict_to_payload({"metrics": [
+            {"name": "a", "int_value": -5},
+            {"name": "b", "datatype": 2, "int_value": -5},
+            {"name": "c", "long_value": -7},
+        ]})
+        a, b, c = restored.metrics
+        self.assertEqual((a.int_value, a.datatype), (4294967291, 3))
+        self.assertEqual((b.int_value, b.datatype), (4294967291, 2))
+        self.assertEqual((c.long_value, c.datatype), (2 ** 64 - 7, 4))
+
 
 class IdentityRewriteTests(unittest.TestCase):
 
@@ -330,13 +355,6 @@ class PlanTests(unittest.TestCase):
         with self.assertRaises(capture.CaptureError) as ctx:
             self._plan(capture=bad)
         self.assertIn("99", str(ctx.exception))
-
-    def test_a_capture_recorded_before_the_rename_is_still_read(self):
-        # The key carried the platform's former name until 1.0; the format did not change, so a
-        # file a site recorded before then plays under either key.
-        old = capture_file()
-        old["acs_capture_version"] = old.pop("aber_capture_version")
-        self.assertTrue(self._plan(capture=old))
 
     def test_a_gateway_id_of_the_wrong_shape_is_refused(self):
         # sparkplug_id is a GENERATED column, so a friendly name cannot be one -- and passing it

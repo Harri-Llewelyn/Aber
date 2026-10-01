@@ -16,41 +16,47 @@ export const PERMISSION_UUIDS = {
   GATEWAY_MANAGE:     'e789a012-3456-4c1d-8706-933e08544e35',
   TELEMETRY_READ:     'f012a345-6789-4c1d-8706-933e08544e36',
   ARCHIVE_MANAGE:     'b345c678-9012-4c1d-8706-933e08544e37',
-  // Renamed from DOCUMENT_MANAGE by 0049. THE UUID IS UNCHANGED and must stay so:
-  // role_permissions references it by id, so this is a variable rename, not an authorisation
-  // change. Only the permission's `name` string moved, in 0049.
+  // Renamed from DOCUMENT_MANAGE (archive/0049_documents_become_links.sql). The UUID is unchanged
+  // and must stay so: role_permissions references it by id, so only the permission's `name` moved.
   LINK_MANAGE:        'a012b345-6789-4c1d-8706-933e08544e38',
   AUTHZ_MANAGE:       'e012c345-6789-4c1d-8706-933e08544e39',
   SCHEMA_MANAGE:      'f123d456-7890-4c1d-8706-933e08544e40',
+  // Retired: GitOps edge sync is gone and no check consults `gitops:manage`; the row remains in the
+  // database.
   GITOPS_MANAGE:      'c234e567-8901-4c1d-8706-933e08544e41',
-  DIGITAL_THREAD_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
-  // Added by 0086. The first WRITE grant Operator has ever held, and it is a write to a queue
-  // rather than to an asset -- the asset write policies are unchanged.
+  AUDIT_TRAIL_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
+  // The first write grant Operator holds, and it is a write to a queue rather than to an entity:
+  // the entity write policies are unchanged.
   PROPOSAL_CREATE:    'b678f901-2345-4c1d-8706-933e08544e43',
 };
 
 /**
- * Every value `digital_thread.action` can hold, with the label the filter offers for it.
+ * Every value `audit_trail.action` can hold, with the label the filter offers for it.
  *
- * Shared because the Digital Thread filter renders these as options and `api.js` uses the same
+ * Shared because the Audit Trail filter renders these as options and `api.js` uses the same
  * keys as an allow-list before building a SQL predicate: an unlisted action would apply no
  * predicate and return every kind. The labels name the database action rather than reusing the
  * marker vocabulary (Created / Operational / Configuration / Lifecycle), so the filter and the
  * event drawer's badge name the same thing.
  */
-export const DIGITAL_THREAD_ACTIONS = {
+export const AUDIT_TRAIL_ACTIONS = {
   INSERT:           'Insert',
   UPDATE:           'Update',
   DELETE:           'Delete',
   SCHEMA_REJECTION: 'Schema rejection',
-  // NOT WRITTEN BY THE AUDIT TRIGGER, like SCHEMA_REJECTION above. 0041 records a broker credential
-  // minted for a gateway; 0043 records a long-lived token signed for a service principal. Both are
-  // filterable because both are the reason somebody opens this page -- "who was given what, when".
+  // Not written by the audit trigger, like SCHEMA_REJECTION above. A broker credential minted for a
+  // gateway (archive/0041_virtual_gateway_credential.sql) and a long-lived token signed for a machine
+  // identity (archive/0043_record_service_token_issued.sql) each file one: "who was given what, when".
   CREDENTIAL_ISSUED: 'Credential issued',
   TOKEN_MINTED:      'Token minted',
   // The pair is the question: "who was given what" is only half an answer without "and when was
   // it taken away".
   TOKEN_REVOKED:     'Token revoked',
+  // A machine identity's own lifecycle, written by the functions that withdraw, reinstate and
+  // describe one. Its creation is an INSERT. The stored names keep "principal".
+  PRINCIPAL_REVOKED:    'Principal revoked',
+  PRINCIPAL_REINSTATED: 'Principal reinstated',
+  PRINCIPAL_DESCRIBED:  'Principal described',
   // An approval writes one row naming both parties, and is filterable because "what has been
   // approved lately" is a question this page answers. Rejected and withdrawn proposals are absent:
   // neither changed anything, and the proposal row carries the refusal.
@@ -64,12 +70,13 @@ export const DIGITAL_THREAD_ACTIONS = {
   // Named rather than INSERT/DELETE because what happened is that somebody became an Administrator.
   ROLE_GRANTED:      'Role granted',
   ROLE_REVOKED:      'Role revoked',
-  // Written by `ingest_record_gateway_health()` (0100) when an appliance reports a different flow
-  // hash: the digest before and after, and what the forge's main held at that moment. Actor
-  // `ingestion`, no user: the daemon witnessed what the appliance reported.
+  // Written by `ingest_record_gateway_health()` (archive/0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql)
+  // when an appliance reports a different flow hash: the digest before and after, and what the
+  // forge's main held at that moment. Actor `ingestion`, no user.
   FLOW_DEPLOYED:     'Flow deployed',
-  // The backup lane (0101). The first three are a person's acts and name them; the last three are
-  // the backup service's, actor `service`, no user.
+  // The backup lane (archive/0101_a_backup_an_operator_can_take_without_a_shell.sql). The first
+  // three are a person's acts and name them; the last three are the backup service's, actor
+  // `service`, no user.
   BACKUP_REQUESTED:  'Backup requested',
   BACKUP_CANCELLED:  'Backup cancelled',
   BACKUP_RELEASED:   'Backup released',
@@ -79,73 +86,81 @@ export const DIGITAL_THREAD_ACTIONS = {
 };
 
 /**
- * Every entity type the Digital Thread records, in the order the timeline draws them.
+ * Every entity type the Audit Trail records, in the order the timeline draws them.
  *
  * One list: the timeline's sections, the filter dropdown and `api.js` each held their own and
  * disagreed silently (a kind missing from the api.js map matched no row and read as "no events").
  * `table` is the string the trigger stores (TG_TABLE_NAME, or `service_principals` written by
  * hand for identities in GoTrue's schema). `kind` is the UI's spelling, which a handover from
  * another page arrives carrying; both forms normalise through here. Adding a kind here makes it
- * drawable, filterable and resolvable at once, and `digitalThreadEntityTypes.test.js` fails if
+ * drawable, filterable and resolvable at once, and `auditTrailEntityTypes.test.js` fails if
  * any consumer is left behind.
  */
-export const DIGITAL_THREAD_ENTITY_TYPES = [
+// `domain: 'asset'` is the database's audit-domain value; the UI calls these rows entities.
+export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset' },
   { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },
   { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset' },
   { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset' },
-  // The security lane (0070), in the order a reader meets it: who holds what, what the machines
-  // are, then the contracts and settings that shape both.
+  // The security lane (archive/0070_audit_domain_and_the_acts_nothing_recorded.sql), in the order a
+  // reader meets it: who holds what, what the machines are, then the contracts and settings that
+  // shape both.
   { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
-  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Service identities', domain: 'security' },
+  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
+  // Deprecate and restore are UPDATEs on the catalog row (0010, #468).
+  { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
-  // `device_nameplate` is keyed by the device id, so a nameplate approval also belongs to that
-  // device's own history (the entity thread in api.js unions the two).
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
-  // The backup lane (0101): the act and the artefact, both filed under security by
-  // audit_domain_for()'s fail-closed default, which is where an act on the whole database belongs.
+  // The backup lane: the act and the artefact, both filed under security by audit_domain_for()'s
+  // fail-closed default, which is where an act on the whole database belongs.
   { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security' },
   { kind: 'BACKUP',           table: 'backups',            label: 'Backups',            domain: 'security' },
 ];
 
 /**
- * The roles the `digital_thread_select_security` policy admits to the security domain. The asset
- * domain is readable by every role that holds `digital_thread:read`.
+ * The roles the `audit_trail_select_security` policy admits to the security domain. The asset
+ * domain is readable by every role that holds `audit_trail:read`.
  */
-export const DIGITAL_THREAD_SECURITY_ROLES = ['Administrator', 'Auditor'];
+export const AUDIT_TRAIL_SECURITY_ROLES = ['Administrator', 'Auditor'];
 
 /**
- * The entity types a role may ask the Digital Thread for. A kind the policy would return no rows
+ * The entity types a role may ask the Audit Trail for. A kind the policy would return no rows
  * for is left out of the filter, so a Shopfloor_Manager is not offered a lane that always reads
  * "no events". An unknown role (still loading) is offered everything.
  */
-export function digitalThreadEntityTypesFor(userRole) {
-  if (!userRole || DIGITAL_THREAD_SECURITY_ROLES.includes(userRole)) return DIGITAL_THREAD_ENTITY_TYPES;
-  return DIGITAL_THREAD_ENTITY_TYPES.filter(e => e.domain !== 'security');
+export function auditTrailEntityTypesFor(userRole) {
+  if (!userRole || AUDIT_TRAIL_SECURITY_ROLES.includes(userRole)) return AUDIT_TRAIL_ENTITY_TYPES;
+  return AUDIT_TRAIL_ENTITY_TYPES.filter(e => e.domain !== 'security');
 }
 
 /** Stored `entity_type` -> the UI's spelling. What the timeline reads rows through. */
 export const ENTITY_KIND_BY_TABLE = Object.fromEntries(
-  DIGITAL_THREAD_ENTITY_TYPES.map(e => [e.table, e.kind])
+  AUDIT_TRAIL_ENTITY_TYPES.map(e => [e.table, e.kind])
 );
 
 /** The UI's spelling -> stored `entity_type`. What a filter has to become before it is a query. */
 export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
-  DIGITAL_THREAD_ENTITY_TYPES.map(e => [e.kind, e.table])
+  AUDIT_TRAIL_ENTITY_TYPES.map(e => [e.kind, e.table])
 );
 
 /**
- * Every tab id the router will accept. This list and `TABS` in App.jsx must agree:
+ * Every tab id the router will accept. This list and `TABS` in navigation.jsx must agree:
  * `handleNavClick` returns early on an id that is not here, so a tab declared there and forgotten
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */
 export const VALID_TABS = [
-  'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'metrics', 'vocabulary', 'directory',
+  'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'directory',
   'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings'
 ];
+
+/**
+ * Tab ids a release renamed, old -> new. The router opens the new tab at the old path and
+ * rewrites the address, so a bookmark or a link somebody shared keeps working.
+ */
+export const RENAMED_TABS = { 'digital-thread': 'audit-trail' };
 
 // Realtime rollout flag and the polling intervals paired with it. REALTIME_ENABLED gates every
 // supabase.channel() subscription; off, the tabs fall back to the 3s poll. With Realtime on,

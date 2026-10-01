@@ -74,7 +74,7 @@ spec:
             - name: SUPABASE_URL
               value: {{ include "aber.supabase.internalUrl" . | quote }}
             # ...while this one is followed by the BROWSER and must be the ingress address. Using
-            # one for both is the classic way this breaks: a browser cannot resolve `supabase-kong`.
+            # one for both is the classic way this breaks: a browser cannot resolve `supabase-envoy`.
             - name: SUPABASE_PUBLIC_URL
               value: {{ include "aber.supabaseUrl" . | quote }}
             # Studio's calls go THROUGH the gateway, so these are the keys the gateway accepts,

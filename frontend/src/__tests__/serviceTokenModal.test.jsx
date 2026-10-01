@@ -50,7 +50,7 @@ describe('isMintableFromPage', () => {
     expect(isMintableFromPage(describePrincipal('b0000000-0000-4000-8000-000000000003'))).toBe(false)
   })
 
-  it('admits an undocumented principal, which is what create_service_principal() makes', () => {
+  it('admits an undocumented principal, which is what create_machine_principal() makes', () => {
     expect(isMintableFromPage(describePrincipal('c0000000-0000-4000-8000-000000000009'))).toBe(true)
   })
 
@@ -92,7 +92,7 @@ describe('ServiceTokenModal', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue(MINTED.token)).toBeTruthy())
     // THE jti IS SHOWN BECAUSE IT IS THE HANDLE FOR REVOKING THIS TOKEN. Without it, an operator
-    // who has closed the dialog has to find the TOKEN_MINTED row in the Digital Thread.
+    // who has closed the dialog has to find the TOKEN_MINTED row in the Audit Trail.
     expect(screen.getByDisplayValue(MINTED.jti)).toBeTruthy()
   })
 
@@ -106,7 +106,7 @@ describe('ServiceTokenModal', () => {
 
   /**
    * The scope is read from the response, not hardcoded: revocation is a PostgREST hook, and
-   * storage, realtime, the edge runtime and Studio keep accepting a withdrawn token until it
+   * storage, realtime, the edge runtime and Studio keep accepting a revoked token until it
    * expires.
    */
   it('states that revoking reaches the API only', async () => {
@@ -115,6 +115,28 @@ describe('ServiceTokenModal', () => {
 
     screen.getByRole('button', { name: /Issue Token/i }).click()
     await waitFor(() => expect(screen.getByText(/verify the signature independently/i)).toBeTruthy())
+  })
+
+  /** I3X_TOKEN is what `i3x-mcp` reads, so it is said for the MCP identity and for no other. */
+  it('names I3X_TOKEN only for the identity whose client reads it', async () => {
+    api.mintServiceToken.mockResolvedValue(MINTED)
+    const first = open()
+    screen.getByRole('button', { name: /Issue Token/i }).click()
+    await waitFor(() => expect(screen.getByText('I3X_TOKEN')).toBeTruthy())
+    first.unmount()
+
+    open({ principal: { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [] }, principalName: 'Line 4' })
+    screen.getByRole('button', { name: /Issue Token/i }).click()
+    await waitFor(() => expect(screen.getByDisplayValue(MINTED.token)).toBeTruthy())
+    expect(screen.queryByText('I3X_TOKEN')).toBeNull()
+  })
+
+  it('names Studio among the services a revocation does not reach, before and after the mint', async () => {
+    api.mintServiceToken.mockResolvedValue(MINTED)
+    open()
+    expect(document.body.textContent).toMatch(/edge functions and Studio the expiry is the only limit/)
+    screen.getByRole('button', { name: /Issue Token/i }).click()
+    await waitFor(() => expect(document.body.textContent).toMatch(/the edge functions and Studio verify the signature/))
   })
 
   /**

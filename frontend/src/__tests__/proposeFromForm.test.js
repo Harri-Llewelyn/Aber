@@ -4,7 +4,6 @@ import {
   patchFromForm,
   formFromPatch,
   nonProposableFields,
-  isProposable,
   submitProposal,
 } from '../utils/proposeFromForm'
 import { api } from '../api'
@@ -18,8 +17,8 @@ beforeEach(() => {
 })
 
 /**
- * The translation layer between a form and a lane: there is one form per asset, and this is what
- * lets it end in a proposal instead of a write.
+ * The translation layer between a form and the kind of change it files: this is what lets a form
+ * end in a proposal instead of a write.
  */
 describe('what a form would change', () => {
   const current = {
@@ -60,9 +59,9 @@ describe('what a form would change', () => {
     // Same shape as the cell pair above: `area_name` is the box, `name` is the column, and it is
     // what reaches MQTT as the <area> segment of every uns/ topic beneath it.
     const patch = patchFromForm('area',
-      { area_name: 'Building A', description: null, icon: 'Factory' },
-      { area_name: 'Building One', description: null, icon: 'Factory' })
-    expect(patch).toEqual({ name: 'Building One' })
+      { area_name: 'North Shop', description: null, icon: 'Factory' },
+      { area_name: 'Press Hall', description: null, icon: 'Factory' })
+    expect(patch).toEqual({ name: 'Press Hall' })
   })
 
   it('carries all three of an area’s chosen columns and nothing else', () => {
@@ -70,7 +69,7 @@ describe('what a form would change', () => {
        but a form that offered a box for one would be refused at the INSERT rather than here. */
     expect(Object.values(PROPOSAL_FORMS.area.fields).sort())
       .toEqual(['description', 'icon', 'name'])
-    expect(PROPOSAL_FORMS.area.lane).toBe('areas')
+    expect(PROPOSAL_FORMS.area.kind).toBe('areas')
     expect(PROPOSAL_FORMS.area.idField).toBe('area_id')
   })
 
@@ -101,7 +100,6 @@ describe('what a form would change', () => {
     // here even if that control were ever bypassed.
     const patch = patchFromForm('device', current, { ...current, active_gateway_id: 'gw-9' })
     expect(patch).toEqual({})
-    expect(isProposable('device', 'active_gateway_id')).toBe(false)
   })
 })
 
@@ -176,7 +174,7 @@ describe('filing it', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  /* The two link-lane tests are gone with 0108. They proved submitLinkProposal() addressed the
-     right lane -- a helper no page ever called, against lanes the database no longer admits. A
-     link is attached through EntityLinksModal, whose own suite is entityLinks.test.jsx. */
+  /* No test files a link proposal: the database admits none (archived migration
+     0108_a_link_is_attached_never_proposed.sql). A link is attached through EntityLinksModal,
+     whose suite is entityLinks.test.jsx. */
 })

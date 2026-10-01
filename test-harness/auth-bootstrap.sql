@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS auth.identities (
 -- the chain fails one error later than it used to.
 --
 -- INSERT AS WELL, because this table stands in for GoTrue and the suites have to be able to do
--- GoTrue's job. `test_digital_thread_guard.py` seeds a person -- email, password AND an identity
+-- GoTrue's job. `test_audit_trail_guard.py` seeds a person -- email, password AND an identity
 -- row, which is 0048's three-part definition of not-a-machine -- so a read-only grant fails it with
 -- `permission denied for table identities`, one step past where the missing table used to stop it.
 GRANT SELECT, INSERT ON auth.identities TO postgres;

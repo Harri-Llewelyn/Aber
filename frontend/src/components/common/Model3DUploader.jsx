@@ -137,8 +137,8 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
         >
           <IconCube size={22} />
           <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-            {/* The filename can be long and this sits in a modal that scrolls horizontally --
-                constrain it, or the buttons are pushed off-screen. */}
+            {/* The filename can be long and this sits in a narrow drawer: constrain it, or the
+                buttons are pushed off-screen. */}
             <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               Model attached: {modelFileName(path)}
             </div>

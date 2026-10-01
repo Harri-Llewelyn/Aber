@@ -50,12 +50,6 @@ export function hasUnmodelledMetrics(device, schemaOrSchemas) {
   return unmodelledMetrics(device, schemaOrSchemas).length > 0
 }
 
-/** Resolve the schema assigned to a device from a loaded schema list, keyed as `schema_uuid`. */
-export function schemaForDevice(device, schemas) {
-  if (!device?.schema_id) return null
-  return (schemas || []).find(s => s.schema_uuid === device.schema_id) || null
-}
-
 /**
  * Every schema attached to a device. Reads `submodel_schema_ids` (the device_submodels join) and
  * falls back to the 1:1 `schema_id`. Returns [] rather than [null] when nothing is attached.
@@ -175,8 +169,7 @@ export function deviceHasTag(device, schemaOrSchemas, tag, latestValues, catalog
 
 /**
  * Every tag present across a fleet, for a filter. Unmodelled is offered only when a device has it.
- */
-/**
+ *
  * `latestFor` is a function from device to its last values, not a map: telemetry is keyed on
  * `sparkplug_id`, a device row on its uuid, and a wrong key produces no finding rather than an
  * error.

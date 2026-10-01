@@ -14,7 +14,7 @@ import { IconPanelLeft, IconCheck } from './Icons'
  *   expanded   the rail is 232px wide and the page makes room for it.
  *   collapsed  icons only; the pointer does nothing.
  *
- * In every mode keyboard focus inside the rail shows the labels, because a Tab through thirteen
+ * In every mode keyboard focus inside the rail shows the labels, because a Tab through a column of
  * transparent labels is not navigation. A focus that arrives while the pointer is already on the
  * rail is a click, and is ignored so the panel does not stay open over the page it navigated to.
  */

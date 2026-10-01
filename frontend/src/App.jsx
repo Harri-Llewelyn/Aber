@@ -3,7 +3,7 @@ import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
 import { useTheme } from './hooks/useTheme'
-import { useToast } from './hooks/useToast'
+import { useToast, clearStoredHistory } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
@@ -50,8 +50,9 @@ import {
   RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle, releaseVersion,
 } from './utils/releaseVersion'
 
-import { Toast } from './components/common/Toast'
+import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
+import { NotificationHistory } from './components/common/NotificationHistory'
 import { HelpPanel } from './components/common/HelpPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { useNavSignals } from './hooks/useNavSignals'
@@ -64,7 +65,7 @@ const AreasTab         = lazy(() => import('./components/tabs/AreasTab').then(m 
 const CellsTab         = lazy(() => import('./components/tabs/CellsTab').then(m => ({ default: m.CellsTab })))
 const GatewaysTab      = lazy(() => import('./components/tabs/GatewaysTab').then(m => ({ default: m.GatewaysTab })))
 const DevicesTab       = lazy(() => import('./components/tabs/DevicesTab').then(m => ({ default: m.DevicesTab })))
-const DigitalThreadTab = lazy(() => import('./components/tabs/DigitalThreadTab').then(m => ({ default: m.DigitalThreadTab })))
+const AuditTrailTab = lazy(() => import('./components/tabs/AuditTrailTab').then(m => ({ default: m.AuditTrailTab })))
 // Reached only via GoTrue's OAuth redirect, so it is never in the main bundle's critical path.
 const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
@@ -78,11 +79,6 @@ const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then
 const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
 const BackupsTab       = lazy(() => import('./components/tabs/BackupsTab').then(m => ({ default: m.BackupsTab })))
 const ApprovalsTab     = lazy(() => import('./components/tabs/ApprovalsTab').then(m => ({ default: m.ApprovalsTab })))
-
-/* The page list lives in navigation.jsx and is re-exported here unchanged: the sidebar and the
-   search palette read it and cannot import from this file without a cycle, and the tests import
-   TABS and tabIsVisible from here. */
-export { TABS, tabIsVisible, NAV_GROUPS, groupedNav } from './navigation'
 
 function AuthScreen({ onLoginSuccess, notice }) {
   // Its own theme handle: this renders instead of Dashboard, never beside it.
@@ -374,16 +370,16 @@ function Dashboard({ session, onSignOut }) {
   // Separate from the device filter above: set by a device drawer's Schema chip and consumed by
   // SchemasTab, which opens that schema's drawer.
   const [selectedSchemaId, setSelectedSchemaId] = useState('')
-  // Set when a cell is opened from the Site Map; consumed by CellsTab.
+  // Set when a cell is opened from another page; consumed by CellsTab.
   const [selectedCellFilter, setSelectedCellFilter] = useState('')
   // Set by a cell drawer's Area chip; consumed by AreasTab, which opens that area's drawer.
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
   // Set by the search bar; consumed by SettingsTab, which opens that setting's category on it.
   const [selectedSettingKey, setSelectedSettingKey] = useState('')
-  // Set by a "Digital Thread" action on an asset row; consumed by DigitalThreadTab as { id, type }.
-  const [selectedThreadEntity, setSelectedThreadEntity] = useState(null)
-  // Set by Use on the Vocabulary page; consumed by MetricsTab, which resolves it against the
-  // vocabularies it already holds and opens its Add Metric form.
+  // Set by an "Audit Trail" action on an asset row; consumed by AuditTrailTab as { id, type }.
+  const [selectedTrailEntity, setSelectedTrailEntity] = useState(null)
+  // Set by clicking an entry on the Vocabulary page; consumed by MetricsTab, which resolves it
+  // against the vocabularies it already holds and opens its Add Metric dialog.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
@@ -391,7 +387,7 @@ function Dashboard({ session, onSignOut }) {
 
   const { tab, setTab, handleNavClick } = useAppRouting(
     setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
-    setSelectedThreadEntity, setPendingVocabularyEntry, setSelectedAreaFilter
+    setSelectedTrailEntity, setPendingVocabularyEntry, setSelectedAreaFilter
   )
 
   /**
@@ -399,9 +395,9 @@ function Dashboard({ session, onSignOut }) {
    * is a tombstone's handover: the entity is gone from the live tables, so the page shows deleted
    * entities rather than hiding every row of it.
    */
-  const viewThreadFor = (id, type, purged = false) => {
-    setSelectedThreadEntity({ id, type, purged })
-    setTab('digital-thread', { entity: id })
+  const viewTrailFor = (id, type, purged = false) => {
+    setSelectedTrailEntity({ id, type, purged })
+    setTab('audit-trail', { entity: id })
   }
 
   /**
@@ -444,7 +440,7 @@ function Dashboard({ session, onSignOut }) {
     return showDevice(proposal.entity_id)
   }
   const { theme, toggleTheme } = useTheme()
-  const { toast, showToast, clearToast } = useToast()
+  const { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory } = useToast()
   const { mode: sidebarMode, setMode: setSidebarMode } = useSidebarMode()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
@@ -492,7 +488,7 @@ function Dashboard({ session, onSignOut }) {
   const apiBusy = useApiActivity()
 
   // Data refresh is owned by the tabs through useRealtimeTable, which subscribes only to the tables
-  // the visible tab renders. Quarantine arrivals are handled by useQuarantineAlerts below.
+  // the visible tab renders. Quarantine arrivals are handled by useQuarantineAlerts above.
 
   const persona = session?.user?.email || 'Administrator'
 
@@ -535,13 +531,14 @@ function Dashboard({ session, onSignOut }) {
           onSelectArea={showArea}
           onSelectSchema={showSchema}
           onSelectSetting={showSetting}
-          /* No type: the search knows the id and not what it belongs to, and the thread's own
+          /* No type: the search knows the id and not what it belongs to, and the trail's own
              search matches an entity id whatever kind carries it. */
-          onSelectThread={(id) => viewThreadFor(id, '')}
+          onSelectTrail={(id) => viewTrailFor(id, '')}
         />
 
-        {/* The right-hand side holds the one control whose value moves, the alert pill, plus the
-            doors to everything else. Standing preferences live in the account menu. */}
+        {/* The right-hand side holds the two controls whose values move, the alert pill and the
+            notification bell, plus the doors to everything else. Standing preferences live in the
+            account menu. */}
         <div className="topbar-right">
           {/* A device alert goes to Devices and a gateway alert to Gateways, chosen by the alert's
               declared scope rather than its id prefix, through the same helpers every other surface
@@ -552,8 +549,12 @@ function Dashboard({ session, onSignOut }) {
             onSelectGateway={showGateway}
           />
 
-          {/* A discovery aid rather than a preference, so it stays in the bar. Beside the alert
-              glyph because the avatar must stay the last thing in the bar. */}
+          {/* What the toasts said, beside what is wrong now and separate from it: the pill's count
+              is a reason to act, and this list holds resolved and routine messages too. */}
+          <NotificationHistory entries={history} onMarkRead={markAllRead} onClear={clearHistory} />
+
+          {/* A discovery aid rather than a preference, so it stays in the bar, ahead of the avatar,
+              which must stay the last thing in it. */}
           <button
             className="topbar-icon-button"
             onClick={() => setShowShortcuts(true)}
@@ -605,18 +606,18 @@ function Dashboard({ session, onSignOut }) {
 
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
-            {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-            {tab === 'areas'          && <AreasTab showToast={showToast} onViewThread={a => viewThreadFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
-            {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+            {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
+            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+            {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
-            {tab === 'digital-thread' && hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ) && (
-              <DigitalThreadTab
+            {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
+              <AuditTrailTab
                 userRole={userRole}
-                initialEntity={selectedThreadEntity}
-                onClearEntity={() => setSelectedThreadEntity(null)}
+                initialEntity={selectedTrailEntity}
+                onClearEntity={() => setSelectedTrailEntity(null)}
                 showToast={showToast}
               />
             )}
@@ -627,19 +628,19 @@ function Dashboard({ session, onSignOut }) {
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from
                 auth.uid(). */}
-            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} hasPermission={hasPermission} userRole={userRole} currentUserId={session?.user?.id}
+            {tab === 'approvals'      && <ApprovalsTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id}
               initialSubject={proposalFocus?.subject || ''}
               onClearFocus={() => setProposalFocus(null)}
               onOpenSubject={openProposalSubject}
-              /* The proposal's target, not the proposal: the thread shows the machine's or schema's
-                 history with the approval in it. device_nameplate rows are keyed by the device id. */
-              onViewThread={p => viewThreadFor(p.entity_id, p.entity_type === 'schemas' ? 'SCHEMA' : 'DEVICE')} />}
+              /* The proposal's subject, not the proposal: the page names its kind and whether it
+                 was deleted, as the Archived Entities page does. */
+              onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` is passed on because the page distinguishes read-only Auditor from the
                 roles that can record. */}
             {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewThread={t => viewThreadFor(t.id, t.type, t.purged)} />}
+            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}
@@ -658,7 +659,7 @@ function Dashboard({ session, onSignOut }) {
         <HelpPanel open={showHelp} tabId={tab} onClose={() => setShowHelp(false)} />
       </div>
 
-      {toast && <Toast msg={toast.msg} type={toast.type} onDone={clearToast} />}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} onExpire={expireToast} />
       {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} showToast={showToast} persona={persona} activeTab={tab} />}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
     </div>
@@ -735,6 +736,13 @@ export default function App() {
     }
   }, [])
 
+  /* The notification history is one person's. It goes whenever the tab is left without a session,
+     whether by Sign Out, a sign-out from another tab or a rejected stored session, so the next
+     person to sign in here starts with an empty list. */
+  useEffect(() => {
+    if (!loading && !session) clearStoredHistory()
+  }, [loading, session])
+
   // OAuth consent, checked before the loading and auth branches. GoTrue redirects here from
   // /oauth/authorize because it ships no consent UI. The page reads the session itself and must not
   // fall through to AuthScreen, which would lose the authorization_id.
@@ -769,10 +777,10 @@ export default function App() {
     return <AuthScreen notice={authNotice} onLoginSuccess={(sess) => { setAuthNotice(null); setSession(sess) }} />
   }
 
-  // Two sessions end here: Studio sits behind a session the gateway owns, so the beacon clears its
-  // cookie alongside signOut(). Both start in the same tick so a slow console cannot delay the
-  // local sign-out, and signOut() is called synchronously on click, which navigationShell.test.jsx
-  // asserts.
+  // Three sessions end here: Studio and the forge sit behind sessions the gateway owns, so a beacon
+  // clears each cookie alongside signOut(). All start in the same tick so a slow console cannot
+  // delay the local sign-out, and signOut() is called synchronously on click, which
+  // navigationShell.test.jsx asserts.
   return <Dashboard
     session={session}
     onSignOut={() => Promise.all([signOutOfStudio(), signOutOfForge(), supabase.auth.signOut()])}

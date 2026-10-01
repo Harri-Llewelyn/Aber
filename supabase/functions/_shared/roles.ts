@@ -6,7 +6,7 @@
  * reachable as a function: `main/index.ts` answers 404 for any name not in FUNCTION_REGISTRY.
  */
 
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * Resolve a user's role name from `public.user_roles`, or null. The client is the caller's

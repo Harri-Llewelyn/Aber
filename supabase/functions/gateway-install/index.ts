@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
+import { strToU8 } from "fflate";
 
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -7,6 +6,7 @@ import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { installerTransport } from "../_shared/installer.ts";
 import { newCredentialSecret, renderGatewayEnv } from "../_shared/gatewayEnv.ts";
 import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
+import { zip } from "../_shared/zip.ts";
 
 /**
  * What the one-liner fetches, each authorised by the enrolment token in `X-Enrolment-Token`: the
@@ -97,7 +97,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (file === "platform.zip") {
     const files: Record<string, Uint8Array> = {};
     for (const [path, text] of Object.entries(GATEWAY_PLATFORM_FILES)) files[path] = strToU8(text);
-    const archive = zipSync(files, { level: 6, mtime: new Date() });
+    const archive = zip(files, { level: 6, mtime: new Date() });
     console.log(`gateway-install: served the platform playbook to ${identity.sparkplug_id}`);
     return new Response(archive, {
       status: 200,
@@ -126,4 +126,4 @@ export default async function handler(req: Request): Promise<Response> {
   });
 }
 
-serve(handler);
+Deno.serve(handler);

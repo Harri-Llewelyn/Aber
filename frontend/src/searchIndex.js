@@ -1,8 +1,7 @@
 /**
  * What the search bar can find, and how it ranks it. Pages are derived from the nav, never listed
  * here. Cards are the sections inside a page, listed below; a guard test asserts every entry names
- * a real page, and the entries carry the label verbatim. Assets are resolved from a UUID against
- * the database at search time. Matching is substring and initials, not fuzzy: everything here is a
+ * a real page. Assets are resolved from a UUID against the database at search time. Matching is substring and initials, not fuzzy: everything here is a
  * short label from a closed set, and a fuzzy matcher returns things the typed letters do not appear
  * in.
  */
@@ -12,25 +11,29 @@
  * the UI.
  */
 export const PAGE_KEYWORDS = {
+  // 'overview' and 'floor plan' are the page's old names; they stay findable.
   'site-map':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'floor plan', 'status'],
   // Every word somebody would reach for while holding the thing rather than its name: an
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
                      'change', 'review', 'publish'],
+  // 'building' and 'floor' are the old names for an area.
   'areas':          ['building', 'buildings', 'floor', 'isa-95', 'isa95', 'site', 'hierarchy', 'uns'],
+  // 'zone' is the old name for a cell.
   'cells':          ['zone', 'work center', 'work centre', 'shopfloor', 'location'],
   'gateways':       ['edge', 'node', 'edge node', 'mqtt', 'sparkplug', 'broker', 'bundle', 'enrolment', 'enrollment'],
   'devices':        ['asset', 'machine', 'equipment', 'work unit', 'sensor', 'robot', 'quarantine', 'nameplate'],
   // 'archives' is still the page id and the route, so the old name has to stay findable here:
   // the label moved to "Archived Entities" but nobody's habits did.
   'archives':       ['archives', 'archived', 'decommissioned', 'restore', 'retired', 'purge', 'out of commission'],
-  'schemas':        ['contract', 'registry', 'model', 'version', 'draft', 'fork', 'publish'],
+  'schemas':        ['contract', 'registry', 'model', 'version', 'draft', 'create version', 'fork', 'publish'],
   // Keeps catalog/catalogue: the catalogue was part of the Schemas page and is searched for by
   // that name as often as by its own.
   'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
-  'digital-thread': ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed'],
+  // The page's name before 1.0 stays findable, as the archives' old name does above.
+  'audit-trail':    ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed', 'digital thread'],
   'capture':        ['record', 'recording', 'replay', 'playback', 'shadow'],
   'cold-storage':   ['parquet', 'tiered', 'object storage', 'minio', 'telemetry archive', 's3'],
   'access-control': ['users', 'roles', 'permissions', 'principals', 'credentials', 'rbac', 'identities'],
@@ -39,22 +42,23 @@ export const PAGE_KEYWORDS = {
 }
 
 /**
- * The sections inside each page, by the heading they render. One entry per heading somebody would
- * type; the Site Map's lanes have no heading and no anchor, so it is not listed.
+ * The sections inside each page. One entry per section somebody would type, usually the heading the
+ * page renders; the Site Map's lanes have entries of their own. 'floor plan', 'floors' and
+ * 'buildings' below are old names, and 'zones' is the old name for a cell.
  */
 export const CARDS = [
   { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
   { id: 'site-wide-lane',       label: 'Site-Wide',            tab: 'site-map',       keywords: ['no cell', 'bms', 'agv', 'unassigned lane'] },
+  { id: 'simulated-lane',       label: 'Simulated',            tab: 'site-map',       keywords: ['no cell', 'simulator', 'synthetic', 'generated'] },
   { id: 'unassigned-lane',      label: 'Unassigned',           tab: 'site-map',       keywords: ['no cell', 'orphan', 'unplaced'] },
 
   { id: 'area-list',            label: 'Areas',                tab: 'areas',          keywords: ['buildings', 'unfiled cells', 'area list'] },
-  { id: 'shopfloor-cells',      label: 'Shopfloor Cells',      tab: 'cells',          keywords: ['cell list', 'zones'] },
-  { id: 'edge-gateways',        label: 'Edge Gateways',        tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
+  { id: 'shopfloor-cells',      label: 'Cells',                tab: 'cells',          keywords: ['cell list', 'zones'] },
+  { id: 'edge-gateways',        label: 'Gateways',             tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
-  /* No 'Archived Entities' card: the page took that name, and a card repeating its page's label
-     verbatim scores identically and renders as the same row twice. */
+  /* No 'Archived Entities' card: it would add no keyword the page entry does not have. */
 
-  { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'fork'] },
+  { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'create version', 'fork'] },
   /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers
      every query this card did. */
   { id: 'vocab-mtconnect',      label: 'MTConnect',            tab: 'vocabulary',     keywords: ['machine tool', 'data items', 'components'] },
@@ -65,17 +69,16 @@ export const CARDS = [
   { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory',     keywords: ['mosquitto', 'broker', 'daemon'] },
   { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
-  { id: 'thread-timeline',      label: 'Digital Thread',       tab: 'digital-thread', keywords: ['timeline', 'events', 'audit trail'] },
+  { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events', 'digital thread'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },
 
   { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
-  { id: 'service-identities',   label: 'Service identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human'] },
-  { id: 'database-principals',  label: 'Database principals',  tab: 'access-control', keywords: ['auth users', 'cannot sign in', 'service role'] },
+  { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
+  { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', keywords: ['mqtt users', 'platform accounts'] },
   { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', keywords: ['dynamic security', 'mosquitto roles', 'topic access', 'orphaned accounts'] },
-  { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] },
-  { id: 'runtime-configuration', label: 'Runtime configuration', tab: 'settings',     keywords: ['system settings', 'retention', 'thresholds'] }
+  { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] }
 ]
 
 /**
@@ -133,7 +136,7 @@ export function buildTargets(visibleTabs, settings = []) {
 
 const norm = (s) => String(s || '').toLowerCase().trim()
 
-/** The first letter of each word: "Metric Catalog" -> "mc", so `mc` finds it. */
+/** The first letter of each word: "Access Control" -> "ac", so `ac` finds it. */
 const initials = (label) =>
   norm(label).split(/[^a-z0-9]+/).filter(Boolean).map(w => w[0]).join('')
 
@@ -148,7 +151,7 @@ export function scoreTarget(target, query) {
   const label = norm(target.label)
   if (label === q) return 100
   if (label.startsWith(q)) return 80
-  /* Initials: mc for Metric Catalog. No minimum length: a single letter that matches the initials
+  /* Initials: ac for Access Control. No minimum length: a single letter that matches the initials
      also matches the prefix band above, which scores higher. */
   if (initials(target.label).startsWith(q)) return 70
   if (label.split(/[^a-z0-9]+/).some(w => w.startsWith(q))) return 60

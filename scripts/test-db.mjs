@@ -10,11 +10,11 @@
  * `python supabase/migrations/test_audit_domain.py`, no environment set -- points at production
  * data, and always has.
  *
- * Most of them roll back. It does not help as much as it sounds: `digital_thread` is append-only by
+ * Most of them roll back. It does not help as much as it sounds: `audit_trail` is append-only by
  * 0003, and the rows a rolled-back test provokes are the ones a COMMITTED fixture leaves behind.
  * On this stack, at the time this was written:
  *
- *     525 digital_thread rows total
+ *     525 audit_trail rows total
  *     346 of them (66%) stamped actor_source = 'migration'
  *
  * and not one of those 346 was written by a migration. `Test_Host_Run_Gateway` and
@@ -68,7 +68,7 @@
  *
  * Everything above builds the schema by replaying the chain onto nothing, which is what CI does and
  * what the migrations' own self-checks run against. A migration that asserts over ACCUMULATED ROWS
- * is invisible to all of it. 0120 asserted that no row in `digital_thread` disagreed with the
+ * is invisible to all of it. 0120 asserted that no row in `audit_trail` disagreed with the
  * audit-domain classifier -- true of an empty database, false of any deployed stack, because a
  * retired entity type's rows keep the lane they were stamped with and nothing backfills them. It
  * passed 29 suites twice and then failed db-init four times on the dev cluster.
@@ -83,11 +83,19 @@
  * The capture is READ-ONLY against the live stack (pg_dump and one COPY TO STDOUT) and writes only
  * to the throwaway container. Use it for any migration that touches existing rows -- anything with
  * an UPDATE, a DELETE, a new CHECK constraint, or a self-check that counts.
+ *
+ * `--reuse` is the second boot without a cluster: it keeps the container a `--keep` run left, with
+ * every row the chain and the suites wrote, replays the chain onto it as db-init does on every
+ * upgrade, and runs the lane again.
+ *
+ *   node scripts/test-db.mjs --keep       # first boot: an empty database
+ *   node scripts/test-db.mjs --reuse      # second boot: the same database, used
  * =================================================================================================
  *
  * Usage:
  *   node scripts/test-db.mjs              # bring up, migrate, run every suite, tear down
  *   node scripts/test-db.mjs --keep       # leave the container running afterwards
+ *   node scripts/test-db.mjs --reuse      # replay the chain onto the kept container, then run
  *   node scripts/test-db.mjs --no-run     # bring up and migrate only, then stop
  *   node scripts/test-db.mjs -k test_role # run only suites whose filename contains this
  *   node scripts/test-db.mjs --with-history  # replay the chain against a deployed stack's rows
@@ -120,12 +128,15 @@ const IMAGE = 'supabase/postgres:17.6.1.175'
 const CONTAINER = 'aber_test_db'
 
 // NOT 54322. That is the live stack's published port, and the entire point of this script is to
-// not be there. Overridable for the case of two checkouts running at once.
-const PORT = process.env.ABER_TEST_DB_PORT || '54329'
+// not be there. Overridable for the case of two checkouts running at once. `--reuse` reads the
+// port the kept container was published on instead.
+let PORT = process.env.ABER_TEST_DB_PORT || '54329'
 const PASSWORD = 'postgres'
 
 const args = process.argv.slice(2)
 const keep = args.includes('--keep')
+// Replay the chain onto the container a --keep run left, rather than onto a new empty one.
+const reuse = args.includes('--reuse')
 const noRun = args.includes('--no-run')
 // Replay the chain a second time against a deployed stack's rows. See the block below.
 const history = args.includes('--with-history') || args.some(a => a.startsWith('--history-file='))
@@ -177,22 +188,42 @@ if (run('docker', ['info']).status !== 0) {
   process.exit(1)
 }
 
-// A LEFTOVER FROM --keep IS REPLACED, NOT REUSED. Reusing one would carry the previous run's
-// committed fixtures into this one, which is the exact failure mode being escaped.
-teardown()
+if (reuse) {
+  // THE SECOND BOOT: the kept container and every row its last run committed, which is what
+  // db-init replays the chain onto on every upgrade. Started if a reboot stopped it.
+  const state = run('docker', ['inspect', '-f', '{{.State.Running}}', CONTAINER])
+  if (state.status !== 0) {
+    die(`--reuse needs the container a --keep run left, and there is no ${CONTAINER}.`,
+        'Run `node scripts/test-db.mjs --keep` first.')
+  }
+  if (state.stdout.trim() !== 'true') {
+    const started = run('docker', ['start', CONTAINER])
+    if (started.status !== 0) die(`could not start ${CONTAINER}.`, started.stderr)
+  }
+  // The port it was published on, which may not be this shell's ABER_TEST_DB_PORT.
+  const published = run('docker', ['port', CONTAINER, '5432/tcp'])
+  const port = published.stdout.trim().split('\n')[0]?.split(':').pop()
+  if (published.status !== 0 || !port) die(`could not read the port ${CONTAINER} is published on.`, published.stderr)
+  PORT = port
+  console.log(`${c.bold('Reusing')} ${CONTAINER} on port ${PORT}, with every row its last run left…`)
+} else {
+  // A LEFTOVER FROM --keep IS REPLACED, NOT REUSED. Reusing one would carry the previous run's
+  // committed fixtures into this one, which is the exact failure mode a first boot escapes.
+  teardown()
 
-console.log(`${c.bold('Starting')} throwaway ${IMAGE} on port ${PORT}…`)
-const up = run('docker', [
-  'run', '-d', '--name', CONTAINER,
-  '-e', `POSTGRES_PASSWORD=${PASSWORD}`,
-  // LOOPBACK ONLY, as the dev loop's forwards are. This one is
-  // throwaway and short-lived, which changes how long the exposure lasts and not what it is:
-  // a Postgres with a known password, published on every interface. Every consumer is the
-  // suite runner on this machine.
-  '-p', `127.0.0.1:${PORT}:5432`,
-  IMAGE
-])
-if (up.status !== 0) die('could not start the container.', up.stderr)
+  console.log(`${c.bold('Starting')} throwaway ${IMAGE} on port ${PORT}…`)
+  const up = run('docker', [
+    'run', '-d', '--name', CONTAINER,
+    '-e', `POSTGRES_PASSWORD=${PASSWORD}`,
+    // LOOPBACK ONLY, as the dev loop's forwards are. This one is
+    // throwaway and short-lived, which changes how long the exposure lasts and not what it is:
+    // a Postgres with a known password, published on every interface. Every consumer is the
+    // suite runner on this machine.
+    '-p', `127.0.0.1:${PORT}:5432`,
+    IMAGE
+  ])
+  if (up.status !== 0) die('could not start the container.', up.stderr)
+}
 
 // pg_isready ALONE IS NOT ENOUGH on this image: it reports ready during the init scripts' own
 // restart, and a migration applied in that window dies mid-file. The SELECT is what the chart's
@@ -214,22 +245,29 @@ if (!ready) die('Postgres never became ready.', run('docker', ['logs', '--tail',
 // -------------------------------------------------------------------------------------------
 // Bootstrap and migrate
 // -------------------------------------------------------------------------------------------
-const bootstrap = path.join(REPO, 'test-harness', 'auth-bootstrap.sql')
-if (!existsSync(bootstrap)) die(`test-harness/auth-bootstrap.sql is missing.`)
+// The container's own setup, done once: a reused container has it, as a deployed stack has GoTrue.
+if (!reuse) {
+  const bootstrap = path.join(REPO, 'test-harness', 'auth-bootstrap.sql')
+  if (!existsSync(bootstrap)) die(`test-harness/auth-bootstrap.sql is missing.`)
 
-console.log('Applying the GoTrue-shaped auth fixture (as supabase_admin)…')
-const bootstrapSql = run('docker', ['cp', bootstrap, `${CONTAINER}:/tmp/auth-bootstrap.sql`])
-if (bootstrapSql.status !== 0) die('could not copy the bootstrap in.', bootstrapSql.stderr)
-const applied = psql(['-f', '/tmp/auth-bootstrap.sql'], { user: 'supabase_admin' })
-if (applied.status !== 0) die('the auth bootstrap did not apply.', applied.stderr)
+  console.log('Applying the GoTrue-shaped auth fixture (as supabase_admin)…')
+  const bootstrapSql = run('docker', ['cp', bootstrap, `${CONTAINER}:/tmp/auth-bootstrap.sql`])
+  if (bootstrapSql.status !== 0) die('could not copy the bootstrap in.', bootstrapSql.stderr)
+  const applied = psql(['-f', '/tmp/auth-bootstrap.sql'], { user: 'supabase_admin' })
+  if (applied.status !== 0) die('the auth bootstrap did not apply.', applied.stderr)
 
-const searchPath = psql(['-c', 'ALTER ROLE postgres SET search_path TO auth, public, extensions;'])
-if (searchPath.status !== 0) die('could not set the search_path.', searchPath.stderr)
+  const searchPath = psql(['-c', 'ALTER ROLE postgres SET search_path TO auth, public, extensions;'])
+  if (searchPath.status !== 0) die('could not set the search_path.', searchPath.stderr)
+}
 
 const migrationsDir = path.join(REPO, 'supabase', 'migrations')
 const migrations = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort()
 if (migrations.length === 0) die('no migrations found.')
 
+// Emptied first: `docker cp` into an existing directory nests the copy inside it, and a reused
+// container would then replay its previous run's files.
+const cleared = run('docker', ['exec', '-u', 'root', CONTAINER, 'rm', '-rf', '/migrations'])
+if (cleared.status !== 0) die('could not clear the previous migrations.', cleared.stderr)
 const copied = run('docker', ['cp', migrationsDir, `${CONTAINER}:/migrations`])
 if (copied.status !== 0) die('could not copy the migrations in.', copied.stderr)
 
@@ -251,7 +289,7 @@ function applyChain (label) {
   }
 }
 
-applyChain()
+applyChain(reuse ? 'onto the database its last run left' : '')
 
 if (history) loadHistoryAndReplay()
 
@@ -261,7 +299,7 @@ if (history) loadHistoryAndReplay()
 // WHY THIS EXISTS, AND WHAT IT COST NOT TO HAVE IT. Every verification path in this repository
 // replays the chain onto an EMPTY database: CI, this script, and the migrations' own self-checks.
 // An assertion whose subject is accumulated data is invisible to all three, and the first thing it
-// meets is a deployment. 0120 asserted that no row in digital_thread disagreed with the classifier
+// meets is a deployment. 0120 asserted that no row in audit_trail disagreed with the classifier
 // -- true of an empty database, false of any stack with history, because a retired entity type's
 // rows keep the lane they were stamped with. It passed 29 suites twice and then failed db-init
 // four times on the dev cluster, taking the Helm upgrade with it.
@@ -407,7 +445,7 @@ function loadHistoryAndReplay () {
   const loaded = psql(['-f', '/tmp/history.sql'])
   if (loaded.status !== 0) die('the history did not load.', loaded.stderr || loaded.stdout)
 
-  const rows = psql(['-Atc', 'SELECT count(*) FROM public.digital_thread;'])
+  const rows = psql(['-Atc', 'SELECT count(*) FROM public.audit_trail;'])
   console.log(c.dim(`  ${rows.stdout.trim()} audit rows in place`))
 
   // THE ASSERTION. Everything above is setup; this is a boot of a deployed stack, and a migration

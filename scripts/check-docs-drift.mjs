@@ -41,6 +41,18 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 /** Every markdown file in the repository. Derived, so deleting one moves no check. */
 const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 
+/** Whether .gitignore's own patterns, read the way git reads them, ignore a path. Negations only
+ *  re-include, so they are skipped. */
+const IGNORED = read('.gitignore').split('\n').map((l) => l.trim())
+  .filter((l) => l && !l.startsWith('#') && !l.startsWith('!'))
+  .map((l) => {
+    const anchored = l.replace(/\/$/, '').includes('/');
+    const body = l.replace(/^\//, '').replace(/\/$/, '').split('**/').map((part) =>
+      part.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')).join('(?:.*/)?');
+    return new RegExp(`${anchored ? '^' : '(?:^|/)'}${body}(?:/|$)`);
+  });
+const gitignored = (path) => IGNORED.some((p) => p.test(path));
+
 // -------------------------------------------------------------------------------------------------
 // 1. Every local markdown link resolves.
 // -------------------------------------------------------------------------------------------------
@@ -670,13 +682,39 @@ function edgeFunctionNames() {
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
     // so every function appears in it exactly once, in its final form. Entries return as soon as
     // a migration added after the fold redeclares something the baseline holds, and each one
-    // records WHY that replacement is meant. See README.md, "There is no 0017", for the case
-    // where an unrecorded one would have regressed audit attribution.
+    // records WHY that replacement is meant. The README.md note "The archive has no 0017" is the
+    // case where an unrecorded one would have regressed audit attribution.
 
     // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
     // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
     // the pre-0006 form and folds forward at the next squash.
-    'public.digital_thread_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
+    'public.audit_trail_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
+
+    // 0010 files `metric_catalog` in the asset lane (#468), the same signature and return type.
+    // The baseline's copy fails it closed to security and folds forward at the next squash.
+    'public.audit_domain_for': '0010 adds metric_catalog to the asset lane; the baseline holds the pre-0010 form',
+
+    // 0013 widens the allow-list to the six a machine may hold and gives each refusal its own
+    // reason, the same signature and return type. The baseline refuses all but three reads.
+    'public.create_machine_principal': '0013 allows schema:manage, proposal:create and archive:manage and states why each other permission is refused; the baseline holds the pre-0013 form',
+
+    // 0013 keeps all five arms and rewrites the comments on the cell and gateway lanes, which said
+    // they resolve what the tables' own policies resolve.
+    'public.may_decide_proposal': '0013 restates what the cell and gateway lanes check and why no machine reaches them; the baseline holds the pre-0013 comments',
+
+    // 0017 adds the floor, the same signature and return type: the newest three backups are
+    // never prunable. 0018 adds each row's off-site copy to what it returns, so the prune deletes
+    // the copy too. The baseline selects by age alone and folds forward at the next squash.
+    'public.backup_prunable': '0017 never returns the newest three backups and 0018 adds each one\'s off-site copy; the baseline holds the pre-0017 form',
+
+    // 0020 believes each X-Aber-Actor value only from the caller it describes, and files a machine
+    // identity as 'service' whatever it declares. The same signature and return type.
+    'public.log_audit_trail_event': '0020 ties each declared actor_source to its caller; the baseline accepts ingestion, service and migration from anyone',
+
+    // 0021 stamps causation_id = txid_current() on the row each writes, as the audit trigger does
+    // on the target's row. The same signatures and return types.
+    'public.approve_proposal': '0021 stamps the PROPOSAL_APPLIED row with the approval\'s causation_id; the baseline leaves it NULL',
+    'public.expire_open_proposals': '0021 stamps each PROPOSAL_EXPIRED row with the run\'s causation_id; the baseline leaves it NULL',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -751,11 +789,94 @@ function edgeFunctionNames() {
     fail(
       'Every migration is replayed on every boot in filename order and there is no applied-migrations\n' +
         '      ledger, so the LAST declaration wins -- silently, with no error. A redeclaration is fine when\n' +
-        '      it is meant; record it in INTENDED_REDECLARATIONS with the reason. See README.md, "There is\n' +
-        '      no 0017", for the case where an unrecorded one would have regressed audit attribution.'
+        '      it is meant; record it in INTENDED_REDECLARATIONS with the reason. The README.md note "The\n' +
+        '      archive has no 0017" is the case where an unrecorded one would have regressed audit attribution.'
     );
   } else {
     pass(`${seen.size} function(s) declared across the chain; all ${Object.keys(INTENDED_REDECLARATIONS).length} redeclarations are recorded as intended`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 32. i3X's authentication probe is a function `authenticated` may call and `anon` may not.
+//
+// i3x_service.py authenticates every request but GET /info by calling AUTH_PROBE_PATH as the
+// caller. Revoked from `authenticated`, dropped or given an argument, it refuses every token;
+// callable by `anon`, it accepts the publishable key and any string that is not a token. It must
+// be plpgsql and not IMMUTABLE: a call the planner inlines or folds is no longer in PostgREST's
+// reused plan, so its EXECUTE check is skipped for the next role that runs that plan.
+// -------------------------------------------------------------------------------------------------
+{
+  const probe = read('i3x/i3x_service.py').match(/^AUTH_PROBE_PATH = "rpc\/([a-z0-9_]+)"$/m);
+  if (!probe) {
+    fail('i3x/i3x_service.py: AUTH_PROBE_PATH is not an "rpc/<function>" literal, so check 32 cannot read it');
+  } else {
+    const fn = probe[1];
+    const sig = `public\\.${fn}\\(\\)`;
+    const dir = 'supabase/migrations';
+    const sql = readdirSync(join(REPO, dir))
+      .filter((n) => /^\d+_.*\.sql$/.test(n))
+      .sort()
+      .map((n) => read(`${dir}/${n}`))
+      .join('\n');
+    const faults = [];
+    if (!new RegExp(`CREATE OR REPLACE FUNCTION ${sig}`).test(sql)) {
+      faults.push(`no migration declares public.${fn}() with no arguments`);
+    }
+    // The last declaration's header, up to its body, is the definition the database ends with.
+    const headers = [...sql.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${sig}[^$]*?AS\\s*\\$`, 'g'))];
+    const header = headers.length ? headers[headers.length - 1][0] : '';
+    if (header && !/\bLANGUAGE\s+plpgsql\b/i.test(header)) {
+      faults.push(`public.${fn}() is not plpgsql, so the planner may inline it and skip its EXECUTE check`);
+    }
+    if (/\bIMMUTABLE\b/i.test(header)) {
+      faults.push(`public.${fn}() is IMMUTABLE, so the planner folds the call and skips its EXECUTE check`);
+    }
+    if (!new RegExp(`GRANT (ALL|EXECUTE) ON FUNCTION ${sig} TO [^;]*\\bauthenticated\\b`).test(sql)) {
+      faults.push(`public.${fn}() is not granted to authenticated`);
+    }
+    if (!new RegExp(`REVOKE ALL ON FUNCTION ${sig} FROM PUBLIC`).test(sql)) {
+      faults.push(`public.${fn}() keeps PUBLIC's default EXECUTE, which anon inherits`);
+    }
+    if (new RegExp(`GRANT [^;]* ON FUNCTION ${sig} TO [^;]*\\b(anon|PUBLIC)\\b`, 'i').test(sql)) {
+      faults.push(`public.${fn}() is granted to anon or PUBLIC`);
+    }
+    if (new RegExp(`(REVOKE [^;]* ON FUNCTION ${sig} FROM [^;]*\\bauthenticated\\b|DROP FUNCTION[^;]*\\b${fn}\\b)`, 'i').test(sql)) {
+      faults.push(`a migration revokes public.${fn}() from authenticated, or drops it`);
+    }
+    if (!read('i3x/README.md').includes(`rpc/${fn}`)) {
+      faults.push(`i3x/README.md -> "Security" does not name the probe, rpc/${fn}`);
+    }
+    if (faults.length) {
+      fail(`i3X's authentication probe rpc/${fn} would refuse every token or admit anon:\n` +
+        faults.map((f) => `        ${f}`).join('\n'));
+    } else {
+      pass(`i3X authenticates through rpc/${fn}, which authenticated may call and anon may not`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 35. validate.py's check 12h sends a non-token to every route the i3X server serves.
+//
+// The check proves "401 everywhere but GET /info" only for the routes it lists, so a route added to
+// ROUTES and not to I3X_ROUTES would go unprobed while the check still passed.
+// -------------------------------------------------------------------------------------------------
+{
+  const block = (src, re) => (src.match(re) || [])[1] || '';
+  const routes = (text) => new Set([...text.matchAll(/"((?:GET|POST|PUT|PATCH|DELETE) \/[^"]*)"/g)].map((m) => m[1]));
+  const served = routes(block(read('i3x/i3x_service.py'), /^ROUTES = \{\n([\s\S]*?)^\}/m));
+  const swept = routes(block(read('ingestion/validate.py'), /^I3X_ROUTES = \(\n([\s\S]*?)^\)/m));
+  const unswept = [...served].filter((r) => !swept.has(r));
+  const unserved = [...swept].filter((r) => !served.has(r));
+  if (!served.size || !swept.size) {
+    fail('check 35 cannot read ROUTES in i3x/i3x_service.py or I3X_ROUTES in ingestion/validate.py');
+  } else if (unswept.length || unserved.length) {
+    fail('validate.py I3X_ROUTES and i3x_service.py ROUTES disagree:' +
+      (unswept.length ? `\n        served but not swept by check 12h: ${unswept.join(', ')}` : '') +
+      (unserved.length ? `\n        swept but not served: ${unserved.join(', ')}` : ''));
+  } else {
+    pass(`validate.py's check 12h probes all ${served.size} i3X routes`);
   }
 }
 
@@ -776,6 +897,10 @@ function edgeFunctionNames() {
       'one row holding the in-flight pg_net request id for the Prometheus liveness probe (0054). ' +
       'RLS on with no policy and the anon/authenticated grants revoked -- infrastructure, and a ' +
       'writable request-id table would let a caller redirect where the probe reads liveness from',
+    forge_sweep_lease:
+      'one row saying which forge-sweep pass may run (0025). RLS on with no policy, nothing granted ' +
+      'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +
+      'RPCs that forge-sweep calls, and a browser has no reason to see which pass is running',
     schema_bootstrap:
       'one row recording whether db-init reached the end of the migration chain on this boot ' +
       '(0072). RLS on with no policy and the anon/authenticated grants revoked -- it is bootstrap ' +
@@ -815,24 +940,29 @@ function edgeFunctionNames() {
       + 'connection, never over PostgREST. The browser reads the same facts from `gateways` and '
       + '`gateway_status` with RLS applied, which is why publishing a second, RLS-free path to '
       + 'them would be a downgrade rather than a convenience',
-  digital_thread_partition_health:
+  audit_trail_partition_health:
       'Partition counts and default-partition depth for the audit table (0079), granted to '
       + '`grafana_reader` alone and revoked from anon/authenticated -- the same arrangement as '
       + 'platform_health and storage_footprint above. It is read by the Grafana `supabase` '
       + 'datasource over a direct connection so an alert can see that the monthly partition job '
       + 'has stopped, and it counts audit rows: a published path would be a way to size the '
-      + 'security lane without holding digital_thread:read',
-  digital_thread_default:
-      'The DEFAULT partition of digital_thread (0079), which exists so that a lapsed partition '
+      + 'security lane without holding audit_trail:read',
+  backup_health:
+      'How long since the platform backup last succeeded (0011), granted to `grafana_reader` alone '
+      + 'and revoked from anon/authenticated -- the same arrangement as the views above. It reads '
+      + 'backup_jobs as its owner so the Backup Stale rule can see it; the Backups page reads the '
+      + 'table itself, under the Administrator-only RLS a published path would bypass',
+  backup_offsite_health:
+      'How long the newest backup has gone without an off-site copy (0018), granted to '
+      + '`grafana_reader` alone and revoked from anon/authenticated, like backup_health above. It '
+      + 'reads backups, the destination settings and the vault through an owner-run function so '
+      + 'the Off-site Backup Stale rule can see a number and nothing behind it',
+  audit_trail_default:
+      'The DEFAULT partition of audit_trail (0079), which exists so that a lapsed partition '
       + 'job degrades instead of refusing every audit write -- and therefore every asset write, '
       + 'since the audit INSERT is a trigger on cells/gateways/devices. Not an endpoint in its '
       + 'own right: readers use the parent, where the RLS policies are, and 0079 revokes every '
       + 'application-role privilege on partitions precisely so that this name is unreachable',
-  digital_thread_partitioned:
-      'SCAFFOLDING, AND IT DOES NOT OUTLIVE ITS OWN TRANSACTION. 0079 builds the partitioned '
-      + 'table under this name, copies into it, then renames it to digital_thread inside one DO '
-      + 'block -- so no database ever has a relation called this. Listed only because this check '
-      + 'reads CREATE statements out of the migration text rather than the live catalogue',
   one_shot_migrations:
       'The ledger for migrations that must run EXACTLY ONCE rather than on every boot like the '
       + 'rest of the chain (0040). RLS on with no policy at all and the anon/authenticated grants '
@@ -848,9 +978,13 @@ function edgeFunctionNames() {
     [...spec.matchAll(/^ {2}(\/[^\s:]*):/gm)].map((m) => m[1])
   );
 
+  // Not 0000: it creates nothing that survives under the name it creates it with (its
+  // conversion's scaffolding is renamed or dropped before `0001` runs).
   let migrationSql = '';
   for (const f of readdirSync(join(REPO, 'supabase/migrations'))) {
-    if (f.endsWith('.sql')) migrationSql += readFileSync(join(REPO, 'supabase/migrations', f), 'utf8') + '\n';
+    if (f.endsWith('.sql') && !f.startsWith('0000_')) {
+      migrationSql += readFileSync(join(REPO, 'supabase/migrations', f), 'utf8') + '\n';
+    }
   }
   const relations = new Set(
     [...migrationSql.matchAll(
@@ -1071,6 +1205,54 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 10d2. The Realtime publication lists every table the frontend subscribes to.
+//
+// The baseline applies the publication with an absolute `SET TABLE` from its `intended` list, so a
+// table published anywhere else is dropped on the next replay. A subscription to an unpublished
+// table delivers nothing and raises no error: the page just goes on polling. The squash dropped the
+// Capture page's two job tables this way.
+// -------------------------------------------------------------------------------------------------
+{
+  const baseline = read('supabase/migrations/0001_baseline_schema.sql');
+  const listed = /intended CONSTANT text\[\] := ARRAY\[([^\]]*)\]/.exec(baseline);
+  const published = new Set(listed ? [...listed[1].matchAll(/'([a-z_0-9]+)'/g)].map((m) => m[1]) : []);
+
+  // Every `useRealtimeTable([...])` call, and every `table: '...'` filter of a postgres_changes
+  // subscription made straight on a channel.
+  const subscribed = new Map();
+  const note = (table, file) => subscribed.set(table, [...(subscribed.get(table) || []), file]);
+  for (const file of allFiles.filter((f) => /^frontend\/src\/.*\.(jsx?|tsx?)$/.test(f)
+    && !/__tests__|\.test\./.test(f))) {
+    const src = read(file);
+    for (const m of src.matchAll(/useRealtimeTable\(\s*\[([^\]]*)\]/g)) {
+      for (const t of m[1].matchAll(/'([a-z_0-9]+)'/g)) note(t[1], file);
+    }
+    if (src.includes('postgres_changes')) {
+      for (const m of src.matchAll(/\btable:\s*'([a-z_0-9]+)'/g)) note(m[1], file);
+    }
+  }
+
+  if (!published.size) {
+    fail('Could not read the `intended` list from the baseline\'s realtime publication block.\n'
+      + '      Update the pattern in check 10d2 to match it, or this check passes nothing.');
+  } else if (!subscribed.size) {
+    fail('No Realtime subscription found under frontend/src. Update the patterns in check 10d2.');
+  } else {
+    const missing = [...subscribed].filter(([t]) => !published.has(t));
+    if (missing.length) {
+      fail(`The frontend subscribes to table(s) the supabase_realtime publication does not list: `
+        + `${missing.map(([t, fs]) => `${t} (${[...new Set(fs)].join(', ')})`).join('; ')}.\n`
+        + '      Such a subscription delivers nothing and raises no error. Add the table to\n'
+        + '      `intended` in supabase/migrations/0001_baseline_schema.sql, section 5: the\n'
+        + '      publication is applied there with an absolute SET TABLE, so a table published\n'
+        + '      only where it is created is removed again on the next replay.');
+    } else {
+      pass(`all ${subscribed.size} tables the frontend subscribes to are in the realtime publication`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 10e. The CA-expiry warning window is one decision, declared twice: Grafana's
 // `aber-gateway-ca-expiring` rule and the Gateways page's CERT_EXPIRY_WARN_DAYS. A UI that warns
 // at a different day count than the rule fires sends an operator looking for an alert that has
@@ -1104,6 +1286,175 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`the CA-expiry window is ${ruleDays[1]} days in both the Grafana rule and the Gateways page`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 10f. The API reference and the Audit Trail filter name every action the trail records, and
+// no other. `audit_trail.action` has no CHECK, so the set is read from what the applied
+// migrations INSERT: each action is a literal, `TG_OP` (the audit trigger's INSERT, UPDATE and
+// DELETE), or a variable its function assigns only literals. Any other shape fails rather than
+// passing with an action unread.
+// -------------------------------------------------------------------------------------------------
+{
+  // `--` comments out, quote-aware per line, so an apostrophe in prose cannot open a string.
+  const uncommented = (sql) => sql.split('\n').map((line) => {
+    let quoted = false;
+    for (let i = 0; i < line.length; i += 1) {
+      if (line[i] === "'") quoted = !quoted;
+      else if (!quoted && line.startsWith('--', i)) return line.slice(0, i);
+    }
+    return line;
+  }).join('\n');
+  // The index of the parenthesis closing the one at `open`, skipping quoted text.
+  const closing = (s, open) => {
+    let depth = 0;
+    let quoted = false;
+    for (let i = open; i < s.length; i += 1) {
+      if (s[i] === "'") quoted = !quoted;
+      else if (!quoted && s[i] === '(') depth += 1;
+      else if (!quoted && s[i] === ')' && --depth === 0) return i;
+    }
+    return -1;
+  };
+  const topLevel = (s) => {
+    const parts = [];
+    let depth = 0;
+    let quoted = false;
+    let start = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      if (s[i] === "'") quoted = !quoted;
+      else if (!quoted && s[i] === '(') depth += 1;
+      else if (!quoted && s[i] === ')') depth -= 1;
+      else if (!quoted && depth === 0 && s[i] === ',') {
+        parts.push(s.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    return [...parts, s.slice(start).trim()];
+  };
+
+  const written = new Map();
+  const unread = [];
+  let sites = 0;
+  const files = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  for (const file of files) {
+    const sql = uncommented(read(`supabase/migrations/${file}`));
+    for (const m of sql.matchAll(/INSERT\s+INTO\s+(?:public\.)?audit_trail\b/gi)) {
+      sites += 1;
+      const at = `${file}:${sql.slice(0, m.index).split('\n').length}`;
+      const open = sql.indexOf('(', m.index + m[0].length);
+      const columns = /^\s*\(/.test(sql.slice(m.index + m[0].length))
+        ? topLevel(sql.slice(open + 1, closing(sql, open))).map((c) => c.toLowerCase())
+        : [];
+      const rest = sql.slice(closing(sql, open) + 1);
+      const values = /^\s*VALUES\s*\(/i.exec(rest);
+      if (!columns.includes('action') || !values) {
+        unread.push(`${at}: not \`INSERT INTO audit_trail (..., action, ...) VALUES (...)\``);
+        continue;
+      }
+      const tupleAt = closing(sql, open) + 1 + values[0].length - 1;
+      const expr = topLevel(sql.slice(tupleAt + 1, closing(sql, tupleAt)))[columns.indexOf('action')];
+      const record = (action) => written.set(action, [...(written.get(action) || []), at]);
+      if (/^'[A-Z_]+'$/.test(expr)) {
+        record(expr.slice(1, -1));
+      } else if (expr === 'TG_OP') {
+        ['INSERT', 'UPDATE', 'DELETE'].forEach(record);
+      } else if (/^[a-z_][a-z0-9_]*$/.test(expr)) {
+        // The function around the INSERT: from its CREATE to the end of its body.
+        const begin = sql.lastIndexOf('CREATE OR REPLACE FUNCTION', m.index);
+        const end = sql.indexOf('$$;', m.index);
+        const body = sql.slice(begin, end < 0 ? undefined : end);
+        const assigned = [...body.matchAll(new RegExp(`\\b${expr}\\s*:=\\s*([^;]+);`, 'g'))].map((a) => a[1].trim());
+        if (begin < 0 || !assigned.length || assigned.some((a) => !/^'[A-Z_]+'$/.test(a))) {
+          unread.push(`${at}: \`${expr}\` is not assigned only literals in its function`);
+        } else {
+          assigned.forEach((a) => record(a.slice(1, -1)));
+        }
+      } else {
+        unread.push(`${at}: the action is \`${expr}\``);
+      }
+    }
+  }
+
+  // The schema's own block: from its key to the next key at the same indentation.
+  const spec = read('docs/openapi.yaml');
+  const entryAt = spec.indexOf('\n    AuditTrailEntry:\n');
+  const entry = entryAt < 0 ? '' : spec.slice(entryAt + 1).split(/\n(?= {4}\S)/)[0];
+  const specEnum = entry.match(/\n {8}action:\n {10}type: string\n {10}enum: \[([^\]]*)\]/);
+  const constants = read('frontend/src/constants.js');
+  const blockAt = constants.indexOf('export const AUDIT_TRAIL_ACTIONS = {');
+  const block = blockAt < 0 ? '' : constants.slice(blockAt, constants.indexOf('};', blockAt));
+  const offered = [...block.matchAll(/^\s+([A-Z][A-Z_]*):/gm)].map((k) => k[1]);
+
+  const drift = (name, listed) => {
+    const missing = [...written.keys()].filter((a) => !listed.includes(a)).sort();
+    const extra = listed.filter((a) => !written.has(a)).sort();
+    return [
+      ...missing.map((a) => `${name} lacks ${a}, which ${written.get(a)[0]} writes`),
+      ...extra.map((a) => `${name} lists ${a}, which no applied migration writes`),
+    ];
+  };
+
+  if (!sites) {
+    fail('found no `INSERT INTO public.audit_trail` in the applied migrations; the shape this check '
+      + 'reads has changed, so it is checking nothing.');
+  } else if (unread.length) {
+    fail(`could not read the action of ${unread.length} audit_trail INSERT(s):\n`
+      + unread.map((u) => `        ${u}`).join('\n')
+      + '\n      Write the action as a literal, or teach check 10f the new shape.');
+  } else if (!specEnum || !offered.length) {
+    fail(`could not read ${specEnum ? 'AUDIT_TRAIL_ACTIONS in frontend/src/constants.js'
+      : 'the enum of AuditTrailEntry.action in docs/openapi.yaml'}, so the actions were not compared.`);
+  } else {
+    const problems10f = [
+      ...drift('AuditTrailEntry.action in docs/openapi.yaml', specEnum[1].split(',').map((s) => s.trim()).filter(Boolean)),
+      ...drift('AUDIT_TRAIL_ACTIONS in frontend/src/constants.js', offered),
+    ];
+    if (problems10f.length) {
+      fail(`the Audit Trail's actions disagree with what the migrations write:\n`
+        + problems10f.map((p) => `        ${p}`).join('\n'));
+    } else {
+      pass(`the API reference and the dashboard name the ${written.size} actions ${sites} trail INSERTs write`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 10g. A gateway status is refused by one rule in the three places that hold it: ingestion's
+// RESERVED_GATEWAY_STATUSES and MAX_GATEWAY_STATUS_LENGTH, the heartbeat gate
+// ingest_record_gateway_health(), and the table's gateways_status_valid CHECK. A CHECK narrower
+// than the gate fails the heartbeat's UPDATE, and a live gateway goes STALE.
+// -------------------------------------------------------------------------------------------------
+{
+  const py = read('ingestion/ingestion.py');
+  const chain = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort()
+    .map((f) => read(`supabase/migrations/${f}`)).join('\n');
+  // The last declaration wins on replay, so the gate is read from there.
+  const gateAt = chain.lastIndexOf('CREATE OR REPLACE FUNCTION public.ingest_record_gateway_health(');
+  const gate = gateAt < 0 ? '' : chain.slice(gateAt, chain.indexOf('$$;', gateAt));
+  const checkAt = chain.lastIndexOf('ADD CONSTRAINT gateways_status_valid');
+  const check = checkAt < 0 ? '' : chain.slice(checkAt, chain.indexOf(';', checkAt));
+  const words = (m) => (m ? [...m[1].matchAll(/['"]([A-Z_]+)['"]/g)].map((w) => w[1]).sort().join(', ') : null);
+
+  const places = [
+    ['ingestion.py', words(py.match(/^RESERVED_GATEWAY_STATUSES = frozenset\(\{([^}]*)\}\)/m)),
+      py.match(/^MAX_GATEWAY_STATUS_LENGTH = (\d+)$/m)?.[1]],
+    ['ingest_record_gateway_health()', words(gate.match(/upper\(p_status\) IN \(([^)]*)\)/)),
+      gate.match(/length\(p_status\) > (\d+)/)?.[1]],
+    ['gateways_status_valid', words(check.match(/upper\(status\) NOT IN \(([^)]*)\)/)),
+      check.match(/length\(status\) <= (\d+)/)?.[1]],
+  ];
+  const unread = places.filter(([, reserved, cap]) => !reserved || !cap).map(([where]) => where);
+  if (unread.length) {
+    fail(`could not read the reserved gateway statuses or the length cap from ${unread.join(', ')}; `
+      + 'the shape this check reads has changed, so it is checking nothing.');
+  } else if (new Set(places.map(([, reserved, cap]) => `${reserved} / ${cap}`)).size > 1) {
+    fail('the gateway status rule disagrees between the places that hold it:\n'
+      + places.map(([where, reserved, cap]) => `        ${where}: reserved ${reserved}; at most ${cap} characters`).join('\n'));
+  } else {
+    pass(`ingestion, the heartbeat gate and gateways_status_valid reserve ${places[0][1]} and cap a status at ${places[0][2]}`);
   }
 }
 
@@ -1420,7 +1771,7 @@ function edgeFunctionNames() {
   const elsewhere = {
     ABER_CA_PEM: 'the image entrypoint reads it from the mounted platform root',
     ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
-    ASSET_EXPORT_MAX_THREAD_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
+    ASSET_EXPORT_MAX_TRAIL_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
   };
 
   const set = new Set([
@@ -1546,8 +1897,8 @@ function edgeFunctionNames() {
 
   if (!allowed) {
     fail(
-      'could not find c_allowed in any migration declaring create_machine_principal(). 0080 and ' +
-        '0125 each spell it `c_allowed CONSTANT text[] := ARRAY[...]` -- if that shape changed, ' +
+      'could not find c_allowed in any migration declaring create_machine_principal(). 0001 and ' +
+        '0013 each spell it `c_allowed CONSTANT text[] := ARRAY[...]` -- if that shape changed, ' +
         'this check needs to change with it rather than silently passing.'
     );
   } else if (!offered) {
@@ -1561,6 +1912,225 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`the Access Control page offers exactly the ${allowed.length} permissions create_machine_principal() allows`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 11f. Each permission create_machine_principal() allows opens, for a machine, what the Access
+// Control page says it does.
+//
+// A machine holds permissions through principal_permissions and never a role, so it passes
+// has_authority() and never has_role(). MACHINE_REACH names, for each allowed permission, the
+// policies and functions it is meant to open, and each must consult it through has_authority() in
+// its LAST definition in the chain. "Consulted somewhere" is not enough: `retired_entities` consulted
+// audit_trail:read while the trail itself admitted no machine.
+//
+// telemetry:read and quarantine:view open nothing by design: what they describe is open to every
+// authenticated caller. Their entries name those reads and assert both halves of that sentence:
+// each read is open to all, and no has_authority() consults the permission. Gating one later
+// moves its entry to `gates`.
+//
+// Two refusal reasons are facts and are held here too: nothing consults link:manage or
+// gitops:manage through has_authority(), and cell:manage and gateway:manage are consulted only
+// where a proposal is decided. So is may_decide_proposal()'s answer: its cell and gateway lanes
+// consult the permission, those tables' write policies name a role pair, that pair are the only
+// roles granted the permission, and no machine may hold it -- so the lane agrees with the table
+// for a person, and no machine reaches it.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const chain = readdirSync(join(REPO, dir), { withFileTypes: true })
+    .filter((e) => e.isFile() && /^\d+_.*\.sql$/.test(e.name))
+    .map((e) => e.name)
+    .sort()
+    .map((name) => ({ name, sql: read(`${dir}/${name}`) }));
+  // Applied after the chain by storage-init; a storage policy could consult a permission too.
+  const storageSql = { name: 'supabase/storage-policies.sql', sql: read('supabase/storage-policies.sql') };
+
+  const uncommented = (text) => text.replace(/--[^\n]*/g, '');
+  const quoted = (list) => [...list.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  // Static patterns only: each has_authority(ARRAY[...]) call, as the permissions it names.
+  const consults = (text, perm) =>
+    [...uncommented(text).matchAll(/has_authority\(\s*ARRAY\[([^\]]*)\]/g)].some((m) => quoted(m[1]).includes(perm));
+
+  // The last definition of every function, keyed by its signature: replay order makes it the one
+  // that runs.
+  const functions = new Map();
+  for (const { sql } of chain) {
+    for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION\s+public\.([a-z_0-9]+)\s*\(/gi)) {
+      const rest = sql.slice(m.index);
+      const tag = /\bAS\s+(\$[A-Za-z_]*\$)/.exec(rest);
+      const end = tag ? rest.indexOf(tag[1], tag.index + tag[0].length) : -1;
+      if (end < 0) continue;
+      const signature = rest.slice(0, rest.search(/\)\s*RETURNS\b/)).replace(/\s+/g, ' ');
+      functions.set(signature, { fn: m[1].toLowerCase(), text: rest.slice(0, end) });
+    }
+  }
+  const definitionsOf = (fn) => [...functions.values()].filter((d) => d.fn === fn);
+
+  // The policy in force: the last CREATE in order, unless a DROP came after it.
+  const policiesIn = (sources) => {
+    const out = new Map();
+    for (const { sql } of sources) {
+      const events = [
+        ...[...sql.matchAll(/CREATE POLICY\s+"?([a-z_0-9]+)"?\s+ON\s+(?:public|storage)\.([a-z_0-9]+)\b[^;]*;/gi)]
+          .map((m) => ({ at: m.index, key: `${m[2]}.${m[1]}`, text: m[0] })),
+        ...[...sql.matchAll(/DROP POLICY\s+(?:IF EXISTS\s+)?"?([a-z_0-9]+)"?\s+ON\s+(?:public|storage)\.([a-z_0-9]+)/gi)]
+          .map((m) => ({ at: m.index, key: `${m[2]}.${m[1]}`, text: null })),
+      ].sort((a, b) => a.at - b.at);
+      for (const e of events) {
+        if (e.text) out.set(e.key, e);
+        else out.delete(e.key);
+      }
+    }
+    return out;
+  };
+  const policies = policiesIn(chain);
+  const everyPolicy = new Map([...policies, ...policiesIn([storageSql])]);
+
+  const consultedBy = (perm) => [
+    ...[...functions.values()].filter((d) => consults(d.text, perm)).map((d) => `${d.fn}()`),
+    ...[...everyPolicy].filter(([, d]) => consults(d.text, perm)).map(([key]) => `policy ${key}`),
+  ];
+  const openToAll = (text) => /FOR SELECT\s+TO\s+authenticated\s+USING\s*\(\s*true\s*\)\s*;$/i.test(text);
+  const roleArray = (text) => {
+    const m = /has_role\(ARRAY\[([^\]]*)\]/.exec(text || '');
+    return m ? [...m[1].matchAll(/'(\w+)'/g)].map((r) => r[1]).sort() : null;
+  };
+
+  // Who holds each permission, replayed from the seed: grants, less any withdrawal the chain makes.
+  const all = chain.map((f) => f.sql).join('\n');
+  const roleName = new Map([...all.matchAll(/INSERT INTO public\.roles VALUES \((\d+), '(\w+)'/g)].map((m) => [m[1], m[2]]));
+  const permName = new Map(
+    [...all.matchAll(/INSERT INTO public\.permissions VALUES \('([0-9a-f-]{36})', '([a-z_]+:[a-z_]+)'/g)].map((m) => [m[1], m[2]])
+  );
+  const grants = new Set(
+    [...all.matchAll(/INSERT INTO public\.role_permissions VALUES \((\d+), '([0-9a-f-]{36})'\)/g)].map((m) => `${m[1]}|${m[2]}`)
+  );
+  const withdrawals = [...all.matchAll(/DELETE FROM public\.role_permissions\s+WHERE role_id = (\d+)\s+AND permission_id IN \(([^;]*?)\);/g)];
+  const unparsed = [...all.matchAll(/DELETE FROM public\.role_permissions/g)].length - withdrawals.length;
+  for (const m of withdrawals) for (const u of m[2].matchAll(/'([0-9a-f-]{36})'/g)) grants.delete(`${m[1]}|${u[1]}`);
+  const holders = (perm) =>
+    [...grants].map((g) => g.split('|')).filter(([, p]) => permName.get(p) === perm).map(([r]) => roleName.get(r)).sort();
+
+  // What each permission a machine may hold is meant to open. `gates` must consult it through
+  // has_authority(); `never` must not; `openToAll` must be readable by every authenticated caller;
+  // `people` is a policy whose has_role() arm must name exactly the roles holding the permission.
+  const MACHINE_REACH = {
+    'telemetry:read': {
+      openToAll: ['areas.areas_select_authenticated', 'cells.cells_select_authenticated',
+        'gateways.gateways_select_authenticated', 'devices.devices_select_authenticated',
+        'device_nameplate.device_nameplate_select_authenticated', 'schemas.schemas_select_authenticated',
+        'metric_catalog.metric_catalog_select_authenticated'],
+      grantedToAll: 'telemetry',
+    },
+    'quarantine:view': { openToAll: ['devices.devices_select_authenticated'] },
+    'audit_trail:read': {
+      gates: ['policy audit_trail.audit_trail_select_asset', 'policy retired_entities.retired_entities_select_privileged'],
+      never: ['policy audit_trail.audit_trail_select_security'],
+      people: 'audit_trail.audit_trail_select_asset',
+    },
+    'archive:manage': { gates: ['policy retired_entities.retired_entities_select_privileged'] },
+    'proposal:create': { gates: ['policy change_proposals.change_proposals_insert_proposer'] },
+    'schema:manage': { gates: ['fork_schema()', 'publish_schema_version()', 'discard_schema_draft()'] },
+  };
+
+  const [creator] = definitionsOf('create_machine_principal');
+  const list = creator && /c_allowed\s+CONSTANT\s+text\[\]\s*:=\s*ARRAY\[([^\]]*)\]/i.exec(creator.text);
+  const allowed = list ? [...list[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : null;
+
+  const found = [];
+  const bad = (m) => found.push(m);
+  const definitionOf = (check) => {
+    if (check.startsWith('policy ')) return policies.get(check.slice(7))?.text ?? null;
+    const defs = definitionsOf(check.replace(/\(\)$/, ''));
+    return defs.length ? defs.map((d) => d.text).join('\n') : null;
+  };
+
+  if (!allowed) {
+    bad('could not read c_allowed from create_machine_principal(); 11e names the shape it expects');
+  } else if (unparsed) {
+    bad(`the chain has ${unparsed} DELETE(s) from role_permissions in a shape this check cannot read, so it cannot say who holds a permission`);
+  } else {
+    for (const perm of allowed) {
+      const reach = MACHINE_REACH[perm];
+      if (!reach) {
+        bad(`create_machine_principal() allows ${perm}, and 11f does not say what it opens for a machine. Name the policy or function it is meant to open.`);
+        continue;
+      }
+      for (const check of reach.gates || []) {
+        const text = definitionOf(check);
+        if (!text) bad(`${perm} is meant to open ${check}, which no applied migration defines`);
+        else if (!consults(text, perm)) bad(`${perm} is meant to open ${check} for a machine, and ${check} does not consult it through has_authority(), so a machine holding it is refused there`);
+      }
+      for (const check of reach.never || []) {
+        const text = definitionOf(check);
+        if (text && consults(text, perm)) bad(`${check} consults ${perm} through has_authority(), which opens it to a machine; it is meant to stay closed to machines`);
+      }
+      for (const key of reach.openToAll || []) {
+        const policy = policies.get(key);
+        if (!policy || !openToAll(policy.text)) bad(`${perm}'s reach line says a machine reads ${key.split('.')[0]}, which it does only while ${key} is FOR SELECT TO authenticated USING (true); it is now ${policy ? policy.text : 'missing'}`);
+      }
+      if (reach.grantedToAll) {
+        const table = reach.grantedToAll;
+        let granted = false;
+        for (const m of all.matchAll(/(GRANT|REVOKE)\s+[^;]*?\s+ON\s+TABLE\s+public\.([a-z_0-9]+)\s+(?:TO|FROM)\s+([^;]+);/g)) {
+          if (m[2] === table && /\bauthenticated\b/.test(m[3])) granted = m[1] === 'GRANT';
+        }
+        if (!granted) bad(`${perm}'s reach line says a machine reads ${table}, which authenticated is no longer granted`);
+      }
+      if (reach.openToAll) {
+        const by = consultedBy(perm);
+        if (by.length) bad(`${perm} is now consulted through has_authority() by ${by.join(', ')}; name that in 11f's gates, and say on the Access Control page what it opens`);
+      }
+      if (reach.people) {
+        const named = roleArray(policies.get(reach.people)?.text);
+        const held = holders(perm);
+        if (!named || named.join(',') !== held.join(',')) bad(`${reach.people} admits the roles [${(named || []).join(', ')}] and the seed grants ${perm} to [${held.join(', ')}]; its has_authority() arm changes what a person reads unless the two agree`);
+      }
+    }
+    for (const perm of Object.keys(MACHINE_REACH).filter((p) => !allowed.includes(p))) {
+      bad(`11f describes ${perm}, which create_machine_principal() no longer allows; remove the entry`);
+    }
+
+    // The refusal reasons that are facts.
+    for (const perm of ['link:manage', 'gitops:manage']) {
+      const by = consultedBy(perm);
+      if (by.length) bad(`create_machine_principal() refuses ${perm} because no check a machine passes consults it, and ${by.join(', ')} now does; decide whether a machine may hold it, and restate the reason`);
+    }
+    // Each lane of may_decide_proposal() in force, as the predicate and the names it passes.
+    const lanes = new Map(
+      definitionsOf('may_decide_proposal').flatMap((d) =>
+        [...uncommented(d.text).matchAll(/WHEN\s+'([a-z_]+)'\s+THEN\s+public\.(has_role|has_authority)\(ARRAY\[([^\]]*)\]\)/g)]
+          .map((m) => [m[1], `${m[2]}:${quoted(m[3]).join(',')}`]))
+    );
+    for (const [table, perm, kind] of [['cells', 'cell:manage', 'cell'], ['gateways', 'gateway:manage', 'gateway']]) {
+      if (allowed.includes(perm)) {
+        bad(`create_machine_principal() allows ${perm}, which lets a machine decide ${kind} proposals through may_decide_proposal(); machines propose, people decide`);
+        continue;
+      }
+      const by = consultedBy(perm).filter((c) => !['approve_proposal()', 'reject_proposal()', 'may_decide_proposal()'].includes(c));
+      if (by.length) bad(`create_machine_principal() refuses ${perm} because it would only let a machine decide proposals, and ${by.join(', ')} now consult(s) it too; restate the reason`);
+      if (lanes.get(table) !== `has_authority:${perm}`) {
+        bad(`may_decide_proposal()'s ${table} lane no longer consults ${perm}; restate the refusal reason in create_machine_principal() and this check`);
+      }
+      const named = roleArray(policies.get(`${table}.${table}_update_privileged`)?.text);
+      const held = holders(perm);
+      if (!named || named.join(',') !== held.join(',')) {
+        bad(`may_decide_proposal() decides ${kind} proposals on ${perm}, held by [${held.join(', ')}], while ${table}_update_privileged admits [${(named || []).join(', ')}]; a person could apply through the lane what the table refuses them, or the reverse`);
+      }
+    }
+  }
+
+  if (found.length) {
+    for (const m of found) fail(m);
+    fail(
+      'create_machine_principal() allows what a machine may hold, the Access Control page describes\n' +
+        '      what each grant reaches, and this check holds the two to the policies and functions that\n' +
+        '      decide it. Change them together.'
+    );
+  } else {
+    pass(`each of the ${allowed.length} permissions a machine may hold opens what the page says, and may_decide_proposal()'s cell and gateway lanes agree with their tables for people`);
   }
 }
 
@@ -1669,7 +2239,7 @@ function edgeFunctionNames() {
     fail(
       'the Grafana contact point references a SERVICE_ROLE credential. Grafana is deliberately\n' +
         '      given only GRAFANA_ALERT_WEBHOOK_SECRET, which authorises recording an alert and\n' +
-        '      nothing else; service_role bypasses RLS entirely and can rewrite digital_thread.'
+        '      nothing else; service_role bypasses RLS entirely and can rewrite audit_trail.'
     );
   } else {
     pass('the Grafana contact point holds only the scoped webhook secret');
@@ -1688,8 +2258,6 @@ function edgeFunctionNames() {
 // Deliberately not listed, because renaming it is not cosmetic:
 //   * deploy/k8s/internal-ca.yaml `commonName: Factory+ Internal CA`: changing a cert-manager
 //     commonName re-mints the CA, which takes the whole fleet offline (docs/incidents.md).
-//   * `factoryplus_ingestion` / `factoryplus_i3x` / `factoryplus_monitor`: MQTT usernames in the
-//     broker's Dynamic Security document, which holds only hashes.
 // -------------------------------------------------------------------------------------------------
 {
   /** file -> why this file's prose is product identity rather than a framework reference. */
@@ -1700,11 +2268,15 @@ function edgeFunctionNames() {
       'the OAuth consent screen, which names the identity a user is being asked to share',
     'deploy/helm/aber/values.yaml':
       'supabaseStudio.organizationName is displayed in Studio',
+    'deploy/helm/aber/templates/NOTES.txt':
+      'Helm prints it after every install and upgrade, and its first line names the product',
     // Swagger UI renders info.title as the page heading. Whole-file, because every other Factory+
     // reference in this repository is to the framework and belongs in docs/openapi.yaml, which is
     // deliberately not listed.
     'docs/i3x-openapi.yaml':
       'Swagger UI renders info.title as the heading of the published i3X specification',
+    'i3x/address_space.py':
+      'the i3X displayName and namespace strings are what an i3X client shows for this site',
   };
 
   const branded = [];
@@ -2045,6 +2617,69 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 28. The Backups page and the Backup Stale alert agree about when backups have stopped
+//
+// The page's current-state line and the rule count from the same clock; the page holds the
+// threshold in hours, the rule in seconds. Between two different numbers one surface says backups
+// are working while the other pages somebody.
+{
+  const page = read('frontend/src/components/tabs/BackupsTab.jsx')
+    .match(/BACKUP_STALE_HOURS\s*=\s*(\d+)/)?.[1];
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+  const at = rules.indexOf('uid: aber-backup-stale');
+  // The evaluator inside the rule: the first `params: [n]` after its uid.
+  const alert = at === -1 ? undefined : rules.slice(at).match(/type:\s*gt\s*\n\s*params:\s*\[(\d+)\]/)?.[1];
+
+  if (!page || !alert) {
+    fail(
+      `the backup staleness threshold could not be read from both sides (page: ${page || 'MISSING'}, ` +
+        `alert: ${alert || 'MISSING'}). One of them has been renamed or removed, and the other is ` +
+        'now the only definition of a threshold two surfaces are meant to share.'
+    );
+  } else if (Number(page) * 3600 !== Number(alert)) {
+    fail(
+      `the Backups page calls backups stopped after ${page} hours (${Number(page) * 3600}s) and the ` +
+        `Backup Stale alert fires above ${alert}s. Between those numbers one surface says backups ` +
+        'are working while the other pages somebody.'
+    );
+  } else {
+    pass(`the backup staleness threshold is ${page} hours on the Backups page and in its alert rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 28b. The Backups page and backup_prunable() agree about how many backups the prune keeps
+//
+// The page says "Kept: one of the newest three" from its own constant; the floor is the LIMIT in
+// the last migration that declares backup_prunable(). Read from the latest declaration, because the
+// chain replays in order and that one wins.
+{
+  const page = read('frontend/src/components/tabs/BackupsTab.jsx')
+    .match(/BACKUP_RETENTION_FLOOR\s*=\s*(\d+)/)?.[1];
+  const declaring = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => /^\d+_.*\.sql$/.test(f))
+    .sort()
+    .filter((f) => /CREATE OR REPLACE FUNCTION public\.backup_prunable\s*\(/.test(read(`supabase/migrations/${f}`)));
+  const last = declaring[declaring.length - 1];
+  const body = last ? read(`supabase/migrations/${last}`).split(/CREATE OR REPLACE FUNCTION public\.backup_prunable\s*\(/)[1] : '';
+  const sql = body?.split(/\$\$;/)[0].match(/ORDER BY n\.taken_at DESC[^\n]*LIMIT (\d+)/)?.[1];
+
+  if (!page || !sql) {
+    fail(
+      `the retention floor could not be read from both sides (page: ${page || 'MISSING'}, ` +
+        `${last || 'no migration'}: ${sql || 'MISSING'}). One of them has been renamed or removed.`
+    );
+  } else if (page !== sql) {
+    fail(
+      `the Backups page says the newest ${page} backups are kept and backup_prunable() in ${last} ` +
+        `keeps ${sql}. The page would explain a backup the next prune deletes, or miss one it keeps.`
+    );
+  } else {
+    pass(`the retention floor is ${page} backups on the Backups page and in backup_prunable() (${last})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // Every humanize call in an alert summary is given a float
 //
 // `$values.B` is a struct (Labels, Value) with a String() method, so `{{ $values.B }}` prints and
@@ -2152,39 +2787,55 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 17. Every script path named anywhere in the tree names a script that exists.
+// 17. Every repository path named anywhere in the tree names a path that exists.
 //
 // A comment citing a deleted script is the shape #339 went looking for: internally coherent,
 // naming a real-looking path, and false. A reader auditing a coupling follows the pointer, finds
 // nothing, and cannot tell whether the guard moved or was dropped. Seven live files named
 // `scripts/check-image-tag-parity.mjs` when this check was written; it had gone with the second
 // deployment target, and four of the seven were the only statement of a coupling that still
-// mattered.
+// mattered. Two comments went on citing migrations by their path after the chain was archived.
 //
-// A DELIBERATE MENTION OF A DEAD SCRIPT IS ALLOWED, and has to say so on its own line: a line
-// carrying "deleted", "retired", "removed", "replaced" or "gone" is history rather than a
-// pointer. That is the whole exemption, so a stale citation cannot hide behind a file's reputation.
-// The two records that are history by definition are exempt wholesale -- `docs/incidents.md`,
-// where naming the script an incident happened to is the point, and `supabase/migrations/archive/`,
-// which is never executed. `backups/` is gitignored and holds artefacts, not prose.
+// WHAT IS A CITATION: a script path however it is rooted, and a path under one of the repository's
+// top-level directories that ends in a file extension or `/`. A bare two-part name such as
+// `supabase/postgres` or `deploy/ingestion` is an image or a kubectl resource more often than a
+// directory, so it is not read. A gitignored path (`values-local.yaml`, `frontend/dist/`) is
+// absent from the tree by design, so it is neither checked when cited nor read for citations.
 //
-// A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `./` or `../` against the
-// citing file's own directory; anything else against the repository root and then against each
-// directory above the citing file, because a path can be written relative to a root that is not
-// this repository's -- a Helm template names `files/scripts/...` relative to the chart.
+// A DELIBERATE MENTION OF A DEAD PATH IS ALLOWED, and has to say so on its own line: a line
+// carrying "deleted", "retired", "removed", "replaced", "gone", "former" or "proposed" is history
+// rather than a pointer. That is the whole exemption, so a stale citation cannot hide behind a
+// file's reputation. Exempt wholesale: `docs/incidents.md`, where naming the path an incident
+// happened to is the point; `docs/roadmap.md` and `docs/postgres-17-migration-plan.md`, the
+// records of what retired; `supabase/migrations/archive/`, which is never executed; and
+// `supabase/config.toml`, the Supabase CLI's stock file.
+//
+// A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `../` against the citing
+// file's own directory; anything else against it, the repository root and each directory above
+// the citing file, because a path can be written relative to a root that is not this repository's
+// -- a Helm template names `files/scripts/...` relative to the chart. Last, as the tail of a path
+// in the tree: a layout drawn relative to `templates/` names `supabase/realtime-service.yaml`.
 // -------------------------------------------------------------------------------------------------
 {
-  const PAST = /\b(deleted|retired|removed|replaced|gone|superseded)\b/i;
-  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md'];
+  const PAST = /\b(deleted|retired|removed|replaced|gone|superseded|former|formerly|proposed)\b/i;
+  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md', 'docs/postgres-17-migration-plan.md', 'supabase/config.toml'];
   const scanned = allFiles.filter(
     (f) =>
       !EXEMPT.includes(f) &&
+      !gitignored(f) &&
+      !/(^|\/)\.(?:git|docker)ignore$/.test(f) &&
       !f.startsWith('supabase/migrations/archive/') &&
       !f.startsWith('frontend/dist/') &&
       !f.startsWith('.claude/') &&
       !f.startsWith('backups/') &&
       !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
   );
+
+  const TOP = readdirSync(REPO, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !['.git', 'node_modules'].includes(e.name))
+    .map((e) => e.name.replace(/\./g, '\\.'));
+  const REPO_PATH = new RegExp(String.raw`(?<![\w./@:$~-])((?:\.{1,2}/)*(?:${TOP.join('|')})/[\w.@/-]*)`, 'g');
+  const SCRIPT_PATH = /((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g;
 
   const dead = [];
   let citations = 0;
@@ -2195,33 +2846,38 @@ function edgeFunctionNames() {
     const here = posix.dirname(file);
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i += 1) {
-      for (const m of lines[i].matchAll(/((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g)) {
-        const cited = m[1];
+      const cited = new Set([...lines[i].matchAll(SCRIPT_PATH)].map((m) => m[1]));
+      for (const m of lines[i].matchAll(REPO_PATH)) {
+        const path = m[1].replace(/\.+$/, '');
+        if (path.endsWith('/') || /\.\w+$/.test(path.split('/').pop())) cited.add(path);
+      }
+      for (const path of cited) {
         citations += 1;
-        const candidates = [];
-        if (/^\.{1,2}\//.test(cited)) {
-          candidates.push(posix.normalize(posix.join(here, cited)));
-        } else {
-          candidates.push(cited);
+        const bare = posix.normalize(path).replace(/\/$/, '');
+        if (gitignored(bare)) continue;
+        const candidates = [posix.normalize(posix.join(here, path))];
+        if (!path.startsWith('../')) {
+          candidates.push(bare);
           for (let d = here; d !== '.' && d !== '/'; d = posix.dirname(d)) {
-            candidates.push(posix.normalize(posix.join(d, cited)));
+            candidates.push(posix.normalize(posix.join(d, path)));
           }
         }
         if (candidates.some((c) => existsSync(join(REPO, c)))) continue;
+        if (allFiles.some((f) => `/${f}`.endsWith(`/${bare}`) || `/${f}`.includes(`/${bare}/`))) continue;
         if (PAST.test(lines[i])) continue;
-        dead.push(`${file}:${i + 1} cites ${cited}, which does not exist`);
+        dead.push(`${file}:${i + 1} cites ${path}, which does not exist`);
       }
     }
   }
 
   if (dead.length) {
     fail(
-      'a comment or document cites a script that is not in the tree:\n' +
+      'a comment or document cites a path that is not in the tree:\n' +
         [...new Set(dead)].map((d) => `        ${d}`).join('\n') +
-        '\n        (if the script is deliberately gone, say so on the same line)'
+        '\n        (if the path is deliberately gone, say so on the same line)'
     );
   } else {
-    pass(`all ${citations} script citation(s) name a script that exists`);
+    pass(`all ${citations} repository path citation(s) name a path that exists`);
   }
 }
 
@@ -2275,9 +2931,11 @@ function edgeFunctionNames() {
   }
 }
 
-// The restore rehearsal runs the upstream historian image rather than building the chart's
+// -------------------------------------------------------------------------------------------------
+// 26. The restore rehearsal runs the upstream historian image rather than building the chart's
 // (.github/rehearsal-values.yaml), so it has to be the one timescaledb/Dockerfile is built FROM.
 // Renovate bumps the Dockerfile; this is what notices the rehearsal left behind.
+// -------------------------------------------------------------------------------------------------
 {
   const from = read('timescaledb/Dockerfile').match(/^FROM\s+(\S+):(\S+)/m);
   const rehearsal = read('.github/rehearsal-values.yaml')
@@ -2331,6 +2989,9 @@ function edgeFunctionNames() {
     /\bone of two targets\b/i,
     /\bon Compose\b/,
     /\bsecond (?:deployment )?target\b/i,
+    // The platform's pods share no compose network. The appliance's does exist, and its files
+    // say "this compose network" or "the appliance's".
+    /\bthe compose network\b/i,
   ];
   const scanned = allFiles.filter(
     (f) =>
@@ -2365,6 +3026,229 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`no live file describes a second deployment target (${scanned.length} scanned)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 19b. The documents that describe the running stack name Envoy's artefacts, not Kong's. Kong was
+// deleted on 2026-09-13 and the design record went on describing it for two weeks (#444). Prose
+// saying Kong WAS the gateway is fine; its config file, variables, annotation, metrics, image tag and
+// auth plugin are what a reader would act on. docs/gateway.md's History is where Kong's facts live.
+// -------------------------------------------------------------------------------------------------
+{
+  const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'supabase/README.md'];
+  const ARTEFACTS = [/\bkong\.yml\b/, /\bKONG_[A-Z]/, /checksum\/kong-/, /\bkong_[a-z]/, /(?<![\w-])kong:\d/, /\bkey-auth\b/];
+  const offences = [];
+  for (const file of CURRENT) {
+    read(file).split('\n').forEach((line, i) => {
+      if (ARTEFACTS.some((p) => p.test(line))) offences.push(`${file}:${i + 1} ${line.trim().slice(0, 90)}`);
+    });
+  }
+  if (offences.length) {
+    fail(
+      "a document describing the running stack names Kong's artefacts, and Kong is not the gateway " +
+        '(docs/gateway.md; its facts belong in that file\'s History):\n' +
+        offences.map((o) => `        ${o}`).join('\n')
+    );
+  } else {
+    pass(`the ${CURRENT.length} documents describing the running stack name no Kong artefact`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 19c. A name the platform retired does not come back.
+//
+// Every rename left the old name behind somewhere, and after 1.0 an identifier that survives the
+// release stays for good. RETIRED is one line a name: an example of the old name, the pattern that
+// finds it, and what it is now. KEPT is where an old name stays on purpose -- the code that moves
+// it, the tests that plant it, and history -- each with its reason.
+//
+// A KEPT phrase exempts the paragraph that holds it (the lines between blank lines, or one list
+// item), not the file, so a stale use elsewhere in the same file is still caught. A KEPT entry
+// that exempts nothing fails, so the list shrinks with the tree. A gitignored file is not read,
+// and a migration filename is not scanned: it records what the change was.
+// -------------------------------------------------------------------------------------------------
+{
+  /** [an example of the old name, the pattern that finds it, what it is now]. */
+  const RETIRED = [
+    ['supabase-kong', /\bsupabase-kong\b(?!-init)/, 'supabase-envoy'],
+    ['supabaseEnvoy.serviceName', /\bsupabaseEnvoy\.serviceName\b/, 'nothing: the Service is always supabase-envoy'],
+    ['the Overview page', /\bOverviewTab\b|\bthe Overview\b|\bOverview (?:page|map|card|tab)\b|tab id `overview`/, 'the Site Map'],
+    ['floor-plans', /\bfloor-plans\b/, 'area-plans'],
+    ['floor_plans_read_authenticated', /\bfloor_plans_/, 'area_plans_*'],
+    ['is_floor_plan_path', /\bis_floor_plan_path\b/, 'is_area_plan_path'],
+    ['uploadFloorPlan', /FloorPlan|floorPlan|FLOOR_PLAN|FloorPlacement/, 'AreaPlan, areaPlan, AREA_PLAN, CellPlacement'],
+    ['.floor-pin-label', /\bfloor-(?:plan|pin|placement)\b/, '.area-plan…'],
+    ['a floor plan', /\bfloor plans?\b/i, 'an area plan'],
+    ['ACS-Cymru', /acs[-_ ]?cymru/i, 'Aber'],
+    // An escaped `\n` is a boundary too: JSON-encoded text, such as a flow's notes, has no space there.
+    ['acs/flow-shape', /(?<=^|[^\w-]|\\n)(?:acs[-_/.]|ACS_|X-ACS-)\w[\w./-]*|(?<=-n )acs\b/, 'aber…'],
+    ['factoryplus_ingestion', /\bfactoryplus_(?:ingestion|i3x|monitor)\b/, 'aber_ingestion, aber_i3x, aber_monitor'],
+    ['.factoryplus-seeded', /\.factoryplus-(?:seeded|editor-users)/, '.aber-seeded, .aber-editor-users.json'],
+    ['factoryplus-tls-config', /\bfactoryplus-tls-config\b/, 'aber-tls-config'],
+    ['supabase_anon_key', /\bsupabase_anon_key\b/, 'supabase_publishable_key'],
+    ['Node-RED (Virtual Edge Gateway Simulator)', /\b(?:virtual edge )?gateway simulator\b/i, 'Node-RED (Host-Run Gateways)'],
+    ['the demo simulator', /\bdemo(?:nstration)? simulator\b|\bsimulated shopfloor\b/i, 'nothing: no demonstration ships'],
+    ['the Digital Thread', /digital[_ -]?thread/i, 'the Audit Trail: audit_trail, audit-trail, AuditTrail, AUDIT_TRAIL'],
+    // A class, custom property or fixture id, not the <dt> element, a `dt {` selector or a word such as qudt-all.
+    ['.dt-lane', /(?<![\w-])(?:--|\.)?dt-[a-z0-9]/, 'trail-: .trail-lane, --trail-label-width, \'trail-1\''],
+    ['applied_thread_id', /\b(?:applied_)?thread_(?:id|rows)\b|MAX_THREAD_ROWS|\b(?:onView|onSelect|load|canRead)Thread\b|\bviewThreadFor\b/,
+      'applied_trail_id, trail_id, trail_rows, MAX_TRAIL_ROWS, onViewTrail, loadTrail'],
+  ];
+
+  /** Text next to those names that is still right, and which no pattern may flag. */
+  const STILL_RIGHT = [
+    'the scheduling floor and the upgrade floor',
+    'A building with two floors is two areas; an overview of the chart',
+    '`factoryplus_payload_uuid`, the Factory+ payload marker, and the Factory+ Internal CA',
+    'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are the tokens the upstream images read',
+    'a simulated gateway beside a host-run one, inspired by the AMRC Connectivity Stack (ACS)',
+    'supabase-envoy, area-plans, aber-tls-config, aber/flow-shape, dacs-1 and MACS_ADDR',
+    'the writer thread, threading.Thread and daemon_threads beside the audit trail and audit_trail',
+  ];
+
+  const STORAGE_POLICIES = ['supabase/storage-policies.sql', 'deploy/helm/aber/files/storage-policies/storage-policies.sql'];
+  /** [file or directory/, the phrase marking the paragraph kept (null: the whole file), why]. */
+  const KEPT = [
+    ['supabase/migrations/archive/', null, 'never executed: the record of what each archived migration did'],
+    ['docs/incidents.md', null, 'names what each incident happened to'],
+    ['docs/postgres-17-migration-plan.md', null, 'marked Historical'],
+    ['.gitleaksignore', null, 'its fingerprints name historical paths and must match them exactly'],
+    ['supabase/migrations/0000_a_database_from_before_the_fold.sql', null, 'moves a database from before the fold, so it names what it moves'],
+    ['supabase/migrations/0003_the_group_answers_to_aber.sql', null, 'moves the old Sparkplug group'],
+    ['supabase/migrations/0004_the_namespace_answers_to_aber.sql', null, 'moves the old semantic-id authority'],
+    ['supabase/migrations/0024_node_red_is_listed_for_the_gateways_it_runs.sql', null, 'renames the old Directory row'],
+    ['supabase/migrations/0002_seed_data.sql', ['One pair is not a disagreement', 'renamed from `supabase_anon_key`', 'The retired name'],
+      'the group check lets the old default through for 0003, and the vault deletes the old secret name'],
+    [['scripts/storage-init.mjs', 'deploy/helm/aber/files/scripts/storage-init.mjs'], "{ from: 'floor-plans', to: 'area-plans' }", 'RENAMED_BUCKETS moves the old bucket'],
+    [STORAGE_POLICIES, ['under its old name, floor-plans', "policyname LIKE 'floor_plans_%'", 'floor-plans policies gone'],
+      "drops the old bucket's policies and path check, and asserts they are gone"],
+    [['scripts/lib/mosquitto-dynsec.mjs', 'deploy/helm/aber/files/gateway-credential-lib/mosquitto-dynsec.mjs'], 'RETIRED_PLATFORM_USERNAMES =',
+      'the boot reconcile removes the old broker accounts'],
+    ['scripts/lib/mosquitto-dynsec.test.mjs', /factoryplus_/, 'tests that removal'],
+    ['scripts/check-broker-config.mjs', /factoryplus_/, 'plants the old accounts and asserts the broker refuses them'],
+    ['supabase/functions/_shared/forge.ts', 'RETIRED_FLOW_SHAPE_CONTEXTS =', 'the sweep removes the old status context from branch rules'],
+    ['supabase/functions/forge-sweep/test_forge_sweep.py', 'RETIRED_FLOW_SHAPE_CONTEXT =', 'tests that removal'],
+    ['node-red/node-red-init.mjs', ["['.factoryplus-seeded'", 'LEGACY_TLS_NODE ='], 'moves the old names on the volume'],
+    ['node-red/node-red-init.test.mjs', /factoryplus-tls-config/, 'plants the old tls-config node and asserts it moves'],
+    ['supabase/migrations/test_sparkplug_group_setting.py', /ACS-Cymru/, "tests 0003's move"],
+    ['supabase/migrations/test_directory_images.py', 'NODE_RED_OLD_NAME =', "tests 0024's rename"],
+    ['supabase/migrations/test_forge_follows_the_archive.py', "'supabase_anon_key'", 'asserts the old vault name is gone'],
+    ['frontend/src/searchIndex.js', /floor plan/, 'search keywords find a page by its old word'],
+    ['ingestion/README.md', "ACS's `acs-edge`", 'names the upstream ACS component'],
+    ['test-harness/load_generator.py', 'NOT the demonstration simulator', 'says what the load generator is not'],
+    ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
+    ['deploy/helm/aber/values.yaml', ['is moved to `Aber` by 0003', 'The demonstration simulator was removed'], 'history, beside the value it explains'],
+    ['deploy/k8s/README.md', 'There is no shared broker account.', 'the retired shared broker account'],
+    ['docs/upgrades.md', ['| Was | Is | What a site does |', 'the chart was `acs-cymru` until'], 'the 1.0 table: what each rename asks of a site'],
+    ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
+    ['mosquitto/README.md', 'RETIRED_PLATFORM_USERNAMES', 'the removal of the old accounts'],
+    ['README.md', ['The chain is how', 'It used to come up with a four-cell simulated shopfloor'],
+      'the archived chain, and what a fresh install used to hold'],
+    ['supabase/README.md', [
+      'defaulted to the literal `ACS-Cymru`', 'The default moved with the platform', 'The bucket and the check were `floor-plans`',
+      'rename to Aber, `acs/flow-shape`', 'The Node-RED row was seeded as', 'The same pass renamed the vault secret',
+      'It was `floor-plans` until 1.0.', 'The only entry is `floor-plans` to `area-plans`',
+      '`ui.digital_thread_lane_limit` folded every lane',
+    ], 'history: what each name was and how it moved'],
+    ['supabase/migrations/0002_seed_data.sql', '`ui.digital_thread_lane_limit` was declared here', 'the retired setting 0000 deletes'],
+    ['frontend/src/__tests__/auditTrailPurgedEntity.test.jsx', /ui\.digital_thread_lane_limit/, 'an old row on the trail names the retired setting'],
+    ['frontend/src/constants.js', 'export const RENAMED_TABS', 'the old route opens the Audit Trail'],
+    ['frontend/src/__tests__/appRouting.test.jsx', /\/digital-thread/, 'tests the old route'],
+    ['frontend/src/searchIndex.js', /digital thread/, 'search keywords find the Audit Trail by its old name'],
+    [['grafana/provisioning/alerting/alert-rules.yaml', 'deploy/helm/aber/files/grafana-alerting/alert-rules.yaml'],
+      'uid: aber-digital-thread-partitions', 'deleteRules drops the old rule from a Grafana that loaded it'],
+  ];
+
+  const THIS_FILE = 'scripts/check-docs-drift.mjs';
+  const MIGRATION_FILENAME = /\b(?:\d{4}|\d{14})_\w+\.sql\b/g;
+  const matches = (marker, line) => (typeof marker === 'string' ? line.includes(marker) : marker.test(line));
+  const covers = (path, file) => (path.endsWith('/') ? file.startsWith(path) : file === path);
+  /** [start, end) of each paragraph: split at blank lines and at each list item. */
+  const paragraphs = (lines) => {
+    const out = [];
+    let start = null;
+    lines.forEach((line, i) => {
+      const blank = !line.trim();
+      if (start !== null && (blank || /^\s*(?:[-*+]|\d+\.)\s/.test(line))) { out.push([start, i]); start = null; }
+      if (!blank && start === null) start = i;
+    });
+    if (start !== null) out.push([start, lines.length]);
+    return out;
+  };
+
+  const broken = [
+    ...RETIRED.filter(([was, pattern]) => !pattern.test(was)).map(([was]) => `the pattern for "${was}" no longer finds it`),
+    ...STILL_RIGHT.flatMap((text) => RETIRED.filter(([, pattern]) => pattern.test(text)).map(([was]) => `the pattern for "${was}" flags "${text}"`)),
+    ...KEPT.flatMap(([paths]) => [paths].flat().filter((p) => !existsSync(join(REPO, p))).map((p) => `KEPT names ${p}, which is not in the tree`)),
+  ];
+
+  const offences = [];
+  const used = new Set();   // `${entry}:${marker}:${path}` for every KEPT marker that exempted a mention
+  const scanned = allFiles.filter(
+    (f) =>
+      f !== THIS_FILE &&
+      !gitignored(f) &&
+      !f.startsWith('frontend/dist/') &&
+      !f.startsWith('.claude/') &&
+      !f.startsWith('backups/') &&
+      !/(^|\/)(?:package-lock\.json|deno\.lock)$/.test(f) &&
+      !/\.(png|jpe?g|gif|ico|svg|woff2?|ttf|zip|gz|pdf|glb)$/i.test(f)
+  );
+  for (const file of scanned) {
+    let text;
+    try { text = read(file); } catch { continue; }
+    if (text.includes('\0')) continue;
+    const lines = text.split('\n');
+    const found = lines.map((line) => {
+      const bare = line.replace(MIGRATION_FILENAME, '');
+      return RETIRED.map(([, pattern, now]) => [bare.match(pattern)?.[0], now]).filter(([hit]) => hit);
+    });
+    if (!found.some((hits) => hits.length)) continue;
+
+    const keptBy = lines.map(() => []);
+    KEPT.forEach(([paths, marker], entry) => {
+      for (const path of [paths].flat().filter((p) => covers(p, file))) {
+        if (marker === null) { lines.forEach((_, i) => keptBy[i].push(`${entry}:0:${path}`)); continue; }
+        const markers = Array.isArray(marker) ? marker : [marker];
+        for (const [start, end] of paragraphs(lines)) {
+          markers.forEach((m, n) => {
+            if (!lines.slice(start, end).some((line) => matches(m, line))) return;
+            for (let i = start; i < end; i += 1) keptBy[i].push(`${entry}:${n}:${path}`);
+          });
+        }
+      }
+    });
+
+    found.forEach((hits, i) => {
+      if (!hits.length) return;
+      if (keptBy[i].length) { keptBy[i].forEach((k) => used.add(k)); return; }
+      for (const [hit, now] of hits) offences.push(`${file}:${i + 1} "${hit}" is ${now}: ${lines[i].trim().slice(0, 80)}`);
+    });
+  }
+
+  KEPT.forEach(([paths, marker, why], entry) => {
+    const markers = marker === null ? [null] : Array.isArray(marker) ? marker : [marker];
+    for (const path of [paths].flat()) {
+      markers.forEach((m, n) => {
+        if (!used.has(`${entry}:${n}:${path}`)) {
+          broken.push(`KEPT ${path}${m === null ? '' : ` "${m}"`} (${why}) exempts no retired name any more; remove it`);
+        }
+      });
+    }
+  });
+
+  if (broken.length) {
+    fail('check 19c cannot be trusted as written:\n' + broken.map((b) => `        ${b}`).join('\n'));
+  }
+  if (offences.length) {
+    fail(
+      'a retired name is back:\n' +
+        offences.map((o) => `        ${o}`).join('\n') +
+        '\n        (a deliberate mention goes in check 19c\'s KEPT, with its reason)'
+    );
+  } else if (!broken.length) {
+    pass(`no retired name is back (${RETIRED.length} names, ${KEPT.length} kept on purpose, ${scanned.length} files scanned)`);
   }
 }
 
@@ -2479,7 +3363,7 @@ function edgeFunctionNames() {
 // `seed_setting()` preserves an operator's value on a replay and refreshes only the metadata, which
 // makes a second declaration of the same key look harmless. It is not. Both run on every boot, in
 // file order: the later sentence lands, the next boot puts the earlier one back, and the trigger on
-// `system_settings` records each flip as an edit by `migration`. `digital_thread` is append-only to
+// `system_settings` records each flip as an edit by `migration`. `audit_trail` is append-only to
 // every application role and partitioned by month because it only grows, so what accumulates is a
 // setting nobody touched, edited twice a day, forever. `archive.enabled` was declared by both
 // `0002` and `0132` and did exactly that until the sentence was folded back into `0002` (#356).
@@ -2547,7 +3431,7 @@ function edgeFunctionNames() {
     fail(
       `${key} is declared ${where.length} times, in ${[...new Set(where)].join(' and ')}. Both ` +
         'run on every boot, so the later declaration lands and the next boot puts the earlier one ' +
-        'back -- two digital_thread rows a boot recording a change nobody made. Correct a ' +
+        'back -- two audit_trail rows a boot recording a change nobody made. Correct a ' +
         "setting's metadata where it is declared, rather than declaring it again."
     );
   }
@@ -2660,6 +3544,25 @@ function edgeFunctionNames() {
     } else {
       pass(`the Directory image map names the same ${mapped.size} chart component(s) in 0007 and the chart`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 25. The runbook's inline Traefik manifest is deploy/k8s/traefik-config.yaml, which the dev loop
+// applies: an install from the registry has no checkout, so the runbook carries a copy.
+// -------------------------------------------------------------------------------------------------
+{
+  const manifest = (text) => text.split('\n').filter((l) => l.trim() && !l.trimStart().startsWith('#')).join('\n');
+  const file = manifest(read('deploy/k8s/traefik-config.yaml'));
+  const block = read('deploy/k8s/README.md').match(/kubectl apply -f - <<'EOF'\n([\s\S]*?)\nEOF\n/);
+  if (!block) {
+    fail("deploy/k8s/README.md no longer carries the Traefik HelmChartConfig as a `kubectl apply -f - <<'EOF'` block");
+  } else if (manifest(block[1]) !== file) {
+    fail('the Traefik HelmChartConfig in deploy/k8s/README.md differs from deploy/k8s/traefik-config.yaml, which the dev loop applies');
+  } else if (!read('scripts/dev-cluster.mjs').includes("'deploy/k8s/traefik-config.yaml'")) {
+    fail('scripts/dev-cluster.mjs no longer applies deploy/k8s/traefik-config.yaml, so the dev loop measures a different Traefik');
+  } else {
+    pass('the runbook and the dev loop apply the same Traefik HelmChartConfig');
   }
 }
 

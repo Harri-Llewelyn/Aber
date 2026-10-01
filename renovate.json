@@ -25,6 +25,10 @@
   "prConcurrentLimit": 6,
   "prHourlyLimit": 3,
 
+  "constraints": {
+    "deno": "2.1.4"
+  },
+
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
     "enabled": true,
@@ -55,6 +59,13 @@
       ],
       "dependencyDashboardApproval": true,
       "labels": ["dependencies", "supabase-set"]
+    },
+    {
+      "description": "THE DENO THAT RESOLVES THE EDGE FUNCTIONS is the Deno supabase/edge-runtime embeds (`edge-runtime --version`), not the newest: the functions image's `modules` stage and the top-level constraints.deno (which the deno manager maintains supabase/functions/deno.lock with) both name it, and a lock written by another Deno can be a format the build cannot read. It moves by hand when edge-runtime does.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["denoland/deno"],
+      "matchFileNames": ["supabase/functions/Dockerfile"],
+      "enabled": false
     },
     {
       "description": "The historian. Not grouped with anything: a patch bump is usually safe and is still the one change that can take the telemetry store with it.",

@@ -63,10 +63,10 @@ def ensure_auth_user(cur, user_id, label):
     """
     Make `user_id` exist in `auth.users`.
 
-    NOT BOILERPLATE, AND EASY TO MISTAKE FOR IT. `log_digital_thread_event()` writes
+    NOT BOILERPLATE, AND EASY TO MISTAKE FOR IT. `log_audit_trail_event()` writes
     `changed_by = auth.uid()` under a foreign key to `auth.users`, so a fixture that fakes a
     session without an account fails on the AUDIT insert -- with an FK error naming
-    `digital_thread`, which reads like a fault in the audit trail rather than a missing fixture.
+    `audit_trail`, which reads like a fault in the audit trail rather than a missing fixture.
 
     IT ONLY STARTED MATTERING WHEN THE TABLE UNDER TEST BECAME AUDITED. `0070` attached the
     trigger to `system_settings`, `schemas` and `user_roles`, so suites that had been writing to
@@ -101,7 +101,7 @@ def ensure_auth_user(cur, user_id, label):
         except psycopg2.Error:
             cur.execute("ROLLBACK TO SAVEPOINT ensure_user;")
     raise RuntimeError(
-        f"could not create auth.users row {user_id}; digital_thread.changed_by is an FK to it, "
+        f"could not create auth.users row {user_id}; audit_trail.changed_by is an FK to it, "
         "so the tests that act as this user cannot run"
     )
 
@@ -119,7 +119,7 @@ def drop_fixture_principals(user_ids):
     THE ROLE_REVOKED ROWS THIS WRITES ARE LEFT IN PLACE. Dropping the grants is audited by
     `log_role_assignment()`, so cleanup adds two rows rather than removing any. Deleting those is
     possible here (the suite connects as `postgres`) and is refused on purpose:
-    `enforce_digital_thread_append_only()` says clearing audit rows should need the authority of
+    `enforce_audit_trail_append_only()` says clearing audit rows should need the authority of
     dropping a table, and a suite that quietly uses it every run is worse than the noise.
     """
     conn = get_connection()
@@ -383,6 +383,74 @@ class TheWithdrawalReachesPostgres(RoleSplitFixture):
             " VALUES ('Fixture0069/Value', 9);"
         )
 
+    def test_only_an_administrator_can_restore_a_deprecated_metric(self):
+        """
+        #468's Restore sets `deprecated` false and clears `superseded_by`. The immutability trigger
+        freezes only `name` and `datatype`, so an Administrator may; a Shopfloor_Manager holds
+        archive:manage and is shown the button, and the policy filters the row away without an
+        error, which is why api.js reads an empty result as a refusal.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype)"
+                " VALUES ('Fixture0069/Replacement', 9) RETURNING id;"
+            )
+            replacement = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype, deprecated, superseded_by)"
+                " VALUES ('Fixture0069/Deprecated', 9, true, %s) RETURNING id;",
+                (replacement,),
+            )
+            metric = cur.fetchone()[0]
+            restore = ("UPDATE public.metric_catalog SET deprecated = false, superseded_by = NULL"
+                       " WHERE id = %s;")
+
+            as_user(cur, MANAGER_ID)
+            cur.execute(restore, (metric,))
+            self.assertEqual(cur.rowcount, 0, "a Shopfloor_Manager restored a deprecated metric")
+
+            cur.execute("RESET ROLE;")
+            as_user(cur, ADMIN_ID)
+            cur.execute(restore, (metric,))
+            self.assertEqual(cur.rowcount, 1, "an Administrator could not restore a deprecated metric")
+
+            cur.execute("RESET ROLE;")
+            cur.execute("SELECT deprecated, superseded_by FROM public.metric_catalog WHERE id = %s;",
+                        (metric,))
+            self.assertEqual(cur.fetchone(), (False, None))
+
+    def test_only_an_administrator_can_correct_a_metrics_semantic_id(self):
+        """
+        Edit on the Metrics page writes `semantic_id` and `semantic_id_type` and nothing else. The
+        immutability trigger freezes only `name` and `datatype`, so an Administrator may; the policy
+        filters anyone else's UPDATE away without an error, which is why api.js reads no row back
+        as a refusal.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype, semantic_id, semantic_id_type)"
+                " VALUES ('Fixture0069/Mapped', 9, 'https://aber.local/semantics/fixture', 'IRI')"
+                " RETURNING id;"
+            )
+            metric = cur.fetchone()[0]
+            correct = ("UPDATE public.metric_catalog"
+                       " SET semantic_id = '0112/2///61987#ABA565#009', semantic_id_type = 'IRDI'"
+                       " WHERE id = %s;")
+
+            as_user(cur, MANAGER_ID)
+            cur.execute(correct, (metric,))
+            self.assertEqual(cur.rowcount, 0, "a Shopfloor_Manager changed a metric's semantic id")
+
+            cur.execute("RESET ROLE;")
+            as_user(cur, ADMIN_ID)
+            cur.execute(correct, (metric,))
+            self.assertEqual(cur.rowcount, 1, "an Administrator could not correct a metric's semantic id")
+
+            cur.execute("RESET ROLE;")
+            cur.execute("SELECT semantic_id, semantic_id_type FROM public.metric_catalog WHERE id = %s;",
+                        (metric,))
+            self.assertEqual(cur.fetchone(), ("0112/2///61987#ABA565#009", "IRDI"))
+
     def test_manager_cannot_register_a_metric_group(self):
         self._refused_outright("INSERT INTO public.metric_groups (name) VALUES ('Fixture0069');")
 
@@ -418,16 +486,16 @@ class ReadingSurvived(RoleSplitFixture):
     def test_manager_can_read_metric_groups(self):
         self._readable("metric_groups")
 
-    def test_manager_still_reads_the_digital_thread(self):
+    def test_manager_still_reads_the_audit_trail(self):
         """
-        `digital_thread:read` is NOT one of the three, and the distinction matters: 0070 splits
+        `audit_trail:read` is NOT one of the three, and the distinction matters: 0070 splits
         that table into asset and security domains and takes the security lane away from this
         role. That is a separate change with its own argument, and it must not arrive by
         accident here.
         """
         with self.conn.cursor() as cur:
             as_user(cur, MANAGER_ID)
-            cur.execute("SELECT count(*) FROM public.digital_thread;")
+            cur.execute("SELECT count(*) FROM public.audit_trail;")
             self.assertIsNotNone(cur.fetchone()[0])
 
 

@@ -71,7 +71,10 @@ COPY test-harness/aas_fixture.py /app/test-harness/aas_fixture.py
 # fixture of the suite rather than only a deliverable.
 COPY docs/openapi.yaml /app/docs/openapi.yaml
 COPY supabase/functions/aas-export/test_aas_export.py \
+     supabase/functions/aas-export/index.ts \
      /app/supabase/functions/aas-export/
+# The bundle's role check is held to the grants in 0002 and the policies the migrations declare.
+COPY supabase/migrations/*.sql /app/supabase/migrations/
 COPY supabase/functions/aas-api/test_aas_api.py \
      supabase/functions/aas-api/index.ts \
      /app/supabase/functions/aas-api/

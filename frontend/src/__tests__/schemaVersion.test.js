@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   SCHEMA_STATUS, schemaVersion, schemaStatus, statusLabel, statusBadgeClass,
   schemaVersionLabel, baseSchemaName, nextVersion, nextVersionName,
-  isSchemaEditable, canForkSchema, canPublishSchema, draftFor, lineageOf, isCurrentSchema
+  isSchemaEditable, canForkSchema, lineageOf, isCurrentSchema
 } from '../utils/schemaVersion'
 
 const schema = (over = {}) => ({
@@ -10,7 +10,7 @@ const schema = (over = {}) => ({
   parent_schema_id: null, change_description: 'Initial release', ...over
 })
 
-describe('schemaVersion — defaults for a pre-0037 row', () => {
+describe('schemaVersion — defaults for a row from before versioning (archived migration 20260101000037_schema_versioning.sql)', () => {
   // The API layer defaults these, but the utils fail closed independently: a row whose status
   // could not be read must render read-only, never open an editor over a schema devices use.
   it('reads a row with no version or status as v1 / active', () => {
@@ -90,36 +90,11 @@ describe('schemaVersion — lifecycle predicates', () => {
     expect(canForkSchema(schema({ status: 'archived' }))).toBe(false)
   })
 
-  it('makes only a draft publishable', () => {
-    expect(canPublishSchema(schema({ status: 'draft' }))).toBe(true)
-    expect(canPublishSchema(schema({ status: 'active' }))).toBe(false)
-  })
-
   it('keeps drafts in the default list but not archived versions', () => {
     expect(isCurrentSchema(schema({ status: 'active' }))).toBe(true)
     // An unfinished draft has to stay reachable -- opening it is the only way to finish it.
     expect(isCurrentSchema(schema({ status: 'draft' }))).toBe(true)
     expect(isCurrentSchema(schema({ status: 'archived' }))).toBe(false)
-  })
-})
-
-describe('schemaVersion — draftFor', () => {
-  const v1 = schema({ schema_uuid: 'v1' })
-  const draft = schema({ schema_uuid: 'v2', version: 2, status: 'draft', parent_schema_id: 'v1' })
-
-  it('finds the open draft hanging off a schema', () => {
-    expect(draftFor([v1, draft], v1)).toBe(draft)
-  })
-
-  it('ignores a published successor — only an OPEN draft blocks a new fork', () => {
-    const published = { ...draft, status: 'active' }
-    expect(draftFor([v1, published], v1)).toBeNull()
-  })
-
-  it('returns null rather than throwing when there is nothing to look at', () => {
-    expect(draftFor([], v1)).toBeNull()
-    expect(draftFor(null, v1)).toBeNull()
-    expect(draftFor([v1], null)).toBeNull()
   })
 })
 

@@ -85,7 +85,7 @@ def ensure_auth_user(cur, user_id):
     """
     Make `user_id` exist in `auth.users`.
 
-    NOT BOILERPLATE: `log_digital_thread_event()` writes `changed_by = auth.uid()` under a foreign
+    NOT BOILERPLATE: `log_audit_trail_event()` writes `changed_by = auth.uid()` under a foreign
     key to `auth.users`, so a fixture that fakes a session without an account fails on the AUDIT
     insert. The emailed shape is tried first -- an id-only row is indistinguishable from one of the
     stack's own machine principals, which have their own trigger. Each attempt is savepointed so a

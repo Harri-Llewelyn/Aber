@@ -33,7 +33,7 @@ ConfigMaps, Jobs). Services deliberately do not use it; see aber.labels.
 
 {{/*
 SERVICE NAMES ARE NOT PREFIXED. They are the component names, so in-cluster DNS resolves
-supabase-kong:8000, timescaledb:5432 and mosquitto:1883, the URLs grafana.ini, settings.js and the
+supabase-envoy:8000, timescaledb:5432 and mosquitto:1883, the URLs grafana.ini, settings.js and the
 edge-function environment carry. Two releases in one namespace is not supported; use two
 namespaces. Do not rename a Service to tidy it.
 */}}
@@ -439,7 +439,7 @@ that does not exist (issue #31).
 */}}
 {{- define "aber.autoscalableWorkloads" -}}
 supabase-rest: PostgREST is stateless and holds a connection pool per replica
-supabase-envoy: the gateway is configured declaratively and holds no state between requests. `supabase-kong` was listed beside it for the side-by-side migration and is gone with Kong itself (b7989a0); the Service keeps that name, but there is no second gateway to scale
+supabase-envoy: the gateway is configured declaratively and holds no state between requests
 supabase-functions: the edge runtime is a request router whose workers are per-request isolates
 frontend: NGINX serving static files
 {{- end -}}
@@ -502,7 +502,7 @@ does not satisfy it; an IP SAN or an explicit DNS SAN does.
 {{- end -}}
 {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.external.enabled (eq .Values.mosquitto.external.type "LoadBalancer") -}}
 {{- if and (eq (toString .Values.mosquitto.external.loadBalancerIP) "") (not .Values.mosquitto.tls.extraIpSans) (not .Values.mosquitto.tls.extraDnsSans) -}}
-{{- fail (printf "\n\naber: broker TLS is on with an external LoadBalancer, but the certificate would carry no\nexternal identity -- no IP SAN and no DNS SAN beyond the in-cluster name.\n\nGateways dial the broker BY ADDRESS; there is rarely plant DNS for it. A certificate with no IP SAN\nfails verification on every gateway while the in-cluster clients -- which connect to `mosquitto` --\nverify perfectly. The stack reports healthy, the demo simulator keeps producing telemetry, and the\nfleet is silently off.\n\nOnce the cluster has assigned the address:\n\n  kubectl -n %s get svc mosquitto-external -o jsonpath='{.status.loadBalancer.ingress[0].ip}'\n\nthen set ONE of:\n  mosquitto.tls.extraIpSans={<that address>}      # gateways dial the IP (usual case)\n  mosquitto.external.loadBalancerIP=<address>     # pin it, and it is added to the SANs for you\n  mosquitto.tls.extraDnsSans={mqtt.plant.example} # gateways dial a plant DNS name\n" .Release.Namespace)  -}}
+{{- fail (printf "\n\naber: broker TLS is on with an external LoadBalancer, but the certificate would carry no\nexternal identity -- no IP SAN and no DNS SAN beyond the in-cluster name.\n\nGateways dial the broker BY ADDRESS; there is rarely plant DNS for it. A certificate with no IP SAN\nfails verification on every gateway while the in-cluster clients -- which connect to `mosquitto` --\nverify perfectly. The stack reports healthy, the host-run gateways keep producing telemetry, and\nthe fleet is silently off.\n\nOnce the cluster has assigned the address:\n\n  kubectl -n %s get svc mosquitto-external -o jsonpath='{.status.loadBalancer.ingress[0].ip}'\n\nthen set ONE of:\n  mosquitto.tls.extraIpSans={<that address>}      # gateways dial the IP (usual case)\n  mosquitto.external.loadBalancerIP=<address>     # pin it, and it is added to the SANs for you\n  mosquitto.tls.extraDnsSans={mqtt.plant.example} # gateways dial a plant DNS name\n" .Release.Namespace)  -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -646,7 +646,7 @@ baseline schema's postgres_fdw server reads as a schema fault; helm test (M6) pi
 {{/*
 The gateway as reached from inside the cluster. The browser-facing address is publicUrls.supabase.
 */}}
-{{- define "aber.supabase.internalUrl" -}}http://supabase-kong:8000{{- end -}}
+{{- define "aber.supabase.internalUrl" -}}http://supabase-envoy:8000{{- end -}}
 
 {{/* ======================================================================================== */}}
 {{/* TLS to the databases (postgresTls). One issuer for both, so one CA verifies either; clients project ca.crt alone, since the Secret also holds the server's key. */}}
@@ -947,7 +947,7 @@ Read by ingress.yaml, NOTES.txt and the NetworkPolicies, so the public surface h
 {{- $routes = append $routes (dict "name" "frontend" "host" (include "aber.hostOf" (dict "ctx" . "name" "frontend")) "service" "frontend" "port" 3000) -}}
 {{- end -}}
 {{- if .Values.supabaseEnvoy.enabled -}}
-{{- $routes = append $routes (dict "name" "supabase" "host" (include "aber.hostOf" (dict "ctx" . "name" "supabase")) "service" .Values.supabaseEnvoy.serviceName "port" 8000) -}}
+{{- $routes = append $routes (dict "name" "supabase" "host" (include "aber.hostOf" (dict "ctx" . "name" "supabase")) "service" "supabase-envoy" "port" 8000) -}}
 {{- end -}}
 {{- if .Values.nodeRed.enabled -}}
 {{- $routes = append $routes (dict "name" "nodered" "host" (include "aber.hostOf" (dict "ctx" . "name" "nodered")) "service" "node-red" "port" 1880) -}}
@@ -962,7 +962,7 @@ Read by ingress.yaml, NOTES.txt and the NetworkPolicies, so the public surface h
      Gated on the gateway too, so the route is absent rather than pointed somewhere unauthenticated.
      */}}
 {{- if and .Values.supabaseStudio.enabled .Values.supabaseEnvoy.enabled -}}
-{{- $routes = append $routes (dict "name" "studio" "host" (include "aber.hostOf" (dict "ctx" . "name" "studio")) "service" .Values.supabaseEnvoy.serviceName "port" 8001) -}}
+{{- $routes = append $routes (dict "name" "studio" "host" (include "aber.hostOf" (dict "ctx" . "name" "studio")) "service" "supabase-envoy" "port" 8001) -}}
 {{- end -}}
 {{- if .Values.swaggerUi.enabled -}}
 {{- $routes = append $routes (dict "name" "docs" "host" (include "aber.hostOf" (dict "ctx" . "name" "docs")) "service" "swagger-ui" "port" 8080) -}}
@@ -981,7 +981,7 @@ Read by ingress.yaml, NOTES.txt and the NetworkPolicies, so the public surface h
      whole control: Gitea signs in whoever X-WEBAUTH-USER names, from any peer (measured), so a route
      naming gitea:3000 would let a request choose its own identity. Git over SSH is gitea-external's.
      */}}
-{{- $routes = append $routes (dict "name" "gitea" "host" (include "aber.hostOf" (dict "ctx" . "name" "gitea")) "service" .Values.supabaseEnvoy.serviceName "port" 8002) -}}
+{{- $routes = append $routes (dict "name" "gitea" "host" (include "aber.hostOf" (dict "ctx" . "name" "gitea")) "service" "supabase-envoy" "port" 8002) -}}
 {{- end -}}
 {{- if .Values.mosquitto.enabled -}}
 {{/*
@@ -1140,19 +1140,6 @@ when read makes the settings look wrong and get rewritten on every boot, silentl
      */}}
 - name: NODERED_OAUTH_CALLBACK_URL
   value: {{ printf "%s/auth/strategy/callback" $nodered | quote }}
-{{- end -}}
-
-{{/*
-The COMPONENT LABEL of whichever gateway is deployed, not the Service name: the Envoy Service
-adopts the name supabase-kong so every URL keeps resolving, but NetworkPolicy and ServiceMonitor
-select pod labels, which the adopted name does not touch.
-*/}}
-{{- define "aber.gatewayComponent" -}}
-{{- if .Values.supabaseEnvoy.enabled -}}
-supabase-envoy
-{{- else -}}
-supabase-kong
-{{- end -}}
 {{- end -}}
 
 {{/*

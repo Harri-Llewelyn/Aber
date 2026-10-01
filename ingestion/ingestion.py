@@ -52,7 +52,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 # The INGESTION principal, not a shared platform account. The broker's roles grant it `read
 # spBv1.0/#` plus `write spBv1.0/+/NCMD/+` and nothing else, which is exactly what this daemon
 # does: it is a consumer whose only publish() is the rebirth NCMD in request_rebirth().
-MQTT_USER = os.getenv("MQTT_USER", "factoryplus_ingestion")
+MQTT_USER = os.getenv("MQTT_USER", "aber_ingestion")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
 # MQTTS is opt-in and does not change how the daemon authenticates. Verification is always on;
@@ -157,8 +157,8 @@ supabase_client = None
 try:
     from supabase import create_client
     if SUPABASE_URL and SUPABASE_GATEWAY_KEY and SUPABASE_INGESTION_KEY:
-        # Names the daemon as the actor behind its writes; log_digital_thread_event() reads it from
-        # the `request.headers` GUC and accepts only 'ingestion' / 'service' / 'migration'.
+        # Names the daemon as the actor behind its writes; log_audit_trail_event() reads it from
+        # the `request.headers` GUC and believes 'ingestion' only from Service_Ingestor's token.
         # Set on the PostgREST session: ClientOptions(headers=...) raises in supabase-py 2.x.
         supabase_client = create_client(SUPABASE_URL, SUPABASE_GATEWAY_KEY)
         try:
@@ -520,6 +520,12 @@ STATUS_REJECT_WARN_INTERVAL_SECONDS = 300
 _alias_map = {}
 _alias_lock = threading.Lock()
 
+# The datatypes the same births declare, under the same lock and reset the same way:
+# (group_id, edge_node_id) -> {alias: datatype}, and -> {device_id or "": {name: datatype}}.
+# A DATA message may omit `datatype`, and a signed integer cannot be read without it.
+_alias_datatypes = {}
+_name_datatypes = {}
+
 # Throttle for rebirth requests, keyed "<group>/<node>".
 _rebirth_requested = {}
 REBIRTH_METRIC_NAME = "Node Control/Rebirth"
@@ -530,10 +536,19 @@ REBIRTH_METRIC_NAME = "Node Control/Rebirth"
 _last_seq = {}
 _seq_lock = threading.Lock()
 
-# Devices heard from in THIS process -- {device_uuid: {"at": monotonic, "name": label}}.
-# Deliberately in-memory and deliberately not seeded from the database: see stale_device_ids().
+# Devices heard from in THIS process -- {device_uuid: {"at": monotonic, "name": label, "node":
+# alias_key, "epoch": the node's _node_epoch then}}. Deliberately in-memory and deliberately not
+# seeded from the database: see stale_device_ids().
 _device_seen = {}
+# Devices this process has set OFFLINE and not heard born since, under the same lock. A watchdog
+# timeout keeps the device's _device_seen entry, which is what lets its DDATA set it ONLINE again;
+# anything else records {}. See accept_device_data().
+_device_offline = {}
 _device_seen_lock = threading.Lock()
+
+# Each edge node's NBIRTH and NDEATH count in this process, keyed like the alias table. Either ends
+# the births of the node's devices, so a device timed out before one must be born again.
+_node_epoch = {}
 
 # `status` and `identity_source` are read back so process_dbirth() can skip an UPDATE that
 # changes nothing. `devices` is REPLICA IDENTITY FULL and published to Realtime, so every
@@ -619,29 +634,44 @@ def alias_key(group_id, edge_node_id):
     """The alias table key. Normalised so a missing group and an empty one are the same node."""
     return (group_id or "", edge_node_id or "")
 
-def register_birth_aliases(group_id, edge_node_id, payload, reset=False):
-    """
-    Record the alias -> name bindings a birth certificate declares. Returns the number stored.
+def _declared_datatype(metric):
+    """The metric's own `datatype`, or None when absent or 0 (Sparkplug's Unknown)."""
+    if metric.HasField("datatype") and metric.datatype:
+        return metric.datatype
+    return None
 
-    `reset` clears the node's table first and is used for NBIRTH only: an NBIRTH invalidates all
-    prior state for the node and its devices. A DBIRTH merges.
+def register_birth_aliases(group_id, edge_node_id, payload, reset=False, device_id=None):
+    """
+    Record the alias -> name bindings a birth certificate declares, and the datatypes it declares
+    by alias and by name. Returns the number of aliases stored.
+
+    `reset` clears the node's tables first and is used for NBIRTH only: an NBIRTH invalidates all
+    prior state for the node and its devices. A DBIRTH merges aliases and replaces the datatypes
+    it declares by name for `device_id` (None for the node's own metrics).
     """
     key = alias_key(group_id, edge_node_id)
     declared = {}
+    typed = {}
     for metric in getattr(payload, "metrics", []):
         if not metric.name:
             continue
+        datatype = _declared_datatype(metric)
+        if datatype:
+            typed[metric.name] = datatype
         if not metric.HasField("alias"):
             continue
-        declared[metric.alias] = metric.name
+        declared[metric.alias] = (metric.name, datatype)
 
     with _alias_lock:
         if reset:
             _alias_map[key] = {}
+            _alias_datatypes[key] = {}
+            _name_datatypes[key] = {}
         table = _alias_map.setdefault(key, {})
+        alias_types = _alias_datatypes.setdefault(key, {})
 
         stored = 0
-        for alias, name in declared.items():
+        for alias, (name, datatype) in declared.items():
             # Overwriting an existing alias is free; only a NEW one can grow the table, so the
             # cap is checked against additions rather than against the declaration size.
             if alias not in table and len(table) >= MAX_ALIASES_PER_NODE:
@@ -652,7 +682,27 @@ def register_birth_aliases(group_id, edge_node_id, payload, reset=False):
                 )
                 break
             table[alias] = name
+            if datatype:
+                alias_types[alias] = datatype
+            else:
+                alias_types.pop(alias, None)
             stored += 1
+
+        # Capped like the alias table, across all of the node's devices: the device segment of a
+        # topic is not pinned by the broker ACL, so the device ids are publisher-chosen.
+        names = _name_datatypes.setdefault(key, {})
+        device = device_id or ""
+        room = MAX_ALIASES_PER_NODE - sum(len(t) for d, t in names.items() if d != device)
+        if len(typed) > room:
+            logger.warning(
+                "Datatype table for edge node '%s' is at its %d-entry cap; ignoring further "
+                "declarations. Their integers are read unsigned.", edge_node_id, MAX_ALIASES_PER_NODE
+            )
+            typed = dict(list(typed.items())[:max(room, 0)])
+        if typed:
+            names[device] = typed
+        else:
+            names.pop(device, None)
 
     if stored:
         logger.info(
@@ -674,6 +724,50 @@ def resolve_metric_name(group_id, edge_node_id, metric):
         return None
     with _alias_lock:
         return _alias_map.get(alias_key(group_id, edge_node_id), {}).get(metric.alias)
+
+def resolve_metric_datatype(group_id, edge_node_id, metric, device_id=None, name=None):
+    """
+    The metric's Sparkplug datatype: its own, else what a birth declared for its alias, else for
+    `name` on `device_id` and then on the node. None when no birth seen since startup declared one.
+    """
+    datatype = _declared_datatype(metric)
+    if datatype:
+        return datatype
+    key = alias_key(group_id, edge_node_id)
+    with _alias_lock:
+        if metric.HasField("alias"):
+            datatype = _alias_datatypes.get(key, {}).get(metric.alias)
+            if datatype:
+                return datatype
+        if not name:
+            return None
+        names = _name_datatypes.get(key, {})
+        return names.get(device_id or "", {}).get(name) or names.get("", {}).get(name)
+
+# -----------------------------------------------------------------------------
+# Sparkplug B integer values
+# -----------------------------------------------------------------------------
+# MIRRORED in i3x/i3x_service.py; test_i3x_service.py asserts the two copies agree. The signed
+# datatypes (Int8, Int16, Int32, Int64) and their width in bits.
+SPARKPLUG_SIGNED_INT_BITS = {1: 8, 2: 16, 3: 32, 4: 64}
+
+def sparkplug_integer_value(datatype, raw):
+    """
+    An `int_value` or `long_value` read as `datatype`: a signed type is sign-extended from its own
+    width and anything else is returned unchanged. Masking to the width first accepts both
+    encodings of a narrow type (0xFB and 0xFFFFFFFB are an Int8 of -5) and an already-signed value.
+    """
+    bits = SPARKPLUG_SIGNED_INT_BITS.get(datatype)
+    if bits is None:
+        return raw
+    raw &= (1 << bits) - 1
+    return raw - (1 << bits) if raw >> (bits - 1) else raw
+
+def _integer_value(datatype, raw):
+    """sparkplug_integer_value(), counting an integer whose datatype nothing declared."""
+    if datatype is None:
+        count("metrics_integer_datatype_unknown")
+    return sparkplug_integer_value(datatype, raw)
 
 # -----------------------------------------------------------------------------
 # NCMD Rebirth Requests
@@ -720,10 +814,9 @@ def request_node_rebirth(client, group_id, edge_node_id, force=False):
         logger.error("Could not publish a rebirth request to '%s': %s", topic, e)
         return False
 
+    # The caller logs why it asked.
     logger.warning(
-        "REBIRTH REQUESTED: published '%s' to '%s'. Its alias table is unknown, so DDATA metrics "
-        "carrying only an alias cannot be resolved until it re-births. Next request no sooner "
-        "than %ds.",
+        "REBIRTH REQUESTED: published '%s' to '%s'. Next request no sooner than %ds.",
         REBIRTH_METRIC_NAME, topic, REBIRTH_REQUEST_INTERVAL_SECONDS
     )
     return True
@@ -804,20 +897,111 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
 # -----------------------------------------------------------------------------
 # Device Liveness Watchdog
 # -----------------------------------------------------------------------------
-def mark_device_seen(device):
-    """Note that this device has just been heard from. In-memory only; writes nothing."""
+def mark_device_seen(device, group_id=None, edge_node_id=None):
+    """
+    Note that this device has just been heard from, and through which node. In-memory only.
+
+    Clears any OFFLINE this process recorded for it, so callers pass a birth, or DDATA that
+    accept_device_data() found live.
+    """
     if not device or not device.get("id"):
         return
+    node = alias_key(group_id, edge_node_id)
     with _device_seen_lock:
         _device_seen[device["id"]] = {
             "at": time.monotonic(),
             "name": device.get("name") or device.get("sparkplug_id") or device["id"],
+            "node": node,
+            "epoch": _node_epoch.get(node, 0),
         }
+        _device_offline.pop(device["id"], None)
 
 def forget_device_seen(device_id):
-    """Stop tracking a device -- it has died explicitly, or has just been flipped OFFLINE."""
+    """DDEATH: stop tracking the device, and hold its DDATA to wait for a birth."""
     with _device_seen_lock:
         _device_seen.pop(device_id, None)
+        _device_offline[device_id] = {}
+
+def time_out_device(device_id, moved):
+    """
+    Stop tracking a device the watchdog has just swept. `moved` is the gate's answer: only a sweep
+    that took the row from ONLINE to OFFLINE leaves the device for its DDATA to set ONLINE again.
+    """
+    with _device_seen_lock:
+        entry = _device_seen.pop(device_id, None)
+        _device_offline[device_id] = entry if moved and entry else {}
+
+def end_device_births(group_id, edge_node_id):
+    """NBIRTH or NDEATH: the node's devices must be born again before DDATA sets one ONLINE."""
+    node = alias_key(group_id, edge_node_id)
+    with _device_seen_lock:
+        _node_epoch[node] = _node_epoch.get(node, 0) + 1
+
+def accept_device_data(device, group_id, edge_node_id, client=None):
+    """
+    What an accepted DDATA says about its device's status. True when the device counts as ONLINE
+    and is tracked from here; False when it must be born first.
+
+    A device this process's watchdog timed out, whose node has neither born nor died since, is set
+    ONLINE again. Any other device held OFFLINE (a DDEATH, a node birth or death since, or an
+    OFFLINE row this process has not seen born) gets a rebirth request, rate limited per node, and
+    its DBIRTH sets it ONLINE. See ingestion/README.md -> "Device Liveness Watchdog".
+    """
+    device_id = device.get("id")
+    node = alias_key(group_id, edge_node_id)
+    with _device_seen_lock:
+        if not device_id or device_id in _device_seen:
+            return True
+        offline = _device_offline.get(device_id)
+        epoch = _node_epoch.get(node, 0)
+
+    if offline is None:
+        # New to this process, as after a restart, so the Directory row is all there is.
+        if device.get("status") != "OFFLINE":
+            return True
+        offline = {}
+
+    if offline and offline.get("node") == node and offline.get("epoch") == epoch:
+        return revive_device(device)
+
+    with _device_seen_lock:
+        # Held here, so a stale cached row cannot make the next DDATA look live.
+        _device_offline[device_id] = {}
+    if request_node_rebirth(client, group_id, edge_node_id):
+        logger.warning(
+            "DDATA from device '%s' (%s), which is OFFLINE and has not been born since. Its data "
+            "is stored; a rebirth of edge node '%s' has been requested so its DBIRTH can set it "
+            "ONLINE.", device.get("name"), device.get("sparkplug_id"), edge_node_id
+        )
+    return False
+
+def revive_device(device):
+    """
+    Set a device the watchdog timed out ONLINE again, as a birth would. True when written; after a
+    failure the device stays timed out, so its next DDATA retries.
+    """
+    if not supabase_client:
+        return False
+    try:
+        # NULL leaves a column alone: identity_source and first_dbirth_at are a birth's to write.
+        supabase_client.rpc("ingest_set_device_state", {
+            "p_device_id": device["id"],
+            "p_status": "ONLINE",
+            "p_identity_source": None,
+            "p_first_dbirth_at": None,
+        }).execute()
+    except Exception as e:
+        logger.error("Could not set device '%s' ONLINE after it published again: %s",
+                     device.get("name"), e)
+        return False
+    # The cached row, as process_dbirth() updates it.
+    device["status"] = "ONLINE"
+    count("device_state_writes")
+    logger.info(
+        "WATCHDOG: device '%s' (%s) is publishing again after its timeout; marked ONLINE.",
+        device.get("name"), device.get("sparkplug_id")
+    )
+    return True
 
 def stale_device_ids(now=None, timeout=None):
     """
@@ -841,9 +1025,9 @@ def sweep_stale_devices(now=None, timeout=None):
     """
     Flip quiet devices OFFLINE. Returns the ids written.
 
-    Write-on-change: log_digital_thread_event() fires on every UPDATE to `devices`, so the gate
+    Write-on-change: log_audit_trail_event() fires on every UPDATE to `devices`, so the gate
     refuses a no-op write and the device is dropped from tracking afterwards, giving one write per
-    quiet period.
+    quiet period. Its next DDATA may set it ONLINE again: see accept_device_data().
     """
     if not supabase_client:
         return []
@@ -851,8 +1035,9 @@ def sweep_stale_devices(now=None, timeout=None):
     written = []
     for device_id, name in stale_device_ids(now, timeout):
         try:
-            # The gate refuses a no-op write (`IS DISTINCT FROM 'OFFLINE'`); no filter is needed here.
-            supabase_client.rpc("ingest_mark_device_offline", {
+            # The gate refuses a no-op write (`IS DISTINCT FROM 'OFFLINE'`) and answers whether it
+            # moved the row, so no filter is needed here.
+            res = supabase_client.rpc("ingest_mark_device_offline", {
                 "p_device_id": device_id,
             }).execute()
             logger.warning(
@@ -866,7 +1051,7 @@ def sweep_stale_devices(now=None, timeout=None):
             # convince us the device was dealt with.
             logger.error("Watchdog could not mark device '%s' OFFLINE: %s", name, e)
             continue
-        forget_device_seen(device_id)
+        time_out_device(device_id, getattr(res, "data", None) is True)
 
     return written
 
@@ -1311,9 +1496,9 @@ def store_birth_parameters(sparkplug_id: str, payload):
         }
 
         if metric.HasField("int_value"):
-            row["val_double"] = float(metric.int_value)
+            row["val_double"] = float(_integer_value(_declared_datatype(metric), metric.int_value))
         elif metric.HasField("long_value"):
-            row["val_double"] = float(metric.long_value)
+            row["val_double"] = float(_integer_value(_declared_datatype(metric), metric.long_value))
         elif metric.HasField("float_value"):
             row["val_double"] = float(metric.float_value)
         elif metric.HasField("double_value"):
@@ -1357,7 +1542,7 @@ def record_declared_metrics(device: dict, payload):
     """
     Persist the birth-declared metric names onto the device row, only when the set has changed.
 
-    log_digital_thread_event() fires on every UPDATE to `devices`, so an unchanged write on every
+    log_audit_trail_event() fires on every UPDATE to `devices`, so an unchanged write on every
     rebirth would append an audit row each time.
     """
     if not supabase_client or not device:
@@ -1427,7 +1612,7 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
     now = datetime.now(timezone.utc).isoformat()
 
     # `status` and `is_quarantined` are pinned by the gate; this is the quarantine path only.
-    # `last_birth_metrics` is carried here so a new device produces one digital_thread entry rather
+    # `last_birth_metrics` is carried here so a new device produces one audit_trail entry rather
     # than an insert chased by an update.
     res = supabase_client.rpc("ingest_register_quarantined_device", {
         "p_name": extract_name_hint(payload) or wire_id,
@@ -1471,7 +1656,7 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
     # Before the registration check, deliberately. The alias table is in-memory and keyed by edge
     # node, so recording it costs nothing and must not depend on whether this device is registered
     # -- a quarantined device's later DDATA still has to be *decodable* to be reported on.
-    register_birth_aliases(group_id, gateway_wire_id, payload)
+    register_birth_aliases(group_id, gateway_wire_id, payload, device_id=wire_id)
 
     if not supabase_client:
         logger.warning("Supabase client unavailable. Skipping Supabase DBIRTH check for '%s'", wire_id)
@@ -1589,7 +1774,7 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         record_declared_metrics(device, payload)
 
         # A birth is evidence of life, quarantined or not, so the watchdog counts it.
-        mark_device_seen(device)
+        mark_device_seen(device, group_id, gateway_wire_id)
     except DirectoryUnavailable as e:
         # The directory went away part way through (after resolve_device() succeeded). Same counter
         # as the arm above: both lose a birth certificate; the log line says where.
@@ -1650,7 +1835,7 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
             "p_device_id": device["id"],
         }).execute()
         # An explicit death certificate is the authoritative answer, so the watchdog stops
-        # tracking this device rather than flipping it OFFLINE a second time later.
+        # tracking this device, and its DDATA waits for a birth.
         forget_device_seen(device["id"])
     except Exception as e:
         logger.error("Error applying DDEATH status update for '%s': %s", wire_id, e, exc_info=True)
@@ -1727,9 +1912,13 @@ CERT_EPOCH_MS_MAX = 7258118400000
 _health_rejected_warned = {}
 HEALTH_REJECT_WARN_INTERVAL_SECONDS = 300
 
-def _numeric_metric_value(metric):
+def _numeric_metric_value(group_id, edge_node_id, metric, name):
     """The metric's numeric value whichever Sparkplug field carries it, or None."""
-    for field in ("int_value", "long_value", "float_value", "double_value"):
+    for field in ("int_value", "long_value"):
+        if metric.HasField(field):
+            datatype = resolve_metric_datatype(group_id, edge_node_id, metric, name=name)
+            return _integer_value(datatype, getattr(metric, field))
+    for field in ("float_value", "double_value"):
         if metric.HasField(field):
             return getattr(metric, field)
     return None
@@ -1767,7 +1956,7 @@ def extract_gateway_health(group_id, edge_node_id, payload):
             health[column] = candidate
             continue
 
-        raw = _numeric_metric_value(metric)
+        raw = _numeric_metric_value(group_id, edge_node_id, metric, name)
         if raw is None:
             _reject_health(edge_node_id, name, "carries no numeric value")
             continue
@@ -1931,6 +2120,8 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # and before gateway resolution, for the same reason as in process_dbirth.
     if msg_type == "NBIRTH":
         register_birth_aliases(group_id, edge_node_id, payload, reset=True)
+    if msg_type in ("NBIRTH", "NDEATH"):
+        end_device_births(group_id, edge_node_id)
 
     if not supabase_client:
         logger.warning("Supabase client unavailable. Dropping %s heartbeat for edge node '%s'", msg_type, edge_node_id)
@@ -1984,7 +2175,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # Not skippable: `public.gateway_status` derives staleness from `last_heartbeat` at read time,
     # so suppressing this write would make a live gateway read STALE. The audit trigger subtracts
     # the columns a heartbeat writes (audit_telemetry_columns(), 0100) before comparing, so a
-    # heartbeat records no digital_thread row; a changed Flow_Hash is the exception, which the gate
+    # heartbeat records no audit_trail row; a changed Flow_Hash is the exception, which the gate
     # records itself as a FLOW_DEPLOYED row. The comparison below only decides the log level.
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
@@ -2040,7 +2231,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 # -----------------------------------------------------------------------------
 # Under the default `audit` policy nothing is dropped: the historian records what was observed
 # and conformance is judged at read time against a schema an engineer can edit afterwards. What
-# this adds is one SCHEMA_REJECTION row in the digital thread per change in the set of faults.
+# this adds is one SCHEMA_REJECTION row in the audit trail per change in the set of faults.
 # Metrics the loop skipped (unresolved alias, timestamp outside the window) are included with
 # `dropped: true`, since those are genuinely lost.
 # See ingestion/README.md -> "Schema Conformance".
@@ -2098,7 +2289,7 @@ _last_violation_signature = {}
 
 def record_payload_violations(device: dict, violations, observed_at):
     """
-    Write one SCHEMA_REJECTION row to the digital thread, only when the fault is new.
+    Write one SCHEMA_REJECTION row to the audit trail, only when the fault is new.
 
     DDATA arrives continuously and the table is append-only with no application role able to
     prune it, so a row per non-conforming message would fill the disk. Written when the set of
@@ -2453,8 +2644,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         return
 
     # After the binding check, not before: a message from a publisher we have just refused to
-    # believe is not evidence that the real device is alive.
-    mark_device_seen(device)
+    # believe is not evidence that the real device is alive. The data is stored either way.
+    if accept_device_data(device, group_id, gateway_wire_id, client):
+        mark_device_seen(device, group_id, gateway_wire_id)
 
     asset_id = device["sparkplug_id"]
     asset_name = device.get("name") or asset_id
@@ -2536,11 +2728,11 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # conformance check reads this rather than re-inspecting the protobuf.
         value_kind = None
 
-        if metric.HasField("int_value"):
-            val_double = float(metric.int_value)
-            value_kind = "double"
-        elif metric.HasField("long_value"):
-            val_double = float(metric.long_value)
+        if metric.HasField("int_value") or metric.HasField("long_value"):
+            raw = metric.int_value if metric.HasField("int_value") else metric.long_value
+            datatype = resolve_metric_datatype(
+                group_id, gateway_wire_id, metric, device_id=wire_id, name=metric_name)
+            val_double = float(_integer_value(datatype, raw))
             value_kind = "double"
         elif metric.HasField("float_value"):
             val_double = float(metric.float_value)
@@ -2732,10 +2924,69 @@ def on_disconnect(client, userdata, rc, properties=None):
             "Under MQTT 3.1.1 this line could only have said 'unexpected'.", rc, int(rc.value)
         )
 
+# MIRRORED in i3x/i3x_service.py; test_i3x_service.py asserts the two copies agree, and both
+# suites read test-harness/fixtures/sparkplug-json-values.json.
+def json_metric_value(metric):
+    """
+    The (field, value, datatype) one JSON-encoded metric carries, as the protobuf encoding would
+    hold it: the first present of the six Sparkplug value keys, then a bare `value`, which is typed
+    by what it holds. An integer is stored as its two's complement in `int_value`, or `long_value`
+    when the key, a 64-bit datatype or its size needs 64 bits; a negative one with no datatype is
+    marked Int32 or Int64 so it reads back signed. A `float_value` is rounded to 32 bits.
+
+    (None, None, datatype) when no value key is present. ValueError when the value is not the JSON
+    type its key names or does not fit its field; the caller drops that metric, not its payload.
+    """
+    import struct
+
+    datatype = metric.get("datatype")
+    if not isinstance(datatype, int) or isinstance(datatype, bool) or not 0 <= datatype < 2**32:
+        datatype = None
+    for key in ("int_value", "long_value", "float_value", "double_value", "boolean_value",
+                "string_value", "value"):
+        value = metric.get(key)
+        if value is None:
+            continue
+        if key == "value" and (isinstance(value, bool) or not isinstance(value, int)):
+            key = {bool: "boolean_value", float: "double_value", str: "string_value"}.get(type(value))
+            if key is None:
+                raise ValueError("value %r is not a number, a boolean or a string" % (value,))
+        if key in ("int_value", "long_value", "value"):
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError("%s %r is not an integer" % (key, value))
+            wide = (key == "long_value" or datatype in (4, 8, 13)
+                    or (key == "value" and not -(2**31) <= value < 2**32))
+            bits = 64 if wide else 32
+            if not -(2 ** (bits - 1)) <= value < 2**bits:
+                raise ValueError("%s %d does not fit in %d bits" % (key, value, bits))
+            if value < 0 and datatype is None:
+                datatype = 4 if wide else 3
+            return ("long_value" if wide else "int_value"), value & ((1 << bits) - 1), datatype
+        if key in ("float_value", "double_value"):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError("%s %r is not a number" % (key, value))
+            if key == "float_value":
+                try:
+                    value = struct.unpack("<f", struct.pack("<f", value))[0]
+                except OverflowError:
+                    raise ValueError("float_value %r does not fit in 32 bits" % (value,)) from None
+            return key, float(value), datatype
+        if not isinstance(value, bool if key == "boolean_value" else str):
+            raise ValueError("%s %r is not a %s" % (key, value, key.split("_")[0]))
+        return key, value, datatype
+    return None, None, datatype
+
+# Throttle for metrics dropped from a JSON payload, keyed by topic: a publisher sending a bad value
+# sends it in every message.
+_json_metric_refused_warned = {}
+JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS = 300
+
 def parse_sparkplug_payload(msg):
     """
-    Decode a Sparkplug B payload, falling back to the JSON encoding used by the Node-RED
-    simulator flow. Returns None if the payload cannot be decoded.
+    Decode a Sparkplug B payload, falling back to the JSON encoding the gateway appliance's
+    Node-RED flow publishes. Returns None if the payload cannot be decoded.
     """
     payload = sparkplug_b_pb2.Payload()
     try:
@@ -2762,27 +3013,35 @@ def parse_sparkplug_payload(msg):
                 payload.seq = int(data['seq']) % 256
 
             for m in data.get('metrics', []):
-                metric = payload.metrics.add()
-                metric.name = m.get('name', '')
-                # Carried through so the fallback is not silently alias-blind. Assigning the field
-                # is what makes HasField('alias') true, which is what resolve_metric_name() tests.
-                if m.get('alias') is not None:
-                    metric.alias = int(m['alias'])
-                if 'string_value' in m and m['string_value'] is not None:
-                    metric.string_value = str(m['string_value'])
-                if 'double_value' in m and m['double_value'] is not None:
-                    metric.double_value = float(m['double_value'])
-                if 'boolean_value' in m and m['boolean_value'] is not None:
-                    metric.boolean_value = bool(m['boolean_value'])
-                if 'int_value' in m and m['int_value'] is not None:
-                    metric.int_value = int(m['int_value'])
-                if 'datatype' in m and m['datatype'] is not None:
-                    metric.datatype = int(m['datatype'])
-                # The metric's own reading time, which the protobuf path already honours: a
-                # report-by-exception refresh or a batched reading is filed when it was taken.
-                ts = m.get('timestamp')
-                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
-                    metric.timestamp = int(ts)
+                # Built apart and appended whole, so a metric that cannot be held is dropped and
+                # logged while the rest of its payload lands.
+                metric = sparkplug_b_pb2.Payload.Metric()
+                try:
+                    field, value, datatype = json_metric_value(m)
+                    # A null name is an alias-only metric, as i3X reads it.
+                    metric.name = m.get('name') or ''
+                    # Carried through so the fallback is not silently alias-blind. Assigning the
+                    # field is what makes HasField('alias') true, which resolve_metric_name() tests.
+                    if m.get('alias') is not None:
+                        metric.alias = int(m['alias'])
+                    if field is not None:
+                        setattr(metric, field, value)
+                    if datatype is not None:
+                        metric.datatype = datatype
+                    # The metric's own reading time, which the protobuf path already honours: a
+                    # report-by-exception refresh or a batched reading is filed when it was taken.
+                    ts = m.get('timestamp')
+                    if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
+                        metric.timestamp = int(ts)
+                except (AttributeError, TypeError, ValueError) as err:
+                    if _throttled(_json_metric_refused_warned, msg.topic, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS):
+                        logger.warning(
+                            "Dropped a metric from the JSON payload on %s and kept the rest: %s. "
+                            "Metric: %.200r (further drops on this topic are not logged for %ds)",
+                            msg.topic, err, m, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS
+                        )
+                    continue
+                payload.metrics.add().CopyFrom(metric)
             return payload
         except Exception:
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)
@@ -2795,9 +3054,9 @@ def extract_claimed_asset_id(payload):
             if metric.HasField('string_value'):
                 return metric.string_value
             if metric.HasField('int_value'):
-                return str(metric.int_value)
+                return str(sparkplug_integer_value(_declared_datatype(metric), metric.int_value))
             if metric.HasField('long_value'):
-                return str(metric.long_value)
+                return str(sparkplug_integer_value(_declared_datatype(metric), metric.long_value))
             return None
     return None
 

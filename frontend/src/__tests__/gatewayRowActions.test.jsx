@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -35,8 +36,11 @@ const show = async (rows, hasPermission = () => true) => {
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={hasPermission} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-  /* The playback gateway is hidden by default, so a fixture containing one has to reveal it first.
-     The filter is a separate question with its own test. */
+  /* The list opens on Active and hides the playback gateway, so a fixture holding an archived or a
+     playback row has to reveal it first. Each filter has its own test. */
+  if (rows.some(r => r.is_archived)) {
+    fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+  }
   if (rows.some(r => r.is_shadow)) {
     fireEvent.click(await screen.findByText(/Show playback gateway/))
   }
@@ -44,8 +48,7 @@ const show = async (rows, hasPermission = () => true) => {
 }
 
 /**
- * Select a gateway row and return its context panel, where the actions live. Archive sits in the
- * row beside Edit; the documents accordion is mounted once for the selected gateway.
+ * Select a gateway row and return its context panel, where every action lives.
  */
 const openPanel = (name = 'Host_Gateway_NodeRED') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
@@ -55,21 +58,28 @@ const inRow = () => within(document.querySelector('.page-main'))
 
 beforeEach(() => vi.clearAllMocks())
 
+describe('the gateways card header', () => {
+  it('names the page with its icon, title and description, and no title tip', async () => {
+    await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
+    const header = expectCardHeading('Gateways', /edge nodes/)
+    expect(header).toHaveTextContent('New Gateway')
+  })
+})
+
 describe('gateway row actions', () => {
   it('leaves no action controls in the row at all', async () => {
-    // The ACTIONS column is gone. The row is identity and state; every action lives in the
-    // drawer the row opens.
+    // The row is identity and state; every action lives in the drawer it opens.
     await show([gateway()])
 
     expect(inRow().queryByRole('link', { name: /Launch UI/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
-    expect(inRow().queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Docs/i })).not.toBeInTheDocument()
     expect(screen.queryByTestId('gateway-actions-gw-1')).not.toBeInTheDocument()
   })
 
-  it('keeps Launch UI prominent — it is the only action that leaves the dashboard', async () => {
+  it('keeps Launch UI prominent, as the link to the gateway\'s own console', async () => {
     await show([gateway()])
     const launch = openPanel().getByRole('link', { name: /Launch UI/i })
 
@@ -92,14 +102,14 @@ describe('gateway row actions', () => {
     await show([gateway()])
     const panel = openPanel()
 
-    expect(panel.getByText(/View Digital Thread/i)).toBeTruthy()
+    expect(panel.getByText(/View Audit Trail/i)).toBeTruthy()
     expect(panel.getByText(/Attached Links/i)).toBeTruthy()
     // Exact, matching the other assertions about this action in this file: a loose regex broke when
     // another component in the drawer mentioned the control by name.
     expect(panel.getByText('Edit Details')).toBeTruthy()
   })
 
-  it('promotes Restore into the row for an archived gateway', async () => {
+  it('offers Restore in the drawer for an archived gateway, in place of Edit', async () => {
     await show([gateway({ is_archived: true })])
 
     const panel = openPanel()
@@ -121,9 +131,10 @@ describe('gateway row actions', () => {
     const panel = openPanel()
     expect(panel.getByText('Edit Details').closest('button').disabled).toBe(true)
     expect(panel.getByText(/Archive Gateway/i).closest('button').disabled).toBe(true)
-    // The audit trace is withdrawn, not disabled, as on Devices: without `digital_thread:read` the
-    // page returns no rows, and the nav hides it from this reader.
-    expect(panel.queryByText(/View Digital Thread/i)).toBeNull()
+    // The hint names the roles that can, from the same table the grants come from.
+    expect(panel.getByText(/Archive Gateway/i).closest('button').title).toBe('Requires Administrator or Shopfloor Manager')
+    // The audit trace is withdrawn, not disabled: the nav hides its page from this reader.
+    expect(panel.queryByText(/View Audit Trail/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {
@@ -138,14 +149,11 @@ describe('gateway row actions', () => {
   })
 })
 
-/* The page asks for no document counts, and that absence is the assertion: a page load must not
-   spend a round trip on a number nothing renders. EntityLinksModal issues its own per-entity read
-   when it opens. */
 /**
  * The playback gateway is visible and almost inert. It stays on this page because it holds a broker
- * credential an operator has to mint. It must not offer Archive (it is the only edge node playback
+ * credential an operator has to issue. It must not offer Archive (it is the only edge node playback
  * can publish as; the database refuses it too) or Request Rebirth (the playback worker holds no
- * subscription, so the NCMD reaches nothing). Minting a credential is not in that list.
+ * subscription, so the NCMD reaches nothing). Issuing a credential is not in that list.
  */
 describe('the playback gateway', () => {
   const playback = () => gateway({
@@ -179,8 +187,8 @@ describe('the playback gateway', () => {
 
   it('still offers its broker credential, which playback cannot run without', async () => {
     await show([playback()])
-    // The action exists for every host-run gateway and this one is no exception: 0060's NOTICE
-    // names this page as where the playback credential comes from.
+    // The action exists for every Host and Simulated gateway, and this page is where the Playback
+    // gateway's credential is issued.
     expect(openPanel('Playback').queryByText(/Credential/i)).not.toBeNull()
   })
 
@@ -204,6 +212,8 @@ describe('gateway document links', () => {
     return Promise.resolve([])
   }
 
+  // A page load must not spend a round trip on a number nothing renders; EntityLinksModal reads its
+  // own links when it opens.
   it('spends no request on document counts when the list loads', async () => {
     api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
@@ -213,8 +223,6 @@ describe('gateway document links', () => {
   })
 
   it('still reaches documents through the drawer', async () => {
-    // Removing the count must not remove the way in. Attached Links opens the modal that does
-    // its own read -- see EntityLinksModal.
     api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
@@ -226,8 +234,7 @@ describe('gateway document links', () => {
 
 /**
  * The playback gateway is hidden from the fleet list by default: it connects to no machine and
- * reads as permanently offline. Hidden, not removed, since minting its broker credential is done
- * here.
+ * reads as permanently offline. Hidden, not removed, since its broker credential is issued here.
  */
 describe('the playback gateway is filtered out by default', () => {
   const playbackRow = () => ({
@@ -263,9 +270,9 @@ describe('the playback gateway is filtered out by default', () => {
     fireEvent.click(await screen.findByText(/Show playback gateway/))
     await waitFor(() => expect(screen.getByText('Playback')).toBeInTheDocument())
     // Showing it is a filter, so it counts and it clears with the rest.
-    fireEvent.click(screen.getByTitle('Clear every filter'))
+    fireEvent.click(screen.getByText(/Clear filters \(1\)/))
     await waitFor(() => expect(screen.queryByText('Playback')).toBeNull())
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByText(/Clear filters/)).toBeNull()
   })
 
   it('offers no toggle on a stack that has none', async () => {
@@ -287,5 +294,81 @@ describe('the playback gateway is filtered out by default', () => {
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
     fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'simulated' } })
     expect(screen.queryByText('Playback')).toBeNull()
+  })
+})
+
+describe('the Gateways list', () => {
+  const live = () => gateway()
+  const retired = () => gateway({ gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', is_archived: true })
+
+  const open = async (rows, hasPermission = () => true) => {
+    api.get.mockImplementation(routeGet(rows))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={hasPermission} initialSearchFilter="" onClearFilter={vi.fn()} />)
+    await waitFor(() => expect(screen.queryByText(/Loading gateways/)).toBeNull())
+  }
+
+  it('opens on Active, with archived gateways one filter away', async () => {
+    await open([live(), retired()])
+
+    expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument()
+    expect(screen.queryByText('Retired_Gateway')).toBeNull()
+    expect(screen.queryByText(/Clear filters/)).toBeNull()
+
+    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'archived' } })
+    expect(screen.getByText('Retired_Gateway')).toBeInTheDocument()
+    expect(screen.getByText(/Clear filters \(1\)/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText(/Clear filters/))
+    expect(screen.queryByText('Retired_Gateway')).toBeNull()
+  })
+
+  it('counts the lifecycle lane on the card title, as shown / total only while another filter narrows it', async () => {
+    await open([live(), retired()])
+    expect(document.querySelector('.section-count').textContent).toBe('1')
+
+    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+    expect(document.querySelector('.section-count').textContent).toBe('2')
+
+    fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: 'Retired' } })
+    expect(document.querySelector('.section-count').textContent).toBe('1 / 2')
+  })
+
+  it('shows a count of 0 on a stack with no gateways', async () => {
+    await open([])
+    expect(document.querySelector('.section-count').textContent).toBe('0')
+  })
+
+  it('tells none yet from none match', async () => {
+    await open([])
+    expect(screen.getByText('No gateways yet.')).toBeInTheDocument()
+  })
+
+  it('says a filter emptied the list when gateways exist', async () => {
+    await open([live()])
+    fireEvent.change(screen.getByPlaceholderText(/Search name, UUID or Sparkplug ID/), { target: { value: 'zzz' } })
+    expect(screen.getByText('No gateways match these filters.')).toBeInTheDocument()
+  })
+
+  it('calls the archived state Archived, in the row and in the drawer', async () => {
+    await show([retired()])
+    expect(within(document.querySelector('table')).getByText('ARCHIVED')).toBeInTheDocument()
+    expect(document.querySelector('tr.row-archived')).not.toBeNull()
+    expect(screen.queryByText(/DECOMMISSIONED|Inaccessible|Out of Commission/i)).toBeNull()
+
+    const panel = openPanel('Retired_Gateway')
+    expect(panel.getByText('ARCHIVED')).toBeInTheDocument()
+  })
+
+  it('names the roles that may register a gateway on a denied button', async () => {
+    await open([live()], () => false)
+    const button = screen.getByRole('button', { name: /New Gateway/ })
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe('Requires Administrator or Shopfloor Manager')
+  })
+
+  it('scrolls inside its card', async () => {
+    await open([live()])
+    expect(document.querySelector('.page-layout').classList.contains('page-fill')).toBe(true)
+    expect(document.querySelector('.card.card-fill > .table-wrap')).not.toBeNull()
   })
 })

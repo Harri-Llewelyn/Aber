@@ -9,7 +9,7 @@ import { grafanaAlertUrl } from '../../constants'
  * The right-hand context drawer: one entity at a time, beside the list it came from. Not an
  * overlay: `.page-layout` is a flex row and this panel is a sibling of the list, so opening it
  * narrows the table and rows stay clickable. Presentational only: it renders `fields` and `actions`
- * and knows nothing about the entity kinds. Why a drawer: ../../README.md, Migrated design notes.
+ * and knows nothing about the entity kinds. Why a drawer: frontend/README.md, Migrated design notes.
  *
  * @param {boolean} open Whether the drawer is expanded. Always rendered; see `aria-hidden` below.
  *
@@ -19,9 +19,10 @@ import { grafanaAlertUrl } from '../../constants'
  *
  * @param {node} subtitle Optional line under the title.
  *
- * @param {Array} fields [{ label, value, mono?, copyable?, title?, help?, full?, danger? }].
- * `copyable` renders a CopyableId; `danger` colours the value only; `help` puts a HelpTip beside
- * the label, for a field whose name does not say what it is for.
+ * @param {Array} fields [{ label, value, display?, mono?, copyable?, title?, help?, full?, danger? }].
+ * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger`
+ * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
+ * not say what it is for.
  *
  * @param {Array} actions [{ label, icon, onClick, href?, disabled?, title?, primary?, pending?,
  * pendingLabel? }]. `pending` puts that one action into the in-flight state.
@@ -65,7 +66,7 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
           <div className="context-panel-heading">
             {/* No type badge: the kind is already established by the page, and is announced on the
                 region label. */}
-            {/* Titled as well as truncated: an entity name long enough to overrun 360px is exactly
+            {/* Titled as well as truncated: an entity name long enough to overrun the drawer is exactly
                 the kind you opened the panel to read. */}
             <div className="context-panel-title" title={title}>{title}</div>
             {subtitle && <div className="context-panel-subtitle">{subtitle}</div>}
@@ -142,7 +143,7 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                       /* Every identifier is copyable: this is where a UUID or topic path leaves the
                          app. `copyable-id-wrap` because a truncated identifier is useless. */
                       : f.copyable
-                        ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} title={f.title} onNotify={onCopy} className="copyable-id-wrap" />
+                        ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} title={f.title} onNotify={onCopy} display={f.display} className="copyable-id-wrap" />
                         : f.value}
                   </dd>
                 </div>

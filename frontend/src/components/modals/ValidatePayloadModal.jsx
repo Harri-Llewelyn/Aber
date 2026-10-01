@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { api } from '../../api'
 import { IconCheck } from '../common/Icons'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { Modal } from '../common/Modal'
 
 /**
  * `initialSchemaUuid` is the schema the caller already had in hand. The select stays even then:
@@ -9,9 +9,6 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
  * place two versions can be tested against the same payload.
  */
 export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
-  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
-  useEscapeKey(onClose)
-
   // Falls back to the first schema rather than to nothing: opened without a target -- which no
   // call site does today -- an empty select would submit a validation against no schema at all.
   const [selectedSchemaUuid, setSelectedSchemaUuid] = useState(
@@ -42,49 +39,42 @@ export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
   }
 
   return (
-    <div className="modal-overlay">
-      <div className="modal modal-md">
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <IconCheck size={18} />
-          <span>Interactive Payload Schema Validator</span>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Select Target Schema Definition</label>
-          <select className="form-control" value={selectedSchemaUuid} onChange={e => setSelectedSchemaUuid(e.target.value)} title="Choose schema to test against">
-            {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Candidate Telemetry JSON Payload</label>
-          <textarea
-            className="form-control mono"
-            style={{ height: '150px', fontSize: '12px' }}
-            value={payloadText}
-            onChange={e => setPayloadText(e.target.value)}
-            title="Paste sample telemetry payload JSON here"
-          />
-        </div>
-
-        {result && (
-          <div style={{
-            padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px',
-            background: result.valid ? 'rgba(0,232,150,0.12)' : 'rgba(255,77,109,0.12)',
-            border: `1px solid ${result.valid ? 'var(--success)' : 'var(--danger)'}`,
-            color: result.valid ? 'var(--success)' : 'var(--danger)'
-          }}>
-            <strong>{result.valid ? 'VALID PAYLOAD' : 'INVALID PAYLOAD'}:</strong> {result.message || result.error}
-          </div>
-        )}
-
-        <div className="modal-actions">
+    <Modal
+      title="Validate Payload"
+      icon={<IconCheck size={18} />}
+      size="md"
+      onClose={onClose}
+      footer={
+        <>
           <button className="btn btn-ghost" onClick={onClose} title="Close validator modal">Close</button>
           <button className="btn btn-primary" onClick={handleValidate} disabled={loading} title="Run backend validation test">
             {loading ? 'Validating…' : 'Validate Payload'}
           </button>
-        </div>
+        </>
+      }
+    >
+      <div className="form-group">
+        <label className="form-label">Select Target Schema Definition</label>
+        <select className="form-control" value={selectedSchemaUuid} onChange={e => setSelectedSchemaUuid(e.target.value)} title="Choose schema to test against">
+          {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
+        </select>
       </div>
-    </div>
+
+      <div className="form-group">
+        <label className="form-label">Candidate Telemetry JSON Payload</label>
+        <textarea
+          className="form-control mono validate-payload-input"
+          value={payloadText}
+          onChange={e => setPayloadText(e.target.value)}
+          title="Paste sample telemetry payload JSON here"
+        />
+      </div>
+
+      {result && (
+        <div className={`callout ${result.valid ? 'callout-success' : 'callout-danger'}`} role="status">
+          <span><strong>{result.valid ? 'VALID PAYLOAD' : 'INVALID PAYLOAD'}:</strong> {result.message || result.error}</span>
+        </div>
+      )}
+    </Modal>
   )
 }

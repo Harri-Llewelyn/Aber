@@ -58,7 +58,7 @@ body:
       description: Your best guess is fine; say so in the description if you are unsure.
       multiple: true
       options:
-        - Database — migrations, RLS, views, digital_thread
+        - Database — migrations, RLS, views, audit_trail
         - Edge functions
         - Ingestion daemon (Sparkplug B → Postgres/TimescaleDB)
         - TimescaleDB / telemetry hypertable
@@ -66,7 +66,7 @@ body:
         - React dashboard
         - i3X server
         - Grafana
-        - Node-RED / gateway simulator
+        - Node-RED / host-run gateways
         - Gateway onboarding, bundles, credentials
         - Helm chart / Kubernetes
         - Scripts, setup, or the test suites

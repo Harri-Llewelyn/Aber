@@ -17,7 +17,7 @@ Two things have to be true before the guard is even reachable, and both were fai
 this was written:
   * the JWT claims must name a schema-managing role, or the RLS policy on `schemas` filters the
     UPDATE to zero rows and it "succeeds" without ever reaching the trigger;
-  * `auth.users` must contain the acting user, because `log_digital_thread_event()` writes
+  * `auth.users` must contain the acting user, because `log_audit_trail_event()` writes
     `changed_by = auth.uid()` under an FK -- so publishing, which repoints devices, fails on the
     audit insert rather than on anything to do with versioning.
 
@@ -128,9 +128,9 @@ class SchemaVersioningTestCase(unittest.TestCase):
         Give the two acting users their roles, and make them exist in `auth.users`.
 
         The second half is not optional and is easy to mistake for boilerplate:
-        `log_digital_thread_event()` writes `changed_by = auth.uid()` under a foreign key to
+        `log_audit_trail_event()` writes `changed_by = auth.uid()` under a foreign key to
         `auth.users`, so without these rows the publish tests fail on the AUDIT insert -- with an
-        FK error naming `digital_thread`, which reads like a fault in the audit trail rather than
+        FK error naming `audit_trail`, which reads like a fault in the audit trail rather than
         a missing fixture.
         """
         for user_id in (ADMIN_USER_ID, OPERATOR_USER_ID, MANAGER_USER_ID):
@@ -163,7 +163,7 @@ class SchemaVersioningTestCase(unittest.TestCase):
                     self.cur.execute("ROLLBACK TO SAVEPOINT ensure_user;")
             else:
                 raise RuntimeError(
-                    f"could not create auth.users row {user_id}; digital_thread.changed_by is "
+                    f"could not create auth.users row {user_id}; audit_trail.changed_by is "
                     "an FK to it, so the publish tests cannot run"
                 )
 
@@ -348,6 +348,60 @@ class TestImmutability(SchemaVersioningTestCase):
 
         self._act_as_owner()
         self.assertIn("OEE/QUALITY", self._fetch(schema_id)["schema_definition"]["properties"])
+
+    def test_a_drafts_semantic_id_can_be_changed_and_cleared(self):
+        """
+        fork_schema() copies the parent's semantic id into the draft, so the draft is where a wrong
+        claim, or a template that has moved on, is corrected or retracted. The dashboard writes the
+        pair together, and clearing the id clears its type. The parent keeps what it published.
+        """
+        nameplate = "https://admin-shell.io/idta/nameplate/3/0/Nameplate"
+        parent_id, _, _, _ = self._seed_schema("TESTVER_Semantic_Parent")
+        self.cur.execute(
+            "UPDATE public.schemas SET semantic_id = %s, semantic_id_type = 'IRI' WHERE id = %s;",
+            (nameplate, parent_id),
+        )
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft_id = self._fork(parent_id)["id"]
+
+        def pair(schema_id):
+            self.cur.execute(
+                "SELECT semantic_id, semantic_id_type FROM public.schemas WHERE id = %s;", (schema_id,)
+            )
+            return self.cur.fetchone()
+
+        self.assertEqual(pair(draft_id), (nameplate, "IRI"), "the draft did not inherit the id")
+
+        self.cur.execute(
+            "UPDATE public.schemas SET semantic_id = %s, semantic_id_type = 'IRDI' WHERE id = %s;",
+            ("0112/2///61987#ABA565#009", draft_id),
+        )
+        self.assertEqual(self.cur.rowcount, 1, "an Administrator could not change a draft's semantic id")
+        self.assertEqual(pair(draft_id), ("0112/2///61987#ABA565#009", "IRDI"))
+
+        self.cur.execute(
+            "UPDATE public.schemas SET semantic_id = NULL, semantic_id_type = NULL WHERE id = %s;",
+            (draft_id,),
+        )
+        self.assertEqual(self.cur.rowcount, 1, "an Administrator could not clear a draft's semantic id")
+        self.assertEqual(pair(draft_id), (None, None))
+
+        self._act_as_owner()
+        self.assertEqual(pair(parent_id), (nameplate, "IRI"), "editing the draft moved its parent")
+
+    def test_an_active_schemas_semantic_id_is_frozen(self):
+        """The id is part of what was published, so only a new version may change it."""
+        schema_id, _, _, _ = self._seed_schema("TESTVER_Semantic_Frozen")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+
+        self.assertRaisesInStatement(
+            lambda: self.cur.execute(
+                "UPDATE public.schemas SET semantic_id = 'urn:example:claim', semantic_id_type = 'IRI'"
+                " WHERE id = %s;",
+                (schema_id,),
+            ),
+            message_contains="immutable",
+        )
 
     def test_archived_schema_cannot_be_reactivated(self):
         """
@@ -694,9 +748,9 @@ class TestPublish(SchemaVersioningTestCase):
         self.assertEqual(current["schema_definition"], widened)
         self.assertEqual(current["change_description"], "Added spindle temperature threshold")
 
-    def test_publishing_writes_the_rebinding_to_the_digital_thread(self):
+    def test_publishing_writes_the_rebinding_to_the_audit_trail(self):
         """
-        Repointing `devices.schema_id` fires `log_digital_thread_event()`, so "what was this
+        Repointing `devices.schema_id` fires `log_audit_trail_event()`, so "what was this
         machine judged against, and when did that change" is answerable from the audit trail
         rather than only from the schema rows.
         """
@@ -704,7 +758,7 @@ class TestPublish(SchemaVersioningTestCase):
         device_id = self._seed_device_on(v1_id, "AUDIT")
 
         self.cur.execute(
-            "SELECT count(*) FROM public.digital_thread WHERE entity_id = %s AND action = 'UPDATE';",
+            "SELECT count(*) FROM public.audit_trail WHERE entity_id = %s AND action = 'UPDATE';",
             (device_id,),
         )
         before = self.cur.fetchone()[0]
@@ -716,7 +770,7 @@ class TestPublish(SchemaVersioningTestCase):
 
         self.cur.execute(
             """
-            SELECT count(*) FROM public.digital_thread
+            SELECT count(*) FROM public.audit_trail
              WHERE entity_id = %s AND entity_type = 'devices' AND action = 'UPDATE'
                AND new_data ->> 'schema_id' = %s;
             """,
@@ -725,7 +779,7 @@ class TestPublish(SchemaVersioningTestCase):
         self.assertEqual(self.cur.fetchone()[0], 1)
 
         self.cur.execute(
-            "SELECT count(*) FROM public.digital_thread WHERE entity_id = %s AND action = 'UPDATE';",
+            "SELECT count(*) FROM public.audit_trail WHERE entity_id = %s AND action = 'UPDATE';",
             (device_id,),
         )
         self.assertGreater(self.cur.fetchone()[0], before)

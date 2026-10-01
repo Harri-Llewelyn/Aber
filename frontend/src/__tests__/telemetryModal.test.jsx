@@ -33,8 +33,7 @@ const observed = [
   { time: new Date(NOW - 30_000).toISOString(), asset_id: 'dev1', metric_name: 'Controller/EXECUTION', val_double: null, val_string: 'ACTIVE', val_bool: null }
 ]
 
-// No expand step: a modal has no collapsed state to defer the request to, and opening it is
-// already the deliberate act the accordion used its first expand for.
+// The modal reads once on open, with no expand step.
 const showDrawer = async (props = {}) => {
   render(<TelemetryModal device={device()} hasPermission={() => true} onExport={vi.fn()} onClose={vi.fn()} {...props} />)
   await waitFor(() => expect(api.get).toHaveBeenCalled())
@@ -45,7 +44,7 @@ beforeEach(() => {
   api.get.mockResolvedValue(observed)
 })
 
-describe('device telemetry drawer', () => {
+describe('device telemetry modal', () => {
   it('names the device it is showing, and reads on open', async () => {
     render(<TelemetryModal device={device()} hasPermission={() => true} onClose={vi.fn()} />)
 
@@ -57,7 +56,7 @@ describe('device telemetry drawer', () => {
     const onClose = vi.fn()
     render(<TelemetryModal device={device()} hasPermission={() => true} onClose={onClose} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /close telemetry/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }))
     expect(onClose).toHaveBeenCalledTimes(1)
 
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -169,7 +168,7 @@ describe('telemetry CSV export dialog', () => {
   const DAY = 24 * 60 * 60 * 1000
 
   /**
-   * A stack on the default policies, as `telemetry_horizons` reports them: Dates, because that is
+   * A stack with a 90-day raw window, as `telemetry_horizons` reports it: Dates, because that is
    * what queryTelemetryHorizons parses the rows into before the dialog sees them.
    */
   const HORIZONS = {

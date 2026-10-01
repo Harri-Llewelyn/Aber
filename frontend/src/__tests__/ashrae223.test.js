@@ -6,7 +6,7 @@ import {
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName, deriveMetricGroup } from '../utils/metricGroup'
 
-// A slice of what ashrae223_vocabulary holds once archived migration 0013 has run.
+// A slice of what ashrae223_vocabulary holds once its seed has run.
 const vocabulary = [
   {
     name: 'Fan', concept_kind: 'Class', label: 'Fan', subclass_of: 'Equipment',
@@ -64,7 +64,7 @@ describe('isMetricConcept', () => {
 
 describe('metricConcepts', () => {
   it('keeps the things and drops the relations', () => {
-    // `Building/connectsTo` would name nothing a point can be attached to.
+    // `BMS/connectsTo` would name nothing a point can be attached to.
     expect(metricConcepts(vocabulary).map(c => c.name)).toEqual(['Fan', 'Pump', 'Equipment'])
   })
 
@@ -101,7 +101,7 @@ describe('ashrae223Sections', () => {
 })
 
 describe('ashrae223Prefill', () => {
-  it('files every concept under the single Building group', () => {
+  it('files every concept under the single BMS group', () => {
     // One group, not one per concept: enforce_metric_group_spelling() makes the first spelling
     // permanent, and 223P is not published yet.
     expect(ashrae223Prefill(vocabulary[0]).group).toBe(ASHRAE223_GROUP)

@@ -21,12 +21,6 @@ export function browsePath(nodeId) {
   return match ? match[1].trim() : ''
 }
 
-/** The namespace URI out of an ExpandedNodeId string, or '' when it carries none. */
-export function namespaceUri(nodeId) {
-  const match = /(?:^|;)nsu=([^;]+)/.exec((nodeId || '').trim())
-  return match ? match[1].trim() : ''
-}
-
 /**
  * The metric group a data point implies: the first segment of its browse path, derived from the
  * data so a new vocabulary row needs no code change.
@@ -105,13 +99,15 @@ export function opcuaSections(vocabulary) {
 /**
  * The Add Metric form state a data point implies. The instance is left empty, since which axis is
  * the part the specification cannot know. Deeper path segments are dropped: only the first is
- * load-bearing for grouping.
+ * load-bearing for grouping. `companionSpec` travels with the name because two specifications can
+ * define the same browse name.
  */
 export function opcuaPrefill(entry) {
   if (!entry) return null
   return {
     group: suggestedGroup(entry),
     type: entry.name,
+    companionSpec: entry.companion_spec || '',
     units: entry.unit || '',
     datatype: sparkplugDatatypeFor(entry.datatype),
     category: categoryFor(entry.datatype),

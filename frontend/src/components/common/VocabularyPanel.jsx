@@ -1,16 +1,21 @@
 import React, { useState, useMemo } from 'react'
-import { IconChevronDown, IconChevronUp, IconCheck, IconX, IconFileCode } from './Icons'
+import { IconChevronDown, IconChevronUp, IconCheck, IconBookOpen, IconFileCode } from './Icons'
 import { HelpTip } from './HelpTip'
 import { PageHeading } from './PageHeading'
+import { SectionCount } from './SectionCount'
+import { TabStrip } from './TabStrip'
+import { SearchInput } from './SearchInput'
+import { EmptyState } from './EmptyState'
 
 /**
  * The standard vocabularies as a page: one heading that does not change, a tab per standard, and
- * the selected standard's entries in a card of its own -- the shape Access Control and Settings
- * use. What differs per standard arrives as a tab descriptor (how sections are derived, what an
- * entry's tooltip says, what counts as in use); see common/MTConnectVocabularyPanel.jsx and its
- * siblings. Sections start collapsed, and searching expands only the sections that match.
+ * the selected standard's entries in a card of its own. What differs per standard arrives as a tab
+ * descriptor (how sections are derived, what an entry's tooltip says, what counts as in use); see
+ * common/MTConnectVocabularyPanel.jsx and its siblings. Sections start collapsed, and searching
+ * opens only the sections that match. An entry is clickable when its tab has an `onUse` and the
+ * viewer can add a metric.
  */
-export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subtitle, tabs, canAddMetric }) {
+export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMetric }) {
   const available = (tabs || []).filter(Boolean)
   const [activeId, setActiveId] = useState(available[0]?.id)
   const [search, setSearch] = useState('')
@@ -55,7 +60,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
     <>
       {active.description}
       {(active.notes || []).map((note, i) => (
-        <span key={i} style={{ display: 'block', marginTop: '6px' }}>
+        <span key={i} className="vocab-note">
           {note.label && <strong>{note.label}</strong>}
           {note.body}
         </span>
@@ -70,101 +75,76 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
     {/* A segmented control rather than a dropdown so all four counts are visible at once. Above the
         card, not inside it: the heading names the page and this names which vocabulary is in it.
         The search text survives a switch, so one query asks every standard. */}
-    <div
-      role="tablist"
-      aria-label="Standard"
-      style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: 'var(--stack)' }}
-    >
-      {available.map(tab => {
-        const selected = tab.id === active.id
-        return (
-          <button
-            key={tab.id}
-            role="tab"
-            aria-selected={selected}
-            onClick={() => setActiveId(tab.id)}
-            className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-ghost'}`}
-            title={tab.hint || `Browse the ${tab.label} vocabulary`}
-          >
-            {tab.label}
-            <span className="section-count" style={{ marginLeft: '6px' }}>
-              {(tab.sections || []).reduce((n, s) => n + s.items.length, 0)}
-            </span>
-          </button>
-        )
-      })}
-    </div>
+    <TabStrip
+      ariaLabel="Standard"
+      value={active.id}
+      onChange={setActiveId}
+      tabs={available.map(tab => ({
+        id: tab.id,
+        label: tab.label,
+        count: (tab.sections || []).reduce((n, s) => n + s.items.length, 0),
+        title: tab.hint || `Browse the ${tab.label} vocabulary`,
+      }))}
+    />
 
-    <div className="card" style={{ marginBottom: 'var(--stack)' }}>
+    <div className="card">
       {/* The card names the standard on show; the page heading above it says what the page is. */}
       <div className="card-header">
         <h3 className="section-title">
           {active.label}
           <HelpTip label={`About the ${active.label} vocabulary`} text={standardTip} />
-          <span className="section-count">{query ? `${matches} / ${total}` : total}</span>
+          <SectionCount total={total} shown={matches} />
         </h3>
       </div>
 
-      {/* One control row inside the card, where every other list page keeps its filters. */}
       <div className="card-body">
-      <div className="filter-bar">
-        <input
-          className="form-control"
-          style={{ width: '240px' }}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder={active.searchPlaceholder || 'Search the vocabulary…'}
-          title="Filter the selected standard by name or description"
-        />
-        {search && (
-          <button className="btn btn-ghost btn-sm" onClick={() => setSearch('')} title="Clear the search">
-            <IconX size={13} />
-          </button>
-        )}
+        <div className="filter-bar">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder={active.searchPlaceholder || 'Search the vocabulary…'}
+            ariaLabel={`Search the ${active.label} vocabulary`}
+          />
+        </div>
       </div>
-      </div>{/* .card-body */}
 
       {query && filtered.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-text">Nothing in the {active.label} vocabulary matches “{search}”.</div>
-        </div>
+        <EmptyState
+          icon={<IconBookOpen size={36} />}
+          message={`Nothing in the ${active.label} vocabulary matches “${search}”.`}
+        />
       )}
 
-      <div style={{ padding: '4px var(--inset) 12px' }}>
+      {/* At most seven sections per standard, so the headings are scanned as a list. */}
+      <div className="vocab-sections">
         {filtered.map(section => {
           const open = isOpen(section.key)
           const used = active.isUsed ? section.items.filter(i => active.isUsed(i)).length : 0
           return (
-            <div key={section.key} style={{ borderTop: '1px solid var(--border)' }}>
-              <button
-                type="button"
-                onClick={() => toggle(section.key)}
-                aria-expanded={open}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: '7px',
-                  /* Tight padding: with ~14 sections per standard the headings are scanned as a
-                     list. */
-                  padding: '6px 2px', background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'var(--text)', textAlign: 'left', font: 'inherit'
-                }}
-                title={open ? 'Collapse this section' : 'Expand this section'}
-              >
-                {open ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-                <span style={{ fontWeight: 600, fontSize: '13px' }}>{section.title}</span>
-                <span className="section-count">{section.items.length}</span>
-                {used > 0 && (
-                  <span style={{ fontSize: '11px', color: 'var(--success-text)' }} title={`${used} already used by a catalog metric`}>
-                    {used} in use
-                  </span>
-                )}
-              </button>
+            <div key={section.key}>
+              <div className="vocab-section-head">
+                <button
+                  type="button"
+                  className="table-group-button"
+                  onClick={() => toggle(section.key)}
+                  aria-expanded={open}
+                  title={open ? 'Collapse this section' : 'Expand this section'}
+                >
+                  {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                  <span className="table-group-label">{section.title}</span>
+                  <span className="section-count">{section.items.length}</span>
+                  {used > 0 && (
+                    <span className="vocab-in-use" title={`${used} already used by a catalog metric`}>
+                      {used} in use
+                    </span>
+                  )}
+                </button>
+              </div>
 
               {open && (
-                <div style={{ paddingBottom: '9px' }}>
-                  {section.hint && (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '11px', margin: '0 0 8px 22px' }}>{section.hint}</p>
-                  )}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginLeft: '22px' }}>
+                <div className="vocab-section-body">
+                  {section.hint && <p className="vocab-section-hint">{section.hint}</p>}
+                  <div className="vocab-chips">
                     {section.items.map(item => {
                       const inUse = active.isUsed ? active.isUsed(item) : false
                       const actionable =
@@ -178,15 +158,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
                           tabIndex={actionable ? 0 : undefined}
                           onClick={actionable ? () => active.onUse(item) : undefined}
                           onKeyDown={actionable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); active.onUse(item) } } : undefined}
-                          className="mono"
-                          style={{
-                            fontSize: '11px', padding: '3px 7px', borderRadius: 'var(--radius)',
-                            border: `1px solid ${inUse ? 'var(--success)' : 'var(--border)'}`,
-                            color: inUse ? 'var(--success)' : 'var(--text-muted)',
-                            background: inUse ? 'rgba(34,197,94,0.08)' : 'var(--bg-glass)',
-                            cursor: actionable ? 'pointer' : 'default',
-                            display: 'inline-flex', alignItems: 'center', gap: '4px'
-                          }}
+                          className={`mono vocab-chip${inUse ? ' vocab-chip-used' : ''}${actionable ? ' vocab-chip-action' : ''}`}
                           title={
                             inUse ? `${tooltip} — already used by a catalog metric`
                               : actionable ? `${tooltip} — click to start a new catalog metric from this`
@@ -194,7 +166,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
                           }
                         >
                           {inUse && <IconCheck size={10} />}{item.name}
-                          {meta && <span style={{ opacity: 0.65 }}>{meta}</span>}
+                          {meta && <span className="vocab-chip-meta">{meta}</span>}
                         </span>
                       )
                     })}

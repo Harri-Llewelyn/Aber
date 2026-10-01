@@ -136,7 +136,13 @@ const WEBHOOK_BRANCH_FILTER = "*";
  * uploaded through the forge's own UI meets a check before it is merged rather than being refused
  * on the appliance afterwards, which is late.
  */
-export const FLOW_SHAPE_CONTEXT = "acs/flow-shape";
+export const FLOW_SHAPE_CONTEXT = "aber/flow-shape";
+
+/**
+ * The names the shape check was posted under before, which nothing posts any more. A rule still
+ * requiring one could never be satisfied, so ensureBranchProtection() takes them out.
+ */
+const RETIRED_FLOW_SHAPE_CONTEXTS = ["acs/flow-shape"];
 
 /**
  * The platform playbook's own organisation and repository: one repository the whole fleet reads,
@@ -433,14 +439,15 @@ async function dropCopiedManifest(cfg: ForgeConfig, name: string): Promise<void>
  * `enable_push: false` is what makes "deploy only what is committed" mean "deploy only what was
  * reviewed"; merging stays allowed to anyone with write once approvals are met, so a manager can
  * merge after an administrator approves. `dismiss_stale_approvals` means a change pushed after
- * approval needs approving again. `main` also requires the `acs/flow-shape` status, so a
+ * approval needs approving again. `main` also requires the `aber/flow-shape` status, so a
  * `flows.json` that the appliance would refuse cannot be merged in the first place.
  *
  * An existing protection is left as an administrator may have tuned it, except for the three
  * things this rule is for: `enable_push` and `push_whitelist_deploy_keys` are closed again if
  * either is found open, because the appliance's key is writable and this rule is what makes it a
- * reporting key; and the shape check is added back to the required contexts, keeping whatever
- * else is required beside it. Returns whether anything was changed. `seedTemplate` is for a
+ * reporting key; and the shape check is added back to the required contexts under its current
+ * name, keeping whatever else is required beside it and dropping a retired name, which nothing
+ * posts and would block every merge. Returns whether anything was changed. `seedTemplate` is for a
  * gateway's repository; a playbook made by hand is protected the same way and is not a gateway's
  * incident log.
  */
@@ -458,11 +465,15 @@ export async function ensureBranchProtection(
       status_check_contexts?: string[];
     };
     const open = rule.enable_push || rule.push_whitelist_deploy_keys;
-    const unchecked = !rule.enable_status_check || !(rule.status_check_contexts ?? []).includes(FLOW_SHAPE_CONTEXT);
+    const required = rule.status_check_contexts ?? [];
+    const retired = required.filter((c) => RETIRED_FLOW_SHAPE_CONTEXTS.includes(c));
+    const unchecked = !rule.enable_status_check || !required.includes(FLOW_SHAPE_CONTEXT) || retired.length > 0;
     if (!open && !unchecked) return false;
     // The contexts already required are kept: an administrator may have added one, and this is
-    // about `acs/flow-shape` being among them rather than about it being the only one.
-    const contexts = [...new Set([...(rule.status_check_contexts ?? []), FLOW_SHAPE_CONTEXT])];
+    // about `aber/flow-shape` being among them rather than about it being the only one.
+    const contexts = [
+      ...new Set([...required.filter((c) => !RETIRED_FLOW_SHAPE_CONTEXTS.includes(c)), FLOW_SHAPE_CONTEXT]),
+    ];
     const closed = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`, {
       enable_push: false,
       push_whitelist_deploy_keys: false,
@@ -472,6 +483,7 @@ export async function ensureBranchProtection(
     if (!closed.ok) throw await refused(`could not close 'main' on '${name}' to pushes`, closed);
     if (open) console.warn(`forge: 'main' on '${name}' admitted pushes; closed again`);
     if (unchecked) console.log(`forge: 'main' on '${name}' now requires ${FLOW_SHAPE_CONTEXT}`);
+    if (retired.length) console.log(`forge: 'main' on '${name}' no longer requires ${retired.join(", ")}`);
     return true;
   }
   if (existing.status !== 404) {
@@ -1156,7 +1168,8 @@ async function ensureWikiHome(
  * URL on re-enrolment and by the sweep. The secret is the one forge-events verifies with. The
  * branch filter admits `main` and `appliance`, so a push to a proposal branch is not delivered; a
  * found hook with another filter (one registered before the appliance branch existed) is patched.
- * Returns whether anything was changed.
+ * A second hook of ours, left by two registrations racing, is deleted so each push arrives once;
+ * the oldest with the right filter is kept. Returns whether anything was changed.
  */
 export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boolean> {
   if (!cfg.webhookUrl) {
@@ -1166,9 +1179,18 @@ export async function ensureWebhook(cfg: ForgeConfig, name: string): Promise<boo
   const listed = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/hooks`);
   if (!listed.ok) throw await refused(`could not list the hooks on '${name}'`, listed);
   const hooks = await listed.json() as { id: number; branch_filter?: string; config?: { url?: string } }[];
-  const ours = hooks.find((h) => h.config?.url === cfg.webhookUrl);
+  const mine = hooks.filter((h) => h.config?.url === cfg.webhookUrl).sort((a, b) => a.id - b.id);
+  const ours = mine.find((h) => h.branch_filter === WEBHOOK_BRANCH_FILTER) ?? mine[0];
+  let changed = false;
+  for (const extra of mine.filter((h) => h !== ours)) {
+    const deleted = await forgeApi(cfg, "DELETE", `/repos/${FORGE_ORGANISATION}/${name}/hooks/${extra.id}`);
+    // 404 is a hook something else removed first, which is the outcome wanted.
+    if (!deleted.ok && deleted.status !== 404) throw await refused(`could not remove a second push webhook from '${name}'`, deleted);
+    console.log(`forge: removed a second push webhook (${extra.id}) from '${name}'`);
+    changed = true;
+  }
   if (ours) {
-    if (ours.branch_filter === WEBHOOK_BRANCH_FILTER) return false;
+    if (ours.branch_filter === WEBHOOK_BRANCH_FILTER) return changed;
     const patched = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}/hooks/${ours.id}`, {
       branch_filter: WEBHOOK_BRANCH_FILTER,
     });

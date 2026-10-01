@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "What each JSON-encoded Sparkplug metric reads as, for the two services that decode one.",
+    "",
+    "  ingestion/ingestion.py   parse_sparkplug_payload()  -- what the historian stores",
+    "  i3x/i3x_service.py       decode_metrics()           -- what the i3X server serves",
+    "",
+    "Both read a JSON metric through json_metric_value(), mirrored in each file. Each suite asserts",
+    "every case below through its own parser: ingestion/test_json_payload.py and",
+    "i3x/test_i3x_service.py. `reads` is the Sparkplug value, an integer read through its datatype;",
+    "null means the metric carries no value. `dropped` means that metric is refused and the rest of",
+    "its payload is kept. Names are unique, because i3X keys what it serves by metric name."
+  ],
+  "cases": [
+    {"metric": {"name": "double", "datatype": 10, "double_value": 21.4}, "reads": 21.4},
+    {"metric": {"name": "float_rounded_to_32_bits", "datatype": 9, "float_value": 0.1}, "reads": 0.10000000149011612},
+    {"metric": {"name": "uint32", "datatype": 7, "int_value": 7}, "reads": 7},
+    {"metric": {"name": "negative_undeclared", "int_value": -5}, "reads": -5},
+    {"metric": {"name": "int16_minimum", "datatype": 2, "int_value": -32768}, "reads": -32768},
+    {"metric": {"name": "int64_in_int_value", "datatype": 4, "int_value": -5}, "reads": -5},
+    {"metric": {"name": "datetime_in_int_value", "datatype": 13, "int_value": 1790000000000}, "reads": 1790000000000},
+    {"metric": {"name": "uint64_maximum", "datatype": 8, "long_value": 18446744073709551615}, "reads": 18446744073709551615},
+    {"metric": {"name": "long_negative_undeclared", "long_value": -9007199254740993}, "reads": -9007199254740993},
+    {"metric": {"name": "boolean", "datatype": 11, "boolean_value": false}, "reads": false},
+    {"metric": {"name": "string", "datatype": 12, "string_value": "ONLINE"}, "reads": "ONLINE"},
+    {"metric": {"name": "bare_string", "value": "RUNNING"}, "reads": "RUNNING"},
+    {"metric": {"name": "bare_boolean", "value": true}, "reads": true},
+    {"metric": {"name": "bare_float", "value": 2.5}, "reads": 2.5},
+    {"metric": {"name": "bare_int32", "datatype": 3, "value": -7}, "reads": -7},
+    {"metric": {"name": "bare_int_beyond_32_bits", "value": 5000000000}, "reads": 5000000000},
+    {"metric": {"name": "bare_negative_beyond_32_bits", "value": -5000000000}, "reads": -5000000000},
+    {"metric": {"name": "typed_key_first", "datatype": 3, "double_value": 1.5, "int_value": 2}, "reads": 2},
+    {"metric": {"name": "no_value", "datatype": 10}, "reads": null},
+    {"metric": {"name": "int_value_beyond_32_bits", "int_value": 4294967296}, "dropped": true},
+    {"metric": {"name": "int_value_not_an_integer", "int_value": 1.5}, "dropped": true},
+    {"metric": {"name": "boolean_value_not_a_boolean", "boolean_value": "false"}, "dropped": true},
+    {"metric": {"name": "string_value_not_a_string", "string_value": 5}, "dropped": true},
+    {"metric": {"name": "float_value_beyond_32_bits", "float_value": 1e39}, "dropped": true},
+    {"metric": {"name": "bare_value_a_list", "value": [1, 2]}, "dropped": true}
+  ]
+}

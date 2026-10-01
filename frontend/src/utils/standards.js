@@ -1,8 +1,8 @@
 /**
  * The standards a catalog metric can be built from. `metric_catalog.standard` is provenance; NULL
- * means a local extension, which every adopted standard permits. The three are complementary:
+ * means a local extension, which every adopted standard permits. The four are complementary:
  * MTConnect for machine tools, ISO 22400 for computed KPIs, OPC UA for robotics and machinery
- * companion specs.
+ * companion specs, ASHRAE 223P for building systems.
  */
 
 export const STANDARDS = {
@@ -47,12 +47,13 @@ export const STANDARD_OPTIONS = [
 ]
 
 /**
- * The AAS (IEC 63278) Reference types `semantic_id_type` may take. Mirrors the CHECK constraint in
- * 0001_baseline_schema.sql; keep the two in step.
+ * The AAS (IEC 63278) Reference types `semantic_id_type` may take. Mirrors the CHECK constraints
+ * 0012_a_semantic_id_is_an_iri_or_an_irdi.sql leaves on `schemas` and `metric_catalog`; keep them in
+ * step. Both export as an ExternalReference, which is all the exporter can emit.
  */
-export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI', 'ModelReference']
+export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI']
 
-/** The type to assume for a semantic id that looks like a URL. Every seeded id is one. */
+/** The type to assume for a semantic id that looks like a URL. Every seeded catalog id is one. */
 export const DEFAULT_SEMANTIC_ID_TYPE = 'IRI'
 
 /**
@@ -68,22 +69,22 @@ export const LOCAL_SEMANTIC_NAMESPACE = 'https://aber.local/semantics'
  */
 export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconnect/v2.0`
 
-/** ISO 22400 KPI namespace. The ids seeded by archived migration 0030 are built on this. */
+/** ISO 22400 KPI namespace. The ids seeded by archived migration 20260101000030_iso22400_vocabulary.sql are built on this. */
 export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400`
 
 /**
- * The semantic id for an MTConnect metric, from its full name. Mirror of the SQL in
- * 0002_seed_data.sql: `'https://aber.local/semantics/mtconnect/v2.0/' || name`. The whole
- * name, because a catalog entry is a data item on a component path, which is what an AAS
- * SubmodelElement corresponds to.
+ * The semantic id for an MTConnect metric: its data item type's vocabulary id, so `Axes/X/POSITION`
+ * and `Axes/Y/POSITION` name one concept (#457). The component path, instance and subType stay in
+ * the name and `sub_type`. Callers pass nothing for a custom type, which has no vocabulary id.
  */
-export function mtconnectSemanticId(metricName) {
-  const name = (metricName || '').trim()
-  if (!name) return ''
-  return `${MTCONNECT_SEMANTIC_NAMESPACE}/${name}`
+export function mtconnectSemanticId(dataItemType) {
+  return mtconnectVocabularySemanticId('DATA_ITEM_TYPE', dataItemType)
 }
 
-/** The kind segment used by `mtconnect_vocabulary.semantic_id`. Mirrors the CASE in 0032. */
+/**
+ * The kind segment used by `mtconnect_vocabulary.semantic_id`. Mirrors KIND_SEGMENT in
+ * scripts/generate-mtconnect-vocabulary.mjs; check-mirror-drift.mjs check 7 compares the result.
+ */
 const VOCABULARY_KIND_SEGMENT = {
   DATA_ITEM_TYPE: 'DataItemType',
   COMPONENT: 'Component',
@@ -103,21 +104,53 @@ export function mtconnectVocabularySemanticId(kind, name) {
 }
 
 /**
+ * One ISO/IEC 11179-6 IRDI: a registration authority (a four-digit ICD, then organisation parts
+ * separated by `-` or `/`, some of them empty), a `#`, the data identifier, a `#`, the version.
+ * ECLASS writes `0173-1#02-AAO677#002`, IEC CDD `0112/2///61987#ABA565#009`.
+ */
+const IRDI = String.raw`\d{4}(?:[-/][A-Za-z0-9_]*)*#[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*#\d+`
+
+/** An IRDI, or several joined by `/` as an ECLASS property-value pair is. Anchored at both ends. */
+const IRDI_PATH = new RegExp(`^${IRDI}(?:/${IRDI})*$`)
+
+/**
  * Best guess at which kind of AAS Reference an identifier is. Conservative: it recognises the two
- * unambiguous shapes and leaves the rest to the operator. An IRDI looks like
- * `0173-1#02-AAO677#002`.
+ * unambiguous shapes and leaves the rest to the operator.
  */
 export function inferSemanticIdType(value) {
   const v = (value || '').trim()
   if (!v) return ''
   if (/^https?:\/\//i.test(v) || /^urn:/i.test(v)) return 'IRI'
-  if (/^\d{4}-[^#]*#[^#]+#\d+$/.test(v)) return 'IRDI'
+  if (IRDI_PATH.test(v)) return 'IRDI'
   return ''
+}
+
+/**
+ * A semantic id and its reference type as they are stored: the id trimmed, and no type without an
+ * id. Forms compare this form of the pair to decide whether anything changed.
+ */
+export function storedSemanticIdPair(semanticId, semanticIdType) {
+  const id = (semanticId || '').trim()
+  return { semanticId: id, semanticIdType: id ? (semanticIdType || '') : '' }
+}
+
+/** Whether two `{ semanticId, semanticIdType }` pairs would be stored as the same pair. */
+export function sameSemanticIdPair(a, b) {
+  const x = storedSemanticIdPair(a?.semanticId, a?.semanticIdType)
+  const y = storedSemanticIdPair(b?.semanticId, b?.semanticIdType)
+  return x.semanticId === y.semanticId && x.semanticIdType === y.semanticIdType
+}
+
+/**
+ * The reference type to show once the semantic id changes from `previousId` to `nextId`. A blank id
+ * has no type. A type that agreed with the guess for the previous id follows the new guess, so
+ * replacing an IRI with an IRDI retypes it; a type the operator chose against the guess is kept.
+ */
+export function followSemanticIdType(previousId, previousType, nextId) {
+  if (!(nextId || '').trim()) return ''
+  const guessed = !previousType || previousType === inferSemanticIdType(previousId)
+  return guessed ? inferSemanticIdType(nextId) : previousType
 }
 
 /** Display label for a `standard` value as stored (NULL/'' meaning a local extension). */
 export const LOCAL_EXTENSION_LABEL = 'Local extension'
-
-export function standardLabel(standard) {
-  return standard || LOCAL_EXTENSION_LABEL
-}

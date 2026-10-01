@@ -28,6 +28,9 @@
      light one. */
   --warning-text: #ffb300;
   --success-text: #00e896;
+  /* The accent as a label on its own tint (the info, pending and provisioned badges): the same as
+     --accent here, darker in the light theme. */
+  --accent-text:  #00d4ff;
   /* The ink for a button filled with --warning, the amber counterpart to --accent-contrast. Dark
      ink measures 6.59:1 in the light theme; white would be 3.18:1. */
   --warning-contrast: #0b0e14;
@@ -37,7 +40,7 @@
   --brand-sharepoint: #0078d4;
   --brand-drive:      #0f9d58;
   /* --danger clears AA on a bare card but only 4.45:1 on the 0.15 rose tint the error toast and
-     .badge-offline sit on; one step lighter clears it at 5.3:1. */
+     .badge-danger sit on; one step lighter clears it at 5.3:1. */
   --danger-text:  #ff6b85;
   /* The cluster badge: a fifth colour outside the four-colour event classification, because a badge
      says how many events are here, not what kind. Violet is the nearest unused hue to the accent.
@@ -45,22 +48,43 @@
   --cluster:      #a855f7;
   --cluster-bg:   rgba(168, 85, 247, 0.18);
   --cluster-text: #d8b4fe;
-  /* The monospace stack as a token, so `var(--font-mono, monospace)` resolves to JetBrains Mono
-     rather than the bare generic. Structural, so the light theme does not restate it. */
+  /* The monospace face, written once. Structural, so the light theme does not restate it. */
   --font-mono:    'JetBrains Mono', monospace;
+  /* The interface face, written once. Structural, like --font-mono. */
+  --font-display: 'Outfit', sans-serif;
   /* Spacing. --inset is the horizontal inset from a container's edge to its content, one value
-     shared by the page, the card, the card header and the table cell, so their left edges align.
+     shared by the card, the card header and the table cell, so their left edges align.
      --inset-tight is for chrome already on a panel (a filter bar inside a card, the context panel's
-     header). Vertical rhythm is deliberately not a token: it differs per element. */
+     header). --gutter is the page's own margin, from the window's edges to the outermost cards and
+     the help drawer: tighter than a card's inset, because it is space no content uses. Vertical
+     rhythm is deliberately not a token: it differs per element. */
   --inset:        16px;
   --inset-tight:  12px;
+  --gutter:       12px;
+  /* The scrollbar's width, which .content reserves on its right and takes back out of its padding. */
+  --scrollbar:    6px;
   /* Between stacked blocks: card to card, banner to card. Was 24px inline on three pages, 16px in
      the directory's rule and 12px inline on Access Control, for the same relationship. */
   --stack:        16px;
   --radius:       12px;
   --radius-sm:    8px;
+  /* The small radius: a callout, a compact chip. --radius-pill is a badge or a count. */
+  --radius-xs:    6px;
+  --radius-pill:  999px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
   --transition:   all 0.2s ease;
+  /* The z-index ladder. A layer sits above the ones listed before it; a new layer takes a rung,
+     not a number picked to win.
+       1-5    inside one component (a sticky header, a marker on a plan, a timeline node)
+       60     the alert and notification panels, anchored under the topbar
+       90     the sidebar, and the context panel when it is a drawer below 800px (they sit on
+              opposite edges, so the tie never overlaps)
+       100    the topbar
+       200    a popover under the topbar: the user menu, global search, the sidebar mode menu
+       1000   the modal overlay
+       above 1000, the dialog confirm layer: set in the .modal block, above the modal it confirms
+       1200   the help-tip bubble, above any dialog
+       2000   the toast stack, above everything */
 }
 
 [data-theme="light"] {
@@ -90,6 +114,9 @@
      and 4.99:1. */
   --warning-text: #b45309;
   --success-text: #047857;
+  /* --accent measures 3.51:1 on the 0.12 --accent-dim fill a badge paints on a white card. Sky-700,
+     the filled-button fill, clears it at 5.09:1, and 4.90:1 on a hovered row. */
+  --accent-text:  #0369a1;
   /* Amber-600 is 3.18:1 under white and 5.35:1 under slate-900, so the ink stays dark here too
      -- unlike --accent-contrast, which flips between the themes. */
   --warning-contrast: #0f172a;
@@ -112,7 +139,7 @@ html, body, #root {
   height: 100%;
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -120,7 +147,7 @@ html, body, #root {
 }
 
 /* ===== Scrollbar ===== */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: var(--scrollbar); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
@@ -206,17 +233,22 @@ html, body, #root {
 
 /* The brand and the right-hand group are equal-weight sides, which is what centres the search box:
    both take `flex: 1 1 0` so they claim equal shares of free space whatever their content measures.
-   Only the brand carries `min-width: 0`, so when the bar runs out of room the brand truncates and
-   the right-hand group holds at content size. */
+   Only the brand may shrink below its content, so when the bar runs out of room the brand gives up
+   its text and the right-hand group holds at content size. It stops at the mark: below that the
+   search box, with its 150px floor, gives way instead of the mark being clipped. */
 .topbar-brand {
+  /* The breakpoints below are this region's width, which is what the text has to fit in. */
+  container: brand / inline-size;
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1 1 0;
-  min-width: 0;
+  /* The mark (28px) and this button's padding and border. */
+  min-width: 42px;
   overflow: hidden;
-  /* It became a <button> when it became the way back to Overview, so everything a button brings
-     with it has to be taken back off: the chrome, the centred text, the inherited-nothing font. */
+  /* It became a <button> when it became the way back to the Site Map, so everything a button
+     brings with it has to be taken back off: the chrome, the centred text, the inherited-nothing
+     font. */
   padding: 4px 6px;
   margin-left: -6px;
   border: 1px solid transparent;
@@ -308,9 +340,9 @@ html, body, #root {
 .topbar-icon-button:hover { color: var(--accent); border-color: var(--accent); }
 .topbar-icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* THE ONLY TOPBAR CONTROL WITH A LIT STATE, because it is the only one that toggles something that
-   stays open. Without it the drawer can be closed by clicking anywhere else, leaving a button that
-   looks identical whether pressing it will open help or close it. */
+/* The lit state of a square bar control whose layer is open: the help drawer, and the notification
+   list while it is showing. Without it the drawer can be closed by clicking anywhere else, leaving
+   a button that looks identical whether pressing it will open help or close it. */
 .topbar-icon-button-active {
   color: var(--accent);
   border-color: var(--accent);
@@ -329,8 +361,9 @@ html, body, #root {
   height: 28px;
   padding: 0;
   flex-shrink: 0;
-  /* No fill: the shortcuts key, the help key and the resting alert pill all sit on the bar's own
-     ground, and this is one row of four controls. Round is what marks it as the identity control. */
+  /* No fill: the bell, the shortcuts key, the help key and the resting alert pill all sit on the
+     bar's own ground, and this is one row of five controls. Round is what marks it as the identity
+     control. */
   background: none;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -340,7 +373,7 @@ html, body, #root {
 }
 
 /* The icon takes the accent on hover rather than the border alone: a 1px ring on a 28px circle is a
-   very small change to notice, and this is the only way into four actions. */
+   very small change to notice, and this is the only way into three actions. */
 .user-avatar:hover { border-color: var(--accent); color: var(--accent); }
 .user-avatar-open { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
 .user-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -425,7 +458,7 @@ html, body, #root {
   border: none;
   background: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 500;
   text-align: left;
@@ -461,8 +494,7 @@ html, body, #root {
 /* Sidebar: the primary navigation, a rail of icons with a labelled panel. Two elements, and the
    split is the mechanism: `.sidebar` is a 52px gutter that does not change width in hover mode, and
    `.sidebar-panel` is absolutely positioned inside it and grows to 232px, painting over the page
-   without reflowing it. Expanded mode widens the gutter instead; see the modes block at the end of
-   the file. */
+   without reflowing it. Expanded mode widens the gutter instead; see `.sidebar-mode-expanded`. */
 .sidebar {
   position: relative;
   flex: 0 0 52px;
@@ -520,7 +552,7 @@ html, body, #root {
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-muted);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   /* The scale's nav step, which is what the tab strip used. A rail has more room for a label than
      a bar did, so there is no reason for this to be the one navigation control that shrank. */
   font-size: 14px;
@@ -602,7 +634,7 @@ html, body, #root {
   background: none;
   outline: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
 }
 
@@ -664,7 +696,7 @@ html, body, #root {
   border: none;
   background: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 500;
   text-align: left;
@@ -708,7 +740,7 @@ html, body, #root {
   color: var(--text-muted);
 }
 
-/* A finding above the results rather than instead of them: an id always has the Digital Thread
+/* A finding above the results rather than instead of them: an id always has the Audit Trail
    row to offer, so this says what the asset probes did not find and leaves the row to speak. */
 .global-search-note {
   padding: 9px 12px;
@@ -725,22 +757,17 @@ html, body, #root {
   color: var(--text-dim);
 }
 
-/* Top bar responsive collapse. Below 1400px the strapline goes and button labels go; below
-   1100px the brand text goes entirely. `.brand-text` is a stacked block as wide as its wider
-   line, and the strapline is far wider than the wordmark, so hiding it reclaims the space. */
-@media (max-width: 1399px) {
+/* Top bar responsive collapse, measured against the brand's own share of the bar rather than the
+   window: the strapline goes when it no longer fits beside the mark (about 240px), and the wordmark
+   only when there is no room for its four letters either. `.brand-text` is a stacked block as wide
+   as its wider line, so hiding the strapline gives the wordmark the whole of it. */
+@container brand (max-width: 250px) {
   .brand-sub { display: none; }
-  /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
-     leaves a shape and a figure -- whereas dropping the pill would hide the only changing thing in
-     the bar at exactly the widths a kiosk display uses. */
-  /* Nothing left to shed. The pill lost its word entirely when it became a glyph, so the band
-     that used to drop it has nothing to do -- and the count it keeps is a single digit that was
-     never the thing costing width. */
 }
 
-@media (max-width: 1099px) {
+@container brand (max-width: 80px) {
   /* The mark alone. The search box has a 150px floor and the session controls do not shrink at
-     all, so below this the brand is the only region with anything left to give. */
+     all, so on the narrowest bar the brand is the only region with anything left to give. */
   .brand-text { display: none; }
 }
 
@@ -755,7 +782,22 @@ html, body, #root {
      page that scrolls draws its cards narrower than one that does not. `stable` reserves the track
      on every page. Browsers without support ignore it. */
   scrollbar-gutter: stable;
-  padding: 12px var(--inset) var(--inset);
+  /* The right padding gives the reserved track back, so the gap beside the cards is --gutter on
+     both sides whether or not the page scrolls. */
+  padding: var(--gutter) calc(var(--gutter) - var(--scrollbar)) var(--gutter) var(--gutter);
+}
+
+/* Firefox does not read ::-webkit-scrollbar. With classic scrollbars it reserves its full platform
+   track (about 17px) beside every page, and with overlay scrollbars none. Its thin track is the
+   nearest it offers to the 6px one. */
+@supports not selector(::-webkit-scrollbar) {
+  .content {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    /* Its track is not --scrollbar wide (none at all with overlay scrollbars), so nothing is taken
+       back out of the padding. */
+    padding-right: var(--gutter);
+  }
 }
 
 /* Section header. `.section-header` as a full-width heading row above a card is gone;
@@ -766,6 +808,15 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+/* A row of tab pills; see TabStrip. Wraps on a narrow window. */
+.tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tab-strip-page { margin-bottom: var(--stack); }
+.tab-strip-card { margin-left: auto; }
+
 .section-count {
   display: inline-flex;
   align-items: center;
@@ -775,7 +826,7 @@ html, body, #root {
   padding: 0 6px;
   background: var(--accent-dim);
   color: var(--accent);
-  border-radius: 100px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   margin-left: 10px;
@@ -787,8 +838,8 @@ html, body, #root {
    the 15px override applies only inside `.card-header` -- so it outranks the card titles below it.
 
    Not licence to restate the rail: a heading that only repeats the tab's name was removed from
-   Overview for saying nothing, and `navigationShell.test.jsx` still guards that. The description is
-   what earns the block. */
+   the Site Map for saying nothing, and `navigationShell.test.jsx` still guards that. The
+   description is what earns the block. */
 .page-heading {
   margin: 0 0 var(--stack);
 }
@@ -807,7 +858,7 @@ html, body, #root {
 }
 
 .page-heading .page-heading-note {
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 /* ===== Cards & Containers ===== */
@@ -852,6 +903,31 @@ html, body, #root {
   line-height: 1.3;
 }
 
+/* A page's only card, naming the page: icon and title on the first row with the count and the
+   actions, the description on its own line beneath. Icon gap and description type match
+   the page heading's. */
+.card-heading .section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-heading .section-title .section-count {
+  margin-left: 2px;
+}
+
+.card-heading > :not(.section-title):not(.card-heading-description) {
+  margin-left: auto;
+}
+
+.card-heading .card-heading-description {
+  flex: 1 0 100%;
+  margin: -8px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
 /* Body padding for a card whose contents are not a table. The same inset as `.card-header` and as a
    table cell, so a card with a header, a body and a table has one left edge. */
 .card-body {
@@ -866,6 +942,9 @@ html, body, #root {
   background: none;
   border: none;
 }
+
+/* The bar's bottom gap when something follows it in the card body. A bar that ends the body has none. */
+.card-body > .filter-bar:not(:last-child) { margin-bottom: 12px; }
 
 /* The seam between a card's body and the table it introduces: the same 1px the card header uses on
    its underside, so the card reads as header / body / table. */
@@ -907,6 +986,59 @@ html, body, #root {
   gap: 10px;
 }
 
+/* The three widths of a filter control, selects and search alike. The doubled selector beats
+   `.form-control { width: 100% }`, which comes later in the file. */
+.control-sm, .form-control.control-sm { width: 150px; max-width: 100%; }
+.control-md, .form-control.control-md { width: 190px; max-width: 100%; }
+.control-lg, .form-control.control-lg { width: 220px; max-width: 100%; }
+
+/* The "Clear filters (N)" button: always the right-hand end of the bar, wrapped or not. */
+.filter-bar-clear { margin-left: auto; }
+
+/* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
+   native search cancel is hidden, since the clear button replaces it. */
+.search-input { position: relative; display: inline-flex; align-items: center; }
+/* The icon and the clear button take 58px of the field, so the wide search is wider than a wide
+   select: at 220px "Search name, UUID or Sparkplug ID…" was cut short. */
+.search-input.control-lg { width: 280px; }
+.search-input-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.search-input .search-input-field { padding-left: 30px; padding-right: 28px; }
+.search-input .search-input-field::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.search-input-clear {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.search-input-clear:hover { color: var(--text-primary); background: var(--bg-glass); }
+.search-input-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The foot of a list that loads in steps (ListFoot): a rule above, the button or the end line
+   inside. It sits after the scroller, not in it. */
+.list-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px var(--inset);
+  border-top: 1px solid var(--border);
+}
+.list-foot-end { font-size: 12px; color: var(--text-muted); }
+
 /* A cell rendered as an action -- used for counts that navigate elsewhere (e.g. a schema's
    device count opening the Devices page filtered to it). Reads as a link, not a button. */
 .count-link {
@@ -947,8 +1079,6 @@ html, body, #root {
 .table-scroll thead tr {
   position: sticky;
   top: 0;
-  /* Above the rows it covers, and nothing else -- `.action-menu` portals to <body> precisely so
-     it is not competing at this level. */
   z-index: 2;
 }
 
@@ -959,6 +1089,59 @@ html, body, #root {
   background: var(--bg-card);
   /* `border-bottom` on the row does not travel with a sticky element in every engine, so the
      hairline is drawn as a shadow that does. Without it the header floats on top of the rows. */
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+/* IN-CARD SCROLL. A page opts in with `.page-fill` on its `.page-layout`, and puts `.card-fill` on
+   the ONE card that gives way; the other children of `.page-main` keep their height. Inside that card
+   either a `.table-wrap` directly under it is the scroller, or a child marked `.card-fill-scroll`
+   is. Anything after the scroller (a list foot, a note) stays on screen. If the parts that cannot
+   shrink are taller than the window, the page scrolls as before. */
+.page-fill { height: 100%; }
+
+.page-fill > .page-main {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.page-fill > .page-main > * { flex-shrink: 0; }
+
+/* Two cards in a row are a stack apart. A page heading and a page banner carry their own bottom
+   margin, so this is on card-after-card only, never a flex gap on the whole column. */
+.page-fill > .page-main > .card + .card { margin-top: var(--stack); }
+
+.page-fill > .page-main > .card-fill {
+  flex-shrink: 1;
+  min-height: 0;
+}
+
+.card-fill {
+  display: flex;
+  flex-direction: column;
+}
+
+.card-fill > * { flex-shrink: 0; }
+
+.card-fill > .card-fill-scroll,
+.card-fill > .table-wrap {
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The table scroller pins its header like .table-scroll, without that class's cap. */
+.card-fill > .table-wrap.table-scroll { max-height: none; }
+
+.card-fill > .table-wrap thead tr {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.card-fill > .table-wrap thead th {
+  background: var(--bg-card);
   box-shadow: inset 0 -1px 0 var(--border);
 }
 
@@ -998,48 +1181,6 @@ tbody tr {
 
 tbody tr:hover { background: var(--bg-glass); }
 
-/* Table summary footer: a counts bar under a table, for totals that describe the whole list.
-   `--bg-glass` matches `thead tr`, so the table is bracketed by the same tint at both ends. */
-.table-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 16px;
-  background: var(--bg-glass);
-  border-top: 1px solid var(--border);
-}
-
-/* A count and its label as one pill, so the pair cannot be split across a wrap -- which is what
-   made the loose-text version hard to scan at width: "0 issued 0 bundle outstanding 0 revoked"
-   reads as six tokens rather than three facts. */
-.table-summary-pill {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 11px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.table-summary-pill strong {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  /* Tabular figures so a column of counts does not jitter as it updates, the same reason
-     `.alert-pill-count` carries it. */
-  font-variant-numeric: tabular-nums;
-}
-
-/* ZERO IS DIMMED RATHER THAN HIDDEN. "0 revoked" is a fact worth reading -- it is the difference
-   between "nothing has been revoked" and "revocation is not shown here" -- but it should not
-   compete with a count that is not zero. */
-.table-summary-pill-zero strong { color: var(--text-dim); font-weight: 500; }
-
 /* Callout: a bordered, tinted banner for a caveat the reader must not miss, inside the card it
    qualifies. A shape as well as a colour, so it survives a reader who cannot distinguish the hue. */
 .callout {
@@ -1048,7 +1189,7 @@ tbody tr:hover { background: var(--bg-glass); }
   align-items: flex-start;
   margin: 12px var(--inset) 0;
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
   background: var(--bg-glass);
   font-size: 12px;
@@ -1067,14 +1208,52 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .callout-warning .callout-icon { color: var(--warning); }
+
+/* An error or a refusal that stands on the page: the same subtle tint as the warning, in the danger
+   hue. The text is --danger-text because --danger is below AA on the tint in the light theme. */
+.callout-danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--danger-text);
+}
+
+.callout-danger .callout-icon { color: var(--danger); }
+
+/* A note that explains rather than warns. */
+.callout-info {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.callout-info .callout-icon { color: var(--accent-text); }
 .callout strong { color: var(--text-primary); }
 
-/* A callout that qualifies a whole page rather than the card it sits in. AFTER `.callout`, not
-   before: the two selectors have equal specificity, so the one declared later is the one that wins
-   the margin. `.callout` insets itself by `--inset` to line up with a card's contents and leaves no
-   gap beneath, both of which are wrong out on the page. */
+/* `.callout`'s own margin lines it up with a card's contents when it is a direct child of `.card`.
+   Inside a card body, or a dialog, the container has already inset it, so the inline margin goes.
+   The top margin stays, as the gap above. */
+.card-body > .callout, .modal .callout { margin-inline: 0; }
+
+/* The page banner: a callout above a page's first card, as `callout callout-warning callout-page`
+   with an icon element first and ONE body element (a div or span) after it. Full width, wraps, and
+   the icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later
+   rule wins the margin, and `.callout`'s inset and missing bottom gap are wrong out on the page.
+   The warning form is the stronger tint here: a finding on arrival, not a standing property. */
 .callout-page {
+  align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
   margin: 0 0 var(--stack);
+  padding: 10px var(--inset);
+  font-size: 13px;
+}
+
+.callout-page > :not(.callout-icon) { flex: 1; min-width: 0; }
+.callout-page .callout-icon { margin-top: 0; }
+
+.callout-warning.callout-page {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning-text);
 }
 
 /* Group header row: a collapsible category inside a table body. `--bg-card` mixed toward the text
@@ -1110,7 +1289,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 
 .mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--accent);
 }
@@ -1131,8 +1310,46 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--danger);
 }
 
-/* Buttons in a table cell, held to the right-hand edge of the row. */
-.row-actions {
+/* The note under a form field: muted, small, and a fixed 4px below the control. */
+.form-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* A small uppercase label over a value or a group of controls. */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+/* One line, cut off with an ellipsis. Needs a width from its container to cut against. */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The dotted underline that says "hover for the meaning". */
+.hint-underline {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+/* Stacks its direct children with the page gap. The one way to space cards, banners and blocks;
+   a wrapper that also holds a directory-group keeps that group's own rule. */
+.stack > * + * { margin-top: var(--stack); }
+
+/* A table row whose entity is archived: the amber tint. The generic row hover paints over it. */
+tr.row-archived { background: rgba(255, 179, 0, 0.06); }
+
+/* Buttons in a table cell, held to the right-hand edge of the row. The header cell over them takes
+   the same class so the column title lines up. */
+td.row-actions, th.row-actions {
   text-align: right;
   white-space: nowrap;
 }
@@ -1165,7 +1382,7 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* An endpoint is one unbroken token (`http://127.0.0.1:54321/functions/v1`), which a fixed
-   column cannot break at a space. Without this it overruns its cell into STATUS. */
+   column cannot break at a space. Without this it overruns its cell into Reach. */
 .table-directory .cell-endpoint { overflow-wrap: anywhere; }
 
 /* A tag is one token too, and some are long (`2026.07.07-sha-a6a04f2`). */
@@ -1199,8 +1416,8 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* Copyable: deliberately quieter. It is useful, but it is not a destination, and colouring it
    like one would put the two back on equal footing. */
-.endpoint-copy { color: var(--text-secondary); font-family: inherit; }
-.endpoint-copy:hover { border-color: var(--text-secondary); background: var(--bg-surface); }
+.endpoint-copy { color: var(--text-muted); font-family: inherit; }
+.endpoint-copy:hover { border-color: var(--text-muted); background: var(--bg-surface); }
 
 /* Keyboard reachability is not optional here: the copy variant is the ONLY way to obtain a
    broker or database address from this page. */
@@ -1273,17 +1490,31 @@ tbody tr:hover { background: var(--bg-glass); }
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
-  border-radius: 100px;
+  border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
+/* The table-cell size: 11px, so a row does not mix two badge sizes. */
+.badge-sm { font-size: 11px; }
+
 .badge-online  { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
-.badge-offline { background: rgba(255, 77, 109, 0.15); color: var(--danger);  }
 .badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning-text); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* Variants named for what they say. `ok`, `critical` and `unknown` are the tones the credential,
+   broker, token and cold-storage helpers return, used as `badge-${tone}`. Danger takes --danger-text,
+   which clears AA on the rose tint where --danger does not, and info, pending and provisioned take
+   --accent-text likewise. Unknown is neutral with a dashed border: the page could not read the
+   state, which is not the same as a neutral one. */
+.badge-success,
+.badge-ok       { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
+.badge-danger,
+.badge-critical { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
+.badge-info     { background: var(--accent-dim); color: var(--accent-text); }
+.badge-unknown  { background: var(--bg-glass); color: var(--text-muted); border: 1px dashed var(--border); }
 
 /* The two remote gateway enrolment states. Neither existing variant fits: `badge-warning` means
    look at this, and `badge-neutral` reads as decommissioned. They differ by border, not only tint:
@@ -1291,14 +1522,20 @@ tbody tr:hover { background: var(--bg-glass); }
    everything it needs. */
 .badge-pending {
   background: rgba(0, 212, 255, 0.15);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid rgba(0, 212, 255, 0.45);
 }
 
 .badge-provisioned {
   background: rgba(0, 212, 255, 0.07);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px dashed rgba(0, 212, 255, 0.45);
+}
+
+/* Out of commission: the warning badge with a border, and an icon in front. See ArchivedBadge. */
+.badge-archived {
+  border: 1px solid var(--warning);
+  gap: 4px;
 }
 
 .badge-dot {
@@ -1316,7 +1553,7 @@ tbody tr:hover { background: var(--bg-glass); }
   padding: 9px 18px;
   border: none;
   border-radius: var(--radius-sm);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -1342,6 +1579,23 @@ tbody tr:hover { background: var(--bg-glass); }
   border: 1px solid var(--border);
 }
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--accent); }
+
+/* A square icon-only button, such as a dialog's close ×. Follows .btn-ghost so it overrides its
+   border and fill. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+.btn-icon:hover { color: var(--accent); background: transparent; }
+/* 28px is the default; -sm is for a dense row. */
+.btn-icon-sm { width: 24px; height: 24px; }
 
 /* The count pill inside a selected filter button. `.section-count` paints --accent on --accent-dim,
    which is invisible on a `.btn-primary` fill, so the pill takes the button's ink as its fill and
@@ -1411,68 +1665,6 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .btn-group { display: flex; gap: 8px; }
 
-/* Overflow action menu, portalled to <body> because .table-wrap is overflow-x:auto and would clip
-   it. The z-index clears the page but stays under .modal-overlay (1000). */
-.action-menu {
-  z-index: 900;
-  min-width: 200px;
-  padding: 4px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-hover);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: fadeIn 0.12s ease;
-}
-
-.action-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.action-menu-item:hover:not(:disabled),
-.action-menu-item:focus-visible {
-  background: var(--bg-glass);
-  outline: none;
-}
-
-.action-menu-item:disabled {
-  color: var(--text-dim);
-  cursor: not-allowed;
-}
-
-.action-menu-item-danger:hover:not(:disabled) {
-  background: rgba(255, 82, 82, 0.12);
-  color: var(--danger);
-}
-
-.action-menu-icon {
-  display: inline-flex;
-  width: 14px;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.action-menu-separator {
-  height: 1px;
-  margin: 4px 2px;
-  background: var(--border);
-}
-
 /* A document provider's badge: the provider's colour tints the fill and draws the border, while the
    label takes --text-primary, because the brand colours are not legible as text. `color-mix` keeps
    the tint derived from the one place the colour is written. */
@@ -1514,6 +1706,10 @@ tbody tr:hover { background: var(--bg-glass); }
   animation: fadeIn 0.15s ease;
 }
 
+/* A dialog that opens over another one (a confirmation over a form, the shortcuts list over
+   anything). Above the ordinary layer at 1000. */
+.modal-overlay-confirm { z-index: 1100; }
+
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .modal {
@@ -1528,7 +1724,7 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-primary);
 
   /* Caps the height of every modal so a long dialog scrolls inside itself rather than growing past
-     both edges of the viewport. ActionMenu portals to <body>, so this cannot clip it. */
+     both edges of the viewport. */
   max-height: calc(100vh - 48px);
   overflow-y: auto;
 }
@@ -1559,7 +1755,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* For a modal holding a TABLE rather than a form. `.modal`'s 480px is sized for stacked fields;
    the telemetry inspector is four columns and was unreadable at that width -- which is the whole
-   reason it left the 360px context panel. */
+   reason it left the context panel. */
 .modal-wide {
   max-width: 900px;
   padding: 20px 22px;
@@ -1583,6 +1779,48 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-primary);
 }
 
+/* The title <h2> that `<Modal>` renders inside the header row: the row supplies the spacing, so the
+   standalone margin goes, and an icon sits before the text. */
+.modal-header-row .modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.modal-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* A failure the operator must see before pressing the button again. The callout's shape, in danger
+   colours: --danger-text for the words, --danger for the border and icon. */
+.modal-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* One paragraph under the header saying what the dialog will do. */
+.modal-lead {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.modal-error-icon { flex-shrink: 0; margin-top: 2px; color: var(--danger); }
+
 .form-group {
   margin-bottom: 16px;
 }
@@ -1604,7 +1842,7 @@ tbody tr:hover { background: var(--bg-glass); }
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   transition: var(--transition);
   outline: none;
@@ -1623,6 +1861,72 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .form-control option { background: var(--bg-surface); color: var(--text-primary); }
+
+/* SemanticIdField's row under the field: the marker on a suggested id and the compact actions.
+   --text-muted, not --text-dim, which falls under AA on the Add Metric form's glass. */
+.semantic-id-suggested {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.semantic-id-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.semantic-id-actions .btn { padding: 2px 8px; font-size: 12px; }
+
+/* The search under the field. The list scrolls rather than growing the form or the dialog. */
+.semantic-id-picker {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+.semantic-id-picker-list {
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.semantic-id-picker-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.semantic-id-picker-option:hover { background: var(--bg-glass); }
+.semantic-id-picker-option:focus-visible { background: var(--bg-glass); outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.semantic-id-picker-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.semantic-id-picker-id {
+  font-size: 11px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.semantic-id-picker-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 .modal-actions {
   display: flex;
@@ -1656,11 +1960,8 @@ tbody tr:hover { background: var(--bg-glass); }
 .empty-state .btn { display: inline-flex; margin-top: 12px; }
 
 /* ===== Stat strip ===== */
-/* A row of figures above a table, centred on the card and ruled between. Left-aligned and spaced
-   only by a gap, a run of six read as one ragged block with no boundary between "object storage
-   used" and the figure after it -- the eye had to use the label casing to find where each one
-   started. The rule does that instead, and centring stops a short run sitting off to one side of a
-   wide card. */
+/* A row of figures above a table, centred on the card and ruled between, so each figure has a
+   visible boundary and a short run does not sit off to one side of a wide card. */
 .stat-strip {
   display: flex;
   justify-content: center;
@@ -1682,7 +1983,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
 }
 
@@ -1692,32 +1993,93 @@ tbody tr:hover { background: var(--bg-glass); }
 .val-bool-false { color: var(--danger); }
 
 /* ===== Toast ===== */
-/* The background must be opaque: a toast is `position: fixed` over arbitrary content, so the 0.15
-   tint is painted as a background-image over an opaque background-color of --bg-card, which is the
-   base the ratios in themeContrast.test.js assume. Keep them as separate properties: the
-   `background:` shorthand resets background-color. */
-.toast {
+/* The corner the toasts stack in. Always in the DOM, because its two regions are the live regions
+   (see Toast.jsx), and it never takes a click itself: only the toasts inside it do. */
+.toast-stack {
   position: fixed;
   bottom: 28px;
   right: 28px;
-  padding: 14px 20px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: calc(100vw - 56px);
+  pointer-events: none;
+}
+
+/* Errors sit above the rest. The gap between the two regions exists only while both hold a toast,
+   and an empty region must stay rendered rather than `display: none`, or it stops being announced. */
+.toast-region {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.toast-region:not(:empty) + .toast-region:not(:empty) { margin-top: 8px; }
+
+/* The background must be opaque: a toast floats over arbitrary content, so the 0.15 tint is painted
+   as a background-image over an opaque background-color of --bg-card, which is the base the ratios
+   in themeContrast.test.js assume. Keep them as separate properties: the `background:` shorthand
+   resets background-color. */
+.toast {
+  padding: 12px 10px 12px 16px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
-  z-index: 2000;
   animation: slideInRight 0.25s ease;
-  max-width: 340px;
+  max-width: 380px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   box-shadow: var(--shadow);
   background-color: var(--bg-card);
+  pointer-events: auto;
 }
+
+.toast-icon { display: flex; flex-shrink: 0; margin-top: 2px; }
+
+/* Wraps anywhere: an error can carry a long identifier with no spaces in it. */
+.toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* 24px, the WCAG 2.2 minimum target. Takes the toast's own ink, which each type measures on its tint. */
+.toast-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin: -2px 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.toast-dismiss:hover { background: var(--bg-glass); }
+.toast-dismiss:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 
 .toast-success {
   background-image: linear-gradient(rgba(0, 232, 150, 0.15), rgba(0, 232, 150, 0.15));
   border: 1px solid var(--success);
   color: var(--success-text);
+}
+
+/* --accent-text, the accent's label ink on its own tint (the pending badge's pairing). */
+.toast-info {
+  background-image: linear-gradient(rgba(0, 212, 255, 0.15), rgba(0, 212, 255, 0.15));
+  border: 1px solid var(--accent);
+  color: var(--accent-text);
+}
+
+.toast-warning {
+  background-image: linear-gradient(rgba(255, 179, 0, 0.15), rgba(255, 179, 0, 0.15));
+  border: 1px solid var(--warning);
+  color: var(--warning-text);
 }
 
 /* --danger-text, not --danger: the bare signal colour is a border/icon tone and measures below
@@ -1731,6 +2093,10 @@ tbody tr:hover { background: var(--bg-glass); }
 @keyframes slideInRight {
   from { opacity: 0; transform: translateX(20px); }
   to   { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
 }
 
 /* ===== Loading ===== */
@@ -1761,45 +2127,13 @@ tbody tr:hover { background: var(--bg-glass); }
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 60px;
+  padding: 36px var(--inset);
   gap: 12px;
   color: var(--text-muted);
 }
 
-/* ===== Shopfloor Blueprint Map Styles ===== */
-.shopfloor-map-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  box-shadow: var(--shadow);
-  margin-bottom: var(--stack);
-}
-
-.shopfloor-map-bg {
-  padding: 14px 16px 16px;
-}
-
-.shopfloor-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.shopfloor-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
+/* ===== Site Map: area plans and lanes ===== */
+/* The map sits in a plain .card; only its legend, hierarchy, lanes and area cards are its own. */
 .shopfloor-legend {
   display: flex;
   align-items: center;
@@ -1809,17 +2143,10 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* The area thumbnails: three to a row at most, so each plan is legible. The track minimum is a
-   third of the width less its share of the gaps, or 320px, whichever is larger; the 320px floor
-   keeps them readable on a narrow window, where the row holds fewer. `min(…, 100%)` so a track
-   never overflows a container narrower than 320px. `auto-fill`, not `auto-fit`: the tracks stay
-   put when there are fewer areas than columns, so the grid keeps its shape as areas are added. */
-.shopfloor-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(max(320px, calc(33.333% - 8px)), 100%), 1fr));
-  gap: 12px;
-  align-items: start;
-}
+.shopfloor-legend > span { display: flex; align-items: center; gap: 5px; }
+
+/* Areas and Cells tables: a badge that follows a name or another badge. */
+.badge-follow { margin-left: 8px; }
 
 /* The rungs above the map: enterprise, then site. Small caps for the level, the name beside it. */
 .site-hierarchy {
@@ -1853,18 +2180,18 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .site-hierarchy-sep { color: var(--text-dim); }
 
-/* ===== The Overview card: the three lanes, side by side across the width ===== */
-/* One track each so the three always share the width evenly; below 720px they stack. Each lane is
-   a button that opens the panel, so the whole strip is the target. */
+/* ===== The Site Map card: the three lanes, side by side across the width ===== */
+/* The lanes and the area grid are laid out against the card's body, not the window: a drawer
+   docked beside the page narrows the card without narrowing the window. */
+.site-map-body { container: site-map / inline-size; }
+
+/* One track each so the three always share the width evenly. Each lane is a button that opens the
+   panel, so the whole strip is the target. */
 .site-lanes {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
-}
-
-@media (max-width: 720px) {
-  .site-lanes { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Each lane keeps its own hue: blue is the infrastructure signal, grey is what not to trust, amber
@@ -1918,10 +2245,9 @@ tbody tr:hover { background: var(--bg-glass); }
 .site-lane-queue:hover,
 .site-lane-queue.is-open { box-shadow: 0 0 14px rgba(255, 179, 0, 0.2); }
 
-/* A lane wears its hue only while it holds something. An empty Unassigned queue is the good state
-   and an amber tile over 0 · 0 was a standing false alarm, so an empty lane keeps its outline and
-   drops the fill. The 4px cap stays 4px, in grey: dropping it would make the empty lanes shorter
-   than the full ones and the strip ragged. Compounded, so it outranks each lane's own hue. */
+/* A lane wears its hue only while it holds something: an empty lane keeps its outline and drops
+   the fill. The 4px cap stays, in grey, so empty lanes are as tall as full ones. Compounded, so it
+   outranks each lane's own hue. */
 .site-lane.is-empty {
   border-color: var(--border);
   background: transparent;
@@ -1934,9 +2260,23 @@ tbody tr:hover { background: var(--bg-glass); }
 /* The open lane is the one the panel shows: the same outline the selected pin gets. */
 .site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* ===== The Site Map card: floor plans and pins ===== */
-/* Area thumbnails share the cell grid's tracks. */
-.area-thumb {
+/* As the card narrows a lane drops its counts, then its name, down to the dot and the icon. The
+   lane's panel lists what it holds, and the button's aria-label and title still name it. After the
+   lane rules, which set the padding these narrow. */
+@container site-map (max-width: 800px) {
+  .site-lane-counts { display: none; }
+}
+
+@container site-map (max-width: 440px) {
+  .site-lane { justify-content: center; padding-left: 6px; padding-right: 6px; }
+  .site-lane-name { display: none; }
+}
+
+/* ===== The Site Map card: area plans and pins ===== */
+/* Area cards sit in the tracks of `.shopfloor-grid`. Each is a container so its header can drop
+   the counts when the card itself is narrow, whatever the window or the column count. */
+.area-card {
+  container: area-card / inline-size;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1948,23 +2288,24 @@ tbody tr:hover { background: var(--bg-glass); }
   text-align: left;
   cursor: pointer;
   transition: var(--transition);
+  --plan-max-height: 260px;
 }
 
-.area-thumb:hover {
+.area-card:hover {
   border-color: var(--border-hover);
   box-shadow: 0 0 14px var(--accent-dim);
 }
 
-/* Compounded so it keeps its border under `.area-thumb:hover`. */
-.area-thumb.area-thumb-alerting,
-.area-thumb.area-thumb-alerting:hover {
+/* Compounded so it keeps its border under `.area-card:hover`. */
+.area-card.area-card-alerting,
+.area-card.area-card-alerting:hover {
   border-color: var(--danger);
   box-shadow: 0 0 14px rgba(255, 77, 109, 0.25);
 }
 
 /* An archived area: still drawn, with its plan and its pins, and muted the way an archived cell's
    pin is. The border takes the warning colour so it reads as archived rather than as faded. */
-.area-thumb.area-thumb-archived {
+.area-card.area-card-archived {
   opacity: 0.7;
   border-color: var(--warning);
 }
@@ -1972,7 +2313,7 @@ tbody tr:hover { background: var(--bg-glass); }
 /* Wraps, so a card too narrow for the name and the counts together gives the counts their own
    line rather than shrinking the name away to nothing. Four tallies and an open context panel is
    where that happens: the name is the one thing on the card that must survive. */
-.area-thumb-header {
+.area-card-header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1982,20 +2323,26 @@ tbody tr:hover { background: var(--bg-glass); }
   min-width: 0;
 }
 
-.area-thumb-header .zone-name { flex: 1 1 auto; }
+.area-card-header .zone-name { flex: 1 1 auto; }
 
 /* The description tip belongs to the name, not to the counts. `margin-left` is dropped because the
    header's own `gap` is already the spacing, and `flex-shrink` because an 18px circle is the first
    thing a flex row would squeeze when a long area name takes the line. */
-.area-thumb-header .help-tip { flex-shrink: 0; margin-left: 0; }
+.area-card-header .help-tip { flex-shrink: 0; margin-left: 0; }
 
-/* The counts keep the right-hand end whether they share the name's line or take one below it. */
-.area-thumb-counts { flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+/* The counts keep the right-hand end whether they share the name's line or take one below it. On
+   a line of their own they wrap rather than overflow the card. */
+.area-card-counts { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+
+/* A card too narrow for the counts drops them: the area's panel gives the same tally. */
+@container area-card (max-width: 240px) {
+  .area-card-counts { display: none; }
+}
 
 /* The area's own assets, in the same line as the rest. Marked so the breakdown reads as one. */
-.area-thumb-wide { color: var(--text); }
+.area-card-wide { color: var(--text-primary); }
 
-.area-thumb-name {
+.area-card-name {
   flex: 1 1 auto;
   min-width: 0;
   background: none;
@@ -2010,14 +2357,14 @@ tbody tr:hover { background: var(--bg-glass); }
   white-space: nowrap;
 }
 
-.area-thumb-name:hover { color: var(--accent); }
-.area-thumb-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.area-card-name:hover { color: var(--accent); }
+.area-card-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
-.area-thumb.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+.area-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
 
 /* Only what the plan cannot draw: cells with no place on it, and the area-wide assets that have
    no place by definition. Absent when there is nothing to say, so the line means there is. */
-.area-thumb-aside {
+.area-card-aside {
   display: block;
   width: 100%;
   background: none;
@@ -2029,36 +2376,35 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
 }
 
-.area-thumb-aside:hover { color: var(--text); }
-.area-thumb-aside-warn { color: var(--warning-text); }
+.area-card-aside:hover { color: var(--text-primary); }
+.area-card-aside-warn { color: var(--warning-text); }
 
 /* The grid is the map, so it follows the number of areas rather than a fixed minimum width: one
-   area takes the row, two split it, three or more settle on thirds. Below the breakpoint every
-   area takes the row, whatever the count. */
+   area takes the row, two split it, three or more settle on thirds. On a card under 760px wide
+   every area takes the row, whatever the count. */
 .shopfloor-grid {
+  display: grid;
   grid-template-columns: repeat(var(--map-columns, 3), minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
 }
 
-@media (max-width: 900px) {
+@container site-map (max-width: 760px) {
   .shopfloor-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* A plan is at most --thumb-max-height tall: a tall plan is a narrow column in its card rather
-   than a card the height of the page. It grows as the grid narrows, because the pins on it have
-   to stay apart at the spacing the database enforces. */
-.area-thumb {
-  --thumb-max-height: 260px;
-}
+/* A plan is at most --plan-max-height tall (260px on .area-card): a tall plan is a narrow column
+   in its card rather than a card the height of the page. It grows as the grid narrows, because the
+   pins on it have to stay apart at the spacing the database enforces. */
+.shopfloor-grid[style*="--map-columns: 2"] .area-card { --plan-max-height: 340px; }
+.shopfloor-grid[style*="--map-columns: 1"] .area-card { --plan-max-height: 440px; }
 
-.shopfloor-grid[style*="--map-columns: 2"] .area-thumb { --thumb-max-height: 340px; }
-.shopfloor-grid[style*="--map-columns: 1"] .area-thumb { --thumb-max-height: 440px; }
-
-.area-thumb .floor-plan {
-  width: min(100%, calc(var(--thumb-max-height) * var(--plan-aspect, 1.3333)));
+.area-card .area-plan {
+  width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333)));
   margin: 0 auto;
 }
 
-.floor-plan {
+.area-plan {
   position: relative;
   width: 100%;
   background: var(--bg-glass);
@@ -2068,10 +2414,10 @@ tbody tr:hover { background: var(--bg-glass); }
   user-select: none;
 }
 
-.floor-plan-interactive { cursor: crosshair; }
+.area-plan-interactive { cursor: crosshair; }
 
-.floor-plan-image,
-.floor-plan-outline {
+.area-plan-image,
+.area-plan-outline {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2081,18 +2427,18 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The plan fills its box exactly, so a fraction of the box is a fraction of the drawing. */
-.floor-plan-image { object-fit: fill; }
+.area-plan-image { object-fit: fill; }
 
-.floor-plan-outline .outline-frame {
+.area-plan-outline .outline-frame {
   fill: none;
   stroke: var(--text-dim);
   stroke-width: 2;
   stroke-dasharray: 8 6;
 }
 
-.floor-plan-outline .outline-grid { stroke: var(--border); stroke-width: 1; }
+.area-plan-outline .outline-grid { stroke: var(--border); stroke-width: 1; }
 
-.floor-plan-caption {
+.area-plan-caption {
   position: absolute;
   left: 8px;
   bottom: 6px;
@@ -2104,7 +2450,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* A pin: the disc sits on the place, the label hangs beneath. Colour names a state the legend
    decodes and the `title` repeats it in words. */
-.floor-pin {
+.area-plan-pin {
   --pin-colour: var(--text-dim);
   position: absolute;
   transform: translate(-50%, -50%);
@@ -2121,13 +2467,13 @@ tbody tr:hover { background: var(--bg-glass); }
   font: inherit;
 }
 
-.floor-pin-normal    { --pin-colour: var(--success); }
-.floor-pin-attention { --pin-colour: var(--warning); }
-.floor-pin-idle      { --pin-colour: var(--text-dim); }
-.floor-pin-alert     { --pin-colour: var(--danger); }
-.floor-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
+.area-plan-pin-normal    { --pin-colour: var(--success); }
+.area-plan-pin-attention { --pin-colour: var(--warning); }
+.area-plan-pin-idle      { --pin-colour: var(--text-dim); }
+.area-plan-pin-alert     { --pin-colour: var(--danger); }
+.area-plan-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
 
-.floor-pin-disc {
+.area-plan-pin-disc {
   position: relative;
   width: 40px;
   height: 40px;
@@ -2141,20 +2487,20 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
-.floor-pin-small .floor-pin-disc {
+.area-plan-pin-small .area-plan-pin-disc {
   width: 18px;
   height: 18px;
   border-width: 2px;
   box-shadow: none;
 }
 
-.floor-pin-small { gap: 2px; }
+.area-plan-pin-small { gap: 2px; }
 
-.floor-pin-selected .floor-pin-disc { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25); }
+.area-plan-pin-selected .area-plan-pin-disc { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25); }
 
-.floor-pin:focus-visible .floor-pin-disc { outline: 2px solid var(--accent); outline-offset: 2px; }
+.area-plan-pin:focus-visible .area-plan-pin-disc { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.floor-pin-label {
+.area-plan-pin-label {
   font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
@@ -2168,29 +2514,28 @@ tbody tr:hover { background: var(--bg-glass); }
   text-overflow: ellipsis;
 }
 
-.floor-pin-small .floor-pin-label { font-size: 11px; padding: 0 4px; max-width: 90px; }
+.area-plan-pin-small .area-plan-pin-label { font-size: 11px; padding: 0 4px; max-width: 90px; }
 
 /* The alert ring: the one animated thing on the map, and it means what the legend's red means. */
-.floor-pin-alert .floor-pin-disc::after {
+.area-plan-pin-alert .area-plan-pin-disc::after {
   content: '';
   position: absolute;
   inset: -4px;
   border-radius: 50%;
   border: 3px solid var(--danger);
-  animation: floor-pin-pulse 1.4s ease-out infinite;
+  animation: area-plan-pin-pulse 1.4s ease-out infinite;
 }
 
-@keyframes floor-pin-pulse {
+@keyframes area-plan-pin-pulse {
   0%   { transform: scale(1); opacity: 0.8; }
   100% { transform: scale(1.8); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .floor-pin-alert .floor-pin-disc::after { animation: none; opacity: 0.6; }
+  .area-plan-pin-alert .area-plan-pin-disc::after { animation: none; opacity: 0.6; }
 }
 
-/* Under the floor rail: the cells on this floor with no place, cells on no floor, and the area's
-   Area-Wide assets. On the all-areas view it holds the unfiled cells, beside the thumbnails. */
+/* Under the grid of areas: the cells filed in no area, which no plan can draw. */
 .site-map-tray {
   display: flex;
   flex-direction: column;
@@ -2208,8 +2553,8 @@ tbody tr:hover { background: var(--bg-glass); }
   gap: 6px;
 }
 
-/* The chips wrap in the tray, and scroll once there are many: the side column must not push the
-   plan below the fold. */
+/* The chips wrap in the tray, and scroll once there are many, so a long queue of unfiled cells
+   stays one short block under the areas. */
 .site-map-tray-group .context-device-list { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
 
 .chip-link.is-selected {
@@ -2229,9 +2574,9 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The placement picker in the cell form. */
-.floor-placement { display: flex; flex-direction: column; gap: 6px; }
+.area-plan-placement { display: flex; flex-direction: column; gap: 6px; }
 
-.floor-placement-footer {
+.area-plan-placement-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2240,9 +2585,9 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The plan control in the area panel: the one attached plan, or the zone that takes one. */
-.area-plan { display: flex; flex-direction: column; gap: 8px; }
+.area-plan-panel { display: flex; flex-direction: column; gap: 8px; }
 
-.area-plan-header {
+.area-plan-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2250,8 +2595,11 @@ tbody tr:hover { background: var(--bg-glass); }
   flex-wrap: wrap;
 }
 
-.area-plan-row {
+/* Wraps: in a narrow drawer the two buttons take a line of their own rather than squeezing the
+   state beside them down to one word a line. */
+.area-plan-panel-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -2261,17 +2609,17 @@ tbody tr:hover { background: var(--bg-glass); }
   font-size: 12px;
 }
 
-.area-plan-glyph { flex-shrink: 0; color: var(--text-muted); }
+.area-plan-panel-glyph { flex-shrink: 0; color: var(--text-muted); }
 
-.area-plan-state { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.area-plan-panel-state { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 
-.area-plan-meta { font-size: 11px; color: var(--text-muted); }
+.area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-.area-plan-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
+.area-plan-panel-actions { display: flex; gap: 4px; flex-wrap: wrap; }
 
 /* An area with no plan gets the target rather than a button: the file is usually already in a
    folder somebody is dragging from. */
-.area-plan-drop {
+.area-plan-panel-drop {
   flex-direction: column;
   gap: 6px;
   padding: 18px 12px;
@@ -2283,10 +2631,10 @@ tbody tr:hover { background: var(--bg-glass); }
   transition: border-color 120ms, background 120ms;
 }
 
-.area-plan-drop:hover { border-color: var(--accent); }
-.area-plan-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.area-plan-drop[data-dragging='yes'] { border-color: var(--accent); background: var(--bg-surface); }
-.area-plan-drop-line { font-size: 12px; color: var(--text-primary); }
+.area-plan-panel-drop:hover { border-color: var(--accent); }
+.area-plan-panel-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.area-plan-panel-drop[data-dragging='yes'] { border-color: var(--accent); background: var(--bg-surface); }
+.area-plan-panel-drop-line { font-size: 12px; color: var(--text-primary); }
 
 .zone-name {
   overflow: hidden;
@@ -2294,7 +2642,7 @@ tbody tr:hover { background: var(--bg-glass); }
   white-space: nowrap;
 }
 
-/* Health rollup dot: one per lane and thumbnail, the worst state of the devices resolving to it.
+/* Health rollup dot: one per lane and area card, the worst state of the devices resolving to it.
    Never colour alone: the dot carries a `title` naming the state. */
 .tile-dot {
   width: 8px;
@@ -2328,16 +2676,7 @@ tbody tr:hover { background: var(--bg-glass); }
    the chip it describes is a legend that lies. */
 .legend-chip-danger { border-color: var(--danger); background: rgba(255, 77, 109, 0.15); }
 
-/* --text-muted, not --text-dim: --text-dim measures exactly 4.50:1 on a bare card; --text-muted
-   stays clear over the lane fills too. See themeContrast.test.js. */
-.zone-empty {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-style: italic;
-  line-height: 1.35;
-}
-
-/* A chip that navigates, used in the context drawers for Serving Gateway, Cell Zone and Schema. A
+/* A chip that navigates, used in the context drawers for Serving Gateway, Cell and Schema. A
    <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs.
    Inherits `.chip` and adds only the affordance. `text-align: left` because a button centres its
    text by default. */
@@ -2362,7 +2701,7 @@ tbody tr:hover { background: var(--bg-glass); }
    Above the metadata because it is the only item in that panel with a deadline on it -- see the note
    in ContextPanel.jsx. */
 .context-alert {
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   padding: 10px 12px;
   margin-bottom: 14px;
   border: 1px solid var(--warning);
@@ -2403,7 +2742,7 @@ tbody tr:hover { background: var(--bg-glass); }
   margin-top: 5px;
 }
 
-/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is 360px
+/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
    and "Raised by Grafana · since 14:22:07" plus the link is close enough to that to wrap on a narrow
    band, and a clipped link is worse than a two-line footer. */
 .context-alert-foot {
@@ -2454,7 +2793,7 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
   border: 1px solid transparent;
   background: none;
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   /* A fixed floor, so the bar does not resize as the count arrives, clears or crosses 9, and the
      account button beside it does not step sideways. */
   min-width: 34px;
@@ -2583,6 +2922,7 @@ tbody tr:hover { background: var(--bg-glass); }
   color: inherit;
   font-family: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition: var(--transition);
 }
@@ -2590,11 +2930,8 @@ tbody tr:hover { background: var(--bg-glass); }
 .alert-pill-item-link:hover { background: var(--bg-glass); }
 .alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* No underline; the colour carries the affordance. Two variants render this class, a <button> for
-   an asset alert and an <a> for a platform alert that opens Grafana, and only the anchor picked up
-   the browser underline. The title takes the accent, as .endpoint-open does; the summary and meta
-   keep their muted colours. */
-.alert-pill-item-link { text-decoration: none; }
+/* An <a> for a platform alert that opens Grafana: the title takes the accent, as .endpoint-open
+   does; the summary and meta keep their muted colours. */
 a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
@@ -2640,6 +2977,179 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   color: var(--text-muted);
 }
 
+/* The top bar's notification history: the bell, its unread badge and the list behind it. See
+   NotificationHistory.jsx. The wrapper anchors the panel to the bell, as .alert-pill-wrap does. */
+.notif-wrap { position: relative; display: flex; }
+.notif-button { position: relative; }
+
+/* The unread count on the bell's corner. Opaque, with each tone painted as a background-image
+   over --bg-card, so the ratios measured for the toasts hold here too. A routine success keeps the
+   neutral base: the tones are spent on what is worth opening the list for. */
+.notif-badge {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.notif-badge-info {
+  background-image: linear-gradient(rgba(0, 212, 255, 0.15), rgba(0, 212, 255, 0.15));
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.notif-badge-warning {
+  background-image: linear-gradient(rgba(255, 179, 0, 0.15), rgba(255, 179, 0, 0.15));
+  border-color: var(--warning);
+  color: var(--warning-text);
+}
+
+.notif-badge-error {
+  background-image: linear-gradient(rgba(255, 77, 109, 0.15), rgba(255, 77, 109, 0.15));
+  border-color: var(--danger);
+  color: var(--danger-text);
+}
+
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: 440px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* Focused programmatically as it opens, so a screen reader announces it; the ring would only
+   outline the whole panel. */
+.notif-panel:focus { outline: none; }
+
+/* Sticky, so Clear and Close stay in reach at the bottom of fifty entries. */
+.notif-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.notif-panel-actions { display: flex; align-items: center; gap: 4px; }
+
+.notif-clear {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.notif-clear:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.notif-clear:disabled { opacity: 0.5; cursor: default; }
+
+.notif-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.notif-close:hover { color: var(--text-primary); background: var(--bg-glass); }
+
+.notif-clear:focus-visible,
+.notif-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.notif-empty {
+  padding: 22px 18px 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notif-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 8px 0 2px;
+}
+
+.notif-list { list-style: none; margin: 0; padding: 0; }
+
+.notif-item {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notif-item:last-child { border-bottom: none; }
+
+/* The type's glyph in its signal colour, the icon tone each of these clears 3:1 in. */
+.notif-item-icon { display: flex; flex-shrink: 0; margin-top: 2px; }
+.notif-item-success .notif-item-icon { color: var(--success); }
+.notif-item-info .notif-item-icon    { color: var(--accent); }
+.notif-item-warning .notif-item-icon { color: var(--warning); }
+.notif-item-error .notif-item-icon   { color: var(--danger); }
+
+.notif-item-body { flex: 1; min-width: 0; }
+
+.notif-item-msg {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.notif-item-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+.notif-foot {
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* The 3D model preview in the device drawer. One class on all three states (the element, the
    loading line and the error line) so the panel does not resize as the viewer loads or fails.
    `--bg-base` rather than the card surface, so a pale model does not disappear into the panel. */
@@ -2679,9 +3189,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   color: var(--text-muted);
 }
 
-/* The cell icon picker: a grid of labelled buttons rather than a <select>, because the operator is
-   choosing what the card will look like on the map. `auto-fit` so the grid reflows at any modal
-   width; each option carries its label. */
+/* The cell and area icon picker: a grid of labelled buttons rather than a <select>, because the
+   operator is choosing what the pin will look like on the plan. `auto-fit` so the grid reflows at
+   any modal width; each option carries its label. */
 .icon-picker {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
@@ -2762,8 +3272,8 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   flex-shrink: 0;
 }
 
-/* A gateway name is `.mono`, which carries its own 12px. Inside a chip that is a point larger than
-   everything beside it and it grew the row it sits in. The colour is deliberately NOT reset --
+/* A gateway name is `.mono`, which carries its own 13px. Inside a chip that is larger than
+   everything beside it and it would grow the row it sits in. The colour is deliberately NOT reset --
    accent is what distinguishes a gateway chip from a device chip at a glance. */
 .chip .mono { font-size: inherit; }
 
@@ -2778,9 +3288,8 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
    `min-width: auto` and refuses to shrink below its content. `align-items: flex-start` so the panel
    does not stretch to the height of a long table. */
 /* No `gap`: a gap applies between the flex items whether or not the drawer has any width, so every
-   page that renders a ContextPanel gave up 16px on its right edge permanently and ended short of
-   the pages that render no drawer at all (Archives, Directory, Vocabulary). The space belongs to
-   the open drawer, so the open drawer carries it. */
+   page with a ContextPanel would give up 16px on its right edge and end short of the pages with no
+   drawer. The open drawer carries the space. */
 .page-layout {
   display: flex;
   align-items: flex-start;
@@ -2817,11 +3326,11 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s linear 0.25s;
 }
 
-/* The margin is the page's gutter, and it opens and closes with the drawer -- transitioned
+/* The margin is the gap between two cards, and it opens and closes with the drawer -- transitioned
    alongside the width so the table beside it reflows once rather than twice. */
 .context-panel-open {
   width: var(--context-panel-width);
-  margin-left: 16px;
+  margin-left: var(--stack);
   visibility: visible;
   transition: width 0.25s ease, margin-left 0.25s ease, visibility 0s;
 }
@@ -2900,8 +3409,9 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
 .context-panel-fields { display: flex; flex-direction: column; gap: 9px; }
 
-/* Label above value, not beside it. A side-by-side pair inside 360px gives the value ~180px, which
-   is not enough for a UUID or a Sparkplug topic path -- the two things most often read here. */
+/* Label above value, not beside it. A side-by-side pair inside the drawer gives the value about
+   half its width, which is not enough for a UUID or a Sparkplug topic path -- the two things most
+   often read here. */
 .context-field { min-width: 0; }
 
 .context-field-label {
@@ -2936,7 +3446,7 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 }
 
 .context-field-value.mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   /* Overrides `.mono`'s accent colour: in this panel a monospace value is a plain fact, not a
      link, and colouring every id would make the whole list read as actionable. */
@@ -3044,14 +3554,21 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The app-level drawer, which is the help panel. It is a sibling of `.content` rather than inside
    `.page-layout`, so there is no scrolling ancestor for `position: sticky`; it takes the full
-   height of the body and scrolls inside itself. Single-class specificity on purpose, placed above
-   the 1100px block so the overlay treatment still wins on a narrow viewport. */
+   height of the body and scrolls inside itself. Closed it has no margin as well as no width: a
+   margin on the closed drawer was an empty strip down the right of every page. */
 .context-panel-app {
   position: relative;
   top: auto;
   max-height: none;
   align-self: stretch;
-  margin: var(--inset-tight) var(--inset-tight) var(--inset-tight) 0;
+  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s linear 0.25s;
+}
+
+/* Open, it keeps the page's gutter from the window's edges. On the page side `.content`'s padding
+   is already the gap, so it adds none there. */
+.context-panel-app.context-panel-open {
+  margin: var(--gutter) var(--gutter) var(--gutter) 0;
+  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s;
 }
 
 .context-panel-app .context-panel-inner {
@@ -3118,9 +3635,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .help-missing { color: var(--text-muted); font-style: italic; }
 
-/* Below this the drawer would leave the table too little room to be worth reading. It becomes an
-   overlay instead -- still not modal, still dismissible, but no longer stealing half the list. */
-@media (max-width: 1100px) {
+/* Below 800px there is no room for the drawer beside the list, so it slides over the page, still
+   not modal and still dismissible. Above that it keeps its column: at half a 1080p screen the list
+   still gets about 540px beside it. */
+@media (max-width: 800px) {
   .context-panel-open {
     position: fixed;
     top: 52px;
@@ -3135,7 +3653,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     max-height: none;
     z-index: 90;
   }
+  /* The help drawer's docked margins would inset its overlay from the window's edges. */
+  .context-panel-app.context-panel-open { margin: 0; }
   .context-panel-inner {
+    /* The desktop width would leave the overlay's extra width as an empty strip on the right. */
+    width: 100%;
     max-height: none;
     height: 100%;
     border-radius: 0;
@@ -3192,45 +3714,25 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border: 0;
 }
 
-/* Digital Thread swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
+/* Audit Trail swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
-/* The page fills the viewport instead of growing past it, so the timeline can scroll inside the
-   card and the axis row can pin to the top of that scroll. A chain of flex columns from here down
-   to .dt-scroll: every link may shrink, and everything beside the scroller -- the card header, the
-   filter bar, the header row, the lane toggle, the foot -- is told not to. A maximum rather than a
-   height, so a short thread gets a short card. */
-.dt-page { height: 100%; }
-
-.dt-page > .page-main {
+/* The card body holding the timeline: the one link in the card that gives way (.card-fill-scroll),
+   and inside it .trail-scroll is the one thing that scrolls. It keeps overflow visible so the two
+   are not nested scrollers; the parts beside the scroller do not shrink. */
+.card-fill > .trail-timeline {
   display: flex;
   flex-direction: column;
-  max-height: 100%;
+  overflow: visible;
 }
 
-.dt-page > .page-main > .card {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+.trail-timeline > :not(.trail-scroll) { flex-shrink: 0; }
 
-.dt-page > .page-main > .card > :not(.dt-timeline) { flex-shrink: 0; }
-
-/* The card body holding the timeline: the one link in the card that gives way, and inside it the
-   scroller is the one thing that does. */
-.dt-timeline {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.dt-timeline > :not(.dt-scroll) { flex-shrink: 0; }
-
-.dt-timeline > .dt-scroll { min-height: 0; }
+.trail-timeline > .trail-scroll { min-height: 0; }
 
 /* The row above the timeline: the count at the left, the colour key at the right. Baseline-aligned,
    because the two are set at different sizes. */
-.dt-header {
+.trail-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -3239,9 +3741,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   margin-bottom: 10px;
 }
 
-/* The colour key. `.dt-node-dot` shares the `.dt-node-<kind>` fills with the markers themselves,
+/* The colour key. `.trail-node-dot` shares the `.trail-node-<kind>` fills with the markers themselves,
    so the legend cannot drift away from what it describes. */
-.dt-legend {
+.trail-legend {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -3250,38 +3752,34 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--text-muted);
 }
 
-.dt-legend-item {
+.trail-legend-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.dt-node-dot {
+.trail-node-dot {
   width: 9px;
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-/* How much of the thread is on screen. Shares one row with the legend: the count at the left, the
+/* How much of the trail is on screen. Shares one row with the legend: the count at the left, the
    key at the right. A tier above the muted legend beside it, which is what stops it reading as part
    of the key. Tabular figures so the numbers do not shuffle sideways as the poll and Load more
    change them under a reader's eye. */
-.dt-count {
+.trail-count {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 
-/* Both scrolls live HERE rather than on the page. Horizontal, because the drawer is a flex sibling
-   of the list: opening it takes 360px off this element's width, and a page that scrolled as a
-   whole would push the lane labels off-screen the moment an event was selected. Vertical, because
-   this is the box the axis row pins to: a sticky element resolves against its nearest scroll
-   container, and this was already one for the horizontal axis, so while the page did the vertical
-   scrolling the axis pinned to a box that never moved. The .dt-page chain is what gives this
-   element a height to overflow. */
-.dt-scroll {
+/* Both scrolls live here rather than on the page: the drawer is a flex sibling of the list and takes
+   width off this box, and the axis row pins to its nearest scroll container, so that must be this
+   one. The .page-fill chain gives it a height to overflow. */
+.trail-scroll {
   overflow-x: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -3290,37 +3788,37 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The three widths every rule below is laid out from, declared once: a gridline is placed against
    the track's box, and the track's box is what is left of a lane after the label and the gap. The
    minimum width is their sum, so the track can never be forced past the box it is drawn in. */
-.dt-swimlanes {
-  --dt-label-width: 260px;
-  --dt-lane-gap: 10px;
-  --dt-track-min: 380px;
+.trail-swimlanes {
+  --trail-label-width: 260px;
+  --trail-lane-gap: 10px;
+  --trail-track-min: 380px;
   /* The axis track's height, which is also where a pinned section heading sits. */
-  --dt-axis-height: 24px;
-  min-width: calc(var(--dt-label-width) + var(--dt-lane-gap) + var(--dt-track-min));
+  --trail-axis-height: 24px;
+  min-width: calc(var(--trail-label-width) + var(--trail-lane-gap) + var(--trail-track-min));
 }
 
 /* The rows, in a box of their own under the axis. `isolation` makes it a stacking context, which
    is what lets the gridlines sit at z-index -1: behind every row, its hover tint and its sticky
    label, and above nothing but the card. */
-.dt-body {
+.trail-body {
   position: relative;
   isolation: isolate;
 }
 
 /* Vertical gridlines, one per axis tick, spanning the track column of every row. Positioned once
    here rather than once per lane. Inert: nothing under the pointer is a line. */
-.dt-gridlines {
+.trail-gridlines {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--dt-label-width) + var(--dt-lane-gap));
+  left: calc(var(--trail-label-width) + var(--trail-lane-gap));
   right: 0;
   z-index: -1;
   pointer-events: none;
 }
 
 /* Dotted and faint: a reference to read a marker against, not a rule to follow. */
-.dt-gridline {
+.trail-gridline {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -3330,22 +3828,22 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* A lane is one ruled row of a grid: the label column and the track, divided from the row below by
    a hairline. `stretch`, so the label's opaque background covers the whole row height. */
-.dt-lane {
+.trail-lane {
   display: flex;
   align-items: stretch;
-  gap: var(--dt-lane-gap);
+  gap: var(--trail-lane-gap);
   border-bottom: 1px solid var(--border);
 }
 
 /* The row under the pointer, so one entity's markers can be followed across a wide track. The same
-   tint the tables use. The label is opaque in the card colour (see .dt-lane-label), so the tint is
+   tint the tables use. The label is opaque in the card colour (see .trail-lane-label), so the tint is
    laid over that as an image rather than replacing it -- the row and its label then match without
    the label losing what keeps markers from showing through it. */
-.dt-lane:not(.dt-axis):hover {
+.trail-lane:not(.trail-axis):hover {
   background: var(--bg-glass);
 }
 
-.dt-lane:not(.dt-axis):hover .dt-lane-label {
+.trail-lane:not(.trail-axis):hover .trail-lane-label {
   background-image: linear-gradient(var(--bg-glass), var(--bg-glass));
 }
 
@@ -3355,7 +3853,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
    read as one header system: the `thead` tint is 2% in the light theme and did not read as a band
    on a white card, while the base colour is a header band in both themes. The track inside stays
    bare: the row is what is opaque, and a scale is not a lane. */
-.dt-lane.dt-axis {
+.trail-lane.trail-axis {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -3363,40 +3861,40 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* The corner is part of the row, so it takes the row's colour. */
-.dt-axis .dt-lane-label {
+.trail-axis .trail-lane-label {
   background: var(--bg-base);
 }
 
 /* The section heading is a row of the grid: the same two columns as a lane, the same height and
    the same rule beneath, so the first lane under it has an edge above it and the rhythm does not
-   break at a section. Stated here rather than shared with .dt-lane, which the lane counts and the
+   break at a section. Stated here rather than shared with .trail-lane, which the lane counts and the
    hover rule select on. Sticky under the axis row, so a reader deep in a section still knows which
    one; the offset is the axis track plus the row's divider. Above the labels (2), because its own
    lanes come after it in the DOM and would paint over it as they scrolled under. Opaque for the
    rows that pass under it, on the base surface so it stands apart from the rows it heads; see the
    axis row above for why not the `thead` tint. */
-.dt-section {
+.trail-section {
   position: sticky;
-  top: calc(var(--dt-axis-height) + 1px);
+  top: calc(var(--trail-axis-height) + 1px);
   z-index: 3;
   display: flex;
   align-items: stretch;
-  gap: var(--dt-lane-gap);
+  gap: var(--trail-lane-gap);
   border-bottom: 1px solid var(--border);
   background: var(--bg-base);
 }
 
 /* A heading's label: the icon at 9px, where the lanes' names indent to meet its text. The row's
    own colour, opaque, so markers cannot show through it either. */
-.dt-section .dt-lane-label {
+.trail-section .trail-lane-label {
   padding-left: 9px;
   background: var(--bg-base);
   color: var(--text-muted);
 }
 
-.dt-section-icon { flex-shrink: 0; }
+.trail-section-icon { flex-shrink: 0; }
 
-.dt-section-name {
+.trail-section-name {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -3404,8 +3902,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* The count, dim and monospaced beside the name; the label's own gap separates them. */
-.dt-section-count {
-  font-family: 'JetBrains Mono', monospace;
+.trail-section-count {
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-dim);
 }
@@ -3413,16 +3911,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
    them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
    here would let a dozen dots slide through the text. */
-/* 260px, not 210px. A schema lane is `<name> v<version>`, and a lineage shares the name and differs
-   only in the version -- so at 210px, with the deleted flag beside it, every version of one schema
-   ellipsised to the same string and the lanes became indistinguishable. The track is `flex: 1` and
-   every marker is positioned as a fraction of it, so the width comes off the track harmlessly. The
-   full name is on the label's `title` either way. */
-.dt-lane-label {
+/* 260px: a schema lane is `<name> v<version>` and a lineage shares the name, so a narrower label
+   ellipsises every version to the same string. The track is `flex: 1` and every marker is a
+   fraction of it, so the width comes off the track. The full name is on the label's `title`. */
+.trail-lane-label {
   position: sticky;
   left: 0;
   z-index: 2;
-  flex: 0 0 var(--dt-label-width);
+  flex: 0 0 var(--trail-label-width);
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3440,7 +3936,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The one element allowed to lose characters. Everything else in the label -- the icon, the
    deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
-.dt-lane-name {
+.trail-lane-name {
   color: var(--text-primary);
   font-weight: 600;
   overflow: hidden;
@@ -3450,31 +3946,27 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* No name resolved anywhere -- not from a live row, not from an audit snapshot. Dimmer than a
    real name so a lane that could not be identified does not read like one that was. */
-.dt-lane-unnamed {
+.trail-lane-unnamed {
   font-weight: 500;
   font-size: 11px;
   color: var(--text-muted);
 }
 
-/* The entity is gone and the name came out of its final snapshot. */
 /* The part of a label that identifies one row within a lineage -- a schema's version. It sits
-   OUTSIDE `.dt-lane-name` so the ellipsis cannot reach it: appended to the name it was the end of
+   OUTSIDE `.trail-lane-name` so the ellipsis cannot reach it: appended to the name it was the end of
    the string, and sixteen versions of one schema drew sixteen lanes reading the same truncation. */
-.dt-lane-qualifier {
+.trail-lane-qualifier {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-dim);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
-/* A flag, not a heading. It was 11px uppercase with half a pixel of tracking, which cost about
-   62px of a 184px label -- two thirds of the room the NAME had, on exactly the lanes whose name is
-   the only thing distinguishing them from their neighbours. */
-.dt-lane-gone {
+/* A flag, not a heading: it costs the lane's name as little room as possible. */
+.trail-lane-gone {
   flex-shrink: 0;
-  /* 11px is the type-scale floor themeContrast.test.js holds; the width came back from dropping
-     the uppercasing and the tracking, not from shrinking it below what is readable. */
+  /* 11px is the type-scale floor themeContrast.test.js holds. */
   font-size: 11px;
   font-weight: 600;
   color: var(--danger-text);
@@ -3486,10 +3978,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
    with a rule under every row, a second line through each one made the page a stack of rules for
    the eye to follow instead of markers. 28px holds an 18px cluster badge with 5px clear on each
    side. */
-.dt-track {
+.trail-track {
   position: relative;
   flex: 1;
-  min-width: var(--dt-track-min);
+  min-width: var(--trail-track-min);
   height: 28px;
   /* A stacking context of its own, so a marker's z-index -- a badge is 3, the active ring 4, a
      hovered badge 5 -- orders markers within their track and never lifts one above a sticky
@@ -3497,13 +3989,13 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   isolation: isolate;
 }
 
-.dt-axis-track { height: var(--dt-axis-height); }
+.trail-axis-track { height: var(--trail-axis-height); }
 
-.dt-tick {
+.trail-tick {
   position: absolute;
   top: 6px;
   transform: translateX(-50%);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -3511,13 +4003,13 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The end ticks are aligned by their inner edge rather than centred, or each would hang half its
    width past the track and widen the scroll area by a label. */
-.dt-tick:first-child { transform: none; }
-.dt-tick:last-child  { transform: translateX(-100%); }
+.trail-tick:first-child { transform: none; }
+.trail-tick:last-child  { transform: translateX(-100%); }
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --
    see offsetFor(). */
-.dt-node {
+.trail-node {
   position: absolute;
   top: 50%;
   width: 13px;
@@ -3535,31 +4027,31 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Markers crowd where activity is dense. A pile is a badge now, but a near miss is still two dots
    with barely a gap, so raising the hovered one keeps its neighbour reachable; the tooltip and the
    drawer are what tell them apart. */
-.dt-node:hover,
-.dt-node:focus-visible {
+.trail-node:hover,
+.trail-node:focus-visible {
   transform: translate(-50%, -50%) scale(1.4);
   z-index: 3;
 }
 
 /* The active marker has to survive being surrounded: a solid accent ring with a gap inside it in
    the card colour, since `--accent-glow` alone almost disappears in a dense stretch. Shared with
-   `.dt-cluster`, not a `.dt-node` compound, so a badge can carry the ring while the drawer steps
+   `.trail-cluster`, not a `.trail-node` compound, so a badge can carry the ring while the drawer steps
    through the events inside it; `box-shadow` follows the element's own border-radius. */
-.dt-node-selected {
+.trail-node-selected {
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
   z-index: 4;
 }
 
-.dt-node-creation,    .dt-node-dot.dt-node-creation    { background: var(--success); }
-.dt-node-operational, .dt-node-dot.dt-node-operational { background: var(--accent); }
-.dt-node-governance,  .dt-node-dot.dt-node-governance  { background: var(--warning); }
-.dt-node-critical,    .dt-node-dot.dt-node-critical    { background: var(--danger); }
+.trail-node-creation,    .trail-node-dot.trail-node-creation    { background: var(--success); }
+.trail-node-operational, .trail-node-dot.trail-node-operational { background: var(--accent); }
+.trail-node-governance,  .trail-node-dot.trail-node-governance  { background: var(--warning); }
+.trail-node-critical,    .trail-node-dot.trail-node-critical    { background: var(--danger); }
 
 /* The cluster badge: several events too close together to draw separately, replaced by their count.
    Violet, because a badge is not a kind of event; see --cluster. Positioning is separate from the
-   look: this rule is the pill and the `.dt-track` rule places it, so the legend can render a real
-   `.dt-cluster` as an inline sample. */
-.dt-cluster {
+   look: this rule is the pill and the `.trail-track` rule places it, so the legend can render a real
+   `.trail-cluster` as an inline sample. */
+.trail-cluster {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3570,7 +4062,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   background: var(--cluster-bg);
   border: 1px solid var(--cluster);
   color: var(--cluster-text);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;
@@ -3580,7 +4072,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* On a track it is a marker. 18px inside a 28px lane, centred on the same line the dots sit on.
    Above them in the stack, because a badge that a stray single dot painted over would be the
    overlap problem again in a new colour. */
-.dt-track .dt-cluster {
+.trail-track .trail-cluster {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
@@ -3588,8 +4080,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   z-index: 3;
 }
 
-.dt-track .dt-cluster:hover,
-.dt-track .dt-cluster:focus-visible {
+.trail-track .trail-cluster:hover,
+.trail-track .trail-cluster:focus-visible {
   /* A smaller lift than a dot's 1.4x: the badge is already 18px, and at 1.4 it would overhang the
      lane it belongs to. */
   transform: translate(-50%, -50%) scale(1.15);
@@ -3600,7 +4092,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The legend's sample. Not clickable, and a notch smaller so it sits on the 11px key line beside
    the four 9px dots rather than setting the row's height on its own. */
-.dt-legend-cluster {
+.trail-legend-cluster {
   cursor: default;
   height: 16px;
   min-width: 16px;
@@ -3608,37 +4100,17 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 0 5px;
 }
 
-/* The foot of the timeline, present only when the thread continues past what is loaded or ended
-   at a page boundary. Separated by a rule, because it makes a claim about the data above it. */
-.dt-pagination {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-/* Muted and italic: it is a statement of completeness, not a warning. The truncated case gets the
-   button instead, and a button is louder than any colour would be here. */
-.dt-pagination-end {
-  font-size: 11px;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
 /* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
    above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
    borders and fills, not for text. */
-.dt-badge-creation    { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
-.dt-badge-operational { background: var(--accent-dim);       color: var(--accent); }
-.dt-badge-governance  { background: rgba(255, 179, 0, 0.15); color: var(--warning-text); }
-.dt-badge-critical    { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
+.trail-badge-creation    { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
+.trail-badge-operational { background: var(--accent-dim);       color: var(--accent-text); }
+.trail-badge-governance  { background: rgba(255, 179, 0, 0.15); color: var(--warning-text); }
+.trail-badge-critical    { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
 
 /* Stepping through one asset's history: full width of the subtitle row, stacked, because the
    position line and the two buttons are three things at three sizes. */
-.dt-drawer-nav {
+.trail-drawer-nav {
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -3646,7 +4118,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   margin-top: 2px;
 }
 
-.dt-drawer-nav-pos {
+.trail-drawer-nav-pos {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
@@ -3655,18 +4127,18 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* Equal halves rather than content width: the two labels are different lengths, and a Next
    button that sits wherever Previous happens to end moves under the cursor as you step. */
-.dt-drawer-nav-btns {
+.trail-drawer-nav-btns {
   display: flex;
   gap: 6px;
 }
 
-.dt-nav-btn {
+.trail-nav-btn {
   flex: 1 1 0;
   justify-content: center;
   font-size: 11px;
 }
 
-.dt-drawer-nav-badges {
+.trail-drawer-nav-badges {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -3675,8 +4147,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* The other changes one transaction made. Above the diff in the drawer, with the same top border
-   and rhythm as .dt-diff, because the two are peers. */
-.dt-causation {
+   and rhythm as .trail-diff, because the two are peers. */
+.trail-causation {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
@@ -3684,7 +4156,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The caveat is part of the control, not a tooltip: the sibling list is a lower bound rather than a
    count. */
-.dt-causation-hint {
+.trail-causation-hint {
   font-size: 11px;
   line-height: 1.45;
   color: var(--text-muted);
@@ -3692,11 +4164,11 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 /* Its own row under the hint: a full-width control here would read as the section's heading. */
-.dt-causation-all {
+.trail-causation-all {
   margin-bottom: 8px;
 }
 
-.dt-causation-list {
+.trail-causation-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -3707,7 +4179,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* A button, not a link or a bare row: it changes what the drawer shows without navigating, and
    `button` gets Enter, Space and the focus ring for free. */
-.dt-causation-item {
+.trail-causation-item {
   width: 100%;
   display: flex;
   align-items: baseline;
@@ -3722,17 +4194,17 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   cursor: pointer;
 }
 
-.dt-causation-item:hover {
+.trail-causation-item:hover {
   border-color: var(--accent);
   background: var(--accent-dim);
 }
 
-/* Fixed width so the three columns line up down the list rather than stepping in and out with
-   whichever entity kind each row happens to be. DEVICE is the longest of the three. */
-.dt-causation-kind {
+/* Fixed width so the name column lines up down the list rather than stepping in and out with
+   whichever entity kind each row happens to be. */
+.trail-causation-kind {
   flex: 0 0 auto;
   min-width: 58px;
-  /* NO font-size OF ITS OWN: it inherits 11px from .dt-causation-item, which is the floor
+  /* NO font-size OF ITS OWN: it inherits 11px from .trail-causation-item, which is the floor
      themeContrast.test.js enforces across App.css. These read as secondary through weight,
      letter-spacing and --text-muted rather than by shrinking below the scale. */
   font-weight: 700;
@@ -3743,30 +4215,30 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* Takes the slack, and wraps rather than truncating: an asset name is the thing the reader is
    scanning for, and an ellipsis in the middle of `Sim_Gateway_Cell1_Machining` hides the half that
    distinguishes it from the other three. */
-.dt-causation-name {
+.trail-causation-name {
   flex: 1 1 auto;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.dt-causation-action {
+.trail-causation-action {
   flex: 0 0 auto;
   font-weight: 700;
   letter-spacing: 0.6px;
   color: var(--text-muted);
 }
 
-/* ===== Digital Thread: the diff inspector inside the drawer ===== */
-.dt-diff { margin-top: 14px; }
+/* ===== Audit Trail: the diff inspector inside the drawer ===== */
+.trail-diff { margin-top: 14px; }
 
-.dt-diff-none {
+.trail-diff-none {
   font-size: 12px;
   color: var(--text-muted);
   font-style: italic;
   margin-top: 4px;
 }
 
-.dt-diff-table {
+.trail-diff-table {
   width: 100%;
   margin-top: 8px;
   border-collapse: collapse;
@@ -3779,8 +4251,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* The global `th` rule sets `white-space: nowrap`, uppercase and letter-spacing for every table
    header, and each property name here is a `<th scope="row">`. This resets the inherited three
    before setting anything of its own; wrapping rules cannot help while `nowrap` stands. */
-.dt-diff-table th,
-.dt-diff-table td {
+.trail-diff-table th,
+.trail-diff-table td {
   text-align: left;
   vertical-align: top;
   white-space: normal;
@@ -3802,38 +4274,37 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* The outer edges have nothing to be separated from, and reclaiming those 12px gives them to the
    values that need them. */
-.dt-diff-table th:first-child,
-.dt-diff-table td:first-child { padding-left: 0; }
-.dt-diff-table th:last-child,
-.dt-diff-table td:last-child { padding-right: 0; }
+.trail-diff-table th:first-child,
+.trail-diff-table td:first-child { padding-left: 0; }
+.trail-diff-table th:last-child,
+.trail-diff-table td:last-child { padding-right: 0; }
 
-/* Equal thirds. The property column was the widest at 38%, which is the right call when names
-   cannot wrap -- now that they can, the values are what need the room, and three even columns
-   keep the header row and the divider lines reading as one grid. */
-.dt-diff-table th:nth-child(1),
-.dt-diff-table td:nth-child(1) { width: 33.34%; }
-.dt-diff-table th:nth-child(2),
-.dt-diff-table td:nth-child(2) { width: 33.33%; }
+/* Equal thirds: the values need the room, and three even columns keep the header row and the
+   divider lines reading as one grid. */
+.trail-diff-table th:nth-child(1),
+.trail-diff-table td:nth-child(1) { width: 33.34%; }
+.trail-diff-table th:nth-child(2),
+.trail-diff-table td:nth-child(2) { width: 33.33%; }
 
 /* Vertical dividers, and the one between Previous and New is the load-bearing one: those columns
    hold the same property's two values, often differing by a character. Drawn on the cell so it
    stops at the last row. */
-.dt-diff-table tbody th:nth-child(1),
-.dt-diff-table tbody td:nth-child(1),
-.dt-diff-table tbody td:nth-child(2) { border-right: 1px solid var(--border); }
+.trail-diff-table tbody th:nth-child(1),
+.trail-diff-table tbody td:nth-child(1),
+.trail-diff-table tbody td:nth-child(2) { border-right: 1px solid var(--border); }
 
 /* An INSERT or a DELETE has one value column, not two. A fixed 130px for the name -- rather than
    a percentage -- because the name column's job is the same at any drawer width, and every pixel
    past what it needs is taken from a serialised metric array that will use all of them. */
-.dt-diff-onesided th:nth-child(1),
-.dt-diff-onesided td:nth-child(1) {
+.trail-diff-onesided th:nth-child(1),
+.trail-diff-onesided td:nth-child(1) {
   width: 130px;
   border-right: 1px solid var(--border);
 }
-.dt-diff-onesided th:nth-child(2),
-.dt-diff-onesided td:nth-child(2) { width: auto; }
+.trail-diff-onesided th:nth-child(2),
+.trail-diff-onesided td:nth-child(2) { width: auto; }
 
-.dt-diff-table thead th {
+.trail-diff-table thead th {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -3841,39 +4312,38 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--text-muted);
 }
 
-/* The property name is a LABEL, not a value -- muted, so the two things being compared beside it
-   are what the eye lands on. It was --text-primary, which gave the column name the same weight as
-   the data and made every row read as three equal facts. */
-.dt-diff-table tbody th {
-  font-family: var(--font-mono, monospace);
+/* The property name is a label, not a value: muted, so the two values beside it are what the eye
+   lands on. */
+.trail-diff-table tbody th {
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
 }
 
-.dt-diff-table td {
-  font-family: var(--font-mono, monospace);
+.trail-diff-table td {
+  font-family: var(--font-mono);
   color: var(--text-primary);
 }
 
 /* The previous value is struck through and dimmed rather than merely sitting to the left of the
    new one: at this size the two columns read as a pair of values before they read as a
    before/after, and which one is current is the whole question. */
-.dt-diff-before {
+.trail-diff-before {
   color: var(--text-muted);
   text-decoration: line-through;
 }
 
-.dt-diff-empty {
+.trail-diff-empty {
   color: var(--text-muted);
   font-style: italic;
   font-family: inherit;
 }
 
-/* ===== Digital Thread: the raw payload accordion ===== */
-.dt-raw { margin-top: 4px; }
+/* ===== Audit Trail: the raw payload accordion ===== */
+.trail-raw { margin-top: 4px; }
 
-.dt-raw-summary {
+.trail-raw-summary {
   cursor: pointer;
   font-size: 11px;
   font-weight: 600;
@@ -3883,19 +4353,19 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   list-style: revert;
 }
 
-.dt-raw-summary:hover { color: var(--accent); }
+.trail-raw-summary:hover { color: var(--accent); }
 
-.dt-raw-body { margin-top: 8px; }
+.trail-raw-body { margin-top: 8px; }
 
-.dt-raw-label {
-  font-family: 'JetBrains Mono', monospace;
+.trail-raw-label {
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
   margin-bottom: 3px;
 }
 
-.dt-raw-json {
-  font-family: 'JetBrains Mono', monospace;
+.trail-raw-json {
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   background: var(--bg-base);
@@ -3914,23 +4384,16 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* ===== Settings ============================================================================= */
 
-.settings-load-error {
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  font-size: 12px;
-  color: var(--danger-text);
-}
-
-.settings-group { padding: 0; margin-bottom: 12px; }
+.settings-group { padding: 0; margin-bottom: var(--stack); }
 
 /* Label and control side by side, wrapping to stacked on a narrow viewport rather than
    squeezing the input to unusability. */
 .setting-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: var(--inset);
   align-items: flex-start;
-  padding: 14px 16px;
+  padding: var(--inset);
   border-bottom: 1px solid var(--border);
 }
 .setting-row:last-child { border-bottom: none; }
@@ -3982,7 +4445,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 .setting-json {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11px;
   resize: vertical;
 }
@@ -4110,8 +4573,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   line-height: 1.45;
 }
 
-/* Approvals: a card's own prose, and the hint under a control that explains itself. Both
-   `--text-muted` at 13px, like every other card description. */
 /* Between the approvals cards. Deliberately not `.card + .card`, for the reason the directory
    groups give: several pages stack cards that are meant to sit tight against each other. */
 .approvals-card + .approvals-card { margin-top: var(--stack); }
@@ -4126,7 +4587,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 9px 12px;
   margin-bottom: 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   background: var(--bg-glass);
   color: var(--text-muted);
   font-size: 12px;
@@ -4166,9 +4627,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 .help-tip:hover,
-.help-tip:focus-visible,
 .help-tip-pinned { color: var(--accent); }
-.help-tip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.help-tip:focus-visible { color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .help-tip-bubble {
   position: fixed;
@@ -4180,16 +4640,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 400;
   line-height: 1.5;
   letter-spacing: normal;
   text-transform: none;
-  /* `pre-line`, not `normal`: a tooltip long enough to need a second paragraph -- Cold telemetry's,
-     which carries the only-copy warning -- had its blank line collapsed into one wall of text.
-     Spaces and wrapping still collapse as before, and no other tip's text contains a newline, so
-     this only enables the break rather than changing any existing bubble. */
+  /* `pre-line` so a tip can carry a second paragraph (Cold telemetry's only-copy warning); spaces
+     and wrapping still collapse. */
   white-space: pre-line;
   pointer-events: none;
 }
@@ -4272,7 +4730,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-muted);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   font-weight: 500;
   text-align: left;
@@ -4312,7 +4770,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-display);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
@@ -4347,7 +4805,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--text);
+  color: var(--text-primary);
   cursor: pointer;
 }
 
@@ -4366,3 +4824,262 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   padding: 6px 0;
   color: var(--text-muted);
 }
+
+/* ===== Devices ===== */
+/* A badge that follows a name in the same cell. */
+.cell-tag { margin-left: 8px; }
+
+/* Badges stacked in a cell: the status badge over the alert badge. */
+.badge-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* A one-line finding under a cell's value: an icon and a short sentence. */
+.cell-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.cell-flag > svg { flex-shrink: 0; margin-top: 1px; }
+.cell-flag-warning { color: var(--warning-text); }
+.cell-flag-danger { color: var(--danger-text); }
+
+/* A legacy free-text classification in the Type column. */
+.cell-legacy { font-style: italic; color: var(--text-dim); }
+
+/* A form note that is a finding rather than a definition. */
+.form-hint.hint-warning { color: var(--warning-text); }
+.form-hint.hint-danger { color: var(--danger-text); }
+.form-hint.hint-warning > svg,
+.form-hint.hint-danger > svg { vertical-align: -2px; }
+
+.form-hint-inline { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+
+/* The read-only preview of a device's derived type tags. */
+.derived-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-glass);
+}
+
+/* GATEWAYS: the setup and credential dialogs. */
+
+/* Exempts the typed-name label's uppercasing, so the operator is not told to type capitals that
+   are not in the name. */
+.gateway-typed-name { text-transform: none; color: var(--text-primary); }
+
+.gateway-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gateway-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A block of commands or values to copy. `pre` keeps it ahead of .mono's colour and size. */
+pre.gateway-code {
+  margin: 6px 0 0;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-glass);
+  font-size: 12px;
+  white-space: pre;
+  word-break: break-all;
+}
+
+pre.gateway-code-wrap { white-space: pre-wrap; }
+
+.gateway-delivered { color: var(--success-text); font-size: 12px; }
+
+.gateway-delivery-failed {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--warning-text);
+}
+
+/* GATEWAYS: the list page. */
+.gateway-name-badge { margin-left: 8px; }
+.gateway-cell-warning { color: var(--warning-text); }
+.gateway-cell-italic { font-style: italic; }
+.gateway-withheld { color: var(--warning-text); }
+
+/* METRICS, SCHEMAS, VOCABULARY. The Add Metric form: fields wrap, and each carries its own flex
+   basis. */
+.metric-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.metric-form .form-group { margin: 0; }
+
+/* A semantic id is a full IRI; the cap keeps it from widening the catalog table. */
+.metric-id-cell { max-width: 260px; }
+
+/* The label of a group header, on Metrics and on the Vocabulary sections. */
+.table-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.table-group-label-muted { color: var(--text-muted); }
+
+.metric-edit-facts {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.schema-change-cell { max-width: 280px; }
+
+.validate-payload-input {
+  height: 150px;
+  font-size: 12px;
+}
+
+.callout-success {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+/* The schema detail dialog's five footer buttons do not fit one row at its width. */
+.modal-lg .modal-actions { flex-wrap: wrap; }
+
+/* VOCABULARY. A section header reuses `.table-group-button` and `.table-group-label`; the strip
+   behind it is `.table-group-row`'s tint. */
+.vocab-sections { padding: 0 0 4px; }
+
+.vocab-section-head {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+}
+
+.vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+
+.vocab-in-use {
+  font-size: 11px;
+  color: var(--success-text);
+}
+
+.vocab-section-body { padding: 12px 16px; }
+
+.vocab-section-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vocab-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.vocab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-glass);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vocab-chip-used {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success-text);
+}
+
+.vocab-chip-action { cursor: pointer; }
+.vocab-chip-meta { opacity: 0.65; }
+
+.vocab-note {
+  display: block;
+  margin-top: 6px;
+}
+
+/* COLD STORAGE: the Destination card, the stat strip and the catalogue rows. */
+.cold-stat { min-width: 120px; }
+.cold-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cold-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.cold-stat-warning .cold-stat-value { color: var(--warning-text); }
+/* Alone above the empty state it is centred, with no column width to pad it off its label. */
+.cold-stat-center { min-width: 0; text-align: center; }
+.cold-stat-center .cold-stat-value { font-size: 26px; }
+.cold-backlog-lead { margin-bottom: var(--stack); }
+/* The two commands sit on their own lines so a wrapped command is one a reader can select. */
+.cold-empty-commands { margin-top: 16px; font-size: 11px; line-height: 2; }
+.cold-empty-commands > div:nth-of-type(2) { margin-top: 8px; }
+.cold-row-error {
+  margin-top: 4px;
+  max-width: 38ch;
+  font-size: 11px;
+  color: var(--warning-text);
+}
+.cold-destination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.cold-destination + .cold-destination { margin-top: 12px; }
+.cold-key-set { font-size: 12px; color: var(--text-primary); }
+/* A badge whose meaning is its tooltip: the dotted underline says so. */
+.badge-hint {
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+/* CAPTURE: the drop zones and the small gaps in the details panel. */
+.capture-drop {
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.capture-drop-play { margin-top: 12px; }
+.capture-drop-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.capture-drop-icon { vertical-align: -2px; margin-right: 6px; }
+.capture-badge-lead { margin-right: 6px; }
+.capture-label-count { margin-left: 6px; }
