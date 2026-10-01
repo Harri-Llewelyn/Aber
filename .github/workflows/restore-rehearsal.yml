@@ -140,6 +140,23 @@ jobs:
           age --version
           aws --version
 
+      # The same reclaim as ci.yml's k8s-validation, for the same reason: the runner starts with
+      # ~14 GB free, and the stack's pulled images plus the three built here push the node past the
+      # kubelet's image-GC and eviction thresholds. It then deletes unused images, and the three
+      # imported ones cannot be pulled back: the evicted pods return as ImagePullBackOff.
+      - name: Reclaim Runner Disk Before Creating The Cluster
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android      || true
+          sudo rm -rf /usr/share/dotnet           || true
+          sudo rm -rf /opt/ghc                    || true
+          sudo rm -rf /usr/local/.ghcup           || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo rm -rf /usr/share/swift            || true
+          docker image prune -af                  || true
+          df -h / | tail -1
+
       - name: Set up k3d
         uses: ./.github/actions/install-k3d
 
@@ -369,6 +386,10 @@ jobs:
       - name: Cluster State On Failure
         if: failure()
         run: |
+          # Disk first: an eviction under disk pressure looks like every other failure.
+          df -h / | tail -1 || true
+          kubectl get nodes -o jsonpath='{range .items[*].status.conditions[*]}{.type}={.status} {end}{"\n"}' || true
+          kubectl -n "$NS" get events --sort-by=.lastTimestamp | grep -E 'Evict|DiskPressure|ImageGC|FreeDiskSpace|Pull' | tail -20 || true
           kubectl -n "$NS" get pods -o wide || true
           kubectl -n "$NS" get pvc || true
           kubectl -n "$NS" describe pods | tail -120 || true
