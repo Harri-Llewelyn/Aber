@@ -1627,9 +1627,12 @@ jobs:
                   bad.append(f"{job}: up={r['value'][1]}")
               else:
                   print(f"  ok  {job}")
-          # The set the chart annotates with the dev values (mosquitto's exporter is off there), plus
-          # the host. A job lost from this set is reported; one added must be declared here.
-          expected = {'ingestion', 'node', 'supabase-envoy', 'supabase-rest', 'grafana', 'prometheus', 'loki', 'alloy'}
+          # What Alloy scrapes with the dev values: the annotated pods, the two databases' exporters,
+          # the host, and the kubelet with its cAdvisor. A job lost from this set is reported; one
+          # added must be declared here.
+          expected = {'ingestion', 'mosquitto', 'supabase-db', 'timescaledb', 'supabase-envoy',
+                      'supabase-rest', 'grafana', 'prometheus', 'loki', 'alloy', 'node', 'kubelet',
+                      'cadvisor'}
           for want in sorted(expected - set(seen)):
               bad.append(f"scrape job '{want}' is absent -- its pod lost its annotations or the collector cannot reach it")
           for extra in sorted(set(seen) - expected):
@@ -1709,7 +1712,7 @@ jobs:
             -H "Host: api.localhost" \
             -H "Connection: Upgrade" -H "Upgrade: websocket" \
             -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-            "http://127.0.0.1/realtime/v1/websocket?apikey=$ANON&vsn=1.0.0" 2>"$ERR" || true)
+            "http://127.0.0.1/realtime/v1/websocket?apikey=$KEY&vsn=1.0.0" 2>"$ERR" || true)
 
           if ! printf '%s' "$RESP" | grep -q "101 Switching Protocols"; then
             echo "::error::Realtime did not complete the WebSocket upgrade through the ingress"
