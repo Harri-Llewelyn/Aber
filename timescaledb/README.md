@@ -34,7 +34,8 @@ GUC: psql interpolates `:'var'` while lexing and does not descend into dollar-qu
    decision: with the flag off the StatefulSet drops the library, and creating the extension would
    leave a view that raises on every read.
 3. **`retention.sql`**, with the chunk interval, compression and retention values.
-4. **`aggregates.sql`**, when `timescaledb.rollups.enabled`, with the three rollup retentions.
+4. **`aggregates.sql`**, when `timescaledb.rollups.enabled`, with the three rollup retentions and
+   `rollups.compressAfter`.
 5. **`storage.sql`**, between `aggregates.sql` and `roles.sql`, and both halves are load-bearing:
    it reports on the rollups, so they must exist, and `roles.sql` grants on the view it creates.
    Run out of order the failure is an empty data-lifecycle panel on a fresh volume only, which is
@@ -221,6 +222,21 @@ little and means a dashboard on the hourly rollup is never an hour stale. Rollup
 raw: `retention.sql` drops raw chunks (after 14 days by default, `timescaledb.retention.retainFor`)
 while these keep shape, excursions and
 state transitions far longer at a fraction of the size.
+
+**The rollups are compressed, and their chunk span is set.** `rollup_compress_after`
+(`timescaledb.rollups.compressAfter`, 2 days) must be longer than the 25-hour `start_offset`: a
+compressed bucket can still be refreshed, but compressing inside the refresh window would rewrite a
+chunk on every refresh, so the file refuses a shorter value. The columnstore is segmented by
+`asset_id, metric_name` as the raw hypertable is, so a dashboard's one-series read decompresses one
+segment; a continuous aggregate's default segmentby is empty. It is set once, because re-issuing it
+raises once compressed chunks exist, and turning the policy off leaves chunks already compressed as
+they are. Each rollup's chunk span is set rather than inherited: TimescaleDB gives a continuous
+aggregate ten times the raw chunk interval at its creation, which was 70 days on a stack older than
+the sized raw chunks, and a chunk is compressed only once all of it is older than `compressAfter`.
+The spans (1 day, 7 days, 30 days) put about a day of rows in a one-minute chunk at any fleet size;
+a wider chunk already open keeps its span until it closes. The variable is optional, so a caller
+that predates it leaves the rollups uncompressed. What compression measured is in
+`deploy/k8s/README.md`.
 
 **`telemetry_gapfill()` carries the last observation forward.** Under report-by-exception a metric
 that has not changed publishes nothing, so the aggregates emit one bucket in sixty for a steady

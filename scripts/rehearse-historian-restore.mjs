@@ -113,19 +113,21 @@ for (let d = DAYS; d >= 1; d -= 1) {
 }
 result.fill_seconds = seconds(fillStarted);
 
-step('compress what the policy would, and materialise the rollups');
+step('materialise the rollups, and compress what each policy would');
 let t = Date.now();
-sql(`SELECT count(compress_chunk(c, if_not_compressed => true))
-       FROM show_chunks('telemetry', older_than => now() - coalesce(
-         (SELECT (config ->> 'compress_after')::interval FROM timescaledb_information.jobs
-           WHERE proc_name = 'policy_compression' AND hypertable_name = 'telemetry'), interval '1 day')) c;`);
-result.compress_seconds = seconds(t);
-t = Date.now();
 for (const view of ['telemetry_1m', 'telemetry_5m', 'telemetry_1h']) {
   sql(`CALL refresh_continuous_aggregate('${view}', :'end'::timestamptz - (:days * interval '1 day') - interval '1 hour', :'end'::timestamptz);`,
     { end, days: DAYS });
 }
 result.rollup_seconds = seconds(t);
+// The raw hypertable and, where their policies exist, the rollups.
+t = Date.now();
+sql(`SELECT count(compress_chunk(c, if_not_compressed => true))
+       FROM timescaledb_information.jobs j,
+            show_chunks(format('%I.%I', j.hypertable_schema, j.hypertable_name)::regclass,
+                        older_than => now() - (j.config ->> 'compress_after')::interval) c
+      WHERE j.proc_name = 'policy_compression';`);
+result.compress_seconds = seconds(t);
 result.database_bytes = Number(sql('SELECT pg_database_size(current_database())'));
 result.database = sql('SELECT pg_size_pretty(pg_database_size(current_database()))');
 const before = sql(FINGERPRINT);

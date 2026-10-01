@@ -51,7 +51,7 @@ try {
   // The maintenance Job's order and variables, with placeholder passwords so every role is created.
   sql(file('extension.sql'))
   sql(file('retention.sql'), ['-v', 'compress_after=1 day', '-v', 'retain_after=14 days', '-v', 'chunk_interval=1 day'])
-  sql(file('aggregates.sql'), ['-v', 'rollup_1m_retain=180 days', '-v', 'rollup_5m_retain=1 year', '-v', 'rollup_1h_retain=5 years'])
+  sql(file('aggregates.sql'), ['-v', 'rollup_1m_retain=180 days', '-v', 'rollup_5m_retain=1 year', '-v', 'rollup_1h_retain=5 years', '-v', 'rollup_compress_after=2 days'])
   sql(file('storage.sql'))
   sql(file('cold_archive.sql'))
   sql(file('physical_backup.sql'))

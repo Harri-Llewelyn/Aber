@@ -238,6 +238,15 @@ changes nothing on its volume. A site that mirrors images into its own registry 
 the list; a site that pinned `timescaledb.image` in its values keeps the upstream image and cannot
 turn physical backup on until it unpins it.
 
+**The rollups start being compressed, and the first pass is the whole of their history.** The
+maintenance step turns on the rollups' columnstore and a policy for `timescaledb.rollups.compressAfter`
+(2 days), and the policy's first run compresses every closed rollup chunk older than that: about
+73 GB at 100 devices × 10 metrics every 30 s, becoming about 16. It runs in the background and the
+dashboards keep reading throughout, but it is a burst of disk work on the first day, so upgrade a
+large site outside its busiest hours. The chunk open at the upgrade keeps the span it was made
+with (up to 70 days on a stack older than the sized raw chunks) and is compressed once it closes.
+`compressAfter: never` keeps the rollups as they were.
+
 ### Migrations are forward-only
 
 There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;

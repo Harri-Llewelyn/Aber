@@ -415,6 +415,10 @@ volume.
 | **End to end**, decision to a writable historian | **37 s** | — |
 | Every row, bucket and marker as expected | yes | yes, by row count and markers; the float sum check was replaced after this run |
 
+**With the rollups compressed** (#415), the same fill made a **2.0 GiB** historian: the full backup
+took 6.2 s and wrote 0.16 GiB, the restore 7 s and recovery 16 s, **24 s end to end**, every row and
+bucket identical. The 12 GiB runs above predate it.
+
 **Replay**, measured with `--backup-first`: the backup came before the fill (0.46 GiB in the
 repository, 17 s), so recovery replayed the whole fill from the archived WAL. It replayed
 **28.6 GiB of WAL in 295 s, about 100 MiB/s**, on one redo process (135 s of CPU), and every row,
@@ -426,8 +430,8 @@ after zstd.
 at about 650 MB/s, because the repository and the historian shared a local disk. **At a site the
 link to the repository sets the time**: a restore reads the backup's compressed bytes across it, so
 a 1 Gbit/s path to the object store (about 110 MB/s) turns the 0.93 GiB above into 9 seconds and a
-fleet-scale full (a quarter of a 1.1 TB historian, `deploy/k8s/README.md`, *What grows*) into about
-45 minutes, before replay. Synthetic values compress better than real signals, so real fulls are
+fleet-scale full (a quarter of a 560 GB historian, `deploy/k8s/README.md`, *What grows*) into about
+20 minutes, before replay. Synthetic values compress better than real signals, so real fulls are
 larger than 8–10 %.
 
 ### What building it on a live stack found

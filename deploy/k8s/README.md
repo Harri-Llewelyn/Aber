@@ -96,9 +96,9 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | :--- | :--- | ---: | ---: |
 | Raw telemetry, open chunk + `compressAfter` (uncompressed) | `timescaledb.retention.chunkInterval` × 2 | ~0.9 GB | ~22 GB |
 | Raw telemetry, the rest of the window (compressed) | `retainFor`, 14 days | ~1 GB | ~375 GB |
-| `telemetry_1m` (not compressed) | `oneMinuteRetainFor`, 180 days | ~46 GB | ~464 GB |
-| `telemetry_5m` (not compressed) | `fiveMinuteRetainFor`, 1 year | ~19 GB | ~188 GB |
-| `telemetry_1h` (not compressed) | `oneHourRetainFor`, 5 years | ~8 GB | ~81 GB |
+| `telemetry_1m` (compressed after `rollups.compressAfter`, 2 days) | `oneMinuteRetainFor`, 180 days | ~10 GB | ~96 GB |
+| `telemetry_5m` (compressed likewise) | `fiveMinuteRetainFor`, 1 year | ~4 GB | ~42 GB |
+| `telemetry_1h` (compressed likewise) | `oneHourRetainFor`, 5 years | ~2 GB | ~21 GB |
 | WAL, each database | `max_wal_size`, 1 GB by default | 1 GB | 1 GB |
 | `audit_trail` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
 | Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
@@ -106,7 +106,7 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
 | Storage (models, captures, area plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
 | Logical backups | `backup.retentionDays` (14), on a 20 Gi volume | the platform database, and the historian unless physical backup is on | the platform database; the historian is physical at this size |
-| Historian physical backup repository | `physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~45 GB | ~2.3 TB, three quarters of it WAL |
+| Historian physical backup repository | `physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~16 GB | ~2 TB, most of it WAL |
 | Unarchived WAL, while archiving is failing | `physicalBackup.archiveQueueMax` (8 GiB), on the historian's volume | ~90 MB an hour | ~27 GB an hour |
 
 **The physical backup's repository is mostly WAL at fleet scale.** Measured on the restore
@@ -116,12 +116,16 @@ pgBackRest's zstd, on synthetic values that compress better than real ones, so t
 compression and rollup writes it causes later. The table's figures take the rollups at their full
 retention, weekly fulls and two of them kept.
 
-**The rollups dominate, and they are not compressed.** At S the 1-minute rollup alone reaches
-about 46 GB, more than the historian's default 20 Gi volume; at S's rate that volume fills in
-roughly two months. Rollup rows are written for each bucket with data, so a report-by-exception
-fleet (#400) that refreshes every 120 s writes about half as many 1-minute rows. Compressing the
-rollups (measured at about 5×) is #415. Until then, size the historian from the rollup rows and
-their retention, or shorten `oneMinuteRetainFor`.
+**The rollups are still most of the historian, compressed.** Each is compressed once its chunk is
+older than `rollups.compressAfter`: **34 to 45 bytes a row** against 179 to 185 uncompressed, 4.6×
+on synthetic values, with the last few days of each left uncompressed for the refresh (#415). At S
+the steady state is about 16 GB of rollups beside 2 GB of raw, which fits the default 20 Gi volume
+with little to spare: set `timescaledb.persistence.size` from this table plus the growth you
+expect. Rollup rows are written for each bucket with data, so a report-by-exception fleet (#400)
+that refreshes every 120 s writes about half as many 1-minute rows. Uncompressed, as they were
+before #415, the rollups were about 73 GB at S. On a stack upgraded from then, the policy's first
+run compresses every closed rollup chunk (see `docs/upgrades.md`), and the chunk open at the
+upgrade keeps the span it was made with, up to 70 days, until it closes.
 
 **What the stack does under load is a separate question, and it is measured separately.**
 [`test-harness/README.md`](../../test-harness/README.md), *The scale envelope*, carries the method,
@@ -1348,11 +1352,11 @@ and recovery replaying the WAL written since that backup, on one process. With a
 every day, the replay is at most a day of WAL. Rehearsed on the development node
 ([`test-harness/README.md`](../../test-harness/README.md), *Restoring the historian*):
 
-| | Measured: 100 devices, 14 days, 12 GiB historian | Arithmetic: 1,000 devices at 1 Hz, 1.1 TB historian |
+| | Measured: 100 devices, 14 days, 2 GiB historian | Arithmetic: 1,000 devices at 1 Hz, 560 GB historian |
 | :--- | :--- | :--- |
-| Data directory | 20 s for 0.9 GiB of backup, from MinIO on the same disk | ~45 min for ~280 GB at 1 Gbit/s to the object store |
+| Data directory | 7 s for 0.16 GiB of backup, from a volume on the same disk | ~20 min for ~140 GB at 1 Gbit/s to the object store |
 | WAL replay | 295 s for 28.6 GiB (about 100 MiB/s) | up to ~1.8 h for the ~650 GB a day writes |
-| **Worst case, a target just before the next daily backup** | **under a minute** (a day of WAL is ~2 GB) | **about 2.5 hours** |
+| **Worst case, a target just before the next daily backup** | **under a minute** (a day of WAL is ~2 GB) | **about 2 hours** |
 
 The right-hand column is arithmetic from the left, not a measurement: the link, the disk and the
 CPU running redo each move it. Rehearse at the site's own size before quoting an RTO; the

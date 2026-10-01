@@ -163,7 +163,7 @@ spec:
               {{- if .Values.timescaledb.rollups.enabled }}
 
               echo 'Reconciling telemetry rollups...'
-              $PSQL -v rollup_1m_retain={{ .Values.timescaledb.rollups.oneMinuteRetainFor | quote }} -v rollup_5m_retain={{ .Values.timescaledb.rollups.fiveMinuteRetainFor | quote }} -v rollup_1h_retain={{ .Values.timescaledb.rollups.oneHourRetainFor | quote }} -f /sql/aggregates.sql
+              $PSQL -v rollup_1m_retain={{ .Values.timescaledb.rollups.oneMinuteRetainFor | quote }} -v rollup_5m_retain={{ .Values.timescaledb.rollups.fiveMinuteRetainFor | quote }} -v rollup_1h_retain={{ .Values.timescaledb.rollups.oneHourRetainFor | quote }} -v rollup_compress_after={{ .Values.timescaledb.rollups.compressAfter | default "never" | quote }} -f /sql/aggregates.sql
 
               {{/*
                 AFTER aggregates.sql, necessarily: roles.sql grants on the rollup views that file

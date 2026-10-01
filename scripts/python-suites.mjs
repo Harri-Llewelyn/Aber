@@ -916,6 +916,12 @@ export const SUITES = {
       'Background worker sizing. A pool too small for the continuous aggregates does not error -- ' +
       'the aggregates just stop refreshing, and every dashboard reading them goes quietly stale.',
   },
+  'timescaledb/test_rollup_compression.py': {
+    lanes: ['stack'],
+    why:
+      'The rollups are compressed by series, on their own chunk spans, after the late-data window. ' +
+      'Uncompressed they were most of the historian and filled its default volume in two months (#415).',
+  },
   'timescaledb/test_physical_backup.py': {
     lanes: ['stack'],
     why:
