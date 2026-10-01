@@ -1,0 +1,31 @@
+# Trivy, installed the same way for every workflow that scans.
+#
+# A composite action rather than a copied block: release.yml gates the images it publishes and
+# image-scan.yml watches the third-party ones, and the two applying different scanner versions
+# would make "clean at release, vulnerable on the first of the month" mean nothing.
+#
+# A pinned release binary checked against its published checksum, not Aqua's apt repository: the
+# release job holds the package-write and signing tokens, and a scanner fetched as "whatever is
+# newest" runs with them. The version is the one scripts/scan-config.mjs pins; check-docs-drift.mjs
+# holds the two together. The vulnerability database is still fetched fresh at scan time.
+name: Install Trivy
+description: Install a pinned Trivy release binary and verify it against its published checksum.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Trivy
+      shell: bash
+      env:
+        TRIVY_VERSION: 0.74.0
+        # trivy_<version>_Linux-64bit.tar.gz in trivy_<version>_checksums.txt on the release.
+        TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+      run: |
+        set -euo pipefail
+        TARBALL="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+        curl -sfL -o "/tmp/$TARBALL" \
+          "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$TARBALL"
+        echo "$TRIVY_SHA256  /tmp/$TARBALL" | sha256sum -c -
+        tar -xzf "/tmp/$TARBALL" -C /tmp trivy
+        sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+        trivy --version

@@ -704,7 +704,7 @@ schedule, not on this repository's.
 | Workflow | Job | Asks |
 | :--- | :--- | :--- |
 | [`renovate.yml`](../.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — routine PRs monthly, security PRs immediately |
-| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly |
+| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly, third-party images only; every image built here is gated at release |
 | [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) | **rehearse** | *Would a restore actually work today?* — weekly |
 
 ### The restore rehearsal is the odd one out
@@ -773,8 +773,8 @@ never on a branch:
 | Job | Covers |
 | :--- | :--- |
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
-| **build-images** | The eight independent images, in parallel, each pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
-| **build-ingestion-chain** | `ingestion`, then `test-runner` `FROM` it, as one `docker buildx bake` of `docker-bake.hcl`; built to OCI archives first so the attestations are asserted before (and without) a push, then pushed, signed and verified |
+| **build-images** | The eight independent images, in parallel, each built to an OCI archive and **scanned** before it is pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
+| **build-ingestion-chain** | `ingestion`, then `test-runner` `FROM` it, as one `docker buildx bake` of `docker-bake.hcl`; built to OCI archives first so the attestations are asserted and both images **scanned** before (and without) a push, then pushed, signed and verified |
 | **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back, sign the pushed digest and verify it |
 | **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
 
