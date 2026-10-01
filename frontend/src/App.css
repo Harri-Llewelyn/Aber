@@ -612,7 +612,7 @@ html, body, #root {
   border-radius: 8px;
   background: var(--warning);
   color: var(--warning-contrast);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 16px;
   text-align: center;
@@ -621,7 +621,6 @@ html, body, #root {
 .sidebar-expanded .sidebar-item-count {
   position: static;
   margin-left: auto;
-  font-size: 11px;
 }
 
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
