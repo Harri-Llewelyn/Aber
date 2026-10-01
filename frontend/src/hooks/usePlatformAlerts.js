@@ -16,14 +16,20 @@ export const POLL_INTERVAL_MS = 15000
  * `public.platform_alerts`; this hook reads the `platform_alerts_active` view and subscribes to the
  * table, because a view cannot be in a publication. The initial fetch primes the known set so a
  * page load does not toast everything already firing.
+ *
+ * A firing toast carries the alert name only; the notification history keeps the summary too. When
+ * `onOpenAlerts` is given the toast is clickable and calls it with the toast's id.
  */
-export function usePlatformAlerts(showToast) {
+export function usePlatformAlerts(showToast, onOpenAlerts) {
   const [active, setActive] = useState([])
   const knownRef = useRef(new Map())
   const primedRef = useRef(false)
   const showToastRef = useRef(showToast)
 
+  const onOpenRef = useRef(onOpenAlerts)
+
   useEffect(() => { showToastRef.current = showToast }, [showToast])
+  useEffect(() => { onOpenRef.current = onOpenAlerts }, [onOpenAlerts])
 
   /**
    * Re-read the active view and announce the difference. Diffs two snapshots rather than trusting
@@ -51,8 +57,12 @@ export function usePlatformAlerts(showToast) {
         if (!knownRef.current.has(fingerprint)) {
           // No emoji prefix: Toast draws its own icon from `type`.
           showToastRef.current?.(
-            `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
-            row.severity === 'critical' ? 'error' : 'warning'
+            row.alert_name,
+            row.severity === 'critical' ? 'error' : 'warning',
+            {
+              detail: `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
+              onOpen: onOpenRef.current ? (id) => onOpenRef.current?.(id) : undefined
+            }
           )
         }
       }

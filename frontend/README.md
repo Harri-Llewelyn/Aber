@@ -80,6 +80,15 @@ three languages. See [Migrated design notes](#migrated-design-notes) for what th
 is a UI affordance only — RLS is the enforcement, and every gated action is independently refused
 by the database.
 
+### What looks clickable
+
+Only what acts looks clickable. `.mono` is a typeface and takes the text colour; accent colour
+means a real link (the Directory's open chip, a `.count-link`). A value that copies is a
+`CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A long
+id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`); the tooltip and the copy
+carry the full value. A read-only or disabled `.form-control` takes the page background and muted
+text, and `.btn-warning` is the amber button for a risky action that is not destructive.
+
 ### Derived lists in a tab are memoised, and the dependency list is the contract
 
 `DevicesTab` holds around thirty pieces of state, so *any* of them — opening a modal, a Realtime
@@ -92,6 +101,15 @@ So `filteredAssets`, `attentionCount` and `tagOptions` are `useMemo`d, and the p
 `gateways.find(...)` / `cells.find(...)` scans are hoisted into `gatewayById` / `cellById` Maps.
 **Miss a dependency and the table silently stops responding to that filter** — a worse bug than the
 slowness, so the list names every value the predicate reads, in the order it reads them.
+
+### A dialog keeps its buttons in view
+
+`Modal` is a flex column capped at the window height. The header row, the error slot and the footer
+(`.modal-actions`) keep their size; only `.modal-body` (the lead and the children) scrolls, so Save
+never scrolls away and an error never pushes it down. `.modal` itself must not scroll. A dialog
+whose list should take the leftover height passes `fill` and marks that child `modal-fill`; the
+schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
+window and is not needed any more.
 
 ---
 
@@ -297,6 +315,29 @@ supplies no release version, is not evidence of drift.
 
 ## Tabs
 
+**A page has one card.** Its title and description are the card's `CardHeading`. The seamless tab bar
+(`common/TabStrip.jsx`, one underline style, no pills) sits under the heading and shows one tab's
+content at a time; the card scrolls, the page does not. Under the bar is a toolbar row, the existing
+`.filter-bar`: the tab's "?" `HelpTip` first, its filters next, its actions in `.filter-bar-actions`
+at the right. Tabs carry no counts. A tab with work waiting takes `attention={n}`: the label turns
+the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
+line keeps search, status and the key toggle and moves the rest into `common/FiltersPopover.jsx`.
+
+```jsx
+<div className="card">
+  <CardHeading title="Devices" description="…" />
+  <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
+    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]} />
+  <div className="filter-bar">
+    <HelpTip text="…" />
+    <SearchInput … />
+    <FiltersPopover activeCount={extraCount} onClear={clearExtras}>{/* the other controls */}</FiltersPopover>
+    <div className="filter-bar-actions"><button className="btn btn-sm btn-primary">New …</button></div>
+  </div>
+  {/* the tab's content */}
+</div>
+```
+
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins, one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its plan, its unplaced cells and its Area-Wide assets) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
@@ -369,6 +410,13 @@ page name put a second *"Devices"* into the document on every page — a duplica
 and for anything reading the document as text. `aria-hidden` kept it out of the accessibility tree;
 nothing was keeping it out of the text.
 
+**Icon and primary action.** `icon` (a node) is drawn before the title and hidden from assistive
+technology; the title stays the accessible name. The first action marked `primary` is listed first
+and highlighted; a later one marked `primary` renders as a plain action in its own position. A page
+picks its primary in this order: setup while a gateway is pending; otherwise the destination where
+one exists (Launch UI, Open Dashboard); otherwise Restore when archived; otherwise Edit Details
+(Propose a Change in propose mode).
+
 ---
 
 ## Toasts and the notification history
@@ -405,6 +453,15 @@ corner and records the same message in the history behind the bell in the top ba
   it, and an unread state that followed a user between browsers would need a per-user table with
   RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
   cannot fan one event out to several signed-in users.
+- **A firing alert toasts its name only.** `showToast(msg, type, { detail, onOpen })`: `detail` is
+  what the history records when it differs from the toast text, and `onOpen` turns the message
+  into a button that is called with the toast's id. A platform alert passes its name as the text
+  and "name — summary" as the detail, because the summary can be several sentences with a SQL
+  statement, which stacked as tall red blocks, kept a warning up longer and was read aloud in full
+  by the `role="alert"` region. Clicking the toast opens the alert pill's list, where the summary
+  is, and dismisses the toast: `App` owns the pill's open state (`AlertPill` takes optional
+  `open` and `onOpenChange`, and keeps its own state without them). Other toasts are not clickable.
+  "Resolved — name" is unchanged.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act.
   The history says what the toasts said, resolved and routine messages included; merging the two
   would fill the pill's count with entries nobody needs to act on.
@@ -437,6 +494,18 @@ Two rules that were each learned from a real bug:
 - **Constrain cells holding variable-length data.** `.table-wrap` scrolls horizontally, so an
   unconstrained cell pushes the row's action buttons off-screen. This has bitten the quarantine
   queue twice.
+- **Every table header, group band and section band is one opaque colour, `--bg-base`**, sticky or
+  not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
+  white card or showed rows through a pinned header. A header never takes an inline background.
+- **Group and section headings pin to the top of their scroller** while their own rows are in
+  view: `.table-group-row` (Metrics) and `.vocab-section-head` (Vocabulary). A group row sits below
+  a pinned `thead` at `--table-head-height`, which `.table-scroll` and `.card-fill > .table-wrap`
+  set to the header's fixed height (12px padding twice plus a 16px line, so keep header cells on one
+  line). It works the same whether the scroller is a `.card-fill` card body or a `.table-scroll`.
+- **A row that opens a side panel has `row-selectable` and shows a chevron.** The CSS draws it on
+  the row's last cell as a mask, reserving space on the right; a row without the class shows none.
+  Row click opens the panel; a click on a button, link or input inside the row does not
+  (`rowSelectHandler`).
 - **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
   cut — the entry that matters most is not the one that sorts first.

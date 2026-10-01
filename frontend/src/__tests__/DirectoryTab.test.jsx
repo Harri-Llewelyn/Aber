@@ -216,7 +216,7 @@ describe('DirectoryTab service groups', () => {
       for (const s of unopenable) {
         const el = screen.getByText(s.endpoint_url).closest('button, a')
         expect(el.tagName).toBe('BUTTON')
-        expect(el).toHaveClass('endpoint-copy')
+        expect(el).toHaveClass('copyable-id')
       }
     })
 
@@ -236,7 +236,7 @@ describe('DirectoryTab service groups', () => {
         await waitFor(() => expect(writeText).toHaveBeenCalledWith('mqtt://localhost:1883'))
         await waitFor(() =>
           expect(showToast).toHaveBeenCalledWith(
-            expect.stringContaining('mqtt://localhost:1883'), 'success'))
+            expect.stringContaining('Copied endpoint address'), 'success'))
       } finally {
         Object.defineProperty(navigator, 'clipboard', {
           value: original, configurable: true, writable: true
@@ -384,7 +384,7 @@ describe('DirectoryTab refresh', () => {
     // The page is a read-only directory with no controls of its own. The endpoint cells are still
     // buttons, one per row a browser cannot open, so this counts what is not an endpoint.
     const buttons = screen.getAllByRole('button')
-      .filter(b => !b.classList.contains('endpoint-action') && !b.classList.contains('help-tip'))
+      .filter(b => !b.classList.contains('copyable-id') && !b.classList.contains('help-tip'))
     expect(buttons).toHaveLength(0)
   })
 

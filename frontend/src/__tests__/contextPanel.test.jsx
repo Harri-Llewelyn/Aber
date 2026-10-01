@@ -170,6 +170,52 @@ describe('ContextPanel component', () => {
     expect(link).toHaveAttribute('href', 'http://localhost:1880')
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
   })
+
+  it('draws the icon before the title, hidden from assistive technology', () => {
+    render(<ContextPanel {...baseProps} open onClose={vi.fn()} icon={<svg data-testid="entity-icon" />} />)
+    const icon = screen.getByTestId('entity-icon')
+    const holder = icon.closest('.context-panel-icon')
+    expect(holder).toHaveAttribute('aria-hidden', 'true')
+    const title = document.querySelector('.context-panel-title')
+    expect(holder.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('complementary', { name: /Simulated_CNC_01 device details/ })).toBeTruthy()
+  })
+
+  it('lists the first primary action first and highlights only it', () => {
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(
+      <ContextPanel
+        {...baseProps}
+        open
+        onClose={vi.fn()}
+        actions={[
+          { label: 'Request Rebirth' },
+          { label: 'Set Up Gateway', primary: true },
+          { label: 'Launch UI', primary: true }
+        ]}
+      />
+    )
+    const buttons = [...document.querySelectorAll('.context-action')]
+    expect(buttons.map(b => b.textContent.trim())).toEqual(['Set Up Gateway', 'Request Rebirth', 'Launch UI'])
+    expect(buttons.map(b => b.classList.contains('btn-primary'))).toEqual([true, false, false])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('keeps an action order with no primary as given', () => {
+    render(<ContextPanel {...baseProps} open onClose={vi.fn()} actions={[{ label: 'B' }, { label: 'A' }]} />)
+    expect([...document.querySelectorAll('.context-action')].map(b => b.textContent.trim())).toEqual(['B', 'A'])
+  })
+})
+
+describe('A row that opens a panel shows a chevron', () => {
+  it('draws it on the last cell of .row-selectable, as a mask rather than text', () => {
+    const rule = APP_CSS.match(/tr\.row-selectable > td:last-child::after \{([\s\S]*?)\n\}/)[1]
+    expect(rule).toMatch(/mask:\s*url\(/)
+    expect(rule).toMatch(/content:\s*""/)
+    expect(APP_CSS).toMatch(/tr\.row-selectable > td:last-child \{[^}]*padding-right/)
+    expect(APP_CSS).toMatch(/tr\.row-selectable\.row-selected > td:last-child::after/)
+  })
 })
 
 describe('rowSelectHandler', () => {

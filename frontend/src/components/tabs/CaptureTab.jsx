@@ -447,12 +447,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 narrowing it. */}
             <TabStrip
               ariaLabel="Capture subject"
-              placement="card"
               value={subjectKind}
               onChange={kind => { setSubjectKind(kind); setSelectedId(null) }}
               tabs={[
-                { id: 'gateway', label: 'Gateways', count: gateways.length, title: 'Record everything one gateway publishes, every device beneath it included' },
-                { id: 'device', label: 'Devices', count: devices.length, title: "Record one device, plus its gateway's birth certificate" },
+                { id: 'gateway', label: 'Gateways', title: 'Record everything one gateway publishes, every device beneath it included' },
+                { id: 'device', label: 'Devices', title: "Record one device, plus its gateway's birth certificate" },
               ]}
             />
           </div>

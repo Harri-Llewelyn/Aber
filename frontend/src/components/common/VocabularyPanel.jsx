@@ -82,7 +82,6 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
       tabs={available.map(tab => ({
         id: tab.id,
         label: tab.label,
-        count: (tab.sections || []).reduce((n, s) => n + s.items.length, 0),
         title: tab.hint || `Browse the ${tab.label} vocabulary`,
       }))}
     />

@@ -109,6 +109,50 @@ describe('Modal', () => {
     expect(css).toMatch(/\.modal-overlay-confirm \{ z-index: 1100; \}/)
   })
 
+  describe('keeps the header and the footer in view', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, '..', 'App.css'), 'utf8')
+    const rule = selector => {
+      const at = css.indexOf(`\n${selector} {`)
+      return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
+    }
+
+    it('lays out header row, a body holding the lead and children, then error and footer', () => {
+      render(
+        <Modal title="T" onClose={vi.fn()} lead="Lead text" error="It broke" footer={<button>Go</button>}>
+          <p>Body text</p>
+        </Modal>
+      )
+      const dialog = screen.getByRole('dialog')
+      expect([...dialog.children].map(c => c.className)).toEqual([
+        'modal-header-row', 'modal-body', 'modal-error', 'modal-actions'
+      ])
+      const body = dialog.querySelector('.modal-body')
+      expect(body).toHaveTextContent('Lead text')
+      expect(body).toHaveTextContent('Body text')
+      expect(body).not.toHaveTextContent('It broke')
+      expect(body.querySelector('.modal-actions')).toBeNull()
+    })
+
+    it('marks a filling body only when asked', () => {
+      const { rerender } = render(<Modal title="T" onClose={vi.fn()}>x</Modal>)
+      expect(document.querySelector('.modal-body')).not.toHaveClass('modal-body-fill')
+      rerender(<Modal title="T" fill onClose={vi.fn()}>x</Modal>)
+      expect(document.querySelector('.modal-body')).toHaveClass('modal-body-fill')
+    })
+
+    it('makes the body the scroller, and not the dialog', () => {
+      expect(rule('.modal-body')).toMatch(/overflow-y:\s*auto/)
+      expect(rule('.modal-body')).toMatch(/min-height:\s*0/)
+      expect(rule('.modal')).toMatch(/display:\s*flex/)
+      expect(rule('.modal')).toMatch(/flex-direction:\s*column/)
+      expect(rule('.modal')).toMatch(/max-height:/)
+      expect(rule('.modal')).not.toMatch(/overflow/)
+      for (const sel of ['.modal-header-row', '.modal-error', '.modal-actions']) {
+        expect(rule(sel)).toMatch(/flex:\s*none/)
+      }
+    })
+  })
+
   it('puts header actions beside the close button', () => {
     render(<Modal title="T" onClose={vi.fn()} headerActions={<button>Export</button>} />)
     const row = document.querySelector('.modal-header-row')

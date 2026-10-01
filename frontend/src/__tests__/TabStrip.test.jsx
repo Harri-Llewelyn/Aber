@@ -6,14 +6,14 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { TabStrip } from '../components/common/TabStrip'
 
 const TABS = [
-  { id: 'a', label: 'Alpha', count: 3, title: 'First' },
-  { id: 'b', label: 'Beta', count: 0 },
+  { id: 'a', label: 'Alpha', title: 'First', attention: 3 },
+  { id: 'b', label: 'Beta', attention: 0 },
   { id: 'c', label: 'Gamma' },
 ]
 
-function Harness({ placement }) {
+function Harness() {
   const [value, setValue] = useState('a')
-  return <TabStrip tabs={TABS} value={value} onChange={setValue} ariaLabel="Letters" placement={placement} />
+  return <TabStrip tabs={TABS} value={value} onChange={setValue} ariaLabel="Letters" />
 }
 
 describe('TabStrip', () => {
@@ -27,11 +27,22 @@ describe('TabStrip', () => {
     expect(tabs[0].title).toBe('First')
   })
 
-  it('draws the count pill, zero included, and none when absent', () => {
+  it('shows attention only above 0, with an icon, the number and a name that carries it', () => {
     render(<Harness />)
-    expect(screen.getByRole('tab', { name: 'Alpha 3' })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: 'Beta 0' })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: 'Gamma' }).querySelector('.section-count')).toBeNull()
+    const alpha = screen.getByRole('tab', { name: 'Alpha, 3 waiting' })
+    expect(alpha.className).toContain('tab-strip-tab-attention')
+    expect(alpha.querySelector('svg')).toBeTruthy()
+    expect(alpha.querySelector('.tab-strip-attention').textContent).toBe('3')
+    for (const name of ['Beta', 'Gamma']) {
+      const tab = screen.getByRole('tab', { name })
+      expect(tab.className).not.toContain('tab-strip-tab-attention')
+      expect(tab.querySelector('svg')).toBeNull()
+    }
+  })
+
+  it('carries no count pill', () => {
+    render(<Harness />)
+    expect(document.querySelector('.section-count')).toBeNull()
   })
 
   it('selects on click', () => {
@@ -44,31 +55,29 @@ describe('TabStrip', () => {
   it('moves and selects with the arrow keys, wrapping at the ends', () => {
     render(<Harness />)
     const key = (name, k) => fireEvent.keyDown(screen.getByRole('tab', { name }), { key: k })
-    key('Alpha 3', 'ArrowRight')
-    expect(screen.getByRole('tab', { name: 'Beta 0' }).getAttribute('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Beta 0' }))
-    key('Beta 0', 'ArrowLeft')
-    key('Alpha 3', 'ArrowLeft')
+    key('Alpha, 3 waiting', 'ArrowRight')
+    expect(screen.getByRole('tab', { name: 'Beta' }).getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Beta' }))
+    key('Beta', 'ArrowLeft')
+    key('Alpha, 3 waiting', 'ArrowLeft')
     expect(screen.getByRole('tab', { name: 'Gamma' }).getAttribute('aria-selected')).toBe('true')
     key('Gamma', 'ArrowRight')
-    expect(screen.getByRole('tab', { name: 'Alpha 3' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Alpha, 3 waiting' }).getAttribute('aria-selected')).toBe('true')
   })
 
   it('jumps with Home and End', () => {
     render(<Harness />)
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Alpha 3' }), { key: 'End' })
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Alpha, 3 waiting' }), { key: 'End' })
     expect(screen.getByRole('tab', { name: 'Gamma' }).getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Gamma' }), { key: 'Home' })
-    expect(screen.getByRole('tab', { name: 'Alpha 3' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Alpha, 3 waiting' }).getAttribute('aria-selected')).toBe('true')
   })
 
-  it('wraps, and takes the page or card placement', () => {
-    const { rerender } = render(<Harness />)
-    const strip = screen.getByRole('tablist')
-    expect(strip.className).toContain('tab-strip')
-    expect(strip.className).toContain('tab-strip-page')
-    rerender(<Harness placement="card" />)
-    expect(screen.getByRole('tablist').className).toContain('tab-strip-card')
+  it('marks the selected tab and has one style', () => {
+    render(<Harness />)
+    expect(screen.getByRole('tablist').className).toBe('tab-strip')
+    expect(screen.getByRole('tab', { name: 'Alpha, 3 waiting' }).className).toContain('tab-strip-tab-selected')
+    expect(screen.getByRole('tab', { name: 'Beta' }).className).not.toContain('tab-strip-tab-selected')
   })
 
   it('declares the wrapping in CSS', () => {

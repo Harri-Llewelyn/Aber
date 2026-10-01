@@ -33,8 +33,11 @@ export const TOAST_SPOKEN_PREFIX = { warning: 'Warning: ', error: 'Error: ' }
  * One toast. Its timer pauses while the pointer is over it or focus is inside it, and the close
  * button is there for every type, since an error has no timer at all. Escape is not bound: it
  * already closes the modal or drawer the toast is floating over.
+ *
+ * With `onOpen` the message is a button that calls it with the toast's id; the close button never
+ * does.
  */
-export function Toast({ id, msg, type, onDismiss, onExpire }) {
+export function Toast({ id, msg, type, onDismiss, onExpire, onOpen }) {
   const duration = toastDuration(msg, type)
   const remaining = useRef(duration)
   const startedAt = useRef(0)
@@ -76,6 +79,12 @@ export function Toast({ id, msg, type, onDismiss, onExpire }) {
   }, [])
 
   const Icon = TOAST_ICONS[type] ?? IconInfo
+  const text = (
+    <>
+      {TOAST_SPOKEN_PREFIX[type] && <span className="sr-only">{TOAST_SPOKEN_PREFIX[type]}</span>}
+      {msg}
+    </>
+  )
 
   return (
     <div
@@ -86,10 +95,13 @@ export function Toast({ id, msg, type, onDismiss, onExpire }) {
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) release('focus') }}
     >
       <span className="toast-icon" aria-hidden="true"><Icon size={16} /></span>
-      <span className="toast-msg">
-        {TOAST_SPOKEN_PREFIX[type] && <span className="sr-only">{TOAST_SPOKEN_PREFIX[type]}</span>}
-        {msg}
-      </span>
+      {onOpen ? (
+        <button type="button" className="toast-msg toast-open" onClick={() => onOpen(id)} title="Show the firing alerts">
+          {text}
+        </button>
+      ) : (
+        <span className="toast-msg">{text}</span>
+      )}
       <button type="button" className="toast-dismiss" onClick={() => onDismiss?.(id)} aria-label="Dismiss" title="Dismiss">
         <IconX size={14} />
       </button>
@@ -104,7 +116,7 @@ export function Toast({ id, msg, type, onDismiss, onExpire }) {
  */
 export function ToastStack({ toasts = [], onDismiss, onExpire }) {
   const renderToast = (t) => (
-    <Toast key={t.id} id={t.id} msg={t.msg} type={t.type} onDismiss={onDismiss} onExpire={onExpire} />
+    <Toast key={t.id} id={t.id} msg={t.msg} type={t.type} onDismiss={onDismiss} onExpire={onExpire} onOpen={t.onOpen} />
   )
   return (
     <div className="toast-stack">

@@ -111,16 +111,13 @@ describe('Vocabulary page', () => {
     expect(screen.queryByRole('heading', { name: /ASHRAE 223P Vocabulary/ })).toBeNull()
   })
 
-  it('offers every standard as a tab, with its entry count visible', async () => {
-    // All four counts visible at once is the point of a segmented control over a dropdown: it is
-    // what shows the vocabularies are different sizes and different kinds of thing.
+  it('offers every standard as a tab, carrying no count', async () => {
     renderTab()
     await ready()
 
-    expect(within(standardTab(/MTConnect/)).getByText('4')).toBeTruthy()
-    expect(within(standardTab(/ISO 22400/)).getByText('2')).toBeTruthy()
-    expect(within(standardTab(/OPC UA/)).getByText('2')).toBeTruthy()
-    expect(within(standardTab(/ASHRAE 223P/)).getByText('2')).toBeTruthy()
+    for (const name of [/MTConnect/, /ISO 22400/, /OPC UA/, /ASHRAE 223P/]) {
+      expect(standardTab(name).querySelector('.section-count')).toBeNull()
+    }
   })
 
   it('opens on MTConnect and marks only that tab selected', async () => {

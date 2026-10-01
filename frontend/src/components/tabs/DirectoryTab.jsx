@@ -2,13 +2,13 @@ import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
-import { IconExternalLink, IconCopy, IconCheck, IconBookOpen } from '../common/Icons'
+import { IconExternalLink, IconBookOpen } from '../common/Icons'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { PageHeading } from '../common/PageHeading'
 import { SectionCount } from '../common/SectionCount'
-import { copyText } from '../common/CopyableId'
+import CopyableId from '../common/CopyableId'
 import { formatDateTime } from '../../utils/format'
 
 /**
@@ -87,49 +87,34 @@ export function endpointReach(url, exposure, viewerOnHost) {
 }
 
 /**
- * The endpoint cell: a link when it can be opened, a copy button when it cannot. Both are
- * button-shaped, so which can be opened is answerable by looking.
+ * The endpoint cell: a link chip when it can be opened, a copy chip when it cannot. Both are
+ * bordered monospace chips with an icon, so which can be opened is answerable by looking.
  */
 function EndpointCell({ url, exposure, viewerOnHost, onNotify }) {
-  const [copied, setCopied] = useState(false)
   const reach = endpointReach(url, exposure, viewerOnHost)
 
   if (reach.open) {
     return (
       <a
-        className="endpoint-action endpoint-open mono"
+        className="endpoint-action endpoint-open"
         href={url}
         target="_blank"
         rel="noreferrer"
         title={reach.note}
       >
-        {url} <IconExternalLink size={10} />
+        {url} <IconExternalLink size={12} className="copyable-id-icon" />
       </a>
     )
   }
 
-  const copy = async () => {
-    const ok = await copyText(url)
-    onNotify?.(
-      ok ? `Copied ${url}` : 'Could not reach the clipboard -- select the address and copy it.',
-      ok ? 'success' : 'error'
-    )
-    if (!ok) return
-    setCopied(true)
-    // Reset rather than latch: the button is reusable and a permanently ticked control reads as
-    // a state the row is in rather than as something that just happened.
-    setTimeout(() => setCopied(false), 1600)
-  }
-
   return (
-    <button
-      type="button"
-      className="endpoint-action endpoint-copy mono"
-      onClick={copy}
+    <CopyableId
+      value={url}
+      label="endpoint address"
       title={reach.note}
-    >
-      {url} {copied ? <IconCheck size={10} /> : <IconCopy size={10} />}
-    </button>
+      onNotify={onNotify}
+      className="copyable-id-wrap"
+    />
   )
 }
 

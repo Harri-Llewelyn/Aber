@@ -75,10 +75,11 @@ describe('Configuration Parameters modal width', () => {
 
   // Widening a dialog is only safe because the height cap is on `.modal`, which every step
   // inherits.
-  it('still inherits the height cap and internal scrolling', () => {
+  it('still inherits the height cap', () => {
     const base = APP_CSS.match(/\n\.modal \{([\s\S]*?)\n\}/)[1]
     expect(base).toMatch(/max-height:\s*calc\(100vh - 48px\)/)
-    expect(base).toMatch(/overflow-y:\s*auto/)
+    // The body scrolls, not the dialog, so the header and footer stay in view.
+    expect(base).not.toMatch(/overflow/)
     // The wide step must not redeclare either and quietly drop them.
     const wide = APP_CSS.match(/\n\.modal-wide \{([\s\S]*?)\n\}/)[1]
     expect(wide).not.toMatch(/max-height/)

@@ -14,6 +14,8 @@ import { api } from '../api'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
+const zIndex = (rule) => Number(/z-index:\s*(-?\d+)/.exec(rule)?.[1])
+
 /** The body of the rule whose selector list contains `selector`. */
 const ruleFor = (selector) => {
   for (const m of APP_CSS.matchAll(/\n((?:[^\n{}]*,\n)*[^\n{}]*) \{([^}]*)\}/g)) {
@@ -61,6 +63,41 @@ describe('the page-fill rules', () => {
     expect(ruleFor('.card-fill > .table-wrap')).toMatch(/overflow-y:\s*auto/)
     expect(ruleFor('.card-fill > .table-wrap.table-scroll')).toMatch(/max-height:\s*none/)
     expect(ruleFor('.card-fill > .table-wrap thead tr')).toMatch(/position:\s*sticky/)
+  })
+})
+
+describe('table header and band colour', () => {
+  const BASE = /background:\s*var\(--bg-base\)/
+
+  it('paints every thead cell and row, sticky or not, on the one opaque base surface', () => {
+    expect(ruleFor('thead th')).toMatch(BASE)
+    expect(ruleFor('thead tr')).toMatch(BASE)
+  })
+
+  it('has no second header colour: no thead rule paints anything but the base surface', () => {
+    for (const m of APP_CSS.matchAll(/\n([^\n{}]*thead[^\n{}]*) \{([^}]*)\}/g)) {
+      const bg = /background(?:-color)?:\s*([^;]+);/.exec(m[2])?.[1]
+      if (bg) expect(bg, m[1]).toBe('var(--bg-base)')
+    }
+  })
+
+  it('paints group and section bands on the base surface and pins them to the top of the scroller', () => {
+    for (const selector of ['.table-group-row > td', '.vocab-section-head']) {
+      const rule = ruleFor(selector)
+      expect(rule, selector).toMatch(BASE)
+      expect(rule, selector).toMatch(/position:\s*sticky/)
+      expect(rule, selector).not.toMatch(/color-mix|--bg-card|--bg-glass/)
+    }
+  })
+
+  it('sticks a group row below a pinned header, whichever kind of scroller pins it', () => {
+    expect(ruleFor('.table-group-row > td')).toMatch(/top:\s*var\(--table-head-height,\s*0px\)/)
+    expect(ruleFor('.table-scroll')).toMatch(/--table-head-height:\s*\d+px/)
+    expect(APP_CSS).toMatch(/\n\.card-fill > \.table-wrap \{ --table-head-height:\s*\d+px; \}/)
+    // The header's own height is what the offset is: padding 12px twice plus a 16px line.
+    expect(ruleFor('.table-scroll thead th')).toMatch(/line-height:\s*16px/)
+    expect(ruleFor('.card-fill > .table-wrap thead th')).toMatch(/line-height:\s*16px/)
+    expect(zIndex(ruleFor('.table-group-row > td'))).toBeLessThan(zIndex(ruleFor('.table-scroll thead tr')))
   })
 })
 

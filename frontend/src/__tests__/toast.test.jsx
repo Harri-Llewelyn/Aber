@@ -384,3 +384,64 @@ describe('the history useToast keeps', () => {
     expect(window.sessionStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull()
   })
 })
+
+describe('a firing platform alert', () => {
+  const row = {
+    fingerprint: 'f1', alert_name: 'Historian Backup Stale', severity: 'warning',
+    summary: 'The last backup is 3 days old; run SELECT 1 FROM backups', starts_at: '2026-10-01T00:00:00Z'
+  }
+  const FULL = `${row.alert_name} — ${row.summary}`
+
+  async function mountAlerts(rows, onOpenAlerts) {
+    let current = []
+    const { supabase } = await import('../lib/supabaseClient')
+    vi.spyOn(supabase.auth, 'getSession').mockResolvedValue({ data: { session: {} } })
+    vi.spyOn(supabase, 'from').mockImplementation(() => ({
+      select: () => ({ order: () => Promise.resolve({ data: current, error: null }) })
+    }))
+    vi.spyOn(supabase, 'channel').mockReturnValue({ on() { return this }, subscribe() { return this } })
+    vi.spyOn(supabase, 'removeChannel').mockImplementation(() => {})
+    const { usePlatformAlerts } = await import('../hooks/usePlatformAlerts')
+    function AlertsHarness() {
+      hook = useToast()
+      const open = React.useCallback((id) => { onOpenAlerts?.(id); hook.dismissToast(id) }, [])
+      usePlatformAlerts(hook.showToast, open)
+      return <ToastStack toasts={hook.toasts} onDismiss={hook.dismissToast} onExpire={hook.expireToast} />
+    }
+    render(<AlertsHarness />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    current = rows
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+  }
+
+  it('toasts the alert name only, and the history keeps the summary', async () => {
+    await mountAlerts([row])
+    expect(screen.getByText('Historian Backup Stale').closest('.toast')).toBeTruthy()
+    expect(screen.queryByText(/SELECT 1/)).toBeNull()
+    expect(hook.history[0].msg).toBe(FULL)
+  })
+
+  it('opens the alerts list on a click or Enter, and dismisses the toast', async () => {
+    const onOpen = vi.fn()
+    await mountAlerts([row], onOpen)
+    const button = screen.getByRole('button', { name: /Historian Backup Stale/ })
+    expect(button.tagName).toBe('BUTTON') // a native button answers Enter and Space with a click
+    fireEvent.click(button)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('.toast')).toBeNull()
+  })
+
+  it('does not open the list from the Dismiss button', async () => {
+    const onOpen = vi.fn()
+    await mountAlerts([row], onOpen)
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(document.querySelector('.toast')).toBeNull()
+  })
+
+  it('leaves other toasts unclickable', () => {
+    renderStack()
+    show('Saved', 'success')
+    expect(within(toastFor('Saved')).queryAllByRole('button').map(b => b.getAttribute('aria-label'))).toEqual(['Dismiss'])
+  })
+})

@@ -25,11 +25,23 @@ import { POLL_INTERVAL_MS, RECONCILE_MS } from '../../hooks/usePlatformAlerts'
  * @param {Function} onSelectGateway The same for a `gateway` row. Optional and separate, so a
  * consumer with one page and not the other degrades to an inert row.
  *
+ * @param {boolean} open Whether the list is open, when the parent owns that. Optional: without it
+ * the pill keeps its own state.
+ *
+ * @param {Function} onOpenChange Called with the next open state. Pair it with `open`. Optional.
+ *
  * @param {boolean} realtime Whether Realtime is carrying updates; a parameter so tests can pin both
  * branches.
  */
-export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realtime = REALTIME_ENABLED }) {
-  const [open, setOpen] = useState(false)
+export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realtime = REALTIME_ENABLED, open: openProp, onOpenChange }) {
+  const [ownOpen, setOwnOpen] = useState(false)
+  const controlled = openProp !== undefined
+  const open = controlled ? openProp : ownOpen
+  const setOpen = (next) => {
+    const value = typeof next === 'function' ? next(open) : next
+    if (!controlled) setOwnOpen(value)
+    onOpenChange?.(value)
+  }
   useEscapeKey(() => setOpen(false), open)
   // A click anywhere else closes it: a popover in a header with no focus trap or backdrop. The ref
   // goes on the wrapper so the pill's own click still toggles.

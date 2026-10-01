@@ -541,6 +541,7 @@ html, body, #root {
 }
 
 .sidebar-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -599,6 +600,28 @@ html, body, #root {
    since which page you are on outranks what is waiting there. */
 .sidebar-item.sidebar-item-warning:not(.active) { color: var(--warning-text); }
 .sidebar-item.sidebar-item-warning:not(.active):hover { color: var(--warning-text); }
+
+/* The number: a badge on the icon's top-right corner while the rail is collapsed, the end of the
+   label once it is expanded. Filled, so it reads on the active item's accent too. */
+.sidebar-item-count {
+  position: absolute;
+  top: 0;
+  left: 22px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warning);
+  color: var(--warning-contrast);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  letter-spacing: 0;
+}
+.sidebar-expanded .sidebar-item-count {
+  position: static;
+  margin-left: auto;
+}
 
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
    it sits on the bar's true centre and shrinks before the brand does. */
@@ -808,14 +831,55 @@ html, body, #root {
   color: var(--text-primary);
 }
 
-/* A row of tab pills; see TabStrip. Wraps on a narrow window. */
+/* The seamless tab bar; see TabStrip. An underline row: the bar's rule runs the full width and the
+   selected tab's accent underline sits on it. Wraps on a narrow window. Above a card it is a
+   standalone row; inside a card it keeps the card's inset and has no gap beneath. */
 .tab-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 0 4px;
+  margin-bottom: var(--stack);
+  border-bottom: 1px solid var(--border);
 }
-.tab-strip-page { margin-bottom: var(--stack); }
-.tab-strip-card { margin-left: auto; }
+.card > .tab-strip { margin-bottom: 0; padding: 0 var(--inset); }
+/* In a card header the bar takes its own line and runs flush over the header's padding and rule. */
+.card-header > .tab-strip {
+  flex-basis: 100%;
+  margin: 0 calc(-1 * var(--inset)) -12px;
+  padding: 0 var(--inset);
+  border-bottom: none;
+}
+.tab-strip-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: -1px;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.tab-strip-tab:hover { color: var(--text-primary); }
+.tab-strip-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tab-strip-tab-selected {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+/* Work waits behind the tab: the warning colour, with the icon and the number beside it. */
+.tab-strip-tab-attention,
+.tab-strip-tab-attention:hover { color: var(--warning-text); }
+.tab-strip-attention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
 
 .section-count {
   display: inline-flex;
@@ -967,6 +1031,17 @@ html, body, #root {
   border-radius: var(--radius);
 }
 
+/* The toolbar row under a card's tab bar: flush, chromeless, ruled off from the content below. The
+   tab's "?" HelpTip comes first, its filters follow, and its actions go in .filter-bar-actions. */
+.card > .tab-strip + .filter-bar {
+  margin-bottom: 0;
+  padding: 10px var(--inset);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
 .filter-bar .form-control {
   height: 34px;
   padding-top: 0;
@@ -977,10 +1052,11 @@ html, body, #root {
 /* Pushes everything after it to the right-hand end of the bar. */
 .filter-bar-spacer { margin-left: auto; }
 
-/* A group at the right-hand end, for export and refresh controls that fold into the filter row. The
-   spacer is on the group rather than its first child, so the end stays stable when a control is
-   conditional. */
+/* A group at the right-hand end, for a tab's actions and for export and refresh controls that fold
+   into the filter row. The margin is on the group rather than its first child, so the end stays
+   stable when a control is conditional. */
 .filter-bar-actions {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -994,6 +1070,35 @@ html, body, #root {
 
 /* The "Clear filters (N)" button: always the right-hand end of the bar, wrapped or not. */
 .filter-bar-clear { margin-left: auto; }
+
+/* The Filters popover: fixed under its button (see FiltersPopover), on the popover rung. */
+.filters-popover {
+  position: fixed;
+  z-index: 200;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.filters-popover-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px var(--inset-tight);
+  overflow-y: auto;
+}
+.filters-popover-controls .form-control { width: 100%; }
+.filters-popover-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px var(--inset-tight);
+  border-top: 1px solid var(--border);
+}
 
 /* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
    native search cancel is hidden, since the clear button replaces it. */
@@ -1039,27 +1144,34 @@ html, body, #root {
 }
 .list-foot-end { font-size: 12px; color: var(--text-muted); }
 
-/* A cell rendered as an action -- used for counts that navigate elsewhere (e.g. a schema's
-   device count opening the Devices page filtered to it). Reads as a link, not a button. */
+/* A count that navigates elsewhere (a schema's device count opening Devices filtered to it): a text
+   link in the accent colour, underlined on hover and focus. A count pill inside it loses its pill. */
 .count-link {
   background: none;
   border: none;
   padding: 0;
   cursor: pointer;
   font: inherit;
-}
-
-.count-link:hover .section-count,
-.count-link:focus-visible .section-count {
-  background: var(--accent);
-  color: var(--bg-card);
-}
-
-.count-link:disabled { cursor: default; }
-.count-link:disabled:hover .section-count {
-  background: var(--accent-dim);
   color: var(--accent);
 }
+
+.count-link:hover,
+.count-link:focus-visible { text-decoration: underline; }
+.count-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+
+.count-link .section-count {
+  background: none;
+  color: inherit;
+  padding: 0;
+  min-width: 0;
+  height: auto;
+  margin-left: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.count-link:disabled { cursor: default; color: var(--text-muted); text-decoration: none; }
 
 /* ===== Table ===== */
 .table-wrap {
@@ -1071,6 +1183,7 @@ html, body, #root {
    table without one moves the problem inside the box. `overscroll-behavior: contain` stops a flick
    that bottoms out here from scrolling the page. */
 .table-scroll {
+  --table-head-height: 40px;
   max-height: 420px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1082,11 +1195,11 @@ html, body, #root {
   z-index: 2;
 }
 
-/* `thead tr` already carries `--bg-glass`, which is translucent: rows scrolling under a pinned
-   header would show through it. The opaque card colour goes on the cells, since the row's own
-   background is the glass tint that has to stay. */
+/* The header is opaque (`thead th`) so rows scrolling under it do not show through. Its height is
+   fixed at `--table-head-height` (12px padding twice plus a 16px line), which is where a pinned
+   group row sits. */
 .table-scroll thead th {
-  background: var(--bg-card);
+  line-height: 16px;
   /* `border-bottom` on the row does not travel with a sticky element in every engine, so the
      hairline is drawn as a shadow that does. Without it the header floats on top of the rows. */
   box-shadow: inset 0 -1px 0 var(--border);
@@ -1131,6 +1244,10 @@ html, body, #root {
   overscroll-behavior: contain;
 }
 
+/* The header pins only on a table-wrap directly under the card, so only that scroller carries the
+   header height a group row sits below. */
+.card-fill > .table-wrap { --table-head-height: 40px; }
+
 /* The table scroller pins its header like .table-scroll, without that class's cap. */
 .card-fill > .table-wrap.table-scroll { max-height: none; }
 
@@ -1141,7 +1258,7 @@ html, body, #root {
 }
 
 .card-fill > .table-wrap thead th {
-  background: var(--bg-card);
+  line-height: 16px;
   box-shadow: inset 0 -1px 0 var(--border);
 }
 
@@ -1150,9 +1267,15 @@ table {
   border-collapse: collapse;
 }
 
+/* One opaque header colour, sticky or not: the base surface, as the Audit Trail's header rows and
+   the group bands. Not a tint, which rows scrolling under a pinned header would show through. */
+thead tr,
+thead th {
+  background: var(--bg-base);
+}
+
 thead tr {
   border-bottom: 1px solid var(--border);
-  background: var(--bg-glass);
 }
 
 th {
@@ -1256,18 +1379,22 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--warning-text);
 }
 
-/* Group header row: a collapsible category inside a table body. `--bg-card` mixed toward the text
-   colour, separated from both the row background and the `--bg-glass` hover colour, so a category
-   header does not look permanently hovered. */
+/* Group header row: a collapsible category inside a table body, on the header colour. It pins to
+   the top of the scroller, below a pinned `thead` (`--table-head-height`, 0 where the header does
+   not pin), for as long as its own `tbody` is in view. Its hairlines are shadows, since a border
+   does not travel with a sticky cell. Under the header's z-index 2. */
 .table-group-row > td {
+  position: sticky;
+  top: var(--table-head-height, 0px);
+  z-index: 1;
   padding: 0;
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+  background: var(--bg-base);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
 }
 
 /* Hover belongs to the BUTTON, not the row: the whole header is the control, and a row-level rule
-   would also fire when the pointer is over the gap beside it. */
-.table-group-row:hover > td { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+   would also fire when the pointer is over the gap beside it. The tint stays opaque. */
+.table-group-row:hover > td { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
 
 /* Padded like a table cell (`td` is `12px 16px`), because it stands in for one, so the label aligns
    with the column beneath it and the row stands as tall as the rows it groups. */
@@ -1288,10 +1415,11 @@ tbody tr:hover { background: var(--bg-glass); }
 .table-group-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 
+/* Monospace is a typeface, not a cue: it takes the text colour. Accent marks a real link. */
 .mono {
   font-family: var(--font-mono);
   font-size: 13px;
-  color: var(--accent);
+  color: var(--text-primary);
 }
 
 /* A secondary cell: a timestamp, an age, anything read only after the row has been identified
@@ -1389,65 +1517,51 @@ td.row-actions, th.row-actions {
 .table-directory .cell-version { overflow-wrap: anywhere; }
 .table-directory .cell-version .mono { font-size: 12px; }
 
-/* An endpoint reads as a control, and its shape says which: an accent-bordered one opens, a muted
-   one copies. */
+/* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 3px 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
   text-decoration: none;
-  cursor: pointer;
   overflow-wrap: anywhere;
-  text-align: left;
-  transition: var(--transition);
 }
-
-/* Openable: accent text and an accent border on hover, matching how every other navigation
-   affordance in the app signals that it goes somewhere. */
 .endpoint-open { color: var(--accent); }
-.endpoint-open:hover { border-color: var(--accent); background: var(--bg-surface); }
-
-/* Copyable: deliberately quieter. It is useful, but it is not a destination, and colouring it
-   like one would put the two back on equal footing. */
-.endpoint-copy { color: var(--text-muted); font-family: inherit; }
-.endpoint-copy:hover { border-color: var(--text-muted); background: var(--bg-surface); }
-
-/* Keyboard reachability is not optional here: the copy variant is the ONLY way to obtain a
-   broker or database address from this page. */
-.endpoint-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.endpoint-open:hover { border-color: var(--accent); }
 
 /* Between the category cards. Deliberately not `.card + .card`: several pages stack cards that
    are meant to sit tight against each other. */
 .directory-group + .directory-group { margin-top: var(--stack); }
 
-/* Copyable identifiers: every Sparkplug id shown is click-to-copy, styled to read as inline text
-   while still being a real <button>. */
-.copyable-id {
+/* The one chip shape for what copies and what opens: bordered, monospace, an icon at rest. The copy
+   chip is quiet text; the link chip (.endpoint-open) is accent text. The icon says which is which. */
+.copyable-id,
+.endpoint-action {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
   padding: 2px 6px;
-  margin: -2px -6px;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
-  max-width: 100%;
+  transition: var(--transition);
+}
+
+/* The vertical margin cancels the padding, so a chip adds only its border to a row. */
+.copyable-id {
+  margin: -2px 0;
+  color: var(--text-muted);
 }
 
 .copyable-id:hover,
-.copyable-id:focus-visible {
-  background: var(--bg-glass);
-  border-color: var(--border-hover);
+.endpoint-action:hover {
+  background: var(--bg-surface);
 }
+.copyable-id:hover { border-color: var(--text-muted); }
+
+.copyable-id:focus-visible,
+.endpoint-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .copyable-id-value {
   overflow: hidden;
@@ -1455,9 +1569,19 @@ td.row-actions, th.row-actions {
   white-space: nowrap;
 }
 
-/* Opt-in wrapping, for values that are worth reading in full rather than identifying at a glance
-   -- a Sparkplug topic template is ~70 characters and would otherwise be an ellipsis in a modal.
-   Truncation stays the default because that is what a dense table row needs. */
+/* `truncate="start"`: the value is split in two spans. The head gives way with an ellipsis, the tail
+   (the end of the value) never shrinks, so the part that tells two values apart stays visible. */
+.copyable-id-value-start { display: flex; }
+.copyable-id-head {
+  flex: 0 1 auto;
+  min-width: 1.2ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.copyable-id-tail { flex: none; }
+
+/* Opt-in wrapping, for values worth reading in full: a Sparkplug topic template is ~70 characters
+   and would otherwise be an ellipsis in a modal. Truncation stays the default for a dense row. */
 .copyable-id-wrap {
   align-items: flex-start;
 }
@@ -1468,15 +1592,7 @@ td.row-actions, th.row-actions {
   overflow-wrap: anywhere;
 }
 
-/* Revealed on hover/focus so a dense table is not peppered with icons. */
-.copyable-id-icon {
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.copyable-id:hover .copyable-id-icon,
-.copyable-id:focus-visible .copyable-id-icon { opacity: 0.7; }
+.copyable-id-icon { flex-shrink: 0; }
 
 .copyable-id-error {
   flex-shrink: 0;
@@ -1615,6 +1731,18 @@ td.row-actions, th.row-actions {
 }
 .btn-danger:hover { background: rgba(255, 77, 109, 0.2); box-shadow: 0 0 12px rgba(255, 77, 109, 0.2); }
 
+/* An action that is risky but not destructive: amber fill, --warning-contrast ink. Pair it with an
+   icon or a word, since colour alone is not a signal. */
+.btn-warning {
+  background: var(--warning);
+  color: var(--warning-contrast);
+}
+.btn-warning:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--warning) 40%, transparent);
+}
+.btn-warning:focus-visible { outline: 2px solid var(--warning); outline-offset: 2px; }
+
 /* A destructive action in a table row: it rests as an ordinary ghost button and takes the danger
    colour once pointed at. --text-muted so it is readable at rest. Compounded with .btn-danger,
    which declares the same three properties, so this does not rest on source order. */
@@ -1723,11 +1851,25 @@ td.row-actions, th.row-actions {
   animation: slideUp 0.2s ease;
   color: var(--text-primary);
 
-  /* Caps the height of every modal so a long dialog scrolls inside itself rather than growing past
-     both edges of the viewport. */
+  /* A column capped at the window height: the header and footer keep their size and only
+     `.modal-body` scrolls, so Save is never scrolled out of view. `.modal` itself must not scroll. */
+  display: flex;
+  flex-direction: column;
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
+
+/* `<Modal fill>`: the body lays its children out as a column, and the one marked `.modal-fill` takes
+   what is left. Every other child keeps its own height. */
+.modal-body-fill { display: flex; flex-direction: column; }
+.modal-body-fill > * { flex-shrink: 0; }
+.modal-body-fill > .modal-fill { flex: 1 1 auto; flex-shrink: 1; min-height: 0; }
 
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(16px); }
@@ -1736,7 +1878,7 @@ td.row-actions, th.row-actions {
 
 /* The modal width scale. `.modal` itself is the default step (480px), a column of stacked form
    fields; the steps below are named after the kind of content that earns them. Every step inherits
-   `.modal`'s height cap and internal scrolling. */
+   `.modal`'s height cap and `.modal-body`'s scrolling. */
 
 /* A yes/no question and nothing else. Narrower than a form on purpose: a short line of text set
    across 480px reads as an unfinished dialog. */
@@ -1762,6 +1904,7 @@ td.row-actions, th.row-actions {
 }
 
 .modal-header-row {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1775,7 +1918,6 @@ td.row-actions, th.row-actions {
 .modal-title {
   font-size: 17px;
   font-weight: 600;
-  margin-bottom: 22px;
   color: var(--text-primary);
 }
 
@@ -1799,6 +1941,7 @@ td.row-actions, th.row-actions {
 /* A failure the operator must see before pressing the button again. The callout's shape, in danger
    colours: --danger-text for the words, --danger for the border and icon. */
 .modal-error {
+  flex: none;
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -1855,6 +1998,16 @@ td.row-actions, th.row-actions {
 
 /* Placeholders bound to the theme explicitly rather than the browser default. --text-muted, not
    --text-dim, which measures 2.45:1 against --bg-base in dark mode. */
+/* A field that cannot be edited: the page background, muted text, no focus ring. */
+.form-control:disabled,
+.form-control[readonly] {
+  background: var(--bg-base);
+  color: var(--text-muted);
+  border-color: var(--border);
+  box-shadow: none;
+}
+.form-control:disabled { cursor: not-allowed; }
+
 .form-control::placeholder {
   color: var(--text-muted);
   opacity: 1; /* Firefox dims placeholders by default, compounding the contrast problem. */
@@ -1929,6 +2082,7 @@ td.row-actions, th.row-actions {
 }
 
 .modal-actions {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -2041,6 +2195,20 @@ td.row-actions, th.row-actions {
 
 /* Wraps anywhere: an error can carry a long identifier with no spaces in it. */
 .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* A toast that opens something: the message is a button drawn as text, so only the cursor and the
+   focus ring say it is clickable. */
+.toast-open {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.toast-open:hover { text-decoration: underline; }
+.toast-open:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 
 /* 24px, the WCAG 2.2 minimum target. Takes the toast's own ink, which each type measures on its tint. */
 .toast-dismiss {
@@ -3360,7 +3528,21 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
 .context-panel-heading { min-width: 0; }
 
+.context-panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-panel-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
 .context-panel-title {
+  min-width: 0;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
@@ -3448,9 +3630,6 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 .context-field-value.mono {
   font-family: var(--font-mono);
   font-size: 11px;
-  /* Overrides `.mono`'s accent colour: in this panel a monospace value is a plain fact, not a
-     link, and colouring every id would make the whole list read as actionable. */
-  color: var(--text-primary);
 }
 
 /* A field whose value is the problem, such as a gateway CA inside its expiry window. Colour only,
@@ -3550,7 +3729,31 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 tr.row-selected > td { background: var(--accent-dim); }
 tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
+/* A row that opens a side panel ends in a chevron, drawn on its last cell as a mask so it carries
+   no text for a screen reader. The cell reserves the space, so the chevron never overlaps content. */
 .row-selectable { cursor: pointer; }
+
+tr.row-selectable > td:last-child {
+  position: relative;
+  padding-right: 40px;
+}
+
+tr.row-selectable > td:last-child::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  background-color: var(--text-dim);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
+
+tr.row-selectable:hover > td:last-child::after { background-color: var(--text-primary); }
+tr.row-selectable.row-selected > td:last-child::after { background-color: var(--accent); }
 
 /* The app-level drawer, which is the help panel. It is a sibling of `.content` rather than inside
    `.page-layout`, so there is no scrolling ancestor for `position: sticky`; it takes the full
@@ -4967,15 +5170,19 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 .modal-lg .modal-actions { flex-wrap: wrap; }
 
 /* VOCABULARY. A section header reuses `.table-group-button` and `.table-group-label`; the strip
-   behind it is `.table-group-row`'s tint. */
+   behind it is the header colour, and pins to the top of its scroller for as long as its own
+   section is in view. */
 .vocab-sections { padding: 0 0 4px; }
 
 .vocab-section-head {
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-base);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
 }
 
-.vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+.vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
 
 .vocab-in-use {
   font-size: 11px;

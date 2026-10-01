@@ -14,6 +14,7 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { formatDateTime, formatRelative } from '../../utils/format'
+import { canDecide } from '../../utils/proposalAuthority'
 
 /**
  * The Approvals page: one inbox for every change somebody proposed but may not apply.
@@ -75,16 +76,6 @@ const KEY_LABELS = {
 
 export function keyLabel(key) {
   return KEY_LABELS[key] || key
-}
-
-/**
- * Whether this session may decide this kind of change, mirroring `may_decide_proposal()`. Every
- * live kind resolves to these two roles for a person; a decided-only schema row is false for
- * everybody. A mirror that is allowed to be wrong: the database decides again on every call.
- */
-export function canDecide(entityType, userRole) {
-  if (entityType === 'schemas') return false
-  return userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 }
 
 /** `null` renders as an explicit word rather than as a blank a reader would take for "unchanged". */

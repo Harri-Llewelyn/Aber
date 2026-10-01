@@ -4,13 +4,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   ApprovalsTab,
   ActorLabel,
-  canDecide,
   diffRows,
   keyLabel,
   KINDS,
   filterProposals,
   locationNameMap
 } from '../components/tabs/ApprovalsTab'
+import { canDecide } from '../utils/proposalAuthority'
 import { api } from '../api'
 import { ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND } from '../constants'
 import { formatDateTime } from '../utils/format'

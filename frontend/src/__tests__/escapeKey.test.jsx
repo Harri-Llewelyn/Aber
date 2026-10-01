@@ -282,6 +282,7 @@ describe('modal widths come from the scale, not from inline numbers', () => {
   it('caps height and scrolls internally on the base rule every step inherits', () => {
     const base = APP_CSS.match(/\n\.modal \{([\s\S]*?)\n\}/)[1]
     expect(base).toMatch(/max-height:\s*calc\(100vh - 48px\)/)
-    expect(base).toMatch(/overflow-y:\s*auto/)
+    // The body scrolls, not the dialog, so the header and footer stay in view.
+    expect(base).not.toMatch(/overflow/)
   })
 })

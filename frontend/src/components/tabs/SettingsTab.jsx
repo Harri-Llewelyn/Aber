@@ -292,7 +292,6 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
             tabs={groups.map(group => ({
               id: group.category,
               label: group.category,
-              count: group.settings.length,
               title: `${group.settings.length} setting${group.settings.length === 1 ? '' : 's'}`,
             }))}
           />

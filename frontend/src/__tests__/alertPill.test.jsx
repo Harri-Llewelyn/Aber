@@ -389,3 +389,16 @@ describe('AlertPill', () => {
     })
   })
 })
+
+describe('AlertPill controlled by its parent', () => {
+  it('follows `open` and reports the change instead of keeping its own state', () => {
+    const onOpenChange = vi.fn()
+    const { rerender } = render(<AlertPill alerts={[]} open={false} onOpenChange={onOpenChange} />)
+    expect(screen.queryByRole('dialog', { name: 'Firing alerts' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'No firing alerts' }))
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+    expect(screen.queryByRole('dialog', { name: 'Firing alerts' })).toBeNull()
+    rerender(<AlertPill alerts={[]} open onOpenChange={onOpenChange} />)
+    expect(screen.getByRole('dialog', { name: 'Firing alerts' })).toBeTruthy()
+  })
+})
