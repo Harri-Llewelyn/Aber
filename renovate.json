@@ -13,7 +13,7 @@
     "SCHEDULING IS MONTHLY, AND THE WORKFLOW CRON IS NOT. Routine currency work opens on the first of the month, because a weekly batch of pull requests is a standing tax on whoever has to read them and the thing being defended against moves over months, not days. The workflow that INVOKES Renovate still runs daily, and that is deliberate rather than sloppy: Renovate can only act while the process is running, so a monthly cron would silently make vulnerabilityAlerts monthly too -- and those are supposed to ignore the schedule entirely. Daily invocation plus a monthly window means routine noise once a month and a security advisory picked up within a day."
   ],
 
-  "extends": ["config:recommended"],
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
 
   "timezone": "Europe/London",
   "schedule": ["before 6am on the first day of the month"],

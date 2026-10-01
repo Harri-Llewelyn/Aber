@@ -107,12 +107,12 @@ jobs:
           fi
 
       - name: Checkout Code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # Pinned. An unpinned action deciding what to do about unpinned dependencies is a joke that
       # writes itself, and this one holds a token that can open pull requests.
       - name: Renovate
-        uses: renovatebot/github-action@v46.2.2
+        uses: renovatebot/github-action@e09d604f8f803bb527bd8321ed5be06c460b8682 # v46.2.2
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
           configurationFile: renovate.json

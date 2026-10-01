@@ -109,10 +109,12 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Set up Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.16.3
 
       - name: Install psql
         # The rehearsal talks to both databases directly over a port-forward, so the CLIENT has to
@@ -384,7 +386,7 @@ jobs:
       # full database, so they are not something to accumulate.
       - name: Upload The Backup On Failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rehearsal-backup-${{ github.run_id }}
           path: ${{ env.BACKUP_DIR }}
@@ -401,7 +403,7 @@ jobs:
       # issues -- the first is a fact about the repository, the second is noise that gets muted.
       - name: File Or Update The Failure
         if: failure() && github.event_name == 'schedule'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const title = 'Backup and restore rehearsal is failing';
