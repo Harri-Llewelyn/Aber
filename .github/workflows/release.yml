@@ -208,7 +208,7 @@ jobs:
       # Built to an OCI archive and scanned before anything is pushed. Build & Push repeats these
       # inputs and resolves every layer from this builder's cache, so nothing is built twice.
       - name: Build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
