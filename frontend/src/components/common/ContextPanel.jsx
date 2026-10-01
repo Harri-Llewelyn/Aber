@@ -17,6 +17,9 @@ import { grafanaAlertUrl } from '../../constants'
  *
  * @param {string} title The entity's display name.
  *
+ * @param {node} icon Optional entity icon drawn before the title. Decorative: hidden from assistive
+ * technology, so the title stays the accessible name.
+ *
  * @param {node} subtitle Optional line under the title.
  *
  * @param {Array} fields [{ label, value, display?, mono?, copyable?, title?, help?, full?, danger? }].
@@ -25,7 +28,9 @@ import { grafanaAlertUrl } from '../../constants'
  * not say what it is for.
  *
  * @param {Array} actions [{ label, icon, onClick, href?, disabled?, title?, primary?, pending?,
- * pendingLabel? }]. `pending` puts that one action into the in-flight state.
+ * pendingLabel? }]. `pending` puts that one action into the in-flight state. The first action marked
+ * `primary` is drawn highlighted at the top of the list; a later one marked `primary` is drawn as
+ * a plain action in its own position.
  *
  * @param {Function} onCopy Toast callback handed to CopyableId.
  *
@@ -43,13 +48,17 @@ import { grafanaAlertUrl } from '../../constants'
  * @param {string} className Extra classes on the <aside>; the app-level instance sits in a
  * different row (`.context-panel-app`).
  */
-export function ContextPanel({ open, type, title, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '' }) {
+export function ContextPanel({ open, type, title, icon, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '' }) {
   const closeRef = useRef(null)
 
   // Escape closes, caught at the document because the panel does not take focus. Through the shared
   // stack, so Escape out of a modal opened from this panel closes the modal and not the panel
   // behind it; `open` keeps a closed panel off the stack.
   useEscapeKey(onClose, open)
+
+  const firstPrimary = actions.findIndex(a => a.primary)
+  const orderedActions = actions.map((a, i) => ({ ...a, primary: i === firstPrimary }))
+  if (firstPrimary > 0) orderedActions.unshift(orderedActions.splice(firstPrimary, 1)[0])
 
   return (
     /* Always in the DOM, hidden with `aria-hidden` rather than unmounted: the width transition
@@ -68,7 +77,10 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                 region label. */}
             {/* Titled as well as truncated: an entity name long enough to overrun the drawer is exactly
                 the kind you opened the panel to read. */}
-            <div className="context-panel-title" title={title}>{title}</div>
+            <div className="context-panel-title-row">
+              {icon && <span className="context-panel-icon" aria-hidden="true">{icon}</span>}
+              <div className="context-panel-title" title={title}>{title}</div>
+            </div>
             {subtitle && <div className="context-panel-subtitle">{subtitle}</div>}
           </div>
           <button
@@ -157,7 +169,7 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
           {actions.length > 0 && (
             <div className="context-panel-actions">
               <div className="context-panel-section-label">Actions</div>
-              {actions.map((a, i) => {
+              {orderedActions.map((a, i) => {
                 const cls = `btn btn-sm ${a.primary ? 'btn-primary' : 'btn-ghost'} context-action${a.danger ? ' context-action-danger' : ''}`
                 // An href action is a real link, so middle-click and copy link work.
                 return a.href ? (

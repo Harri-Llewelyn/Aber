@@ -3475,7 +3475,21 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 
 .context-panel-heading { min-width: 0; }
 
+.context-panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-panel-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
 .context-panel-title {
+  min-width: 0;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
@@ -3665,7 +3679,31 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 tr.row-selected > td { background: var(--accent-dim); }
 tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
+/* A row that opens a side panel ends in a chevron, drawn on its last cell as a mask so it carries
+   no text for a screen reader. The cell reserves the space, so the chevron never overlaps content. */
 .row-selectable { cursor: pointer; }
+
+tr.row-selectable > td:last-child {
+  position: relative;
+  padding-right: 40px;
+}
+
+tr.row-selectable > td:last-child::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  background-color: var(--text-dim);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
+
+tr.row-selectable:hover > td:last-child::after { background-color: var(--text-primary); }
+tr.row-selectable.row-selected > td:last-child::after { background-color: var(--accent); }
 
 /* The app-level drawer, which is the help panel. It is a sibling of `.content` rather than inside
    `.page-layout`, so there is no scrolling ancestor for `position: sticky`; it takes the full

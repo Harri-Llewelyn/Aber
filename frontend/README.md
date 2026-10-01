@@ -401,6 +401,13 @@ page name put a second *"Devices"* into the document on every page — a duplica
 and for anything reading the document as text. `aria-hidden` kept it out of the accessibility tree;
 nothing was keeping it out of the text.
 
+**Icon and primary action.** `icon` (a node) is drawn before the title and hidden from assistive
+technology; the title stays the accessible name. The first action marked `primary` is listed first
+and highlighted; a later one marked `primary` renders as a plain action in its own position. A page
+picks its primary in this order: setup while a gateway is pending; otherwise the destination where
+one exists (Launch UI, Open Dashboard); otherwise Restore when archived; otherwise Edit Details
+(Propose a Change in propose mode).
+
 ---
 
 ## Toasts and the notification history
@@ -477,6 +484,10 @@ Two rules that were each learned from a real bug:
   a pinned `thead` at `--table-head-height`, which `.table-scroll` and `.card-fill > .table-wrap`
   set to the header's fixed height (12px padding twice plus a 16px line, so keep header cells on one
   line). It works the same whether the scroller is a `.card-fill` card body or a `.table-scroll`.
+- **A row that opens a side panel has `row-selectable` and shows a chevron.** The CSS draws it on
+  the row's last cell as a mask, reserving space on the right; a row without the class shows none.
+  Row click opens the panel; a click on a button, link or input inside the row does not
+  (`rowSelectHandler`).
 - **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
   cut — the entry that matters most is not the one that sorts first.
