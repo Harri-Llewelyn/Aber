@@ -6,8 +6,8 @@ info:
   description: |
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
     Interoperability eXchange) read-side view of this platform's asset model — **52 passed,
-    0 failed** against CESMII's official 60-test conformance suite at `5010274f` (cesmii/i3X,
-    2026-06-18), the ref CI pins, which tests shape. What it says about a seeded plant is
+    0 failed** against CESMII's official 60-test conformance suite at `3eae7ea4` (cesmii/i3X,
+    2026-09-25), the ref CI pins, which tests shape. What it says about a seeded plant is
     checked against the Directory by `ingestion/validate.py` (checks 12 and 17).
 
     ### This is a different service from the Platform API
