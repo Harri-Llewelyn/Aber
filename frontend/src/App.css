@@ -541,6 +541,7 @@ html, body, #root {
 }
 
 .sidebar-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -599,6 +600,29 @@ html, body, #root {
    since which page you are on outranks what is waiting there. */
 .sidebar-item.sidebar-item-warning:not(.active) { color: var(--warning-text); }
 .sidebar-item.sidebar-item-warning:not(.active):hover { color: var(--warning-text); }
+
+/* The number: a badge on the icon's top-right corner while the rail is collapsed, the end of the
+   label once it is expanded. Filled, so it reads on the active item's accent too. */
+.sidebar-item-count {
+  position: absolute;
+  top: 0;
+  left: 22px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warning);
+  color: var(--warning-contrast);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  letter-spacing: 0;
+}
+.sidebar-expanded .sidebar-item-count {
+  position: static;
+  margin-left: auto;
+  font-size: 11px;
+}
 
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
    it sits on the bar's true centre and shrinks before the brand does. */

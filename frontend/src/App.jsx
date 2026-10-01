@@ -481,7 +481,7 @@ function Dashboard({ session, onSignOut }) {
 
   // What the rail flags in the warning colour: quarantine, offline gateways, unfiled cells. Owned
   // here for the same reason the alerts are.
-  const navSignals = useNavSignals()
+  const navSignals = useNavSignals({ hasPermission, userRole, userId: session?.user?.id })
 
   // Fed by the counter every call through `api` increments, so it covers a save on a modal and a
   // tab's reconciliation poll alike without either having to report anything.

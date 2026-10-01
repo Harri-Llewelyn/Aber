@@ -45,8 +45,8 @@ export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChange
             {index > 0 && <div className="sidebar-divider" role="presentation" />}
 
             {group.tabs.map(t => {
-              // A page with work waiting takes the warning colour, and says why on its title and
-              // label, so the colour is never the only signal (hooks/useNavSignals.js).
+              // A page with work waiting takes the warning colour and its number, and says why on its title
+              // and label (the count is aria-hidden: the label already carries it).
               const signal = signals[t.id]
               return (
                 <button
@@ -59,6 +59,7 @@ export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChange
                 >
                   <span className="sidebar-item-icon">{t.icon}</span>
                   <span className="sidebar-item-label">{t.label}</span>
+                  {signal?.count > 0 && <span className="sidebar-item-count" aria-hidden="true">{signal.count > 99 ? '99+' : signal.count}</span>}
                 </button>
               )
             })}
