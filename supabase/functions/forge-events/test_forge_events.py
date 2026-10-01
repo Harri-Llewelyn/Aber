@@ -121,6 +121,24 @@ def forge_as_machine(path, method="GET", body=None):
         return err.code, (json.loads(text) if text.strip() else None)
 
 
+def platform_playbook_published(timeout=180):
+    """
+    Enrolment creates the platform repository; the sweep publishes the playbook into it, every
+    fifteen minutes. A stack minutes old (every CI run) may not have swept yet, so ask for one
+    pass and wait for site.yml on main.
+    """
+    path = "/api/v1/repos/platform/gateway-platform/contents/site.yml"
+    if forge_as_machine(path)[0] == 200:
+        return True
+    rest("/rpc/sweep_forge", method="POST", body={})
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(3)
+        if forge_as_machine(path)[0] == 200:
+            return True
+    return False
+
+
 @unittest.skipIf(not SERVICE_ROLE_KEY or not PUBLISHABLE_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY must be set")
 @unittest.skipIf(not WEBHOOK_SECRET, "GITEA_WEBHOOK_SECRET must be set to the value the edge runtime holds")
 class ForgeEventsBase(unittest.TestCase):
@@ -616,6 +634,7 @@ class TestTheApplianceItself(ForgeEventsBase):
             self.assertIn("/platform/gateway-platform", platform_url.replace(":", "/"))
             self.assertRegex(payload["repository"]["platform_tag"], r"^v\d+\.\d+\.\d+")
             platform_clone = os.path.join(self.work, "platform")
+            self.assertTrue(platform_playbook_published(), "one sweep did not publish the platform playbook")
             code, out = self.git("clone", "--quiet", f"{FORGE_SSH.rstrip('/')}/platform/gateway-platform.git", platform_clone, cwd=self.work)
             self.assertEqual(code, 0, f"the deploy key could not read the platform repository: {out}")
             self.assertTrue(os.path.exists(os.path.join(platform_clone, "site.yml")), "the platform repository holds no playbook")
