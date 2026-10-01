@@ -451,7 +451,15 @@ class TestCredentialServiceFailure(EnrollGatewayBase):
         stack_exec.wait_until("credential", "wget", "-qO-", "http://127.0.0.1:9010/healthz")
         self.stopped = False
 
-        retried, retry_payload = enroll(token)
+        # The Service lists the pod a moment before every node routes to it, so the first call can
+        # still meet a refused connection. The appliance is told to retry with the same bundle, and
+        # does; an unreleased claim would answer 401, never another retryable 503.
+        deadline = time.monotonic() + 30
+        while True:
+            retried, retry_payload = enroll(token)
+            if retried != 503 or not (retry_payload or {}).get("retryable") or time.monotonic() > deadline:
+                break
+            time.sleep(2)
         self.assertEqual(
             retried, 200,
             f"the SAME bundle could not be retried after a transient failure: {retry_payload}",
