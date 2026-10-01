@@ -177,6 +177,23 @@ migration. Do NOT work around this with --no-owner: RLS policies reference roles
 dump stripped of ownership restores into a database where every policy denies."
 log "  ok -- all $(echo "$REQUIRED_ROLES" | wc -w | tr -d ' ') present"
 
+# --- 0a. Realtime is stopped ---------------------------------------------------------------------
+#
+# supabase-realtime makes its daily realtime.messages partitions while it runs. One it makes between
+# 0b's drop and the replay fails the restore: `cannot drop inherited constraint
+# "messages_<date>_pkey"`. It connects as supabase_admin, so it is recognised by application name.
+log "preflight: supabase-realtime is stopped"
+realtime=$(sb_query "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE '%realtime%'" | tr -d '\r\n ')
+[ "$realtime" = "0" ] || die "supabase-realtime holds $realtime connection(s) to the database.
+
+It recreates its daily realtime.messages partitions while it runs, and one made during the restore
+fails it. Stop it, restore, then start it again:
+
+  kubectl -n <namespace> scale deploy/supabase-realtime --replicas=0
+  (run this script)
+  kubectl -n <namespace> scale deploy/supabase-realtime --replicas=1"
+log "  ok"
+
 # --- 0b. Every partition of every partitioned table ------------------------------------------------
 #
 # A partition's primary key is inherited from its parent and cannot be dropped on its own, and
@@ -241,6 +258,12 @@ log "  ok"
 # --- 1. Supabase first -----------------------------------------------------------------------
 restore_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
            "$SUPABASE_DB_HOST" "$SUPABASE_DB_PORT" "$SUPABASE_DB_PASSWORD" "$SUPABASE_FILE"
+
+# PostgREST reloads its schema cache from the image's DDL event triggers, and a --clean replay
+# drops those triggers early and recreates them last: the reload it saw happened mid-restore, with
+# the tables gone, and PostgREST answers 404 for them until told again.
+sb_query "NOTIFY pgrst, 'reload schema'" >/dev/null
+log "  PostgREST told to reload its schema cache"
 
 # --- 2. Then the historian, WRAPPED IN TimescaleDB's RESTORE GUARDS ---------------------------
 #

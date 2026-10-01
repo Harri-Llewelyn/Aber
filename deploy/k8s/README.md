@@ -1230,9 +1230,15 @@ not have to infer which files belong together.
 Restore:
 
 ```bash
+kubectl -n aber scale deploy/supabase-realtime --replicas=0
 kubectl -n aber exec -it statefulset/supabase-db -- \
   pg_restore -U supabase_admin -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
+kubectl -n aber scale deploy/supabase-realtime --replicas=1
 ```
+
+- **Realtime is stopped for the replay.** It makes its daily `realtime.messages` partitions while
+  it runs, and one made during the restore fails it with `cannot drop inherited constraint`.
+  `scripts/restore-databases.sh` refuses to start while Realtime is connected.
 
 - **`-U supabase_admin`, not `-U postgres`.** `postgres` is not a superuser in the
   `supabase/postgres` image, and the six event triggers (`pgrst_drop_watch`, `issue_pg_cron_access`,
@@ -1244,6 +1250,10 @@ kubectl -n aber exec -it statefulset/supabase-db -- \
   `supabase_functions_admin` by pg_net's setup — so restore into a namespace where the whole stack
   has booted, not just the database. Full table in
   [`../../supabase/README.md`](../../supabase/README.md#backup-and-recovery).
+- **Then tell PostgREST to reload its schema cache**:
+  `psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema'"`, or restart
+  `supabase-rest`. Otherwise it answers 404 for restored tables, because its last reload ran
+  mid-restore. `scripts/restore-databases.sh` does this itself.
 - **Ownership and privileges are kept in the dump on purpose.** Objects are owned by those roles and
   RLS policies reference them by name; a dump stripped of ownership restores into a database where
   every policy denies.
