@@ -4,7 +4,7 @@ import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../constant
 import { usePolling } from './usePolling'
 import { useRealtimeTable } from './useRealtimeTable'
 import { gatewayFleetCounts, deviceFleetCounts } from '../utils/fleetCounts'
-import { canDecide } from '../components/tabs/ApprovalsTab'
+import { canDecide } from '../utils/proposalAuthority'
 
 /**
  * What the rail should flag for the person looking, from the lists the pages read. A signal is a
