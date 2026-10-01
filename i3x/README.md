@@ -6,8 +6,8 @@ eXchange) server over this stack's existing model.
 **What is verified, and by what.** Two results, each covering only what it tests:
 
 - **CESMII's conformance suite: `1.0 Compatible`**, 52 passed and 0 failed of its 60 tests at
-  `5010274f` (cesmii/i3X, 2026-06-18), the ref CI pins. That ref predates the Implementation Guide's
-  1.0 final of 2026-09-25, whose changes were editorial. The suite is written for any i3X server, so
+  `3eae7ea4` (cesmii/i3X, 2026-09-25), the ref CI pins: the Implementation Guide's 1.0 final. The
+  one commit since the previous pin (`5010274f`) changed that guide only, so the suite is unchanged. The suite is written for any i3X server, so
   it tests shape (envelopes, status codes, that every edge has its inverse), and it skips what it
   cannot provoke, SUB-07 and SUB-13 among them ([Testing](#testing)). Not *Full 1.0 Compliance*,
   deliberately: that requires the optional Update methods, which this server refuses

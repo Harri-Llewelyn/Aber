@@ -5,10 +5,17 @@ on:
     branches: [ master, main ]
   pull_request:
     branches: [ master, main ]
+  workflow_dispatch:
+
+# A superseded run is cancelled: a later push to the same ref covers everything the cancelled
+# one would have.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Which paths changed. A job-level filter, not `paths-ignore` on the trigger: the cheap jobs run
-  # on everything, only the two end-to-end stacks are gated. Fails open (a range it cannot compute
+  # on everything, only the end-to-end stack is gated. Fails open (a range it cannot compute
   # answers `code=true`). No third-party action; `git diff` answers this.
   changes:
     name: Which Paths Changed
@@ -44,8 +51,9 @@ jobs:
           fi
 
           if [ -z "$RANGE" ]; then
-            echo "no comparable range (first push, or a force-push); running everything"
+            echo "no comparable range (first push, a force-push, or a manual dispatch); running everything"
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "playbook=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -1447,9 +1455,10 @@ jobs:
       RELEASE: aber
       NS: aber
       # A commit SHA: the `1.0.0` tag predates the conformance suite, and an unpinned branch would let
-      # someone else's commit decide whether this pipeline is green. Read the suite's CHANGELOG before
-      # bumping: a new MUST test is a real finding about this server.
-      I3X_SUITE_REF: "5010274f4952acb1c23dc77b32bd44eed16f0c2b"
+      # someone else's commit decide whether this pipeline is green. This one is the 1.0 branch head
+      # of 2026-09-25. Read the suite's CHANGELOG before bumping: a new MUST test is a real finding
+      # about this server.
+      I3X_SUITE_REF: "3eae7ea455f333181ba07bad14064006c2f4c939"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
