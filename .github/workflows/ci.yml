@@ -1356,14 +1356,16 @@ jobs:
         with:
           python-version: '3.13'
 
-      # From the requirements files, not a hand-picked list. jsonschema and pytest are the two not
-      # declared by either package: jsonschema validates the AAS export against the IDTA schema, and
-      # pytest is for ingestion/test_cold_archive.py, the one suite with no `__main__` block.
+      # From the requirements files, not a hand-picked list. jsonschema, pytest and pyyaml are the
+      # three not declared by either package: jsonschema validates the AAS export against the IDTA
+      # schema, pytest is for ingestion/test_cold_archive.py, the one suite with no `__main__` block,
+      # and pyyaml is what the appliance's converge script reads platform.yml with (an appliance
+      # has it as python3-yaml, from the platform playbook's base role).
       - name: Install Python Test Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r ingestion/requirements.txt -r i3x/requirements.txt
-          pip install jsonschema pytest
+          pip install jsonschema pytest pyyaml
 
       # `ingestion/*_pb2.py` is gitignored and built from sparkplug_b.proto at image build, so a fresh
       # checkout has none.
@@ -1421,8 +1423,9 @@ jobs:
       # The suites under `scripts/lib/`: the two copies of the flow shape check, the appliance's
       # converge script, the mosquitto credential merge, the orphan sweep's filter and the service
       # JWT; and node-red-init's move of a volume's flow. Explicit file paths, not the
-      # directory (see `npm run test:lib`). The converge suite needs `jq` on PATH, which this
-      # runner has and a Windows development box does not; it skips loudly rather than silently.
+      # directory (see `npm run test:lib`). The converge suite needs `jq` on PATH and python3's yaml
+      # module (installed above), which a Windows development box lacks; it skips loudly rather than
+      # silently.
       - name: Run Node Library Suites
         run: npm run test:lib
 

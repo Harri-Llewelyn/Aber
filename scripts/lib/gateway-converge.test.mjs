@@ -31,6 +31,12 @@ const MISSING = ['bash', 'jq', 'python3', 'git'].filter(
 );
 // `openssl version`, not `--version`: OpenSSL 3 refuses the long form.
 if (spawnSync('openssl', ['version'], { stdio: 'ignore' }).status !== 0) MISSING.push('openssl');
+// The script reads platform.yml with python3's yaml module and, without it, falls back to the
+// enrolment tag without a word, so a host lacking it would fail the tag cases for no real reason.
+if (!MISSING.includes('python3') &&
+    spawnSync('python3', ['-c', 'import yaml'], { stdio: 'ignore' }).status !== 0) {
+  MISSING.push('python3-yaml');
+}
 const SKIP = MISSING.length
   ? `needs ${MISSING.join(', ')} on PATH; the platform playbook's base role installs them on an appliance`
   : false;
