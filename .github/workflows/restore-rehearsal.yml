@@ -141,9 +141,7 @@ jobs:
           aws --version
 
       - name: Set up k3d
-        run: |
-          curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/v5.7.4/install.sh | TAG=v5.7.4 bash
-          k3d version
+        uses: ./.github/actions/install-k3d
 
       - name: Create k3d Cluster
         run: |

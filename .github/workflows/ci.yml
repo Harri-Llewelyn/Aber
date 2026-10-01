@@ -1504,9 +1504,7 @@ jobs:
           df -h / | tail -1
 
       - name: Set up k3d
-        run: |
-          curl -sfL https://raw.githubusercontent.com/k3d-io/k3d/v5.7.4/install.sh | TAG=v5.7.4 bash
-          k3d version
+        uses: ./.github/actions/install-k3d
 
       # THE SAME LOOP A DEVELOPER RUNS. scripts/dev-cluster.mjs creates the cluster (port 80 for
       # Traefik, 1883 and 8883 for the broker), installs cert-manager and the internal CA, builds the

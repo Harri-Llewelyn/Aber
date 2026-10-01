@@ -1,0 +1,18 @@
+name: Install k3d
+description: Install a pinned k3d release binary and verify it against its published checksum.
+runs:
+  using: composite
+  steps:
+    - name: Install k3d
+      shell: bash
+      env:
+        K3D_VERSION: v5.7.4
+        # From checksums.txt on the release. Bumping K3D_VERSION means refreshing this by hand;
+        # Renovate has no manager for it, and that is the point of the pin.
+        K3D_SHA256: 1ac1da365236736a8df8c32107b54aca208384ab1d9a06771443c85ad698a5eb
+      run: |
+        set -euo pipefail
+        curl -sfL -o /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/$K3D_VERSION/k3d-linux-amd64"
+        echo "$K3D_SHA256  /tmp/k3d" | sha256sum -c -
+        sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
+        k3d version
