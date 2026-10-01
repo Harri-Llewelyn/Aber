@@ -738,9 +738,12 @@ async function up () {
   }
   // An upgrade creates the e2e Jobs suspended, to start once the workloads have rolled out. An
   // install has no older pods for them to meet, and creates them running, as CI's does.
-  const holdE2e = flag('e2e') && capture('helm', ['status', RELEASE, '-n', NS]).ok
+  const upgrade = capture('helm', ['status', RELEASE, '-n', NS]).ok
+  const holdE2e = flag('e2e') && upgrade
   await installChart({ tls, e2e: flag('e2e'), holdE2e })
-  if (!flag('no-build')) {
+  // Only an upgrade has pods older than the images just imported. After an install every pod
+  // started from them, and a restart would only interrupt the e2e Jobs already running.
+  if (upgrade && !flag('no-build')) {
     restartWorkloadsUsing(IMAGES.filter(i => !only || only.includes(i.name)).map(i => `${IMG_NS}/${i.name}:${version}`))
   }
   await waitForStack()
