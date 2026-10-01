@@ -132,7 +132,7 @@ describe('the axis row stays in view', () => {
       expect(ruleFor(selector), selector).toMatch(base)
       expect(ruleFor(selector), selector).not.toMatch(/background-image/)
     }
-    // Which is a deliberate step away from the tables' own header tint.
-    expect(ruleFor('thead tr')).toMatch(/background:\s*var\(--bg-glass\)/)
+    // And the tables' own headers are on the same surface, so tables and the timeline match.
+    expect(APP_CSS).toMatch(/\nthead tr,\nthead th \{\s*background:\s*var\(--bg-base\);/)
   })
 })

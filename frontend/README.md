@@ -460,6 +460,14 @@ Two rules that were each learned from a real bug:
 - **Constrain cells holding variable-length data.** `.table-wrap` scrolls horizontally, so an
   unconstrained cell pushes the row's action buttons off-screen. This has bitten the quarantine
   queue twice.
+- **Every table header, group band and section band is one opaque colour, `--bg-base`**, sticky or
+  not. A tint (`--bg-glass`, or the card colour mixed with text) was tried and either vanished on a
+  white card or showed rows through a pinned header. A header never takes an inline background.
+- **Group and section headings pin to the top of their scroller** while their own rows are in
+  view: `.table-group-row` (Metrics) and `.vocab-section-head` (Vocabulary). A group row sits below
+  a pinned `thead` at `--table-head-height`, which `.table-scroll` and `.card-fill > .table-wrap`
+  set to the header's fixed height (12px padding twice plus a 16px line, so keep header cells on one
+  line). It works the same whether the scroller is a `.card-fill` card body or a `.table-scroll`.
 - **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
   cut — the entry that matters most is not the one that sorts first.

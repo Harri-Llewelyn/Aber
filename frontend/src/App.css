@@ -1153,6 +1153,7 @@ html, body, #root {
    table without one moves the problem inside the box. `overscroll-behavior: contain` stops a flick
    that bottoms out here from scrolling the page. */
 .table-scroll {
+  --table-head-height: 40px;
   max-height: 420px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1164,11 +1165,11 @@ html, body, #root {
   z-index: 2;
 }
 
-/* `thead tr` already carries `--bg-glass`, which is translucent: rows scrolling under a pinned
-   header would show through it. The opaque card colour goes on the cells, since the row's own
-   background is the glass tint that has to stay. */
+/* The header is opaque (`thead th`) so rows scrolling under it do not show through. Its height is
+   fixed at `--table-head-height` (12px padding twice plus a 16px line), which is where a pinned
+   group row sits. */
 .table-scroll thead th {
-  background: var(--bg-card);
+  line-height: 16px;
   /* `border-bottom` on the row does not travel with a sticky element in every engine, so the
      hairline is drawn as a shadow that does. Without it the header floats on top of the rows. */
   box-shadow: inset 0 -1px 0 var(--border);
@@ -1213,6 +1214,10 @@ html, body, #root {
   overscroll-behavior: contain;
 }
 
+/* The header pins only on a table-wrap directly under the card, so only that scroller carries the
+   header height a group row sits below. */
+.card-fill > .table-wrap { --table-head-height: 40px; }
+
 /* The table scroller pins its header like .table-scroll, without that class's cap. */
 .card-fill > .table-wrap.table-scroll { max-height: none; }
 
@@ -1223,7 +1228,7 @@ html, body, #root {
 }
 
 .card-fill > .table-wrap thead th {
-  background: var(--bg-card);
+  line-height: 16px;
   box-shadow: inset 0 -1px 0 var(--border);
 }
 
@@ -1232,9 +1237,15 @@ table {
   border-collapse: collapse;
 }
 
+/* One opaque header colour, sticky or not: the base surface, as the Audit Trail's header rows and
+   the group bands. Not a tint, which rows scrolling under a pinned header would show through. */
+thead tr,
+thead th {
+  background: var(--bg-base);
+}
+
 thead tr {
   border-bottom: 1px solid var(--border);
-  background: var(--bg-glass);
 }
 
 th {
@@ -1338,18 +1349,22 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--warning-text);
 }
 
-/* Group header row: a collapsible category inside a table body. `--bg-card` mixed toward the text
-   colour, separated from both the row background and the `--bg-glass` hover colour, so a category
-   header does not look permanently hovered. */
+/* Group header row: a collapsible category inside a table body, on the header colour. It pins to
+   the top of the scroller, below a pinned `thead` (`--table-head-height`, 0 where the header does
+   not pin), for as long as its own `tbody` is in view. Its hairlines are shadows, since a border
+   does not travel with a sticky cell. Under the header's z-index 2. */
 .table-group-row > td {
+  position: sticky;
+  top: var(--table-head-height, 0px);
+  z-index: 1;
   padding: 0;
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+  background: var(--bg-base);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
 }
 
 /* Hover belongs to the BUTTON, not the row: the whole header is the control, and a row-level rule
-   would also fire when the pointer is over the gap beside it. */
-.table-group-row:hover > td { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+   would also fire when the pointer is over the gap beside it. The tint stays opaque. */
+.table-group-row:hover > td { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
 
 /* Padded like a table cell (`td` is `12px 16px`), because it stands in for one, so the label aligns
    with the column beneath it and the row stands as tall as the rows it groups. */
@@ -5049,15 +5064,19 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 .modal-lg .modal-actions { flex-wrap: wrap; }
 
 /* VOCABULARY. A section header reuses `.table-group-button` and `.table-group-label`; the strip
-   behind it is `.table-group-row`'s tint. */
+   behind it is the header colour, and pins to the top of its scroller for as long as its own
+   section is in view. */
 .vocab-sections { padding: 0 0 4px; }
 
 .vocab-section-head {
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-base);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
 }
 
-.vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+.vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
 
 .vocab-in-use {
   font-size: 11px;
