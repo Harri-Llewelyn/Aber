@@ -482,8 +482,8 @@ function Dashboard({ session, onSignOut }) {
   // The page's rail label, and the pill's count, so the tab and the bar never disagree.
   useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length)
 
-  // What the rail flags in the warning colour: quarantine, offline gateways, unfiled cells. Owned
-  // here for the same reason the alerts are.
+  // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
+  // unfiled cells and waiting proposals. Owned here for the same reason the alerts are.
   const navSignals = useNavSignals({ hasPermission, userRole, userId: session?.user?.id })
 
   // Fed by the counter every call through `api` increments, so it covers a save on a modal and a

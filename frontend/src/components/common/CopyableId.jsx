@@ -51,8 +51,8 @@ export async function copyText(text) {
  */
 /**
  * `variant="button"` styles it as `.btn-ghost`: the understated `.copyable-id` is right for an id
- * in a cell and wrong for a fixed label, which reads as low-contrast text. The icon class is
- * dropped because its reveal selector depends on the base class.
+ * in a cell and wrong for a fixed label, which reads as low-contrast text. It draws its icon
+ * before the label, at button size, instead of the chip's trailing icon.
  */
 export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display, variant, truncate = 'end' }) {
   const asButton = variant === 'button'
