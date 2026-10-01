@@ -1230,9 +1230,15 @@ not have to infer which files belong together.
 Restore:
 
 ```bash
+kubectl -n aber scale deploy/supabase-realtime --replicas=0
 kubectl -n aber exec -it statefulset/supabase-db -- \
   pg_restore -U supabase_admin -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
+kubectl -n aber scale deploy/supabase-realtime --replicas=1
 ```
+
+- **Realtime is stopped for the replay.** It makes its daily `realtime.messages` partitions while
+  it runs, and one made during the restore fails it with `cannot drop inherited constraint`.
+  `scripts/restore-databases.sh` refuses to start while Realtime is connected.
 
 - **`-U supabase_admin`, not `-U postgres`.** `postgres` is not a superuser in the
   `supabase/postgres` image, and the six event triggers (`pgrst_drop_watch`, `issue_pg_cron_access`,

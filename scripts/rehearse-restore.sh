@@ -474,6 +474,18 @@ cmd_restore() {
   fi
   forward_databases
 
+  # Realtime makes its daily partitions while it runs, and restore-databases.sh refuses while it is
+  # connected; stopped for the replay, started after, as the runbook says.
+  log "stopping supabase-realtime for the replay"
+  kubectl -n "$NS" scale deploy/supabase-realtime --replicas=0 >/dev/null
+  local i connected
+  for i in $(seq 1 60); do
+    connected=$(sb -tAc "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE '%realtime%'" | tr -d '\r\n ')
+    [ "$connected" = "0" ] && break
+    sleep 2
+  done
+  [ "$connected" = "0" ] || die "supabase-realtime still holds $connected connection(s) two minutes after scaling to zero"
+
   ASSUME_YES=true \
   BACKUP_DIR="$backup" BACKUP_STAMP="$stamp" \
   SUPABASE_DB_HOST=127.0.0.1 SUPABASE_DB_PORT="$SB_PORT" \
@@ -481,6 +493,10 @@ cmd_restore() {
   TIMESCALE_HOST=127.0.0.1 TIMESCALE_PORT="$TS_PORT" \
   DB_USER="$TS_USER" DB_NAME="$TS_DB" DB_PASSWORD="$TS_PASSWORD" \
     bash "$(dirname "$0")/restore-databases.sh"
+
+  log "starting supabase-realtime again"
+  kubectl -n "$NS" scale deploy/supabase-realtime --replicas=1 >/dev/null
+  kubectl -n "$NS" rollout status deploy/supabase-realtime --timeout=10m
 
   # The half restore-databases.sh cannot do, and says so: it cannot reach a volume. Left there,
   # `devices.model_3d_path` would come back pointing at objects that do not exist.

@@ -4747,7 +4747,9 @@ logical dump cannot boot a dead appliance.
 
 ```bash
 scripts/backup-databases.sh                  # both databases + the storage objects
+kubectl -n aber scale deploy/supabase-realtime --replicas=0
 BACKUP_STAMP=<stamp> scripts/restore-databases.sh
+kubectl -n aber scale deploy/supabase-realtime --replicas=1
 ```
 
 Writes three timestamped artefacts plus a manifest into `./backups/` (gitignored — a dump holds
@@ -4771,7 +4773,7 @@ kubectl -n aber exec statefulset/supabase-db -- \
   pg_dump -Fp -Z6 -U supabase_admin -d postgres > supabase-db.sql.gz
 ```
 
-Nine things about these dumps are not obvious and each has bitten someone:
+Ten things about these dumps are not obvious and each has bitten someone:
 
 - **Ownership and privileges stay in the dump, and nine roles must already exist.** A dump contains
   **no `CREATE ROLE`** at all, yet objects are owned by roles and RLS policies reference them **by
@@ -4820,6 +4822,10 @@ Nine things about these dumps are not obvious and each has bitten someone:
   pointing at nothing, and the failure surfaces as a *relation-level* PostgREST error that reads
   like a schema fault. `restore-databases.sh` enforces the order and then queries through the
   wrapper as `authenticated`, because a restore that loses grants queries fine as `postgres`.
+- **Realtime is stopped for the restore.** It makes its daily `realtime.messages` partitions while
+  it runs, and one made between the partition drop and the replay fails the restore with `cannot
+  drop inherited constraint`. `restore-databases.sh` refuses while Realtime is connected (it
+  connects as `supabase_admin`, so the check is by application name).
 - **PostgREST is told to reload its schema cache after the replay.** It reloads on the image's DDL
   event triggers, and `--clean` drops those triggers early and recreates them last, so the reload it
   saw ran mid-restore with the tables gone, and it answered 404 for them afterwards
