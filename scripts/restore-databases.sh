@@ -242,6 +242,12 @@ log "  ok"
 restore_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
            "$SUPABASE_DB_HOST" "$SUPABASE_DB_PORT" "$SUPABASE_DB_PASSWORD" "$SUPABASE_FILE"
 
+# PostgREST reloads its schema cache from the image's DDL event triggers, and a --clean replay
+# drops those triggers early and recreates them last: the reload it saw happened mid-restore, with
+# the tables gone, and PostgREST answers 404 for them until told again.
+sb_query "NOTIFY pgrst, 'reload schema'" >/dev/null
+log "  PostgREST told to reload its schema cache"
+
 # --- 2. Then the historian, WRAPPED IN TimescaleDB's RESTORE GUARDS ---------------------------
 #
 # NOT OPTIONAL, and the reason is not obvious from the dump. TimescaleDB keeps its own catalogue in

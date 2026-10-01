@@ -4771,7 +4771,7 @@ kubectl -n aber exec statefulset/supabase-db -- \
   pg_dump -Fp -Z6 -U supabase_admin -d postgres > supabase-db.sql.gz
 ```
 
-Eight things about these dumps are not obvious and each has bitten someone:
+Nine things about these dumps are not obvious and each has bitten someone:
 
 - **Ownership and privileges stay in the dump, and nine roles must already exist.** A dump contains
   **no `CREATE ROLE`** at all, yet objects are owned by roles and RLS policies reference them **by
@@ -4820,6 +4820,11 @@ Eight things about these dumps are not obvious and each has bitten someone:
   pointing at nothing, and the failure surfaces as a *relation-level* PostgREST error that reads
   like a schema fault. `restore-databases.sh` enforces the order and then queries through the
   wrapper as `authenticated`, because a restore that loses grants queries fine as `postgres`.
+- **PostgREST is told to reload its schema cache after the replay.** It reloads on the image's DDL
+  event triggers, and `--clean` drops those triggers early and recreates them last, so the reload it
+  saw ran mid-restore with the tables gone, and it answered 404 for them afterwards
+  (`PGRST205 ... not find the table 'public.backup_jobs'`). A hand-run `pg_restore` needs the same
+  `NOTIFY pgrst, 'reload schema'`, or a restart of `supabase-rest`.
 - **The historian restore is wrapped in `timescaledb_pre_restore()` / `post_restore()`.** The
   extension's `_timescaledb_catalog.continuous_agg` carries circular foreign keys — `pg_dump` warns
   at dump time — and restoring it with background workers live leaves the three rollups from `0010`
