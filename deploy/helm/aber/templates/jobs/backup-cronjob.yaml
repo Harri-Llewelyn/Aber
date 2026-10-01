@@ -184,7 +184,8 @@ spec:
                     trigger pgrst_drop_watch`. Both roles authenticate with postgresPassword.
                   */}}
                   {{ if .Values.supabaseDb.enabled }}dump supabase-db {{ include "aber.supabaseDb.host" . }} {{ include "aber.supabaseDb.port" . }} supabase_admin postgres "$SUPABASE_PGPASSWORD"{{ end }}
-                  {{ if .Values.timescaledb.enabled }}dump timescaledb {{ include "aber.timescale.host" . }} {{ include "aber.timescale.port" . }} {{ .Values.timescaledb.username }} {{ .Values.timescaledb.database }} "$TS_PGPASSWORD"{{ end }}
+                  {{- /* The historian is backed up by pgBackRest instead while timescaledb.physicalBackup is on. */}}
+                  {{ if and .Values.timescaledb.enabled (not (include "aber.physicalBackupOn" .)) }}dump timescaledb {{ include "aber.timescale.host" . }} {{ include "aber.timescale.port" . }} {{ .Values.timescaledb.username }} {{ .Values.timescaledb.database }} "$TS_PGPASSWORD"{{ end }}
                   {{- if $includeStorage }}
 
                   echo '--- archive the storage objects (every bucket)'

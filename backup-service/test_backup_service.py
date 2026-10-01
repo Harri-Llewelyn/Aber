@@ -171,9 +171,14 @@ class BackupServiceTests(unittest.TestCase):
         self.assertEqual(backup["note"], NOTE)
         names = {c["name"] for c in backup["components"]}
         # The CA is present when the stack was installed with TLS (backup.ca.secretName), absent
-        # otherwise; everything else the dev cluster mounts.
-        self.assertLessEqual({"supabase-db", "timescaledb", "vault-key", "storage-objects", "forge", "broker"}, names, names)
-        self.assertLessEqual(names, {"supabase-db", "timescaledb", "vault-key", "storage-objects", "forge", "broker", "ca"}, names)
+        # otherwise; the historian's dump is absent while pgBackRest backs it up
+        # (timescaledb.physicalBackup); everything else the dev cluster mounts.
+        dumps_historian = service("printenv", "DUMP_TIMESCALE", check=False).strip() != "false"
+        expected = {"supabase-db", "vault-key", "storage-objects", "forge", "broker"}
+        if dumps_historian:
+            expected.add("timescaledb")
+        self.assertLessEqual(expected, names, names)
+        self.assertLessEqual(names, expected | {"ca"}, names)
         self.assertEqual(backup["size_bytes"], sum(c["size_bytes"] for c in backup["components"]))
 
         # The files are where the row says, as big as it says, with the digest it says.
@@ -192,7 +197,7 @@ class BackupServiceTests(unittest.TestCase):
         self.assertIn(f"stamp={backup['stamp']}", manifest)
         self.assertIn("format=", manifest)
         self.assertIn("supabase_db=supabase-db-", manifest)
-        self.assertIn("timescaledb=timescaledb-", manifest)
+        self.assertIn("timescaledb=timescaledb-" if dumps_historian else "timescaledb=physical", manifest)
         self.assertIn("forge=forge-", manifest)
 
         # The forge archive carries a database copy that passes its own integrity check.

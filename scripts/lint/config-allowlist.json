@@ -9,6 +9,7 @@
   "DS-0002 supabase/functions/Dockerfile": "The image ends without a USER: tracked in #419.",
   "DS-0002 swagger-ui/Dockerfile": "The image ends without a USER: tracked in #419.",
   "DS-0002 test-harness/Dockerfile": "The image ends without a USER: tracked in #419.",
+  "DS-0002 timescaledb/Dockerfile": "The image ends without a USER: the upstream entrypoint starts as root, fixes the data directory's ownership and drops to postgres (uid 70) before the server starts. Tracked in #419.",
   "KSV-0014 CronJob/aber-backup container/backup": "Writable root filesystem: tracked in #419.",
   "KSV-0014 CronJob/aber-cold-archive container/cold-archive": "Writable root filesystem: tracked in #419.",
   "KSV-0014 DaemonSet/alloy container/alloy": "Writable root filesystem: tracked in #419.",

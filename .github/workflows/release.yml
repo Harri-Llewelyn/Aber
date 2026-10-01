@@ -1,6 +1,6 @@
-# Release: publish the ten images this repository builds, then the Helm chart, to GHCR over OCI.
+# Release: publish the eleven images this repository builds, then the Helm chart, to GHCR over OCI.
 # Images first, chart last, and the chart job `needs` them: the chart names the images at
-# `Chart.AppVersion`, and a chart published before its images installs successfully into ten
+# `Chart.AppVersion`, and a chart published before its images installs successfully into eleven
 # ImagePullBackOffs. The `v*` tag is the single source of version: it stamps the image tags, the
 # chart `version` and `appVersion` in this run, and Chart.yaml's committed values serve only the
 # untagged path. No `latest` tag is pushed, so a chart release can only run the images built beside
@@ -113,7 +113,7 @@ jobs:
       - name: Verify Documentation Matches The Repository
         run: node scripts/check-docs-drift.mjs
 
-  # The eight independent images, in parallel. ingestion is not here: test-runner is built FROM it,
+  # The nine independent images, in parallel. ingestion is not here: test-runner is built FROM it,
   # and the two are one Bake build. See build-ingestion-chain below.
   build-images:
     name: Image — ${{ matrix.name }}
@@ -156,6 +156,12 @@ jobs:
           - name: backup-service
             dockerfile: backup-service/Dockerfile
             context: backup-service
+            build_args: ''
+          # The historian: timescale/timescaledb with pgBackRest, which physical backup runs inside
+          # the server's own container.
+          - name: timescaledb
+            dockerfile: timescaledb/Dockerfile
+            context: timescaledb
             build_args: ''
           # The schema itself: supabase/postgres with supabase/migrations/*.sql copied in. This
           # image's tag is the database version, and the chain cannot travel in the chart (a
@@ -387,7 +393,7 @@ jobs:
             --set e2e.enabled=true > /tmp/from-package.yaml
 
           MISSING=0
-          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
+          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service timescaledb db-init swagger-ui; do
             REF="$IMAGE_NAMESPACE/$img:$V"
             if grep -qF "$REF" /tmp/from-package.yaml; then
               echo "  ok  $REF"
@@ -477,7 +483,7 @@ jobs:
             echo '```'
             echo
             echo "Images published at \`$V\`, each signed with the same identity and carrying an SBOM and provenance:"
-            for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
+            for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service timescaledb db-init swagger-ui; do
               echo "- \`$IMAGE_NAMESPACE/$img:$V\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"
@@ -520,7 +526,7 @@ jobs:
           set -eu
           OUT="/tmp/aber-$V-sbom"
           mkdir -p "$OUT"
-          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
+          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service timescaledb db-init swagger-ui; do
             REF="$IMAGE_NAMESPACE/$img:$V"
             docker buildx imagetools inspect "$REF" --format '{{json .SBOM}}' > /tmp/sbom.json
             jq -e '.SPDX' /tmp/sbom.json > "$OUT/$img-$V.spdx.json"

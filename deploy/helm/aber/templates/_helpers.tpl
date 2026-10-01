@@ -111,7 +111,6 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
 {{- $pinned := list
       (list "supabase-studio" $v.supabaseStudio.enabled $v.supabaseStudio.image)
       (list "mosquitto" $v.mosquitto.enabled $v.mosquitto.image)
-      (list "timescaledb" $v.timescaledb.enabled $v.timescaledb.image)
       (list "grafana" $v.grafana.enabled $v.grafana.image)
       (list "supabase-envoy" $v.supabaseEnvoy.enabled $v.supabaseEnvoy.image)
       (list "supabase-auth" $v.supabaseAuth.enabled $v.supabaseAuth.image)
@@ -123,6 +122,9 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
 {{- range $pinned -}}
 {{- if index . 1 -}}
 {{- $image := index . 2 -}}
+{{- if not $image.tag -}}
+{{- fail (printf "aber.directoryImages: %s has no image tag; an image this repository builds belongs in the built list" (index . 0)) -}}
+{{- end -}}
 {{- $_ := set $out (index . 0) (printf "%s:%s" $image.repository $image.tag) -}}
 {{- end -}}
 {{- end -}}
@@ -130,6 +132,7 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
       (list "node-red" $v.nodeRed.enabled $v.nodeRed.image)
       (list "supabase-functions" $v.supabaseFunctions.enabled $v.supabaseFunctions.image)
       (list "ingestion" $v.ingestion.enabled $v.ingestion.image)
+      (list "timescaledb" $v.timescaledb.enabled $v.timescaledb.image)
       (list "swagger-ui" $v.swaggerUi.enabled $v.swaggerUi.image) -}}
 {{- range $built -}}
 {{- if index . 1 -}}
@@ -577,6 +580,7 @@ hostnames it also lacks.
 {{- include "aber.validateBrokerTls" . -}}
 {{- include "aber.validateAutoscaling" . -}}
 {{- include "aber.validateCapacity" . -}}
+{{- include "aber.validatePhysicalBackup" . -}}
 {{- end -}}
 
 {{/*
@@ -1340,4 +1344,149 @@ timescaledb.retention.compressAfter, or one chunk interval.
 */}}
 {{- define "aber.timescaleCompressAfter" -}}
 {{- .Values.timescaledb.retention.compressAfter | default (include "aber.timescaleChunkInterval" .) -}}
+{{- end -}}
+
+{{/*
+The historian's physical backup (timescaledb.physicalBackup): pgBackRest's configuration, and the
+environment, mounts and volumes both of the containers that run it share -- the server's, for
+archive-push and archive-get, and the backup sidecar's.
+*/}}
+{{- define "aber.physicalBackupOn" -}}
+{{- if and .Values.timescaledb.enabled .Values.timescaledb.physicalBackup.enabled }}true{{ end -}}
+{{- end -}}
+
+{{- define "aber.validatePhysicalBackup" -}}
+{{- if include "aber.physicalBackupOn" . -}}
+{{- $b := .Values.timescaledb.physicalBackup -}}
+{{- if eq $b.repo.type "s3" -}}
+{{- $s := $b.repo.s3 -}}
+{{- $missing := list -}}
+{{- range $k := list "endpoint" "region" "bucket" "existingSecret" -}}
+{{- if not (get $s $k) }}{{ $missing = append $missing (printf "timescaledb.physicalBackup.repo.s3.%s" $k) }}{{ end -}}
+{{- end -}}
+{{- if $missing -}}
+{{- fail (printf "\n\naber: timescaledb.physicalBackup.repo.type is s3, and these are empty:\n  %s\n\nThe Secret named by existingSecret holds AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and\nREPO_CIPHER_PASS. Or set repo.type: posix for a volume in this cluster.\n" (join "\n  " $missing)) -}}
+{{- end -}}
+{{- if not (hasPrefix "https://" $s.endpoint) -}}
+{{- fail (printf "\n\naber: timescaledb.physicalBackup.repo.s3.endpoint is %q.\n\npgBackRest reaches S3 over https only. Give the full URL, e.g. https://s3.eu-west-2.amazonaws.com;\nfor an endpoint with a private CA, name a Secret holding its ca.crt in repo.s3.caSecret.\n" $s.endpoint) -}}
+{{- end -}}
+{{- else if ne $b.repo.type "posix" -}}
+{{- fail (printf "\n\naber: timescaledb.physicalBackup.repo.type is %q; it is s3 or posix.\n" $b.repo.type) -}}
+{{- end -}}
+{{- $h := int $b.hourUtc -}}{{- $d := int $b.fullOn -}}
+{{- if or (lt $h 0) (gt $h 23) (lt $d 0) (gt $d 6) -}}
+{{- fail (printf "\n\naber: timescaledb.physicalBackup.hourUtc is %v and fullOn is %v; they are 0-23 and 0-6 (0 = Sunday).\n" $b.hourUtc $b.fullOn) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* pgbackrest.conf. Credentials are not in it: they arrive as PGBACKREST_* environment variables. */}}
+{{- define "aber.pgbackrestConf" -}}
+{{- $b := .Values.timescaledb.physicalBackup -}}
+[global]
+repo1-type={{ $b.repo.type }}
+repo1-retention-full={{ int $b.retainFull }}
+{{- if eq $b.repo.type "s3" }}
+{{- $s := $b.repo.s3 }}
+{{- $u := urlParse $s.endpoint }}
+{{- $hostPort := splitList ":" $u.host }}
+repo1-path={{ $s.path }}
+repo1-s3-endpoint={{ first $hostPort }}
+{{- if gt (len $hostPort) 1 }}
+repo1-storage-port={{ last $hostPort }}
+{{- end }}
+repo1-s3-region={{ $s.region }}
+repo1-s3-bucket={{ $s.bucket }}
+repo1-s3-uri-style={{ ternary "path" "host" $s.pathStyle }}
+repo1-storage-verify-tls={{ ternary "y" "n" $s.verifyTls }}
+{{- if $s.caSecret }}
+repo1-storage-ca-file=/etc/aber/pgbackrest-ca/ca.crt
+{{- end }}
+repo1-cipher-type=aes-256-cbc
+{{- else }}
+repo1-path=/var/lib/pgbackrest
+{{- end }}
+compress-type=zst
+process-max={{ int $b.processMax }}
+start-fast=y
+archive-async=y
+spool-path=/var/lib/postgresql/data/pgbackrest-spool
+archive-push-queue-max={{ $b.archiveQueueMax }}
+log-level-console=info
+log-level-file=off
+lock-path=/var/run/postgresql/pgbackrest-lock
+
+[historian]
+pg1-path=/var/lib/postgresql/data/pgdata
+pg1-socket-path=/var/run/postgresql
+pg1-user={{ .Values.timescaledb.username }}
+pg1-database={{ .Values.timescaledb.database }}
+{{- end -}}
+
+{{/* The server flags that turn WAL archiving on. */}}
+{{- define "aber.physicalBackupServerArgs" -}}
+- -c
+- archive_mode=on
+- -c
+- archive_command=pgbackrest --stanza=historian archive-push %p
+- -c
+- archive_timeout={{ int .Values.timescaledb.physicalBackup.archiveTimeoutSeconds }}
+{{- end -}}
+
+{{- define "aber.physicalBackupEnv" -}}
+{{- $s := .Values.timescaledb.physicalBackup.repo.s3 -}}
+{{- if eq .Values.timescaledb.physicalBackup.repo.type "s3" -}}
+- name: PGBACKREST_REPO1_S3_KEY
+  valueFrom: { secretKeyRef: { name: {{ $s.existingSecret }}, key: AWS_ACCESS_KEY_ID } }
+- name: PGBACKREST_REPO1_S3_KEY_SECRET
+  valueFrom: { secretKeyRef: { name: {{ $s.existingSecret }}, key: AWS_SECRET_ACCESS_KEY } }
+- name: PGBACKREST_REPO1_CIPHER_PASS
+  valueFrom: { secretKeyRef: { name: {{ $s.existingSecret }}, key: REPO_CIPHER_PASS } }
+{{- end -}}
+{{- end -}}
+
+{{- define "aber.physicalBackupMounts" -}}
+- name: pgbackrest-conf
+  mountPath: /etc/pgbackrest
+  readOnly: true
+- name: pgsocket
+  mountPath: /var/run/postgresql
+{{- if eq .Values.timescaledb.physicalBackup.repo.type "posix" }}
+- name: pgbackrest-repo
+  mountPath: /var/lib/pgbackrest
+{{- else if .Values.timescaledb.physicalBackup.repo.s3.caSecret }}
+- name: pgbackrest-ca
+  mountPath: /etc/aber/pgbackrest-ca
+  readOnly: true
+{{- end }}
+{{- end -}}
+
+{{- define "aber.physicalBackupVolumes" -}}
+- name: pgbackrest-conf
+  configMap:
+    name: {{ printf "%s-timescaledb-pgbackrest" (include "aber.fullname" .) }}
+    items:
+      - key: pgbackrest.conf
+        path: pgbackrest.conf
+- name: pgbackrest-script
+  configMap:
+    name: {{ printf "%s-timescaledb-pgbackrest" (include "aber.fullname" .) }}
+    defaultMode: 0555
+    items:
+      - key: historian-backup.sh
+        path: historian-backup.sh
+- name: pgsocket
+  emptyDir: {}
+{{- if eq .Values.timescaledb.physicalBackup.repo.type "posix" }}
+- name: pgbackrest-repo
+  persistentVolumeClaim:
+    claimName: {{ printf "%s-historian-backup" (include "aber.fullname" .) }}
+{{- else if .Values.timescaledb.physicalBackup.repo.s3.caSecret }}
+- name: pgbackrest-ca
+  secret:
+    secretName: {{ .Values.timescaledb.physicalBackup.repo.s3.caSecret }}
+    items:
+      - key: ca.crt
+        path: ca.crt
+{{- end }}
 {{- end -}}

@@ -46,7 +46,11 @@ GUC: psql interpolates `:'var'` while lexing and does not descend into dollar-qu
    `archive.enabled` a control rather than a deploy-time decision. It is not inside the rollups
    conditional, because it touches no rollup, and the platform's archive self-check treats a
    reachable historian with no manifest as a mismatch.
-7. **`roles.sql`**, last, because it grants on what every file above creates. Run first it fails
+7. **`physical_backup.sql`**, before `roles.sql`, which grants the exporter SELECT on the table
+   it creates. It takes no variables and runs whether or not `timescaledb.physicalBackup` is on,
+   and with the rollups off as well, because the backup sidecar waits for its table before the
+   first backup and would otherwise wait forever.
+8. **`roles.sql`**, last, because it grants on what every file above creates. Run first it fails
    with "relation telemetry_1h does not exist", and only on a fresh volume, which is the worst kind
    of ordering bug because every stack that already has the rollups passes. An empty BI password
    makes it skip a role rather than create one with a blank secret, so it needs no `if`.
@@ -319,6 +323,22 @@ and verified-without-exported are refused, and that the whole ordered sequence i
 a guard that admits nothing is as broken as one that admits anything and would stop archival dead
 rather than loudly. The probe is rolled back, so no fictional chunk names land in the catalogue.
 
+## `physical_backup.sql`
+
+**The database's own copy of what pgBackRest did.** pgBackRest keeps the authoritative record in
+the repository, where the exporter cannot reach it. The `pgbackrest` sidecar
+(`pgbackrest/historian-backup.sh`) calls `physical_backup_record()` over the pod's socket after
+every run, failed runs included, passing `pgbackrest info --output=json`. The function takes the
+newest backup's label and sizes from that document, so a row records what pgBackRest actually took:
+a differential asked for on an empty repository is recorded as the full it became. `check` rows
+are the archive check the sidecar runs at start and are never counted as a backup.
+
+**The exporter reads it, nothing writes to it but the sidecar.** EXECUTE is revoked from PUBLIC
+because PostgreSQL grants it on creation; the sidecar connects as the superuser. Rows older than
+90 days are deleted on each call, which bounds the table without a policy job. The alert's clock
+falls back to the first recorded run, then to the server's start, so a stack that has just
+switched backup on is not reported as a day late.
+
 ## `roles.sql`
 
 **Each block is the authority on its role's reach.** Grants are re-issued and revokes re-issued
@@ -380,6 +400,8 @@ silently serves no WAL series at all, one of the figures the exporter was added 
 statistics views and stops there; `public.storage_footprint` is a view in this database and needs
 its own SELECT, plus EXECUTE on the function in its body. The exporter's custom queries read it,
 and scraping it is what turns a point-in-time table into the growth rate an operator can alert on.
+`public.physical_backup_runs` is granted the same way, guarded on the table existing, for the
+backup clock the Historian Backup Stale alert measures from.
 
 ### `ingest_writer`
 

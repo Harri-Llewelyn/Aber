@@ -1932,6 +1932,118 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # Historian Backup Stale: no successful physical backup for 36h, gated on archive_mode. Before
+      # the first success the clock starts when backup was switched on.
+      - uid: aber-db-historian-backup-stale
+        title: Historian Backup Stale
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The historian has had no successful physical backup for
+            {{ humanizeDuration $values.B.Value }}. A restore can reach no later than the last one.
+            The sidecar's log names the cause: kubectl -n aber logs timescaledb-0 -c pgbackrest
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                (time() - max(aber_historian_backup_clock_since_time))
+                and on () (max(aber_historian_wal_archive_enabled) == 1)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [129600]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Historian WAL Archiving Failing: the last archive attempt failed and nothing has succeeded
+      # since, for 10m. Unarchived WAL fills the data volume until archiveQueueMax drops it.
+      - uid: aber-db-historian-wal-archiving
+        title: Historian WAL Archiving Failing
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The historian has not archived WAL for {{ humanizeDuration $values.B.Value }} and its
+            last attempt failed. Unarchived WAL accumulates on the data volume until
+            archiveQueueMax, after which it is dropped. Usually the repository endpoint or its
+            credentials: kubectl -n aber logs timescaledb-0 -c timescaledb | grep archive
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                (time() - max(aber_historian_wal_archive_last_archived_time))
+                and on () (max(aber_historian_wal_archive_last_failed_time) > max(aber_historian_wal_archive_last_archived_time))
+                and on () (max(aber_historian_wal_archive_enabled) == 1)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
 deleteRules:
   # The partitions rule's uid before the page was renamed; a Grafana that loaded it drops it.
   - orgId: 1

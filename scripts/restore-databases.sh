@@ -7,6 +7,9 @@
 #   1. supabase-db   -- carries `public.telemetry`, which is a FOREIGN TABLE over the historian.
 #                       Its foreign server, user mapping and RLS policies come back with it.
 #   2. timescaledb   -- the hypertable the foreign table points at.
+#                       A manifest reading timescaledb=physical has no dump: the historian was
+#                       backed up by pgBackRest, and is restored with scripts/restore-historian.mjs
+#                       BEFORE this script, so step 3 finds it.
 #   3. verify        -- query `public.telemetry` THROUGH the wrapper. Neither restore proves the
 #                       join works, and a broken wrapper surfaces as a relation-level PostgREST
 #                       error that reads as a schema fault.
@@ -67,11 +70,16 @@ MANIFEST="$BACKUP_DIR/manifest-${BACKUP_STAMP}.txt"
 # shellcheck disable=SC1090
 FORMAT=$(sed -n 's/^format=//p' "$MANIFEST")
 SUPABASE_FILE="$BACKUP_DIR/$(sed -n 's/^supabase_db=//p' "$MANIFEST")"
-TIMESCALE_FILE="$BACKUP_DIR/$(sed -n 's/^timescaledb=//p' "$MANIFEST")"
+TIMESCALE_NAME=$(sed -n 's/^timescaledb=//p' "$MANIFEST")
+TIMESCALE_FILE="$BACKUP_DIR/$TIMESCALE_NAME"
 STORAGE_NAME=$(sed -n 's/^storage=//p' "$MANIFEST")
 
 [ -f "$SUPABASE_FILE" ]  || die "missing $SUPABASE_FILE"
-[ -f "$TIMESCALE_FILE" ] || die "missing $TIMESCALE_FILE"
+if [ "$TIMESCALE_NAME" = physical ]; then
+  TIMESCALE_FILE="<pgBackRest; restore it first with scripts/restore-historian.mjs>"
+else
+  [ -f "$TIMESCALE_FILE" ] || die "missing $TIMESCALE_FILE"
+fi
 
 cat <<EOF
 
@@ -249,18 +257,22 @@ restore_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_N
 # post_restore RUNS EVEN IF THE RESTORE FAILS. Skipping it would leave the database with its
 # background workers stopped -- no retention, no compression, no continuous-aggregate refresh -- and
 # nothing about the running stack would look wrong until the disk filled.
-log "timescaledb: entering pre-restore mode (stops background workers)"
-ts_query "SELECT timescaledb_pre_restore()" >/dev/null
+if [ "$TIMESCALE_NAME" = physical ]; then
+  log "timescaledb: backed up by pgBackRest, so not restored here (scripts/restore-historian.mjs)"
+else
+  log "timescaledb: entering pre-restore mode (stops background workers)"
+  ts_query "SELECT timescaledb_pre_restore()" >/dev/null
 
-restore_rc=0
-restore_db "timescaledb" "$TIMESCALE_SERVICE" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
-           "$TIMESCALE_DB_HOST" "$TIMESCALE_DB_PORT" "$TIMESCALE_DB_PASSWORD" "$TIMESCALE_FILE" \
-           || restore_rc=$?
+  restore_rc=0
+  restore_db "timescaledb" "$TIMESCALE_SERVICE" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
+             "$TIMESCALE_DB_HOST" "$TIMESCALE_DB_PORT" "$TIMESCALE_DB_PASSWORD" "$TIMESCALE_FILE" \
+             || restore_rc=$?
 
-log "timescaledb: leaving pre-restore mode"
-ts_query "SELECT timescaledb_post_restore()" >/dev/null
+  log "timescaledb: leaving pre-restore mode"
+  ts_query "SELECT timescaledb_post_restore()" >/dev/null
 
-[ "$restore_rc" -eq 0 ] || die "timescaledb restore failed (exit $restore_rc); background workers have been restarted"
+  [ "$restore_rc" -eq 0 ] || die "timescaledb restore failed (exit $restore_rc); background workers have been restarted"
+fi
 
 AGGS=$(ts_query "SELECT count(*) FROM timescaledb_information.continuous_aggregates")
 log "  ok -- $AGGS continuous aggregate(s) present"

@@ -7,7 +7,7 @@ has been yes — and an upgrade that costs a site visit per appliance is an upgr
 which is how a fleet ends up years behind on a platform whose whole point is interoperability.
 
 The short answer here is **no, and it is structural rather than a promise**. What follows is why,
-and — in §4 — the four places where that is not the whole truth. It holds from 1.0.0 onwards;
+and — in §4 — the five places where that is not the whole truth. It holds from 1.0.0 onwards;
 [the floor](#the-floor-100) is what lies below that and what to do about it.
 
 ---
@@ -230,6 +230,14 @@ telemetry older than 14 days that no archive holds. The rollups keep their own w
 the old window, set `retainFor` before upgrading.** See `supabase/README.md`, *Raw telemetry is
 kept for a stated window*.
 
+**The historian runs this repository's image from the same release.** `timescaledb.image` moves
+from `timescale/timescaledb:2.29.2-pg17` to `ghcr.io/harri-llewelyn/aber/timescaledb` at the
+chart's version: the same image with pgBackRest added, for `timescaledb.physicalBackup`. Same
+PostgreSQL, same TimescaleDB, same data directory, so the upgrade restarts the historian once and
+changes nothing on its volume. A site that mirrors images into its own registry adds this one to
+the list; a site that pinned `timescaledb.image` in its values keeps the upstream image and cannot
+turn physical backup on until it unpins it.
+
 ### Migrations are forward-only
 
 There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;
@@ -350,7 +358,14 @@ The historian's image preloads `timescaledb` alone, and `-c` **replaces** that v
 appending to it, so the chart names both libraries with `timescaledb` first. A build that dropped it
 would start a server that does not know what a hypertable is.
 
-### 4.4 A renamed metric orphans its history
+### 4.4 Turning the historian's physical backup on or off restarts it
+
+`timescaledb.physicalBackup.enabled` sets `archive_mode`, another postmaster setting, so switching
+it either way rolls `timescaledb-0` once. Turning it on also stops the nightly logical dump taking
+the historian; turning it off puts the historian back in the dump and leaves the repository where
+it is. See `deploy/k8s/README.md`, *Backing up the historian*.
+
+### 4.5 A renamed metric orphans its history
 
 `metric_catalog` registers every metric name with its standard and semantic id. A future version that
 **renames** a metric would leave the old name's history under the old name — the historian records

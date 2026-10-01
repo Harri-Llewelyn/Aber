@@ -4,6 +4,8 @@ Take a backup of the whole platform without a shell, and see every backup run: w
 
 **The historian in a backup holds raw telemetry for the raw window (14 days unless the site changed it) and the 1-minute, 5-minute and 1-hour rollups.** Raw readings older than the window are only on cold storage, which no backup includes.
 
+**Where the historian has its own physical backup, it is not in these.** The components then list no historian, and the historian is backed up daily by the database itself, with every change archived in between, so it can be restored to any moment rather than to the last backup. Restoring it is a runbook run from a shell.
+
 ## What the controls do
 
 - **Take a backup** queues one now. The note is kept with the backup and is the thing to read when choosing which one to restore from, so say why it was taken.

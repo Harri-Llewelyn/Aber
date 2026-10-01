@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Lint the historian's schema: a throwaway timescale/timescaledb at the chart's tag, built the way
+ * Lint the historian's schema: a throwaway of the image timescaledb/Dockerfile builds FROM, built the way
  * the maintenance Job builds it (timescaledb/init, then the maintenance files in the Job's order),
  * checked by splinter and, where the image carries it, plpgsql_check. Findings are judged against
  * the `historian` sections of scripts/lint/database-allowlist.json; see scripts/lib/db-lint.mjs.
@@ -18,10 +18,10 @@ import {
 } from './lib/db-lint.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const values = readFileSync(join(REPO, 'deploy/helm/aber/values.yaml'), 'utf8')
-const tag = values.match(/^timescaledb:\n(?:.*\n)*?\s+tag: (\S+)/m)?.[1]
-if (!tag) throw new Error('could not read timescaledb.image.tag from values.yaml')
-const IMAGE = `timescale/timescaledb:${tag}`
+// The upstream base, not the chart's image: pgBackRest changes nothing the lint reads, and the base
+// needs no build.
+const IMAGE = readFileSync(join(REPO, 'timescaledb/Dockerfile'), 'utf8').match(/^FROM\s+(\S+)/m)?.[1]
+if (!IMAGE) throw new Error('could not read the FROM line of timescaledb/Dockerfile')
 const CONTAINER = 'aber_lint_historian'
 const keep = process.argv.includes('--keep')
 const env = { ...process.env, MSYS_NO_PATHCONV: '1' }
@@ -54,6 +54,7 @@ try {
   sql(file('aggregates.sql'), ['-v', 'rollup_1m_retain=180 days', '-v', 'rollup_5m_retain=1 year', '-v', 'rollup_1h_retain=5 years'])
   sql(file('storage.sql'))
   sql(file('cold_archive.sql'))
+  sql(file('physical_backup.sql'))
   sql(file('roles.sql'), ['-v', 'bi_reader_password=lint', '-v', 'ingest_writer_password=lint', '-v', 'fdw_reader_password=lint'])
 
   // splinter names Supabase's API roles; here they exist only so those checks can run, and hold

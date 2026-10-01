@@ -1,0 +1,41 @@
+{{- /*
+The historian's physical backup (timescaledb.physicalBackup): pgBackRest's configuration and the
+sidecar's schedule, mounted into the timescaledb pod, and the volume a posix repository lives on.
+The schedule is mirrored from ./timescaledb/pgbackrest by scripts/sync-helm-chart-files.mjs.
+*/ -}}
+{{- if include "aber.physicalBackupOn" . }}
+{{- $script := .Files.Get "files/timescaledb-pgbackrest/historian-backup.sh" }}
+{{- if not $script }}
+{{- fail "\n\naber: files/timescaledb-pgbackrest/historian-backup.sh is missing.\n\nMirror it from ./timescaledb/pgbackrest with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-timescaledb-pgbackrest" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "timescaledb") | nindent 4 }}
+data:
+  pgbackrest.conf: |
+    {{- include "aber.pgbackrestConf" . | nindent 4 }}
+  historian-backup.sh: |
+{{ $script | indent 4 }}
+{{- if eq .Values.timescaledb.physicalBackup.repo.type "posix" }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-historian-backup" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "timescaledb") | nindent 4 }}
+  annotations:
+    # Survives `helm uninstall`: that is when the backups are most likely to be wanted.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- include "aber.storageClass" (dict "ctx" . "component" .Values.timescaledb.physicalBackup.repo.posix) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.timescaledb.physicalBackup.repo.posix.size }}
+{{- end }}
+{{- end }}

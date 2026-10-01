@@ -74,7 +74,7 @@ spec:
           install with a relation error that reads as a chart fault.
         */}}
         - name: wait-for-telemetry-table
-          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
@@ -105,7 +105,7 @@ spec:
           {{- end }}
       containers:
         - name: maintenance
-          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "aber.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
@@ -201,6 +201,10 @@ spec:
               echo 'Reconciling the cold archive manifest...'
               $PSQL -f /sql/cold_archive.sql
 
+              {{/* Before roles.sql, which grants the exporter SELECT on the table it creates. */}}
+              echo 'Reconciling the physical backup record...'
+              $PSQL -f /sql/physical_backup.sql
+
               echo 'Reconciling read-only BI role...'
               $PSQL -v bi_reader_password="$BI_READER_PASSWORD" \
                     -v ingest_writer_password="$INGEST_WRITER_PASSWORD" \
@@ -223,6 +227,9 @@ spec:
               */}}
               echo 'Reconciling the cold archive manifest...'
               $PSQL -f /sql/cold_archive.sql
+
+              echo 'Reconciling the physical backup record...'
+              $PSQL -f /sql/physical_backup.sql
               {{- end }}
           volumeMounts:
             {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}

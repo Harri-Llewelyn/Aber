@@ -373,3 +373,80 @@ Three faults, all fixed at this commit and all invisible without a real run: the
 `msg_type="DDATA"` where the daemon writes `"ddata"`, so it read zero received messages while the
 write path ran flat out and the unit fixture agreed with it; the launcher's `kubectl wait` raced
 the pod's creation; and the report showed the undelivered gap without saying who dropped it.
+
+---
+
+## Restoring the historian
+
+[`scripts/rehearse-historian-restore.mjs`](../scripts/rehearse-historian-restore.mjs) answers the
+question a stakeholder asks of a backup: **how long does a restore take, and what does it bring
+back?** It fills the historian with synthetic telemetry at a stated fleet and window, compresses it
+and materialises the rollups as the policies would, takes a full backup through the sidecar,
+writes one row before a target moment and one after it, empties the historian's data volume, and
+restores to the target with [`scripts/restore-historian.mjs`](../scripts/restore-historian.mjs).
+It passes only if every synthetic row and rollup bucket comes back (exact `numeric` sums, because a
+`float8` sum depends on the order rows are read in), the first marker is back, the second is not,
+and recovery promoted onto a new timeline. `--backup-first` takes the backup before the fill, so
+recovery replays the whole fill from the archived WAL.
+
+It is destructive: it wipes the historian. A development stack, never a site.
+
+```bash
+node scripts/rehearse-historian-restore.mjs --out rehearsal.json                 # 100 devices, 14 days
+node scripts/rehearse-historian-restore.mjs --backup-first --out replay.json      # measure WAL replay
+node scripts/rehearse-historian-restore.mjs --devices 1000 --days 2              # a larger fleet
+```
+
+### Results
+
+Measured 2026-09-23 on the k3d development node (16 vCPU, one Docker Desktop virtual disk under
+everything), 100 devices × 10 metrics every 30 s for 14 days: **40,320,000 raw rows**, compressed,
+with 20,160,000 one-minute rollup buckets. The repository was MinIO in the same cluster, over TLS
+with the internal CA, encrypted with aes-256-cbc; a second run used a posix repository on a
+volume.
+
+| | S3 repository | posix repository |
+| :--- | ---: | ---: |
+| Historian | 12.1 GiB (3.5 GiB of it the first run's deleted rows) | 8.4 GiB |
+| Full backup | 31.4 s | 21.9 s |
+| Written to the repository | 0.93 GiB (7.7 %) | 0.82 GiB (9.7 %) |
+| Restore: pgBackRest writing the data directory | 20 s | 16 s |
+| Recovery: start, replay to the target, promote | 16 s | 5 s, timed by hand |
+| **End to end**, decision to a writable historian | **37 s** | — |
+| Every row, bucket and marker as expected | yes | yes, by row count and markers; the float sum check was replaced after this run |
+
+**Replay**, measured with `--backup-first`: the backup came before the fill (0.46 GiB in the
+repository, 17 s), so recovery replayed the whole fill from the archived WAL. It replayed
+**28.6 GiB of WAL in 295 s, about 100 MiB/s**, on one redo process (135 s of CPU), and every row,
+bucket and marker came back; 316 s end to end. The fill wrote about **760 bytes of WAL a raw row**,
+counting the compression and rollup writes it caused, and the repository held about 140 of them
+after zstd.
+
+**What these numbers are.** A backup read the database at about 400 MB/s and a restore wrote it
+at about 650 MB/s, because the repository and the historian shared a local disk. **At a site the
+link to the repository sets the time**: a restore reads the backup's compressed bytes across it, so
+a 1 Gbit/s path to the object store (about 110 MB/s) turns the 0.93 GiB above into 9 seconds and a
+fleet-scale full (a quarter of a 1.1 TB historian, `deploy/k8s/README.md`, *What grows*) into about
+45 minutes, before replay. Synthetic values compress better than real signals, so real fulls are
+larger than 8–10 %.
+
+### What building it on a live stack found
+
+Four faults, all fixed before this was committed, and none visible to the chart's render checks.
+The third was found by reading the rule against the first; the rest by running it:
+
+* **An unreachable repository crash-restarted the historian every two minutes.** Asynchronous
+  archive-push forks a process that outlives the command that started it, and an orphan is adopted
+  by PID 1. The postmaster was PID 1, and it reads a child exiting with any code but 0 or 1 as a
+  crashed backend: every failed push terminated every connection and ran crash recovery, which
+  also reset the archiver statistics the WAL archiving alert reads, so the alert could never fire.
+  Found by taking the repository away for fourteen minutes. The image now runs `tini` as PID 1.
+* **The first backup after enabling went unrecorded.** The sidecar started before the maintenance
+  Job had created `physical_backup_runs`, took its full backup, and could not write the row the
+  Historian Backup Stale alert reads. It now waits for the table.
+* **A restore after a failed restore never finished.** The script restored the StatefulSet to the
+  replica count it found at start, which after a failed attempt is 0, and waited for a pod that
+  would never come. It now starts the one replica the historian always has.
+* **The stale alert would page the moment backup was switched on.** With no successful backup the
+  last-success time is 0; the alert now counts from when backup was switched on until the first
+  full completes, which at fleet scale takes hours.

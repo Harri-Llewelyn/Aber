@@ -469,7 +469,7 @@ transaction-ID age, which takes days, and the fastest is a connection count alre
 
 **Every rule here is `noDataState: OK`, and that is a deliberate choice with a known cost.**
 `databaseMetrics.enabled` can be turned off, and the rule file is provisioned whatever it is set
-to. With the exporters gone every series below is absent, and `OK` is what keeps six rules from
+to. With the exporters gone every series below is absent, and `OK` is what keeps every rule here from
 alerting forever about a measurement the operator declined. The cost is recorded on *Database Not
 Answering*, which is the rule it weakens.
 
@@ -545,14 +545,14 @@ starting, in recovery, or refusing connections because the connections rule went
 What this rule cannot see, and `noDataState: OK` is what makes it blind: if the pod is gone, Alloy
 stops discovering it, the series stop existing, and this evaluates NoData and reports OK. That case
 belongs to the Cluster group, *Container Restarting* and the workload rules beside it, which reads
-cAdvisor and does not depend on this exporter. The alternative, `Alerting`, would make all six
-rules in this group fire forever on any stack running with `databaseMetrics.enabled: false`, which
+cAdvisor and does not depend on this exporter. The alternative, `Alerting`, would make every
+rule in this group fire forever on any stack running with `databaseMetrics.enabled: false`, which
 is a supported configuration. Five minutes rides out a rolling restart of the database
 StatefulSet, which is a normal upgrade and takes well under that.
 
 ### Database Collector Failing (`aber-db-collector-failing`)
 
-Warning, `for: 10m`, per collector. The rule that keeps the other five honest. The exporter does
+Warning, `for: 10m`, per collector. The rule that keeps the others in this group honest. The exporter does
 not fail a scrape when a collector fails: it logs an error, keeps serving, and
 `pg_exporter_last_scrape_error` stays 0, so that collector's series simply stop existing, every
 panel drawn on them goes empty, and every rule written against them evaluates NoData and reports
@@ -564,3 +564,29 @@ database where the extension was not loaded, and `wal` under a role whose `pg_mo
 held without INHERIT. In both cases this gauge was the only signal. Ten minutes because a
 collector can fail once on a statement timeout during a checkpoint and recover by itself; ten
 minutes of continuous failure is configuration, not load.
+
+### Historian Backup Stale (`aber-db-historian-backup-stale`)
+
+Critical, `for: 0s`, over 36 hours. The `pgbackrest` sidecar takes one backup a day when
+`timescaledb.physicalBackup` is on and records each in `physical_backup_runs`; 36 hours without a
+successful one is a missed day, and a restore can reach no later than the last backup plus the WAL
+archived after it. The window is the tolerance, so there is no `for`.
+
+Gated with `and on () aber_historian_wal_archive_enabled == 1`, which reads `archive_mode`, so a
+stack without physical backup never raises it. The clock is `aber_historian_backup_clock_since_time`:
+the last success; before the first, the first recorded run; before that, the server's start.
+Counting from zero would page the moment backup is switched on, while the first full, which can
+take hours on a large historian, is still running.
+
+### Historian WAL Archiving Failing (`aber-db-historian-wal-archiving`)
+
+Critical, `for: 10m`. The last archive attempt failed and nothing has been archived since, both
+read from `pg_stat_archiver`. PostgreSQL keeps every segment it could not archive, so the data
+volume fills; at `timescaledb.physicalBackup.archiveQueueMax` pgBackRest drops the queue to save
+the database, and a point-in-time restore can no longer cross that gap. Ten minutes rides out a
+brief repository outage, after which `archive-push` catches up by itself. The usual causes are the
+repository endpoint and its credentials.
+
+This rule can fire only because the historian image runs `tini` as PID 1 (`timescaledb/Dockerfile`).
+With the postmaster as PID 1 a failed asynchronous push read as a crashed backend, and each
+crash-restart reset `pg_stat_archiver`, the counters this rule compares.

@@ -95,6 +95,11 @@ spec:
         # pg_hba and the TLS flags are read at start, so a change to either rolls the pod.
         checksum/tls: {{ include (print $.Template.BasePath "/data/postgres-tls.yaml") . | sha256sum }}
         {{- end }}
+        {{- if include "aber.physicalBackupOn" . }}
+        # archive_command and the sidecar read pgbackrest.conf at each run; the roll picks up the
+        # server flags that go with a change.
+        checksum/pgbackrest: {{ include (print $.Template.BasePath "/data/timescaledb-pgbackrest.yaml") . | sha256sum }}
+        {{- end }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -109,7 +114,7 @@ spec:
         {{- toYaml .Values.timescaledb.podSecurityContext | nindent 8 }}
       containers:
         - name: timescaledb
-          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           {{- /*
             THE WORKER POOL, PASSED AS SERVER FLAGS RATHER THAN A postgresql.conf.
@@ -156,6 +161,11 @@ spec:
             {{- if .Values.postgresTls.enabled }}
             {{- include "aber.dbTlsServerArgs" . | nindent 12 }}
             {{- end }}
+            {{- if include "aber.physicalBackupOn" . }}
+            {{- /* A POSTMASTER SETTING: archive_mode is read at start, so switching the backup on or
+                   off restarts the historian. */}}
+            {{- include "aber.physicalBackupServerArgs" . | nindent 12 }}
+            {{- end }}
           ports:
             - name: postgres
               containerPort: 5432
@@ -171,6 +181,10 @@ spec:
             # costs nothing on local-path.
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+            {{- if include "aber.physicalBackupOn" . }}
+            # archive-push and, during a restore, archive-get run here, inside the server.
+            {{- include "aber.physicalBackupEnv" . | nindent 12 }}
+            {{- end }}
           # THREE PROBES, EACH DOING A DIFFERENT JOB.
           #
           # startupProbe holds the other two off while initdb runs and the bootstrap scripts
@@ -211,8 +225,46 @@ spec:
             {{- if .Values.postgresTls.enabled }}
             {{- include "aber.dbTlsServerMounts" (dict "db" "timescaledb") | nindent 12 }}
             {{- end }}
+            {{- if include "aber.physicalBackupOn" . }}
+            {{- include "aber.physicalBackupMounts" . | nindent 12 }}
+            {{- end }}
+        {{- if include "aber.physicalBackupOn" . }}
+        {{- /*
+          The scheduled backups (timescaledb/pgbackrest/historian-backup.sh). The server's image, so
+          one pgBackRest version writes the repository; the database's own uid, because a backup
+          reads the 0700 data directory. It reaches the server over the shared socket directory.
+        */}}
+        - name: pgbackrest
+          image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
+          imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
+          command: ["/bin/sh", "/opt/aber/historian-backup.sh"]
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.timescaledb.database | quote }}
+            - name: BACKUP_HOUR_UTC
+              value: {{ .Values.timescaledb.physicalBackup.hourUtc | quote }}
+            - name: BACKUP_FULL_ON
+              value: {{ .Values.timescaledb.physicalBackup.fullOn | quote }}
+            {{- include "aber.physicalBackupEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.timescaledb.physicalBackup.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: pgbackrest-script
+              mountPath: /opt/aber
+              readOnly: true
+            {{- include "aber.physicalBackupMounts" . | nindent 12 }}
+        {{- end }}
         {{- if .Values.postgresTls.enabled }}
-        {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (printf "%s:%s" .Values.timescaledb.image.repository .Values.timescaledb.image.tag) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
+        {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .)) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
         {{- end }}
         {{- if .Values.databaseMetrics.enabled }}
         {{- include "aber.dbMetricsExporter" (dict "ctx" . "db" $component "database" .Values.timescaledb.database) | nindent 8 }}
@@ -228,6 +280,9 @@ spec:
         {{- end }}
         {{- if .Values.postgresTls.enabled }}
         {{- include "aber.dbTlsServerVolumes" (dict "ctx" . "db" "timescaledb") | nindent 8 }}
+        {{- end }}
+        {{- if include "aber.physicalBackupOn" . }}
+        {{- include "aber.physicalBackupVolumes" . | nindent 8 }}
         {{- end }}
       {{- with .Values.timescaledb.nodeSelector }}
       nodeSelector:
