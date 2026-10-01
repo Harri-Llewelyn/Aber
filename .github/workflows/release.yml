@@ -357,7 +357,9 @@ jobs:
       # ingestion base is reported twice; skipping test-runner would leave its own layers unscanned.
       - name: Scan Both
         run: |
-          set -uo pipefail   # NOT -e: a finding in one must not hide the other's result.
+          # Each command's failure is caught with `||` (the runner's bash has -e): a finding in one
+          # must not hide the other's result.
+          set -uo pipefail
           FAILED=0
           for t in ingestion test-runner; do
             echo "::group::$t"
@@ -435,16 +437,17 @@ jobs:
           echo "package=$PKG" >> "$GITHUB_OUTPUT"
           ls -la /tmp/chart
 
-      # Render the packaged chart with no values and confirm every built image resolved to this
-      # version. An empty `image.tag` that failed to pick up appVersion would render `repo:`, which
-      # Kubernetes reads as `repo:latest`, and ship as ImagePullBackOffs in an artefact that
-      # packaged cleanly.
+      # Render the packaged chart and confirm every built image resolved to this version. An empty
+      # `image.tag` that failed to pick up appVersion would render `repo:`, which Kubernetes reads as
+      # `repo:latest`, and ship as ImagePullBackOffs in an artefact that packaged cleanly. The
+      # optional workloads are switched on, as image-scan.yml does, or their images never render.
       - name: Verify The Package Names This Version's Images
         run: |
           set -eu
           V='${{ needs.prepare-release.outputs.version }}'
           helm template aber '${{ steps.package.outputs.package }}' \
             -f deploy/helm/aber/values-dev.yaml \
+            --set backup.enabled=true --set backupService.enabled=true --set playback.enabled=true \
             --set e2e.enabled=true > /tmp/from-package.yaml
 
           MISSING=0

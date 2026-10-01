@@ -83,7 +83,9 @@ jobs:
 
       - name: Scan
         run: |
-          set -uo pipefail   # NOT -e: one vulnerable image must not stop the other sixteen.
+          # The runner starts bash with -e, so each scan's status is caught with `||`: one vulnerable
+          # image must not stop the scans of the rest.
+          set -uo pipefail
           FAILED=0
           echo "## Container CVE scan" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -97,14 +99,14 @@ jobs:
             # standing red X. An unfixed CVE in a base image is not something this repository can
             # act on: there is no version to move to, so failing on it would train everyone to
             # ignore this job. HIGH and CRITICAL only, for the same reason.
+            STATUS=0
             trivy image \
               --severity HIGH,CRITICAL \
               --ignore-unfixed \
               --exit-code 1 \
               --no-progress \
               --scanners vuln \
-              "$IMAGE"
-            STATUS=$?
+              "$IMAGE" || STATUS=$?
             echo "::endgroup::"
 
             if [ "$STATUS" -ne 0 ]; then

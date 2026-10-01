@@ -13,7 +13,11 @@ FROM python:3.13-slim
 #
 # --no-install-recommends, which i3x/Dockerfile has always passed. Without it apt pulls in
 # linux-libc-dev -- kernel headers nothing here compiles against, and 66 reported CVEs.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+#
+# `apt-get upgrade` takes the base's Debian packages to the distribution's current fixes, so a fix
+# Debian ships between two cuts of the base reaches the release rather than failing its scan.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 

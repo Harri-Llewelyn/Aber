@@ -44,9 +44,28 @@ USER node-red
 # discovery document reports issuer "" with relative paths, which fails issuer validation too.
 # Identity comes from the nodered-userinfo edge function instead. Same arrangement as
 # grafana.ini's [auth.generic_oauth], and the reasoning is spelled out there.
-RUN npm install --no-audit --no-fund --no-update-notifier --save \
+#
+# THE OVERRIDE lifts the axios in Node-RED's own tree to the patch that fixes its advisories, keyed
+# to the major it replaces. It goes when the pinned base ships that version; the release scan says.
+RUN node -e ' \
+      const f = "/usr/src/node-red/package.json"; \
+      const p = JSON.parse(require("fs").readFileSync(f)); \
+      p.overrides = { ...p.overrides, "axios@^1": "1.20.0" }; \
+      require("fs").writeFileSync(f, JSON.stringify(p, null, 2) + "\n");' \
+ && npm install --no-audit --no-fund --no-update-notifier --save \
       passport-oauth2@1.8.0 \
       jsonwebtoken@9.0.2
+
+# NPM'S BUNDLED undici AND brace-expansion, replaced by their patch releases (same dependencies,
+# same engines). Node-RED's palette manager runs this npm, and an override cannot reach a bundled
+# tree; npm 11.21.0, the newest, still bundles undici 6.28.0 and brace-expansion 5.0.9. `npm pack`
+# checks each tarball against the registry's integrity. Both lines go when npm bundles the fixes.
+RUN cd /tmp && npm pack --silent undici@6.28.1 brace-expansion@5.0.11 \
+ && for p in undici brace-expansion; do \
+      d=/usr/src/node-red/node_modules/npm/node_modules/$p; \
+      rm -rf "$d" && mkdir -p "$d" && tar -xzf /tmp/$p-*.tgz -C "$d" --strip-components=1; \
+    done \
+ && rm -f /tmp/*.tgz
 
 # THE PROVISIONING SCRIPT, baked in rather than mounted from a ConfigMap. Node-RED is its only
 # caller, and Helm stores the chart archive and the rendered manifest in one release Secret under a
